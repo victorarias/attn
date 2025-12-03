@@ -125,8 +125,8 @@ func runWrapper(label string) {
 		os.Exit(0)
 	}()
 
-	// Run claude with hooks
-	args := []string{"--hooks", configPath}
+	// Run claude with settings (includes hooks)
+	args := []string{"--settings", configPath}
 	// When label was set via -s, we need to skip "-s label" from args
 	// In -s mode: os.Args = ["cm", "-s", "label", ...other args]
 	// In default mode: os.Args = ["cm", ...claude args]
