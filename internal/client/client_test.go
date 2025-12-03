@@ -156,3 +156,123 @@ func TestClient_SocketPath(t *testing.T) {
 		t.Errorf("DefaultSocketPath() = %q, want %q", path, expected)
 	}
 }
+
+func TestClient_Unregister(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+
+		cmd, msg, err := protocol.ParseMessage(buf[:n])
+		if err != nil || cmd != protocol.CmdUnregister {
+			return
+		}
+		unreg := msg.(*protocol.UnregisterMessage)
+		if unreg.ID != "sess-123" {
+			return
+		}
+
+		resp := protocol.Response{OK: true}
+		json.NewEncoder(conn).Encode(resp)
+	}()
+
+	c := New(sockPath)
+	err = c.Unregister("sess-123")
+	if err != nil {
+		t.Fatalf("Unregister error: %v", err)
+	}
+}
+
+func TestClient_UpdateTodos(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+
+		cmd, msg, err := protocol.ParseMessage(buf[:n])
+		if err != nil || cmd != protocol.CmdTodos {
+			return
+		}
+		todos := msg.(*protocol.TodosMessage)
+		if todos.ID != "sess-123" || len(todos.Todos) != 2 {
+			return
+		}
+
+		resp := protocol.Response{OK: true}
+		json.NewEncoder(conn).Encode(resp)
+	}()
+
+	c := New(sockPath)
+	err = c.UpdateTodos("sess-123", []string{"todo1", "todo2"})
+	if err != nil {
+		t.Fatalf("UpdateTodos error: %v", err)
+	}
+}
+
+func TestClient_Heartbeat(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+
+		cmd, msg, err := protocol.ParseMessage(buf[:n])
+		if err != nil || cmd != protocol.CmdHeartbeat {
+			return
+		}
+		hb := msg.(*protocol.HeartbeatMessage)
+		if hb.ID != "sess-123" {
+			return
+		}
+
+		resp := protocol.Response{OK: true}
+		json.NewEncoder(conn).Encode(resp)
+	}()
+
+	c := New(sockPath)
+	err = c.Heartbeat("sess-123")
+	if err != nil {
+		t.Fatalf("Heartbeat error: %v", err)
+	}
+}
