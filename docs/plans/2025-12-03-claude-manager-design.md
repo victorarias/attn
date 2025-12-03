@@ -259,11 +259,11 @@ When `cm` or `cm -s <label>` runs:
 - **Metrics:** How much time spent waiting vs working
 - **Multi-machine:** Sync state across machines (stretch)
 
-## Open Questions
+## Decisions
 
-1. Should the dashboard auto-refresh or manual only?
-2. Hook installation: write to `.claude/hooks/` or use `--hooks` flag?
-3. How to handle Claude sessions started without `cm` wrapper?
+1. **Dashboard auto-refresh:** Yes - live updates
+2. **Hook installation:** `--hooks` flag - less intrusive, easier to install/update, no file pollution
+3. **Sessions without `cm`:** Not tracked - opt-in only, keeps it simple
 
 ## References
 
