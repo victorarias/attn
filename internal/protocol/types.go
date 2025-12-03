@@ -1,6 +1,10 @@
 package protocol
 
-import "time"
+import (
+	"encoding/json"
+	"errors"
+	"time"
+)
 
 // Commands
 const (
@@ -76,4 +80,66 @@ type Response struct {
 	OK       bool       `json:"ok"`
 	Error    string     `json:"error,omitempty"`
 	Sessions []*Session `json:"sessions,omitempty"`
+}
+
+// ParseMessage parses a JSON message and returns the command type and parsed message
+func ParseMessage(data []byte) (string, interface{}, error) {
+	// First, extract just the command
+	var peek struct {
+		Cmd string `json:"cmd"`
+	}
+	if err := json.Unmarshal(data, &peek); err != nil {
+		return "", nil, err
+	}
+	if peek.Cmd == "" {
+		return "", nil, errors.New("missing cmd field")
+	}
+
+	// Parse based on command type
+	switch peek.Cmd {
+	case CmdRegister:
+		var msg RegisterMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdUnregister:
+		var msg UnregisterMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdState:
+		var msg StateMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdTodos:
+		var msg TodosMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdQuery:
+		var msg QueryMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdHeartbeat:
+		var msg HeartbeatMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	default:
+		return "", nil, errors.New("unknown command: " + peek.Cmd)
+	}
 }
