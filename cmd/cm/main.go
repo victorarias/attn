@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/victorarias/claude-manager/internal/client"
@@ -73,6 +74,9 @@ Usage:
 }
 
 func runWrapper(label string) {
+	// Track if label was explicitly provided via -s flag
+	labelProvided := label != ""
+
 	if label == "" {
 		label = wrapper.DefaultLabel()
 	}
@@ -102,8 +106,9 @@ func runWrapper(label string) {
 	configPath, err := wrapper.WriteHooksConfig(tmpDir, sessionID, socketPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not write hooks config: %v\n", err)
+	} else {
+		defer wrapper.CleanupHooksConfig(configPath)
 	}
-	defer wrapper.CleanupHooksConfig(configPath)
 
 	// Set up cleanup on exit
 	cleanup := func() {
@@ -122,7 +127,16 @@ func runWrapper(label string) {
 
 	// Run claude with hooks
 	args := []string{"--hooks", configPath}
-	args = append(args, os.Args[1:]...)
+	// When label was set via -s, we need to skip "-s label" from args
+	// In -s mode: os.Args = ["cm", "-s", "label", ...other args]
+	// In default mode: os.Args = ["cm", ...claude args]
+	if labelProvided {
+		// -s mode, skip "cm -s label" and forward the rest
+		args = append(args, os.Args[3:]...)
+	} else {
+		// Default mode (no -s flag), forward all args except "cm"
+		args = append(args, os.Args[1:]...)
+	}
 
 	cmd := exec.Command("claude", args...)
 	cmd.Stdin = os.Stdin
@@ -155,8 +169,16 @@ func getTmuxTarget() string {
 func startDaemonBackground() {
 	cmd := exec.Command(os.Args[0], "daemon")
 	cmd.Start()
-	// Give daemon time to start
-	// In production, would poll socket
+
+	// Poll socket to wait for daemon to be ready
+	socketPath := client.DefaultSocketPath()
+	c := client.New(socketPath)
+	for i := 0; i < 50; i++ {
+		if c.IsRunning() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func runDaemon() {
