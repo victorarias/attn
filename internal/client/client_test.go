@@ -1,0 +1,158 @@
+package client
+
+import (
+	"encoding/json"
+	"net"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/victorarias/claude-manager/internal/protocol"
+)
+
+func TestClient_Register(t *testing.T) {
+	// Create temp socket
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	// Start mock server
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	// Handle one connection
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		// Read message
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+
+		// Verify it's a register message
+		cmd, msg, err := protocol.ParseMessage(buf[:n])
+		if err != nil || cmd != protocol.CmdRegister {
+			return
+		}
+		reg := msg.(*protocol.RegisterMessage)
+		if reg.Label != "test-session" {
+			return
+		}
+
+		// Send response
+		resp := protocol.Response{OK: true}
+		json.NewEncoder(conn).Encode(resp)
+	}()
+
+	// Test client
+	c := New(sockPath)
+	err = c.Register("sess-123", "test-session", "/tmp", "main:1.%0")
+	if err != nil {
+		t.Fatalf("Register error: %v", err)
+	}
+}
+
+func TestClient_UpdateState(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+
+		cmd, msg, err := protocol.ParseMessage(buf[:n])
+		if err != nil || cmd != protocol.CmdState {
+			return
+		}
+		state := msg.(*protocol.StateMessage)
+		if state.State != protocol.StateWaiting {
+			return
+		}
+
+		resp := protocol.Response{OK: true}
+		json.NewEncoder(conn).Encode(resp)
+	}()
+
+	c := New(sockPath)
+	err = c.UpdateState("sess-123", protocol.StateWaiting)
+	if err != nil {
+		t.Fatalf("UpdateState error: %v", err)
+	}
+}
+
+func TestClient_Query(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		buf := make([]byte, 4096)
+		conn.Read(buf)
+
+		resp := protocol.Response{
+			OK: true,
+			Sessions: []*protocol.Session{
+				{ID: "1", Label: "one", State: protocol.StateWaiting},
+				{ID: "2", Label: "two", State: protocol.StateWaiting},
+			},
+		}
+		json.NewEncoder(conn).Encode(resp)
+	}()
+
+	c := New(sockPath)
+	sessions, err := c.Query(protocol.StateWaiting)
+	if err != nil {
+		t.Fatalf("Query error: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Errorf("got %d sessions, want 2", len(sessions))
+	}
+}
+
+func TestClient_NotRunning(t *testing.T) {
+	c := New("/nonexistent/socket.sock")
+	err := c.Register("id", "label", "/tmp", "main:1.%0")
+	if err == nil {
+		t.Error("expected error when daemon not running")
+	}
+}
+
+func TestClient_SocketPath(t *testing.T) {
+	// Test default socket path
+	os.Setenv("HOME", "/home/testuser")
+	defer os.Unsetenv("HOME")
+
+	path := DefaultSocketPath()
+	expected := "/home/testuser/.claude-manager.sock"
+	if path != expected {
+		t.Errorf("DefaultSocketPath() = %q, want %q", path, expected)
+	}
+}
