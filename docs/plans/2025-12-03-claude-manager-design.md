@@ -105,8 +105,8 @@ Starts Claude Code with tracking enabled.
 
 **Usage:**
 ```bash
-cm              # Use directory basename as label
-cm drumstick    # Use explicit label
+cm                  # Use directory basename as label
+cm -s drumstick     # Use explicit label
 ```
 
 **Startup sequence:**
@@ -224,15 +224,15 @@ claude-manager/
 ### CLI Interface
 
 ```bash
-cm                    # Start Claude with tracking (label = directory name)
-cm <label>            # Start Claude with explicit label
-cm daemon             # Run daemon in foreground
+cm                     # Start Claude with tracking (label = directory name)
+cm -s <label>          # Start Claude with explicit label
+cm daemon              # Run daemon in foreground
 cm daemon --background # Run daemon in background
-cm status             # Output for tmux status bar
-cm -d                 # Open dashboard
-cm dashboard          # Open dashboard (alias)
-cm list               # List all sessions (JSON)
-cm kill <label>       # Unregister a session
+cm status              # Output for tmux status bar
+cm -d                  # Open dashboard
+cm dashboard           # Open dashboard (alias)
+cm list                # List all sessions (JSON)
+cm kill <label>        # Unregister a session
 ```
 
 ### File Locations
@@ -246,7 +246,7 @@ cm kill <label>       # Unregister a session
 
 ### Auto-start Daemon
 
-When `cm <label>` runs:
+When `cm` or `cm -s <label>` runs:
 1. Check if socket exists and daemon responds
 2. If not, fork daemon in background
 3. Wait for socket to be ready
