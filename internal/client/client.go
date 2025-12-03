@@ -12,7 +12,11 @@ import (
 
 // DefaultSocketPath returns the default socket path
 func DefaultSocketPath() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to /tmp if home directory is not available
+		return "/tmp/.claude-manager.sock"
+	}
 	return filepath.Join(home, ".claude-manager.sock")
 }
 
