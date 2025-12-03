@@ -15,8 +15,8 @@ Running multiple Claude sessions means losing track of which ones need your inpu
 ## Usage
 
 ```bash
-cm drumstick      # Start Claude with label "drumstick"
 cm                # Start Claude with directory name as label
+cm -s drumstick   # Start Claude with explicit label
 cm -d             # Open dashboard
 cm status         # Output for tmux status bar
 ```
