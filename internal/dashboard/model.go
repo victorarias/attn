@@ -27,7 +27,7 @@ func NewModel(c *client.Client) *Model {
 
 // Init initializes the model
 func (m *Model) Init() tea.Cmd {
-	return m.refresh
+	return tea.Batch(m.refresh, TickCmd())
 }
 
 // refresh fetches sessions from daemon
@@ -66,7 +66,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			return m, m.refresh
 		case "enter":
-			if s := m.SelectedSession(); s != nil {
+			if s := m.SelectedSession(); s != nil && s.TmuxTarget != "" {
 				return m, m.jumpToPane(s.TmuxTarget)
 			}
 		}
@@ -77,6 +77,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
 			m.cursor = len(m.sessions) - 1
 		}
+		return m, TickCmd()
 	case errMsg:
 		m.err = msg.err
 	case tickMsg:
