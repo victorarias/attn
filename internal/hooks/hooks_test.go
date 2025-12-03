@@ -10,33 +10,40 @@ func TestGenerateHooks(t *testing.T) {
 	sessionID := "abc123"
 	socketPath := "/home/user/.claude-manager.sock"
 
-	hooks := Generate(sessionID, socketPath)
+	settings := Generate(sessionID, socketPath)
 
 	// Verify it's valid JSON
 	var parsed map[string]interface{}
-	if err := json.Unmarshal([]byte(hooks), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(settings), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
-	// Check hooks exist
-	hooksArray, ok := parsed["hooks"].([]interface{})
+	// Check hooks exist as a map
+	hooksMap, ok := parsed["hooks"].(map[string]interface{})
 	if !ok {
-		t.Fatal("hooks field not found or not array")
+		t.Fatal("hooks field not found or not a map")
 	}
 
-	// Should have multiple hooks
-	if len(hooksArray) < 3 {
-		t.Errorf("expected at least 3 hooks, got %d", len(hooksArray))
+	// Should have 3 event types
+	if len(hooksMap) < 3 {
+		t.Errorf("expected at least 3 event types, got %d", len(hooksMap))
 	}
 
-	// Verify hook structure
-	for _, h := range hooksArray {
-		hook := h.(map[string]interface{})
-		if _, ok := hook["matcher"]; !ok {
-			t.Error("hook missing matcher")
+	// Verify each event type has hook entries
+	for eventType, entries := range hooksMap {
+		entriesArray, ok := entries.([]interface{})
+		if !ok {
+			t.Errorf("event %s: expected array of entries", eventType)
+			continue
 		}
-		if _, ok := hook["hooks"]; !ok {
-			t.Error("hook missing hooks array")
+		for _, entry := range entriesArray {
+			hook := entry.(map[string]interface{})
+			if _, ok := hook["matcher"]; !ok {
+				t.Errorf("event %s: hook missing matcher", eventType)
+			}
+			if _, ok := hook["hooks"]; !ok {
+				t.Errorf("event %s: hook missing hooks array", eventType)
+			}
 		}
 	}
 }
