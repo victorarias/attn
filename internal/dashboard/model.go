@@ -133,6 +133,41 @@ func (m *Model) buildRepoGroups() []*repoGroup {
 	return groups
 }
 
+// countPRItems returns total navigable items in PR pane
+func (m *Model) countPRItems() int {
+	groups := m.buildRepoGroups()
+	count := 0
+	for _, g := range groups {
+		count++ // repo header
+		if !g.collapsed {
+			count += len(g.prs) // individual PRs
+		}
+	}
+	return count
+}
+
+// getPRItemAt returns what's at the given cursor position
+// Returns: (isRepo bool, repoName string, pr *protocol.PR)
+func (m *Model) getPRItemAt(cursor int) (bool, string, *protocol.PR) {
+	groups := m.buildRepoGroups()
+	idx := 0
+	for _, g := range groups {
+		if idx == cursor {
+			return true, g.name, nil
+		}
+		idx++
+		if !g.collapsed {
+			for _, pr := range g.prs {
+				if idx == cursor {
+					return false, g.name, pr
+				}
+				idx++
+			}
+		}
+	}
+	return false, "", nil
+}
+
 // refresh fetches sessions from daemon
 func (m *Model) refresh() tea.Msg {
 	if m.client == nil {
@@ -232,9 +267,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
 			m.cursor = len(m.sessions) - 1
 		}
-		visiblePRs := m.getVisiblePRs()
-		if m.prCursor >= len(visiblePRs) && len(visiblePRs) > 0 {
-			m.prCursor = len(visiblePRs) - 1
+		maxItems := m.countPRItems()
+		if m.prCursor >= maxItems && maxItems > 0 {
+			m.prCursor = maxItems - 1
 		}
 		return m, TickCmd()
 	case errMsg:
@@ -257,12 +292,12 @@ func (m *Model) moveCursor(delta int) {
 
 func (m *Model) movePRCursor(delta int) {
 	m.prCursor += delta
-	visiblePRs := m.getVisiblePRs()
+	maxItems := m.countPRItems()
 	if m.prCursor < 0 {
 		m.prCursor = 0
 	}
-	if m.prCursor >= len(visiblePRs) && len(visiblePRs) > 0 {
-		m.prCursor = len(visiblePRs) - 1
+	if m.prCursor >= maxItems && maxItems > 0 {
+		m.prCursor = maxItems - 1
 	}
 }
 
@@ -274,13 +309,28 @@ func (m *Model) SelectedSession() *protocol.Session {
 	return nil
 }
 
-// SelectedPR returns the currently selected PR
+// SelectedPR returns the currently selected PR, or nil if on a repo header
 func (m *Model) SelectedPR() *protocol.PR {
-	visiblePRs := m.getVisiblePRs()
-	if m.prCursor >= 0 && m.prCursor < len(visiblePRs) {
-		return visiblePRs[m.prCursor]
+	if m.focusPane != 1 {
+		return nil
 	}
-	return nil
+	isRepo, _, pr := m.getPRItemAt(m.prCursor)
+	if isRepo {
+		return nil
+	}
+	return pr
+}
+
+// SelectedRepo returns the repo name if cursor is on a repo header
+func (m *Model) SelectedRepo() string {
+	if m.focusPane != 1 {
+		return ""
+	}
+	isRepo, repoName, _ := m.getPRItemAt(m.prCursor)
+	if isRepo {
+		return repoName
+	}
+	return ""
 }
 
 // getVisiblePRs returns PRs filtered by muted state
