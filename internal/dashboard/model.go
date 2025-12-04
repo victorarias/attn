@@ -53,6 +53,10 @@ type Model struct {
 	width           int    // terminal width
 	height          int    // terminal height
 	loadingRepos    map[string]bool // repos currently fetching PR details
+	// Confirmation dialog state
+	confirmAction   string      // "approve" or "merge"
+	confirmPR       *protocol.PR
+	statusMessage   string      // temporary status message
 }
 
 // repoGroup represents a repository with its PRs
@@ -212,6 +216,14 @@ type prDetailsMsg struct {
 	err     error
 }
 
+// prActionMsg is sent when a PR action completes
+type prActionMsg struct {
+	action  string // "approve" or "merge"
+	pr      *protocol.PR
+	success bool
+	message string
+}
+
 // Update handles messages
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -220,6 +232,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case tea.KeyMsg:
+		// Clear status message on any key
+		m.statusMessage = ""
+
+		// Handle confirmation dialog
+		if m.confirmAction != "" {
+			switch msg.String() {
+			case "y", "Y":
+				// Execute the confirmed action
+				pr := m.confirmPR
+				action := m.confirmAction
+				m.confirmAction = ""
+				m.confirmPR = nil
+				if action == "approve" {
+					return m, m.approvePR(pr)
+				} else if action == "merge" {
+					return m, m.mergePR(pr)
+				}
+			case "n", "N", "esc":
+				// Cancel
+				m.confirmAction = ""
+				m.confirmPR = nil
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -286,9 +323,43 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "R":
 			return m, m.restartDaemon
+		case "a":
+			// Approve PR
+			if m.focusPane == 1 {
+				if pr := m.SelectedPR(); pr != nil && !pr.Muted {
+					m.confirmAction = "approve"
+					m.confirmPR = pr
+				}
+			}
+		case "g":
+			// Merge PR
+			if m.focusPane == 1 {
+				if pr := m.SelectedPR(); pr != nil && !pr.Muted {
+					m.confirmAction = "merge"
+					m.confirmPR = pr
+				}
+			}
 		}
 	case sessionsMsg:
 		m.sessions = msg.sessions
+		// Preserve detail fields from existing PRs
+		oldPRs := make(map[string]*protocol.PR)
+		for _, pr := range m.prs {
+			oldPRs[pr.ID] = pr
+		}
+		for _, pr := range msg.prs {
+			if old, ok := oldPRs[pr.ID]; ok && old.DetailsFetched {
+				// Preserve detail fields if still valid
+				if !old.LastUpdated.Before(pr.LastUpdated) {
+					pr.DetailsFetched = old.DetailsFetched
+					pr.DetailsFetchedAt = old.DetailsFetchedAt
+					pr.Mergeable = old.Mergeable
+					pr.MergeableState = old.MergeableState
+					pr.CIStatus = old.CIStatus
+					pr.ReviewStatus = old.ReviewStatus
+				}
+			}
+		}
 		m.prs = msg.prs
 		// Build repo states map
 		m.repoStates = make(map[string]*protocol.RepoState)
@@ -331,6 +402,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case prActionMsg:
+		if msg.success {
+			m.statusMessage = fmt.Sprintf("✓ %s: %s", msg.action, msg.message)
+		} else {
+			m.statusMessage = fmt.Sprintf("✗ %s failed: %s", msg.action, msg.message)
+		}
+		// Refresh to get updated PR state
+		return m, m.refresh
 	}
 	return m, nil
 }
@@ -504,6 +583,50 @@ func (m *Model) openPRInBrowser(url string) tea.Cmd {
 	})
 }
 
+func (m *Model) approvePR(pr *protocol.PR) tea.Cmd {
+	return func() tea.Msg {
+		// Use gh pr review --approve
+		cmd := exec.Command("gh", "pr", "review", "--approve", pr.ID)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return prActionMsg{
+				action:  "Approve",
+				pr:      pr,
+				success: false,
+				message: strings.TrimSpace(string(output)),
+			}
+		}
+		return prActionMsg{
+			action:  "Approve",
+			pr:      pr,
+			success: true,
+			message: fmt.Sprintf("#%d approved", pr.Number),
+		}
+	}
+}
+
+func (m *Model) mergePR(pr *protocol.PR) tea.Cmd {
+	return func() tea.Msg {
+		// Use gh pr merge with default strategy
+		cmd := exec.Command("gh", "pr", "merge", pr.ID)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return prActionMsg{
+				action:  "Merge",
+				pr:      pr,
+				success: false,
+				message: strings.TrimSpace(string(output)),
+			}
+		}
+		return prActionMsg{
+			action:  "Merge",
+			pr:      pr,
+			success: true,
+			message: fmt.Sprintf("#%d merged", pr.Number),
+		}
+	}
+}
+
 func (m *Model) restartDaemon() tea.Msg {
 	socketPath := client.DefaultSocketPath()
 
@@ -596,9 +719,28 @@ func (m *Model) View() string {
 		grayStyle.Render("◌"),
 		cyanStyle.Render("★"),
 		magentaStyle.Render("◇"))
-	help := legendStyle.Render("[←/→] Switch  [m] Mute  [M] Muted PRs  [V] Muted repos  [Space] Open/Expand  [R] Restart  [q] Quit")
 
-	return content + "\n" + legend + "\n" + help + "\n"
+	// Status line (confirmation dialog or status message)
+	var statusLine string
+	if m.confirmAction != "" {
+		actionVerb := m.confirmAction
+		statusLine = yellowStyle.Render(fmt.Sprintf("» %s #%d? [y]es / [n]o", actionVerb, m.confirmPR.Number))
+	} else if m.statusMessage != "" {
+		if strings.HasPrefix(m.statusMessage, "✓") {
+			statusLine = greenStyle.Render(m.statusMessage)
+		} else {
+			statusLine = redStyle.Render(m.statusMessage)
+		}
+	}
+
+	help := legendStyle.Render("[←/→] Switch  [m] Mute  [a] Approve  [g] Merge  [Space] Open/Expand  [R] Restart  [q] Quit")
+
+	result := content + "\n" + legend + "\n"
+	if statusLine != "" {
+		result += statusLine + "\n"
+	}
+	result += help + "\n"
+	return result
 }
 
 func (m *Model) buildSessionsContent(width int) string {
