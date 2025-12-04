@@ -57,6 +57,9 @@ func (d *Daemon) Start() error {
 	d.listener = listener
 	d.log("daemon started")
 
+	// Start background persistence (3 second interval)
+	go d.store.StartPersistence(3*time.Second, d.done)
+
 	// Start PR polling
 	go d.pollPRs()
 
@@ -252,29 +255,14 @@ func (d *Daemon) doPRPoll() {
 		return
 	}
 
-	// Filter: skip muted PRs that were polled within 24h
-	existingPRs := d.store.ListPRs("")
-	mutedRecently := make(map[string]bool)
-	for _, pr := range existingPRs {
-		if pr.Muted && time.Since(pr.LastPolled) < 24*time.Hour {
-			mutedRecently[pr.ID] = true
-		}
-	}
+	d.store.SetPRs(prs)
 
-	var activePRs []*protocol.PR
-	for _, pr := range prs {
-		if !mutedRecently[pr.ID] {
-			activePRs = append(activePRs, pr)
-		}
-	}
-
-	d.store.SetPRs(activePRs)
-
+	// Count waiting (non-muted) PRs for logging
 	waiting := 0
-	for _, pr := range activePRs {
-		if pr.State == protocol.StateWaiting {
+	for _, pr := range d.store.ListPRs("") {
+		if pr.State == protocol.StateWaiting && !pr.Muted {
 			waiting++
 		}
 	}
-	d.logf("PR poll: %d PRs (%d waiting)", len(activePRs), waiting)
+	d.logf("PR poll: %d PRs (%d waiting)", len(prs), waiting)
 }

@@ -1,6 +1,8 @@
 package store
 
 import (
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -240,5 +242,45 @@ func TestStore_DirtyFlag(t *testing.T) {
 
 	if s.IsDirty() {
 		t.Error("store should not be dirty after ClearDirty")
+	}
+}
+
+func TestStore_BackgroundPersistence(t *testing.T) {
+	// Create temp file for state
+	tmpFile, err := os.CreateTemp("", "store-test-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	s := NewWithPersistence(tmpFile.Name())
+	done := make(chan struct{})
+
+	// Start background persistence with short interval
+	go s.StartPersistence(50*time.Millisecond, done)
+
+	// Add a session (marks dirty)
+	s.Add(&protocol.Session{ID: "bg-test", Label: "bg-test"})
+
+	// Wait for persistence to run
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop persistence
+	close(done)
+
+	// Verify file was written
+	data, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("failed to read state file: %v", err)
+	}
+
+	if !strings.Contains(string(data), "bg-test") {
+		t.Error("state file should contain bg-test session")
+	}
+
+	// Verify dirty flag was cleared
+	if s.IsDirty() {
+		t.Error("dirty flag should be cleared after save")
 	}
 }
