@@ -279,3 +279,26 @@ func (s *Store) ClearDirty() {
 func (s *Store) markDirty() {
 	s.dirty = true
 }
+
+// StartPersistence runs a background loop that saves state when dirty
+func (s *Store) StartPersistence(interval time.Duration, done <-chan struct{}) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-done:
+			// Final save on shutdown
+			if s.IsDirty() {
+				s.Save()
+				s.ClearDirty()
+			}
+			return
+		case <-ticker.C:
+			if s.IsDirty() {
+				s.Save()
+				s.ClearDirty()
+			}
+		}
+	}
+}
