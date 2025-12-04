@@ -88,12 +88,14 @@ func (s *Store) Load() error {
 	return nil
 }
 
-// save persists sessions to disk
-func (s *Store) save() {
+// Save persists sessions to disk if path is configured
+func (s *Store) Save() {
 	if s.path == "" {
 		return
 	}
 
+	// Read state under lock
+	s.mu.RLock()
 	state := persistedState{
 		Sessions: make([]*protocol.Session, 0, len(s.sessions)),
 		PRs:      make([]*protocol.PR, 0, len(s.prs)),
@@ -104,7 +106,9 @@ func (s *Store) save() {
 	for _, pr := range s.prs {
 		state.PRs = append(state.PRs, pr)
 	}
+	s.mu.RUnlock()
 
+	// Write to file without lock
 	data, err := json.Marshal(state)
 	if err != nil {
 		return
@@ -119,7 +123,6 @@ func (s *Store) Add(session *protocol.Session) {
 	defer s.mu.Unlock()
 	s.sessions[session.ID] = session
 	s.markDirty()
-	s.save()
 }
 
 // Get retrieves a session by ID
@@ -134,7 +137,7 @@ func (s *Store) Remove(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, id)
-	s.save()
+	s.markDirty()
 }
 
 // List returns sessions, optionally filtered by state, sorted by label
@@ -165,7 +168,7 @@ func (s *Store) UpdateState(id, state string) {
 	if session, ok := s.sessions[id]; ok {
 		session.State = state
 		session.StateSince = time.Now()
-		s.save()
+		s.markDirty()
 	}
 }
 
@@ -176,7 +179,7 @@ func (s *Store) UpdateTodos(id string, todos []string) {
 
 	if session, ok := s.sessions[id]; ok {
 		session.Todos = todos
-		s.save()
+		s.markDirty()
 	}
 }
 
@@ -197,7 +200,7 @@ func (s *Store) ToggleMute(id string) {
 
 	if session, ok := s.sessions[id]; ok {
 		session.Muted = !session.Muted
-		s.save()
+		s.markDirty()
 	}
 }
 
@@ -218,7 +221,7 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 	for _, pr := range prs {
 		s.prs[pr.ID] = pr
 	}
-	s.save()
+	s.markDirty()
 }
 
 // ListPRs returns PRs, optionally filtered by state, sorted by repo/number
@@ -247,7 +250,7 @@ func (s *Store) ToggleMutePR(id string) {
 
 	if pr, ok := s.prs[id]; ok {
 		pr.Muted = !pr.Muted
-		s.save()
+		s.markDirty()
 	}
 }
 
