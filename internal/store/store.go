@@ -17,6 +17,7 @@ type Store struct {
 	sessions map[string]*protocol.Session
 	prs      map[string]*protocol.PR
 	path     string // path to state file (empty = no persistence)
+	dirty    bool   // tracks unsaved changes
 }
 
 // New creates a new session store
@@ -117,6 +118,7 @@ func (s *Store) Add(session *protocol.Session) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[session.ID] = session
+	s.markDirty()
 	s.save()
 }
 
@@ -254,4 +256,23 @@ func (s *Store) GetPR(id string) *protocol.PR {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.prs[id]
+}
+
+// IsDirty returns whether the store has unsaved changes
+func (s *Store) IsDirty() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.dirty
+}
+
+// ClearDirty clears the dirty flag (called after successful save)
+func (s *Store) ClearDirty() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dirty = false
+}
+
+// markDirty sets the dirty flag
+func (s *Store) markDirty() {
+	s.dirty = true
 }

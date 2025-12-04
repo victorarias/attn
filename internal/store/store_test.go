@@ -222,3 +222,23 @@ func TestStore_ToggleMutePR(t *testing.T) {
 		t.Error("PR should be muted after toggle")
 	}
 }
+
+func TestStore_DirtyFlag(t *testing.T) {
+	s := New()
+
+	if s.IsDirty() {
+		t.Error("new store should not be dirty")
+	}
+
+	s.Add(&protocol.Session{ID: "test", Label: "test"})
+
+	if !s.IsDirty() {
+		t.Error("store should be dirty after Add")
+	}
+
+	s.ClearDirty()
+
+	if s.IsDirty() {
+		t.Error("store should not be dirty after ClearDirty")
+	}
+}
