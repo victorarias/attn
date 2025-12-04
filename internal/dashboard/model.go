@@ -11,15 +11,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/victorarias/claude-manager/internal/client"
+	"github.com/victorarias/claude-manager/internal/github"
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
 
 // Styles using lipgloss
 var (
 	// Colors
-	yellowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))  // waiting
-	greenStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))  // working
-	grayStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))  // muted
+	yellowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))  // waiting
+	greenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))  // working/success
+	grayStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))  // muted
+	cyanStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))  // author (your PRs)
+	magentaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))  // reviewer (review requests)
+	redStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))  // failure/blocked
 
 	// Pane border styles (width set dynamically)
 	focusedBorderStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4"))
@@ -35,6 +39,7 @@ var (
 // Model is the bubbletea model for the dashboard
 type Model struct {
 	client          *client.Client
+	ghFetcher       *github.Fetcher
 	sessions        []*protocol.Session
 	prs             []*protocol.PR
 	repoStates      map[string]*protocol.RepoState
@@ -47,6 +52,7 @@ type Model struct {
 	currentSession  string // current tmux session name
 	width           int    // terminal width
 	height          int    // terminal height
+	loadingRepos    map[string]bool // repos currently fetching PR details
 }
 
 // repoGroup represents a repository with its PRs
@@ -55,13 +61,16 @@ type repoGroup struct {
 	prs       []*protocol.PR
 	muted     bool
 	collapsed bool
+	loading   bool // fetching PR details
 }
 
 // NewModel creates a new dashboard model
 func NewModel(c *client.Client) *Model {
 	return &Model{
 		client:         c,
+		ghFetcher:      github.NewFetcher(),
 		currentSession: getCurrentTmuxSession(),
+		loadingRepos:   make(map[string]bool),
 	}
 }
 
@@ -128,6 +137,7 @@ func (m *Model) buildRepoGroups() []*repoGroup {
 			prs:       grouped[repo],
 			muted:     muted,
 			collapsed: collapsed,
+			loading:   m.loadingRepos[repo],
 		})
 	}
 
@@ -194,6 +204,13 @@ type errMsg struct {
 }
 
 type tickMsg struct{}
+
+// prDetailsMsg is sent when PR details have been fetched
+type prDetailsMsg struct {
+	repo    string
+	details map[int]*github.PRDetails // PR number -> details
+	err     error
+}
 
 // Update handles messages
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -292,6 +309,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 	case tickMsg:
 		return m, m.refresh
+	case prDetailsMsg:
+		// Clear loading state
+		delete(m.loadingRepos, msg.repo)
+		if msg.err != nil {
+			// Log error but don't fail the UI
+			return m, nil
+		}
+		// Update PRs with fetched details
+		now := time.Now()
+		for _, pr := range m.prs {
+			if pr.Repo == msg.repo {
+				if details, ok := msg.details[pr.Number]; ok {
+					pr.DetailsFetched = true
+					pr.DetailsFetchedAt = now
+					pr.Mergeable = details.Mergeable
+					pr.MergeableState = details.MergeableState
+					pr.CIStatus = details.CIStatus
+					pr.ReviewStatus = details.ReviewStatus
+				}
+			}
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -382,15 +421,61 @@ func (m *Model) toggleMutePR(prID string) tea.Cmd {
 }
 
 func (m *Model) toggleRepoCollapsed(repo string) tea.Cmd {
-	return func() tea.Msg {
-		// Get current displayed state (default is collapsed when no state exists)
-		state := m.repoStates[repo]
-		currentlyCollapsed := state == nil || state.Collapsed
-		newCollapsed := !currentlyCollapsed
+	// Get current displayed state (default is collapsed when no state exists)
+	state := m.repoStates[repo]
+	currentlyCollapsed := state == nil || state.Collapsed
+	newCollapsed := !currentlyCollapsed
+
+	// If we're expanding, check if we need to fetch PR details
+	var fetchCmd tea.Cmd
+	if !newCollapsed {
+		// Check if any PRs in this repo need detail refresh
+		needsFetch := false
+		for _, pr := range m.prs {
+			if pr.Repo == repo && pr.NeedsDetailRefresh() {
+				needsFetch = true
+				break
+			}
+		}
+		if needsFetch && !m.loadingRepos[repo] {
+			m.loadingRepos[repo] = true
+			fetchCmd = m.fetchPRDetails(repo)
+		}
+	}
+
+	collapseCmd := func() tea.Msg {
 		if err := m.client.SetRepoCollapsed(repo, newCollapsed); err != nil {
 			return errMsg{err: err}
 		}
 		return m.refresh()
+	}
+
+	if fetchCmd != nil {
+		return tea.Batch(collapseCmd, fetchCmd)
+	}
+	return collapseCmd
+}
+
+// fetchPRDetails fetches detailed status for all PRs in a repo
+func (m *Model) fetchPRDetails(repo string) tea.Cmd {
+	// Collect PR numbers that need fetching
+	var prNumbers []int
+	for _, pr := range m.prs {
+		if pr.Repo == repo && pr.NeedsDetailRefresh() {
+			prNumbers = append(prNumbers, pr.Number)
+		}
+	}
+
+	return func() tea.Msg {
+		details := make(map[int]*github.PRDetails)
+		for _, num := range prNumbers {
+			d, err := m.ghFetcher.FetchPRDetails(repo, num)
+			if err != nil {
+				continue // Skip individual failures
+			}
+			details[num] = d
+		}
+		return prDetailsMsg{repo: repo, details: details}
 	}
 }
 
@@ -505,10 +590,12 @@ func (m *Model) View() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Top, sessPane, " ", prPane)
 
 	// Legend
-	legend := fmt.Sprintf("%s waiting  %s working  %s muted",
+	legend := fmt.Sprintf("%s waiting  %s working  %s muted  |  %s yours  %s review",
 		yellowStyle.Render("●"),
 		greenStyle.Render("○"),
-		grayStyle.Render("◌"))
+		grayStyle.Render("◌"),
+		cyanStyle.Render("★"),
+		magentaStyle.Render("◇"))
 	help := legendStyle.Render("[←/→] Switch  [m] Mute  [M] Muted PRs  [V] Muted repos  [Space] Open/Expand  [R] Restart  [q] Quit")
 
 	return content + "\n" + legend + "\n" + help + "\n"
@@ -604,7 +691,12 @@ func (m *Model) buildPRsContent(width int) string {
 			style = grayStyle
 		}
 
-		repoLine := fmt.Sprintf("%s%s %s (%d)", cursor, icon, repoShort, len(group.prs))
+		loadingIndicator := ""
+		if group.loading {
+			loadingIndicator = " ⟳"
+		}
+
+		repoLine := fmt.Sprintf("%s%s %s (%d)%s", cursor, icon, repoShort, len(group.prs), loadingIndicator)
 		lines = append(lines, style.Render(repoLine))
 		prIndex++
 
@@ -616,31 +708,24 @@ func (m *Model) buildPRsContent(width int) string {
 					cursor = "  > "
 				}
 
+				// Determine style based on role and state
 				var style lipgloss.Style
-				var stateStr string
+				var roleIcon string
 				if pr.Muted {
 					style = grayStyle
-					stateStr = "muted"
-				} else if pr.State == protocol.StateWaiting {
-					style = yellowStyle
-					switch pr.Reason {
-					case protocol.PRReasonReadyToMerge:
-						stateStr = "merge"
-					case protocol.PRReasonCIFailed:
-						stateStr = "fix"
-					case protocol.PRReasonChangesRequested:
-						stateStr = "fix"
-					case protocol.PRReasonReviewNeeded:
-						stateStr = "review"
-					default:
-						stateStr = "open"
-					}
+					roleIcon = "◌"
+				} else if pr.Role == protocol.PRRoleAuthor {
+					style = cyanStyle
+					roleIcon = "★" // your PR
 				} else {
-					style = greenStyle
-					stateStr = "wait"
+					style = magentaStyle
+					roleIcon = "◇" // review request
 				}
 
-				prLine := fmt.Sprintf("%s⬡ #%d %s", cursor, pr.Number, stateStr)
+				// Build status string from detailed info if available
+				statusStr := m.buildPRStatus(pr)
+
+				prLine := fmt.Sprintf("%s%s #%d %s", cursor, roleIcon, pr.Number, statusStr)
 				lines = append(lines, style.Render(prLine))
 
 				// PR title on next line(s), wrapped to pane width minus indent
@@ -659,6 +744,62 @@ func (m *Model) buildPRsContent(width int) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// buildPRStatus builds status string from PR details
+func (m *Model) buildPRStatus(pr *protocol.PR) string {
+	if pr.Muted {
+		return "muted"
+	}
+
+	// If details not fetched yet, show basic status
+	if !pr.DetailsFetched {
+		if pr.Role == protocol.PRRoleReviewer {
+			return "needs review"
+		}
+		return "open"
+	}
+
+	// Build status from detailed info
+	var parts []string
+
+	// CI status
+	switch pr.CIStatus {
+	case "success":
+		parts = append(parts, "✓ci")
+	case "failure":
+		parts = append(parts, "✗ci")
+	case "pending":
+		parts = append(parts, "⋯ci")
+	}
+
+	// Review status
+	switch pr.ReviewStatus {
+	case "approved":
+		parts = append(parts, "✓rev")
+	case "changes_requested":
+		parts = append(parts, "✗rev")
+	case "pending", "none":
+		if pr.Role == protocol.PRRoleAuthor {
+			parts = append(parts, "⋯rev")
+		}
+	}
+
+	// Mergeable status
+	if pr.Mergeable != nil {
+		if *pr.Mergeable {
+			if pr.MergeableState == "clean" {
+				parts = append(parts, "ready")
+			}
+		} else {
+			parts = append(parts, "conflicts")
+		}
+	}
+
+	if len(parts) == 0 {
+		return "open"
+	}
+	return strings.Join(parts, " ")
 }
 
 // wrapText wraps text to maxWidth, returning lines
