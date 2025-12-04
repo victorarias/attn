@@ -4,33 +4,56 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/victorarias/claude-manager/internal/client"
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
 
-// ANSI color codes
-const (
-	colorReset  = "\033[0m"
-	colorYellow = "\033[33m" // waiting
-	colorGreen  = "\033[32m" // working
-	colorGray   = "\033[90m" // muted/idle
+// Styles using lipgloss
+var (
+	// Colors
+	yellowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))  // waiting
+	greenStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))  // working
+	grayStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))  // muted
+
+	// Pane styles
+	paneWidth       = 38
+	focusedBorder   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4")).Width(paneWidth)
+	unfocusedBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8")).Width(paneWidth)
+
+	// Header styles
+	headerStyle = lipgloss.NewStyle().Bold(true).Padding(0, 1)
+
+	// Legend style
+	legendStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 )
 
 // Model is the bubbletea model for the dashboard
 type Model struct {
-	client         *client.Client
-	sessions       []*protocol.Session
-	prs            []*protocol.PR
-	cursor         int
-	prCursor       int
-	focusPane      int  // 0 = sessions, 1 = PRs
-	showMutedPRs   bool
-	err            error
-	currentSession string // current tmux session name
+	client          *client.Client
+	sessions        []*protocol.Session
+	prs             []*protocol.PR
+	repoStates      map[string]*protocol.RepoState
+	cursor          int
+	prCursor        int // now indexes into flattened view
+	focusPane       int  // 0 = sessions, 1 = PRs
+	showMutedPRs    bool
+	showMutedRepos  bool
+	err             error
+	currentSession  string // current tmux session name
+}
+
+// repoGroup represents a repository with its PRs
+type repoGroup struct {
+	name      string
+	prs       []*protocol.PR
+	muted     bool
+	collapsed bool
 }
 
 // NewModel creates a new dashboard model
@@ -69,22 +92,65 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(m.refresh, TickCmd())
 }
 
+// buildRepoGroups groups PRs by repository
+func (m *Model) buildRepoGroups() []*repoGroup {
+	// Group PRs by repo
+	grouped := make(map[string][]*protocol.PR)
+	for _, pr := range m.prs {
+		// Skip muted PRs if not showing them
+		if pr.Muted && !m.showMutedPRs {
+			continue
+		}
+		grouped[pr.Repo] = append(grouped[pr.Repo], pr)
+	}
+
+	// Build sorted list of groups
+	var repos []string
+	for repo := range grouped {
+		repos = append(repos, repo)
+	}
+	sort.Strings(repos)
+
+	var groups []*repoGroup
+	for _, repo := range repos {
+		state := m.repoStates[repo]
+		muted := state != nil && state.Muted
+		collapsed := state == nil || state.Collapsed // default collapsed
+
+		// Skip muted repos if not showing them
+		if muted && !m.showMutedRepos {
+			continue
+		}
+
+		groups = append(groups, &repoGroup{
+			name:      repo,
+			prs:       grouped[repo],
+			muted:     muted,
+			collapsed: collapsed,
+		})
+	}
+
+	return groups
+}
+
 // refresh fetches sessions from daemon
 func (m *Model) refresh() tea.Msg {
 	if m.client == nil {
-		return sessionsMsg{sessions: nil, prs: nil}
+		return sessionsMsg{sessions: nil, prs: nil, repos: nil}
 	}
 	sessions, err := m.client.Query("")
 	if err != nil {
 		return errMsg{err: err}
 	}
-	prs, _ := m.client.QueryPRs("") // Ignore error, PRs are optional
-	return sessionsMsg{sessions: sessions, prs: prs}
+	prs, _ := m.client.QueryPRs("")     // Ignore error, PRs are optional
+	repos, _ := m.client.QueryRepos()   // Ignore error, repos are optional
+	return sessionsMsg{sessions: sessions, prs: prs, repos: repos}
 }
 
 type sessionsMsg struct {
 	sessions []*protocol.Session
 	prs      []*protocol.PR
+	repos    []*protocol.RepoState
 }
 
 type errMsg struct {
@@ -156,6 +222,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionsMsg:
 		m.sessions = msg.sessions
 		m.prs = msg.prs
+		// Build repo states map
+		m.repoStates = make(map[string]*protocol.RepoState)
+		for _, repo := range msg.repos {
+			m.repoStates[repo.Repo] = repo
+		}
 		m.err = nil
 		// Ensure cursors are valid
 		if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
@@ -305,24 +376,48 @@ func (m *Model) jumpToPane(tmuxTarget string) tea.Cmd {
 	})
 }
 
-// View renders the dashboard
+// View renders the dashboard with two-column layout
 func (m *Model) View() string {
 	if m.err != nil {
 		return fmt.Sprintf("Error: %v\n\nPress 'r' to retry, 'q' to quit", m.err)
 	}
 
-	var s strings.Builder
-
-	// Sessions section
-	sessHeader := "Sessions"
+	// Build sessions pane content
+	sessContent := m.buildSessionsContent()
+	sessBorder := unfocusedBorder
 	if m.focusPane == 0 {
-		sessHeader = "[Sessions]"
+		sessBorder = focusedBorder
 	}
-	s.WriteString(fmt.Sprintf("%s\n", sessHeader))
-	s.WriteString(strings.Repeat("─", 40) + "\n")
+	sessPane := sessBorder.Render(sessContent)
+
+	// Build PRs pane content
+	prContent := m.buildPRsContent()
+	prBorder := unfocusedBorder
+	if m.focusPane == 1 {
+		prBorder = focusedBorder
+	}
+	prPane := prBorder.Render(prContent)
+
+	// Join horizontally
+	content := lipgloss.JoinHorizontal(lipgloss.Top, sessPane, " ", prPane)
+
+	// Legend
+	legend := fmt.Sprintf("%s waiting  %s working  %s muted",
+		yellowStyle.Render("●"),
+		greenStyle.Render("○"),
+		grayStyle.Render("◌"))
+	help := legendStyle.Render("[Tab] Switch  [m] Mute  [M] Show muted  [Enter] Open  [R] Restart  [q] Quit")
+
+	return content + "\n" + legend + "\n" + help + "\n"
+}
+
+func (m *Model) buildSessionsContent() string {
+	var lines []string
+	lines = append(lines, headerStyle.Render(fmt.Sprintf("Sessions (%d)", len(m.sessions))))
+	lines = append(lines, "")
 
 	if len(m.sessions) == 0 {
-		s.WriteString("  No active sessions\n")
+		lines = append(lines, grayStyle.Render("  No active sessions"))
 	} else {
 		for i, session := range m.sessions {
 			cursor := "  "
@@ -330,42 +425,42 @@ func (m *Model) View() string {
 				cursor = "> "
 			}
 
-			var color, indicator, stateStr string
+			var style lipgloss.Style
+			var indicator, stateStr string
 			if session.Muted {
-				color = colorGray
+				style = grayStyle
 				indicator = "◌"
 				stateStr = "muted"
 			} else if session.State == protocol.StateWaiting {
-				color = colorYellow
+				style = yellowStyle
 				indicator = "●"
 				stateStr = "waiting"
 			} else {
-				color = colorGreen
+				style = greenStyle
 				indicator = "○"
 				stateStr = "working"
 			}
 
-			s.WriteString(fmt.Sprintf("%s%s%s %-15s %s%s\n",
-				cursor, color, indicator, truncate(session.Label, 15), stateStr, colorReset))
+			label := truncate(session.Label, 14)
+			line := fmt.Sprintf("%s%s %-14s %s", cursor, indicator, label, stateStr)
+			lines = append(lines, style.Render(line))
 		}
 	}
 
-	s.WriteString("\n")
+	return strings.Join(lines, "\n")
+}
 
-	// PRs section
-	prHeader := fmt.Sprintf("Pull Requests (%d)", len(m.getVisiblePRs()))
-	if m.focusPane == 1 {
-		prHeader = "[" + prHeader + "]"
-	}
-	s.WriteString(fmt.Sprintf("%s\n", prHeader))
-	s.WriteString(strings.Repeat("─", 40) + "\n")
-
+func (m *Model) buildPRsContent() string {
+	var lines []string
 	visiblePRs := m.getVisiblePRs()
+	lines = append(lines, headerStyle.Render(fmt.Sprintf("Pull Requests (%d)", len(visiblePRs))))
+	lines = append(lines, "")
+
 	if len(visiblePRs) == 0 {
 		if len(m.prs) == 0 {
-			s.WriteString("  No PRs (gh CLI?)\n")
+			lines = append(lines, grayStyle.Render("  No PRs (gh CLI?)"))
 		} else {
-			s.WriteString("  All PRs muted\n")
+			lines = append(lines, grayStyle.Render("  All PRs muted"))
 		}
 	} else {
 		for i, pr := range visiblePRs {
@@ -374,12 +469,13 @@ func (m *Model) View() string {
 				cursor = "> "
 			}
 
-			var color, stateStr string
+			var style lipgloss.Style
+			var stateStr string
 			if pr.Muted {
-				color = colorGray
+				style = grayStyle
 				stateStr = "muted"
 			} else if pr.State == protocol.StateWaiting {
-				color = colorYellow
+				style = yellowStyle
 				switch pr.Reason {
 				case protocol.PRReasonReadyToMerge:
 					stateStr = "merge"
@@ -393,7 +489,7 @@ func (m *Model) View() string {
 					stateStr = "open"
 				}
 			} else {
-				color = colorGreen
+				style = greenStyle
 				stateStr = "wait"
 			}
 
@@ -403,110 +499,14 @@ func (m *Model) View() string {
 				repoShort = pr.Repo[idx+1:]
 			}
 
-			s.WriteString(fmt.Sprintf("%s%s⬡ %s#%d %s%s\n",
-				cursor, color, truncate(repoShort, 12), pr.Number, stateStr, colorReset))
+			line := fmt.Sprintf("%s⬡ %s#%d %s", cursor, truncate(repoShort, 12), pr.Number, stateStr)
+			lines = append(lines, style.Render(line))
 		}
 	}
 
-	s.WriteString("\n")
-
-	// Legend
-	s.WriteString(fmt.Sprintf("%s●%s waiting  %s○%s working  %s◌%s muted\n",
-		colorYellow, colorReset, colorGreen, colorReset, colorGray, colorReset))
-	s.WriteString("[Tab] Switch  [m] Mute  [M] Show muted  [Enter] Open  [q] Quit\n")
-
-	return s.String()
+	return strings.Join(lines, "\n")
 }
 
-func (m *Model) renderSessionsPane(width int) []string {
-	var lines []string
-
-	if len(m.sessions) == 0 {
-		lines = append(lines, "No active sessions")
-		return lines
-	}
-
-	for i, session := range m.sessions {
-		cursor := "  "
-		if i == m.cursor && m.focusPane == 0 {
-			cursor = "> "
-		}
-
-		var color, indicator, stateStr string
-		if session.Muted {
-			color = colorGray
-			indicator = "◌"
-			stateStr = "muted"
-		} else if session.State == protocol.StateWaiting {
-			color = colorYellow
-			indicator = "●"
-			stateStr = "waiting"
-		} else {
-			color = colorGreen
-			indicator = "○"
-			stateStr = "working"
-		}
-
-		line := fmt.Sprintf("%s%s%s %-12s %s%s",
-			cursor, color, indicator, truncate(session.Label, 12), stateStr, colorReset)
-		lines = append(lines, line)
-	}
-
-	return lines
-}
-
-func (m *Model) renderPRsPane(width int) []string {
-	var lines []string
-
-	visiblePRs := m.getVisiblePRs()
-
-	if len(visiblePRs) == 0 {
-		if len(m.prs) == 0 {
-			lines = append(lines, "No PRs (gh CLI?)")
-		} else {
-			lines = append(lines, "All PRs muted")
-		}
-		return lines
-	}
-
-	for i, pr := range visiblePRs {
-		cursor := "  "
-		if i == m.prCursor && m.focusPane == 1 {
-			cursor = "> "
-		}
-
-		var color, stateStr string
-		if pr.Muted {
-			color = colorGray
-			stateStr = "muted"
-		} else if pr.State == protocol.StateWaiting {
-			color = colorYellow
-			switch pr.Reason {
-			case protocol.PRReasonReadyToMerge:
-				stateStr = "merge"
-			case protocol.PRReasonCIFailed:
-				stateStr = "fix"
-			case protocol.PRReasonChangesRequested:
-				stateStr = "fix"
-			case protocol.PRReasonReviewNeeded:
-				stateStr = "review"
-			default:
-				stateStr = "wait"
-			}
-		} else {
-			color = colorGreen
-			stateStr = "wait"
-		}
-
-		// Format: ⬡ repo#123  state
-		repoShort := truncate(pr.Repo, 15)
-		line := fmt.Sprintf("%s%s⬡ %s#%d %s%s",
-			cursor, color, repoShort, pr.Number, stateStr, colorReset)
-		lines = append(lines, line)
-	}
-
-	return lines
-}
 
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
@@ -515,30 +515,6 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-1] + "…"
 }
 
-func padRight(s string, length int) string {
-	// Strip ANSI codes for length calculation
-	visible := stripANSI(s)
-	padding := length - len(visible)
-	if padding <= 0 {
-		return s
-	}
-	return s + strings.Repeat(" ", padding)
-}
-
-func stripANSI(s string) string {
-	// Simple ANSI stripper for length calculation
-	result := s
-	for _, code := range []string{colorReset, colorYellow, colorGreen, colorGray} {
-		result = strings.ReplaceAll(result, code, "")
-	}
-	return result
-}
-
-func formatDuration(d time.Duration) string {
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	return fmt.Sprintf("%dm %02ds", minutes, seconds)
-}
 
 // TickCmd returns a command that ticks for auto-refresh
 func TickCmd() tea.Cmd {
