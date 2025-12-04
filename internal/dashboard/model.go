@@ -452,59 +452,125 @@ func (m *Model) buildSessionsContent() string {
 
 func (m *Model) buildPRsContent() string {
 	var lines []string
-	visiblePRs := m.getVisiblePRs()
-	lines = append(lines, headerStyle.Render(fmt.Sprintf("Pull Requests (%d)", len(visiblePRs))))
+	groups := m.buildRepoGroups()
+
+	totalPRs := 0
+	for _, g := range groups {
+		totalPRs += len(g.prs)
+	}
+
+	lines = append(lines, headerStyle.Render(fmt.Sprintf("Pull Requests (%d)", totalPRs)))
 	lines = append(lines, "")
 
-	if len(visiblePRs) == 0 {
+	if len(groups) == 0 {
 		if len(m.prs) == 0 {
 			lines = append(lines, grayStyle.Render("  No PRs (gh CLI?)"))
 		} else {
 			lines = append(lines, grayStyle.Render("  All PRs muted"))
 		}
-	} else {
-		for i, pr := range visiblePRs {
-			cursor := "  "
-			if i == m.prCursor && m.focusPane == 1 {
-				cursor = "> "
-			}
+		return strings.Join(lines, "\n")
+	}
 
-			var style lipgloss.Style
-			var stateStr string
-			if pr.Muted {
-				style = grayStyle
-				stateStr = "muted"
-			} else if pr.State == protocol.StateWaiting {
-				style = yellowStyle
-				switch pr.Reason {
-				case protocol.PRReasonReadyToMerge:
-					stateStr = "merge"
-				case protocol.PRReasonCIFailed:
-					stateStr = "fix"
-				case protocol.PRReasonChangesRequested:
-					stateStr = "fix"
-				case protocol.PRReasonReviewNeeded:
-					stateStr = "review"
-				default:
-					stateStr = "open"
+	prIndex := 0
+	for _, group := range groups {
+		// Render repo header
+		cursor := "  "
+		if m.focusPane == 1 && m.prCursor == prIndex {
+			cursor = "> "
+		}
+
+		icon := "▶"
+		if !group.collapsed {
+			icon = "▼"
+		}
+
+		// Short repo name
+		repoShort := group.name
+		if idx := strings.LastIndex(group.name, "/"); idx >= 0 {
+			repoShort = group.name[idx+1:]
+		}
+
+		style := lipgloss.NewStyle()
+		if group.muted {
+			style = grayStyle
+		}
+
+		repoLine := fmt.Sprintf("%s%s %s (%d)", cursor, icon, repoShort, len(group.prs))
+		lines = append(lines, style.Render(repoLine))
+		prIndex++
+
+		// Render PRs if expanded
+		if !group.collapsed {
+			for _, pr := range group.prs {
+				cursor := "    " // extra indent for PRs
+				if m.focusPane == 1 && m.prCursor == prIndex {
+					cursor = "  > "
 				}
-			} else {
-				style = greenStyle
-				stateStr = "wait"
-			}
 
-			// Show short repo name
-			repoShort := pr.Repo
-			if idx := strings.LastIndex(pr.Repo, "/"); idx >= 0 {
-				repoShort = pr.Repo[idx+1:]
-			}
+				var style lipgloss.Style
+				var stateStr string
+				if pr.Muted {
+					style = grayStyle
+					stateStr = "muted"
+				} else if pr.State == protocol.StateWaiting {
+					style = yellowStyle
+					switch pr.Reason {
+					case protocol.PRReasonReadyToMerge:
+						stateStr = "merge"
+					case protocol.PRReasonCIFailed:
+						stateStr = "fix"
+					case protocol.PRReasonChangesRequested:
+						stateStr = "fix"
+					case protocol.PRReasonReviewNeeded:
+						stateStr = "review"
+					default:
+						stateStr = "open"
+					}
+				} else {
+					style = greenStyle
+					stateStr = "wait"
+				}
 
-			line := fmt.Sprintf("%s⬡ %s#%d %s", cursor, truncate(repoShort, 12), pr.Number, stateStr)
-			lines = append(lines, style.Render(line))
+				prLine := fmt.Sprintf("%s⬡ #%d %s", cursor, pr.Number, stateStr)
+				lines = append(lines, style.Render(prLine))
+
+				// PR title on next line(s), wrapped
+				titleLines := wrapText(pr.Title, paneWidth-6)
+				for _, tl := range titleLines {
+					lines = append(lines, grayStyle.Render("      "+tl))
+				}
+
+				prIndex++
+			}
 		}
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// wrapText wraps text to maxWidth, returning lines
+func wrapText(text string, maxWidth int) []string {
+	if len(text) <= maxWidth {
+		return []string{text}
+	}
+
+	var lines []string
+	for len(text) > maxWidth {
+		// Find last space before maxWidth
+		breakAt := maxWidth
+		for i := maxWidth - 1; i > 0; i-- {
+			if text[i] == ' ' {
+				breakAt = i
+				break
+			}
+		}
+		lines = append(lines, text[:breakAt])
+		text = strings.TrimLeft(text[breakAt:], " ")
+	}
+	if len(text) > 0 {
+		lines = append(lines, text)
+	}
+	return lines
 }
 
 
