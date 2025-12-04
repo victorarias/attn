@@ -284,3 +284,49 @@ func TestStore_BackgroundPersistence(t *testing.T) {
 		t.Error("dirty flag should be cleared after save")
 	}
 }
+
+func TestStore_RepoState(t *testing.T) {
+	s := New()
+
+	// Initially no repo state
+	state := s.GetRepoState("owner/repo")
+	if state != nil {
+		t.Error("expected nil for unknown repo")
+	}
+
+	// Toggle mute creates state
+	s.ToggleMuteRepo("owner/repo")
+	state = s.GetRepoState("owner/repo")
+	if state == nil {
+		t.Fatal("expected repo state after toggle")
+	}
+	if !state.Muted {
+		t.Error("repo should be muted")
+	}
+
+	// Toggle again unmutes
+	s.ToggleMuteRepo("owner/repo")
+	state = s.GetRepoState("owner/repo")
+	if state.Muted {
+		t.Error("repo should be unmuted")
+	}
+
+	// Set collapsed
+	s.SetRepoCollapsed("owner/repo", true)
+	state = s.GetRepoState("owner/repo")
+	if !state.Collapsed {
+		t.Error("repo should be collapsed")
+	}
+}
+
+func TestStore_ListRepoStates(t *testing.T) {
+	s := New()
+
+	s.ToggleMuteRepo("repo-a")
+	s.SetRepoCollapsed("repo-b", true)
+
+	states := s.ListRepoStates()
+	if len(states) != 2 {
+		t.Errorf("expected 2 repo states, got %d", len(states))
+	}
+}
