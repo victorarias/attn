@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,7 @@ type Logger struct {
 	file   *os.File
 	logger *log.Logger
 	debug  bool
+	mu     sync.Mutex
 }
 
 func New(path string) (*Logger, error) {
@@ -44,6 +46,8 @@ func (l *Logger) Close() error {
 }
 
 func (l *Logger) log(level, msg string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	l.logger.Printf("[%s] %s: %s", timestamp, level, msg)
 }
