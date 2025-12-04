@@ -132,3 +132,93 @@ func TestStore_Touch(t *testing.T) {
 		t.Error("LastSeen should be updated after Touch")
 	}
 }
+
+func TestStore_ToggleMute(t *testing.T) {
+	s := New()
+
+	s.Add(&protocol.Session{
+		ID:    "abc123",
+		Muted: false,
+	})
+
+	// First toggle: false -> true
+	s.ToggleMute("abc123")
+	if !s.Get("abc123").Muted {
+		t.Error("expected Muted=true after first toggle")
+	}
+
+	// Second toggle: true -> false
+	s.ToggleMute("abc123")
+	if s.Get("abc123").Muted {
+		t.Error("expected Muted=false after second toggle")
+	}
+}
+
+func TestStore_ToggleMute_NonExistent(t *testing.T) {
+	s := New()
+
+	// Should not panic on non-existent session
+	s.ToggleMute("nonexistent")
+}
+
+func TestStore_SetAndListPRs(t *testing.T) {
+	s := New()
+
+	prs := []*protocol.PR{
+		{ID: "owner/repo#1", State: protocol.StateWaiting, Muted: false},
+		{ID: "owner/repo#2", State: protocol.StateWorking, Muted: false},
+	}
+
+	s.SetPRs(prs)
+
+	all := s.ListPRs("")
+	if len(all) != 2 {
+		t.Errorf("ListPRs('') returned %d PRs, want 2", len(all))
+	}
+
+	waiting := s.ListPRs(protocol.StateWaiting)
+	if len(waiting) != 1 {
+		t.Errorf("ListPRs(waiting) returned %d PRs, want 1", len(waiting))
+	}
+}
+
+func TestStore_SetPRs_PreservesMuted(t *testing.T) {
+	s := New()
+
+	// Initial PRs
+	prs := []*protocol.PR{
+		{ID: "owner/repo#1", State: protocol.StateWaiting, Muted: false},
+	}
+	s.SetPRs(prs)
+
+	// Mute it
+	s.ToggleMutePR("owner/repo#1")
+
+	// Set PRs again (simulating poll)
+	prs2 := []*protocol.PR{
+		{ID: "owner/repo#1", State: protocol.StateWorking, Muted: false},
+	}
+	s.SetPRs(prs2)
+
+	// Should still be muted
+	all := s.ListPRs("")
+	if !all[0].Muted {
+		t.Error("PR should still be muted after SetPRs")
+	}
+}
+
+func TestStore_ToggleMutePR(t *testing.T) {
+	s := New()
+
+	prs := []*protocol.PR{
+		{ID: "owner/repo#1", State: protocol.StateWaiting, Muted: false},
+	}
+	s.SetPRs(prs)
+
+	s.ToggleMutePR("owner/repo#1")
+
+	all := s.ListPRs("")
+	if !all[0].Muted {
+		t.Error("PR should be muted after toggle")
+	}
+}
