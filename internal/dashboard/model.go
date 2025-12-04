@@ -21,10 +21,9 @@ var (
 	greenStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))  // working
 	grayStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))  // muted
 
-	// Pane styles
-	paneWidth       = 38
-	focusedBorder   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4")).Width(paneWidth)
-	unfocusedBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8")).Width(paneWidth)
+	// Pane border styles (width set dynamically)
+	focusedBorderStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("4"))
+	unfocusedBorderStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))
 
 	// Header styles
 	headerStyle = lipgloss.NewStyle().Bold(true).Padding(0, 1)
@@ -40,12 +39,14 @@ type Model struct {
 	prs             []*protocol.PR
 	repoStates      map[string]*protocol.RepoState
 	cursor          int
-	prCursor        int // now indexes into flattened view
+	prCursor        int  // now indexes into flattened view
 	focusPane       int  // 0 = sessions, 1 = PRs
 	showMutedPRs    bool
 	showMutedRepos  bool
 	err             error
 	currentSession  string // current tmux session name
+	width           int    // terminal width
+	height          int    // terminal height
 }
 
 // repoGroup represents a repository with its PRs
@@ -197,6 +198,10 @@ type tickMsg struct{}
 // Update handles messages
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -465,19 +470,34 @@ func (m *Model) View() string {
 		return fmt.Sprintf("Error: %v\n\nPress 'r' to retry, 'q' to quit", m.err)
 	}
 
+	// Calculate pane widths (sessions: 35%, PRs: 65%)
+	// Account for borders (2 chars each) and gap (1 char)
+	totalWidth := m.width
+	if totalWidth < 60 {
+		totalWidth = 80 // fallback
+	}
+	sessWidth := (totalWidth - 5) * 35 / 100
+	prWidth := totalWidth - sessWidth - 5
+	if sessWidth < 25 {
+		sessWidth = 25
+	}
+	if prWidth < 30 {
+		prWidth = 30
+	}
+
 	// Build sessions pane content
-	sessContent := m.buildSessionsContent()
-	sessBorder := unfocusedBorder
+	sessContent := m.buildSessionsContent(sessWidth)
+	sessBorder := unfocusedBorderStyle.Width(sessWidth)
 	if m.focusPane == 0 {
-		sessBorder = focusedBorder
+		sessBorder = focusedBorderStyle.Width(sessWidth)
 	}
 	sessPane := sessBorder.Render(sessContent)
 
 	// Build PRs pane content
-	prContent := m.buildPRsContent()
-	prBorder := unfocusedBorder
+	prContent := m.buildPRsContent(prWidth)
+	prBorder := unfocusedBorderStyle.Width(prWidth)
 	if m.focusPane == 1 {
-		prBorder = focusedBorder
+		prBorder = focusedBorderStyle.Width(prWidth)
 	}
 	prPane := prBorder.Render(prContent)
 
@@ -494,7 +514,7 @@ func (m *Model) View() string {
 	return content + "\n" + legend + "\n" + help + "\n"
 }
 
-func (m *Model) buildSessionsContent() string {
+func (m *Model) buildSessionsContent(width int) string {
 	var lines []string
 	lines = append(lines, headerStyle.Render(fmt.Sprintf("Sessions (%d)", len(m.sessions))))
 	lines = append(lines, "")
@@ -502,6 +522,12 @@ func (m *Model) buildSessionsContent() string {
 	if len(m.sessions) == 0 {
 		lines = append(lines, grayStyle.Render("  No active sessions"))
 	} else {
+		// Calculate label width: width - cursor(2) - indicator(2) - state(8)
+		labelWidth := width - 12
+		if labelWidth < 10 {
+			labelWidth = 10
+		}
+
 		for i, session := range m.sessions {
 			cursor := "  "
 			if i == m.cursor && m.focusPane == 0 {
@@ -524,8 +550,8 @@ func (m *Model) buildSessionsContent() string {
 				stateStr = "working"
 			}
 
-			label := truncate(session.Label, 14)
-			line := fmt.Sprintf("%s%s %-14s %s", cursor, indicator, label, stateStr)
+			label := truncate(session.Label, labelWidth)
+			line := fmt.Sprintf("%s%s %-*s %s", cursor, indicator, labelWidth, label, stateStr)
 			lines = append(lines, style.Render(line))
 		}
 	}
@@ -533,7 +559,7 @@ func (m *Model) buildSessionsContent() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) buildPRsContent() string {
+func (m *Model) buildPRsContent(width int) string {
 	var lines []string
 	groups := m.buildRepoGroups()
 
@@ -617,8 +643,12 @@ func (m *Model) buildPRsContent() string {
 				prLine := fmt.Sprintf("%s⬡ #%d %s", cursor, pr.Number, stateStr)
 				lines = append(lines, style.Render(prLine))
 
-				// PR title on next line(s), wrapped
-				titleLines := wrapText(pr.Title, paneWidth-6)
+				// PR title on next line(s), wrapped to pane width minus indent
+				titleWidth := width - 6
+				if titleWidth < 20 {
+					titleWidth = 20
+				}
+				titleLines := wrapText(pr.Title, titleWidth)
 				for _, tl := range titleLines {
 					lines = append(lines, grayStyle.Render("      "+tl))
 				}
