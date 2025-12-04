@@ -201,14 +201,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "tab", "l":
+		case "tab":
 			if m.focusPane == 0 {
 				m.focusPane = 1
 			} else {
 				m.focusPane = 0
 			}
-		case "h":
+		case "left", "h":
 			m.focusPane = 0
+		case "right", "l":
+			m.focusPane = 1
 		case "up", "k":
 			if m.focusPane == 0 {
 				m.moveCursor(-1)
@@ -223,7 +225,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "r":
 			return m, m.refresh
-		case "enter":
+		case "enter", " ":
 			if m.focusPane == 0 {
 				if s := m.SelectedSession(); s != nil && s.TmuxTarget != "" {
 					return m, m.jumpToPane(s.TmuxTarget)
@@ -489,7 +491,7 @@ func (m *Model) View() string {
 		yellowStyle.Render("●"),
 		greenStyle.Render("○"),
 		grayStyle.Render("◌"))
-	help := legendStyle.Render("[Tab] Switch  [m] Mute  [M] Muted PRs  [V] Muted repos  [Enter] Open/Expand  [R] Restart  [q] Quit")
+	help := legendStyle.Render("[←/→] Switch  [m] Mute  [M] Muted PRs  [V] Muted repos  [Space] Open/Expand  [R] Restart  [q] Quit")
 
 	return content + "\n" + legend + "\n" + help + "\n"
 }
