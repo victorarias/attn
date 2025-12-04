@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/victorarias/claude-manager/internal/github"
 	"github.com/victorarias/claude-manager/internal/logging"
 	"github.com/victorarias/claude-manager/internal/protocol"
 	"github.com/victorarias/claude-manager/internal/store"
@@ -19,6 +20,7 @@ type Daemon struct {
 	listener   net.Listener
 	done       chan struct{}
 	logger     *logging.Logger
+	ghFetcher  *github.Fetcher
 }
 
 // New creates a new daemon
@@ -29,6 +31,7 @@ func New(socketPath string) *Daemon {
 		store:      store.NewWithPersistence(store.DefaultStatePath()),
 		done:       make(chan struct{}),
 		logger:     logger,
+		ghFetcher:  github.NewFetcher(),
 	}
 }
 
@@ -53,6 +56,9 @@ func (d *Daemon) Start() error {
 	}
 	d.listener = listener
 	d.log("daemon started")
+
+	// Start PR polling
+	go d.pollPRs()
 
 	for {
 		select {
@@ -213,4 +219,62 @@ func (d *Daemon) sendOK(conn net.Conn) {
 func (d *Daemon) sendError(conn net.Conn, errMsg string) {
 	resp := protocol.Response{OK: false, Error: errMsg}
 	json.NewEncoder(conn).Encode(resp)
+}
+
+func (d *Daemon) pollPRs() {
+	if d.ghFetcher == nil || !d.ghFetcher.IsAvailable() {
+		d.log("gh CLI not available, PR polling disabled")
+		return
+	}
+
+	d.log("PR polling started (90s interval)")
+
+	// Initial poll
+	d.doPRPoll()
+
+	ticker := time.NewTicker(90 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.done:
+			return
+		case <-ticker.C:
+			d.doPRPoll()
+		}
+	}
+}
+
+func (d *Daemon) doPRPoll() {
+	prs, err := d.ghFetcher.FetchAll()
+	if err != nil {
+		d.logf("PR poll error: %v", err)
+		return
+	}
+
+	// Filter: skip muted PRs that were polled within 24h
+	existingPRs := d.store.ListPRs("")
+	mutedRecently := make(map[string]bool)
+	for _, pr := range existingPRs {
+		if pr.Muted && time.Since(pr.LastPolled) < 24*time.Hour {
+			mutedRecently[pr.ID] = true
+		}
+	}
+
+	var activePRs []*protocol.PR
+	for _, pr := range prs {
+		if !mutedRecently[pr.ID] {
+			activePRs = append(activePRs, pr)
+		}
+	}
+
+	d.store.SetPRs(activePRs)
+
+	waiting := 0
+	for _, pr := range activePRs {
+		if pr.State == protocol.StateWaiting {
+			waiting++
+		}
+	}
+	d.logf("PR poll: %d PRs (%d waiting)", len(activePRs), waiting)
 }
