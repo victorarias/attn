@@ -311,25 +311,80 @@ func (m *Model) View() string {
 		return fmt.Sprintf("Error: %v\n\nPress 'r' to retry, 'q' to quit", m.err)
 	}
 
-	if len(m.sessions) == 0 {
-		return "No active sessions\n\nPress 'r' to refresh, 'q' to quit"
+	// Get terminal width (default to 120 if can't detect)
+	width := 120
+
+	// Calculate pane widths
+	leftWidth := width/2 - 2
+	rightWidth := width/2 - 2
+
+	// Build left pane (sessions)
+	leftLines := m.renderSessionsPane(leftWidth)
+
+	// Build right pane (PRs)
+	rightLines := m.renderPRsPane(rightWidth)
+
+	// Ensure both panes have same height
+	maxLines := len(leftLines)
+	if len(rightLines) > maxLines {
+		maxLines = len(rightLines)
+	}
+	for len(leftLines) < maxLines {
+		leftLines = append(leftLines, strings.Repeat(" ", leftWidth))
+	}
+	for len(rightLines) < maxLines {
+		rightLines = append(rightLines, strings.Repeat(" ", rightWidth))
 	}
 
-	s := "Claude Sessions\n"
-	s += strings.Repeat("─", 60) + "\n"
+	// Combine panes
+	var s strings.Builder
+
+	// Header
+	leftHeader := " Sessions "
+	rightHeader := fmt.Sprintf(" Pull Requests (%d) ", len(m.getVisiblePRs()))
+	if m.focusPane == 0 {
+		leftHeader = "[" + leftHeader + "]"
+	} else {
+		rightHeader = "[" + rightHeader + "]"
+	}
+
+	s.WriteString(fmt.Sprintf("┌─%s%s┬─%s%s┐\n",
+		leftHeader, strings.Repeat("─", leftWidth-len(leftHeader)-1),
+		rightHeader, strings.Repeat("─", rightWidth-len(rightHeader)-1)))
+
+	for i := 0; i < maxLines; i++ {
+		s.WriteString(fmt.Sprintf("│ %s│ %s│\n", padRight(leftLines[i], leftWidth-1), padRight(rightLines[i], rightWidth-1)))
+	}
+
+	s.WriteString(fmt.Sprintf("└%s┴%s┘\n", strings.Repeat("─", leftWidth), strings.Repeat("─", rightWidth)))
+
+	// Legend
+	s.WriteString(fmt.Sprintf("%s●%s waiting  %s○%s working  %s◌%s muted\n",
+		colorYellow, colorReset, colorGreen, colorReset, colorGray, colorReset))
+	s.WriteString("[Tab] Switch pane  [m] Mute  [M] Show muted PRs  [Enter] Open  [r] Refresh  [q] Quit\n")
+
+	return s.String()
+}
+
+func (m *Model) renderSessionsPane(width int) []string {
+	var lines []string
+
+	if len(m.sessions) == 0 {
+		lines = append(lines, "No active sessions")
+		return lines
+	}
 
 	for i, session := range m.sessions {
 		cursor := "  "
-		if i == m.cursor {
+		if i == m.cursor && m.focusPane == 0 {
 			cursor = "> "
 		}
 
-		// Determine color and indicator based on state and muted
 		var color, indicator, stateStr string
 		if session.Muted {
 			color = colorGray
 			indicator = "◌"
-			stateStr = "idle"
+			stateStr = "muted"
 		} else if session.State == protocol.StateWaiting {
 			color = colorYellow
 			indicator = "●"
@@ -340,42 +395,91 @@ func (m *Model) View() string {
 			stateStr = "working"
 		}
 
-		duration := formatDuration(time.Since(session.StateSince))
-		todoCount := ""
-		if len(session.Todos) > 0 {
-			todoCount = fmt.Sprintf("[%d todos]", len(session.Todos))
-		}
-
-		s += fmt.Sprintf("%s%s%s %-15s %-8s %8s  %s%s\n",
-			cursor, color, indicator, session.Label, stateStr, duration, todoCount, colorReset)
+		line := fmt.Sprintf("%s%s%s %-12s %s%s",
+			cursor, color, indicator, truncate(session.Label, 12), stateStr, colorReset)
+		lines = append(lines, line)
 	}
 
-	s += strings.Repeat("─", 60) + "\n"
+	return lines
+}
 
-	// Detail panel for selected session
-	if selected := m.SelectedSession(); selected != nil {
-		s += fmt.Sprintf("\n%s\n", selected.Label)
-		s += fmt.Sprintf("Directory: %s\n", selected.Directory)
-		if selected.TmuxTarget != "" {
-			s += fmt.Sprintf("Tmux: %s\n", selected.TmuxTarget)
-		}
+func (m *Model) renderPRsPane(width int) []string {
+	var lines []string
 
-		s += "\nTodos:\n"
-		if len(selected.Todos) == 0 {
-			s += "  (no todos)\n"
+	visiblePRs := m.getVisiblePRs()
+
+	if len(visiblePRs) == 0 {
+		if len(m.prs) == 0 {
+			lines = append(lines, "No PRs (gh CLI?)")
 		} else {
-			for _, todo := range selected.Todos {
-				s += fmt.Sprintf("  %s\n", todo)
-			}
+			lines = append(lines, "All PRs muted")
 		}
+		return lines
 	}
 
-	s += strings.Repeat("─", 60) + "\n"
-	s += fmt.Sprintf("%s●%s waiting  %s○%s working  %s◌%s idle\n",
-		colorYellow, colorReset, colorGreen, colorReset, colorGray, colorReset)
-	s += "[m] Idle   [x] Delete   [R] Restart   [Enter] Jump   [r] Refresh   [q] Quit\n"
+	for i, pr := range visiblePRs {
+		cursor := "  "
+		if i == m.prCursor && m.focusPane == 1 {
+			cursor = "> "
+		}
 
-	return s
+		var color, stateStr string
+		if pr.Muted {
+			color = colorGray
+			stateStr = "muted"
+		} else if pr.State == protocol.StateWaiting {
+			color = colorYellow
+			switch pr.Reason {
+			case protocol.PRReasonReadyToMerge:
+				stateStr = "merge"
+			case protocol.PRReasonCIFailed:
+				stateStr = "fix"
+			case protocol.PRReasonChangesRequested:
+				stateStr = "fix"
+			case protocol.PRReasonReviewNeeded:
+				stateStr = "review"
+			default:
+				stateStr = "wait"
+			}
+		} else {
+			color = colorGreen
+			stateStr = "wait"
+		}
+
+		// Format: ⬡ repo#123  state
+		repoShort := truncate(pr.Repo, 15)
+		line := fmt.Sprintf("%s%s⬡ %s#%d %s%s",
+			cursor, color, repoShort, pr.Number, stateStr, colorReset)
+		lines = append(lines, line)
+	}
+
+	return lines
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
+}
+
+func padRight(s string, length int) string {
+	// Strip ANSI codes for length calculation
+	visible := stripANSI(s)
+	padding := length - len(visible)
+	if padding <= 0 {
+		return s
+	}
+	return s + strings.Repeat(" ", padding)
+}
+
+func stripANSI(s string) string {
+	// Simple ANSI stripper for length calculation
+	result := s
+	for _, code := range []string{colorReset, colorYellow, colorGreen, colorGray} {
+		result = strings.ReplaceAll(result, code, "")
+	}
+	return result
 }
 
 func formatDuration(d time.Duration) string {
