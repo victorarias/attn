@@ -158,20 +158,20 @@ func TestFormatWithPRs_RepoGrouping(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "1 repo",
+			name: "1 repo PRs only",
 			prs: []*protocol.PR{
 				{Repo: "owner/repo-a", State: protocol.StateWaiting},
 				{Repo: "owner/repo-a", State: protocol.StateWaiting},
 			},
-			want: "● 2 waiting | repo-a(2)",
+			want: "● repo-a(2)",
 		},
 		{
-			name: "2 repos",
+			name: "2 repos PRs only",
 			prs: []*protocol.PR{
 				{Repo: "owner/repo-a", State: protocol.StateWaiting},
 				{Repo: "owner/repo-b", State: protocol.StateWaiting},
 			},
-			want: "● 2 waiting | repo-a(1) repo-b(1)",
+			want: "● repo-a(1) repo-b(1)",
 		},
 		{
 			name: "3+ repos shows counts",
@@ -180,7 +180,18 @@ func TestFormatWithPRs_RepoGrouping(t *testing.T) {
 				{Repo: "owner/repo-b", State: protocol.StateWaiting},
 				{Repo: "owner/repo-c", State: protocol.StateWaiting},
 			},
-			want: "● 3 waiting | 3 PRs in 3 repos",
+			want: "● 3 PRs in 3 repos",
+		},
+		{
+			name: "sessions and PRs separate",
+			sessions: []*protocol.Session{
+				{Label: "foo", State: protocol.StateWaiting},
+				{Label: "bar", State: protocol.StateWaiting},
+			},
+			prs: []*protocol.PR{
+				{Repo: "owner/repo-a", State: protocol.StateWaiting},
+			},
+			want: "● 2 sessions | repo-a(1)",
 		},
 		{
 			name: "muted repo excluded",
@@ -191,7 +202,7 @@ func TestFormatWithPRs_RepoGrouping(t *testing.T) {
 			repos: []*protocol.RepoState{
 				{Repo: "owner/muted", Muted: true},
 			},
-			want: "● 1 waiting | repo-a(1)",
+			want: "● repo-a(1)",
 		},
 		{
 			name: "muted PR excluded",
@@ -199,7 +210,7 @@ func TestFormatWithPRs_RepoGrouping(t *testing.T) {
 				{Repo: "owner/repo-a", State: protocol.StateWaiting, Muted: false},
 				{Repo: "owner/repo-a", State: protocol.StateWaiting, Muted: true},
 			},
-			want: "● 1 waiting | repo-a(1)",
+			want: "● repo-a(1)",
 		},
 	}
 

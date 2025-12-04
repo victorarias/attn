@@ -120,14 +120,20 @@ func FormatWithPRsAndRepos(sessions []*protocol.Session, prs []*protocol.PR, rep
 		}
 	}
 
-	totalWaiting := sessionWaiting + prWaiting
-	if totalWaiting == 0 {
+	if sessionWaiting == 0 && prWaiting == 0 {
 		return "✓ all clear"
 	}
 
-	// Format PR part
-	var prPart string
+	var parts []string
+
+	// Sessions part
+	if sessionWaiting > 0 {
+		parts = append(parts, fmt.Sprintf("%d sessions", sessionWaiting))
+	}
+
+	// PRs part
 	if prWaiting > 0 {
+		var prPart string
 		if len(repoCount) <= 2 {
 			// Show repo names
 			var repoParts []string
@@ -147,11 +153,8 @@ func FormatWithPRsAndRepos(sessions []*protocol.Session, prs []*protocol.PR, rep
 		} else {
 			prPart = fmt.Sprintf("%d PRs in %d repos", prWaiting, len(repoCount))
 		}
+		parts = append(parts, prPart)
 	}
 
-	result := fmt.Sprintf("● %d waiting", totalWaiting)
-	if prPart != "" {
-		result += " | " + prPart
-	}
-	return result
+	return "● " + strings.Join(parts, " | ")
 }
