@@ -42,3 +42,12 @@ Claude Manager (`cm`) tracks multiple Claude Code sessions and surfaces which on
 ### Communication
 
 All IPC uses JSON over unix socket at `~/.claude-manager.sock`. Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates.
+
+## When Something Is Broken
+
+1. **Diagnose WHY** before proposing fixes - understand the root cause
+2. **Fix the root cause**, don't remove functionality to make the error go away
+3. **If refactoring**, list preserved behaviors and verify each one survives
+4. **Never remove user-requested functionality** without explicit approval
+
+Ask yourself: "Am I fixing the problem or avoiding it?"

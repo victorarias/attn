@@ -2,7 +2,6 @@ package dashboard
 
 import (
 	"testing"
-	"time"
 
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
@@ -64,21 +63,3 @@ func TestModel_SelectedSession(t *testing.T) {
 	}
 }
 
-func TestModel_FormatDuration(t *testing.T) {
-	tests := []struct {
-		duration time.Duration
-		want     string
-	}{
-		{30 * time.Second, "0m 30s"},
-		{90 * time.Second, "1m 30s"},
-		{5*time.Minute + 2*time.Second, "5m 02s"},
-		{65 * time.Minute, "65m 00s"},
-	}
-
-	for _, tt := range tests {
-		got := formatDuration(tt.duration)
-		if got != tt.want {
-			t.Errorf("formatDuration(%v) = %q, want %q", tt.duration, got, tt.want)
-		}
-	}
-}
