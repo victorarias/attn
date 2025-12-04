@@ -229,7 +229,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.jumpToPane(s.TmuxTarget)
 				}
 			} else {
-				if pr := m.SelectedPR(); pr != nil {
+				// PR pane - check if on repo or PR
+				if repo := m.SelectedRepo(); repo != "" {
+					// Toggle collapse
+					return m, m.toggleRepoCollapsed(repo)
+				} else if pr := m.SelectedPR(); pr != nil {
 					return m, m.openPRInBrowser(pr.URL)
 				}
 			}
@@ -239,12 +243,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.toggleMute(s.ID)
 				}
 			} else {
-				if pr := m.SelectedPR(); pr != nil {
+				// PR pane - mute repo or PR
+				if repo := m.SelectedRepo(); repo != "" {
+					return m, m.toggleMuteRepo(repo)
+				} else if pr := m.SelectedPR(); pr != nil {
 					return m, m.toggleMutePR(pr.ID)
 				}
 			}
 		case "M":
 			m.showMutedPRs = !m.showMutedPRs
+		case "V":
+			m.showMutedRepos = !m.showMutedRepos
 		case "x", "d":
 			if m.focusPane == 0 {
 				if s := m.SelectedSession(); s != nil {
@@ -365,6 +374,30 @@ func (m *Model) toggleMutePR(prID string) tea.Cmd {
 	}
 }
 
+func (m *Model) toggleRepoCollapsed(repo string) tea.Cmd {
+	return func() tea.Msg {
+		// Get current state
+		state := m.repoStates[repo]
+		collapsed := true
+		if state != nil {
+			collapsed = !state.Collapsed
+		}
+		if err := m.client.SetRepoCollapsed(repo, collapsed); err != nil {
+			return errMsg{err: err}
+		}
+		return m.refresh()
+	}
+}
+
+func (m *Model) toggleMuteRepo(repo string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.client.ToggleMuteRepo(repo); err != nil {
+			return errMsg{err: err}
+		}
+		return m.refresh()
+	}
+}
+
 func (m *Model) deleteSession(sessionID string) tea.Cmd {
 	return func() tea.Msg {
 		if err := m.client.Unregister(sessionID); err != nil {
@@ -456,7 +489,7 @@ func (m *Model) View() string {
 		yellowStyle.Render("●"),
 		greenStyle.Render("○"),
 		grayStyle.Render("◌"))
-	help := legendStyle.Render("[Tab] Switch  [m] Mute  [M] Show muted  [Enter] Open  [R] Restart  [q] Quit")
+	help := legendStyle.Render("[Tab] Switch  [m] Mute  [M] Muted PRs  [V] Muted repos  [Enter] Open/Expand  [R] Restart  [q] Quit")
 
 	return content + "\n" + legend + "\n" + help + "\n"
 }
