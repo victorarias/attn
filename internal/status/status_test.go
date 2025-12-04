@@ -148,3 +148,67 @@ func TestFormat_AllClear(t *testing.T) {
 		t.Errorf("Expected '✓ all clear', got: %s", result)
 	}
 }
+
+func TestFormatWithPRs_RepoGrouping(t *testing.T) {
+	tests := []struct {
+		name     string
+		sessions []*protocol.Session
+		prs      []*protocol.PR
+		repos    []*protocol.RepoState
+		want     string
+	}{
+		{
+			name: "1 repo",
+			prs: []*protocol.PR{
+				{Repo: "owner/repo-a", State: protocol.StateWaiting},
+				{Repo: "owner/repo-a", State: protocol.StateWaiting},
+			},
+			want: "● 2 waiting | repo-a(2)",
+		},
+		{
+			name: "2 repos",
+			prs: []*protocol.PR{
+				{Repo: "owner/repo-a", State: protocol.StateWaiting},
+				{Repo: "owner/repo-b", State: protocol.StateWaiting},
+			},
+			want: "● 2 waiting | repo-a(1) repo-b(1)",
+		},
+		{
+			name: "3+ repos shows counts",
+			prs: []*protocol.PR{
+				{Repo: "owner/repo-a", State: protocol.StateWaiting},
+				{Repo: "owner/repo-b", State: protocol.StateWaiting},
+				{Repo: "owner/repo-c", State: protocol.StateWaiting},
+			},
+			want: "● 3 waiting | 3 PRs in 3 repos",
+		},
+		{
+			name: "muted repo excluded",
+			prs: []*protocol.PR{
+				{Repo: "owner/repo-a", State: protocol.StateWaiting},
+				{Repo: "owner/muted", State: protocol.StateWaiting},
+			},
+			repos: []*protocol.RepoState{
+				{Repo: "owner/muted", Muted: true},
+			},
+			want: "● 1 waiting | repo-a(1)",
+		},
+		{
+			name: "muted PR excluded",
+			prs: []*protocol.PR{
+				{Repo: "owner/repo-a", State: protocol.StateWaiting, Muted: false},
+				{Repo: "owner/repo-a", State: protocol.StateWaiting, Muted: true},
+			},
+			want: "● 1 waiting | repo-a(1)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatWithPRsAndRepos(tt.sessions, tt.prs, tt.repos)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
