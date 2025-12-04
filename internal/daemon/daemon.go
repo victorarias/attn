@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/victorarias/claude-manager/internal/logging"
 	"github.com/victorarias/claude-manager/internal/protocol"
 	"github.com/victorarias/claude-manager/internal/store"
 )
@@ -17,14 +18,27 @@ type Daemon struct {
 	store      *store.Store
 	listener   net.Listener
 	done       chan struct{}
+	logger     *logging.Logger
 }
 
 // New creates a new daemon
 func New(socketPath string) *Daemon {
+	logger, _ := logging.New(logging.DefaultLogPath())
+	return &Daemon{
+		socketPath: socketPath,
+		store:      store.NewWithPersistence(store.DefaultStatePath()),
+		done:       make(chan struct{}),
+		logger:     logger,
+	}
+}
+
+// NewForTesting creates a daemon with a non-persistent store for tests
+func NewForTesting(socketPath string) *Daemon {
 	return &Daemon{
 		socketPath: socketPath,
 		store:      store.New(),
 		done:       make(chan struct{}),
+		logger:     nil, // No logging in tests
 	}
 }
 
@@ -38,6 +52,7 @@ func (d *Daemon) Start() error {
 		return err
 	}
 	d.listener = listener
+	d.log("daemon started")
 
 	for {
 		select {
@@ -63,11 +78,27 @@ func (d *Daemon) Start() error {
 
 // Stop stops the daemon
 func (d *Daemon) Stop() {
+	d.log("daemon stopping")
 	close(d.done)
 	if d.listener != nil {
 		d.listener.Close()
 	}
 	os.Remove(d.socketPath)
+	if d.logger != nil {
+		d.logger.Close()
+	}
+}
+
+func (d *Daemon) log(msg string) {
+	if d.logger != nil {
+		d.logger.Info(msg)
+	}
+}
+
+func (d *Daemon) logf(format string, args ...interface{}) {
+	if d.logger != nil {
+		d.logger.Infof(format, args...)
+	}
 }
 
 func (d *Daemon) handleConnection(conn net.Conn) {
@@ -99,6 +130,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleQuery(conn, msg.(*protocol.QueryMessage))
 	case protocol.CmdHeartbeat:
 		d.handleHeartbeat(conn, msg.(*protocol.HeartbeatMessage))
+	case protocol.CmdMute:
+		d.handleMute(conn, msg.(*protocol.MuteMessage))
 	default:
 		d.sendError(conn, "unknown command")
 	}
@@ -110,7 +143,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		Label:      msg.Label,
 		Directory:  msg.Dir,
 		TmuxTarget: msg.Tmux,
-		State:      protocol.StateWorking,
+		State:      protocol.StateWaiting,
 		StateSince: time.Now(),
 		LastSeen:   time.Now(),
 	}
@@ -146,6 +179,11 @@ func (d *Daemon) handleQuery(conn net.Conn, msg *protocol.QueryMessage) {
 
 func (d *Daemon) handleHeartbeat(conn net.Conn, msg *protocol.HeartbeatMessage) {
 	d.store.Touch(msg.ID)
+	d.sendOK(conn)
+}
+
+func (d *Daemon) handleMute(conn net.Conn, msg *protocol.MuteMessage) {
+	d.store.ToggleMute(msg.ID)
 	d.sendOK(conn)
 }
 
