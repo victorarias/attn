@@ -143,6 +143,29 @@ type PR struct {
 	LastUpdated time.Time `json:"last_updated"`
 	LastPolled  time.Time `json:"last_polled"`
 	Muted       bool      `json:"muted"`
+	// Detailed status (fetched on-demand via gh api)
+	DetailsFetched   bool      `json:"details_fetched"`    // true if details have been loaded
+	DetailsFetchedAt time.Time `json:"details_fetched_at"` // when details were fetched
+	Mergeable        *bool     `json:"mergeable"`          // nil=unknown, true/false
+	MergeableState   string    `json:"mergeable_state"`    // clean, blocked, dirty, unstable
+	CIStatus         string    `json:"ci_status"`          // success, failure, pending, none
+	ReviewStatus     string    `json:"review_status"`      // approved, changes_requested, pending, none
+}
+
+// NeedsDetailRefresh returns true if PR details should be re-fetched
+func (pr *PR) NeedsDetailRefresh() bool {
+	if !pr.DetailsFetched {
+		return true
+	}
+	// Invalidate if PR was updated after we fetched details
+	if pr.LastUpdated.After(pr.DetailsFetchedAt) {
+		return true
+	}
+	// Invalidate if details are older than 5 minutes
+	if time.Since(pr.DetailsFetchedAt) > 5*time.Minute {
+		return true
+	}
+	return false
 }
 
 // RepoState tracks per-repo UI state

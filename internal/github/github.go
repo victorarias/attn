@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/victorarias/claude-manager/internal/protocol"
@@ -134,4 +135,67 @@ func convertPR(gh ghSearchPR, role string) *protocol.PR {
 		LastUpdated: time.Now(),
 		LastPolled:  time.Now(),
 	}
+}
+
+// PRDetails contains detailed PR status from GitHub API
+type PRDetails struct {
+	Mergeable      *bool
+	MergeableState string
+	CIStatus       string
+	ReviewStatus   string
+}
+
+// FetchPRDetails fetches detailed status for a PR via gh api
+func (f *Fetcher) FetchPRDetails(repo string, number int) (*PRDetails, error) {
+	if !f.IsAvailable() {
+		return nil, fmt.Errorf("gh CLI not available")
+	}
+
+	// Fetch PR details
+	prCmd := exec.Command(f.ghPath, "api",
+		fmt.Sprintf("repos/%s/pulls/%d", repo, number),
+		"--jq", "{mergeable, mergeable_state, head_sha: .head.sha}")
+
+	prOutput, err := prCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("fetch PR: %w", err)
+	}
+
+	var prData struct {
+		Mergeable      *bool  `json:"mergeable"`
+		MergeableState string `json:"mergeable_state"`
+		HeadSHA        string `json:"head_sha"`
+	}
+	if err := json.Unmarshal(prOutput, &prData); err != nil {
+		return nil, fmt.Errorf("parse PR: %w", err)
+	}
+
+	details := &PRDetails{
+		Mergeable:      prData.Mergeable,
+		MergeableState: prData.MergeableState,
+	}
+
+	// Fetch CI status
+	if prData.HeadSHA != "" {
+		ciCmd := exec.Command(f.ghPath, "api",
+			fmt.Sprintf("repos/%s/commits/%s/check-runs", repo, prData.HeadSHA),
+			"--jq", "[.check_runs[].conclusion] | if length == 0 then \"none\" elif all(. == \"success\") then \"success\" elif any(. == null) then \"pending\" else \"failure\" end")
+
+		ciOutput, err := ciCmd.Output()
+		if err == nil {
+			details.CIStatus = strings.TrimSpace(string(ciOutput))
+		}
+	}
+
+	// Fetch review status
+	reviewCmd := exec.Command(f.ghPath, "api",
+		fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number),
+		"--jq", `[.[] | select(.state != "COMMENTED")] | if length == 0 then "none" elif any(.state == "CHANGES_REQUESTED") then "changes_requested" elif any(.state == "APPROVED") then "approved" else "pending" end`)
+
+	reviewOutput, err := reviewCmd.Output()
+	if err == nil {
+		details.ReviewStatus = strings.TrimSpace(string(reviewOutput))
+	}
+
+	return details, nil
 }
