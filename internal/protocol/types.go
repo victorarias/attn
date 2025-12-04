@@ -14,12 +14,29 @@ const (
 	CmdTodos      = "todos"
 	CmdQuery      = "query"
 	CmdHeartbeat  = "heartbeat"
+	CmdMute       = "mute"
+	CmdQueryPRs   = "query_prs"
+	CmdMutePR     = "mute_pr"
 )
 
 // States
 const (
 	StateWorking = "working"
 	StateWaiting = "waiting"
+)
+
+// PR reasons (why it needs attention)
+const (
+	PRReasonReadyToMerge     = "ready_to_merge"
+	PRReasonCIFailed         = "ci_failed"
+	PRReasonChangesRequested = "changes_requested"
+	PRReasonReviewNeeded     = "review_needed"
+)
+
+// PR roles
+const (
+	PRRoleAuthor   = "author"
+	PRRoleReviewer = "reviewer"
 )
 
 // RegisterMessage registers a new session with the daemon
@@ -63,6 +80,24 @@ type HeartbeatMessage struct {
 	ID  string `json:"id"`
 }
 
+// MuteMessage toggles a session's muted state
+type MuteMessage struct {
+	Cmd string `json:"cmd"`
+	ID  string `json:"id"`
+}
+
+// QueryPRsMessage queries PRs from daemon
+type QueryPRsMessage struct {
+	Cmd    string `json:"cmd"`
+	Filter string `json:"filter,omitempty"` // "waiting", "working", or empty for all
+}
+
+// MutePRMessage toggles a PR's muted state
+type MutePRMessage struct {
+	Cmd string `json:"cmd"`
+	ID  string `json:"id"`
+}
+
 // Session represents a tracked Claude session
 type Session struct {
 	ID         string    `json:"id"`
@@ -73,6 +108,22 @@ type Session struct {
 	StateSince time.Time `json:"state_since"`
 	Todos      []string  `json:"todos,omitempty"`
 	LastSeen   time.Time `json:"last_seen"`
+	Muted      bool      `json:"muted"`
+}
+
+// PR represents a tracked GitHub pull request
+type PR struct {
+	ID          string    `json:"id"`           // "owner/repo#number"
+	Repo        string    `json:"repo"`         // "owner/repo"
+	Number      int       `json:"number"`
+	Title       string    `json:"title"`
+	URL         string    `json:"url"`
+	Role        string    `json:"role"`         // "author" or "reviewer"
+	State       string    `json:"state"`        // "waiting" or "working"
+	Reason      string    `json:"reason"`       // why it needs attention
+	LastUpdated time.Time `json:"last_updated"`
+	LastPolled  time.Time `json:"last_polled"`
+	Muted       bool      `json:"muted"`
 }
 
 // Response from daemon
@@ -80,6 +131,7 @@ type Response struct {
 	OK       bool       `json:"ok"`
 	Error    string     `json:"error,omitempty"`
 	Sessions []*Session `json:"sessions,omitempty"`
+	PRs      []*PR      `json:"prs,omitempty"`
 }
 
 // ParseMessage parses a JSON message and returns the command type and parsed message
@@ -134,6 +186,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdHeartbeat:
 		var msg HeartbeatMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdMute:
+		var msg MuteMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdQueryPRs:
+		var msg QueryPRsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdMutePR:
+		var msg MutePRMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
