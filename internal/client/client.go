@@ -160,6 +160,39 @@ func (c *Client) ToggleMutePR(id string) error {
 	return err
 }
 
+// ToggleMuteRepo toggles a repo's muted state
+func (c *Client) ToggleMuteRepo(repo string) error {
+	msg := map[string]string{
+		"cmd":  protocol.CmdMuteRepo,
+		"repo": repo,
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// SetRepoCollapsed sets a repo's collapsed state
+func (c *Client) SetRepoCollapsed(repo string, collapsed bool) error {
+	msg := map[string]interface{}{
+		"cmd":       protocol.CmdCollapseRepo,
+		"repo":      repo,
+		"collapsed": collapsed,
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// QueryRepos returns all repo states
+func (c *Client) QueryRepos() ([]*protocol.RepoState, error) {
+	msg := map[string]string{
+		"cmd": protocol.CmdQueryRepos,
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Repos, nil
+}
+
 // IsRunning checks if the daemon is running
 func (c *Client) IsRunning() bool {
 	conn, err := net.Dial("unix", c.socketPath)
