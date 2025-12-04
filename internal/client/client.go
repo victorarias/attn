@@ -127,6 +127,39 @@ func (c *Client) Heartbeat(id string) error {
 	return err
 }
 
+// ToggleMute toggles a session's muted state
+func (c *Client) ToggleMute(id string) error {
+	msg := protocol.MuteMessage{
+		Cmd: protocol.CmdMute,
+		ID:  id,
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// QueryPRs returns PRs matching the filter
+func (c *Client) QueryPRs(filter string) ([]*protocol.PR, error) {
+	msg := protocol.QueryPRsMessage{
+		Cmd:    protocol.CmdQueryPRs,
+		Filter: filter,
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.PRs, nil
+}
+
+// ToggleMutePR toggles a PR's muted state
+func (c *Client) ToggleMutePR(id string) error {
+	msg := protocol.MutePRMessage{
+		Cmd: protocol.CmdMutePR,
+		ID:  id,
+	}
+	_, err := c.send(msg)
+	return err
+}
+
 // IsRunning checks if the daemon is running
 func (c *Client) IsRunning() bool {
 	conn, err := net.Dial("unix", c.socketPath)
