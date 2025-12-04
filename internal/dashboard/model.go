@@ -378,13 +378,11 @@ func (m *Model) toggleMutePR(prID string) tea.Cmd {
 
 func (m *Model) toggleRepoCollapsed(repo string) tea.Cmd {
 	return func() tea.Msg {
-		// Get current state
+		// Get current displayed state (default is collapsed when no state exists)
 		state := m.repoStates[repo]
-		collapsed := true
-		if state != nil {
-			collapsed = !state.Collapsed
-		}
-		if err := m.client.SetRepoCollapsed(repo, collapsed); err != nil {
+		currentlyCollapsed := state == nil || state.Collapsed
+		newCollapsed := !currentlyCollapsed
+		if err := m.client.SetRepoCollapsed(repo, newCollapsed); err != nil {
 			return errMsg{err: err}
 		}
 		return m.refresh()
