@@ -145,6 +145,12 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleQueryPRs(conn, msg.(*protocol.QueryPRsMessage))
 	case protocol.CmdMutePR:
 		d.handleMutePR(conn, msg.(*protocol.MutePRMessage))
+	case protocol.CmdMuteRepo:
+		d.handleMuteRepo(conn, msg.(*protocol.MuteRepoMessage))
+	case protocol.CmdCollapseRepo:
+		d.handleCollapseRepo(conn, msg.(*protocol.CollapseRepoMessage))
+	case protocol.CmdQueryRepos:
+		d.handleQueryRepos(conn, msg.(*protocol.QueryReposMessage))
 	default:
 		d.sendError(conn, "unknown command")
 	}
@@ -212,6 +218,25 @@ func (d *Daemon) handleQueryPRs(conn net.Conn, msg *protocol.QueryPRsMessage) {
 func (d *Daemon) handleMutePR(conn net.Conn, msg *protocol.MutePRMessage) {
 	d.store.ToggleMutePR(msg.ID)
 	d.sendOK(conn)
+}
+
+func (d *Daemon) handleMuteRepo(conn net.Conn, msg *protocol.MuteRepoMessage) {
+	d.store.ToggleMuteRepo(msg.Repo)
+	d.sendOK(conn)
+}
+
+func (d *Daemon) handleCollapseRepo(conn net.Conn, msg *protocol.CollapseRepoMessage) {
+	d.store.SetRepoCollapsed(msg.Repo, msg.Collapsed)
+	d.sendOK(conn)
+}
+
+func (d *Daemon) handleQueryRepos(conn net.Conn, msg *protocol.QueryReposMessage) {
+	repos := d.store.ListRepoStates()
+	resp := protocol.Response{
+		OK:    true,
+		Repos: repos,
+	}
+	json.NewEncoder(conn).Encode(resp)
 }
 
 func (d *Daemon) sendOK(conn net.Conn) {
