@@ -16,6 +16,7 @@ type Store struct {
 	mu       sync.RWMutex
 	sessions map[string]*protocol.Session
 	prs      map[string]*protocol.PR
+	repos    map[string]*protocol.RepoState
 	path     string // path to state file (empty = no persistence)
 	dirty    bool   // tracks unsaved changes
 }
@@ -25,6 +26,7 @@ func New() *Store {
 	return &Store{
 		sessions: make(map[string]*protocol.Session),
 		prs:      make(map[string]*protocol.PR),
+		repos:    make(map[string]*protocol.RepoState),
 	}
 }
 
@@ -33,6 +35,7 @@ func NewWithPersistence(path string) *Store {
 	s := &Store{
 		sessions: make(map[string]*protocol.Session),
 		prs:      make(map[string]*protocol.PR),
+		repos:    make(map[string]*protocol.RepoState),
 		path:     path,
 	}
 	s.Load() // load existing state if any
@@ -49,8 +52,9 @@ func DefaultStatePath() string {
 }
 
 type persistedState struct {
-	Sessions []*protocol.Session `json:"sessions"`
-	PRs      []*protocol.PR      `json:"prs,omitempty"`
+	Sessions []*protocol.Session   `json:"sessions"`
+	PRs      []*protocol.PR        `json:"prs,omitempty"`
+	Repos    []*protocol.RepoState `json:"repos,omitempty"`
 }
 
 // Load loads sessions from disk
@@ -85,6 +89,9 @@ func (s *Store) Load() error {
 	for _, pr := range state.PRs {
 		s.prs[pr.ID] = pr
 	}
+	for _, repo := range state.Repos {
+		s.repos[repo.Repo] = repo
+	}
 	return nil
 }
 
@@ -99,12 +106,16 @@ func (s *Store) Save() {
 	state := persistedState{
 		Sessions: make([]*protocol.Session, 0, len(s.sessions)),
 		PRs:      make([]*protocol.PR, 0, len(s.prs)),
+		Repos:    make([]*protocol.RepoState, 0, len(s.repos)),
 	}
 	for _, session := range s.sessions {
 		state.Sessions = append(state.Sessions, session)
 	}
 	for _, pr := range s.prs {
 		state.PRs = append(state.PRs, pr)
+	}
+	for _, repo := range s.repos {
+		state.Repos = append(state.Repos, repo)
 	}
 	s.mu.RUnlock()
 
@@ -301,4 +312,51 @@ func (s *Store) StartPersistence(interval time.Duration, done <-chan struct{}) {
 			}
 		}
 	}
+}
+
+// GetRepoState returns the state for a repo, or nil if not set
+func (s *Store) GetRepoState(repo string) *protocol.RepoState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.repos[repo]
+}
+
+// ToggleMuteRepo toggles a repo's muted state
+func (s *Store) ToggleMuteRepo(repo string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, ok := s.repos[repo]
+	if !ok {
+		state = &protocol.RepoState{Repo: repo}
+		s.repos[repo] = state
+	}
+	state.Muted = !state.Muted
+	s.markDirty()
+}
+
+// SetRepoCollapsed sets a repo's collapsed state
+func (s *Store) SetRepoCollapsed(repo string, collapsed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	state, ok := s.repos[repo]
+	if !ok {
+		state = &protocol.RepoState{Repo: repo}
+		s.repos[repo] = state
+	}
+	state.Collapsed = collapsed
+	s.markDirty()
+}
+
+// ListRepoStates returns all repo states
+func (s *Store) ListRepoStates() []*protocol.RepoState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]*protocol.RepoState, 0, len(s.repos))
+	for _, state := range s.repos {
+		result = append(result, state)
+	}
+	return result
 }
