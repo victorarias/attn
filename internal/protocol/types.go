@@ -8,15 +8,18 @@ import (
 
 // Commands
 const (
-	CmdRegister   = "register"
-	CmdUnregister = "unregister"
-	CmdState      = "state"
-	CmdTodos      = "todos"
-	CmdQuery      = "query"
-	CmdHeartbeat  = "heartbeat"
-	CmdMute       = "mute"
-	CmdQueryPRs   = "query_prs"
-	CmdMutePR     = "mute_pr"
+	CmdRegister     = "register"
+	CmdUnregister   = "unregister"
+	CmdState        = "state"
+	CmdTodos        = "todos"
+	CmdQuery        = "query"
+	CmdHeartbeat    = "heartbeat"
+	CmdMute         = "mute"
+	CmdQueryPRs     = "query_prs"
+	CmdMutePR       = "mute_pr"
+	CmdMuteRepo     = "mute_repo"
+	CmdCollapseRepo = "collapse_repo"
+	CmdQueryRepos   = "query_repos"
 )
 
 // States
@@ -98,6 +101,22 @@ type MutePRMessage struct {
 	ID  string `json:"id"`
 }
 
+// MuteRepoMessage toggles repo muted state
+type MuteRepoMessage struct {
+	Repo string `json:"repo"`
+}
+
+// CollapseRepoMessage sets repo collapsed state
+type CollapseRepoMessage struct {
+	Repo      string `json:"repo"`
+	Collapsed bool   `json:"collapsed"`
+}
+
+// QueryReposMessage requests repo states
+type QueryReposMessage struct {
+	Filter string `json:"filter,omitempty"`
+}
+
 // Session represents a tracked Claude session
 type Session struct {
 	ID         string    `json:"id"`
@@ -126,12 +145,20 @@ type PR struct {
 	Muted       bool      `json:"muted"`
 }
 
+// RepoState tracks per-repo UI state
+type RepoState struct {
+	Repo      string `json:"repo"`
+	Muted     bool   `json:"muted"`
+	Collapsed bool   `json:"collapsed"`
+}
+
 // Response from daemon
 type Response struct {
-	OK       bool       `json:"ok"`
-	Error    string     `json:"error,omitempty"`
-	Sessions []*Session `json:"sessions,omitempty"`
-	PRs      []*PR      `json:"prs,omitempty"`
+	OK       bool         `json:"ok"`
+	Error    string       `json:"error,omitempty"`
+	Sessions []*Session   `json:"sessions,omitempty"`
+	PRs      []*PR        `json:"prs,omitempty"`
+	Repos    []*RepoState `json:"repos,omitempty"`
 }
 
 // ParseMessage parses a JSON message and returns the command type and parsed message
@@ -207,6 +234,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdMutePR:
 		var msg MutePRMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdMuteRepo:
+		var msg MuteRepoMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCollapseRepo:
+		var msg CollapseRepoMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdQueryRepos:
+		var msg QueryReposMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
