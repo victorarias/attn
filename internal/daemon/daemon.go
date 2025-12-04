@@ -132,6 +132,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleHeartbeat(conn, msg.(*protocol.HeartbeatMessage))
 	case protocol.CmdMute:
 		d.handleMute(conn, msg.(*protocol.MuteMessage))
+	case protocol.CmdQueryPRs:
+		d.handleQueryPRs(conn, msg.(*protocol.QueryPRsMessage))
+	case protocol.CmdMutePR:
+		d.handleMutePR(conn, msg.(*protocol.MutePRMessage))
 	default:
 		d.sendError(conn, "unknown command")
 	}
@@ -184,6 +188,20 @@ func (d *Daemon) handleHeartbeat(conn net.Conn, msg *protocol.HeartbeatMessage) 
 
 func (d *Daemon) handleMute(conn net.Conn, msg *protocol.MuteMessage) {
 	d.store.ToggleMute(msg.ID)
+	d.sendOK(conn)
+}
+
+func (d *Daemon) handleQueryPRs(conn net.Conn, msg *protocol.QueryPRsMessage) {
+	prs := d.store.ListPRs(msg.Filter)
+	resp := protocol.Response{
+		OK:  true,
+		PRs: prs,
+	}
+	json.NewEncoder(conn).Encode(resp)
+}
+
+func (d *Daemon) handleMutePR(conn net.Conn, msg *protocol.MutePRMessage) {
+	d.store.ToggleMutePR(msg.ID)
 	d.sendOK(conn)
 }
 
