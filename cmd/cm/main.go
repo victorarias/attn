@@ -395,8 +395,9 @@ func runStatus() {
 		// Silent failure for status bar
 		return
 	}
-	prs, _ := c.QueryPRs("") // Ignore error, PRs are optional
-	output := status.FormatWithPRs(sessions, prs)
+	prs, _ := c.QueryPRs("")   // Ignore error, PRs are optional
+	repos, _ := c.QueryRepos() // Ignore error, repos are optional
+	output := status.FormatWithPRsAndRepos(sessions, prs, repos)
 	if output != "" {
 		fmt.Print(output)
 	}

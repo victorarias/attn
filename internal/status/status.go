@@ -88,3 +88,70 @@ func FormatWithPRs(sessions []*protocol.Session, prs []*protocol.PR) string {
 
 	return strings.Join(parts, " | ")
 }
+
+// FormatWithPRsAndRepos formats status with repo-aware PR display
+func FormatWithPRsAndRepos(sessions []*protocol.Session, prs []*protocol.PR, repos []*protocol.RepoState) string {
+	// Build muted repos set
+	mutedRepos := make(map[string]bool)
+	for _, r := range repos {
+		if r.Muted {
+			mutedRepos[r.Repo] = true
+		}
+	}
+
+	// Count sessions
+	sessionWaiting := 0
+	for _, s := range sessions {
+		if s.State == protocol.StateWaiting && !s.Muted {
+			sessionWaiting++
+		}
+	}
+
+	// Group PRs by repo, excluding muted
+	repoCount := make(map[string]int)
+	prWaiting := 0
+	for _, pr := range prs {
+		if pr.Muted || mutedRepos[pr.Repo] {
+			continue
+		}
+		if pr.State == protocol.StateWaiting {
+			prWaiting++
+			repoCount[pr.Repo]++
+		}
+	}
+
+	totalWaiting := sessionWaiting + prWaiting
+	if totalWaiting == 0 {
+		return "✓ all clear"
+	}
+
+	// Format PR part
+	var prPart string
+	if prWaiting > 0 {
+		if len(repoCount) <= 2 {
+			// Show repo names
+			var repoParts []string
+			var repoNames []string
+			for r := range repoCount {
+				repoNames = append(repoNames, r)
+			}
+			sort.Strings(repoNames)
+			for _, r := range repoNames {
+				short := r
+				if idx := strings.LastIndex(r, "/"); idx >= 0 {
+					short = r[idx+1:]
+				}
+				repoParts = append(repoParts, fmt.Sprintf("%s(%d)", short, repoCount[r]))
+			}
+			prPart = strings.Join(repoParts, " ")
+		} else {
+			prPart = fmt.Sprintf("%d PRs in %d repos", prWaiting, len(repoCount))
+		}
+	}
+
+	result := fmt.Sprintf("● %d waiting", totalWaiting)
+	if prPart != "" {
+		result += " | " + prPart
+	}
+	return result
+}
