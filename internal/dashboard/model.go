@@ -311,57 +311,109 @@ func (m *Model) View() string {
 		return fmt.Sprintf("Error: %v\n\nPress 'r' to retry, 'q' to quit", m.err)
 	}
 
-	// Get terminal width (default to 120 if can't detect)
-	width := 120
-
-	// Calculate pane widths
-	leftWidth := width/2 - 2
-	rightWidth := width/2 - 2
-
-	// Build left pane (sessions)
-	leftLines := m.renderSessionsPane(leftWidth)
-
-	// Build right pane (PRs)
-	rightLines := m.renderPRsPane(rightWidth)
-
-	// Ensure both panes have same height
-	maxLines := len(leftLines)
-	if len(rightLines) > maxLines {
-		maxLines = len(rightLines)
-	}
-	for len(leftLines) < maxLines {
-		leftLines = append(leftLines, strings.Repeat(" ", leftWidth))
-	}
-	for len(rightLines) < maxLines {
-		rightLines = append(rightLines, strings.Repeat(" ", rightWidth))
-	}
-
-	// Combine panes
 	var s strings.Builder
 
-	// Header
-	leftHeader := " Sessions "
-	rightHeader := fmt.Sprintf(" Pull Requests (%d) ", len(m.getVisiblePRs()))
+	// Sessions section
+	sessHeader := "Sessions"
 	if m.focusPane == 0 {
-		leftHeader = "[" + leftHeader + "]"
+		sessHeader = "[Sessions]"
+	}
+	s.WriteString(fmt.Sprintf("%s\n", sessHeader))
+	s.WriteString(strings.Repeat("─", 40) + "\n")
+
+	if len(m.sessions) == 0 {
+		s.WriteString("  No active sessions\n")
 	} else {
-		rightHeader = "[" + rightHeader + "]"
+		for i, session := range m.sessions {
+			cursor := "  "
+			if i == m.cursor && m.focusPane == 0 {
+				cursor = "> "
+			}
+
+			var color, indicator, stateStr string
+			if session.Muted {
+				color = colorGray
+				indicator = "◌"
+				stateStr = "muted"
+			} else if session.State == protocol.StateWaiting {
+				color = colorYellow
+				indicator = "●"
+				stateStr = "waiting"
+			} else {
+				color = colorGreen
+				indicator = "○"
+				stateStr = "working"
+			}
+
+			s.WriteString(fmt.Sprintf("%s%s%s %-15s %s%s\n",
+				cursor, color, indicator, truncate(session.Label, 15), stateStr, colorReset))
+		}
 	}
 
-	s.WriteString(fmt.Sprintf("┌─%s%s┬─%s%s┐\n",
-		leftHeader, strings.Repeat("─", leftWidth-len(leftHeader)-1),
-		rightHeader, strings.Repeat("─", rightWidth-len(rightHeader)-1)))
+	s.WriteString("\n")
 
-	for i := 0; i < maxLines; i++ {
-		s.WriteString(fmt.Sprintf("│ %s│ %s│\n", padRight(leftLines[i], leftWidth-1), padRight(rightLines[i], rightWidth-1)))
+	// PRs section
+	prHeader := fmt.Sprintf("Pull Requests (%d)", len(m.getVisiblePRs()))
+	if m.focusPane == 1 {
+		prHeader = "[" + prHeader + "]"
+	}
+	s.WriteString(fmt.Sprintf("%s\n", prHeader))
+	s.WriteString(strings.Repeat("─", 40) + "\n")
+
+	visiblePRs := m.getVisiblePRs()
+	if len(visiblePRs) == 0 {
+		if len(m.prs) == 0 {
+			s.WriteString("  No PRs (gh CLI?)\n")
+		} else {
+			s.WriteString("  All PRs muted\n")
+		}
+	} else {
+		for i, pr := range visiblePRs {
+			cursor := "  "
+			if i == m.prCursor && m.focusPane == 1 {
+				cursor = "> "
+			}
+
+			var color, stateStr string
+			if pr.Muted {
+				color = colorGray
+				stateStr = "muted"
+			} else if pr.State == protocol.StateWaiting {
+				color = colorYellow
+				switch pr.Reason {
+				case protocol.PRReasonReadyToMerge:
+					stateStr = "merge"
+				case protocol.PRReasonCIFailed:
+					stateStr = "fix"
+				case protocol.PRReasonChangesRequested:
+					stateStr = "fix"
+				case protocol.PRReasonReviewNeeded:
+					stateStr = "review"
+				default:
+					stateStr = "open"
+				}
+			} else {
+				color = colorGreen
+				stateStr = "wait"
+			}
+
+			// Show short repo name
+			repoShort := pr.Repo
+			if idx := strings.LastIndex(pr.Repo, "/"); idx >= 0 {
+				repoShort = pr.Repo[idx+1:]
+			}
+
+			s.WriteString(fmt.Sprintf("%s%s⬡ %s#%d %s%s\n",
+				cursor, color, truncate(repoShort, 12), pr.Number, stateStr, colorReset))
+		}
 	}
 
-	s.WriteString(fmt.Sprintf("└%s┴%s┘\n", strings.Repeat("─", leftWidth), strings.Repeat("─", rightWidth)))
+	s.WriteString("\n")
 
 	// Legend
 	s.WriteString(fmt.Sprintf("%s●%s waiting  %s○%s working  %s◌%s muted\n",
 		colorYellow, colorReset, colorGreen, colorReset, colorGray, colorReset))
-	s.WriteString("[Tab] Switch pane  [m] Mute  [M] Show muted PRs  [Enter] Open  [r] Refresh  [q] Quit\n")
+	s.WriteString("[Tab] Switch  [m] Mute  [M] Show muted  [Enter] Open  [q] Quit\n")
 
 	return s.String()
 }

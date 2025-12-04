@@ -9,19 +9,15 @@ import (
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
 
-// ghPR is the structure returned by gh pr list --json
-type ghPR struct {
-	Number         int    `json:"number"`
-	Title          string `json:"title"`
-	URL            string `json:"url"`
-	HeadRepository struct {
+// ghSearchPR is the structure returned by gh search prs --json
+type ghSearchPR struct {
+	Number     int    `json:"number"`
+	Title      string `json:"title"`
+	URL        string `json:"url"`
+	IsDraft    bool   `json:"isDraft"`
+	Repository struct {
 		NameWithOwner string `json:"nameWithOwner"`
-	} `json:"headRepository"`
-	StatusCheckRollup struct {
-		State string `json:"state"` // SUCCESS, FAILURE, PENDING
-	} `json:"statusCheckRollup"`
-	ReviewDecision string `json:"reviewDecision"` // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
-	Mergeable      string `json:"mergeable"`      // MERGEABLE, CONFLICTING, UNKNOWN
+	} `json:"repository"`
 }
 
 // Fetcher fetches PRs from GitHub
@@ -66,10 +62,11 @@ func (f *Fetcher) FetchAll() ([]*protocol.PR, error) {
 }
 
 func (f *Fetcher) fetchAuthored() ([]*protocol.PR, error) {
-	cmd := exec.Command(f.ghPath, "pr", "list",
+	cmd := exec.Command(f.ghPath, "search", "prs",
 		"--author", "@me",
 		"--state", "open",
-		"--json", "number,title,url,headRepository,statusCheckRollup,reviewDecision,mergeable")
+		"--limit", "50",
+		"--json", "number,title,url,repository,isDraft")
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -80,10 +77,11 @@ func (f *Fetcher) fetchAuthored() ([]*protocol.PR, error) {
 }
 
 func (f *Fetcher) fetchReviewRequests() ([]*protocol.PR, error) {
-	cmd := exec.Command(f.ghPath, "pr", "list",
-		"--search", "review-requested:@me",
+	cmd := exec.Command(f.ghPath, "search", "prs",
+		"--review-requested", "@me",
 		"--state", "open",
-		"--json", "number,title,url,headRepository,statusCheckRollup,reviewDecision,mergeable")
+		"--limit", "50",
+		"--json", "number,title,url,repository,isDraft")
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -94,35 +92,35 @@ func (f *Fetcher) fetchReviewRequests() ([]*protocol.PR, error) {
 }
 
 func parsePRList(data []byte, role string) ([]*protocol.PR, error) {
-	var ghPRs []ghPR
+	var ghPRs []ghSearchPR
 	if err := json.Unmarshal(data, &ghPRs); err != nil {
 		return nil, err
 	}
 
 	var prs []*protocol.PR
 	for _, gh := range ghPRs {
+		// Skip draft PRs
+		if gh.IsDraft {
+			continue
+		}
 		pr := convertPR(gh, role)
 		prs = append(prs, pr)
 	}
 	return prs, nil
 }
 
-func parsePR(data []byte, role string) (*protocol.PR, error) {
-	var gh ghPR
-	if err := json.Unmarshal(data, &gh); err != nil {
-		return nil, err
-	}
-	return convertPR(gh, role), nil
-}
+func convertPR(gh ghSearchPR, role string) *protocol.PR {
+	repo := gh.Repository.NameWithOwner
 
-func convertPR(gh ghPR, role string) *protocol.PR {
-	repo := gh.HeadRepository.NameWithOwner
-	state, reason := determineState(
-		gh.StatusCheckRollup.State,
-		gh.ReviewDecision,
-		gh.Mergeable,
-		role,
-	)
+	// Simplified state: authored PRs need attention, review requests need review
+	var state, reason string
+	if role == protocol.PRRoleAuthor {
+		state = protocol.StateWaiting
+		reason = "" // Could be any reason, we don't have detailed status
+	} else {
+		state = protocol.StateWaiting
+		reason = protocol.PRReasonReviewNeeded
+	}
 
 	return &protocol.PR{
 		ID:          fmt.Sprintf("%s#%d", repo, gh.Number),
@@ -136,41 +134,4 @@ func convertPR(gh ghPR, role string) *protocol.PR {
 		LastUpdated: time.Now(),
 		LastPolled:  time.Now(),
 	}
-}
-
-func determineState(ciState, reviewDecision, mergeable, role string) (string, string) {
-	// CI failed - author needs to fix
-	if ciState == "FAILURE" || ciState == "ERROR" {
-		if role == protocol.PRRoleAuthor {
-			return protocol.StateWaiting, protocol.PRReasonCIFailed
-		}
-		return protocol.StateWorking, "" // Reviewer waiting for author to fix
-	}
-
-	// Changes requested - author needs to address
-	if reviewDecision == "CHANGES_REQUESTED" {
-		if role == protocol.PRRoleAuthor {
-			return protocol.StateWaiting, protocol.PRReasonChangesRequested
-		}
-		return protocol.StateWorking, "" // Reviewer waiting for author
-	}
-
-	// Review needed - reviewer needs to act
-	if reviewDecision == "REVIEW_REQUIRED" || reviewDecision == "" {
-		if role == protocol.PRRoleReviewer {
-			return protocol.StateWaiting, protocol.PRReasonReviewNeeded
-		}
-		return protocol.StateWorking, "" // Author waiting for reviews
-	}
-
-	// Approved + CI passed - author can merge
-	if reviewDecision == "APPROVED" && (ciState == "SUCCESS" || ciState == "") {
-		if role == protocol.PRRoleAuthor {
-			return protocol.StateWaiting, protocol.PRReasonReadyToMerge
-		}
-		return protocol.StateWorking, "" // Reviewer done, waiting for author
-	}
-
-	// CI pending or other states - waiting on external
-	return protocol.StateWorking, ""
 }

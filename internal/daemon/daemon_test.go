@@ -14,7 +14,7 @@ func TestDaemon_RegisterAndQuery(t *testing.T) {
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
-	d := New(sockPath)
+	d := NewForTesting(sockPath)
 	go d.Start()
 	defer d.Stop()
 
@@ -46,7 +46,7 @@ func TestDaemon_StateUpdate(t *testing.T) {
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
-	d := New(sockPath)
+	d := NewForTesting(sockPath)
 	go d.Start()
 	defer d.Stop()
 
@@ -77,7 +77,7 @@ func TestDaemon_Unregister(t *testing.T) {
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
-	d := New(sockPath)
+	d := NewForTesting(sockPath)
 	go d.Start()
 	defer d.Stop()
 
@@ -98,7 +98,7 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
-	d := New(sockPath)
+	d := NewForTesting(sockPath)
 	go d.Start()
 	defer d.Stop()
 
@@ -106,22 +106,21 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 
 	c := client.New(sockPath)
 
-	// Register multiple sessions
+	// Register multiple sessions (all start as waiting)
 	c.Register("1", "one", "/tmp/1", "main:1.%0")
 	c.Register("2", "two", "/tmp/2", "main:2.%1")
 	c.Register("3", "three", "/tmp/3", "main:3.%2")
 
-	// Update some to waiting
-	c.UpdateState("1", protocol.StateWaiting)
-	c.UpdateState("3", protocol.StateWaiting)
+	// Update one to working
+	c.UpdateState("2", protocol.StateWorking)
 
-	// Query waiting
+	// Query waiting (sessions 1 and 3)
 	waiting, _ := c.Query(protocol.StateWaiting)
 	if len(waiting) != 2 {
 		t.Errorf("got %d waiting, want 2", len(waiting))
 	}
 
-	// Query working
+	// Query working (session 2)
 	working, _ := c.Query(protocol.StateWorking)
 	if len(working) != 1 {
 		t.Errorf("got %d working, want 1", len(working))
@@ -136,7 +135,7 @@ func TestDaemon_SocketCleanup(t *testing.T) {
 	f, _ := os.Create(sockPath)
 	f.Close()
 
-	d := New(sockPath)
+	d := NewForTesting(sockPath)
 	go d.Start()
 	defer d.Stop()
 
