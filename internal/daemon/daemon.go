@@ -151,6 +151,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleCollapseRepo(conn, msg.(*protocol.CollapseRepoMessage))
 	case protocol.CmdQueryRepos:
 		d.handleQueryRepos(conn, msg.(*protocol.QueryReposMessage))
+	case protocol.CmdFetchPRDetails:
+		d.handleFetchPRDetails(conn, msg.(*protocol.FetchPRDetailsMessage))
 	default:
 		d.sendError(conn, "unknown command")
 	}
@@ -235,6 +237,36 @@ func (d *Daemon) handleQueryRepos(conn net.Conn, msg *protocol.QueryReposMessage
 	resp := protocol.Response{
 		OK:    true,
 		Repos: repos,
+	}
+	json.NewEncoder(conn).Encode(resp)
+}
+
+func (d *Daemon) handleFetchPRDetails(conn net.Conn, msg *protocol.FetchPRDetailsMessage) {
+	if d.ghFetcher == nil || !d.ghFetcher.IsAvailable() {
+		d.sendError(conn, "gh CLI not available")
+		return
+	}
+
+	// Get all PRs for this repo
+	prs := d.store.ListPRsByRepo(msg.Repo)
+
+	// Fetch details for each PR that needs refresh
+	for _, pr := range prs {
+		if pr.NeedsDetailRefresh() {
+			details, err := d.ghFetcher.FetchPRDetails(pr.Repo, pr.Number)
+			if err != nil {
+				d.logf("Failed to fetch details for %s: %v", pr.ID, err)
+				continue
+			}
+			d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus)
+		}
+	}
+
+	// Return updated PRs
+	updatedPRs := d.store.ListPRsByRepo(msg.Repo)
+	resp := protocol.Response{
+		OK:  true,
+		PRs: updatedPRs,
 	}
 	json.NewEncoder(conn).Encode(resp)
 }

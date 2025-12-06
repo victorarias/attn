@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/victorarias/claude-manager/internal/config"
 )
 
 type Logger struct {
@@ -28,8 +30,7 @@ func New(path string) (*Logger, error) {
 		return nil, err
 	}
 
-	debugEnv := os.Getenv("CM_DEBUG")
-	debug := debugEnv == "debug" || debugEnv == "trace"
+	debug := config.DebugLevel() >= config.LogDebug
 
 	return &Logger{
 		file:   file,
@@ -79,9 +80,5 @@ func (l *Logger) Debugf(format string, args ...interface{}) {
 }
 
 func DefaultLogPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "/tmp/claude-manager.log"
-	}
-	return filepath.Join(home, ".claude-manager", "daemon.log")
+	return config.LogPath()
 }

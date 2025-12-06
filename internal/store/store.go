@@ -3,11 +3,11 @@ package store
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/victorarias/claude-manager/internal/config"
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
 
@@ -44,11 +44,7 @@ func NewWithPersistence(path string) *Store {
 
 // DefaultStatePath returns the default state file path
 func DefaultStatePath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "/tmp/.claude-manager-state.json"
-	}
-	return filepath.Join(home, ".claude-manager-state.json")
+	return config.StatePath()
 }
 
 type persistedState struct {
@@ -215,15 +211,24 @@ func (s *Store) ToggleMute(id string) {
 	}
 }
 
-// SetPRs replaces all PRs, preserving muted state
+// SetPRs replaces all PRs, preserving muted state and detail fields
 func (s *Store) SetPRs(prs []*protocol.PR) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Preserve muted state from existing PRs
+	// Preserve state from existing PRs
 	for _, pr := range prs {
 		if existing, ok := s.prs[pr.ID]; ok {
 			pr.Muted = existing.Muted
+			// Preserve detail fields if PR hasn't been updated since last fetch
+			if existing.DetailsFetched && !existing.DetailsFetchedAt.Before(pr.LastUpdated) {
+				pr.DetailsFetched = existing.DetailsFetched
+				pr.DetailsFetchedAt = existing.DetailsFetchedAt
+				pr.Mergeable = existing.Mergeable
+				pr.MergeableState = existing.MergeableState
+				pr.CIStatus = existing.CIStatus
+				pr.ReviewStatus = existing.ReviewStatus
+			}
 		}
 	}
 
@@ -270,6 +275,36 @@ func (s *Store) GetPR(id string) *protocol.PR {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.prs[id]
+}
+
+// UpdatePRDetails updates the detail fields for a PR
+func (s *Store) UpdatePRDetails(id string, mergeable *bool, mergeableState, ciStatus, reviewStatus string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if pr, ok := s.prs[id]; ok {
+		pr.DetailsFetched = true
+		pr.DetailsFetchedAt = time.Now()
+		pr.Mergeable = mergeable
+		pr.MergeableState = mergeableState
+		pr.CIStatus = ciStatus
+		pr.ReviewStatus = reviewStatus
+		s.markDirty()
+	}
+}
+
+// ListPRsByRepo returns all PRs for a specific repo
+func (s *Store) ListPRsByRepo(repo string) []*protocol.PR {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var result []*protocol.PR
+	for _, pr := range s.prs {
+		if pr.Repo == repo {
+			result = append(result, pr)
+		}
+	}
+	return result
 }
 
 // IsDirty returns whether the store has unsaved changes
