@@ -12,59 +12,35 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/victorarias/claude-manager/internal/client"
+	"github.com/victorarias/claude-manager/internal/config"
 	"github.com/victorarias/claude-manager/internal/daemon"
 	"github.com/victorarias/claude-manager/internal/dashboard"
 	"github.com/victorarias/claude-manager/internal/status"
 	"github.com/victorarias/claude-manager/internal/wrapper"
 )
 
-// Log levels
-const (
-	LogError = iota
-	LogWarn
-	LogInfo
-	LogDebug
-	LogTrace
-)
-
-var logLevel = LogError
-
-func init() {
-	// Set log level from environment
-	switch os.Getenv("CM_DEBUG") {
-	case "trace":
-		logLevel = LogTrace
-	case "debug":
-		logLevel = LogDebug
-	case "info":
-		logLevel = LogInfo
-	case "warn":
-		logLevel = LogWarn
-	case "1", "true":
-		logLevel = LogDebug
-	}
-}
+var logLevel = config.DebugLevel()
 
 func logTrace(format string, args ...interface{}) {
-	if logLevel >= LogTrace {
+	if logLevel >= config.LogTrace {
 		fmt.Fprintf(os.Stderr, "[TRACE] "+format+"\n", args...)
 	}
 }
 
 func logDebug(format string, args ...interface{}) {
-	if logLevel >= LogDebug {
+	if logLevel >= config.LogDebug {
 		fmt.Fprintf(os.Stderr, "[DEBUG] "+format+"\n", args...)
 	}
 }
 
 func logInfo(format string, args ...interface{}) {
-	if logLevel >= LogInfo {
+	if logLevel >= config.LogInfo {
 		fmt.Fprintf(os.Stderr, "[INFO] "+format+"\n", args...)
 	}
 }
 
 func logWarn(format string, args ...interface{}) {
-	if logLevel >= LogWarn {
+	if logLevel >= config.LogWarn {
 		fmt.Fprintf(os.Stderr, "[WARN] "+format+"\n", args...)
 	}
 }
@@ -99,7 +75,7 @@ func parseArgs(args []string) (label string, yolo bool, dashboard bool, remainin
 
 func main() {
 	logDebug("cm starting, args: %v", os.Args)
-	logTrace("environment CM_DEBUG=%s", os.Getenv("CM_DEBUG"))
+	logTrace("environment DEBUG=%s", os.Getenv("DEBUG"))
 
 	// Parse cm-specific flags manually to allow unknown flags to pass through to claude
 	label, yolo, dashboardFlag, args := parseArgs(os.Args[1:])
@@ -154,26 +130,28 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println(`cm - Claude Manager
+	name := config.BinaryName()
+	fmt.Printf(`%s - Attention Manager
 
 Usage:
-  cm                    Start Claude with tracking (label = directory name)
-  cm -s <label>         Start Claude with explicit label
-  cm -y                 Yolo mode (skip permissions)
-  cm -s <label> -y      Combine flags (order doesn't matter)
-  cm -d                 Open dashboard
-  cm dashboard          Open dashboard (alias)
-  cm daemon             Run daemon in foreground
-  cm restart            Restart the daemon
-  cm status             Output for tmux status bar
-  cm list               List all sessions (JSON)
-  cm kill <id>          Unregister a session
+  %s                    Start Claude with tracking (label = directory name)
+  %s -s <label>         Start Claude with explicit label
+  %s -y                 Yolo mode (skip permissions)
+  %s -s <label> -y      Combine flags (order doesn't matter)
+  %s -d                 Open dashboard
+  %s dashboard          Open dashboard (alias)
+  %s daemon             Run daemon in foreground
+  %s restart            Restart the daemon
+  %s status             Output for tmux status bar
+  %s list               List all sessions (JSON)
+  %s kill <id>          Unregister a session
 
 Claude flags (-c, -r, etc.) are passed through automatically.
 
 Environment:
-  CM_DEBUG=debug    Enable debug logging
-  CM_DEBUG=trace    Enable trace logging (verbose)`)
+  DEBUG=debug    Enable debug logging
+  DEBUG=trace    Enable trace logging (verbose)
+`, name, name, name, name, name, name, name, name, name, name, name, name)
 }
 
 func runWrapperWithFlags(label string, yolo bool, claudeArgs []string) {
@@ -233,7 +211,7 @@ func runWrapperWithFlags(label string, yolo bool, claudeArgs []string) {
 	}
 
 	// Log config contents at trace level
-	if logLevel >= LogTrace {
+	if logLevel >= config.LogTrace {
 		if content, err := os.ReadFile(configPath); err == nil {
 			logTrace("hooks config content:\n%s", string(content))
 		}

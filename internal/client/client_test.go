@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/victorarias/claude-manager/internal/config"
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
 
@@ -146,12 +147,15 @@ func TestClient_NotRunning(t *testing.T) {
 }
 
 func TestClient_SocketPath(t *testing.T) {
+	// Set binary name for test
+	config.SetBinaryName("cm")
+
 	// Test default socket path
 	os.Setenv("HOME", "/home/testuser")
 	defer os.Unsetenv("HOME")
 
 	path := DefaultSocketPath()
-	expected := "/home/testuser/.claude-manager.sock"
+	expected := "/home/testuser/.cm.sock"
 	if path != expected {
 		t.Errorf("DefaultSocketPath() = %q, want %q", path, expected)
 	}

@@ -4,20 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 
+	"github.com/victorarias/claude-manager/internal/config"
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
 
 // DefaultSocketPath returns the default socket path
 func DefaultSocketPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		// Fallback to /tmp if home directory is not available
-		return "/tmp/.claude-manager.sock"
-	}
-	return filepath.Join(home, ".claude-manager.sock")
+	return config.SocketPath()
 }
 
 // Client communicates with the daemon
@@ -191,6 +185,19 @@ func (c *Client) QueryRepos() ([]*protocol.RepoState, error) {
 		return nil, err
 	}
 	return resp.Repos, nil
+}
+
+// FetchPRDetails requests the daemon to fetch PR details for a repo
+func (c *Client) FetchPRDetails(repo string) ([]*protocol.PR, error) {
+	msg := protocol.FetchPRDetailsMessage{
+		Cmd:  protocol.CmdFetchPRDetails,
+		Repo: repo,
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.PRs, nil
 }
 
 // IsRunning checks if the daemon is running

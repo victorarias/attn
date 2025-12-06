@@ -30,12 +30,12 @@ func TestLogger_WritesToFile(t *testing.T) {
 }
 
 func TestLogger_RespectsDebugLevel(t *testing.T) {
-	// Unset CM_DEBUG to ensure test isolation
-	originalDebug := os.Getenv("CM_DEBUG")
-	os.Unsetenv("CM_DEBUG")
+	// Unset DEBUG to ensure test isolation
+	originalDebug := os.Getenv("DEBUG")
+	os.Unsetenv("DEBUG")
 	defer func() {
 		if originalDebug != "" {
-			os.Setenv("CM_DEBUG", originalDebug)
+			os.Setenv("DEBUG", originalDebug)
 		}
 	}()
 
@@ -62,14 +62,14 @@ func TestLogger_RespectsDebugLevel(t *testing.T) {
 }
 
 func TestLogger_DebugEnabled(t *testing.T) {
-	// Set CM_DEBUG for this test
-	originalDebug := os.Getenv("CM_DEBUG")
-	os.Setenv("CM_DEBUG", "debug")
+	// Set DEBUG for this test
+	originalDebug := os.Getenv("DEBUG")
+	os.Setenv("DEBUG", "debug")
 	defer func() {
 		if originalDebug != "" {
-			os.Setenv("CM_DEBUG", originalDebug)
+			os.Setenv("DEBUG", originalDebug)
 		} else {
-			os.Unsetenv("CM_DEBUG")
+			os.Unsetenv("DEBUG")
 		}
 	}()
 
@@ -91,7 +91,7 @@ func TestLogger_DebugEnabled(t *testing.T) {
 	}
 
 	if !strings.Contains(string(content), "debug message") {
-		t.Errorf("debug message should appear when CM_DEBUG=debug, got: %s", content)
+		t.Errorf("debug message should appear when DEBUG=debug, got: %s", content)
 	}
 }
 
