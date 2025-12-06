@@ -7,6 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 make build          # Build binary to ./cm
 make install        # Build and install to ~/.local/bin/cm
+make build-attn     # Build experimental binary to ./attn
+make install-attn   # Build and install to ~/.local/bin/attn
 make test           # Run all tests
 go test ./...       # Run all tests (alternative)
 go test ./internal/store -run TestList  # Run single test
@@ -16,9 +18,9 @@ go test ./internal/store -run TestList  # Run single test
 
 ## Debugging
 
-Set `CM_DEBUG=debug` or `CM_DEBUG=trace` for verbose logging:
+Set `DEBUG=debug` or `DEBUG=trace` for verbose logging:
 ```bash
-CM_DEBUG=debug cm -s test
+DEBUG=debug cm -s test
 ```
 
 ## Architecture
@@ -31,7 +33,7 @@ Claude Manager (`cm`) tracks multiple Claude Code sessions and surfaces which on
 
 2. **Hooks** (`internal/hooks`): Generates Claude Code hooks JSON that reports state changes back to daemon via unix socket using `nc`. Three hooks: Stop (waiting), UserPromptSubmit (working), PostToolUse/TodoWrite (update todos).
 
-3. **Daemon** (`internal/daemon`): Background process listening on `~/.claude-manager.sock`. Handles register/unregister/state/todos/query/heartbeat commands. Auto-started by wrapper if not running.
+3. **Daemon** (`internal/daemon`): Background process listening on `~/.{binary}.sock` (e.g., `~/.cm.sock`). Handles register/unregister/state/todos/query/heartbeat commands. Auto-started by wrapper if not running.
 
 4. **Store** (`internal/store`): Thread-safe in-memory session storage with mutex protection.
 
@@ -41,7 +43,7 @@ Claude Manager (`cm`) tracks multiple Claude Code sessions and surfaces which on
 
 ### Communication
 
-All IPC uses JSON over unix socket at `~/.claude-manager.sock`. Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates.
+All IPC uses JSON over unix socket at `~/.{binary}.sock` (paths derived from binary name via `internal/config`). Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates.
 
 ## When Something Is Broken
 
