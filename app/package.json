@@ -17,7 +17,8 @@
     "@xterm/xterm": "^5.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "tauri-pty": "^0.1.1"
+    "tauri-pty": "^0.1.1",
+    "zustand": "^5.0.9"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
