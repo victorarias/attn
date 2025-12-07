@@ -5,7 +5,11 @@ import { usePty } from './hooks/usePty';
 import './App.css';
 
 function App() {
-  const { connect, resize } = usePty();
+  const { connect, resize } = usePty({
+    command: 'claude',
+    args: [],
+    cwd: '/',
+  });
 
   const handleTerminalReady = useCallback((terminal: XTerm) => {
     connect(terminal);
