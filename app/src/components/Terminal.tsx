@@ -6,11 +6,11 @@ import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 
 interface TerminalProps {
-  onData?: (data: string) => void;
-  terminalRef?: React.MutableRefObject<XTerm | null>;
+  onReady?: (terminal: XTerm) => void;
+  onResize?: (cols: number, rows: number) => void;
 }
 
-export function Terminal({ onData, terminalRef }: TerminalProps) {
+export function Terminal({ onReady, onResize }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -42,18 +42,18 @@ export function Terminal({ onData, terminalRef }: TerminalProps) {
     // Store refs
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
-    if (terminalRef) {
-      terminalRef.current = term;
-    }
 
-    // Handle input
-    if (onData) {
-      term.onData(onData);
+    // Notify that terminal is ready
+    if (onReady) {
+      onReady(term);
     }
 
     // Handle resize
     const handleResize = () => {
       fitAddon.fit();
+      if (onResize) {
+        onResize(term.cols, term.rows);
+      }
     };
     window.addEventListener('resize', handleResize);
 
@@ -62,7 +62,7 @@ export function Terminal({ onData, terminalRef }: TerminalProps) {
       window.removeEventListener('resize', handleResize);
       term.dispose();
     };
-  }, [onData, terminalRef]);
+  }, [onReady, onResize]);
 
   return <div ref={containerRef} className="terminal-container" />;
 }
