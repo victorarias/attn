@@ -1,42 +1,105 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
-import { Terminal } from './components/Terminal';
+import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
-import { usePty } from './hooks/usePty';
+import { useSessionStore } from './store/sessions';
 import './App.css';
 
-// Mock sessions for now
-const mockSessions = [
-  { id: '1', label: 'claude-manager', state: 'waiting' as const },
-  { id: '2', label: 'other-project', state: 'working' as const },
-];
-
 function App() {
-  const [selectedSession, setSelectedSession] = useState<string | null>('1');
+  const {
+    sessions,
+    activeSessionId,
+    createSession,
+    closeSession,
+    setActiveSession,
+    connectTerminal,
+    resizeSession,
+  } = useSessionStore();
 
-  const { connect, resize } = usePty({
-    command: 'claude',
-    args: [],
-    cwd: '/',
-  });
+  const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
-  const handleTerminalReady = useCallback((terminal: XTerm) => {
-    connect(terminal);
-  }, [connect]);
+  // Create initial session on mount
+  useEffect(() => {
+    if (sessions.length === 0) {
+      createSession('claude-manager', '/');
+    }
+  }, []);
 
-  const handleResize = useCallback((cols: number, rows: number) => {
-    resize(cols, rows);
-  }, [resize]);
+  const handleNewSession = useCallback(async () => {
+    const label = `session-${sessions.length + 1}`;
+    await createSession(label, '/');
+  }, [createSession, sessions.length]);
+
+  const handleCloseSession = useCallback(
+    (id: string) => {
+      terminalRefs.current.delete(id);
+      closeSession(id);
+    },
+    [closeSession]
+  );
+
+  const handleSelectSession = useCallback(
+    (id: string) => {
+      setActiveSession(id);
+      // Focus the terminal after a short delay
+      setTimeout(() => {
+        terminalRefs.current.get(id)?.focus();
+      }, 50);
+    },
+    [setActiveSession]
+  );
+
+  const handleTerminalReady = useCallback(
+    (sessionId: string) => (terminal: XTerm) => {
+      connectTerminal(sessionId, terminal);
+    },
+    [connectTerminal]
+  );
+
+  const handleResize = useCallback(
+    (sessionId: string) => (cols: number, rows: number) => {
+      resizeSession(sessionId, cols, rows);
+    },
+    [resizeSession]
+  );
+
+  const setTerminalRef = useCallback(
+    (sessionId: string) => (ref: TerminalHandle | null) => {
+      if (ref) {
+        terminalRefs.current.set(sessionId, ref);
+      }
+    },
+    []
+  );
 
   return (
     <div className="app">
       <Sidebar
-        sessions={mockSessions}
-        selectedId={selectedSession}
-        onSelectSession={setSelectedSession}
+        sessions={sessions}
+        selectedId={activeSessionId}
+        onSelectSession={handleSelectSession}
+        onNewSession={handleNewSession}
+        onCloseSession={handleCloseSession}
       />
       <div className="terminal-pane">
-        <Terminal onReady={handleTerminalReady} onResize={handleResize} />
+        {sessions.map((session) => (
+          <div
+            key={session.id}
+            className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
+          >
+            <Terminal
+              ref={setTerminalRef(session.id)}
+              onReady={handleTerminalReady(session.id)}
+              onResize={handleResize(session.id)}
+            />
+          </div>
+        ))}
+        {sessions.length === 0 && (
+          <div className="no-sessions">
+            <p>No active sessions</p>
+            <p>Click "+" in the sidebar to start a new session</p>
+          </div>
+        )}
       </div>
     </div>
   );

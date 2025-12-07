@@ -22,4 +22,29 @@ html, body, #root {
   flex: 1;
   height: 100%;
   overflow: hidden;
+  position: relative;
+}
+
+.terminal-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: none;
+}
+
+.terminal-wrapper.active {
+  display: block;
+}
+
+.no-sessions {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #808080;
+  font-size: 14px;
+  gap: 8px;
 }
