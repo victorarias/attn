@@ -1,0 +1,137 @@
+// app/src/components/AttentionDrawer.tsx
+import { DaemonSession, DaemonPR } from '../hooks/useDaemonSocket';
+import './AttentionDrawer.css';
+
+interface AttentionDrawerProps {
+  isOpen: boolean;
+  onClose: () => void;
+  waitingSessions: Array<{
+    id: string;
+    label: string;
+    state: 'working' | 'waiting';
+  }>;
+  daemonSessions: DaemonSession[];
+  prs: DaemonPR[];
+  onSelectSession: (id: string) => void;
+}
+
+export function AttentionDrawer({
+  isOpen,
+  onClose,
+  waitingSessions,
+  daemonSessions,
+  prs,
+  onSelectSession,
+}: AttentionDrawerProps) {
+  const waitingDaemonSessions = daemonSessions.filter((s) => s.state === 'waiting');
+  const reviewPRs = prs.filter((p) => p.role === 'reviewer' && !p.muted);
+  const authorPRs = prs.filter((p) => p.role === 'author' && !p.muted);
+
+  const totalItems = waitingSessions.length + waitingDaemonSessions.length + reviewPRs.length + authorPRs.length;
+
+  return (
+    <div className={`attention-drawer ${isOpen ? 'open' : ''}`}>
+      <div className="drawer-header">
+        <span className="drawer-title">Needs Attention</span>
+        <span className="drawer-count">{totalItems}</span>
+        <button className="drawer-close" onClick={onClose}>×</button>
+      </div>
+
+      <div className="drawer-body">
+        {/* Waiting Sessions (local) */}
+        {waitingSessions.length > 0 && (
+          <div className="drawer-section">
+            <div className="section-title">
+              Sessions Waiting
+              <span className="section-count">{waitingSessions.length}</span>
+            </div>
+            {waitingSessions.map((s) => (
+              <div
+                key={s.id}
+                className="attention-item clickable"
+                onClick={() => onSelectSession(s.id)}
+              >
+                <span className="item-dot session" />
+                <span className="item-name">{s.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Waiting Sessions (external) */}
+        {waitingDaemonSessions.length > 0 && (
+          <div className="drawer-section">
+            <div className="section-title">
+              Other Sessions Waiting
+              <span className="section-count">{waitingDaemonSessions.length}</span>
+            </div>
+            {waitingDaemonSessions.map((s) => (
+              <div key={s.id} className="attention-item">
+                <span className="item-dot session" />
+                <span className="item-name">{s.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* PRs - Review Requested */}
+        {reviewPRs.length > 0 && (
+          <div className="drawer-section">
+            <div className="section-title">
+              Review Requested
+              <span className="section-count">{reviewPRs.length}</span>
+            </div>
+            {reviewPRs.map((pr) => (
+              <a
+                key={pr.id}
+                href={pr.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="attention-item clickable"
+              >
+                <span className="item-dot pr" />
+                <span className="item-name">
+                  {pr.repo.split('/')[1]} #{pr.number}
+                </span>
+              </a>
+            ))}
+          </div>
+        )}
+
+        {/* PRs - Your PRs */}
+        {authorPRs.length > 0 && (
+          <div className="drawer-section">
+            <div className="section-title">
+              Your PRs
+              <span className="section-count">{authorPRs.length}</span>
+            </div>
+            {authorPRs.map((pr) => (
+              <a
+                key={pr.id}
+                href={pr.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="attention-item clickable"
+              >
+                <span className="item-dot pr" />
+                <span className="item-name">
+                  {pr.repo.split('/')[1]} #{pr.number}
+                </span>
+                <span className="item-reason">{pr.reason.replace(/_/g, ' ')}</span>
+              </a>
+            ))}
+          </div>
+        )}
+
+        {totalItems === 0 && (
+          <div className="drawer-empty">Nothing needs attention</div>
+        )}
+      </div>
+
+      <div className="drawer-footer">
+        <span className="shortcut"><kbd>⌘K</kbd> toggle</span>
+        <span className="shortcut"><kbd>Esc</kbd> close</span>
+      </div>
+    </div>
+  );
+}
