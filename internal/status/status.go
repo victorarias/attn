@@ -126,9 +126,9 @@ func FormatWithPRsAndRepos(sessions []*protocol.Session, prs []*protocol.PR, rep
 
 	var parts []string
 
-	// Sessions part
+	// Sessions part (bold red in tmux)
 	if sessionWaiting > 0 {
-		parts = append(parts, fmt.Sprintf("%d sessions", sessionWaiting))
+		parts = append(parts, fmt.Sprintf("#[fg=red,bold]%d sessions#[default]", sessionWaiting))
 	}
 
 	// PRs part

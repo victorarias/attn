@@ -191,7 +191,7 @@ func TestFormatWithPRs_RepoGrouping(t *testing.T) {
 			prs: []*protocol.PR{
 				{Repo: "owner/repo-a", State: protocol.StateWaiting},
 			},
-			want: "● 2 sessions | repo-a(1)",
+			want: "● #[fg=red,bold]2 sessions#[default] | repo-a(1)",
 		},
 		{
 			name: "muted repo excluded",
