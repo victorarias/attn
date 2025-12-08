@@ -23,6 +23,16 @@ const (
 	CmdFetchPRDetails  = "fetch_pr_details"
 )
 
+// WebSocket Events (daemon -> client)
+const (
+	EventSessionRegistered   = "session_registered"
+	EventSessionUnregistered = "session_unregistered"
+	EventSessionStateChanged = "session_state_changed"
+	EventSessionTodosUpdated = "session_todos_updated"
+	EventPRsUpdated          = "prs_updated"
+	EventInitialState        = "initial_state"
+)
+
 // States
 const (
 	StateWorking = "working"
@@ -189,6 +199,14 @@ type Response struct {
 	Sessions []*Session   `json:"sessions,omitempty"`
 	PRs      []*PR        `json:"prs,omitempty"`
 	Repos    []*RepoState `json:"repos,omitempty"`
+}
+
+// WebSocketEvent is sent from daemon to connected WebSocket clients
+type WebSocketEvent struct {
+	Event    string     `json:"event"`
+	Session  *Session   `json:"session,omitempty"`
+	Sessions []*Session `json:"sessions,omitempty"`
+	PRs      []*PR      `json:"prs,omitempty"`
 }
 
 // ParseMessage parses a JSON message and returns the command type and parsed message
