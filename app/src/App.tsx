@@ -5,6 +5,8 @@ import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
+import { AttentionDrawer } from './components/AttentionDrawer';
+import { DrawerTrigger } from './components/DrawerTrigger';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket } from './hooks/useDaemonSocket';
 import { useDaemonStore } from './store/daemonSessions';
@@ -100,6 +102,17 @@ function App() {
     setView('dashboard');
   }, [setActiveSession]);
 
+  // Drawer state management
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const toggleDrawer = useCallback(() => {
+    setDrawerOpen((prev) => !prev);
+  }, []);
+
+  const closeDrawer = useCallback(() => {
+    setDrawerOpen(false);
+  }, []);
+
   // No auto-creation - user clicks "+" to start a session
 
   const handleNewSession = useCallback(async () => {
@@ -162,6 +175,12 @@ function App() {
     []
   );
 
+  // Calculate attention count for drawer badge
+  const waitingLocalSessions = enrichedLocalSessions.filter((s) => s.state === 'waiting');
+  const waitingExternalSessions = externalDaemonSessions.filter((s) => s.state === 'waiting');
+  const activePRs = prs.filter((p) => !p.muted);
+  const attentionCount = waitingLocalSessions.length + waitingExternalSessions.length + activePRs.length;
+
   return (
     <div className="app">
       {view === 'dashboard' ? (
@@ -204,6 +223,15 @@ function App() {
               </div>
             )}
           </div>
+          <DrawerTrigger count={attentionCount} onClick={toggleDrawer} />
+          <AttentionDrawer
+            isOpen={drawerOpen}
+            onClose={closeDrawer}
+            waitingSessions={waitingLocalSessions}
+            daemonSessions={externalDaemonSessions}
+            prs={prs}
+            onSelectSession={handleSelectSession}
+          />
         </>
       )}
     </div>
