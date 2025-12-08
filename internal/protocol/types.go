@@ -8,18 +8,19 @@ import (
 
 // Commands
 const (
-	CmdRegister     = "register"
-	CmdUnregister   = "unregister"
-	CmdState        = "state"
-	CmdTodos        = "todos"
-	CmdQuery        = "query"
-	CmdHeartbeat    = "heartbeat"
-	CmdMute         = "mute"
-	CmdQueryPRs     = "query_prs"
-	CmdMutePR       = "mute_pr"
-	CmdMuteRepo     = "mute_repo"
-	CmdCollapseRepo = "collapse_repo"
-	CmdQueryRepos   = "query_repos"
+	CmdRegister        = "register"
+	CmdUnregister      = "unregister"
+	CmdState           = "state"
+	CmdTodos           = "todos"
+	CmdQuery           = "query"
+	CmdHeartbeat       = "heartbeat"
+	CmdMute            = "mute"
+	CmdQueryPRs        = "query_prs"
+	CmdMutePR          = "mute_pr"
+	CmdMuteRepo        = "mute_repo"
+	CmdCollapseRepo    = "collapse_repo"
+	CmdQueryRepos      = "query_repos"
+	CmdFetchPRDetails  = "fetch_pr_details"
 )
 
 // States
@@ -115,6 +116,12 @@ type CollapseRepoMessage struct {
 // QueryReposMessage requests repo states
 type QueryReposMessage struct {
 	Filter string `json:"filter,omitempty"`
+}
+
+// FetchPRDetailsMessage requests daemon to fetch PR details for a repo
+type FetchPRDetailsMessage struct {
+	Cmd  string `json:"cmd"`
+	Repo string `json:"repo"`
 }
 
 // Session represents a tracked Claude session
@@ -278,6 +285,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdQueryRepos:
 		var msg QueryReposMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdFetchPRDetails:
+		var msg FetchPRDetailsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

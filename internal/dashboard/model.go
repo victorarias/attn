@@ -11,7 +11,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/victorarias/claude-manager/internal/client"
-	"github.com/victorarias/claude-manager/internal/github"
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
 
@@ -39,7 +38,6 @@ var (
 // Model is the bubbletea model for the dashboard
 type Model struct {
 	client          *client.Client
-	ghFetcher       *github.Fetcher
 	sessions        []*protocol.Session
 	prs             []*protocol.PR
 	repoStates      map[string]*protocol.RepoState
@@ -72,7 +70,6 @@ type repoGroup struct {
 func NewModel(c *client.Client) *Model {
 	return &Model{
 		client:         c,
-		ghFetcher:      github.NewFetcher(),
 		currentSession: getCurrentTmuxSession(),
 		loadingRepos:   make(map[string]bool),
 	}
@@ -209,11 +206,11 @@ type errMsg struct {
 
 type tickMsg struct{}
 
-// prDetailsMsg is sent when PR details have been fetched
+// prDetailsMsg is sent when PR details have been fetched from daemon
 type prDetailsMsg struct {
-	repo    string
-	details map[int]*github.PRDetails // PR number -> details
-	err     error
+	repo string
+	prs  []*protocol.PR // updated PRs with details populated
+	err  error
 }
 
 // prActionMsg is sent when a PR action completes
@@ -342,25 +339,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case sessionsMsg:
 		m.sessions = msg.sessions
-		// Preserve detail fields from existing PRs
-		oldPRs := make(map[string]*protocol.PR)
-		for _, pr := range m.prs {
-			oldPRs[pr.ID] = pr
-		}
-		for _, pr := range msg.prs {
-			if old, ok := oldPRs[pr.ID]; ok && old.DetailsFetched {
-				// Preserve detail fields if still valid
-				if !old.LastUpdated.Before(pr.LastUpdated) {
-					pr.DetailsFetched = old.DetailsFetched
-					pr.DetailsFetchedAt = old.DetailsFetchedAt
-					pr.Mergeable = old.Mergeable
-					pr.MergeableState = old.MergeableState
-					pr.CIStatus = old.CIStatus
-					pr.ReviewStatus = old.ReviewStatus
-				}
-			}
-		}
-		m.prs = msg.prs
+		m.prs = msg.prs // PR details are now preserved by daemon
 		// Build repo states map
 		m.repoStates = make(map[string]*protocol.RepoState)
 		for _, repo := range msg.repos {
@@ -387,18 +366,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Log error but don't fail the UI
 			return m, nil
 		}
-		// Update PRs with fetched details
-		now := time.Now()
+		// Update local PRs with details from daemon
+		prMap := make(map[string]*protocol.PR)
+		for _, pr := range msg.prs {
+			prMap[pr.ID] = pr
+		}
 		for _, pr := range m.prs {
-			if pr.Repo == msg.repo {
-				if details, ok := msg.details[pr.Number]; ok {
-					pr.DetailsFetched = true
-					pr.DetailsFetchedAt = now
-					pr.Mergeable = details.Mergeable
-					pr.MergeableState = details.MergeableState
-					pr.CIStatus = details.CIStatus
-					pr.ReviewStatus = details.ReviewStatus
-				}
+			if updated, ok := prMap[pr.ID]; ok {
+				pr.DetailsFetched = updated.DetailsFetched
+				pr.DetailsFetchedAt = updated.DetailsFetchedAt
+				pr.Mergeable = updated.Mergeable
+				pr.MergeableState = updated.MergeableState
+				pr.CIStatus = updated.CIStatus
+				pr.ReviewStatus = updated.ReviewStatus
 			}
 		}
 		return m, nil
@@ -535,26 +515,14 @@ func (m *Model) toggleRepoCollapsed(repo string) tea.Cmd {
 	return collapseCmd
 }
 
-// fetchPRDetails fetches detailed status for all PRs in a repo
+// fetchPRDetails fetches detailed status for all PRs in a repo via daemon
 func (m *Model) fetchPRDetails(repo string) tea.Cmd {
-	// Collect PR numbers that need fetching
-	var prNumbers []int
-	for _, pr := range m.prs {
-		if pr.Repo == repo && pr.NeedsDetailRefresh() {
-			prNumbers = append(prNumbers, pr.Number)
-		}
-	}
-
 	return func() tea.Msg {
-		details := make(map[int]*github.PRDetails)
-		for _, num := range prNumbers {
-			d, err := m.ghFetcher.FetchPRDetails(repo, num)
-			if err != nil {
-				continue // Skip individual failures
-			}
-			details[num] = d
+		prs, err := m.client.FetchPRDetails(repo)
+		if err != nil {
+			return prDetailsMsg{repo: repo, err: err}
 		}
-		return prDetailsMsg{repo: repo, details: details}
+		return prDetailsMsg{repo: repo, prs: prs}
 	}
 }
 
@@ -585,8 +553,8 @@ func (m *Model) openPRInBrowser(url string) tea.Cmd {
 
 func (m *Model) approvePR(pr *protocol.PR) tea.Cmd {
 	return func() tea.Msg {
-		// Use gh pr review --approve
-		cmd := exec.Command("gh", "pr", "review", "--approve", pr.ID)
+		// Use gh pr review --approve with URL (works outside git repos)
+		cmd := exec.Command("gh", "pr", "review", "--approve", pr.URL)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return prActionMsg{
@@ -607,8 +575,9 @@ func (m *Model) approvePR(pr *protocol.PR) tea.Cmd {
 
 func (m *Model) mergePR(pr *protocol.PR) tea.Cmd {
 	return func() tea.Msg {
-		// Use gh pr merge with default strategy
-		cmd := exec.Command("gh", "pr", "merge", pr.ID)
+		// Use gh pr merge with URL (works outside git repos)
+		// --merge creates a merge commit (default GitHub behavior)
+		cmd := exec.Command("gh", "pr", "merge", "--merge", pr.URL)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return prActionMsg{
