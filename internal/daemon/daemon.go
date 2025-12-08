@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"time"
 
@@ -18,6 +20,8 @@ type Daemon struct {
 	socketPath string
 	store      *store.Store
 	listener   net.Listener
+	httpServer *http.Server
+	wsHub      *wsHub
 	done       chan struct{}
 	logger     *logging.Logger
 	ghFetcher  *github.Fetcher
@@ -29,6 +33,7 @@ func New(socketPath string) *Daemon {
 	return &Daemon{
 		socketPath: socketPath,
 		store:      store.NewWithPersistence(store.DefaultStatePath()),
+		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
 		logger:     logger,
 		ghFetcher:  github.NewFetcher(),
@@ -40,6 +45,7 @@ func NewForTesting(socketPath string) *Daemon {
 	return &Daemon{
 		socketPath: socketPath,
 		store:      store.New(),
+		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
 		logger:     nil, // No logging in tests
 	}
@@ -56,6 +62,12 @@ func (d *Daemon) Start() error {
 	}
 	d.listener = listener
 	d.log("daemon started")
+
+	// Start WebSocket hub
+	go d.wsHub.run()
+
+	// Start HTTP server for WebSocket
+	go d.startHTTPServer()
 
 	// Start background persistence (3 second interval)
 	go d.store.StartPersistence(3*time.Second, d.done)
@@ -89,12 +101,37 @@ func (d *Daemon) Start() error {
 func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
+	if d.httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		d.httpServer.Shutdown(ctx)
+	}
 	if d.listener != nil {
 		d.listener.Close()
 	}
 	os.Remove(d.socketPath)
 	if d.logger != nil {
 		d.logger.Close()
+	}
+}
+
+func (d *Daemon) startHTTPServer() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", d.handleWS)
+
+	port := os.Getenv("CM_WS_PORT")
+	if port == "" {
+		port = "9849"
+	}
+
+	d.httpServer = &http.Server{
+		Addr:    "127.0.0.1:" + port,
+		Handler: mux,
+	}
+
+	d.logf("WebSocket server starting on ws://127.0.0.1:%s/ws", port)
+	if err := d.httpServer.ListenAndServe(); err != http.ErrServerClosed {
+		d.logf("HTTP server error: %v", err)
 	}
 }
 
