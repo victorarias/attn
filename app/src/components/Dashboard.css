@@ -1,0 +1,176 @@
+/* app/src/components/Dashboard.css */
+.dashboard {
+  height: 100%;
+  width: 100%;
+  background: #0a0a0b;
+  display: flex;
+  flex-direction: column;
+  padding: 40px;
+}
+
+.dashboard-header {
+  margin-bottom: 40px;
+}
+
+.dashboard-header h1 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 24px;
+  font-weight: 700;
+  color: #e8e8e8;
+  margin: 0;
+}
+
+.dashboard-subtitle {
+  font-size: 12px;
+  color: #555;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.dashboard-card {
+  background: #111113;
+  border: 1px solid #2a2a2d;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  max-height: 400px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid #2a2a2d;
+}
+
+.card-header h2 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #555;
+  margin: 0;
+}
+
+.card-action {
+  background: #1a1a1d;
+  border: 1px solid #2a2a2d;
+  border-radius: 4px;
+  color: #888;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.card-action:hover {
+  background: #2a2a2d;
+  color: #e8e8e8;
+}
+
+.card-count {
+  background: #ff6b35;
+  color: #000;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.card-body {
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.card-empty {
+  color: #555;
+  font-size: 13px;
+  text-align: center;
+  padding: 20px;
+}
+
+.session-group {
+  margin-bottom: 16px;
+}
+
+.group-label {
+  font-size: 10px;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+  padding: 0 8px;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #e8e8e8;
+}
+
+.session-row.clickable {
+  cursor: pointer;
+}
+
+.session-row.clickable:hover {
+  background: #1a1a1d;
+}
+
+.state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.state-dot.waiting {
+  background: #ff6b35;
+}
+
+.state-dot.working {
+  background: #22c55e;
+}
+
+.session-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-footer {
+  display: flex;
+  gap: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #2a2a2d;
+  margin-top: 20px;
+}
+
+.shortcut {
+  font-size: 12px;
+  color: #555;
+}
+
+.shortcut kbd {
+  background: #1a1a1d;
+  border: 1px solid #2a2a2d;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  margin-right: 6px;
+}
