@@ -15,7 +15,7 @@ html, body, #root {
   height: 100%;
   width: 100%;
   display: flex;
-  background: #1e1e1e;
+  background: #0a0a0b;
 }
 
 .terminal-pane {

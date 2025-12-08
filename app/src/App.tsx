@@ -4,6 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
+import { Dashboard } from './components/Dashboard';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket } from './hooks/useDaemonSocket';
 import { useDaemonStore } from './store/daemonSessions';
@@ -83,8 +84,7 @@ function App() {
 
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
-  // View state management (will be used in Task 3)
-  // @ts-expect-error - will be used in Task 3
+  // View state management
   const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
 
   // When activeSessionId changes, update view
@@ -94,8 +94,7 @@ function App() {
     }
   }, [activeSessionId]);
 
-  // Add function to go to dashboard (will be used in Task 3)
-  // @ts-expect-error - will be used in Task 3
+  // Function to go to dashboard
   const goToDashboard = useCallback(() => {
     setActiveSession(null);
     setView('dashboard');
@@ -165,36 +164,48 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar
-        localSessions={enrichedLocalSessions}
-        selectedId={activeSessionId}
-        onSelectSession={handleSelectSession}
-        onNewSession={handleNewSession}
-        onCloseSession={handleCloseSession}
-        daemonSessions={externalDaemonSessions}
-        prs={prs}
-        isConnected={isConnected}
-      />
-      <div className="terminal-pane">
-        {sessions.map((session) => (
-          <div
-            key={session.id}
-            className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
-          >
-            <Terminal
-              ref={setTerminalRef(session.id)}
-              onReady={handleTerminalReady(session.id)}
-              onResize={handleResize(session.id)}
-            />
+      {view === 'dashboard' ? (
+        <Dashboard
+          sessions={enrichedLocalSessions}
+          daemonSessions={externalDaemonSessions}
+          prs={prs}
+          onSelectSession={handleSelectSession}
+          onNewSession={handleNewSession}
+        />
+      ) : (
+        <>
+          <Sidebar
+            localSessions={enrichedLocalSessions}
+            selectedId={activeSessionId}
+            onSelectSession={handleSelectSession}
+            onNewSession={handleNewSession}
+            onCloseSession={handleCloseSession}
+            daemonSessions={externalDaemonSessions}
+            prs={prs}
+            isConnected={isConnected}
+          />
+          <div className="terminal-pane">
+            {sessions.map((session) => (
+              <div
+                key={session.id}
+                className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
+              >
+                <Terminal
+                  ref={setTerminalRef(session.id)}
+                  onReady={handleTerminalReady(session.id)}
+                  onResize={handleResize(session.id)}
+                />
+              </div>
+            ))}
+            {sessions.length === 0 && (
+              <div className="no-sessions">
+                <p>No active sessions</p>
+                <p>Click "+" in the sidebar to start a new session</p>
+              </div>
+            )}
           </div>
-        ))}
-        {sessions.length === 0 && (
-          <div className="no-sessions">
-            <p>No active sessions</p>
-            <p>Click "+" in the sidebar to start a new session</p>
-          </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }
