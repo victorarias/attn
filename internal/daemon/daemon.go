@@ -207,23 +207,71 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	}
 	d.store.Add(session)
 	d.sendOK(conn)
+
+	// Broadcast to WebSocket clients
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:   protocol.EventSessionRegistered,
+		Session: session,
+	})
 }
 
 func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage) {
+	// Get session before removing for broadcast
+	sessions := d.store.List("")
+	var session *protocol.Session
+	for _, s := range sessions {
+		if s.ID == msg.ID {
+			session = s
+			break
+		}
+	}
+
 	d.store.Remove(msg.ID)
 	d.sendOK(conn)
+
+	// Broadcast to WebSocket clients
+	if session != nil {
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:   protocol.EventSessionUnregistered,
+			Session: session,
+		})
+	}
 }
 
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.store.UpdateState(msg.ID, msg.State)
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
+
+	// Broadcast to WebSocket clients
+	sessions := d.store.List("")
+	for _, s := range sessions {
+		if s.ID == msg.ID {
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event:   protocol.EventSessionStateChanged,
+				Session: s,
+			})
+			break
+		}
+	}
 }
 
 func (d *Daemon) handleTodos(conn net.Conn, msg *protocol.TodosMessage) {
 	d.store.UpdateTodos(msg.ID, msg.Todos)
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
+
+	// Broadcast to WebSocket clients
+	sessions := d.store.List("")
+	for _, s := range sessions {
+		if s.ID == msg.ID {
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event:   protocol.EventSessionTodosUpdated,
+				Session: s,
+			})
+			break
+		}
+	}
 }
 
 func (d *Daemon) handleQuery(conn net.Conn, msg *protocol.QueryMessage) {
@@ -351,9 +399,16 @@ func (d *Daemon) doPRPoll() {
 
 	d.store.SetPRs(prs)
 
+	// Broadcast to WebSocket clients
+	allPRs := d.store.ListPRs("")
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event: protocol.EventPRsUpdated,
+		PRs:   allPRs,
+	})
+
 	// Count waiting (non-muted) PRs for logging
 	waiting := 0
-	for _, pr := range d.store.ListPRs("") {
+	for _, pr := range allPRs {
 		if pr.State == protocol.StateWaiting && !pr.Muted {
 			waiting++
 		}
