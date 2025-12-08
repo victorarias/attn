@@ -1,38 +1,59 @@
+/* app/src/components/Sidebar.css */
 .sidebar {
-  width: 240px;
+  width: 200px;
   height: 100%;
-  background: #252526;
-  border-right: 1px solid #3c3c3c;
+  background: #111113;
+  border-right: 1px solid #2a2a2d;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
 }
 
 .sidebar-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid #3c3c3c;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid #2a2a2d;
 }
 
-.sidebar-header h2 {
-  margin: 0;
-  font-size: 12px;
+.home-btn {
+  background: #1a1a1d;
+  border: 1px solid #2a2a2d;
+  border-radius: 4px;
+  color: #888;
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-btn:hover {
+  background: #2a2a2d;
+  color: #e8e8e8;
+}
+
+.sidebar-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
   font-weight: 600;
-  color: #cccccc;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: #555;
+  flex: 1;
 }
 
 .new-session-btn {
-  width: 24px;
-  height: 24px;
-  border: none;
+  background: #1a1a1d;
+  border: 1px solid #2a2a2d;
   border-radius: 4px;
-  background: #0e639c;
-  color: white;
-  font-size: 18px;
-  line-height: 1;
+  color: #888;
+  font-size: 16px;
+  width: 28px;
+  height: 28px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -40,7 +61,8 @@
 }
 
 .new-session-btn:hover {
-  background: #1177bb;
+  background: #2a2a2d;
+  color: #e8e8e8;
 }
 
 .session-list {
@@ -49,67 +71,38 @@
   padding: 8px;
 }
 
-.empty-state {
-  padding: 16px;
-  color: #808080;
-  font-size: 13px;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.start-session-btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 4px;
-  background: #0e639c;
-  color: white;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.start-session-btn:hover {
-  background: #1177bb;
-}
-
 .session-item {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  border-radius: 4px;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
   cursor: pointer;
-  color: #cccccc;
   font-size: 13px;
-  position: relative;
+  color: #e8e8e8;
 }
 
 .session-item:hover {
-  background: #2a2d2e;
+  background: #1a1a1d;
 }
 
 .session-item.selected {
-  background: #094771;
-}
-
-.session-item:hover .close-session-btn {
-  opacity: 1;
+  background: #1a1a1d;
 }
 
 .state-indicator {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  margin-right: 8px;
   flex-shrink: 0;
 }
 
-.state-indicator.working {
-  background: #4ec9b0;
+.state-indicator.waiting {
+  background: #ff6b35;
 }
 
-.state-indicator.waiting {
-  background: #dcdcaa;
+.state-indicator.working {
+  background: #22c55e;
 }
 
 .session-label {
@@ -119,116 +112,37 @@
   white-space: nowrap;
 }
 
+.session-shortcut {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #555;
+}
+
 .close-session-btn {
-  width: 20px;
-  height: 20px;
+  background: none;
   border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: #cccccc;
-  font-size: 16px;
-  line-height: 1;
+  color: #555;
+  font-size: 14px;
   cursor: pointer;
+  padding: 0;
   opacity: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+  transition: opacity 0.1s;
+}
+
+.session-item:hover .close-session-btn {
+  opacity: 1;
 }
 
 .close-session-btn:hover {
-  background: #5a5a5a;
-  color: white;
+  color: #e8e8e8;
 }
 
-/* Sections */
-.sidebar-section {
-  border-bottom: 1px solid #3c3c3c;
+.sidebar-footer {
+  padding: 12px;
+  border-top: 1px solid #2a2a2d;
 }
 
-.sidebar-section:last-child {
-  border-bottom: none;
-}
-
-/* Connection indicator */
-.connection-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #f44747;
-}
-
-.connection-indicator.connected {
-  background: #4ec9b0;
-}
-
-/* Todo count */
-.todo-count {
-  background: #3c3c3c;
-  color: #cccccc;
+.shortcut-hint {
   font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 10px;
-  margin-left: auto;
-}
-
-/* Daemon sessions (not interactive) */
-.session-item.daemon-session {
-  opacity: 0.7;
-  cursor: default;
-}
-
-.session-item.daemon-session:hover {
-  background: transparent;
-}
-
-/* PR list */
-.pr-list {
-  padding: 8px;
-}
-
-.pr-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 4px;
-  color: #cccccc;
-  text-decoration: none;
-  font-size: 12px;
-}
-
-.pr-item:hover {
-  background: #2a2d2e;
-}
-
-.pr-item.author {
-  border-left: 2px solid #4ec9b0;
-}
-
-.pr-item.reviewer {
-  border-left: 2px solid #dcdcaa;
-}
-
-.pr-repo {
-  color: #808080;
-}
-
-.pr-number {
-  color: #569cd6;
-}
-
-.pr-reason {
-  color: #808080;
-  font-size: 11px;
-  margin-left: auto;
-}
-
-.pr-count {
-  background: #dcdcaa;
-  color: #1e1e1e;
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 10px;
-  font-weight: 600;
+  color: #555;
 }
