@@ -30,7 +30,6 @@ function App() {
     setDaemonSessions,
     prs,
     setPRs,
-    isConnected,
   } = useDaemonStore();
 
   // Connect to daemon WebSocket
@@ -252,14 +251,12 @@ function App() {
       ) : (
         <>
           <Sidebar
-            localSessions={enrichedLocalSessions}
+            sessions={enrichedLocalSessions}
             selectedId={activeSessionId}
             onSelectSession={handleSelectSession}
             onNewSession={handleNewSession}
             onCloseSession={handleCloseSession}
-            daemonSessions={externalDaemonSessions}
-            prs={prs}
-            isConnected={isConnected}
+            onGoToDashboard={goToDashboard}
           />
           <div className="terminal-pane">
             {sessions.map((session) => (
