@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
-import { open } from '@tauri-apps/plugin-dialog';
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { DrawerTrigger } from './components/DrawerTrigger';
+import { LocationPicker } from './components/LocationPicker';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket } from './hooks/useDaemonSocket';
 import { useDaemonStore } from './store/daemonSessions';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useLocationHistory } from './hooks/useLocationHistory';
 import './App.css';
 
 function App() {
@@ -114,23 +115,28 @@ function App() {
     setDrawerOpen(false);
   }, []);
 
+  // Location picker state management
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const { addToHistory } = useLocationHistory();
+
   // No auto-creation - user clicks "+" to start a session
 
-  const handleNewSession = useCallback(async () => {
-    // Open folder picker
-    const folder = await open({
-      directory: true,
-      multiple: false,
-      title: 'Select working directory for new session',
-    });
+  const handleNewSession = useCallback(() => {
+    setLocationPickerOpen(true);
+  }, []);
 
-    if (!folder) return; // User cancelled
+  const handleLocationSelect = useCallback(
+    async (path: string) => {
+      addToHistory(path);
+      const folderName = path.split('/').pop() || 'session';
+      await createSession(folderName, path);
+    },
+    [addToHistory, createSession]
+  );
 
-    // Use folder name as label
-    const folderName = folder.split('/').pop() || 'session';
-    const label = folderName;
-    await createSession(label, folder);
-  }, [createSession]);
+  const closeLocationPicker = useCallback(() => {
+    setLocationPickerOpen(false);
+  }, []);
 
   const handleCloseSession = useCallback(
     (id: string) => {
@@ -286,6 +292,11 @@ function App() {
           />
         </>
       )}
+      <LocationPicker
+        isOpen={locationPickerOpen}
+        onClose={closeLocationPicker}
+        onSelect={handleLocationSelect}
+      />
     </div>
   );
 }
