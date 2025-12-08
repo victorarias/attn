@@ -1,6 +1,6 @@
 # Tauri + xterm.js Phase 1: Scaffold Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+**Status:** ✅ COMPLETE (2025-12-07)
 
 **Goal:** Create a working Tauri app with React frontend that embeds xterm.js connected to a real PTY shell.
 
@@ -1017,17 +1017,17 @@ git commit -m "feat(app): Phase 1 complete - working Tauri + xterm.js scaffold"
 
 ## Verification Checklist
 
-After completing all tasks, verify:
+All verified complete:
 
-- [ ] `pnpm tauri dev` launches the app
-- [ ] Terminal renders with shell prompt
-- [ ] Typing works (characters appear)
-- [ ] Commands execute (try `ls`, `pwd`)
-- [ ] Colors work (try `ls -G` or a colored prompt)
-- [ ] Resize works (drag window, run `stty size` to confirm)
-- [ ] Claude spawns (change command to `claude`)
-- [ ] Sidebar renders with mock sessions
-- [ ] Release build works (`pnpm tauri build`)
+- [x] `pnpm tauri dev` launches the app
+- [x] Terminal renders with shell prompt
+- [x] Typing works (characters appear)
+- [x] Commands execute (try `ls`, `pwd`)
+- [x] Colors work (try `ls -G` or a colored prompt)
+- [x] Resize works (drag window, run `stty size` to confirm)
+- [x] Claude spawns (change command to `claude`)
+- [x] Sidebar renders with mock sessions
+- [x] Release build works (`pnpm tauri build`)
 
 ---
 

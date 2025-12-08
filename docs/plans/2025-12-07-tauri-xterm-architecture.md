@@ -1,7 +1,7 @@
 # Tauri + xterm.js Architecture
 
 **Date:** 2025-12-07
-**Status:** Design approved
+**Status:** Phase 1 complete, Phase 2 next
 
 ## Goal
 
@@ -202,14 +202,15 @@ Tauri registers URL scheme handler to receive spawn requests.
 
 ## Implementation Phases
 
-### Phase 1: Scaffold
-- [ ] Create Tauri + React project in `app/` directory
-- [ ] Basic window with hardcoded layout
-- [ ] xterm.js rendering a simple shell (`/bin/zsh`)
-- [ ] Rust PTY spawning with `portable-pty`
-- [ ] Bidirectional I/O working
+### Phase 1: Scaffold ✅ COMPLETE
+- [x] Create Tauri + React project in `app/` directory
+- [x] Basic window with hardcoded layout
+- [x] xterm.js rendering a simple shell (`/bin/zsh`)
+- [x] Rust PTY spawning with `portable-pty`
+- [x] Bidirectional I/O working
+- [x] **Bonus:** Multi-session support with create/close
 
-### Phase 2: Go Daemon WebSocket
+### Phase 2: Go Daemon WebSocket (NEXT)
 - [ ] Add WebSocket endpoint to Go daemon
 - [ ] Broadcast session state changes
 - [ ] Broadcast PR updates
