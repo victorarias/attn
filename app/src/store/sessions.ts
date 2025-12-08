@@ -18,7 +18,7 @@ interface SessionStore {
   // Actions
   createSession: (label: string, cwd: string) => Promise<string>;
   closeSession: (id: string) => void;
-  setActiveSession: (id: string) => void;
+  setActiveSession: (id: string | null) => void;
   connectTerminal: (id: string, terminal: Terminal) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
 }
@@ -72,7 +72,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     });
   },
 
-  setActiveSession: (id: string) => {
+  setActiveSession: (id: string | null) => {
     set({ activeSessionId: id });
   },
 

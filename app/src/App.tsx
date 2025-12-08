@@ -1,6 +1,7 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { open } from '@tauri-apps/plugin-dialog';
+import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
 import { useSessionStore } from './store/sessions';
@@ -33,7 +34,72 @@ function App() {
     onPRsUpdate: setPRs,
   });
 
+  // Handle deep-link spawn requests (attn://spawn?cwd=/path&label=name)
+  useEffect(() => {
+    const unlisten = onOpenUrl((urls) => {
+      for (const urlStr of urls) {
+        try {
+          const url = new URL(urlStr);
+          if (url.host === 'spawn') {
+            const cwd = url.searchParams.get('cwd');
+            const label = url.searchParams.get('label') || cwd?.split('/').pop() || 'session';
+            if (cwd) {
+              createSession(label, cwd);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse deep-link URL:', e);
+        }
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [createSession]);
+
+  // Filter out daemon sessions that match local sessions (by directory)
+  // These are sessions we spawned ourselves
+  const localDirs = new Set(sessions.map((s) => s.cwd));
+
+  // Also deduplicate by directory (keep most recent by picking last)
+  const seenDirs = new Map<string, typeof daemonSessions[0]>();
+  for (const ds of daemonSessions) {
+    seenDirs.set(ds.directory, ds);
+  }
+
+  const externalDaemonSessions = Array.from(seenDirs.values()).filter(
+    (ds) => !localDirs.has(ds.directory)
+  );
+
+  // Enrich local sessions with daemon state (working/waiting from hooks)
+  const enrichedLocalSessions = sessions.map((s) => {
+    const daemonSession = daemonSessions.find((ds) => ds.directory === s.cwd);
+    return {
+      ...s,
+      state: daemonSession?.state ?? s.state,
+    };
+  });
+
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
+
+  // View state management (will be used in Task 3)
+  // @ts-expect-error - will be used in Task 3
+  const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
+
+  // When activeSessionId changes, update view
+  useEffect(() => {
+    if (activeSessionId) {
+      setView('session');
+    }
+  }, [activeSessionId]);
+
+  // Add function to go to dashboard (will be used in Task 3)
+  // @ts-expect-error - will be used in Task 3
+  const goToDashboard = useCallback(() => {
+    setActiveSession(null);
+    setView('dashboard');
+  }, [setActiveSession]);
 
   // No auto-creation - user clicks "+" to start a session
 
@@ -100,12 +166,12 @@ function App() {
   return (
     <div className="app">
       <Sidebar
-        localSessions={sessions}
+        localSessions={enrichedLocalSessions}
         selectedId={activeSessionId}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onCloseSession={handleCloseSession}
-        daemonSessions={daemonSessions}
+        daemonSessions={externalDaemonSessions}
         prs={prs}
         isConnected={isConnected}
       />
