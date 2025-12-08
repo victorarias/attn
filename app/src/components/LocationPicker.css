@@ -1,0 +1,156 @@
+/* app/src/components/LocationPicker.css */
+.location-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 100px;
+  z-index: 200;
+}
+
+.location-picker {
+  width: 560px;
+  background: #111113;
+  border: 1px solid #2a2a2d;
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.picker-header {
+  padding: 16px 16px 0;
+}
+
+.picker-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #555;
+  margin-bottom: 12px;
+}
+
+.picker-input-wrap {
+  position: relative;
+}
+
+.picker-input {
+  width: 100%;
+  background: #0d0d0e;
+  border: 1px solid #2a2a2d;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: #e8e8e8;
+  outline: none;
+}
+
+.picker-input:focus {
+  border-color: #4a4a4d;
+}
+
+.picker-input::placeholder {
+  color: #555;
+}
+
+.picker-results {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.picker-section {
+  margin-bottom: 8px;
+}
+
+.picker-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #555;
+  padding: 8px 8px 4px;
+}
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.picker-item:hover,
+.picker-item.selected {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.picker-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #1a1a1d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.picker-item.selected .picker-icon {
+  background: #3b82f6;
+}
+
+.picker-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-name {
+  font-size: 13px;
+  color: #e8e8e8;
+}
+
+.picker-path {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker-empty {
+  color: #555;
+  font-size: 13px;
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.picker-footer {
+  border-top: 1px solid #2a2a2d;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.picker-footer .shortcut {
+  font-size: 11px;
+  color: #555;
+}
+
+.picker-footer kbd {
+  background: #1a1a1d;
+  border: 1px solid #2a2a2d;
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  margin-right: 4px;
+}
