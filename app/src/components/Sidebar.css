@@ -140,3 +140,95 @@
   background: #5a5a5a;
   color: white;
 }
+
+/* Sections */
+.sidebar-section {
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.sidebar-section:last-child {
+  border-bottom: none;
+}
+
+/* Connection indicator */
+.connection-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f44747;
+}
+
+.connection-indicator.connected {
+  background: #4ec9b0;
+}
+
+/* Todo count */
+.todo-count {
+  background: #3c3c3c;
+  color: #cccccc;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-left: auto;
+}
+
+/* Daemon sessions (not interactive) */
+.session-item.daemon-session {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.session-item.daemon-session:hover {
+  background: transparent;
+}
+
+/* PR list */
+.pr-list {
+  padding: 8px;
+}
+
+.pr-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  color: #cccccc;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.pr-item:hover {
+  background: #2a2d2e;
+}
+
+.pr-item.author {
+  border-left: 2px solid #4ec9b0;
+}
+
+.pr-item.reviewer {
+  border-left: 2px solid #dcdcaa;
+}
+
+.pr-repo {
+  color: #808080;
+}
+
+.pr-number {
+  color: #569cd6;
+}
+
+.pr-reason {
+  color: #808080;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.pr-count {
+  background: #dcdcaa;
+  color: #1e1e1e;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+}

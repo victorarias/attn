@@ -4,6 +4,8 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
 import { useSessionStore } from './store/sessions';
+import { useDaemonSocket } from './hooks/useDaemonSocket';
+import { useDaemonStore } from './store/daemonSessions';
 import './App.css';
 
 function App() {
@@ -16,6 +18,20 @@ function App() {
     connectTerminal,
     resizeSession,
   } = useSessionStore();
+
+  const {
+    daemonSessions,
+    setDaemonSessions,
+    prs,
+    setPRs,
+    isConnected,
+  } = useDaemonStore();
+
+  // Connect to daemon WebSocket
+  useDaemonSocket({
+    onSessionsUpdate: setDaemonSessions,
+    onPRsUpdate: setPRs,
+  });
 
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
@@ -84,11 +100,14 @@ function App() {
   return (
     <div className="app">
       <Sidebar
-        sessions={sessions}
+        localSessions={sessions}
         selectedId={activeSessionId}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         onCloseSession={handleCloseSession}
+        daemonSessions={daemonSessions}
+        prs={prs}
+        isConnected={isConnected}
       />
       <div className="terminal-pane">
         {sessions.map((session) => (
