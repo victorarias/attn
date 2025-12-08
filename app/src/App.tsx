@@ -1,5 +1,6 @@
-import { useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
+import { open } from '@tauri-apps/plugin-dialog';
 import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
 import { useSessionStore } from './store/sessions';
@@ -18,17 +19,23 @@ function App() {
 
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
-  // Create initial session on mount
-  useEffect(() => {
-    if (sessions.length === 0) {
-      createSession('claude-manager', '/');
-    }
-  }, []);
+  // No auto-creation - user clicks "+" to start a session
 
   const handleNewSession = useCallback(async () => {
-    const label = `session-${sessions.length + 1}`;
-    await createSession(label, '/');
-  }, [createSession, sessions.length]);
+    // Open folder picker
+    const folder = await open({
+      directory: true,
+      multiple: false,
+      title: 'Select working directory for new session',
+    });
+
+    if (!folder) return; // User cancelled
+
+    // Use folder name as label
+    const folderName = folder.split('/').pop() || 'session';
+    const label = folderName;
+    await createSession(label, folder);
+  }, [createSession]);
 
   const handleCloseSession = useCallback(
     (id: string) => {
@@ -41,9 +48,11 @@ function App() {
   const handleSelectSession = useCallback(
     (id: string) => {
       setActiveSession(id);
-      // Focus the terminal after a short delay
+      // Fit and focus the terminal after a short delay (allows CSS to apply)
       setTimeout(() => {
-        terminalRefs.current.get(id)?.focus();
+        const handle = terminalRefs.current.get(id);
+        handle?.fit();
+        handle?.focus();
       }, 50);
     },
     [setActiveSession]

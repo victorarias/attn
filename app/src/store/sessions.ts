@@ -81,8 +81,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const session = sessions.find((s) => s.id === id);
     if (!session) return;
 
-    // Spawn PTY
-    const pty = await spawn('claude', [], {
+    // Spawn PTY using cm wrapper (registers with daemon, sets up hooks)
+    // -y flag auto-accepts prompts
+    const pty = await spawn('cm', ['-y'], {
       cols: terminal.cols,
       rows: terminal.rows,
       cwd: session.cwd,

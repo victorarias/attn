@@ -22,6 +22,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const xtermRef = useRef<XTerm | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
 
+    // Store callbacks in refs to avoid re-running effect when they change
+    const onReadyRef = useRef(onReady);
+    const onResizeRef = useRef(onResize);
+
+    useEffect(() => {
+      onReadyRef.current = onReady;
+      onResizeRef.current = onResize;
+    });
+
     useImperativeHandle(ref, () => ({
       terminal: xtermRef.current,
       fit: () => {
@@ -67,8 +76,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // Initial fit after a small delay to ensure DOM is ready
       requestAnimationFrame(() => {
         fitAddon.fit();
-        if (onResize) {
-          onResize(term.cols, term.rows);
+        if (onResizeRef.current) {
+          onResizeRef.current(term.cols, term.rows);
         }
       });
 
@@ -77,8 +86,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       fitAddonRef.current = fitAddon;
 
       // Notify that terminal is ready
-      if (onReady) {
-        onReady(term);
+      if (onReadyRef.current) {
+        onReadyRef.current(term);
       }
 
       // Handle resize with debounce
@@ -87,8 +96,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         clearTimeout(resizeTimeout);
         resizeTimeout = window.setTimeout(() => {
           fitAddon.fit();
-          if (onResize) {
-            onResize(term.cols, term.rows);
+          if (onResizeRef.current) {
+            onResizeRef.current(term.cols, term.rows);
           }
         }, 100);
       };
@@ -100,7 +109,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         window.removeEventListener('resize', handleResize);
         term.dispose();
       };
-    }, [onReady, onResize]);
+    }, []);
 
     return <div ref={containerRef} className="terminal-container" />;
   }
