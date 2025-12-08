@@ -26,4 +26,5 @@ require (
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
+	nhooyr.io/websocket v1.8.17 // indirect
 )
