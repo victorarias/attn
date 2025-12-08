@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Location Picker Component</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg-dark: #0a0a0b;
+      --bg-surface: #111113;
+      --bg-elevated: #1a1a1d;
+      --bg-input: #0d0d0e;
+      --border: #2a2a2d;
+      --border-focus: #4a4a4d;
+      --text-primary: #e8e8e8;
+      --text-secondary: #888;
+      --text-muted: #555;
+      --accent-waiting: #ff6b35;
+      --accent-working: #22c55e;
+      --accent-select: #3b82f6;
+      --accent-select-dim: rgba(59, 130, 246, 0.15);
+    }
+
+    body {
+      font-family: 'IBM Plex Sans', sans-serif;
+      background: #000;
+      color: var(--text-primary);
+      padding: 40px;
+      line-height: 1.5;
+    }
+
+    h1 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 14px;
+      margin-bottom: 40px;
+    }
+
+    .state {
+      margin-bottom: 60px;
+    }
+
+    .state-header {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+
+    .state-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent-select);
+    }
+
+    .state-title {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .state-desc {
+      color: var(--text-secondary);
+      font-size: 13px;
+      margin-bottom: 16px;
+      max-width: 600px;
+    }
+
+    /* Modal backdrop */
+    .modal-backdrop {
+      background: var(--bg-dark);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 60px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      min-height: 500px;
+      position: relative;
+    }
+
+    .modal-backdrop::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      border-radius: 8px;
+    }
+
+    /* Location picker modal */
+    .picker {
+      position: relative;
+      width: 560px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+      overflow: hidden;
+    }
+
+    .picker-header {
+      padding: 16px 16px 0;
+    }
+
+    .picker-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .picker-input-wrap {
+      position: relative;
+    }
+
+    .picker-input {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      color: var(--text-primary);
+      outline: none;
+    }
+
+    .picker-input:focus {
+      border-color: var(--border-focus);
+    }
+
+    .picker-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .input-path {
+      color: var(--text-secondary);
+    }
+
+    .input-cursor {
+      color: var(--text-primary);
+    }
+
+    .input-ghost {
+      color: var(--text-muted);
+    }
+
+    .picker-hint {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .picker-hint kbd {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+    }
+
+    /* Results list */
+    .picker-results {
+      max-height: 320px;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .picker-section {
+      margin-bottom: 8px;
+    }
+
+    .picker-section-title {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 8px 8px 4px;
+    }
+
+    .picker-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .picker-item:hover {
+      background: var(--bg-elevated);
+    }
+
+    .picker-item.selected {
+      background: var(--accent-select-dim);
+    }
+
+    .picker-item .icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: var(--bg-elevated);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .picker-item.selected .icon {
+      background: var(--accent-select);
+      color: white;
+    }
+
+    .picker-item .info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .picker-item .name {
+      font-size: 13px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .picker-item .name .match {
+      color: var(--accent-select);
+      font-weight: 600;
+    }
+
+    .picker-item .path {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .picker-item .meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    /* Footer */
+    .picker-footer {
+      border-top: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .picker-footer kbd {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 2px 5px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      margin-right: 4px;
+    }
+
+    .picker-footer .spacer {
+      flex: 1;
+    }
+
+    /* Directory browser state */
+    .dir-breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dir-breadcrumb .sep {
+      color: var(--text-muted);
+    }
+
+    .dir-breadcrumb .segment {
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .dir-breadcrumb .segment:hover {
+      color: var(--text-primary);
+    }
+
+    .dir-breadcrumb .segment.current {
+      color: var(--text-primary);
+    }
+
+    .dir-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .dir-item:hover {
+      background: var(--bg-elevated);
+    }
+
+    .dir-item.selected {
+      background: var(--accent-select-dim);
+    }
+
+    .dir-item .icon {
+      font-size: 14px;
+      width: 20px;
+      text-align: center;
+    }
+
+    .dir-item .icon.folder {
+      color: var(--accent-select);
+    }
+
+    .dir-item .icon.git {
+      color: var(--accent-working);
+    }
+
+    .dir-item .name {
+      flex: 1;
+    }
+
+    .dir-item .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--bg-elevated);
+      color: var(--text-muted);
+    }
+
+    .dir-item .badge.git {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--accent-working);
+    }
+
+    /* Comparison section */
+    .features {
+      margin-top: 40px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .features h2 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .features ul {
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .features li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .features li::before {
+      content: '✓';
+      color: var(--accent-working);
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Location Picker // Component</h1>
+  <p class="subtitle">Custom directory picker with autocomplete, history, and tab completion</p>
+
+  <!-- State 1: Initial / History -->
+  <div class="state">
+    <div class="state-header">
+      <span class="state-label">State 1</span>
+      <span class="state-title">Initial - Recent & Favorites</span>
+    </div>
+    <p class="state-desc">
+      Opens with empty input showing recent locations and favorites.
+      Type to filter, or use arrow keys to navigate.
+    </p>
+    <div class="modal-backdrop">
+      <div class="picker">
+        <div class="picker-header">
+          <div class="picker-title">New Session Location</div>
+          <div class="picker-input-wrap">
+            <input type="text" class="picker-input" placeholder="Type path or search...">
+            <span class="picker-hint"><kbd>Tab</kbd> complete</span>
+          </div>
+        </div>
+        <div class="picker-results">
+          <div class="picker-section">
+            <div class="picker-section-title">Recent</div>
+            <div class="picker-item selected">
+              <div class="icon">📁</div>
+              <div class="info">
+                <div class="name">claude-manager</div>
+                <div class="path">~/projects/claude-manager</div>
+              </div>
+              <div class="meta">2 min ago</div>
+            </div>
+            <div class="picker-item">
+              <div class="icon">📁</div>
+              <div class="info">
+                <div class="name">api-service</div>
+                <div class="path">~/projects/api-service</div>
+              </div>
+              <div class="meta">1 hour ago</div>
+            </div>
+            <div class="picker-item">
+              <div class="icon">📁</div>
+              <div class="info">
+                <div class="name">drumstick-2.0</div>
+                <div class="path">~/projects/drumstick-2.0</div>
+              </div>
+              <div class="meta">3 hours ago</div>
+            </div>
+          </div>
+          <div class="picker-section">
+            <div class="picker-section-title">Favorites</div>
+            <div class="picker-item">
+              <div class="icon">⭐</div>
+              <div class="info">
+                <div class="name">dotfiles</div>
+                <div class="path">~/.config</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="picker-footer">
+          <span><kbd>↑↓</kbd> navigate</span>
+          <span><kbd>Enter</kbd> select</span>
+          <span><kbd>Tab</kbd> complete</span>
+          <span class="spacer"></span>
+          <span><kbd>Esc</kbd> cancel</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- State 2: Typing with autocomplete -->
+  <div class="state">
+    <div class="state-header">
+      <span class="state-label">State 2</span>
+      <span class="state-title">Typing - Fuzzy Search</span>
+    </div>
+    <p class="state-desc">
+      As you type, results filter with fuzzy matching. Matched characters highlighted.
+      History items scored higher than filesystem results.
+    </p>
+    <div class="modal-backdrop">
+      <div class="picker">
+        <div class="picker-header">
+          <div class="picker-title">New Session Location</div>
+          <div class="picker-input-wrap">
+            <div class="picker-input" style="display: flex; align-items: center;">
+              <span class="input-path">drum</span><span class="input-cursor">│</span>
+            </div>
+            <span class="picker-hint"><kbd>Tab</kbd> complete</span>
+          </div>
+        </div>
+        <div class="picker-results">
+          <div class="picker-section">
+            <div class="picker-section-title">Matches</div>
+            <div class="picker-item selected">
+              <div class="icon">📁</div>
+              <div class="info">
+                <div class="name"><span class="match">drum</span>stick-2.0</div>
+                <div class="path">~/projects/drumstick-2.0</div>
+              </div>
+              <div class="meta">history</div>
+            </div>
+            <div class="picker-item">
+              <div class="icon">📁</div>
+              <div class="info">
+                <div class="name"><span class="match">drum</span>stick</div>
+                <div class="path">~/projects/drumstick</div>
+              </div>
+            </div>
+            <div class="picker-item">
+              <div class="icon">📁</div>
+              <div class="info">
+                <div class="name"><span class="match">drum</span>kit-samples</div>
+                <div class="path">~/Music/drumkit-samples</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="picker-footer">
+          <span><kbd>↑↓</kbd> navigate</span>
+          <span><kbd>Enter</kbd> select</span>
+          <span><kbd>Tab</kbd> complete</span>
+          <span class="spacer"></span>
+          <span><kbd>Esc</kbd> cancel</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- State 3: Path with tab completion -->
+  <div class="state">
+    <div class="state-header">
+      <span class="state-label">State 3</span>
+      <span class="state-title">Path Mode - Tab Completion</span>
+    </div>
+    <p class="state-desc">
+      When input starts with ~ or /, switch to path mode. Tab completes to longest common prefix.
+      Shows directory contents as suggestions.
+    </p>
+    <div class="modal-backdrop">
+      <div class="picker">
+        <div class="picker-header">
+          <div class="picker-title">New Session Location</div>
+          <div class="picker-input-wrap">
+            <div class="picker-input" style="display: flex; align-items: center;">
+              <span class="input-path">~/pro</span><span class="input-cursor">│</span><span class="input-ghost">jects/</span>
+            </div>
+            <span class="picker-hint"><kbd>Tab</kbd> → ~/projects/</span>
+          </div>
+        </div>
+        <div class="picker-results">
+          <div class="picker-section">
+            <div class="picker-section-title">Tab completions</div>
+            <div class="picker-item selected">
+              <div class="icon">📁</div>
+              <div class="info">
+                <div class="name"><span class="match">pro</span>jects</div>
+                <div class="path">~/projects</div>
+              </div>
+              <div class="meta">14 items</div>
+            </div>
+            <div class="picker-item">
+              <div class="icon">📁</div>
+              <div class="info">
+                <div class="name"><span class="match">pro</span>files</div>
+                <div class="path">~/profiles</div>
+              </div>
+              <div class="meta">3 items</div>
+            </div>
+          </div>
+        </div>
+        <div class="picker-footer">
+          <span><kbd>↑↓</kbd> navigate</span>
+          <span><kbd>Enter</kbd> select</span>
+          <span><kbd>Tab</kbd> complete</span>
+          <span class="spacer"></span>
+          <span><kbd>Esc</kbd> cancel</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- State 4: Directory browser -->
+  <div class="state">
+    <div class="state-header">
+      <span class="state-label">State 4</span>
+      <span class="state-title">Directory Browser</span>
+    </div>
+    <p class="state-desc">
+      After tab-completing to a directory, show its contents. Git repos are highlighted.
+      Breadcrumb navigation at top. Enter on folder goes into it.
+    </p>
+    <div class="modal-backdrop">
+      <div class="picker">
+        <div class="picker-header">
+          <div class="picker-title">New Session Location</div>
+          <div class="picker-input-wrap">
+            <div class="picker-input" style="display: flex; align-items: center;">
+              <span class="input-path">~/projects/</span><span class="input-cursor">│</span>
+            </div>
+          </div>
+        </div>
+        <div class="dir-breadcrumb">
+          <span class="segment">~</span>
+          <span class="sep">/</span>
+          <span class="segment current">projects</span>
+        </div>
+        <div class="picker-results">
+          <div class="dir-item">
+            <span class="icon">←</span>
+            <span class="name" style="color: var(--text-muted)">..</span>
+          </div>
+          <div class="dir-item selected">
+            <span class="icon folder">📁</span>
+            <span class="name">claude-manager</span>
+            <span class="badge git">git</span>
+          </div>
+          <div class="dir-item">
+            <span class="icon folder">📁</span>
+            <span class="name">api-service</span>
+            <span class="badge git">git</span>
+          </div>
+          <div class="dir-item">
+            <span class="icon folder">📁</span>
+            <span class="name">drumstick-2.0</span>
+            <span class="badge git">git</span>
+          </div>
+          <div class="dir-item">
+            <span class="icon folder">📁</span>
+            <span class="name">experiments</span>
+          </div>
+          <div class="dir-item">
+            <span class="icon folder">📁</span>
+            <span class="name">archived</span>
+          </div>
+        </div>
+        <div class="picker-footer">
+          <span><kbd>↑↓</kbd> navigate</span>
+          <span><kbd>Enter</kbd> open / select</span>
+          <span><kbd>⌘Enter</kbd> select current</span>
+          <span class="spacer"></span>
+          <span><kbd>Esc</kbd> cancel</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Features summary -->
+  <div class="features">
+    <h2>Features</h2>
+    <ul>
+      <li>Recent locations persisted across sessions</li>
+      <li>Fuzzy search across history and filesystem</li>
+      <li>Tab completion like shell (longest common prefix)</li>
+      <li>Ghost text shows completion preview</li>
+      <li>Git repos visually highlighted</li>
+      <li>Breadcrumb navigation when browsing</li>
+      <li>Keyboard-first: never need mouse</li>
+      <li>⌘Enter to select current directory</li>
+    </ul>
+  </div>
+
+</body>
+</html>
