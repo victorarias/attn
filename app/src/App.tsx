@@ -10,6 +10,7 @@ import { DrawerTrigger } from './components/DrawerTrigger';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket } from './hooks/useDaemonSocket';
 import { useDaemonStore } from './store/daemonSessions';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import './App.css';
 
 function App() {
@@ -180,6 +181,57 @@ function App() {
   const waitingExternalSessions = externalDaemonSessions.filter((s) => s.state === 'waiting');
   const activePRs = prs.filter((p) => !p.muted);
   const attentionCount = waitingLocalSessions.length + waitingExternalSessions.length + activePRs.length;
+
+  // Keyboard shortcut handlers
+  const handleJumpToWaiting = useCallback(() => {
+    const waiting = enrichedLocalSessions.find((s) => s.state === 'waiting');
+    if (waiting) {
+      handleSelectSession(waiting.id);
+    }
+  }, [enrichedLocalSessions, handleSelectSession]);
+
+  const handleSelectSessionByIndex = useCallback(
+    (index: number) => {
+      const session = sessions[index];
+      if (session) {
+        handleSelectSession(session.id);
+      }
+    },
+    [sessions, handleSelectSession]
+  );
+
+  const handlePrevSession = useCallback(() => {
+    if (!activeSessionId || sessions.length === 0) return;
+    const currentIndex = sessions.findIndex((s) => s.id === activeSessionId);
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : sessions.length - 1;
+    handleSelectSession(sessions[prevIndex].id);
+  }, [activeSessionId, sessions, handleSelectSession]);
+
+  const handleNextSession = useCallback(() => {
+    if (!activeSessionId || sessions.length === 0) return;
+    const currentIndex = sessions.findIndex((s) => s.id === activeSessionId);
+    const nextIndex = currentIndex < sessions.length - 1 ? currentIndex + 1 : 0;
+    handleSelectSession(sessions[nextIndex].id);
+  }, [activeSessionId, sessions, handleSelectSession]);
+
+  const handleCloseCurrentSession = useCallback(() => {
+    if (activeSessionId) {
+      handleCloseSession(activeSessionId);
+    }
+  }, [activeSessionId, handleCloseSession]);
+
+  // Use keyboard shortcuts hook
+  useKeyboardShortcuts({
+    onNewSession: handleNewSession,
+    onCloseSession: handleCloseCurrentSession,
+    onToggleDrawer: toggleDrawer,
+    onGoToDashboard: goToDashboard,
+    onJumpToWaiting: handleJumpToWaiting,
+    onSelectSession: handleSelectSessionByIndex,
+    onPrevSession: handlePrevSession,
+    onNextSession: handleNextSession,
+    enabled: true,
+  });
 
   return (
     <div className="app">
