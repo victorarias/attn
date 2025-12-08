@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attn - Layout Options</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg-dark: #0a0a0b;
+      --bg-surface: #111113;
+      --bg-elevated: #1a1a1d;
+      --border: #2a2a2d;
+      --text-primary: #e8e8e8;
+      --text-secondary: #888;
+      --text-muted: #555;
+      --accent-waiting: #ff6b35;
+      --accent-working: #22c55e;
+      --accent-pr: #a78bfa;
+      --accent-muted: #3a3a3d;
+    }
+
+    body {
+      font-family: 'IBM Plex Sans', sans-serif;
+      background: #000;
+      color: var(--text-primary);
+      padding: 40px;
+      line-height: 1.5;
+    }
+
+    h1 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 40px;
+    }
+
+    .option {
+      margin-bottom: 80px;
+    }
+
+    .option-header {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .option-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent-waiting);
+    }
+
+    .option-title {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .option-desc {
+      color: var(--text-secondary);
+      font-size: 14px;
+      margin-bottom: 24px;
+      max-width: 600px;
+    }
+
+    .sketch {
+      background: var(--bg-dark);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      height: 500px;
+    }
+
+    /* ============ OPTION A: Dashboard First ============ */
+    .sketch-a {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+    }
+
+    .sketch-a .nav {
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      padding: 16px;
+    }
+
+    .sketch-a .nav-item {
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .sketch-a .nav-item.active {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    .sketch-a .nav-item .badge {
+      margin-left: auto;
+      background: var(--accent-waiting);
+      color: black;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 10px;
+    }
+
+    .sketch-a .main {
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    .sketch-a .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+    }
+
+    .sketch-a .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .sketch-a .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .sketch-a .card-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .sketch-a .session-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      background: var(--bg-elevated);
+    }
+
+    .sketch-a .session-row .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .sketch-a .session-row .dot.waiting { background: var(--accent-waiting); }
+    .sketch-a .session-row .dot.working { background: var(--accent-working); }
+
+    .sketch-a .pr-group {
+      margin-bottom: 12px;
+    }
+
+    .sketch-a .pr-group-header {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .sketch-a .pr-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .sketch-a .pr-row .num {
+      color: var(--accent-pr);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+
+    /* ============ OPTION B: Split Panels ============ */
+    .sketch-b {
+      display: grid;
+      grid-template-columns: 180px 1fr 280px;
+    }
+
+    .sketch-b .sessions-panel {
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      padding: 12px;
+    }
+
+    .sketch-b .panel-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 8px 8px 12px;
+    }
+
+    .sketch-b .session-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .sketch-b .session-item.selected {
+      background: var(--bg-elevated);
+    }
+
+    .sketch-b .session-item .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .sketch-b .session-item .dot.waiting { background: var(--accent-waiting); }
+    .sketch-b .session-item .dot.working { background: var(--accent-working); }
+
+    .sketch-b .terminal {
+      background: var(--bg-dark);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      padding: 16px;
+      color: var(--text-secondary);
+    }
+
+    .sketch-b .terminal .prompt {
+      color: var(--accent-working);
+    }
+
+    .sketch-b .attention-panel {
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+    }
+
+    .sketch-b .attention-section {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .sketch-b .attention-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      cursor: pointer;
+    }
+
+    .sketch-b .attention-header:hover {
+      background: var(--bg-elevated);
+    }
+
+    .sketch-b .attention-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .sketch-b .attention-count {
+      background: var(--accent-waiting);
+      color: black;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 8px;
+    }
+
+    .sketch-b .attention-count.muted {
+      background: var(--accent-muted);
+      color: var(--text-muted);
+    }
+
+    .sketch-b .repo-group {
+      padding: 0 14px 12px;
+    }
+
+    .sketch-b .repo-name {
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 8px 0 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .sketch-b .repo-name .chevron {
+      font-size: 10px;
+    }
+
+    .sketch-b .pr-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 8px;
+      font-size: 12px;
+      border-radius: 4px;
+    }
+
+    .sketch-b .pr-item:hover {
+      background: var(--bg-elevated);
+    }
+
+    .sketch-b .pr-item .number {
+      color: var(--accent-pr);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+
+    .sketch-b .pr-item .title {
+      color: var(--text-secondary);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .sketch-b .pr-item .reason {
+      font-size: 10px;
+      color: var(--text-muted);
+      background: var(--bg-dark);
+      padding: 2px 6px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    /* ============ OPTION C: Focused Mode ============ */
+    .sketch-c {
+      display: grid;
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
+    }
+
+    .sketch-c .topbar {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      height: 48px;
+      gap: 8px;
+    }
+
+    .sketch-c .tab {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .sketch-c .tab.active {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    .sketch-c .tab .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .sketch-c .tab .dot.waiting { background: var(--accent-waiting); }
+    .sketch-c .tab .dot.working { background: var(--accent-working); }
+
+    .sketch-c .tab .close {
+      margin-left: 4px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .sketch-c .attention-indicator {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .sketch-c .attn-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: var(--bg-elevated);
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .sketch-c .attn-badge.has-items {
+      background: rgba(255, 107, 53, 0.15);
+      border: 1px solid rgba(255, 107, 53, 0.3);
+    }
+
+    .sketch-c .attn-badge .count {
+      font-weight: 600;
+      color: var(--accent-waiting);
+    }
+
+    .sketch-c .attn-badge .label {
+      color: var(--text-secondary);
+    }
+
+    .sketch-c .terminal-area {
+      background: var(--bg-dark);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      padding: 16px;
+      color: var(--text-secondary);
+      position: relative;
+    }
+
+    .sketch-c .terminal-area .prompt {
+      color: var(--accent-working);
+    }
+
+    .sketch-c .floating-panel {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 320px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    .sketch-c .floating-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .sketch-c .floating-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .sketch-c .floating-close {
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 18px;
+    }
+
+    .sketch-c .floating-body {
+      padding: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .sketch-c .attn-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      cursor: pointer;
+    }
+
+    .sketch-c .attn-item:hover {
+      background: var(--bg-elevated);
+    }
+
+    .sketch-c .attn-item .icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .sketch-c .attn-item .icon.session {
+      background: rgba(255, 107, 53, 0.2);
+      color: var(--accent-waiting);
+    }
+
+    .sketch-c .attn-item .icon.pr {
+      background: rgba(167, 139, 250, 0.2);
+      color: var(--accent-pr);
+    }
+
+    .sketch-c .attn-item .info {
+      flex: 1;
+    }
+
+    .sketch-c .attn-item .name {
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+
+    .sketch-c .attn-item .meta {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Comparison table */
+    .comparison {
+      margin-top: 60px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .comparison table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .comparison th, .comparison td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .comparison th {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      background: var(--bg-elevated);
+    }
+
+    .comparison td {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .comparison tr:last-child td {
+      border-bottom: none;
+    }
+
+    .comparison .check {
+      color: var(--accent-working);
+    }
+
+    .comparison .x {
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <h1>attn // layout options</h1>
+
+  <!-- Option A: Dashboard First -->
+  <div class="option">
+    <div class="option-header">
+      <span class="option-label">Option A</span>
+      <span class="option-title">Dashboard First</span>
+    </div>
+    <p class="option-desc">
+      Home screen is a dashboard showing all attention items. Sessions are just one card among many.
+      Click a session to enter terminal mode. Good for: seeing the big picture at a glance.
+    </p>
+    <div class="sketch sketch-a">
+      <div class="nav">
+        <div class="nav-item active">
+          <span>⌂</span> Dashboard
+          <span class="badge">4</span>
+        </div>
+        <div class="nav-item">
+          <span>▸</span> claude-manager
+        </div>
+        <div class="nav-item">
+          <span>▸</span> api-service
+        </div>
+        <div class="nav-item">
+          <span>▸</span> + New Session
+        </div>
+      </div>
+      <div class="main">
+        <div class="dashboard-grid">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Sessions Waiting</span>
+            </div>
+            <div class="session-row">
+              <span class="dot waiting"></span>
+              <span>claude-manager</span>
+            </div>
+            <div class="session-row">
+              <span class="dot working"></span>
+              <span>api-service</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">PRs - Review Requested</span>
+            </div>
+            <div class="pr-group">
+              <div class="pr-group-header">▾ acme/frontend</div>
+              <div class="pr-row">
+                <span class="num">#234</span>
+                <span>Add dark mode toggle</span>
+              </div>
+              <div class="pr-row">
+                <span class="num">#231</span>
+                <span>Fix auth redirect</span>
+              </div>
+            </div>
+            <div class="pr-group">
+              <div class="pr-group-header">▾ acme/backend</div>
+              <div class="pr-row">
+                <span class="num">#89</span>
+                <span>Add rate limiting</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Option B: Split Panels -->
+  <div class="option">
+    <div class="option-header">
+      <span class="option-label">Option B</span>
+      <span class="option-title">Split Panels</span>
+    </div>
+    <p class="option-desc">
+      Three-column layout: Sessions | Terminal | Attention. The right panel is always visible
+      showing PRs grouped by repo with collapse/mute. Good for: keeping attention items visible while working.
+    </p>
+    <div class="sketch sketch-b">
+      <div class="sessions-panel">
+        <div class="panel-title">Sessions</div>
+        <div class="session-item selected">
+          <span class="dot waiting"></span>
+          <span>claude-manager</span>
+        </div>
+        <div class="session-item">
+          <span class="dot working"></span>
+          <span>api-service</span>
+        </div>
+        <div class="session-item" style="color: var(--text-muted);">
+          + New Session
+        </div>
+      </div>
+      <div class="terminal">
+        <div><span class="prompt">❯</span> Waiting for input...</div>
+        <div style="margin-top: 12px; color: var(--text-muted);">
+          Session: claude-manager<br>
+          Status: waiting
+        </div>
+      </div>
+      <div class="attention-panel">
+        <div class="attention-section">
+          <div class="attention-header">
+            <span class="attention-title">Review Requested</span>
+            <span class="attention-count">3</span>
+          </div>
+          <div class="repo-group">
+            <div class="repo-name"><span class="chevron">▾</span> acme/frontend</div>
+            <div class="pr-item">
+              <span class="number">#234</span>
+              <span class="title">Add dark mode toggle</span>
+            </div>
+            <div class="pr-item">
+              <span class="number">#231</span>
+              <span class="title">Fix auth redirect loop</span>
+            </div>
+          </div>
+          <div class="repo-group">
+            <div class="repo-name"><span class="chevron">▸</span> acme/backend <span style="color: var(--text-muted); font-size: 10px;">(1)</span></div>
+          </div>
+        </div>
+        <div class="attention-section">
+          <div class="attention-header">
+            <span class="attention-title">Your PRs - Feedback</span>
+            <span class="attention-count">1</span>
+          </div>
+          <div class="repo-group">
+            <div class="pr-item">
+              <span class="number">#412</span>
+              <span class="title">WebSocket integration</span>
+              <span class="reason">changes requested</span>
+            </div>
+          </div>
+        </div>
+        <div class="attention-section">
+          <div class="attention-header">
+            <span class="attention-title" style="text-decoration: line-through;">Muted Repos</span>
+            <span class="attention-count muted">47</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Option C: Focused Mode -->
+  <div class="option">
+    <div class="option-header">
+      <span class="option-label">Option C</span>
+      <span class="option-title">Focused Mode</span>
+    </div>
+    <p class="option-desc">
+      Terminal-first with sessions as tabs. Attention items are hidden in a floating panel
+      triggered by a badge. Maximizes terminal space. Good for: deep work with minimal distractions.
+    </p>
+    <div class="sketch sketch-c">
+      <div class="topbar">
+        <div class="tab active">
+          <span class="dot waiting"></span>
+          <span>claude-manager</span>
+          <span class="close">×</span>
+        </div>
+        <div class="tab">
+          <span class="dot working"></span>
+          <span>api-service</span>
+          <span class="close">×</span>
+        </div>
+        <div class="tab" style="color: var(--text-muted);">+</div>
+        <div class="attention-indicator">
+          <div class="attn-badge has-items">
+            <span class="count">4</span>
+            <span class="label">need attention</span>
+          </div>
+        </div>
+      </div>
+      <div class="terminal-area">
+        <div><span class="prompt">❯</span> Waiting for input...</div>
+        <div style="margin-top: 12px; color: var(--text-muted);">
+          Session: claude-manager<br>
+          Status: waiting
+        </div>
+
+        <div class="floating-panel">
+          <div class="floating-header">
+            <span class="floating-title">Needs Attention</span>
+            <span class="floating-close">×</span>
+          </div>
+          <div class="floating-body">
+            <div class="attn-item">
+              <div class="icon session">▸</div>
+              <div class="info">
+                <div class="name">claude-manager</div>
+                <div class="meta">Session waiting for input</div>
+              </div>
+            </div>
+            <div class="attn-item">
+              <div class="icon pr">PR</div>
+              <div class="info">
+                <div class="name">acme/frontend #234</div>
+                <div class="meta">Review requested</div>
+              </div>
+            </div>
+            <div class="attn-item">
+              <div class="icon pr">PR</div>
+              <div class="info">
+                <div class="name">acme/frontend #231</div>
+                <div class="meta">Review requested</div>
+              </div>
+            </div>
+            <div class="attn-item">
+              <div class="icon pr">PR</div>
+              <div class="info">
+                <div class="name">acme/backend #89</div>
+                <div class="meta">Review requested</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Comparison -->
+  <div class="comparison">
+    <table>
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th>A: Dashboard</th>
+          <th>B: Split</th>
+          <th>C: Focused</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Terminal space</td>
+          <td class="x">Hidden until selected</td>
+          <td>Medium (center panel)</td>
+          <td class="check">Maximized</td>
+        </tr>
+        <tr>
+          <td>Attention visibility</td>
+          <td class="check">Always visible (home)</td>
+          <td class="check">Always visible (panel)</td>
+          <td>On-demand (badge)</td>
+        </tr>
+        <tr>
+          <td>PR grouping/collapse</td>
+          <td class="check">Yes</td>
+          <td class="check">Yes</td>
+          <td class="x">Flat list</td>
+        </tr>
+        <tr>
+          <td>Repo muting</td>
+          <td class="check">Yes</td>
+          <td class="check">Yes (collapsed section)</td>
+          <td>Would need settings</td>
+        </tr>
+        <tr>
+          <td>Context switching</td>
+          <td class="x">Must leave terminal</td>
+          <td class="check">Minimal</td>
+          <td class="check">Minimal</td>
+        </tr>
+        <tr>
+          <td>Scalability (50+ PRs)</td>
+          <td class="check">Cards scroll</td>
+          <td class="check">Panel scrolls, repos collapse</td>
+          <td class="x">Panel gets long</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</body>
+</html>
