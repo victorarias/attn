@@ -1,12 +1,13 @@
 import { create } from 'zustand';
-import { spawn, IPty } from 'tauri-pty';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Terminal } from '@xterm/xterm';
+import { diagLog } from '../utils/diagLog';
 
 export interface Session {
   id: string;
   label: string;
   state: 'working' | 'waiting';
-  pty: IPty | null;
   terminal: Terminal | null;
   cwd: string;
 }
@@ -14,8 +15,10 @@ export interface Session {
 interface SessionStore {
   sessions: Session[];
   activeSessionId: string | null;
+  connected: boolean;
 
   // Actions
+  connect: () => Promise<void>;
   createSession: (label: string, cwd: string) => Promise<string>;
   closeSession: (id: string) => void;
   setActiveSession: (id: string | null) => void;
@@ -24,10 +27,51 @@ interface SessionStore {
 }
 
 let sessionCounter = 0;
+const pendingConnections = new Set<string>();
+let eventUnlisten: (() => void) | null = null;
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
+  connected: false,
+
+  connect: async () => {
+    if (get().connected) return;
+
+    try {
+      await invoke('pty_connect');
+
+      // Listen for PTY events
+      eventUnlisten = await listen<any>('pty-event', (event) => {
+        const msg = event.payload;
+        const { sessions } = get();
+        const session = sessions.find((s) => s.id === msg.id);
+
+        if (!session?.terminal) return;
+
+        switch (msg.event) {
+          case 'data': {
+            // Decode base64 data
+            const data = atob(msg.data);
+            session.terminal.write(data);
+            break;
+          }
+          case 'exit': {
+            session.terminal.write(`\r\n[Process exited with code ${msg.code}]\r\n`);
+            break;
+          }
+          case 'error': {
+            session.terminal.write(`\r\n[Error: ${msg.error}]\r\n`);
+            break;
+          }
+        }
+      });
+
+      set({ connected: true });
+    } catch (e) {
+      console.error('[Session] Connect failed:', e);
+    }
+  },
 
   createSession: async (label: string, cwd: string) => {
     const id = `session-${++sessionCounter}`;
@@ -35,7 +79,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       id,
       label,
       state: 'working',
-      pty: null,
       terminal: null,
       cwd,
     };
@@ -52,11 +95,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const { sessions, activeSessionId } = get();
     const session = sessions.find((s) => s.id === id);
 
-    if (session?.pty) {
-      session.pty.kill();
-    }
-    if (session?.terminal) {
-      session.terminal.dispose();
+    if (session) {
+      invoke('pty_kill', { id }).catch(console.error);
+      session.terminal?.dispose();
     }
 
     const newSessions = sessions.filter((s) => s.id !== id);
@@ -77,46 +118,58 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   connectTerminal: async (id: string, terminal: Terminal) => {
-    const { sessions } = get();
+    const { sessions, connected } = get();
     const session = sessions.find((s) => s.id === id);
     if (!session) return;
 
-    // Spawn PTY using cm wrapper (registers with daemon, sets up hooks)
-    // -y flag auto-accepts prompts
-    const pty = await spawn('cm', ['-y'], {
-      cols: terminal.cols,
-      rows: terminal.rows,
+    // Prevent double-connection
+    if (pendingConnections.has(id)) return;
+    pendingConnections.add(id);
+
+    // Ensure connected to pty-server
+    if (!connected) {
+      await get().connect();
+    }
+
+    const cols = terminal.cols > 0 ? terminal.cols : 80;
+    const rows = terminal.rows > 0 ? terminal.rows : 24;
+
+    diagLog('connectTerminal-spawn', {
+      cols,
+      rows,
       cwd: session.cwd,
     });
 
-    // PTY output -> terminal
-    pty.onData((data: string) => {
-      terminal.write(data);
-    });
+    try {
+      await invoke('pty_spawn', {
+        id,
+        cwd: session.cwd,
+        cols,
+        rows,
+      });
 
-    // Terminal input -> PTY
-    terminal.onData((data: string) => {
-      pty.write(data);
-    });
+      // Terminal input -> PTY
+      terminal.onData((data: string) => {
+        invoke('pty_write', { id, data }).catch(console.error);
+      });
 
-    // Handle PTY exit
-    pty.onExit(() => {
-      terminal.write('\r\n[Process exited]\r\n');
-      // Optionally auto-close session
-      // get().closeSession(id);
-    });
+      // Update session with terminal ref
+      set((state) => ({
+        sessions: state.sessions.map((s) =>
+          s.id === id ? { ...s, terminal } : s
+        ),
+      }));
 
-    // Update session with PTY and terminal refs
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === id ? { ...s, pty, terminal } : s
-      ),
-    }));
+      pendingConnections.delete(id);
+    } catch (e) {
+      console.error('[Session] Spawn failed:', e);
+      terminal.write(`\r\n[Failed to spawn PTY: ${e}]\r\n`);
+      pendingConnections.delete(id);
+    }
   },
 
   resizeSession: (id: string, cols: number, rows: number) => {
-    const { sessions } = get();
-    const session = sessions.find((s) => s.id === id);
-    session?.pty?.resize(cols, rows);
+    diagLog('resizeSession', { id, cols, rows });
+    invoke('pty_resize', { id, cols, rows }).catch(console.error);
   },
 }));
