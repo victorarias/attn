@@ -49,7 +49,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     useEffect(() => {
       if (!containerRef.current) return;
 
-      // Create terminal with better settings
+      // Create terminal
       const term = new XTerm({
         cursorBlink: true,
         fontSize: 14,
@@ -73,31 +73,69 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // Open terminal in container
       term.open(containerRef.current);
 
-      // Initial fit after a small delay to ensure DOM is ready
-      requestAnimationFrame(() => {
-        fitAddon.fit();
-        if (onResizeRef.current) {
-          onResizeRef.current(term.cols, term.rows);
-        }
-      });
-
-      // Store refs
+      // Store refs immediately so imperative handle works
       xtermRef.current = term;
       fitAddonRef.current = fitAddon;
 
-      // Notify that terminal is ready
-      if (onReadyRef.current) {
-        onReadyRef.current(term);
-      }
+      // Use ResizeObserver to wait for container to have real dimensions
+      // This ensures we don't spawn PTY until terminal can calculate correct size
+      let readyFired = false;
+      const observer = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (readyFired) return;
+
+        // Wait until container has actual dimensions
+        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+          // Fit to get correct dimensions
+          fitAddon.fit();
+
+          // Only proceed if we got valid (non-default) dimensions
+          // or if we've waited long enough (fallback after multiple frames)
+          if (term.cols > 0 && term.rows > 0) {
+            readyFired = true;
+            observer.disconnect();
+
+            if (onResizeRef.current) {
+              onResizeRef.current(term.cols, term.rows);
+            }
+
+            // NOW notify that terminal is ready with correct dimensions
+            if (onReadyRef.current) {
+              onReadyRef.current(term);
+            }
+          }
+        }
+      });
+      observer.observe(containerRef.current);
 
       // Handle resize with debounce
+      // Key insight: We need to resize PTY BEFORE xterm.js display to avoid race condition
+      // 1. Calculate new dimensions with proposeDimensions()
+      // 2. Resize PTY first (sends SIGWINCH to Claude Code)
+      // 3. Wait for Claude Code to process the resize
+      // 4. Then resize xterm.js display with fit()
       let resizeTimeout: number;
       const handleResize = () => {
         clearTimeout(resizeTimeout);
         resizeTimeout = window.setTimeout(() => {
-          fitAddon.fit();
-          if (onResizeRef.current) {
-            onResizeRef.current(term.cols, term.rows);
+          // Calculate what dimensions would be without applying them yet
+          const proposedDims = fitAddon.proposeDimensions();
+          if (proposedDims && proposedDims.cols > 0 && proposedDims.rows > 0) {
+            // Tell PTY about new size first (sends SIGWINCH to Claude Code)
+            if (onResizeRef.current) {
+              onResizeRef.current(proposedDims.cols, proposedDims.rows);
+            }
+            // Wait for Claude Code to process SIGWINCH and re-render
+            // Then update xterm.js display to match
+            setTimeout(() => {
+              fitAddon.fit();
+            }, 50);
+          } else {
+            // Fallback: just fit if proposeDimensions fails
+            fitAddon.fit();
+            if (onResizeRef.current) {
+              onResizeRef.current(term.cols, term.rows);
+            }
           }
         }, 100);
       };
@@ -105,6 +143,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
       // Cleanup
       return () => {
+        observer.disconnect();
         clearTimeout(resizeTimeout);
         window.removeEventListener('resize', handleResize);
         term.dispose();
