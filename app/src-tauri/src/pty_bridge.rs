@@ -1,18 +1,18 @@
-use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, Manager, State};
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, State};
 
 #[derive(Default)]
 pub struct PtyState {
     stream: Mutex<Option<UnixStream>>,
-    buffer: Mutex<Vec<u8>>,
 }
 
-fn socket_path() -> PathBuf {
-    dirs::home_dir().unwrap().join(".cm-pty.sock")
+fn socket_path() -> Result<PathBuf, String> {
+    dirs::home_dir()
+        .ok_or_else(|| "Could not determine home directory".to_string())
+        .map(|home| home.join(".cm-pty.sock"))
 }
 
 fn write_frame(stream: &mut UnixStream, data: &serde_json::Value) -> std::io::Result<()> {
@@ -36,38 +36,12 @@ fn read_frame(stream: &mut UnixStream) -> std::io::Result<serde_json::Value> {
 }
 
 #[tauri::command]
-pub async fn pty_connect(state: State<'_, PtyState>) -> Result<(), String> {
-    let path = socket_path();
+pub async fn pty_connect(state: State<'_, PtyState>, app: AppHandle) -> Result<(), String> {
+    let path = socket_path()?;
     let stream = UnixStream::connect(&path).map_err(|e| format!("Connect failed: {}", e))?;
     stream.set_nonblocking(false).map_err(|e| format!("Set blocking failed: {}", e))?;
 
-    *state.stream.lock().unwrap() = Some(stream);
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn pty_spawn(
-    state: State<'_, PtyState>,
-    app: AppHandle,
-    id: String,
-    cwd: String,
-    cols: u32,
-    rows: u32,
-) -> Result<(), String> {
-    let mut guard = state.stream.lock().unwrap();
-    let stream = guard.as_mut().ok_or("Not connected")?;
-
-    let msg = serde_json::json!({
-        "cmd": "spawn",
-        "id": id,
-        "cwd": cwd,
-        "cols": cols,
-        "rows": rows,
-    });
-
-    write_frame(stream, &msg).map_err(|e| e.to_string())?;
-
-    // Start reader thread for this connection
+    // Start reader thread - ONE thread for ALL PTY sessions
     let stream_clone = stream.try_clone().map_err(|e| e.to_string())?;
     let app_clone = app.clone();
 
@@ -83,12 +57,37 @@ pub async fn pty_spawn(
         }
     });
 
+    *state.stream.lock().map_err(|_| "Mutex poisoned".to_string())? = Some(stream);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn pty_spawn(
+    state: State<'_, PtyState>,
+    id: String,
+    cwd: String,
+    cols: u32,
+    rows: u32,
+) -> Result<(), String> {
+    let mut guard = state.stream.lock().map_err(|_| "Mutex poisoned".to_string())?;
+    let stream = guard.as_mut().ok_or("Not connected")?;
+
+    let msg = serde_json::json!({
+        "cmd": "spawn",
+        "id": id,
+        "cwd": cwd,
+        "cols": cols,
+        "rows": rows,
+    });
+
+    write_frame(stream, &msg).map_err(|e| e.to_string())?;
+
     Ok(())
 }
 
 #[tauri::command]
 pub async fn pty_write(state: State<'_, PtyState>, id: String, data: String) -> Result<(), String> {
-    let mut guard = state.stream.lock().unwrap();
+    let mut guard = state.stream.lock().map_err(|_| "Mutex poisoned".to_string())?;
     let stream = guard.as_mut().ok_or("Not connected")?;
 
     let msg = serde_json::json!({
@@ -102,7 +101,7 @@ pub async fn pty_write(state: State<'_, PtyState>, id: String, data: String) -> 
 
 #[tauri::command]
 pub async fn pty_resize(state: State<'_, PtyState>, id: String, cols: u32, rows: u32) -> Result<(), String> {
-    let mut guard = state.stream.lock().unwrap();
+    let mut guard = state.stream.lock().map_err(|_| "Mutex poisoned".to_string())?;
     let stream = guard.as_mut().ok_or("Not connected")?;
 
     let msg = serde_json::json!({
@@ -117,7 +116,7 @@ pub async fn pty_resize(state: State<'_, PtyState>, id: String, cols: u32, rows:
 
 #[tauri::command]
 pub async fn pty_kill(state: State<'_, PtyState>, id: String) -> Result<(), String> {
-    let mut guard = state.stream.lock().unwrap();
+    let mut guard = state.stream.lock().map_err(|_| "Mutex poisoned".to_string())?;
     let stream = guard.as_mut().ok_or("Not connected")?;
 
     let msg = serde_json::json!({
