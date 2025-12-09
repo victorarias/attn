@@ -45,6 +45,16 @@ Claude Manager (`cm`) tracks multiple Claude Code sessions and surfaces which on
 
 All IPC uses JSON over unix socket at `~/.{binary}.sock` (paths derived from binary name via `internal/config`). Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates.
 
+## Terminal Component (xterm.js + PTY)
+
+When modifying `app/src/components/Terminal.tsx`:
+
+1. **Never spawn PTY until terminal has correct dimensions** - Use ResizeObserver to wait for container to have real size before calling `onReady`
+2. **On resize: PTY first, then xterm.js** - Use `proposeDimensions()` to get new size, resize PTY (sends SIGWINCH), wait ~50ms, then call `fit()`
+3. **xterm.js defaults to 80x24** - Don't trust `term.cols/rows` until after `fit()` has been called
+
+See `docs/plans/2025-12-08-xterm-tui-rendering-bug.md` for full investigation.
+
 ## When Something Is Broken
 
 1. **Diagnose WHY** before proposing fixes - understand the root cause
