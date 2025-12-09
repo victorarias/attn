@@ -2,11 +2,13 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import * as pty from 'node-pty';
+import * as fs from 'fs';
 
 const SOCKET_PATH = path.join(os.homedir(), '.cm-pty.sock');
 
 interface Session {
   pty: pty.IPty;
+  socketId: symbol;
 }
 
 const sessions = new Map<string, Session>();
@@ -20,9 +22,27 @@ function writeFrame(socket: net.Socket, data: object): void {
   socket.write(buf);
 }
 
-function handleMessage(socket: net.Socket, msg: any): void {
+function handleMessage(socket: net.Socket, socketId: symbol, msg: any): void {
   switch (msg.cmd) {
     case 'spawn': {
+      // Validate required fields
+      if (!msg.id || typeof msg.id !== 'string') {
+        console.error('[pty-server] spawn: missing or invalid id');
+        return;
+      }
+      if (msg.cols !== undefined && (typeof msg.cols !== 'number' || msg.cols <= 0)) {
+        console.error('[pty-server] spawn: invalid cols');
+        return;
+      }
+      if (msg.rows !== undefined && (typeof msg.rows !== 'number' || msg.rows <= 0)) {
+        console.error('[pty-server] spawn: invalid rows');
+        return;
+      }
+      if (msg.cwd !== undefined && typeof msg.cwd !== 'string') {
+        console.error('[pty-server] spawn: invalid cwd');
+        return;
+      }
+
       const shell = process.env.SHELL || '/bin/bash';
       const ptyProcess = pty.spawn(shell, [], {
         name: 'xterm-256color',
@@ -32,7 +52,7 @@ function handleMessage(socket: net.Socket, msg: any): void {
         env: process.env as { [key: string]: string },
       });
 
-      sessions.set(msg.id, { pty: ptyProcess });
+      sessions.set(msg.id, { pty: ptyProcess, socketId });
 
       ptyProcess.onData((data) => {
         writeFrame(socket, {
@@ -52,6 +72,16 @@ function handleMessage(socket: net.Socket, msg: any): void {
     }
 
     case 'write': {
+      // Validate required fields
+      if (!msg.id || typeof msg.id !== 'string') {
+        console.error('[pty-server] write: missing or invalid id');
+        return;
+      }
+      if (!msg.data || typeof msg.data !== 'string') {
+        console.error('[pty-server] write: missing or invalid data');
+        return;
+      }
+
       const session = sessions.get(msg.id);
       if (session) {
         session.pty.write(msg.data);
@@ -60,6 +90,20 @@ function handleMessage(socket: net.Socket, msg: any): void {
     }
 
     case 'resize': {
+      // Validate required fields
+      if (!msg.id || typeof msg.id !== 'string') {
+        console.error('[pty-server] resize: missing or invalid id');
+        return;
+      }
+      if (typeof msg.cols !== 'number' || msg.cols <= 0) {
+        console.error('[pty-server] resize: missing or invalid cols');
+        return;
+      }
+      if (typeof msg.rows !== 'number' || msg.rows <= 0) {
+        console.error('[pty-server] resize: missing or invalid rows');
+        return;
+      }
+
       const session = sessions.get(msg.id);
       if (session) {
         session.pty.resize(msg.cols, msg.rows);
@@ -68,6 +112,12 @@ function handleMessage(socket: net.Socket, msg: any): void {
     }
 
     case 'kill': {
+      // Validate required fields
+      if (!msg.id || typeof msg.id !== 'string') {
+        console.error('[pty-server] kill: missing or invalid id');
+        return;
+      }
+
       const session = sessions.get(msg.id);
       if (session) {
         session.pty.kill();
@@ -79,11 +129,11 @@ function handleMessage(socket: net.Socket, msg: any): void {
 }
 
 // Remove stale socket
-import * as fs from 'fs';
 try { fs.unlinkSync(SOCKET_PATH); } catch {}
 
 const server = net.createServer((socket) => {
   console.log('[pty-server] Client connected');
+  const socketId = Symbol('socket');
   let buffer = Buffer.alloc(0);
 
   socket.on('data', (chunk) => {
@@ -98,7 +148,7 @@ const server = net.createServer((socket) => {
 
       try {
         const msg = JSON.parse(json);
-        handleMessage(socket, msg);
+        handleMessage(socket, socketId, msg);
       } catch (e) {
         console.error('[pty-server] Parse error:', e);
       }
@@ -107,14 +157,26 @@ const server = net.createServer((socket) => {
 
   socket.on('close', () => {
     console.log('[pty-server] Client disconnected');
-    // Kill all sessions for this socket
+    // Kill only sessions for this socket
     for (const [id, session] of sessions) {
-      session.pty.kill();
-      sessions.delete(id);
+      if (session.socketId === socketId) {
+        session.pty.kill();
+        sessions.delete(id);
+      }
     }
   });
 });
 
-server.listen(SOCKET_PATH, () => {
-  console.log(`[pty-server] Listening on ${SOCKET_PATH}`);
-});
+try {
+  server.listen(SOCKET_PATH, () => {
+    console.log(`[pty-server] Listening on ${SOCKET_PATH}`);
+  });
+
+  server.on('error', (err) => {
+    console.error('[pty-server] Server error:', err);
+    process.exit(1);
+  });
+} catch (err) {
+  console.error('[pty-server] Failed to start server:', err);
+  process.exit(1);
+}
