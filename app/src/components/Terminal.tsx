@@ -2,6 +2,7 @@ import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { CanvasAddon } from '@xterm/addon-canvas';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 
@@ -73,12 +74,21 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // Open terminal in container
       term.open(containerRef.current);
 
+      // Load GPU-accelerated renderer for better performance (reduces flicker)
+      // Try Canvas renderer (WebGL caused line break issues on second message)
+      try {
+        term.loadAddon(new CanvasAddon());
+      } catch {
+        // Canvas failed, DOM renderer will be used (slowest)
+      }
+
       // Store refs immediately so imperative handle works
       xtermRef.current = term;
       fitAddonRef.current = fitAddon;
 
       // Use ResizeObserver to wait for container to have real dimensions
       // This ensures we don't spawn PTY until terminal can calculate correct size
+      // IMPORTANT: Set up observer AFTER WebGL addon is loaded to ensure correct dimensions
       let readyFired = false;
       const observer = new ResizeObserver((entries) => {
         const entry = entries[0];
@@ -86,24 +96,26 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
         // Wait until container has actual dimensions
         if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-          // Fit to get correct dimensions
-          fitAddon.fit();
+          // Wait one frame for WebGL renderer to fully initialize
+          requestAnimationFrame(() => {
+            // Fit to get correct dimensions
+            fitAddon.fit();
 
-          // Only proceed if we got valid (non-default) dimensions
-          // or if we've waited long enough (fallback after multiple frames)
-          if (term.cols > 0 && term.rows > 0) {
-            readyFired = true;
-            observer.disconnect();
+            // Only proceed if we got valid (non-default) dimensions
+            if (term.cols > 0 && term.rows > 0) {
+              readyFired = true;
+              observer.disconnect();
 
-            if (onResizeRef.current) {
-              onResizeRef.current(term.cols, term.rows);
+              if (onResizeRef.current) {
+                onResizeRef.current(term.cols, term.rows);
+              }
+
+              // NOW notify that terminal is ready with correct dimensions
+              if (onReadyRef.current) {
+                onReadyRef.current(term);
+              }
             }
-
-            // NOW notify that terminal is ready with correct dimensions
-            if (onReadyRef.current) {
-              onReadyRef.current(term);
-            }
-          }
+          });
         }
       });
       observer.observe(containerRef.current);
