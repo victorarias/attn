@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Terminal } from '@xterm/xterm';
-import { diagLog } from '../utils/diagLog';
 
 export interface Session {
   id: string;
@@ -28,7 +27,6 @@ interface SessionStore {
 
 let sessionCounter = 0;
 const pendingConnections = new Set<string>();
-let eventUnlisten: (() => void) | null = null;
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
@@ -42,7 +40,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       await invoke('pty_connect');
 
       // Listen for PTY events
-      eventUnlisten = await listen<any>('pty-event', (event) => {
+      await listen<any>('pty-event', (event) => {
         const msg = event.payload;
         const { sessions } = get();
         const session = sessions.find((s) => s.id === msg.id);
@@ -137,12 +135,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const cols = terminal.cols > 0 ? terminal.cols : 80;
     const rows = terminal.rows > 0 ? terminal.rows : 24;
 
-    diagLog('connectTerminal-spawn', {
-      cols,
-      rows,
-      cwd: session.cwd,
-    });
-
     try {
       await invoke('pty_spawn', {
         id,
@@ -172,7 +164,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   resizeSession: (id: string, cols: number, rows: number) => {
-    diagLog('resizeSession', { id, cols, rows });
     invoke('pty_resize', { id, cols, rows }).catch(console.error);
   },
 }));

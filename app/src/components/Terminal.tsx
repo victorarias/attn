@@ -4,7 +4,6 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
-import { diagLog, clearDiagLog } from '../utils/diagLog';
 
 // Terminal font configuration (matches xterm options)
 const FONT_FAMILY = 'Menlo, Monaco, "Courier New", monospace';
@@ -53,103 +52,57 @@ interface TerminalProps {
   onResize?: (cols: number, rows: number) => void;
 }
 
-// Diagnostic logging counter
-let diagLogId = 0;
-
 /**
  * Calculate terminal dimensions exactly like VS Code does.
  * Source: vscode/src/vs/workbench/contrib/terminal/browser/terminalInstance.ts
- * Functions: _getDimension, getXtermScaledDimensions
- *
- * VS Code's flow:
- * 1. Get container dimensions
- * 2. Subtract padding from xterm element + scrollbar space
- * 3. Calculate cols/rows using devicePixelRatio
  */
 function getScaledDimensions(
   container: HTMLElement,
   term: XTerm,
   letterSpacing = 0,
-  lineHeight = 1,
-  caller = 'unknown'
+  lineHeight = 1
 ): { cols: number; rows: number } | null {
-  const logId = ++diagLogId;
-  const log = (step: string, data: Record<string, unknown>) => {
-    diagLog(`${logId}-${caller}-${step}`, data);
-  };
-
-  // STEP 1: Get container dimensions
+  // Get container dimensions
   const containerStyle = getComputedStyle(container);
-  let width = parseFloat(containerStyle.width);
+  let width = Math.min(parseFloat(containerStyle.width), MAX_CANVAS_WIDTH);
   let height = parseFloat(containerStyle.height);
-  const originalWidth = width;
-  const originalHeight = height;
 
-  // VS Code: Limit canvas width to prevent performance issues
-  width = Math.min(width, MAX_CANVAS_WIDTH);
+  if (width <= 0 || height <= 0) return null;
 
-  if (width <= 0 || height <= 0) {
-    log('EARLY_EXIT', { reason: 'invalid container size', width, height });
-    return null;
-  }
-
-  // STEP 2: Subtract padding from xterm element (like VS Code does)
-  // Source: terminalInstance.ts _getDimension() line 730
-  // VS Code ALWAYS uses 14px for scrollbar padding, regardless of scrollback or overviewRuler settings
+  // Subtract padding (VS Code uses 14px for scrollbar)
   const xtermElement = term.element;
   const scrollbarWidth = 14;
-  let horizontalPadding = scrollbarWidth;
-  let verticalPadding = 0;
 
   if (xtermElement) {
     const xtermStyle = getComputedStyle(xtermElement);
-    const paddingLeft = parseFloat(xtermStyle.paddingLeft || '0');
-    const paddingRight = parseFloat(xtermStyle.paddingRight || '0');
-    const paddingTop = parseFloat(xtermStyle.paddingTop || '0');
-    const paddingBottom = parseFloat(xtermStyle.paddingBottom || '0');
-
-    horizontalPadding = paddingLeft + paddingRight + scrollbarWidth;
-    verticalPadding = paddingTop + paddingBottom;
-
-    width = width - horizontalPadding;
-    height = height - verticalPadding;
+    width -= parseFloat(xtermStyle.paddingLeft || '0') + parseFloat(xtermStyle.paddingRight || '0') + scrollbarWidth;
+    height -= parseFloat(xtermStyle.paddingTop || '0') + parseFloat(xtermStyle.paddingBottom || '0');
+  } else {
+    width -= scrollbarWidth;
   }
 
-  if (width <= 0 || height <= 0) {
-    log('EARLY_EXIT', { reason: 'invalid size after padding', width, height });
-    return null;
-  }
+  if (width <= 0 || height <= 0) return null;
 
-  // STEP 3: Get char dimensions - try xterm first, fallback to DOM measurement
-  // Source: terminalConfigurationService.ts getFont()
+  // Get char dimensions from xterm renderer or fallback to DOM measurement
   const core = (term as any)._core;
   const cellDims = core?._renderService?.dimensions?.css?.cell;
   const dpr = window.devicePixelRatio;
 
   let charWidth: number;
   let charHeight: number;
-  let charSource: string;
 
   if (cellDims?.width && cellDims?.height) {
-    // Primary: Use xterm's renderer dimensions
     charWidth = cellDims.width - Math.round(letterSpacing) / dpr;
     charHeight = cellDims.height / lineHeight;
-    charSource = 'xterm-renderer';
   } else {
-    // Fallback: Measure font via DOM (VS Code's _measureFont approach)
     const measured = measureFont(FONT_FAMILY, FONT_SIZE);
     charWidth = measured.charWidth;
     charHeight = measured.charHeight;
-    charSource = 'dom-fallback';
   }
 
-  if (charWidth <= 0 || charHeight <= 0) {
-    log('EARLY_EXIT', { reason: 'invalid char dimensions', charWidth, charHeight, charSource });
-    return null;
-  }
+  if (charWidth <= 0 || charHeight <= 0) return null;
 
-  // STEP 4: Calculate cols/rows with VS Code's formula
-  // Source: xtermTerminal.ts getXtermScaledDimensions()
+  // Calculate cols/rows with VS Code's formula
   const scaledWidthAvailable = width * dpr;
   const scaledCharWidth = charWidth * dpr + letterSpacing;
   const cols = Math.max(Math.floor(scaledWidthAvailable / scaledCharWidth), 1);
@@ -158,15 +111,6 @@ function getScaledDimensions(
   const scaledCharHeight = Math.ceil(charHeight * dpr);
   const scaledLineHeight = Math.floor(scaledCharHeight * lineHeight);
   const rows = Math.max(Math.floor(scaledHeightAvailable / scaledLineHeight), 1);
-
-  log('RESULT', {
-    container: { original: { w: originalWidth, h: originalHeight }, afterPadding: { w: width, h: height } },
-    padding: { horizontal: horizontalPadding, vertical: verticalPadding },
-    char: { width: charWidth, height: charHeight, source: charSource },
-    dpr,
-    currentXterm: { cols: term.cols, rows: term.rows },
-    calculated: { cols, rows },
-  });
 
   return { cols, rows };
 }
@@ -187,16 +131,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     });
 
     // Helper to resize terminal and notify PTY
-    // VS Code pattern: xterm.resize() first, then PTY update
     const resizeTerminal = (term: XTerm, cols: number, rows: number) => {
       if (cols !== term.cols || rows !== term.rows) {
-        diagLog('resizeTerminal', { from: { cols: term.cols, rows: term.rows }, to: { cols, rows } });
-        // Step 1: Resize xterm first
         term.resize(cols, rows);
-        // Step 2: Then notify PTY (sends SIGWINCH)
-        if (onResizeRef.current) {
-          onResizeRef.current(cols, rows);
-        }
+        onResizeRef.current?.(cols, rows);
       }
     };
 
@@ -207,7 +145,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const container = containerRef.current;
         if (!term || !container) return;
 
-        const dims = getScaledDimensions(container, term, 0, 1, 'imperative-fit');
+        const dims = getScaledDimensions(container, term);
         if (dims) {
           resizeTerminal(term, dims.cols, dims.rows);
         }
@@ -246,16 +184,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const scaledCharHeight = Math.ceil(measured.charHeight * dpr);
         initialRows = Math.max(Math.floor(scaledHeightAvailable / scaledCharHeight), 1);
       }
-
-      // Clear previous log and start fresh
-      clearDiagLog();
-      diagLog('INITIAL_DIMS', {
-        container: { width: containerWidth, height: containerHeight },
-        measured: { charWidth: measured.charWidth, charHeight: measured.charHeight },
-        dpr,
-        initialCols,
-        initialRows,
-      });
 
       // Create terminal with VS Code configuration
       // Source: vscode/src/vs/workbench/contrib/terminal/browser/xterm/xtermTerminal.ts constructor
@@ -306,7 +234,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           const container = containerRef.current;
           if (container && term) {
             requestAnimationFrame(() => {
-              const dims = getScaledDimensions(container, term, 0, 1, 'webgl-context-loss');
+              const dims = getScaledDimensions(container, term);
               if (dims) {
                 resizeTerminal(term, dims.cols, dims.rows);
               }
@@ -344,14 +272,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const resizeBoth = (cols: number, rows: number) => {
         lastCols = cols;
         lastRows = rows;
-        diagLog('RESIZE_BOTH', { cols, rows });
         resizeTerminal(term, cols, rows);
       };
 
       // Resize X only (debounced)
       const resizeX = (cols: number) => {
         lastCols = cols;
-        diagLog('RESIZE_X', { cols, currentRows: term.rows });
         resizeTerminal(term, cols, term.rows);
       };
 
@@ -365,7 +291,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const container = containerRef.current;
         if (!container) return;
 
-        const dims = getScaledDimensions(container, term, 0, 1, 'handleResize');
+        const dims = getScaledDimensions(container, term);
         if (!dims) return;
 
         const { cols, rows } = dims;
@@ -412,11 +338,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // VS Code uses a top-down layout system; we use ResizeObserver as the equivalent
       const resizeObserver = new ResizeObserver((entries) => {
         const entry = entries[0];
-        diagLog('ResizeObserver', {
-          contentRect: entry ? { w: entry.contentRect.width, h: entry.contentRect.height } : null,
-          readyFired,
-          currentXterm: { cols: term.cols, rows: term.rows },
-        });
         if (!entry || entry.contentRect.width <= 0 || entry.contentRect.height <= 0) {
           return;
         }
@@ -425,7 +346,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         if (!readyFired) {
           // Wait one frame for renderer to initialize cell dimensions
           requestAnimationFrame(() => {
-            const dims = getScaledDimensions(containerRef.current!, term, 0, 1, 'ResizeObserver-onReady');
+            const dims = getScaledDimensions(containerRef.current!, term);
             if (dims && dims.cols > 0 && dims.rows > 0) {
               readyFired = true;
               lastCols = dims.cols;
@@ -464,7 +385,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             clearTimeout(xResizeTimeout);
             const container = containerRef.current;
             if (container) {
-              const dims = getScaledDimensions(container, term, 0, 1, 'visibility-flush');
+              const dims = getScaledDimensions(container, term);
               if (dims) {
                 lastCols = dims.cols;
                 lastRows = dims.rows;
@@ -486,7 +407,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           currentDpr = newDpr;
           const container = containerRef.current;
           if (container) {
-            const dims = getScaledDimensions(container, term, 0, 1, 'dpr-change');
+            const dims = getScaledDimensions(container, term);
             if (dims) {
               resizeTerminal(term, dims.cols, dims.rows);
             }
