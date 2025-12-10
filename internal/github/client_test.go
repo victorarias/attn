@@ -91,3 +91,84 @@ func TestClient_doRequest_SetsHeaders(t *testing.T) {
 		t.Errorf("X-GitHub-Api-Version header missing or wrong")
 	}
 }
+
+func TestClient_SearchAuthoredPRs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify correct endpoint
+		if r.URL.Path != "/search/issues" {
+			t.Errorf("Path = %q, want /search/issues", r.URL.Path)
+		}
+
+		q := r.URL.Query().Get("q")
+		if !containsAll(q, "is:pr", "is:open", "author:@me") {
+			t.Errorf("Query = %q, missing required qualifiers", q)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"total_count": 2,
+			"items": [
+				{
+					"number": 123,
+					"title": "Test PR 1",
+					"html_url": "https://github.com/owner/repo/pull/123",
+					"draft": false,
+					"repository_url": "https://api.github.com/repos/owner/repo"
+				},
+				{
+					"number": 456,
+					"title": "Draft PR",
+					"html_url": "https://github.com/owner/repo/pull/456",
+					"draft": true,
+					"repository_url": "https://api.github.com/repos/owner/repo"
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	os.Setenv("GITHUB_TOKEN", "test-token")
+	defer os.Unsetenv("GITHUB_TOKEN")
+
+	client, _ := NewClient(server.URL)
+	prs, err := client.SearchAuthoredPRs()
+	if err != nil {
+		t.Fatalf("SearchAuthoredPRs error: %v", err)
+	}
+
+	// Should filter out draft PRs
+	if len(prs) != 1 {
+		t.Fatalf("got %d PRs, want 1 (draft should be filtered)", len(prs))
+	}
+
+	if prs[0].Number != 123 {
+		t.Errorf("PR number = %d, want 123", prs[0].Number)
+	}
+	if prs[0].Repo != "owner/repo" {
+		t.Errorf("PR repo = %q, want owner/repo", prs[0].Repo)
+	}
+}
+
+// Helper function to check if string contains all substrings
+func containsAll(s string, parts ...string) bool {
+	for _, part := range parts {
+		if !contains(s, part) {
+			return false
+		}
+	}
+	return true
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && containsInner(s, substr))
+}
+
+func containsInner(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
