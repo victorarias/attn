@@ -155,8 +155,10 @@ func (d *Daemon) wsReadPump(client *wsClient) {
 		_, data, err := client.conn.Read(ctx)
 		cancel()
 		if err != nil {
+			d.logf("WebSocket read error: %v", err)
 			return
 		}
+		d.logf("WebSocket raw data received: %s", string(data))
 		// Handle client messages
 		go d.handleClientMessage(client, data)
 	}
@@ -176,7 +178,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		appMsg := msg.(*protocol.ApprovePRMessage)
 		d.logf("Processing approve for %s#%d", appMsg.Repo, appMsg.Number)
 		go func() {
-			err := d.ghFetcher.ApprovePR(appMsg.Repo, appMsg.Number)
+			err := d.ghClient.ApprovePR(appMsg.Repo, appMsg.Number)
 			result := protocol.PRActionResultMessage{
 				Event:   protocol.MsgPRActionResult,
 				Action:  "approve",
@@ -199,7 +201,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.MsgMergePR:
 		mergeMsg := msg.(*protocol.MergePRMessage)
 		go func() {
-			err := d.ghFetcher.MergePR(mergeMsg.Repo, mergeMsg.Number, mergeMsg.Method)
+			err := d.ghClient.MergePR(mergeMsg.Repo, mergeMsg.Number, mergeMsg.Method)
 			result := protocol.PRActionResultMessage{
 				Event:   protocol.MsgPRActionResult,
 				Action:  "merge",
