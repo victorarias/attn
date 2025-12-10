@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
+
+	"github.com/victorarias/claude-manager/internal/protocol"
 )
 
 // Client is an HTTP client for the GitHub API
@@ -100,4 +104,69 @@ func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error
 	}
 
 	return respBody, nil
+}
+
+// searchResult represents GitHub search API response
+type searchResult struct {
+	TotalCount int          `json:"total_count"`
+	Items      []searchItem `json:"items"`
+}
+
+type searchItem struct {
+	Number        int    `json:"number"`
+	Title         string `json:"title"`
+	HTMLURL       string `json:"html_url"`
+	Draft         bool   `json:"draft"`
+	RepositoryURL string `json:"repository_url"`
+}
+
+// extractRepoFromURL extracts "owner/repo" from repository_url
+// e.g., "https://api.github.com/repos/owner/repo" -> "owner/repo"
+func extractRepoFromURL(repoURL string) string {
+	re := regexp.MustCompile(`/repos/([^/]+/[^/]+)$`)
+	matches := re.FindStringSubmatch(repoURL)
+	if len(matches) == 2 {
+		return matches[1]
+	}
+	return ""
+}
+
+// SearchAuthoredPRs searches for open PRs authored by the authenticated user
+func (c *Client) SearchAuthoredPRs() ([]*protocol.PR, error) {
+	query := url.QueryEscape("is:pr is:open author:@me")
+	path := fmt.Sprintf("/search/issues?q=%s&per_page=50", query)
+
+	body, err := c.doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result searchResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	var prs []*protocol.PR
+	for _, item := range result.Items {
+		// Skip drafts
+		if item.Draft {
+			continue
+		}
+
+		repo := extractRepoFromURL(item.RepositoryURL)
+		prs = append(prs, &protocol.PR{
+			ID:          fmt.Sprintf("%s#%d", repo, item.Number),
+			Repo:        repo,
+			Number:      item.Number,
+			Title:       item.Title,
+			URL:         item.HTMLURL,
+			Role:        protocol.PRRoleAuthor,
+			State:       protocol.StateWaiting,
+			Reason:      "",
+			LastUpdated: time.Now(),
+			LastPolled:  time.Now(),
+		})
+	}
+
+	return prs, nil
 }
