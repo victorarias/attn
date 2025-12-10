@@ -396,3 +396,66 @@ func TestClient_ApprovePR_Error(t *testing.T) {
 		t.Errorf("Error message = %q, should contain 403", err.Error())
 	}
 }
+
+func TestClient_MergePR(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+
+		// Parse request body
+		json.NewDecoder(r.Body).Decode(&capturedBody)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"sha":     "abc123",
+			"merged":  true,
+			"message": "Pull Request successfully merged",
+		})
+	}))
+	defer server.Close()
+
+	os.Setenv("GITHUB_TOKEN", "test-token")
+	defer os.Unsetenv("GITHUB_TOKEN")
+
+	client, _ := NewClient(server.URL)
+	err := client.MergePR("owner/repo", 42, "squash")
+	if err != nil {
+		t.Fatalf("MergePR error: %v", err)
+	}
+
+	// Verify correct HTTP method
+	if capturedMethod != "PUT" {
+		t.Errorf("HTTP method = %q, want PUT", capturedMethod)
+	}
+
+	// Verify correct endpoint
+	expectedPath := "/repos/owner/repo/pulls/42/merge"
+	if capturedPath != expectedPath {
+		t.Errorf("Path = %q, want %q", capturedPath, expectedPath)
+	}
+
+	// Verify request body contains {"merge_method": "squash"}
+	if capturedBody["merge_method"] != "squash" {
+		t.Errorf("Request body merge_method = %v, want squash", capturedBody["merge_method"])
+	}
+}
+
+func TestClient_MergePR_InvalidMethod(t *testing.T) {
+	os.Setenv("GITHUB_TOKEN", "test-token")
+	defer os.Unsetenv("GITHUB_TOKEN")
+
+	client, _ := NewClient("")
+	err := client.MergePR("owner/repo", 42, "invalid")
+	if err == nil {
+		t.Fatal("MergePR should return error for invalid merge method")
+	}
+
+	// Verify error message mentions invalid method
+	if !contains(err.Error(), "invalid") || !contains(err.Error(), "merge") {
+		t.Errorf("Error message = %q, should mention invalid merge method", err.Error())
+	}
+}
