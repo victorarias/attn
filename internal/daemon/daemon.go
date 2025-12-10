@@ -24,19 +24,28 @@ type Daemon struct {
 	wsHub      *wsHub
 	done       chan struct{}
 	logger     *logging.Logger
-	ghFetcher  *github.Fetcher
+	ghClient   github.GitHubClient
 }
 
 // New creates a new daemon
 func New(socketPath string) *Daemon {
 	logger, _ := logging.New(logging.DefaultLogPath())
+
+	var ghClient github.GitHubClient
+	client, err := github.NewClient("")
+	if err != nil {
+		logger.Infof("GitHub client not available: %v", err)
+	} else {
+		ghClient = client
+	}
+
 	return &Daemon{
 		socketPath: socketPath,
 		store:      store.NewWithPersistence(store.DefaultStatePath()),
 		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
 		logger:     logger,
-		ghFetcher:  github.NewFetcher(),
+		ghClient:   ghClient,
 	}
 }
 
@@ -48,6 +57,19 @@ func NewForTesting(socketPath string) *Daemon {
 		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
 		logger:     nil, // No logging in tests
+		ghClient:   nil,
+	}
+}
+
+// NewWithGitHubClient creates a daemon with a custom GitHub client for testing
+func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemon {
+	return &Daemon{
+		socketPath: socketPath,
+		store:      store.New(),
+		wsHub:      newWSHub(),
+		done:       make(chan struct{}),
+		logger:     nil,
+		ghClient:   ghClient,
 	}
 }
 
@@ -327,8 +349,8 @@ func (d *Daemon) handleQueryRepos(conn net.Conn, msg *protocol.QueryReposMessage
 }
 
 func (d *Daemon) handleFetchPRDetails(conn net.Conn, msg *protocol.FetchPRDetailsMessage) {
-	if d.ghFetcher == nil || !d.ghFetcher.IsAvailable() {
-		d.sendError(conn, "gh CLI not available")
+	if d.ghClient == nil || !d.ghClient.IsAvailable() {
+		d.sendError(conn, "GitHub client not available")
 		return
 	}
 
@@ -338,7 +360,7 @@ func (d *Daemon) handleFetchPRDetails(conn net.Conn, msg *protocol.FetchPRDetail
 	// Fetch details for each PR that needs refresh
 	for _, pr := range prs {
 		if pr.NeedsDetailRefresh() {
-			details, err := d.ghFetcher.FetchPRDetails(pr.Repo, pr.Number)
+			details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
 			if err != nil {
 				d.logf("Failed to fetch details for %s: %v", pr.ID, err)
 				continue
@@ -367,8 +389,8 @@ func (d *Daemon) sendError(conn net.Conn, errMsg string) {
 }
 
 func (d *Daemon) pollPRs() {
-	if d.ghFetcher == nil || !d.ghFetcher.IsAvailable() {
-		d.log("gh CLI not available, PR polling disabled")
+	if d.ghClient == nil || !d.ghClient.IsAvailable() {
+		d.log("GitHub client not available, PR polling disabled")
 		return
 	}
 
@@ -391,7 +413,7 @@ func (d *Daemon) pollPRs() {
 }
 
 func (d *Daemon) doPRPoll() {
-	prs, err := d.ghFetcher.FetchAll()
+	prs, err := d.ghClient.FetchAll()
 	if err != nil {
 		d.logf("PR poll error: %v", err)
 		return
@@ -418,7 +440,7 @@ func (d *Daemon) doPRPoll() {
 
 // RefreshPRs triggers an immediate PR refresh
 func (d *Daemon) RefreshPRs() {
-	if d.ghFetcher == nil || !d.ghFetcher.IsAvailable() {
+	if d.ghClient == nil || !d.ghClient.IsAvailable() {
 		return
 	}
 	d.doPRPoll()
