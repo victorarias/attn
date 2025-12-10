@@ -1,6 +1,8 @@
 package github
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 )
@@ -60,5 +62,32 @@ func TestNewClient_UsesEnvBaseURL(t *testing.T) {
 
 	if client.baseURL != "http://mock:8080" {
 		t.Errorf("baseURL = %q, want %q", client.baseURL, "http://mock:8080")
+	}
+}
+
+func TestClient_doRequest_SetsHeaders(t *testing.T) {
+	var capturedHeaders http.Header
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	os.Setenv("GITHUB_TOKEN", "test-token-123")
+	defer os.Unsetenv("GITHUB_TOKEN")
+
+	client, _ := NewClient(server.URL)
+	client.doRequest("GET", "/test", nil)
+
+	if capturedHeaders.Get("Authorization") != "Bearer test-token-123" {
+		t.Errorf("Authorization header = %q, want Bearer test-token-123", capturedHeaders.Get("Authorization"))
+	}
+	if capturedHeaders.Get("Accept") != "application/vnd.github+json" {
+		t.Errorf("Accept header = %q, want application/vnd.github+json", capturedHeaders.Get("Accept"))
+	}
+	if capturedHeaders.Get("X-GitHub-Api-Version") != "2022-11-28" {
+		t.Errorf("X-GitHub-Api-Version header missing or wrong")
 	}
 }
