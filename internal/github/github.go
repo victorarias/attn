@@ -229,6 +229,16 @@ func (f *Fetcher) MergePR(repo string, number int, method string) error {
 		method = "squash"
 	}
 
+	// Validate merge method
+	validMethods := map[string]bool{
+		"squash": true,
+		"merge":  true,
+		"rebase": true,
+	}
+	if !validMethods[method] {
+		return fmt.Errorf("invalid merge method: %s (must be squash, merge, or rebase)", method)
+	}
+
 	cmd := exec.Command(f.ghPath, "pr", "merge",
 		"--repo", repo,
 		"--"+method, // --squash, --merge, or --rebase
