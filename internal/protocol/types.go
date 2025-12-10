@@ -21,6 +21,8 @@ const (
 	CmdCollapseRepo    = "collapse_repo"
 	CmdQueryRepos      = "query_repos"
 	CmdFetchPRDetails  = "fetch_pr_details"
+	MsgApprovePR       = "approve_pr"
+	MsgMergePR         = "merge_pr"
 )
 
 // WebSocket Events (daemon -> client)
@@ -31,6 +33,7 @@ const (
 	EventSessionTodosUpdated = "session_todos_updated"
 	EventPRsUpdated          = "prs_updated"
 	EventInitialState        = "initial_state"
+	MsgPRActionResult        = "pr_action_result"
 )
 
 // States
@@ -132,6 +135,31 @@ type QueryReposMessage struct {
 type FetchPRDetailsMessage struct {
 	Cmd  string `json:"cmd"`
 	Repo string `json:"repo"`
+}
+
+// ApprovePRMessage requests approval of a PR
+type ApprovePRMessage struct {
+	Cmd    string `json:"cmd"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+}
+
+// MergePRMessage requests merging of a PR
+type MergePRMessage struct {
+	Cmd    string `json:"cmd"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	Method string `json:"method"` // "squash", "merge", "rebase"
+}
+
+// PRActionResultMessage is sent back to client after PR action completes
+type PRActionResultMessage struct {
+	Event   string `json:"event"`
+	Action  string `json:"action"` // "approve" or "merge"
+	Repo    string `json:"repo"`
+	Number  int    `json:"number"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
 }
 
 // Session represents a tracked Claude session
@@ -310,6 +338,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdFetchPRDetails:
 		var msg FetchPRDetailsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case MsgApprovePR:
+		var msg ApprovePRMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case MsgMergePR:
+		var msg MergePRMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
