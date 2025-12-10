@@ -25,20 +25,20 @@ export function AttentionDrawer({
   prs,
   onSelectSession,
 }: AttentionDrawerProps) {
-  const { isPRMuted, isRepoMuted } = useMuteStore();
+  const { mutedPRs, mutedRepos } = useMuteStore();
 
   const waitingDaemonSessions = daemonSessions.filter((s) => s.state === 'waiting');
   const reviewPRs = prs.filter((p) =>
     p.role === 'reviewer' &&
     !p.muted &&
-    !isPRMuted(p.id, p.repo) &&
-    !isRepoMuted(p.repo)
+    !mutedPRs.has(p.id) &&
+    !mutedRepos.has(p.repo)
   );
   const authorPRs = prs.filter((p) =>
     p.role === 'author' &&
     !p.muted &&
-    !isPRMuted(p.id, p.repo) &&
-    !isRepoMuted(p.repo)
+    !mutedPRs.has(p.id) &&
+    !mutedRepos.has(p.repo)
   );
 
   const totalItems = waitingSessions.length + waitingDaemonSessions.length + reviewPRs.length + authorPRs.length;

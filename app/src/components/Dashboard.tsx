@@ -30,18 +30,17 @@ export function Dashboard({
 
   // Group PRs by repo
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
-  const { isPRMuted, isRepoMuted, muteRepo } = useMuteStore();
+  const { mutedPRs, mutedRepos, muteRepo } = useMuteStore();
 
   const prsByRepo = useMemo(() => {
-    const activePRs = prs.filter((p) => !p.muted && !isPRMuted(p.id, p.repo));
+    const activePRs = prs.filter((p) => !p.muted && !mutedPRs.has(p.id) && !mutedRepos.has(p.repo));
     const grouped = new Map<string, DaemonPR[]>();
     for (const pr of activePRs) {
-      if (isRepoMuted(pr.repo)) continue;
       const existing = grouped.get(pr.repo) || [];
       grouped.set(pr.repo, [...existing, pr]);
     }
     return grouped;
-  }, [prs, isPRMuted, isRepoMuted]);
+  }, [prs, mutedPRs, mutedRepos]);
 
   const toggleRepo = (repo: string) => {
     setCollapsedRepos((prev) => {
