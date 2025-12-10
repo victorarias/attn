@@ -1,5 +1,7 @@
 # Node.js PTY Sidecar Implementation Plan
 
+**Status:** Complete
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace tauri-pty with node-pty sidecar to fix terminal rendering issues at wide widths.

@@ -1,5 +1,7 @@
 # Attn UX Redesign Implementation Plan
 
+**Status:** Complete
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Transform attn from a sidebar-based UI to a dashboard + drawer layout with keyboard shortcuts and custom location picker.
