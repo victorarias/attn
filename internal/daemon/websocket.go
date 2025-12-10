@@ -163,15 +163,18 @@ func (d *Daemon) wsReadPump(client *wsClient) {
 }
 
 func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
+	d.logf("WebSocket received: %s", string(data))
 	cmd, msg, err := protocol.ParseMessage(data)
 	if err != nil {
 		d.logf("WebSocket parse error: %v", err)
 		return
 	}
+	d.logf("WebSocket parsed cmd: %s", cmd)
 
 	switch cmd {
 	case protocol.MsgApprovePR:
 		appMsg := msg.(*protocol.ApprovePRMessage)
+		d.logf("Processing approve for %s#%d", appMsg.Repo, appMsg.Number)
 		go func() {
 			err := d.ghFetcher.ApprovePR(appMsg.Repo, appMsg.Number)
 			result := protocol.PRActionResultMessage{
@@ -183,8 +186,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			}
 			if err != nil {
 				result.Error = err.Error()
+				d.logf("Approve failed for %s#%d: %v", appMsg.Repo, appMsg.Number, err)
+			} else {
+				d.logf("Approve succeeded for %s#%d", appMsg.Repo, appMsg.Number)
 			}
 			d.sendToClient(client, result)
+			d.logf("Sent approve result to client")
 			// Trigger PR refresh after action
 			d.RefreshPRs()
 		}()

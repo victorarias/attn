@@ -8,6 +8,7 @@ import { AttentionDrawer } from './components/AttentionDrawer';
 import { DrawerTrigger } from './components/DrawerTrigger';
 import { LocationPicker } from './components/LocationPicker';
 import { UndoToast } from './components/UndoToast';
+import { DaemonProvider } from './contexts/DaemonContext';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket } from './hooks/useDaemonSocket';
 import { useDaemonStore } from './store/daemonSessions';
@@ -34,7 +35,7 @@ function App() {
   } = useDaemonStore();
 
   // Connect to daemon WebSocket
-  useDaemonSocket({
+  const { sendPRAction } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
   });
@@ -254,6 +255,7 @@ function App() {
   });
 
   return (
+    <DaemonProvider sendPRAction={sendPRAction}>
     <div className="app">
       {/* Dashboard - always rendered, shown/hidden via z-index */}
       <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
@@ -316,6 +318,7 @@ function App() {
       />
       <UndoToast />
     </div>
+    </DaemonProvider>
   );
 }
 
