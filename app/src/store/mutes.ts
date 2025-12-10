@@ -110,7 +110,8 @@ export const useMuteStore = create<MuteState & MuteActions>()(
               ...data.state,
               mutedPRs: new Set(data.state.mutedPRs || []),
               mutedRepos: new Set(data.state.mutedRepos || []),
-              undoStack: data.state.undoStack || [],
+              // Clear expired undo items on load - they're only valid for 5 seconds
+              undoStack: [],
             },
           };
         },
