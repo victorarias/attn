@@ -154,7 +154,7 @@ export function Dashboard({
                     {!isCollapsed && (
                       <div className="repo-prs">
                         {repoPRs.map((pr) => (
-                          <div key={pr.id} className="pr-row">
+                          <div key={pr.id} className="pr-row" data-testid="pr-card">
                             <a
                               href={pr.url}
                               target="_blank"

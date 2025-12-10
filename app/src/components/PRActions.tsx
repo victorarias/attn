@@ -87,6 +87,7 @@ export function PRActions({ repo, number, prId, compact = false, onMuted }: PRAc
     return (
       <button
         className={`pr-action-btn ${compact ? 'compact' : ''}`}
+        data-testid={`${action}-button`}
         data-action={action}
         data-loading={isLoading}
         data-success={isSuccess}
@@ -113,6 +114,7 @@ export function PRActions({ repo, number, prId, compact = false, onMuted }: PRAc
         {renderButton('merge', mergeState, handleMerge, 'Merge', '⇋')}
         <button
           className={`pr-action-btn ${compact ? 'compact' : ''}`}
+          data-testid="mute-button"
           data-action="mute"
           onClick={handleMute}
           title="Mute this PR"

@@ -11,7 +11,7 @@ class MockGitHubServer {
   private server: http.Server;
   private requests: Array<{ method: string; path: string; body: any }> = [];
   public url = '';
-  private prs: Array<{ repo: string; number: number; title: string; role: string }> = [];
+  private prs: Array<{ repo: string; number: number; title: string; role: string; draft: boolean }> = [];
 
   constructor() {
     this.server = http.createServer((req, res) => {
@@ -20,6 +20,7 @@ class MockGitHubServer {
       req.on('end', () => {
         const parsed = body ? JSON.parse(body) : {};
         this.requests.push({ method: req.method!, path: req.url!, body: parsed });
+        console.log(`[MockGH] ${req.method} ${req.url}`);
 
         res.setHeader('Content-Type', 'application/json');
 
@@ -35,10 +36,11 @@ class MockGitHubServer {
               number: pr.number,
               title: pr.title,
               html_url: `https://github.com/${pr.repo}/pull/${pr.number}`,
-              draft: false,
+              draft: pr.draft,
               repository_url: `https://api.github.com/repos/${pr.repo}`,
             }));
 
+          console.log(`[MockGH] Returning ${items.length} PRs for query: ${q}`);
           res.end(JSON.stringify({ total_count: items.length, items }));
           return;
         }
@@ -72,8 +74,8 @@ class MockGitHubServer {
     });
   }
 
-  addPR(pr: { repo: string; number: number; title: string; role: 'author' | 'reviewer' }) {
-    this.prs.push(pr);
+  addPR(pr: { repo: string; number: number; title: string; role: 'author' | 'reviewer'; draft?: boolean }) {
+    this.prs.push({ ...pr, draft: pr.draft ?? false });
   }
 
   hasApproveRequest(repo: string, number: number): boolean {
@@ -98,7 +100,7 @@ class MockGitHubServer {
 
 // Daemon launcher
 async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketPath: string; stop: () => void }> {
-  const socketPath = path.join(os.tmpdir(), `cm-e2e-${Date.now()}.sock`);
+  const socketPath = path.join(os.homedir(), '.cm.sock');
   const cmPath = path.join(os.homedir(), '.local', 'bin', 'cm');
 
   // Verify cm binary exists
@@ -106,10 +108,18 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
     throw new Error(`cm binary not found at ${cmPath}. Run 'make install' first.`);
   }
 
-  const proc = spawn(cmPath, ['--daemon'], {
+  // Clean up any existing socket
+  if (fs.existsSync(socketPath)) {
+    try {
+      fs.unlinkSync(socketPath);
+    } catch (err) {
+      console.warn(`Failed to remove existing socket: ${err}`);
+    }
+  }
+
+  const proc = spawn(cmPath, ['daemon'], {
     env: {
       ...process.env,
-      CM_SOCKET: socketPath,
       CM_WS_PORT: '29849',
       GITHUB_API_URL: ghUrl,
       GITHUB_TOKEN: 'test-token',
@@ -117,9 +127,29 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
     stdio: 'pipe',
   });
 
+  // Capture output for debugging
+  let stdout = '';
+  let stderr = '';
+  proc.stdout?.on('data', (data) => {
+    stdout += data.toString();
+    console.log('[Daemon stdout]', data.toString().trim());
+  });
+  proc.stderr?.on('data', (data) => {
+    stderr += data.toString();
+    console.error('[Daemon stderr]', data.toString().trim());
+  });
+  proc.on('exit', (code, signal) => {
+    console.log(`[Daemon] Process exited with code ${code}, signal ${signal}`);
+  });
+
   // Wait for socket to appear
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Daemon timeout after 5s')), 5000);
+    const timeout = setTimeout(() => {
+      const error = new Error(
+        `Daemon timeout after 5s. stdout: ${stdout}\nstderr: ${stderr}`
+      );
+      reject(error);
+    }, 5000);
     const check = setInterval(() => {
       if (fs.existsSync(socketPath)) {
         clearInterval(check);
@@ -153,11 +183,16 @@ export const test = base.extend<Fixtures>({
   mockGitHub: async ({}, use) => {
     const mock = new MockGitHubServer();
     await mock.start();
+    // Reset PRs before each test
+    mock.reset();
     await use(mock);
     mock.close();
   },
 
-  daemonInfo: async ({ mockGitHub }, use) => {
+  // Make daemonInfo an auto fixture with opt-in (not auto-started)
+  daemonInfo: [async ({ mockGitHub }, use) => {
+    // Wait a tiny bit to ensure mock server is fully ready and PRs are added
+    await new Promise(resolve => setTimeout(resolve, 200));
     const daemon = await startDaemon(mockGitHub.url);
     await use({
       wsUrl: 'ws://127.0.0.1:29849/ws',
@@ -165,7 +200,7 @@ export const test = base.extend<Fixtures>({
       stop: daemon.stop,
     });
     daemon.stop();
-  },
+  }, { auto: false }],  // Don't start automatically - only when referenced
 });
 
 export { expect };
