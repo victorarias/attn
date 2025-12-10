@@ -57,6 +57,38 @@
   color: #555;
 }
 
+.picker-loading {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  border: 2px solid #555;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: translateY(-50%) rotate(360deg); }
+}
+
+.picker-breadcrumb {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #555;
+  padding: 4px 14px 0;
+}
+
+.picker-breadcrumb-label {
+  margin-right: 4px;
+}
+
+.picker-breadcrumb-path {
+  color: #888;
+}
+
 .picker-results {
   max-height: 320px;
   overflow-y: auto;
