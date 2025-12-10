@@ -360,3 +360,28 @@ func (c *Client) ApprovePR(repo string, number int) error {
 
 	return nil
 }
+
+// MergePR merges a pull request using the specified merge method
+func (c *Client) MergePR(repo string, number int, method string) error {
+	// Validate merge method
+	validMethods := map[string]bool{
+		"squash": true,
+		"merge":  true,
+		"rebase": true,
+	}
+	if !validMethods[method] {
+		return fmt.Errorf("invalid merge method %q, must be squash, merge, or rebase", method)
+	}
+
+	path := fmt.Sprintf("/repos/%s/pulls/%d/merge", repo, number)
+	body := map[string]string{
+		"merge_method": method,
+	}
+
+	_, err := c.doRequest("PUT", path, body)
+	if err != nil {
+		return fmt.Errorf("merge PR: %w", err)
+	}
+
+	return nil
+}
