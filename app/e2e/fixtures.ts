@@ -189,10 +189,19 @@ export const test = base.extend<Fixtures>({
     mock.close();
   },
 
-  // Make daemonInfo an auto fixture with opt-in (not auto-started)
-  daemonInfo: [async ({ mockGitHub }, use) => {
-    // Wait a tiny bit to ensure mock server is fully ready and PRs are added
-    await new Promise(resolve => setTimeout(resolve, 200));
+  daemonInfo: async ({ mockGitHub }, use) => {
+    // Kill any existing daemons to avoid interference
+    try {
+      await new Promise<void>((resolve) => {
+        spawn('pkill', ['-f', 'cm daemon'], { stdio: 'ignore' }).on('close', () => resolve());
+      });
+      await new Promise(resolve => setTimeout(resolve, 500)); // Wait for cleanup
+    } catch (err) {
+      // Ignore errors if no daemons running
+    }
+
+    // Wait to ensure PRs are added in test body before starting daemon
+    await new Promise(resolve => setTimeout(resolve, 500));
     const daemon = await startDaemon(mockGitHub.url);
     await use({
       wsUrl: 'ws://127.0.0.1:29849/ws',
@@ -200,7 +209,7 @@ export const test = base.extend<Fixtures>({
       stop: daemon.stop,
     });
     daemon.stop();
-  }, { auto: false }],  // Don't start automatically - only when referenced
+  },
 });
 
 export { expect };
