@@ -114,6 +114,13 @@ function App() {
     setDrawerOpen(false);
   }, []);
 
+  // Sidebar collapse state
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  const toggleSidebarCollapse = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev);
+  }, []);
+
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const { addToHistory } = useLocationHistory();
@@ -128,7 +135,13 @@ function App() {
     async (path: string) => {
       addToHistory(path);
       const folderName = path.split('/').pop() || 'session';
-      await createSession(folderName, path);
+      const sessionId = await createSession(folderName, path);
+      // Fit terminal after view becomes visible
+      setTimeout(() => {
+        const handle = terminalRefs.current.get(sessionId);
+        handle?.fit();
+        handle?.focus();
+      }, 100);
     },
     [addToHistory, createSession]
   );
@@ -235,12 +248,14 @@ function App() {
     onSelectSession: handleSelectSessionByIndex,
     onPrevSession: handlePrevSession,
     onNextSession: handleNextSession,
+    onToggleSidebar: toggleSidebarCollapse,
     enabled: true,
   });
 
   return (
     <div className="app">
-      {view === 'dashboard' ? (
+      {/* Dashboard - always rendered, shown/hidden via z-index */}
+      <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
         <Dashboard
           sessions={enrichedLocalSessions}
           daemonSessions={externalDaemonSessions}
@@ -248,47 +263,51 @@ function App() {
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
         />
-      ) : (
-        <>
-          <Sidebar
-            sessions={enrichedLocalSessions}
-            selectedId={activeSessionId}
-            onSelectSession={handleSelectSession}
-            onNewSession={handleNewSession}
-            onCloseSession={handleCloseSession}
-            onGoToDashboard={goToDashboard}
-          />
-          <div className="terminal-pane">
-            {sessions.map((session) => (
-              <div
-                key={session.id}
-                className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
-              >
-                <Terminal
-                  ref={setTerminalRef(session.id)}
-                  onReady={handleTerminalReady(session.id)}
-                  onResize={handleResize(session.id)}
-                />
-              </div>
-            ))}
-            {sessions.length === 0 && (
-              <div className="no-sessions">
-                <p>No active sessions</p>
-                <p>Click "+" in the sidebar to start a new session</p>
-              </div>
-            )}
-          </div>
-          <DrawerTrigger count={attentionCount} onClick={toggleDrawer} />
-          <AttentionDrawer
-            isOpen={drawerOpen}
-            onClose={closeDrawer}
-            waitingSessions={waitingLocalSessions}
-            daemonSessions={externalDaemonSessions}
-            prs={prs}
-            onSelectSession={handleSelectSession}
-          />
-        </>
-      )}
+      </div>
+
+      {/* Session view - always rendered to keep terminals alive */}
+      <div className={`view-container ${view === 'session' ? 'visible' : 'hidden'}`}>
+        <Sidebar
+          sessions={enrichedLocalSessions}
+          selectedId={activeSessionId}
+          collapsed={sidebarCollapsed}
+          onSelectSession={handleSelectSession}
+          onNewSession={handleNewSession}
+          onCloseSession={handleCloseSession}
+          onGoToDashboard={goToDashboard}
+          onToggleCollapse={toggleSidebarCollapse}
+        />
+        <div className="terminal-pane">
+          {sessions.map((session) => (
+            <div
+              key={session.id}
+              className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
+            >
+              <Terminal
+                ref={setTerminalRef(session.id)}
+                onReady={handleTerminalReady(session.id)}
+                onResize={handleResize(session.id)}
+              />
+            </div>
+          ))}
+          {sessions.length === 0 && (
+            <div className="no-sessions">
+              <p>No active sessions</p>
+              <p>Click "+" in the sidebar to start a new session</p>
+            </div>
+          )}
+        </div>
+        <DrawerTrigger count={attentionCount} onClick={toggleDrawer} />
+        <AttentionDrawer
+          isOpen={drawerOpen}
+          onClose={closeDrawer}
+          waitingSessions={waitingLocalSessions}
+          daemonSessions={externalDaemonSessions}
+          prs={prs}
+          onSelectSession={handleSelectSession}
+        />
+      </div>
+
       <LocationPicker
         isOpen={locationPickerOpen}
         onClose={closeLocationPicker}

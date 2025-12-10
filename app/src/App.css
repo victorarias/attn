@@ -16,6 +16,26 @@ html, body, #root {
   width: 100%;
   display: flex;
   background: #0a0a0b;
+  position: relative;
+}
+
+.view-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  z-index: 1;
+}
+
+.view-container.hidden {
+  z-index: 0;
+  pointer-events: none;
+}
+
+.view-container.visible {
+  z-index: 2;
 }
 
 .terminal-pane {

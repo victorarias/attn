@@ -43,13 +43,15 @@ function handleMessage(socket: net.Socket, socketId: symbol, msg: any): void {
         return;
       }
 
-      const shell = process.env.SHELL || '/bin/bash';
-      const ptyProcess = pty.spawn(shell, [], {
+      // Spawn cm (Claude Manager) wrapper which registers with daemon and sets up hooks
+      // Use fish login shell to ensure PATH includes ~/.local/bin
+      // Set TERM=xterm-256color for proper xterm.js compatibility
+      const ptyProcess = pty.spawn('/opt/homebrew/bin/fish', ['-l', '-c', 'set -x TERM xterm-256color; cm -y'], {
         name: 'xterm-256color',
         cols: msg.cols || 80,
         rows: msg.rows || 24,
         cwd: msg.cwd || os.homedir(),
-        env: process.env as { [key: string]: string },
+        env: { ...process.env, TERM: 'xterm-256color' } as { [key: string]: string },
       });
 
       sessions.set(msg.id, { pty: ptyProcess, socketId });

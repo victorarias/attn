@@ -1,5 +1,6 @@
 // app/src/components/LocationPicker.tsx
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { homeDir } from '@tauri-apps/api/path';
 import { useLocationHistory } from '../hooks/useLocationHistory';
 import './LocationPicker.css';
 
@@ -9,14 +10,21 @@ interface LocationPickerProps {
   onSelect: (path: string) => void;
 }
 
-// Placeholder for HOME directory - will be properly integrated in Task 10
-const HOME_PLACEHOLDER = '/home/user';
-
 export function LocationPicker({ isOpen, onClose, onSelect }: LocationPickerProps) {
   const [inputValue, setInputValue] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [homePath, setHomePath] = useState('/Users');
   const inputRef = useRef<HTMLInputElement>(null);
   const { getRecentLocations, addToHistory } = useLocationHistory();
+
+  // Get home directory on mount
+  useEffect(() => {
+    homeDir().then((dir) => {
+      setHomePath(dir.replace(/\/$/, ''));
+    }).catch(() => {
+      // Keep default /Users fallback
+    });
+  }, []);
 
   const recentLocations = getRecentLocations();
 
@@ -76,14 +84,14 @@ export function LocationPicker({ isOpen, onClose, onSelect }: LocationPickerProp
         } else if (inputValue.startsWith('/') || inputValue.startsWith('~')) {
           // Direct path input
           const path = inputValue.startsWith('~')
-            ? inputValue.replace('~', HOME_PLACEHOLDER)
+            ? inputValue.replace('~', homePath)
             : inputValue;
           handleSelect(path);
         }
         return;
       }
     },
-    [filteredLocations, selectedIndex, inputValue, handleSelect, onClose]
+    [filteredLocations, selectedIndex, inputValue, handleSelect, onClose, homePath]
   );
 
   if (!isOpen) return null;
@@ -123,7 +131,7 @@ export function LocationPicker({ isOpen, onClose, onSelect }: LocationPickerProp
                   <div className="picker-icon">📁</div>
                   <div className="picker-info">
                     <div className="picker-name">{loc.label}</div>
-                    <div className="picker-path">{loc.path.replace(HOME_PLACEHOLDER, '~')}</div>
+                    <div className="picker-path">{loc.path.replace(homePath, '~')}</div>
                   </div>
                 </div>
               ))}

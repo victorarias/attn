@@ -1,4 +1,5 @@
 // app/src/components/Dashboard.tsx
+import { useState, useMemo } from 'react';
 import { DaemonSession, DaemonPR } from '../hooks/useDaemonSocket';
 import './Dashboard.css';
 
@@ -24,6 +25,31 @@ export function Dashboard({
 }: DashboardProps) {
   const waitingSessions = sessions.filter((s) => s.state === 'waiting');
   const workingSessions = sessions.filter((s) => s.state === 'working');
+
+  // Group PRs by repo
+  const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
+
+  const prsByRepo = useMemo(() => {
+    const activePRs = prs.filter((p) => !p.muted);
+    const grouped = new Map<string, DaemonPR[]>();
+    for (const pr of activePRs) {
+      const existing = grouped.get(pr.repo) || [];
+      grouped.set(pr.repo, [...existing, pr]);
+    }
+    return grouped;
+  }, [prs]);
+
+  const toggleRepo = (repo: string) => {
+    setCollapsedRepos((prev) => {
+      const next = new Set(prev);
+      if (next.has(repo)) {
+        next.delete(repo);
+      } else {
+        next.add(repo);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="dashboard">
@@ -81,17 +107,60 @@ export function Dashboard({
           </div>
         </div>
 
-        {/* PRs Card - placeholder for now */}
+        {/* PRs Card */}
         <div className="dashboard-card">
           <div className="card-header">
             <h2>Pull Requests</h2>
-            <span className="card-count">{prs.length}</span>
+            <span className="card-count">{prs.filter((p) => !p.muted).length}</span>
           </div>
-          <div className="card-body">
-            {prs.length === 0 ? (
+          <div className="card-body scrollable">
+            {prsByRepo.size === 0 ? (
               <div className="card-empty">No PRs need attention</div>
             ) : (
-              <div className="card-empty">PR list coming soon</div>
+              Array.from(prsByRepo.entries()).map(([repo, repoPRs]) => {
+                const repoName = repo.split('/')[1] || repo;
+                const isCollapsed = collapsedRepos.has(repo);
+                const reviewCount = repoPRs.filter((p) => p.role === 'reviewer').length;
+                const authorCount = repoPRs.filter((p) => p.role === 'author').length;
+
+                return (
+                  <div key={repo} className="pr-repo-group">
+                    <div
+                      className="repo-header clickable"
+                      onClick={() => toggleRepo(repo)}
+                    >
+                      <span className={`collapse-icon ${isCollapsed ? 'collapsed' : ''}`}>▾</span>
+                      <span className="repo-name">{repoName}</span>
+                      <span className="repo-counts">
+                        {reviewCount > 0 && <span className="count review">{reviewCount} review</span>}
+                        {authorCount > 0 && <span className="count author">{authorCount} yours</span>}
+                      </span>
+                    </div>
+                    {!isCollapsed && (
+                      <div className="repo-prs">
+                        {repoPRs.map((pr) => (
+                          <a
+                            key={pr.id}
+                            href={pr.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="pr-row"
+                          >
+                            <span className={`pr-role ${pr.role}`}>
+                              {pr.role === 'reviewer' ? '👀' : '✏️'}
+                            </span>
+                            <span className="pr-number">#{pr.number}</span>
+                            <span className="pr-title">{pr.title}</span>
+                            {pr.role === 'author' && (
+                              <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
+                            )}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         </div>

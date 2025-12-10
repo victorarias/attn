@@ -9,7 +9,12 @@
     "core:default",
     "opener:default",
     "dialog:default",
-    "pty:default",
-    "deep-link:default"
+    "deep-link:default",
+    "fs:default",
+    "fs:allow-write-text-file",
+    {
+      "identifier": "fs:scope",
+      "allow": [{ "path": "$DESKTOP/*" }]
+    }
   ]
 }
