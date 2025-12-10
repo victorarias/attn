@@ -12,3 +12,4 @@ attn
 
 # Test artifacts
 coverage.out
+.playwright-mcp/

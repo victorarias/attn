@@ -146,3 +146,83 @@
   font-size: 11px;
   color: #555;
 }
+
+/* Collapse button */
+.collapse-btn {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.collapse-btn:hover {
+  color: #888;
+}
+
+/* Collapsed state - Icon Rail */
+.sidebar.collapsed {
+  width: 56px;
+  padding: 0;
+}
+
+.icon-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  height: 100%;
+}
+
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: none;
+  background: none;
+  color: #555;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.icon-btn:hover {
+  background: #1a1a1d;
+  color: #e8e8e8;
+}
+
+.icon-btn.active {
+  background: #1a1a1d;
+  color: #e8e8e8;
+}
+
+.icon-divider {
+  width: 24px;
+  height: 1px;
+  background: #2a2a2d;
+  margin: 8px 0;
+}
+
+.icon-spacer {
+  flex: 1;
+}
+
+.expand-btn {
+  margin-top: auto;
+}
+
+/* Mini badge for waiting state */
+.mini-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff6b35;
+}

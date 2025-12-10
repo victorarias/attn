@@ -9,20 +9,55 @@ interface LocalSession {
 interface SidebarProps {
   sessions: LocalSession[];
   selectedId: string | null;
+  collapsed: boolean;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onCloseSession: (id: string) => void;
   onGoToDashboard: () => void;
+  onToggleCollapse: () => void;
 }
 
 export function Sidebar({
   sessions,
   selectedId,
+  collapsed,
   onSelectSession,
   onNewSession,
   onCloseSession,
   onGoToDashboard,
+  onToggleCollapse,
 }: SidebarProps) {
+  if (collapsed) {
+    return (
+      <div className="sidebar collapsed">
+        <div className="icon-rail">
+          <button className="icon-btn" onClick={onGoToDashboard} title="Dashboard (⌘D)">
+            ⌂
+          </button>
+          <div className="icon-divider" />
+          {sessions.map((session, index) => (
+            <button
+              key={session.id}
+              className={`icon-btn session-icon ${selectedId === session.id ? 'active' : ''}`}
+              onClick={() => onSelectSession(session.id)}
+              title={`${session.label} (⌘${index + 1})`}
+            >
+              ▸
+              {session.state === 'waiting' && <span className="mini-badge" />}
+            </button>
+          ))}
+          <button className="icon-btn" onClick={onNewSession} title="New Session (⌘N)">
+            +
+          </button>
+          <div className="icon-spacer" />
+          <button className="icon-btn expand-btn" onClick={onToggleCollapse} title="Expand sidebar">
+            »
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="sidebar">
       <div className="sidebar-header">
@@ -30,6 +65,9 @@ export function Sidebar({
           ⌂
         </button>
         <span className="sidebar-title">Sessions</span>
+        <button className="collapse-btn" onClick={onToggleCollapse} title="Collapse sidebar">
+          «
+        </button>
         <button className="new-session-btn" onClick={onNewSession} title="New Session (⌘N)">
           +
         </button>

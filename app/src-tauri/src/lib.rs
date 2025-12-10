@@ -14,7 +14,6 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_pty::init())  // Keep for now, remove later
         .plugin(tauri_plugin_fs::init())
         .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![

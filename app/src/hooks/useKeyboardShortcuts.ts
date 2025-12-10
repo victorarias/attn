@@ -10,6 +10,7 @@ interface KeyboardShortcutsConfig {
   onSelectSession: (index: number) => void;
   onPrevSession: () => void;
   onNextSession: () => void;
+  onToggleSidebar?: () => void;
   enabled: boolean;
 }
 
@@ -22,6 +23,7 @@ export function useKeyboardShortcuts({
   onSelectSession,
   onPrevSession,
   onNextSession,
+  onToggleSidebar,
   enabled,
 }: KeyboardShortcutsConfig) {
   const handleKeyDown = useCallback(
@@ -86,6 +88,13 @@ export function useKeyboardShortcuts({
         onNextSession();
         return;
       }
+
+      // ⌘B - Toggle sidebar
+      if (isMeta && e.key === 'b' && onToggleSidebar) {
+        e.preventDefault();
+        onToggleSidebar();
+        return;
+      }
     },
     [
       enabled,
@@ -97,6 +106,7 @@ export function useKeyboardShortcuts({
       onSelectSession,
       onPrevSession,
       onNextSession,
+      onToggleSidebar,
     ]
   );
 

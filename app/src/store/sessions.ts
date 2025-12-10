@@ -51,8 +51,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
         switch (msg.event) {
           case 'data': {
-            // Decode base64 data
-            const data = atob(msg.data);
+            // Decode base64 data to UTF-8
+            // atob() returns Latin-1, need to decode as UTF-8
+            const binaryStr = atob(msg.data);
+            const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
+            const data = new TextDecoder('utf-8').decode(bytes);
             session.terminal.write(data);
             break;
           }

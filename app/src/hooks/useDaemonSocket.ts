@@ -59,7 +59,6 @@ export function useDaemonSocket({
     ws.onmessage = (event) => {
       try {
         const data: WebSocketEvent = JSON.parse(event.data);
-        console.log('[Daemon] Event:', data.event);
 
         switch (data.event) {
           case 'initial_state':

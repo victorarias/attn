@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:all": "concurrently -n pty,tauri -c blue,green \"npm run pty:dev\" \"npm run tauri dev\"",
+    "pty:dev": "cd pty-server && npm run dev",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"
@@ -13,15 +15,13 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-deep-link": "~2.4.5",
     "@tauri-apps/plugin-dialog": "^2.4.2",
+    "@tauri-apps/plugin-fs": "^2.4.4",
     "@tauri-apps/plugin-opener": "^2",
-    "@xterm/addon-canvas": "^0.7.0",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/addon-web-links": "^0.11.0",
-    "@xterm/addon-webgl": "^0.18.0",
-    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-web-links": "0.12.0-beta.136",
+    "@xterm/addon-webgl": "0.19.0-beta.136",
+    "@xterm/xterm": "5.6.0-beta.136",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "tauri-pty": "^0.1.1",
     "zustand": "^5.0.9"
   },
   "devDependencies": {
@@ -29,6 +29,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "concurrently": "^9.2.1",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
     "ws": "^8.18.3"

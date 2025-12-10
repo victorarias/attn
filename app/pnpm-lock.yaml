@@ -17,33 +17,27 @@ importers:
       '@tauri-apps/plugin-dialog':
         specifier: ^2.4.2
         version: 2.4.2
+      '@tauri-apps/plugin-fs':
+        specifier: ^2.4.4
+        version: 2.4.4
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.5.2
-      '@xterm/addon-canvas':
-        specifier: ^0.7.0
-        version: 0.7.0(@xterm/xterm@5.5.0)
-      '@xterm/addon-fit':
-        specifier: ^0.10.0
-        version: 0.10.0(@xterm/xterm@5.5.0)
       '@xterm/addon-web-links':
-        specifier: ^0.11.0
-        version: 0.11.0(@xterm/xterm@5.5.0)
+        specifier: 0.12.0-beta.136
+        version: 0.12.0-beta.136(@xterm/xterm@5.6.0-beta.136)
       '@xterm/addon-webgl':
-        specifier: ^0.18.0
-        version: 0.18.0(@xterm/xterm@5.5.0)
+        specifier: 0.19.0-beta.136
+        version: 0.19.0-beta.136(@xterm/xterm@5.6.0-beta.136)
       '@xterm/xterm':
-        specifier: ^5.5.0
-        version: 5.5.0
+        specifier: 5.6.0-beta.136
+        version: 5.6.0-beta.136
       react:
         specifier: ^19.1.0
         version: 19.2.1
       react-dom:
         specifier: ^19.1.0
         version: 19.2.1(react@19.2.1)
-      tauri-pty:
-        specifier: ^0.1.1
-        version: 0.1.1
       zustand:
         specifier: ^5.0.9
         version: 5.0.9(@types/react@19.2.7)(react@19.2.1)
@@ -60,6 +54,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.6.0
         version: 4.7.0(vite@7.2.6)
+      concurrently:
+        specifier: ^9.2.1
+        version: 9.2.1
       typescript:
         specifier: ~5.8.3
         version: 5.8.3
@@ -440,9 +437,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@tauri-apps/api@2.8.0':
-    resolution: {integrity: sha512-ga7zdhbS2GXOMTIZRT0mYjKJtR9fivsXzsyq5U3vjDL0s6DTMwYRm0UHNjzTY5dh4+LSC68Sm/7WEiimbQNYlw==}
-
   '@tauri-apps/api@2.9.1':
     resolution: {integrity: sha512-IGlhP6EivjXHepbBic618GOmiWe4URJiIeZFlB7x3czM0yDHHYviH1Xvoiv4FefdkQtn6v7TuwWCRfOGdnVUGw==}
 
@@ -523,6 +517,9 @@ packages:
   '@tauri-apps/plugin-dialog@2.4.2':
     resolution: {integrity: sha512-lNIn5CZuw8WZOn8zHzmFmDSzg5zfohWoa3mdULP0YFh/VogVdMVWZPcWSHlydsiJhRQYaTNSYKN7RmZKE2lCYQ==}
 
+  '@tauri-apps/plugin-fs@2.4.4':
+    resolution: {integrity: sha512-MTorXxIRmOnOPT1jZ3w96vjSuScER38ryXY88vl5F0uiKdnvTKKTtaEjTEo8uPbl4e3gnUtfsDVwC7h77GQLvQ==}
+
   '@tauri-apps/plugin-opener@2.5.2':
     resolution: {integrity: sha512-ei/yRRoCklWHImwpCcDK3VhNXx+QXM9793aQ64YxpqVF0BDuuIlXhZgiAkc15wnPVav+IbkYhmDJIv5R326Mew==}
 
@@ -555,28 +552,26 @@ packages:
     peerDependencies:
       vite: ^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0
 
-  '@xterm/addon-canvas@0.7.0':
-    resolution: {integrity: sha512-LF5LYcfvefJuJ7QotNRdRSPc9YASAVDeoT5uyXS/nZshZXjYplGXRECBGiznwvhNL2I8bq1Lf5MzRwstsYQ2Iw==}
+  '@xterm/addon-web-links@0.12.0-beta.136':
+    resolution: {integrity: sha512-w2w73DKZEzToWa0nYNiUnn1+5/eY8x799BP/4iJATal9lHBi8IdvxS2pR6a6ZmgVLFQM1zJWAoKD0zC3AS7Lqg==}
     peerDependencies:
-      '@xterm/xterm': ^5.0.0
+      '@xterm/xterm': ^5.6.0-beta.136
 
-  '@xterm/addon-fit@0.10.0':
-    resolution: {integrity: sha512-UFYkDm4HUahf2lnEyHvio51TNGiLK66mqP2JoATy7hRZeXaGMRDr00JiSF7m63vR5WKATF605yEggJKsw0JpMQ==}
+  '@xterm/addon-webgl@0.19.0-beta.136':
+    resolution: {integrity: sha512-MzVlFKrlgJjKQ6T4/TuamvlvR2FFDvxAPY90lo9u4899k7NNif+M8bBdNea3+bsPMU3fKLhGHoTp0+8MjskaeA==}
     peerDependencies:
-      '@xterm/xterm': ^5.0.0
+      '@xterm/xterm': ^5.6.0-beta.136
 
-  '@xterm/addon-web-links@0.11.0':
-    resolution: {integrity: sha512-nIHQ38pQI+a5kXnRaTgwqSHnX7KE6+4SVoceompgHL26unAxdfP6IPqUTSYPQgSwM56hsElfoNrrW5V7BUED/Q==}
-    peerDependencies:
-      '@xterm/xterm': ^5.0.0
+  '@xterm/xterm@5.6.0-beta.136':
+    resolution: {integrity: sha512-cOWfdbPUYjV8qJY0yg/HdJBiq/hl8J2NRma563crQbSveDpuiiKV+T+ZVeGKQ2YZztLCz6h+kox6J7LQcPtpiQ==}
 
-  '@xterm/addon-webgl@0.18.0':
-    resolution: {integrity: sha512-xCnfMBTI+/HKPdRnSOHaJDRqEpq2Ugy8LEj9GiY4J3zJObo3joylIFaMvzBwbYRg8zLtkO0KQaStCeSfoaI2/w==}
-    peerDependencies:
-      '@xterm/xterm': ^5.0.0
+  ansi-regex@5.0.1:
+    resolution: {integrity: sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==}
+    engines: {node: '>=8'}
 
-  '@xterm/xterm@5.5.0':
-    resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
+  ansi-styles@4.3.0:
+    resolution: {integrity: sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg==}
+    engines: {node: '>=8'}
 
   baseline-browser-mapping@2.9.4:
     resolution: {integrity: sha512-ZCQ9GEWl73BVm8bu5Fts8nt7MHdbt5vY9bP6WGnUh+r3l8M7CgfyTlwsgCbMC66BNxPr6Xoce3j66Ms5YUQTNA==}
@@ -589,6 +584,26 @@ packages:
 
   caniuse-lite@1.0.30001759:
     resolution: {integrity: sha512-Pzfx9fOKoKvevQf8oCXoyNRQ5QyxJj+3O0Rqx2V5oxT61KGx8+n6hV/IUyJeifUci2clnmmKVpvtiqRzgiWjSw==}
+
+  chalk@4.1.2:
+    resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
+    engines: {node: '>=10'}
+
+  cliui@8.0.1:
+    resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
+    engines: {node: '>=12'}
+
+  color-convert@2.0.1:
+    resolution: {integrity: sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==}
+    engines: {node: '>=7.0.0'}
+
+  color-name@1.1.4:
+    resolution: {integrity: sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==}
+
+  concurrently@9.2.1:
+    resolution: {integrity: sha512-fsfrO0MxV64Znoy8/l1vVIjjHa29SZyyqPgQBwhiDcaW8wJc2W3XWVOGx4M3oJBnv/zdUZIIp1gDeS98GzP8Ng==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
@@ -607,6 +622,9 @@ packages:
 
   electron-to-chromium@1.5.266:
     resolution: {integrity: sha512-kgWEglXvkEfMH7rxP5OSZZwnaDWT7J9EoZCujhnpLbfi0bbNtRkgdX2E3gt0Uer11c61qCYktB3hwkAS325sJg==}
+
+  emoji-regex@8.0.0:
+    resolution: {integrity: sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==}
 
   esbuild@0.25.12:
     resolution: {integrity: sha512-bbPBYYrtZbkt6Os6FiTLCTFxvq4tt3JKall1vRwshA3fdVztsLAatFaZobhkBC8/BrPetoa0oksYoKXoG4ryJg==}
@@ -634,6 +652,18 @@ packages:
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
+
+  get-caller-file@2.0.5:
+    resolution: {integrity: sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg==}
+    engines: {node: 6.* || 8.* || >= 10.*}
+
+  has-flag@4.0.0:
+    resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
+    engines: {node: '>=8'}
+
+  is-fullwidth-code-point@3.0.0:
+    resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
+    engines: {node: '>=8'}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -686,10 +716,17 @@ packages:
     resolution: {integrity: sha512-DGrYcCWK7tvYMnWh79yrPHt+vdx9tY+1gPZa7nJQtO/p8bLTDaHp4dzwEhQB7pZ4Xe3ok4XKuEPrVuc+wlpkmw==}
     engines: {node: '>=0.10.0'}
 
+  require-directory@2.1.1:
+    resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
+    engines: {node: '>=0.10.0'}
+
   rollup@4.53.3:
     resolution: {integrity: sha512-w8GmOxZfBmKknvdXU1sdM9NHcoQejwF/4mNgj2JuEEdRaHwwF12K7e9eXn1nLZ07ad+du76mkVsyeb2rKGllsA==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
     hasBin: true
+
+  rxjs@7.8.2:
+    resolution: {integrity: sha512-dhKf903U/PQZY6boNNtAGdWbG85WAbjT/1xYoZIC7FAY0yWapOBQVsVrDl58W86//e1VpMNBtRV4MaXfdMySFA==}
 
   scheduler@0.27.0:
     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
@@ -698,16 +735,40 @@ packages:
     resolution: {integrity: sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA==}
     hasBin: true
 
+  shell-quote@1.8.3:
+    resolution: {integrity: sha512-ObmnIF4hXNg1BqhnHmgbDETF8dLPCggZWBjkQfhZpbszZnYur5DUljTcCHii5LC3J5E0yeO/1LIMyH+UvHQgyw==}
+    engines: {node: '>= 0.4'}
+
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
 
-  tauri-pty@0.1.1:
-    resolution: {integrity: sha512-45Lbcr9nCWhdisszvDkAIeU0e5v8LnsFE8nOI2FF/aKWGuVP3CELqloPa6abTZP6blLmZJflQjQYRace2STNnA==}
+  string-width@4.2.3:
+    resolution: {integrity: sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==}
+    engines: {node: '>=8'}
+
+  strip-ansi@6.0.1:
+    resolution: {integrity: sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==}
+    engines: {node: '>=8'}
+
+  supports-color@7.2.0:
+    resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
+    engines: {node: '>=8'}
+
+  supports-color@8.1.1:
+    resolution: {integrity: sha512-MpUEN2OodtUzxvKQl72cUF7RQ5EiHsGvSsVG0ia9c5RbWGL2CI4C7EpPS8UTBIplnlzZiNuV56w+FuNxy3ty2Q==}
+    engines: {node: '>=10'}
 
   tinyglobby@0.2.15:
     resolution: {integrity: sha512-j2Zq4NyQYG5XMST4cbs02Ak8iJUdxRM0XI5QyxXuZOzKOINmWurp3smXu3y5wDcJrptwpSjgXHzIQxR0omXljQ==}
     engines: {node: '>=12.0.0'}
+
+  tree-kill@1.2.2:
+    resolution: {integrity: sha512-L0Orpi8qGpRG//Nd+H90vFB+3iHnue1zSSGmNOOCh1GLJ7rUKVwV2HvijphGQS2UmhUZewS9VgvxYIdgr+fG1A==}
+    hasBin: true
+
+  tslib@2.8.1:
+    resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
   typescript@5.8.3:
     resolution: {integrity: sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ==}
@@ -760,6 +821,10 @@ packages:
       yaml:
         optional: true
 
+  wrap-ansi@7.0.0:
+    resolution: {integrity: sha512-YVGIj2kamLSTxw6NsZjoBxfSwsn0ycdesmc4p+Q21c5zPuZ1pl+NfxVdxPtdHvmNVOQ6XSYG4AUtyt/Fi7D16Q==}
+    engines: {node: '>=10'}
+
   ws@8.18.3:
     resolution: {integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==}
     engines: {node: '>=10.0.0'}
@@ -772,8 +837,20 @@ packages:
       utf-8-validate:
         optional: true
 
+  y18n@5.0.8:
+    resolution: {integrity: sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA==}
+    engines: {node: '>=10'}
+
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
+
+  yargs-parser@21.1.1:
+    resolution: {integrity: sha512-tVpsJW7DdjecAiFpbIB1e3qxIQsE6NoPc5/eTdrbbIC4h0LVsWhnoa3g+m2HclBIujHzsxZ4VJVA+GUuc2/LBw==}
+    engines: {node: '>=12'}
+
+  yargs@17.7.2:
+    resolution: {integrity: sha512-7dSzzRQ++CKnNI/krKnYRV7JKKPUXMEh61soaHKg9mrWEhzFWhFnxPxGl+69cD1Ou63C13NUPCnmIcrvqCuM6w==}
+    engines: {node: '>=12'}
 
   zustand@5.0.9:
     resolution: {integrity: sha512-ALBtUj0AfjJt3uNRQoL1tL2tMvj6Gp/6e39dnfT6uzpelGru8v1tPOGBzayOWbPJvujM8JojDk3E1LxeFisBNg==}
@@ -1072,8 +1149,6 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.53.3':
     optional: true
 
-  '@tauri-apps/api@2.8.0': {}
-
   '@tauri-apps/api@2.9.1': {}
 
   '@tauri-apps/cli-darwin-arm64@2.9.5':
@@ -1131,6 +1206,10 @@ snapshots:
     dependencies:
       '@tauri-apps/api': 2.9.1
 
+  '@tauri-apps/plugin-fs@2.4.4':
+    dependencies:
+      '@tauri-apps/api': 2.9.1
+
   '@tauri-apps/plugin-opener@2.5.2':
     dependencies:
       '@tauri-apps/api': 2.9.1
@@ -1178,23 +1257,21 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@xterm/addon-canvas@0.7.0(@xterm/xterm@5.5.0)':
+  '@xterm/addon-web-links@0.12.0-beta.136(@xterm/xterm@5.6.0-beta.136)':
     dependencies:
-      '@xterm/xterm': 5.5.0
+      '@xterm/xterm': 5.6.0-beta.136
 
-  '@xterm/addon-fit@0.10.0(@xterm/xterm@5.5.0)':
+  '@xterm/addon-webgl@0.19.0-beta.136(@xterm/xterm@5.6.0-beta.136)':
     dependencies:
-      '@xterm/xterm': 5.5.0
+      '@xterm/xterm': 5.6.0-beta.136
 
-  '@xterm/addon-web-links@0.11.0(@xterm/xterm@5.5.0)':
+  '@xterm/xterm@5.6.0-beta.136': {}
+
+  ansi-regex@5.0.1: {}
+
+  ansi-styles@4.3.0:
     dependencies:
-      '@xterm/xterm': 5.5.0
-
-  '@xterm/addon-webgl@0.18.0(@xterm/xterm@5.5.0)':
-    dependencies:
-      '@xterm/xterm': 5.5.0
-
-  '@xterm/xterm@5.5.0': {}
+      color-convert: 2.0.1
 
   baseline-browser-mapping@2.9.4: {}
 
@@ -1208,6 +1285,32 @@ snapshots:
 
   caniuse-lite@1.0.30001759: {}
 
+  chalk@4.1.2:
+    dependencies:
+      ansi-styles: 4.3.0
+      supports-color: 7.2.0
+
+  cliui@8.0.1:
+    dependencies:
+      string-width: 4.2.3
+      strip-ansi: 6.0.1
+      wrap-ansi: 7.0.0
+
+  color-convert@2.0.1:
+    dependencies:
+      color-name: 1.1.4
+
+  color-name@1.1.4: {}
+
+  concurrently@9.2.1:
+    dependencies:
+      chalk: 4.1.2
+      rxjs: 7.8.2
+      shell-quote: 1.8.3
+      supports-color: 8.1.1
+      tree-kill: 1.2.2
+      yargs: 17.7.2
+
   convert-source-map@2.0.0: {}
 
   csstype@3.2.3: {}
@@ -1217,6 +1320,8 @@ snapshots:
       ms: 2.1.3
 
   electron-to-chromium@1.5.266: {}
+
+  emoji-regex@8.0.0: {}
 
   esbuild@0.25.12:
     optionalDependencies:
@@ -1258,6 +1363,12 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
+  get-caller-file@2.0.5: {}
+
+  has-flag@4.0.0: {}
+
+  is-fullwidth-code-point@3.0.0: {}
+
   js-tokens@4.0.0: {}
 
   jsesc@3.1.0: {}
@@ -1293,6 +1404,8 @@ snapshots:
 
   react@19.2.1: {}
 
+  require-directory@2.1.1: {}
+
   rollup@4.53.3:
     dependencies:
       '@types/estree': 1.0.8
@@ -1321,20 +1434,44 @@ snapshots:
       '@rollup/rollup-win32-x64-msvc': 4.53.3
       fsevents: 2.3.3
 
+  rxjs@7.8.2:
+    dependencies:
+      tslib: 2.8.1
+
   scheduler@0.27.0: {}
 
   semver@6.3.1: {}
 
+  shell-quote@1.8.3: {}
+
   source-map-js@1.2.1: {}
 
-  tauri-pty@0.1.1:
+  string-width@4.2.3:
     dependencies:
-      '@tauri-apps/api': 2.8.0
+      emoji-regex: 8.0.0
+      is-fullwidth-code-point: 3.0.0
+      strip-ansi: 6.0.1
+
+  strip-ansi@6.0.1:
+    dependencies:
+      ansi-regex: 5.0.1
+
+  supports-color@7.2.0:
+    dependencies:
+      has-flag: 4.0.0
+
+  supports-color@8.1.1:
+    dependencies:
+      has-flag: 4.0.0
 
   tinyglobby@0.2.15:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.3)
       picomatch: 4.0.3
+
+  tree-kill@1.2.2: {}
+
+  tslib@2.8.1: {}
 
   typescript@5.8.3: {}
 
@@ -1355,9 +1492,29 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.3
 
+  wrap-ansi@7.0.0:
+    dependencies:
+      ansi-styles: 4.3.0
+      string-width: 4.2.3
+      strip-ansi: 6.0.1
+
   ws@8.18.3: {}
 
+  y18n@5.0.8: {}
+
   yallist@3.1.1: {}
+
+  yargs-parser@21.1.1: {}
+
+  yargs@17.7.2:
+    dependencies:
+      cliui: 8.0.1
+      escalade: 3.2.0
+      get-caller-file: 2.0.5
+      require-directory: 2.1.1
+      string-width: 4.2.3
+      y18n: 5.0.8
+      yargs-parser: 21.1.1
 
   zustand@5.0.9(@types/react@19.2.7)(react@19.2.1):
     optionalDependencies:
