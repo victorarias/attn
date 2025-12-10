@@ -19,16 +19,30 @@ export function usePRActions(wsUrl = 'ws://127.0.0.1:9849/ws'): UsePRActionsResu
   const [actionStates, setActionStates] = useState<ActionStates>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const pendingActions = useRef<Map<string, (result: { success: boolean; error?: string }) => void>>(new Map());
+  const reconnectTimeoutRef = useRef<number | null>(null);
+  const timeoutIds = useRef<Map<string, number>>(new Map());
 
-  // Connect to WebSocket
-  useEffect(() => {
+  const connect = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+
     const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log('[PRActions] WebSocket connected');
+    };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         if (data.event === 'pr_action_result') {
           const key = `${data.repo}#${data.number}:${data.action}`;
+
+          // Clear timeout for this action
+          const timeoutId = timeoutIds.current.get(key);
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutIds.current.delete(key);
+          }
 
           // Update state
           setActionStates(prev => {
@@ -64,9 +78,33 @@ export function usePRActions(wsUrl = 'ws://127.0.0.1:9849/ws'): UsePRActionsResu
       }
     };
 
+    ws.onclose = () => {
+      console.log('[PRActions] WebSocket disconnected, reconnecting in 3s...');
+      wsRef.current = null;
+      reconnectTimeoutRef.current = window.setTimeout(connect, 3000);
+    };
+
+    ws.onerror = (err) => {
+      console.error('[PRActions] WebSocket error:', err);
+      ws.close();
+    };
+
     wsRef.current = ws;
-    return () => ws.close();
   }, [wsUrl]);
+
+  // Connect to WebSocket
+  useEffect(() => {
+    connect();
+
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      timeoutIds.current.forEach(id => clearTimeout(id));
+      timeoutIds.current.clear();
+      wsRef.current?.close();
+    };
+  }, [connect]);
 
   const sendAction = useCallback(async (
     action: string,
@@ -106,9 +144,10 @@ export function usePRActions(wsUrl = 'ws://127.0.0.1:9849/ws'): UsePRActionsResu
       }));
 
       // Timeout after 30 seconds
-      setTimeout(() => {
+      const timeoutId = window.setTimeout(() => {
         if (pendingActions.current.has(key)) {
           pendingActions.current.delete(key);
+          timeoutIds.current.delete(key);
           setActionStates(prev => {
             const next = new Map(prev);
             next.set(key, { loading: false, success: false, error: 'Timeout' });
@@ -117,6 +156,7 @@ export function usePRActions(wsUrl = 'ws://127.0.0.1:9849/ws'): UsePRActionsResu
           reject(new Error('Timeout'));
         }
       }, 30000);
+      timeoutIds.current.set(key, timeoutId);
     });
   }, []);
 
