@@ -415,3 +415,11 @@ func (d *Daemon) doPRPoll() {
 	}
 	d.logf("PR poll: %d PRs (%d waiting)", len(prs), waiting)
 }
+
+// RefreshPRs triggers an immediate PR refresh
+func (d *Daemon) RefreshPRs() {
+	if d.ghFetcher == nil || !d.ghFetcher.IsAvailable() {
+		return
+	}
+	d.doPRPoll()
+}

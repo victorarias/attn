@@ -152,11 +152,72 @@ func (d *Daemon) wsReadPump(client *wsClient) {
 
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		_, _, err := client.conn.Read(ctx)
+		_, data, err := client.conn.Read(ctx)
 		cancel()
 		if err != nil {
 			return
 		}
-		// We don't expect messages from client, just keep connection alive
+		// Handle client messages
+		go d.handleClientMessage(client, data)
+	}
+}
+
+func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
+	cmd, msg, err := protocol.ParseMessage(data)
+	if err != nil {
+		d.logf("WebSocket parse error: %v", err)
+		return
+	}
+
+	switch cmd {
+	case protocol.MsgApprovePR:
+		appMsg := msg.(*protocol.ApprovePRMessage)
+		go func() {
+			err := d.ghFetcher.ApprovePR(appMsg.Repo, appMsg.Number)
+			result := protocol.PRActionResultMessage{
+				Event:   protocol.MsgPRActionResult,
+				Action:  "approve",
+				Repo:    appMsg.Repo,
+				Number:  appMsg.Number,
+				Success: err == nil,
+			}
+			if err != nil {
+				result.Error = err.Error()
+			}
+			d.sendToClient(client, result)
+			// Trigger PR refresh after action
+			d.RefreshPRs()
+		}()
+
+	case protocol.MsgMergePR:
+		mergeMsg := msg.(*protocol.MergePRMessage)
+		go func() {
+			err := d.ghFetcher.MergePR(mergeMsg.Repo, mergeMsg.Number, mergeMsg.Method)
+			result := protocol.PRActionResultMessage{
+				Event:   protocol.MsgPRActionResult,
+				Action:  "merge",
+				Repo:    mergeMsg.Repo,
+				Number:  mergeMsg.Number,
+				Success: err == nil,
+			}
+			if err != nil {
+				result.Error = err.Error()
+			}
+			d.sendToClient(client, result)
+			// Trigger PR refresh after action
+			d.RefreshPRs()
+		}()
+	}
+}
+
+func (d *Daemon) sendToClient(client *wsClient, message interface{}) {
+	data, err := json.Marshal(message)
+	if err != nil {
+		return
+	}
+	select {
+	case client.send <- data:
+	default:
+		// Client buffer full, skip
 	}
 }
