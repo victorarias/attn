@@ -15,6 +15,7 @@ import { useDaemonSocket } from './hooks/useDaemonSocket';
 import { useDaemonStore } from './store/daemonSessions';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocationHistory } from './hooks/useLocationHistory';
+import { useMuteStore } from './store/mutes';
 import './App.css';
 
 function App() {
@@ -217,7 +218,8 @@ function App() {
   // Calculate attention count for drawer badge
   const waitingLocalSessions = enrichedLocalSessions.filter((s) => s.state === 'waiting');
   const waitingExternalSessions = externalDaemonSessions.filter((s) => s.state === 'waiting');
-  const activePRs = prs.filter((p) => !p.muted);
+  const { mutedPRs, mutedRepos } = useMuteStore();
+  const activePRs = prs.filter((p) => !p.muted && !mutedPRs.has(p.id) && !mutedRepos.has(p.repo));
   const attentionCount = waitingLocalSessions.length + waitingExternalSessions.length + activePRs.length;
 
   // Keyboard shortcut handlers
