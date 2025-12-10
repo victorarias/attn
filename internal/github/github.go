@@ -199,3 +199,45 @@ func (f *Fetcher) FetchPRDetails(repo string, number int) (*PRDetails, error) {
 
 	return details, nil
 }
+
+// ApprovePR approves a pull request
+func (f *Fetcher) ApprovePR(repo string, number int) error {
+	if !f.IsAvailable() {
+		return fmt.Errorf("gh CLI not available")
+	}
+
+	cmd := exec.Command(f.ghPath, "pr", "review",
+		"--repo", repo,
+		"--approve",
+		fmt.Sprintf("%d", number))
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("approve failed: %s", string(output))
+	}
+	return nil
+}
+
+// MergePR merges a pull request
+func (f *Fetcher) MergePR(repo string, number int, method string) error {
+	if !f.IsAvailable() {
+		return fmt.Errorf("gh CLI not available")
+	}
+
+	// Default to squash if not specified
+	if method == "" {
+		method = "squash"
+	}
+
+	cmd := exec.Command(f.ghPath, "pr", "merge",
+		"--repo", repo,
+		"--"+method, // --squash, --merge, or --rebase
+		"--delete-branch",
+		fmt.Sprintf("%d", number))
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("merge failed: %s", string(output))
+	}
+	return nil
+}
