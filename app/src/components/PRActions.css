@@ -14,13 +14,13 @@
 }
 
 .pr-action-btn {
-  background: #1a1a1d;
-  border: 1px solid #2a2a2d;
+  background: #252528;
+  border: 1px solid #3a3a3d;
   border-radius: 4px;
   padding: 4px 8px;
   font-size: 11px;
   font-weight: 600;
-  color: #888;
+  color: #bbb;
   cursor: pointer;
   transition: all 150ms ease-out;
   display: flex;

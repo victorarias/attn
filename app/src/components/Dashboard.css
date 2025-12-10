@@ -306,23 +306,22 @@
 
 /* Repo mute button */
 .repo-mute-btn {
-  background: none;
-  border: 1px solid transparent;
+  background: #252528;
+  border: 1px solid #3a3a3d;
   border-radius: 4px;
-  color: #555;
+  color: #888;
   font-size: 12px;
-  padding: 2px 6px;
+  padding: 4px 8px;
   cursor: pointer;
-  opacity: 0;
   transition: all 150ms;
 }
 
-.repo-header:hover .repo-mute-btn {
-  opacity: 1;
+.repo-mute-btn:hover {
+  background: rgba(85, 85, 85, 0.3);
+  color: #bbb;
 }
 
-.repo-mute-btn:hover {
-  background: rgba(85, 85, 85, 0.2);
-  border-color: #2a2a2d;
-  color: #888;
+.repo-mute-btn:focus {
+  outline: 2px solid #ff6b35;
+  outline-offset: 1px;
 }
