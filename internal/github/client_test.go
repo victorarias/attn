@@ -327,3 +327,72 @@ func TestClient_FetchPRDetails(t *testing.T) {
 		t.Errorf("ReviewStatus = %q, want approved", details.ReviewStatus)
 	}
 }
+
+func TestClient_ApprovePR(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+
+		// Parse request body
+		json.NewDecoder(r.Body).Decode(&capturedBody)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":    12345,
+			"state": "APPROVED",
+		})
+	}))
+	defer server.Close()
+
+	os.Setenv("GITHUB_TOKEN", "test-token")
+	defer os.Unsetenv("GITHUB_TOKEN")
+
+	client, _ := NewClient(server.URL)
+	err := client.ApprovePR("owner/repo", 42)
+	if err != nil {
+		t.Fatalf("ApprovePR error: %v", err)
+	}
+
+	// Verify correct HTTP method
+	if capturedMethod != "POST" {
+		t.Errorf("HTTP method = %q, want POST", capturedMethod)
+	}
+
+	// Verify correct endpoint
+	expectedPath := "/repos/owner/repo/pulls/42/reviews"
+	if capturedPath != expectedPath {
+		t.Errorf("Path = %q, want %q", capturedPath, expectedPath)
+	}
+
+	// Verify request body contains {"event": "APPROVE"}
+	if capturedBody["event"] != "APPROVE" {
+		t.Errorf("Request body event = %v, want APPROVE", capturedBody["event"])
+	}
+}
+
+func TestClient_ApprovePR_Error(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message": "Resource not accessible by integration"}`))
+	}))
+	defer server.Close()
+
+	os.Setenv("GITHUB_TOKEN", "test-token")
+	defer os.Unsetenv("GITHUB_TOKEN")
+
+	client, _ := NewClient(server.URL)
+	err := client.ApprovePR("owner/repo", 42)
+	if err == nil {
+		t.Fatal("ApprovePR should return error on 403 response")
+	}
+
+	// Verify error message contains status code
+	if !contains(err.Error(), "403") {
+		t.Errorf("Error message = %q, should contain 403", err.Error())
+	}
+}
