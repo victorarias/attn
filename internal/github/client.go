@@ -209,3 +209,22 @@ func (c *Client) SearchReviewRequestedPRs() ([]*protocol.PR, error) {
 
 	return prs, nil
 }
+
+// FetchAll fetches all PRs (authored + review requests)
+func (c *Client) FetchAll() ([]*protocol.PR, error) {
+	var allPRs []*protocol.PR
+
+	authored, err := c.SearchAuthoredPRs()
+	if err != nil {
+		return nil, fmt.Errorf("fetch authored: %w", err)
+	}
+	allPRs = append(allPRs, authored...)
+
+	reviews, err := c.SearchReviewRequestedPRs()
+	if err != nil {
+		return nil, fmt.Errorf("fetch review requests: %w", err)
+	}
+	allPRs = append(allPRs, reviews...)
+
+	return allPRs, nil
+}
