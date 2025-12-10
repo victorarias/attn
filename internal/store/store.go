@@ -240,6 +240,14 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 	s.markDirty()
 }
 
+// AddPR adds or updates a single PR
+func (s *Store) AddPR(pr *protocol.PR) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prs[pr.ID] = pr
+	s.markDirty()
+}
+
 // ListPRs returns PRs, optionally filtered by state, sorted by repo/number
 func (s *Store) ListPRs(stateFilter string) []*protocol.PR {
 	s.mu.RLock()

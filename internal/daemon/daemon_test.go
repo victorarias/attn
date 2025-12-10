@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -272,5 +273,83 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 	// Verify mock server received the approve request
 	if !mockGH.HasApproveRequest("test/repo", 42) {
 		t.Error("Mock server did not receive approve request for test/repo#42")
+	}
+}
+
+func TestDaemon_InjectTestPR(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	d := NewForTesting(sockPath)
+	go d.Start()
+	defer d.Stop()
+
+	// Wait for daemon to start
+	time.Sleep(50 * time.Millisecond)
+
+	c := client.New(sockPath)
+
+	// Create test PR data
+	testPR := &protocol.PR{
+		ID:          "owner/repo#123",
+		Repo:        "owner/repo",
+		Number:      123,
+		Title:       "Test PR for E2E",
+		URL:         "https://github.com/owner/repo/pull/123",
+		Role:        protocol.PRRoleAuthor,
+		State:       protocol.StateWaiting,
+		Reason:      protocol.PRReasonReadyToMerge,
+		LastUpdated: time.Now(),
+		LastPolled:  time.Now(),
+		Muted:       false,
+	}
+
+	// Send inject_test_pr message
+	msg := protocol.InjectTestPRMessage{
+		Cmd: protocol.MsgInjectTestPR,
+		PR:  testPR,
+	}
+	msgJSON, _ := json.Marshal(msg)
+
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("Dial error: %v", err)
+	}
+	defer conn.Close()
+
+	_, err = conn.Write(msgJSON)
+	if err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+
+	// Read response
+	var resp protocol.Response
+	err = json.NewDecoder(conn).Decode(&resp)
+	if err != nil {
+		t.Fatalf("Decode response error: %v", err)
+	}
+
+	if !resp.OK {
+		t.Fatalf("Expected OK=true, got OK=%v, Error=%s", resp.OK, resp.Error)
+	}
+
+	// Verify PR was added using query_prs
+	prs, err := c.QueryPRs("")
+	if err != nil {
+		t.Fatalf("QueryPRs error: %v", err)
+	}
+
+	if len(prs) != 1 {
+		t.Fatalf("Expected 1 PR, got %d", len(prs))
+	}
+
+	if prs[0].ID != "owner/repo#123" {
+		t.Errorf("Expected ID=owner/repo#123, got ID=%s", prs[0].ID)
+	}
+	if prs[0].Title != "Test PR for E2E" {
+		t.Errorf("Expected Title='Test PR for E2E', got Title=%s", prs[0].Title)
+	}
+	if prs[0].State != protocol.StateWaiting {
+		t.Errorf("Expected State=waiting, got State=%s", prs[0].State)
 	}
 }
