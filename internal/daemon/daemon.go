@@ -212,6 +212,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleQueryRepos(conn, msg.(*protocol.QueryReposMessage))
 	case protocol.CmdFetchPRDetails:
 		d.handleFetchPRDetails(conn, msg.(*protocol.FetchPRDetailsMessage))
+	case protocol.MsgInjectTestPR:
+		d.handleInjectTestPR(conn, msg.(*protocol.InjectTestPRMessage))
 	default:
 		d.sendError(conn, "unknown command")
 	}
@@ -436,6 +438,24 @@ func (d *Daemon) doPRPoll() {
 		}
 	}
 	d.logf("PR poll: %d PRs (%d waiting)", len(prs), waiting)
+}
+
+func (d *Daemon) handleInjectTestPR(conn net.Conn, msg *protocol.InjectTestPRMessage) {
+	if msg.PR == nil {
+		d.sendError(conn, "PR cannot be nil")
+		return
+	}
+
+	// Add PR directly to store
+	d.store.AddPR(msg.PR)
+	d.sendOK(conn)
+
+	// Broadcast to WebSocket clients
+	allPRs := d.store.ListPRs("")
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event: protocol.EventPRsUpdated,
+		PRs:   allPRs,
+	})
 }
 
 // RefreshPRs triggers an immediate PR refresh
