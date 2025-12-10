@@ -7,6 +7,7 @@ import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { DrawerTrigger } from './components/DrawerTrigger';
 import { LocationPicker } from './components/LocationPicker';
+import { UndoToast } from './components/UndoToast';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket } from './hooks/useDaemonSocket';
 import { useDaemonStore } from './store/daemonSessions';
@@ -313,6 +314,7 @@ function App() {
         onClose={closeLocationPicker}
         onSelect={handleLocationSelect}
       />
+      <UndoToast />
     </div>
   );
 }
