@@ -1,0 +1,172 @@
+/* app/src/components/PRActions.css */
+.pr-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+.pr-row:hover .pr-actions,
+.pr-row:focus-within .pr-actions,
+.pr-actions.compact {
+  opacity: 1;
+}
+
+.pr-action-btn {
+  background: #1a1a1d;
+  border: 1px solid #2a2a2d;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  cursor: pointer;
+  transition: all 150ms ease-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+}
+
+.pr-action-btn.compact {
+  min-width: 24px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.pr-action-btn:hover {
+  background: #111113;
+  color: #e8e8e8;
+  border-color: #4a4a4d;
+}
+
+.pr-action-btn:focus {
+  outline: 2px solid #ff6b35;
+  outline-offset: 1px;
+}
+
+.pr-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Action-specific colors */
+.pr-action-btn[data-action="approve"]:hover {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border-color: #22c55e;
+}
+
+.pr-action-btn[data-action="merge"]:hover {
+  background: rgba(167, 139, 250, 0.1);
+  color: #a78bfa;
+  border-color: #a78bfa;
+}
+
+.pr-action-btn[data-action="mute"]:hover {
+  background: rgba(85, 85, 85, 0.2);
+}
+
+/* Success state */
+.pr-action-btn[data-success="true"] {
+  background: #22c55e;
+  color: #000;
+  border-color: #22c55e;
+}
+
+/* Error state */
+.pr-action-btn[data-error="true"] {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* Loading spinner */
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #555;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Merge confirmation modal */
+.merge-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+
+.merge-confirm-modal {
+  width: 400px;
+  background: #111113;
+  border: 1px solid #2a2a2d;
+  border-radius: 8px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+.modal-header {
+  padding: 16px;
+  border-bottom: 1px solid #2a2a2d;
+}
+
+.modal-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e8e8;
+}
+
+.modal-body {
+  padding: 16px;
+  color: #888;
+  font-size: 12px;
+}
+
+.modal-footer {
+  padding: 16px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  border-top: 1px solid #2a2a2d;
+}
+
+.modal-btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #2a2a2d;
+}
+
+.modal-btn-cancel {
+  background: transparent;
+  color: #888;
+}
+
+.modal-btn-cancel:hover {
+  background: #1a1a1d;
+  color: #e8e8e8;
+}
+
+.modal-btn-primary {
+  background: #a78bfa;
+  color: #000;
+  border-color: #a78bfa;
+}
+
+.modal-btn-primary:hover {
+  background: #b695f5;
+}
