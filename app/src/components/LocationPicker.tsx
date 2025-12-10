@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { homeDir } from '@tauri-apps/api/path';
 import { useLocationHistory } from '../hooks/useLocationHistory';
+import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
 import './LocationPicker.css';
 
 interface LocationPickerProps {
@@ -16,26 +17,42 @@ export function LocationPicker({ isOpen, onClose, onSelect }: LocationPickerProp
   const [homePath, setHomePath] = useState('/Users');
   const inputRef = useRef<HTMLInputElement>(null);
   const { getRecentLocations, addToHistory } = useLocationHistory();
+  const { suggestions: fsSuggestions, loading, currentDir } = useFilesystemSuggestions(inputValue);
 
   // Get home directory on mount
   useEffect(() => {
     homeDir().then((dir) => {
       setHomePath(dir.replace(/\/$/, ''));
-    }).catch(() => {
-      // Keep default /Users fallback
-    });
+    }).catch(() => {});
   }, []);
 
   const recentLocations = getRecentLocations();
 
-  // Filter locations based on input
-  const filteredLocations = inputValue
+  // Filter recent locations based on input
+  const filteredRecent = inputValue
     ? recentLocations.filter(
         (loc) =>
           loc.label.toLowerCase().includes(inputValue.toLowerCase()) ||
           loc.path.toLowerCase().includes(inputValue.toLowerCase())
       )
     : recentLocations;
+
+  // Combine suggestions: filesystem first, then recent
+  const allSuggestions = [
+    ...fsSuggestions.map(s => ({ type: 'dir' as const, ...s })),
+    ...filteredRecent.slice(0, 10).map(loc => ({
+      type: 'recent' as const,
+      name: loc.label,
+      path: loc.path
+    })),
+  ];
+
+  const totalSuggestions = allSuggestions.length;
+
+  // Reset selection when suggestions change
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [inputValue]);
 
   // Focus input when opened
   useEffect(() => {
@@ -65,33 +82,49 @@ export function LocationPicker({ isOpen, onClose, onSelect }: LocationPickerProp
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex((prev) =>
-          prev < filteredLocations.length - 1 ? prev + 1 : prev
-        );
+        setSelectedIndex((prev) => Math.min(prev + 1, totalSuggestions - 1));
         return;
       }
 
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+        setSelectedIndex((prev) => Math.max(prev - 1, 0));
+        return;
+      }
+
+      // Tab autocompletes the selected directory suggestion
+      if (e.key === 'Tab' && fsSuggestions.length > 0) {
+        e.preventDefault();
+        const selected = allSuggestions[selectedIndex];
+        if (selected && selected.type === 'dir') {
+          setInputValue(selected.path.replace(homePath, '~'));
+        }
         return;
       }
 
       if (e.key === 'Enter') {
         e.preventDefault();
-        if (filteredLocations[selectedIndex]) {
-          handleSelect(filteredLocations[selectedIndex].path);
+        const selected = allSuggestions[selectedIndex];
+        if (selected) {
+          if (selected.type === 'dir') {
+            // For directories, expand to input for further navigation or select
+            const expanded = selected.path;
+            // If user presses Enter on a dir, select it
+            handleSelect(expanded);
+          } else {
+            handleSelect(selected.path);
+          }
         } else if (inputValue.startsWith('/') || inputValue.startsWith('~')) {
           // Direct path input
           const path = inputValue.startsWith('~')
             ? inputValue.replace('~', homePath)
             : inputValue;
-          handleSelect(path);
+          handleSelect(path.replace(/\/$/, '')); // Remove trailing slash
         }
         return;
       }
     },
-    [filteredLocations, selectedIndex, inputValue, handleSelect, onClose, homePath]
+    [allSuggestions, selectedIndex, inputValue, handleSelect, onClose, homePath, fsSuggestions.length, totalSuggestions]
   );
 
   if (!isOpen) return null;
@@ -106,47 +139,79 @@ export function LocationPicker({ isOpen, onClose, onSelect }: LocationPickerProp
               ref={inputRef}
               type="text"
               className="picker-input"
-              placeholder="Type path or search recent..."
+              placeholder="Type path (e.g., ~/projects) or search..."
               value={inputValue}
-              onChange={(e) => {
-                setInputValue(e.target.value);
-                setSelectedIndex(0);
-              }}
+              onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
             />
+            {loading && <div className="picker-loading" />}
           </div>
+          {currentDir && (
+            <div className="picker-breadcrumb">
+              <span className="picker-breadcrumb-label">Browsing:</span>
+              <span className="picker-breadcrumb-path">{currentDir}</span>
+            </div>
+          )}
         </div>
 
         <div className="picker-results">
-          {filteredLocations.length > 0 ? (
+          {/* Filesystem suggestions */}
+          {fsSuggestions.length > 0 && (
             <div className="picker-section">
-              <div className="picker-section-title">Recent</div>
-              {filteredLocations.map((loc, index) => (
+              <div className="picker-section-title">Directories</div>
+              {fsSuggestions.map((item, index) => (
                 <div
-                  key={loc.path}
+                  key={item.path}
                   className={`picker-item ${index === selectedIndex ? 'selected' : ''}`}
-                  onClick={() => handleSelect(loc.path)}
+                  onClick={() => handleSelect(item.path)}
                   onMouseEnter={() => setSelectedIndex(index)}
                 >
                   <div className="picker-icon">📁</div>
                   <div className="picker-info">
-                    <div className="picker-name">{loc.label}</div>
-                    <div className="picker-path">{loc.path.replace(homePath, '~')}</div>
+                    <div className="picker-name">{item.name}</div>
                   </div>
                 </div>
               ))}
             </div>
-          ) : inputValue ? (
-            <div className="picker-empty">
-              No matches. Press Enter to use path directly.
+          )}
+
+          {/* Recent locations */}
+          {filteredRecent.length > 0 && (
+            <div className="picker-section">
+              <div className="picker-section-title">Recent</div>
+              {filteredRecent.slice(0, 10).map((loc, index) => {
+                const globalIndex = fsSuggestions.length + index;
+                return (
+                  <div
+                    key={loc.path}
+                    className={`picker-item ${globalIndex === selectedIndex ? 'selected' : ''}`}
+                    onClick={() => handleSelect(loc.path)}
+                    onMouseEnter={() => setSelectedIndex(globalIndex)}
+                  >
+                    <div className="picker-icon">🕐</div>
+                    <div className="picker-info">
+                      <div className="picker-name">{loc.label}</div>
+                      <div className="picker-path">{loc.path.replace(homePath, '~')}</div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ) : (
-            <div className="picker-empty">No recent locations</div>
+          )}
+
+          {/* Empty state */}
+          {fsSuggestions.length === 0 && filteredRecent.length === 0 && (
+            <div className="picker-empty">
+              {inputValue
+                ? 'No matches. Press Enter to use path directly.'
+                : 'Type a path to browse directories'}
+            </div>
           )}
         </div>
 
         <div className="picker-footer">
           <span className="shortcut"><kbd>↑↓</kbd> navigate</span>
+          <span className="shortcut"><kbd>Tab</kbd> autocomplete</span>
           <span className="shortcut"><kbd>Enter</kbd> select</span>
           <span className="shortcut"><kbd>Esc</kbd> cancel</span>
         </div>
