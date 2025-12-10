@@ -1,6 +1,7 @@
 package github
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -214,5 +215,64 @@ func TestClient_SearchReviewRequestedPRs(t *testing.T) {
 	}
 	if prs[0].Reason != "review_needed" {
 		t.Errorf("Reason = %q, want %q", prs[0].Reason, "review_needed")
+	}
+}
+
+func TestClient_FetchAll(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		q := r.URL.Query().Get("q")
+
+		var items []map[string]interface{}
+		if contains(q, "author:@me") {
+			items = []map[string]interface{}{
+				{
+					"number":         1,
+					"title":          "My PR",
+					"html_url":       "https://github.com/a/b/pull/1",
+					"draft":          false,
+					"repository_url": "https://api.github.com/repos/a/b",
+				},
+			}
+		} else if contains(q, "review-requested:@me") {
+			items = []map[string]interface{}{
+				{
+					"number":         2,
+					"title":          "Review This",
+					"html_url":       "https://github.com/c/d/pull/2",
+					"draft":          false,
+					"repository_url": "https://api.github.com/repos/c/d",
+				},
+			}
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		responseData := map[string]interface{}{
+			"total_count": len(items),
+			"items":       items,
+		}
+
+		// Convert to JSON
+		jsonBytes, _ := json.Marshal(responseData)
+		w.Write(jsonBytes)
+	}))
+	defer server.Close()
+
+	os.Setenv("GITHUB_TOKEN", "test-token")
+	defer os.Unsetenv("GITHUB_TOKEN")
+
+	client, _ := NewClient(server.URL)
+	prs, err := client.FetchAll()
+	if err != nil {
+		t.Fatalf("FetchAll error: %v", err)
+	}
+
+	if len(prs) != 2 {
+		t.Fatalf("got %d PRs, want 2", len(prs))
+	}
+	if callCount != 2 {
+		t.Errorf("API called %d times, want 2", callCount)
 	}
 }
