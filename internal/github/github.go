@@ -137,14 +137,6 @@ func convertPR(gh ghSearchPR, role string) *protocol.PR {
 	}
 }
 
-// PRDetails contains detailed PR status from GitHub API
-type PRDetails struct {
-	Mergeable      *bool
-	MergeableState string
-	CIStatus       string
-	ReviewStatus   string
-}
-
 // FetchPRDetails fetches detailed status for a PR via gh api
 func (f *Fetcher) FetchPRDetails(repo string, number int) (*PRDetails, error) {
 	if !f.IsAvailable() {

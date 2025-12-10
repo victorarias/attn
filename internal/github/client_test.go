@@ -276,3 +276,54 @@ func TestClient_FetchAll(t *testing.T) {
 		t.Errorf("API called %d times, want 2", callCount)
 	}
 }
+
+func TestClient_FetchPRDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case contains(r.URL.Path, "/pulls/42") && !contains(r.URL.Path, "/reviews"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"mergeable":       true,
+				"mergeable_state": "clean",
+				"head":            map[string]string{"sha": "abc123"},
+			})
+		case contains(r.URL.Path, "/check-runs"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"check_runs": []map[string]interface{}{
+					{"conclusion": "success"},
+					{"conclusion": "success"},
+				},
+			})
+		case contains(r.URL.Path, "/reviews"):
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"state": "APPROVED"},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	os.Setenv("GITHUB_TOKEN", "test-token")
+	defer os.Unsetenv("GITHUB_TOKEN")
+
+	client, _ := NewClient(server.URL)
+	details, err := client.FetchPRDetails("owner/repo", 42)
+	if err != nil {
+		t.Fatalf("FetchPRDetails error: %v", err)
+	}
+
+	if details.Mergeable == nil || *details.Mergeable != true {
+		t.Error("Mergeable should be true")
+	}
+	if details.MergeableState != "clean" {
+		t.Errorf("MergeableState = %q, want clean", details.MergeableState)
+	}
+	if details.CIStatus != "success" {
+		t.Errorf("CIStatus = %q, want success", details.CIStatus)
+	}
+	if details.ReviewStatus != "approved" {
+		t.Errorf("ReviewStatus = %q, want approved", details.ReviewStatus)
+	}
+}

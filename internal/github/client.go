@@ -228,3 +228,120 @@ func (c *Client) FetchAll() ([]*protocol.PR, error) {
 
 	return allPRs, nil
 }
+
+// PRDetails contains detailed PR status
+type PRDetails struct {
+	Mergeable      *bool
+	MergeableState string
+	CIStatus       string
+	ReviewStatus   string
+}
+
+// FetchPRDetails fetches detailed status for a PR
+func (c *Client) FetchPRDetails(repo string, number int) (*PRDetails, error) {
+	// Fetch PR details
+	prPath := fmt.Sprintf("/repos/%s/pulls/%d", repo, number)
+	prBody, err := c.doRequest("GET", prPath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("fetch PR: %w", err)
+	}
+
+	var prData struct {
+		Mergeable      *bool  `json:"mergeable"`
+		MergeableState string `json:"mergeable_state"`
+		Head           struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if err := json.Unmarshal(prBody, &prData); err != nil {
+		return nil, fmt.Errorf("parse PR: %w", err)
+	}
+
+	details := &PRDetails{
+		Mergeable:      prData.Mergeable,
+		MergeableState: prData.MergeableState,
+	}
+
+	// Fetch CI status
+	if prData.Head.SHA != "" {
+		ciPath := fmt.Sprintf("/repos/%s/commits/%s/check-runs", repo, prData.Head.SHA)
+		ciBody, err := c.doRequest("GET", ciPath, nil)
+		if err == nil {
+			var ciData struct {
+				CheckRuns []struct {
+					Conclusion *string `json:"conclusion"`
+				} `json:"check_runs"`
+			}
+			if json.Unmarshal(ciBody, &ciData) == nil {
+				details.CIStatus = computeCIStatus(ciData.CheckRuns)
+			}
+		}
+	}
+
+	// Fetch review status
+	reviewPath := fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number)
+	reviewBody, err := c.doRequest("GET", reviewPath, nil)
+	if err == nil {
+		var reviews []struct {
+			State string `json:"state"`
+		}
+		if json.Unmarshal(reviewBody, &reviews) == nil {
+			details.ReviewStatus = computeReviewStatus(reviews)
+		}
+	}
+
+	return details, nil
+}
+
+func computeCIStatus(checkRuns []struct{ Conclusion *string `json:"conclusion"` }) string {
+	if len(checkRuns) == 0 {
+		return "none"
+	}
+
+	allSuccess := true
+	hasPending := false
+	for _, run := range checkRuns {
+		if run.Conclusion == nil {
+			hasPending = true
+			allSuccess = false
+		} else if *run.Conclusion != "success" {
+			allSuccess = false
+		}
+	}
+
+	if allSuccess {
+		return "success"
+	}
+	if hasPending {
+		return "pending"
+	}
+	return "failure"
+}
+
+func computeReviewStatus(reviews []struct{ State string `json:"state"` }) string {
+	if len(reviews) == 0 {
+		return "none"
+	}
+
+	hasApproved := false
+	hasChangesRequested := false
+	for _, review := range reviews {
+		if review.State == "COMMENTED" {
+			continue
+		}
+		if review.State == "APPROVED" {
+			hasApproved = true
+		}
+		if review.State == "CHANGES_REQUESTED" {
+			hasChangesRequested = true
+		}
+	}
+
+	if hasChangesRequested {
+		return "changes_requested"
+	}
+	if hasApproved {
+		return "approved"
+	}
+	return "pending"
+}
