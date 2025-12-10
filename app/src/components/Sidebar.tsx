@@ -99,6 +99,7 @@ export function Sidebar({
 
       <div className="sidebar-footer">
         <span className="shortcut-hint">⌘K drawer</span>
+        <span className="shortcut-hint">⌘B sidebar</span>
       </div>
     </div>
   );
