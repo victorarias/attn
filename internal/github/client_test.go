@@ -172,3 +172,47 @@ func containsInner(s, substr string) bool {
 	}
 	return false
 }
+
+func TestClient_SearchReviewRequestedPRs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		if !contains(q, "review-requested:@me") {
+			t.Errorf("Query = %q, missing review-requested:@me", q)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"total_count": 1,
+			"items": [
+				{
+					"number": 789,
+					"title": "Needs Review",
+					"html_url": "https://github.com/other/repo/pull/789",
+					"draft": false,
+					"repository_url": "https://api.github.com/repos/other/repo"
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	os.Setenv("GITHUB_TOKEN", "test-token")
+	defer os.Unsetenv("GITHUB_TOKEN")
+
+	client, _ := NewClient(server.URL)
+	prs, err := client.SearchReviewRequestedPRs()
+	if err != nil {
+		t.Fatalf("SearchReviewRequestedPRs error: %v", err)
+	}
+
+	if len(prs) != 1 {
+		t.Fatalf("got %d PRs, want 1", len(prs))
+	}
+	if prs[0].Role != "reviewer" {
+		t.Errorf("Role = %q, want %q", prs[0].Role, "reviewer")
+	}
+	if prs[0].Reason != "review_needed" {
+		t.Errorf("Reason = %q, want %q", prs[0].Reason, "review_needed")
+	}
+}
