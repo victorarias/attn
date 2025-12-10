@@ -170,3 +170,42 @@ func (c *Client) SearchAuthoredPRs() ([]*protocol.PR, error) {
 
 	return prs, nil
 }
+
+// SearchReviewRequestedPRs searches for open PRs where authenticated user is requested reviewer
+func (c *Client) SearchReviewRequestedPRs() ([]*protocol.PR, error) {
+	query := url.QueryEscape("is:pr is:open review-requested:@me")
+	path := fmt.Sprintf("/search/issues?q=%s&per_page=50", query)
+
+	body, err := c.doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result searchResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	var prs []*protocol.PR
+	for _, item := range result.Items {
+		if item.Draft {
+			continue
+		}
+
+		repo := extractRepoFromURL(item.RepositoryURL)
+		prs = append(prs, &protocol.PR{
+			ID:          fmt.Sprintf("%s#%d", repo, item.Number),
+			Repo:        repo,
+			Number:      item.Number,
+			Title:       item.Title,
+			URL:         item.HTMLURL,
+			Role:        protocol.PRRoleReviewer,
+			State:       protocol.StateWaiting,
+			Reason:      protocol.PRReasonReviewNeeded,
+			LastUpdated: time.Now(),
+			LastPolled:  time.Now(),
+		})
+	}
+
+	return prs, nil
+}
