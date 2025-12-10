@@ -9,16 +9,16 @@ export function UndoToast() {
   const [countdown, setCountdown] = useState(5);
   const { undoStack, processUndo } = useMuteStore();
 
-  // Watch for new mutes
+  // Watch for new mutes by tracking the latest item's timestamp
+  const latestItem = undoStack[undoStack.length - 1];
   useEffect(() => {
-    if (undoStack.length > 0) {
-      const latest = undoStack[undoStack.length - 1];
-      const itemType = latest.type === 'pr' ? 'PR' : 'Repository';
+    if (latestItem) {
+      const itemType = latestItem.type === 'pr' ? 'PR' : 'Repository';
       setMessage(`${itemType} muted`);
       setVisible(true);
       setCountdown(5);
     }
-  }, [undoStack.length]);
+  }, [latestItem?.timestamp]);
 
   // Countdown timer
   useEffect(() => {
