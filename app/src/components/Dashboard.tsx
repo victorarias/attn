@@ -1,6 +1,8 @@
 // app/src/components/Dashboard.tsx
 import { useState, useMemo } from 'react';
 import { DaemonSession, DaemonPR } from '../hooks/useDaemonSocket';
+import { PRActions } from './PRActions';
+import { useMuteStore } from '../store/mutes';
 import './Dashboard.css';
 
 interface DashboardProps {
@@ -28,16 +30,18 @@ export function Dashboard({
 
   // Group PRs by repo
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
+  const { isPRMuted, isRepoMuted, muteRepo } = useMuteStore();
 
   const prsByRepo = useMemo(() => {
-    const activePRs = prs.filter((p) => !p.muted);
+    const activePRs = prs.filter((p) => !p.muted && !isPRMuted(p.id, p.repo));
     const grouped = new Map<string, DaemonPR[]>();
     for (const pr of activePRs) {
+      if (isRepoMuted(pr.repo)) continue;
       const existing = grouped.get(pr.repo) || [];
       grouped.set(pr.repo, [...existing, pr]);
     }
     return grouped;
-  }, [prs]);
+  }, [prs, isPRMuted, isRepoMuted]);
 
   const toggleRepo = (repo: string) => {
     setCollapsedRepos((prev) => {
@@ -125,36 +129,50 @@ export function Dashboard({
 
                 return (
                   <div key={repo} className="pr-repo-group">
-                    <div
-                      className="repo-header clickable"
-                      onClick={() => toggleRepo(repo)}
-                    >
-                      <span className={`collapse-icon ${isCollapsed ? 'collapsed' : ''}`}>▾</span>
-                      <span className="repo-name">{repoName}</span>
-                      <span className="repo-counts">
-                        {reviewCount > 0 && <span className="count review">{reviewCount} review</span>}
-                        {authorCount > 0 && <span className="count author">{authorCount} yours</span>}
-                      </span>
+                    <div className="repo-header">
+                      <div
+                        className="repo-header-content clickable"
+                        onClick={() => toggleRepo(repo)}
+                      >
+                        <span className={`collapse-icon ${isCollapsed ? 'collapsed' : ''}`}>▾</span>
+                        <span className="repo-name">{repoName}</span>
+                        <span className="repo-counts">
+                          {reviewCount > 0 && <span className="count review">{reviewCount} review</span>}
+                          {authorCount > 0 && <span className="count author">{authorCount} yours</span>}
+                        </span>
+                      </div>
+                      <button
+                        className="repo-mute-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          muteRepo(repo);
+                        }}
+                        title="Mute all PRs from this repo"
+                      >
+                        ⊘
+                      </button>
                     </div>
                     {!isCollapsed && (
                       <div className="repo-prs">
                         {repoPRs.map((pr) => (
-                          <a
-                            key={pr.id}
-                            href={pr.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="pr-row"
-                          >
-                            <span className={`pr-role ${pr.role}`}>
-                              {pr.role === 'reviewer' ? '👀' : '✏️'}
-                            </span>
-                            <span className="pr-number">#{pr.number}</span>
-                            <span className="pr-title">{pr.title}</span>
-                            {pr.role === 'author' && (
-                              <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
-                            )}
-                          </a>
+                          <div key={pr.id} className="pr-row">
+                            <a
+                              href={pr.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="pr-link"
+                            >
+                              <span className={`pr-role ${pr.role}`}>
+                                {pr.role === 'reviewer' ? '👀' : '✏️'}
+                              </span>
+                              <span className="pr-number">#{pr.number}</span>
+                              <span className="pr-title">{pr.title}</span>
+                              {pr.role === 'author' && (
+                                <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
+                              )}
+                            </a>
+                            <PRActions repo={pr.repo} number={pr.number} prId={pr.id} />
+                          </div>
                         ))}
                       </div>
                     )}
