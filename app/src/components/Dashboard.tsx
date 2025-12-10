@@ -114,7 +114,7 @@ export function Dashboard({
         <div className="dashboard-card">
           <div className="card-header">
             <h2>Pull Requests</h2>
-            <span className="card-count">{prs.filter((p) => !p.muted).length}</span>
+            <span className="card-count">{prs.filter((p) => !p.muted && !mutedPRs.has(p.id) && !mutedRepos.has(p.repo)).length}</span>
           </div>
           <div className="card-body scrollable">
             {prsByRepo.size === 0 ? (
