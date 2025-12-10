@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// ProtocolVersion is the version of the daemon-client protocol.
+// Increment this when making breaking changes to the protocol.
+// Client and daemon must have matching versions.
+const ProtocolVersion = "1"
+
 // Commands
 const (
 	CmdRegister        = "register"
@@ -238,10 +243,11 @@ type Response struct {
 
 // WebSocketEvent is sent from daemon to connected WebSocket clients
 type WebSocketEvent struct {
-	Event    string     `json:"event"`
-	Session  *Session   `json:"session,omitempty"`
-	Sessions []*Session `json:"sessions,omitempty"`
-	PRs      []*PR      `json:"prs,omitempty"`
+	Event           string     `json:"event"`
+	ProtocolVersion string     `json:"protocol_version,omitempty"`
+	Session         *Session   `json:"session,omitempty"`
+	Sessions        []*Session `json:"sessions,omitempty"`
+	PRs             []*PR      `json:"prs,omitempty"`
 }
 
 // ParseMessage parses a JSON message and returns the command type and parsed message

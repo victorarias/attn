@@ -98,6 +98,9 @@ class MockGitHubServer {
   }
 }
 
+// Test port - different from production (9849) to avoid conflicts
+const TEST_DAEMON_PORT = '19849';
+
 // Daemon launcher
 async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketPath: string; stop: () => void }> {
   const socketPath = path.join(os.homedir(), '.cm.sock');
@@ -120,7 +123,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
   const proc = spawn(cmPath, ['daemon'], {
     env: {
       ...process.env,
-      CM_WS_PORT: '9849', // Use default port so frontend can connect
+      CM_WS_PORT: TEST_DAEMON_PORT, // Use test port to avoid conflicts with production daemon
       GITHUB_API_URL: ghUrl,
       GITHUB_TOKEN: 'test-token',
     },
@@ -206,7 +209,7 @@ export const test = base.extend<Fixtures>({
 
       daemon = await startDaemon(mockGitHub.url);
       return {
-        wsUrl: 'ws://127.0.0.1:9849/ws',
+        wsUrl: `ws://127.0.0.1:${TEST_DAEMON_PORT}/ws`,
         socketPath: daemon.socketPath,
       };
     };

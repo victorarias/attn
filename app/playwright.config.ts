@@ -1,5 +1,10 @@
 import { defineConfig } from '@playwright/test';
 
+// Test daemon runs on port 19849 to avoid conflicts with production daemon (9849)
+const TEST_DAEMON_PORT = '19849';
+// Test Vite server runs on a different port to allow reusing existing dev server
+const TEST_VITE_PORT = '1421';
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false, // Run tests serially due to shared daemon
@@ -7,13 +12,16 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:1420', // Vite dev server
+    baseURL: `http://localhost:${TEST_VITE_PORT}`,
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'pnpm run dev',
-    url: 'http://localhost:1420',
-    reuseExistingServer: !process.env.CI,
+    command: `npx vite --port ${TEST_VITE_PORT}`,
+    url: `http://localhost:${TEST_VITE_PORT}`,
+    reuseExistingServer: false, // Always start fresh to ensure correct env vars
     timeout: 30000,
+    env: {
+      VITE_DAEMON_PORT: TEST_DAEMON_PORT,
+    },
   },
 });

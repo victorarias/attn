@@ -114,9 +114,10 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) sendInitialState(client *wsClient) {
 	event := &protocol.WebSocketEvent{
-		Event:    protocol.EventInitialState,
-		Sessions: d.store.List(""),
-		PRs:      d.store.ListPRs(""),
+		Event:           protocol.EventInitialState,
+		ProtocolVersion: protocol.ProtocolVersion,
+		Sessions:        d.store.List(""),
+		PRs:             d.store.ListPRs(""),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
