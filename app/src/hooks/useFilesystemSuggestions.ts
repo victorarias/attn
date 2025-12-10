@@ -75,7 +75,7 @@ export function useFilesystemSuggestions(inputPath: string): UseFilesystemSugges
 
       setSuggestions(filtered.map(name => ({
         name,
-        path: dirToQuery + name + '/',
+        path: dirToQuery + name,
       })));
     } catch (e) {
       setError(String(e));
