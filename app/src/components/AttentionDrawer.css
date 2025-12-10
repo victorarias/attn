@@ -108,6 +108,37 @@
   background: #1a1a1d;
 }
 
+/* PR item with actions */
+.attention-item.pr-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.attention-item.pr-item:hover {
+  background: #1a1a1d;
+}
+
+.attention-item .pr-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  color: #e8e8e8;
+  text-decoration: none;
+  overflow: hidden;
+}
+
+.attention-item .pr-link:hover {
+  color: #fff;
+}
+
+/* Compact actions always visible in drawer */
+.attention-item .pr-actions.compact {
+  opacity: 1;
+  flex-shrink: 0;
+}
+
 .item-dot {
   width: 8px;
   height: 8px;

@@ -1,5 +1,7 @@
 // app/src/components/AttentionDrawer.tsx
 import { DaemonSession, DaemonPR } from '../hooks/useDaemonSocket';
+import { PRActions } from './PRActions';
+import { useMuteStore } from '../store/mutes';
 import './AttentionDrawer.css';
 
 interface AttentionDrawerProps {
@@ -23,9 +25,21 @@ export function AttentionDrawer({
   prs,
   onSelectSession,
 }: AttentionDrawerProps) {
+  const { isPRMuted, isRepoMuted } = useMuteStore();
+
   const waitingDaemonSessions = daemonSessions.filter((s) => s.state === 'waiting');
-  const reviewPRs = prs.filter((p) => p.role === 'reviewer' && !p.muted);
-  const authorPRs = prs.filter((p) => p.role === 'author' && !p.muted);
+  const reviewPRs = prs.filter((p) =>
+    p.role === 'reviewer' &&
+    !p.muted &&
+    !isPRMuted(p.id, p.repo) &&
+    !isRepoMuted(p.repo)
+  );
+  const authorPRs = prs.filter((p) =>
+    p.role === 'author' &&
+    !p.muted &&
+    !isPRMuted(p.id, p.repo) &&
+    !isRepoMuted(p.repo)
+  );
 
   const totalItems = waitingSessions.length + waitingDaemonSessions.length + reviewPRs.length + authorPRs.length;
 
@@ -82,18 +96,20 @@ export function AttentionDrawer({
               <span className="section-count">{reviewPRs.length}</span>
             </div>
             {reviewPRs.map((pr) => (
-              <a
-                key={pr.id}
-                href={pr.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="attention-item clickable"
-              >
-                <span className="item-dot pr" />
-                <span className="item-name">
-                  {pr.repo.split('/')[1]} #{pr.number}
-                </span>
-              </a>
+              <div key={pr.id} className="attention-item pr-item">
+                <a
+                  href={pr.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="pr-link"
+                >
+                  <span className="item-dot pr" />
+                  <span className="item-name">
+                    {pr.repo.split('/')[1]} #{pr.number}
+                  </span>
+                </a>
+                <PRActions repo={pr.repo} number={pr.number} prId={pr.id} compact />
+              </div>
             ))}
           </div>
         )}
@@ -106,19 +122,21 @@ export function AttentionDrawer({
               <span className="section-count">{authorPRs.length}</span>
             </div>
             {authorPRs.map((pr) => (
-              <a
-                key={pr.id}
-                href={pr.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="attention-item clickable"
-              >
-                <span className="item-dot pr" />
-                <span className="item-name">
-                  {pr.repo.split('/')[1]} #{pr.number}
-                </span>
-                <span className="item-reason">{pr.reason.replace(/_/g, ' ')}</span>
-              </a>
+              <div key={pr.id} className="attention-item pr-item">
+                <a
+                  href={pr.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="pr-link"
+                >
+                  <span className="item-dot pr" />
+                  <span className="item-name">
+                    {pr.repo.split('/')[1]} #{pr.number}
+                  </span>
+                  <span className="item-reason">{pr.reason.replace(/_/g, ' ')}</span>
+                </a>
+                <PRActions repo={pr.repo} number={pr.number} prId={pr.id} compact />
+              </div>
             ))}
           </div>
         )}
