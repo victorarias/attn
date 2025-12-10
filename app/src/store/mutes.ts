@@ -28,9 +28,14 @@ export const useMuteStore = create<MuteState & MuteActions>()(
       undoStack: [],
 
       mutePR: (prId: string) => {
+        const now = Date.now();
         set((state) => ({
           mutedPRs: new Set([...state.mutedPRs, prId]),
-          undoStack: [...state.undoStack, { type: 'pr', id: prId, timestamp: Date.now() }],
+          // Filter out expired entries before adding new one
+          undoStack: [
+            ...state.undoStack.filter(u => now - u.timestamp < UNDO_WINDOW_MS),
+            { type: 'pr', id: prId, timestamp: now }
+          ],
         }));
       },
 
@@ -41,9 +46,14 @@ export const useMuteStore = create<MuteState & MuteActions>()(
       },
 
       muteRepo: (repo: string) => {
+        const now = Date.now();
         set((state) => ({
           mutedRepos: new Set([...state.mutedRepos, repo]),
-          undoStack: [...state.undoStack, { type: 'repo', id: repo, timestamp: Date.now() }],
+          // Filter out expired entries before adding new one
+          undoStack: [
+            ...state.undoStack.filter(u => now - u.timestamp < UNDO_WINDOW_MS),
+            { type: 'repo', id: repo, timestamp: now }
+          ],
         }));
       },
 
@@ -110,6 +120,7 @@ export const useMuteStore = create<MuteState & MuteActions>()(
               ...value.state,
               mutedPRs: [...value.state.mutedPRs],
               mutedRepos: [...value.state.mutedRepos],
+              undoStack: value.state.undoStack,
             },
           };
           localStorage.setItem(name, JSON.stringify(data));
