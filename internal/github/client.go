@@ -345,3 +345,18 @@ func computeReviewStatus(reviews []struct{ State string `json:"state"` }) string
 	}
 	return "pending"
 }
+
+// ApprovePR approves a pull request by submitting an approval review
+func (c *Client) ApprovePR(repo string, number int) error {
+	path := fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number)
+	body := map[string]string{
+		"event": "APPROVE",
+	}
+
+	_, err := c.doRequest("POST", path, body)
+	if err != nil {
+		return fmt.Errorf("approve PR: %w", err)
+	}
+
+	return nil
+}
