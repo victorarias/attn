@@ -120,7 +120,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
   const proc = spawn(cmPath, ['daemon'], {
     env: {
       ...process.env,
-      CM_WS_PORT: '29849',
+      CM_WS_PORT: '9849', // Use default port so frontend can connect
       GITHUB_API_URL: ghUrl,
       GITHUB_TOKEN: 'test-token',
     },
@@ -176,7 +176,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
 // Export fixtures
 type Fixtures = {
   mockGitHub: MockGitHubServer;
-  daemonInfo: { wsUrl: string; socketPath: string; stop: () => void };
+  startDaemonWithPRs: () => Promise<{ wsUrl: string; socketPath: string }>;
 };
 
 export const test = base.extend<Fixtures>({
@@ -189,26 +189,34 @@ export const test = base.extend<Fixtures>({
     mock.close();
   },
 
-  daemonInfo: async ({ mockGitHub }, use) => {
-    // Kill any existing daemons to avoid interference
-    try {
-      await new Promise<void>((resolve) => {
-        spawn('pkill', ['-f', 'cm daemon'], { stdio: 'ignore' }).on('close', () => resolve());
-      });
-      await new Promise(resolve => setTimeout(resolve, 500)); // Wait for cleanup
-    } catch (err) {
-      // Ignore errors if no daemons running
-    }
+  // This fixture returns a function that test code calls AFTER adding PRs
+  startDaemonWithPRs: async ({ mockGitHub }, use) => {
+    let daemon: { proc: ChildProcess; socketPath: string; stop: () => void } | null = null;
 
-    // Wait to ensure PRs are added in test body before starting daemon
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const daemon = await startDaemon(mockGitHub.url);
-    await use({
-      wsUrl: 'ws://127.0.0.1:29849/ws',
-      socketPath: daemon.socketPath,
-      stop: daemon.stop,
-    });
-    daemon.stop();
+    const startFn = async () => {
+      // Kill any existing daemons to avoid interference
+      try {
+        await new Promise<void>((resolve) => {
+          spawn('pkill', ['-f', 'cm daemon'], { stdio: 'ignore' }).on('close', () => resolve());
+        });
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for cleanup
+      } catch (err) {
+        // Ignore errors if no daemons running
+      }
+
+      daemon = await startDaemon(mockGitHub.url);
+      return {
+        wsUrl: 'ws://127.0.0.1:9849/ws',
+        socketPath: daemon.socketPath,
+      };
+    };
+
+    await use(startFn);
+
+    // Cleanup after test
+    if (daemon) {
+      daemon.stop();
+    }
   },
 });
 
