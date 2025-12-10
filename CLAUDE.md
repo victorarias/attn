@@ -45,15 +45,41 @@ Claude Manager (`cm`) tracks multiple Claude Code sessions and surfaces which on
 
 All IPC uses JSON over unix socket at `~/.{binary}.sock` (paths derived from binary name via `internal/config`). Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates.
 
-## Terminal Component (xterm.js + PTY)
+## Tauri App Development
+
+### Running the App
+
+```bash
+cd app
+pnpm run dev:all    # Starts both pty-server and tauri dev
+```
+
+This runs two processes concurrently:
+- **pty-server**: Node.js sidecar using node-pty over Unix socket (`~/.cm-pty.sock`)
+- **tauri dev**: Vite + Tauri development server
+
+### PTY Architecture
+
+The app uses a Node.js sidecar (`pty-server/`) instead of tauri-pty because:
+- Event-driven streaming vs polling-based IPC
+- No fixed buffer size limitations (tauri-pty had 1024-byte limit)
+- Full terminal width support (no rendering issues at wide widths)
+
+Communication flow:
+```
+Frontend (React) → Tauri Commands → Rust pty_bridge → Unix Socket → pty-server (node-pty)
+```
+
+### Terminal Component (xterm.js)
 
 When modifying `app/src/components/Terminal.tsx`:
 
-1. **Never spawn PTY until terminal has correct dimensions** - Use ResizeObserver to wait for container to have real size before calling `onReady`
-2. **On resize: PTY first, then xterm.js** - Use `proposeDimensions()` to get new size, resize PTY (sends SIGWINCH), wait ~50ms, then call `fit()`
-3. **xterm.js defaults to 80x24** - Don't trust `term.cols/rows` until after `fit()` has been called
+1. **Wait for container dimensions** - Use ResizeObserver to wait for valid size before calling `onReady`
+2. **Pre-calculate initial dimensions** - Measure font before creating XTerm to avoid 80x24 default
+3. **Resize xterm first, then PTY** - Call `term.resize()` then notify PTY (sends SIGWINCH)
+4. **Use VS Code's resize debouncing** - Y-axis immediate, X-axis 100ms debounced (text reflow is expensive)
 
-See `docs/plans/2025-12-08-xterm-tui-rendering-bug.md` for full investigation.
+See `docs/plans/2025-12-09-node-pty-sidecar-design.md` for architecture details.
 
 ## When Something Is Broken
 
