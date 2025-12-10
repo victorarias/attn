@@ -19,7 +19,15 @@ test.describe('PR Actions', () => {
 
     // Wait for PRs to load - need to wait for both WS connection and PR poll
     // The daemon polls 200ms after we access daemonInfo, then broadcasts via WS
-    await page.waitForTimeout(1000); // Give time for WS connection and broadcast
+    await page.waitForTimeout(2000); // Give time for WS connection and broadcast
+
+    // Take a screenshot to see what's on the page
+    await page.screenshot({ path: 'test-results/debug-pr-list.png', fullPage: true });
+
+    // Check if any PR cards exist at all
+    const prCards = page.locator('[data-testid="pr-card"]');
+    const count = await prCards.count();
+    console.log(`Found ${count} PR cards on page`);
 
     // Wait for PR card to appear
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Test PR' });
