@@ -32,8 +32,10 @@ export function usePRActions(wsUrl = 'ws://127.0.0.1:9849/ws'): UsePRActionsResu
     };
 
     ws.onmessage = (event) => {
+      console.log('[PRActions] Received:', event.data);
       try {
         const data = JSON.parse(event.data);
+        console.log('[PRActions] Parsed:', data);
         if (data.event === 'pr_action_result') {
           const key = `${data.repo}#${data.number}:${data.action}`;
 
@@ -136,12 +138,14 @@ export function usePRActions(wsUrl = 'ws://127.0.0.1:9849/ws'): UsePRActionsResu
         }
       });
 
-      ws.send(JSON.stringify({
+      const msg = JSON.stringify({
         cmd: `${action}_pr`,
         repo,
         number,
         ...extra,
-      }));
+      });
+      console.log('[PRActions] Sending:', msg);
+      ws.send(msg);
 
       // Timeout after 30 seconds
       const timeoutId = window.setTimeout(() => {

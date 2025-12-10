@@ -1,8 +1,14 @@
 // app/src/components/PRActions.tsx
 import { useState } from 'react';
-import { usePRActions } from '../hooks/usePRActions';
+import { useDaemonContext } from '../contexts/DaemonContext';
 import { useMuteStore } from '../store/mutes';
 import './PRActions.css';
+
+interface ActionState {
+  loading: boolean;
+  success: boolean;
+  error: string | null;
+}
 
 interface PRActionsProps {
   repo: string;
@@ -13,20 +19,27 @@ interface PRActionsProps {
 }
 
 export function PRActions({ repo, number, prId, compact = false, onMuted }: PRActionsProps) {
-  const { approve, merge, getActionState } = usePRActions();
+  const { sendPRAction } = useDaemonContext();
   const { mutePR } = useMuteStore();
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
-
-  const approveState = getActionState(repo, number, 'approve');
-  const mergeState = getActionState(repo, number, 'merge');
+  const [approveState, setApproveState] = useState<ActionState>({ loading: false, success: false, error: null });
+  const [mergeState, setMergeState] = useState<ActionState>({ loading: false, success: false, error: null });
 
   const handleApprove = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    setApproveState({ loading: true, success: false, error: null });
     try {
-      await approve(repo, number);
+      const result = await sendPRAction('approve', repo, number);
+      if (result.success) {
+        setApproveState({ loading: false, success: true, error: null });
+        setTimeout(() => setApproveState({ loading: false, success: false, error: null }), 2000);
+      } else {
+        setApproveState({ loading: false, success: false, error: result.error || 'Failed' });
+      }
     } catch (err) {
       console.error('Approve failed:', err);
+      setApproveState({ loading: false, success: false, error: String(err) });
     }
   };
 
@@ -38,10 +51,18 @@ export function PRActions({ repo, number, prId, compact = false, onMuted }: PRAc
 
   const confirmMerge = async () => {
     setShowMergeConfirm(false);
+    setMergeState({ loading: true, success: false, error: null });
     try {
-      await merge(repo, number);
+      const result = await sendPRAction('merge', repo, number, 'squash');
+      if (result.success) {
+        setMergeState({ loading: false, success: true, error: null });
+        setTimeout(() => setMergeState({ loading: false, success: false, error: null }), 2000);
+      } else {
+        setMergeState({ loading: false, success: false, error: result.error || 'Failed' });
+      }
     } catch (err) {
       console.error('Merge failed:', err);
+      setMergeState({ loading: false, success: false, error: String(err) });
     }
   };
 
