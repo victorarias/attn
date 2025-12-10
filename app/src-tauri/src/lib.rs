@@ -8,6 +8,48 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+/// Check if the daemon is running by checking for the socket file
+#[tauri::command]
+fn is_daemon_running() -> bool {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return false,
+    };
+    let socket_path = home.join(".cm.sock");
+    socket_path.exists()
+}
+
+/// Start the daemon process
+#[tauri::command]
+fn start_daemon() -> Result<(), String> {
+    use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
+
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let cm_path = home.join(".local/bin/cm");
+
+    if !cm_path.exists() {
+        return Err(format!("cm binary not found at {:?}. Run 'make install' first.", cm_path));
+    }
+
+    Command::new(&cm_path)
+        .arg("daemon")
+        .spawn()
+        .map_err(|e| format!("Failed to start daemon: {}", e))?;
+
+    // Wait for socket to appear (up to 2 seconds)
+    let socket_path = home.join(".cm.sock");
+    for _ in 0..20 {
+        if socket_path.exists() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    Err("Daemon did not start within 2 seconds".to_string())
+}
+
 #[tauri::command]
 async fn list_directory(path: String) -> Result<Vec<String>, String> {
     use std::fs;
@@ -59,6 +101,8 @@ pub fn run() {
             pty_bridge::pty_resize,
             pty_bridge::pty_kill,
             list_directory,
+            is_daemon_running,
+            start_daemon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

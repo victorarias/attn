@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 
 export interface DaemonSession {
   id: string;
@@ -27,6 +27,7 @@ export interface DaemonPR {
 
 interface WebSocketEvent {
   event: string;
+  protocol_version?: string;
   session?: DaemonSession;
   sessions?: DaemonSession[];
   prs?: DaemonPR[];
@@ -37,6 +38,10 @@ interface WebSocketEvent {
   success?: boolean;
   error?: string;
 }
+
+// Protocol version - must match daemon's ProtocolVersion
+// Increment when making breaking changes to the protocol
+const PROTOCOL_VERSION = '1';
 
 interface PRActionResult {
   success: boolean;
@@ -49,15 +54,19 @@ interface UseDaemonSocketOptions {
   wsUrl?: string;
 }
 
+// Default WebSocket port, can be overridden via VITE_DAEMON_PORT env var
+const DEFAULT_WS_URL = `ws://127.0.0.1:${import.meta.env.VITE_DAEMON_PORT || '9849'}/ws`;
+
 export function useDaemonSocket({
   onSessionsUpdate,
   onPRsUpdate,
-  wsUrl = 'ws://127.0.0.1:9849/ws',
+  wsUrl = DEFAULT_WS_URL,
 }: UseDaemonSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const sessionsRef = useRef<DaemonSession[]>([]);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const pendingActionsRef = useRef<Map<string, (result: PRActionResult) => void>>(new Map());
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -66,6 +75,7 @@ export function useDaemonSocket({
 
     ws.onopen = () => {
       console.log('[Daemon] WebSocket connected');
+      setConnectionError(null);
     };
 
     ws.onmessage = (event) => {
@@ -74,6 +84,13 @@ export function useDaemonSocket({
 
         switch (data.event) {
           case 'initial_state':
+            // Check protocol version on initial connection
+            if (data.protocol_version && data.protocol_version !== PROTOCOL_VERSION) {
+              console.error(`[Daemon] Protocol version mismatch: daemon=${data.protocol_version}, client=${PROTOCOL_VERSION}`);
+              setConnectionError(`Version mismatch: Please update your cm binary (daemon v${data.protocol_version}, app v${PROTOCOL_VERSION})`);
+              ws.close();
+              return;
+            }
             if (data.sessions) {
               sessionsRef.current = data.sessions;
               onSessionsUpdate(data.sessions);
@@ -193,6 +210,7 @@ export function useDaemonSocket({
 
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
+    connectionError,
     sendPRAction,
   };
 }

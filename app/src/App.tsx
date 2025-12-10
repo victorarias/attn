@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
+import { invoke } from '@tauri-apps/api/core';
 import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -34,8 +35,25 @@ function App() {
     setPRs,
   } = useDaemonStore();
 
+  // Ensure daemon is running before connecting
+  useEffect(() => {
+    async function ensureDaemon() {
+      try {
+        const isRunning = await invoke<boolean>('is_daemon_running');
+        if (!isRunning) {
+          console.log('[App] Daemon not running, starting...');
+          await invoke('start_daemon');
+          console.log('[App] Daemon started');
+        }
+      } catch (err) {
+        console.error('[App] Failed to start daemon:', err);
+      }
+    }
+    ensureDaemon();
+  }, []);
+
   // Connect to daemon WebSocket
-  const { sendPRAction } = useDaemonSocket({
+  const { sendPRAction, connectionError } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
   });
@@ -257,6 +275,12 @@ function App() {
   return (
     <DaemonProvider sendPRAction={sendPRAction}>
     <div className="app">
+      {/* Error banner for version mismatch */}
+      {connectionError && (
+        <div className="connection-error-banner">
+          {connectionError}
+        </div>
+      )}
       {/* Dashboard - always rendered, shown/hidden via z-index */}
       <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
         <Dashboard
