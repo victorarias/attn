@@ -13,9 +13,11 @@ async fn list_directory(path: String) -> Result<Vec<String>, String> {
     use std::fs;
     use std::path::Path;
 
-    let dir_path = if path.starts_with('~') {
+    let dir_path = if let Some(suffix) = path.strip_prefix("~/") {
         let home = dirs::home_dir().ok_or("Cannot get home directory")?;
-        home.join(&path[2..]) // Skip "~/"
+        home.join(suffix)
+    } else if path == "~" {
+        dirs::home_dir().ok_or("Cannot get home directory")?
     } else {
         Path::new(&path).to_path_buf()
     };
