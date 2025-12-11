@@ -36,6 +36,12 @@
   color: #e8e8e8;
 }
 
+.home-shortcut {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #555;
+}
+
 .sidebar-title {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;

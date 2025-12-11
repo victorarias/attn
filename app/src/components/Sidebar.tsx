@@ -64,6 +64,7 @@ export function Sidebar({
         <button className="home-btn" onClick={onGoToDashboard} title="Dashboard (⌘D)">
           ⌂
         </button>
+        <span className="home-shortcut">⌘D</span>
         <span className="sidebar-title">Sessions</span>
         <button className="collapse-btn" onClick={onToggleCollapse} title="Collapse sidebar">
           «
