@@ -3,7 +3,7 @@ import './Sidebar.css';
 interface LocalSession {
   id: string;
   label: string;
-  state: 'working' | 'waiting';
+  state: 'working' | 'waiting_input' | 'idle';
 }
 
 interface SidebarProps {
@@ -43,7 +43,7 @@ export function Sidebar({
               title={`${session.label} (⌘${index + 1})`}
             >
               ▸
-              {session.state === 'waiting' && <span className="mini-badge" />}
+              {session.state === 'waiting_input' && <span className="mini-badge" />}
             </button>
           ))}
           <button className="icon-btn" onClick={onNewSession} title="New Session (⌘N)">
@@ -81,7 +81,7 @@ export function Sidebar({
             className={`session-item ${selectedId === session.id ? 'selected' : ''}`}
             onClick={() => onSelectSession(session.id)}
           >
-            <span className={`state-indicator ${session.state}`} />
+            <span className={`state-indicator ${session.state.replace('_', '-')}`} />
             <span className="session-label">{session.label}</span>
             <span className="session-shortcut">⌘{index + 1}</span>
             <button

@@ -6,7 +6,7 @@ import { Terminal } from '@xterm/xterm';
 export interface Session {
   id: string;
   label: string;
-  state: 'working' | 'waiting';
+  state: 'working' | 'waiting_input' | 'idle';
   terminal: Terminal | null;
   cwd: string;
 }
