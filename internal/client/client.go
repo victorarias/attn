@@ -54,13 +54,12 @@ func (c *Client) send(msg interface{}) (*protocol.Response, error) {
 }
 
 // Register registers a new session
-func (c *Client) Register(id, label, dir, tmux string) error {
+func (c *Client) Register(id, label, dir string) error {
 	msg := protocol.RegisterMessage{
 		Cmd:   protocol.CmdRegister,
 		ID:    id,
 		Label: label,
 		Dir:   dir,
-		Tmux:  tmux,
 	}
 	_, err := c.send(msg)
 	return err
@@ -82,6 +81,17 @@ func (c *Client) UpdateState(id, state string) error {
 		Cmd:   protocol.CmdState,
 		ID:    id,
 		State: state,
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// SendStop sends a stop signal with transcript path for classification
+func (c *Client) SendStop(id, transcriptPath string) error {
+	msg := protocol.StopMessage{
+		Cmd:            protocol.CmdStop,
+		ID:             id,
+		TranscriptPath: transcriptPath,
 	}
 	_, err := c.send(msg)
 	return err

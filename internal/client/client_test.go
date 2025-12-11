@@ -52,7 +52,7 @@ func TestClient_Register(t *testing.T) {
 
 	// Test client
 	c := New(sockPath)
-	err = c.Register("sess-123", "test-session", "/tmp", "main:1.%0")
+	err = c.Register("sess-123", "test-session", "/tmp")
 	if err != nil {
 		t.Fatalf("Register error: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestClient_Query(t *testing.T) {
 
 func TestClient_NotRunning(t *testing.T) {
 	c := New("/nonexistent/socket.sock")
-	err := c.Register("id", "label", "/tmp", "main:1.%0")
+	err := c.Register("id", "label", "/tmp")
 	if err == nil {
 		t.Error("expected error when daemon not running")
 	}

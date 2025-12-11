@@ -16,7 +16,6 @@ func TestStore_AddAndGet(t *testing.T) {
 		ID:         "abc123",
 		Label:      "drumstick",
 		Directory:  "/home/user/project",
-		TmuxTarget: "main:1.%42",
 		State:      protocol.StateWorking,
 		StateSince: time.Now(),
 		LastSeen:   time.Now(),
