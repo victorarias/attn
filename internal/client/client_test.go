@@ -148,14 +148,14 @@ func TestClient_NotRunning(t *testing.T) {
 
 func TestClient_SocketPath(t *testing.T) {
 	// Set binary name for test
-	config.SetBinaryName("cm")
+	config.SetBinaryName("attn")
 
 	// Test default socket path
 	os.Setenv("HOME", "/home/testuser")
 	defer os.Unsetenv("HOME")
 
 	path := DefaultSocketPath()
-	expected := "/home/testuser/.cm.sock"
+	expected := "/home/testuser/.attn.sock"
 	if path != expected {
 		t.Errorf("DefaultSocketPath() = %q, want %q", path, expected)
 	}

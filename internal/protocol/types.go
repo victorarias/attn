@@ -27,6 +27,7 @@ const (
 	CmdQueryRepos      = "query_repos"
 	CmdFetchPRDetails  = "fetch_pr_details"
 	CmdRefreshPRs      = "refresh_prs"
+	CmdClearSessions   = "clear_sessions"
 	MsgApprovePR       = "approve_pr"
 	MsgMergePR         = "merge_pr"
 	MsgInjectTestPR    = "inject_test_pr"
@@ -38,6 +39,7 @@ const (
 	EventSessionUnregistered = "session_unregistered"
 	EventSessionStateChanged = "session_state_changed"
 	EventSessionTodosUpdated = "session_todos_updated"
+	EventSessionsUpdated     = "sessions_updated"
 	EventPRsUpdated          = "prs_updated"
 	EventReposUpdated        = "repos_updated"
 	EventInitialState        = "initial_state"
@@ -148,6 +150,11 @@ type FetchPRDetailsMessage struct {
 
 // RefreshPRsMessage requests daemon to refresh all PRs from GitHub
 type RefreshPRsMessage struct {
+	Cmd string `json:"cmd"`
+}
+
+// ClearSessionsMessage requests daemon to clear all tracked sessions
+type ClearSessionsMessage struct {
 	Cmd string `json:"cmd"`
 }
 
@@ -374,6 +381,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdRefreshPRs:
 		var msg RefreshPRsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdClearSessions:
+		var msg ClearSessionsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

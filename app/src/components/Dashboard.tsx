@@ -1,6 +1,6 @@
 // app/src/components/Dashboard.tsx
 import { useState, useMemo, useCallback } from 'react';
-import { DaemonSession, DaemonPR } from '../hooks/useDaemonSocket';
+import { DaemonPR } from '../hooks/useDaemonSocket';
 import { PRActions } from './PRActions';
 import { SettingsModal } from './SettingsModal';
 import { useDaemonContext } from '../contexts/DaemonContext';
@@ -14,7 +14,6 @@ interface DashboardProps {
     state: 'working' | 'waiting';
     cwd: string;
   }>;
-  daemonSessions: DaemonSession[];
   prs: DaemonPR[];
   isLoading: boolean;
   isRefreshing?: boolean;
@@ -26,7 +25,6 @@ interface DashboardProps {
 
 export function Dashboard({
   sessions,
-  daemonSessions: _daemonSessions,
   prs,
   isLoading,
   isRefreshing,

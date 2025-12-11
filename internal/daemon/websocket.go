@@ -245,6 +245,15 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			}
 			d.sendToClient(client, result)
 		}()
+
+	case protocol.CmdClearSessions:
+		d.logf("Clearing all sessions")
+		d.store.ClearSessions()
+		// Broadcast empty sessions list to all clients
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:    protocol.EventSessionsUpdated,
+			Sessions: d.store.List(""),
+		})
 	}
 }
 

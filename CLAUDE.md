@@ -5,37 +5,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 
 ```bash
-make build          # Build binary to ./cm
-make install        # Build and install to ~/.local/bin/cm
-make build-attn     # Build experimental binary to ./attn
-make install-attn   # Build and install to ~/.local/bin/attn
+make build          # Build binary to ./attn
+make install        # Build and install to ~/.local/bin/attn (kills daemon)
 make test           # Run all tests
 go test ./...       # Run all tests (alternative)
 go test ./internal/store -run TestList  # Run single test
 ```
 
-**Rule:** Always use `make install` after any code change, not just `make build`. The user runs `cm` from PATH.
+**Rule:** Always use `make install` after any code change. The daemon is auto-killed and restarted by the app.
 
 ## Debugging
 
 Set `DEBUG=debug` or `DEBUG=trace` for verbose logging:
 ```bash
-DEBUG=debug cm -s test
+DEBUG=debug attn -s test
 ```
 
-**Daemon logs:** `~/.cm/daemon.log` (path derived from binary name, e.g., `~/.attn/daemon.log` for attn)
+**Daemon logs:** `~/.attn/daemon.log`
 
 ## Architecture
 
-Claude Manager (`cm`) tracks multiple Claude Code sessions and surfaces which ones need attention via tmux status bar or an interactive dashboard.
+Attention Manager (`attn`) tracks multiple Claude Code sessions and surfaces which ones need attention via an interactive dashboard.
 
 ### Core Flow
 
-1. **Wrapper** (`cmd/cm/main.go`): CLI entry point that wraps `claude` command. Parses cm-specific flags (`-s`, `-y`, `-d`), passes unknown flags through to claude. Registers session with daemon, writes temporary hooks config, executes claude with `--settings` pointing to hooks.
+1. **Wrapper** (`cmd/cm/main.go`): CLI entry point that wraps `claude` command. Parses attn-specific flags (`-s`, `-y`, `-d`), passes unknown flags through to claude. Registers session with daemon, writes temporary hooks config, executes claude with `--settings` pointing to hooks.
 
 2. **Hooks** (`internal/hooks`): Generates Claude Code hooks JSON that reports state changes back to daemon via unix socket using `nc`. Three hooks: Stop (waiting), UserPromptSubmit (working), PostToolUse/TodoWrite (update todos).
 
-3. **Daemon** (`internal/daemon`): Background process listening on `~/.{binary}.sock` (e.g., `~/.cm.sock`). Handles register/unregister/state/todos/query/heartbeat commands. Auto-started by wrapper if not running.
+3. **Daemon** (`internal/daemon`): Background process listening on `~/.attn.sock`. Handles register/unregister/state/todos/query/heartbeat commands. Auto-started by app if not running.
 
 4. **Store** (`internal/store`): Thread-safe in-memory session storage with mutex protection.
 
@@ -59,15 +57,14 @@ The app checks protocol version on WebSocket connect and shows an error banner i
 
 **After protocol changes:**
 1. Increment `ProtocolVersion` in `internal/protocol/types.go`
-2. Run `make install` to install new binary
-3. Kill the running daemon: `pkill -f "cm daemon"` (or restart the app)
-4. The app will auto-start a new daemon with updated code
+2. Run `make install` (kills daemon automatically)
+3. The app will auto-start a new daemon with updated code
 
 **Why:** The daemon runs as a background process and survives `make install`. Without version checking, old daemon + new app = mysterious failures with no logs.
 
 ### Communication
 
-All IPC uses JSON over unix socket at `~/.{binary}.sock` (paths derived from binary name via `internal/config`). Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates.
+All IPC uses JSON over unix socket at `~/.attn.sock`. Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates.
 
 ### Async WebSocket Pattern (REQUIRED for any async operation)
 
@@ -111,7 +108,7 @@ pnpm run dev:all    # Starts both pty-server and tauri dev
 ```
 
 This runs two processes concurrently:
-- **pty-server**: Node.js sidecar using node-pty over Unix socket (`~/.cm-pty.sock`)
+- **pty-server**: Node.js sidecar using node-pty over Unix socket (`~/.attn-pty.sock`)
 - **tauri dev**: Vite + Tauri development server
 
 ### PTY Architecture

@@ -15,7 +15,7 @@ fn is_daemon_running() -> bool {
         Some(h) => h,
         None => return false,
     };
-    let socket_path = home.join(".cm.sock");
+    let socket_path = home.join(".attn.sock");
     socket_path.exists()
 }
 
@@ -27,19 +27,19 @@ fn start_daemon() -> Result<(), String> {
     use std::time::Duration;
 
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let cm_path = home.join(".local/bin/cm");
+    let bin_path = home.join(".local/bin/attn");
 
-    if !cm_path.exists() {
-        return Err(format!("cm binary not found at {:?}. Run 'make install' first.", cm_path));
+    if !bin_path.exists() {
+        return Err(format!("attn binary not found at {:?}. Run 'make install' first.", bin_path));
     }
 
-    Command::new(&cm_path)
+    Command::new(&bin_path)
         .arg("daemon")
         .spawn()
         .map_err(|e| format!("Failed to start daemon: {}", e))?;
 
     // Wait for socket to appear (up to 2 seconds)
-    let socket_path = home.join(".cm.sock");
+    let socket_path = home.join(".attn.sock");
     for _ in 0..20 {
         if socket_path.exists() {
             return Ok(());
