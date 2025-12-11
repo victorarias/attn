@@ -10,11 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/victorarias/claude-manager/internal/client"
 	"github.com/victorarias/claude-manager/internal/config"
 	"github.com/victorarias/claude-manager/internal/daemon"
-	"github.com/victorarias/claude-manager/internal/dashboard"
 	"github.com/victorarias/claude-manager/internal/status"
 	"github.com/victorarias/claude-manager/internal/wrapper"
 )
@@ -51,7 +49,7 @@ func logError(format string, args ...interface{}) {
 
 // parseArgs extracts cm-specific flags and returns remaining args for claude.
 // This allows unknown flags (like -c, -r) to pass through to claude.
-func parseArgs(args []string) (label string, yolo bool, dashboard bool, remaining []string) {
+func parseArgs(args []string) (label string, yolo bool, remaining []string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-s":
@@ -61,8 +59,6 @@ func parseArgs(args []string) (label string, yolo bool, dashboard bool, remainin
 			}
 		case "-y":
 			yolo = true
-		case "-d":
-			dashboard = true
 		case "-h", "--help":
 			printHelp()
 			os.Exit(0)
@@ -78,22 +74,13 @@ func main() {
 	logTrace("environment DEBUG=%s", os.Getenv("DEBUG"))
 
 	// Parse cm-specific flags manually to allow unknown flags to pass through to claude
-	label, yolo, dashboardFlag, args := parseArgs(os.Args[1:])
-	logDebug("parsed flags: label=%q, yolo=%v, dashboard=%v", label, yolo, dashboardFlag)
+	label, yolo, args := parseArgs(os.Args[1:])
+	logDebug("parsed flags: label=%q, yolo=%v", label, yolo)
 	logDebug("remaining args: %v", args)
-
-	// Handle -d flag
-	if dashboardFlag {
-		runDashboard()
-		return
-	}
 
 	// Check for subcommands
 	if len(args) > 0 {
 		switch args[0] {
-		case "dashboard":
-			runDashboard()
-			return
 		case "daemon":
 			runDaemon()
 			return
@@ -138,8 +125,6 @@ Usage:
   %s -s <label>         Start Claude with explicit label
   %s -y                 Yolo mode (skip permissions)
   %s -s <label> -y      Combine flags (order doesn't matter)
-  %s -d                 Open dashboard
-  %s dashboard          Open dashboard (alias)
   %s daemon             Run daemon in foreground
   %s restart            Restart the daemon
   %s status             Output for tmux status bar
@@ -151,7 +136,7 @@ Claude flags (-c, -r, etc.) are passed through automatically.
 Environment:
   DEBUG=debug    Enable debug logging
   DEBUG=trace    Enable trace logging (verbose)
-`, name, name, name, name, name, name, name, name, name, name, name, name)
+`, name, name, name, name, name, name, name, name, name, name)
 }
 
 func runWrapperWithFlags(label string, yolo bool, claudeArgs []string) {
@@ -353,17 +338,6 @@ func runRestart() {
 	// Start new daemon in background
 	startDaemonBackground()
 	fmt.Println("Started new daemon")
-}
-
-func runDashboard() {
-	c := client.New("")
-	m := dashboard.NewModel(c)
-
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
-		os.Exit(1)
-	}
 }
 
 func runStatus() {
