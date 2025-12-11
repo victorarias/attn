@@ -103,12 +103,16 @@
   flex-shrink: 0;
 }
 
-.state-indicator.waiting {
-  background: #ff6b35;
+.state-indicator.waiting_input {
+  background: #f59e0b;
 }
 
 .state-indicator.working {
   background: #22c55e;
+}
+
+.state-indicator.idle {
+  background: #6b7280;
 }
 
 .session-label {
@@ -222,7 +226,7 @@
   margin-top: auto;
 }
 
-/* Mini badge for waiting state */
+/* Mini badge for waiting_input state */
 .mini-badge {
   position: absolute;
   top: 4px;
@@ -230,5 +234,5 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #ff6b35;
+  background: #f59e0b;
 }
