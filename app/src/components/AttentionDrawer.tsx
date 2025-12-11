@@ -58,9 +58,11 @@ export function AttentionDrawer({
               <div
                 key={s.id}
                 className="attention-item clickable"
+                data-testid={`attention-session-${s.id}`}
+                data-state={s.state}
                 onClick={() => onSelectSession(s.id)}
               >
-                <span className={`item-dot session ${s.state.replace('_', '-')}`} />
+                <span className={`item-dot session ${s.state.replace('_', '-')}`} data-testid="state-indicator" />
                 <span className="item-name">{s.label}</span>
               </div>
             ))}

@@ -28,6 +28,21 @@ interface SessionStore {
 let sessionCounter = 0;
 const pendingConnections = new Set<string>();
 
+// Test helper for E2E - allows injecting sessions without PTY
+interface TestSession {
+  id: string;
+  label: string;
+  state: 'working' | 'waiting_input' | 'idle';
+  cwd: string;
+}
+
+declare global {
+  interface Window {
+    __TEST_INJECT_SESSION?: (session: TestSession) => void;
+    __TEST_UPDATE_SESSION_STATE?: (id: string, state: 'working' | 'waiting_input' | 'idle') => void;
+  }
+}
+
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -167,3 +182,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     invoke('pty_resize', { id, cols, rows }).catch(console.error);
   },
 }));
+
+// Expose test helpers for E2E testing (only in development)
+if (import.meta.env.DEV) {
+  window.__TEST_INJECT_SESSION = (session: TestSession) => {
+    useSessionStore.setState((state) => ({
+      sessions: [...state.sessions, { ...session, terminal: null }],
+    }));
+  };
+
+  window.__TEST_UPDATE_SESSION_STATE = (id: string, state: 'working' | 'waiting_input' | 'idle') => {
+    useSessionStore.setState((s) => ({
+      sessions: s.sessions.map((session) =>
+        session.id === id ? { ...session, state } : session
+      ),
+    }));
+  };
+}

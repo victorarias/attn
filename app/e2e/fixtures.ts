@@ -103,12 +103,12 @@ const TEST_DAEMON_PORT = '19849';
 
 // Daemon launcher
 async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketPath: string; stop: () => void }> {
-  const socketPath = path.join(os.homedir(), '.cm.sock');
-  const cmPath = path.join(os.homedir(), '.local', 'bin', 'cm');
+  const socketPath = path.join(os.homedir(), '.attn.sock');
+  const attnPath = path.join(os.homedir(), '.local', 'bin', 'attn');
 
-  // Verify cm binary exists
-  if (!fs.existsSync(cmPath)) {
-    throw new Error(`cm binary not found at ${cmPath}. Run 'make install' first.`);
+  // Verify attn binary exists
+  if (!fs.existsSync(attnPath)) {
+    throw new Error(`attn binary not found at ${attnPath}. Run 'make install' first.`);
   }
 
   // Clean up any existing socket
@@ -120,7 +120,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
     }
   }
 
-  const proc = spawn(cmPath, ['daemon'], {
+  const proc = spawn(attnPath, ['daemon'], {
     env: {
       ...process.env,
       CM_WS_PORT: TEST_DAEMON_PORT, // Use test port to avoid conflicts with production daemon
@@ -176,10 +176,65 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
   };
 }
 
+// Session injection helper
+async function injectTestSession(
+  socketPath: string,
+  session: { id: string; label: string; state: string; directory?: string }
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const client = net.createConnection(socketPath, () => {
+      const msg = {
+        cmd: 'inject_test_session',
+        session: {
+          id: session.id,
+          label: session.label,
+          directory: session.directory || '/tmp/test',
+          state: session.state,
+          state_since: new Date().toISOString(),
+          last_seen: new Date().toISOString(),
+          todos: null,
+          muted: false,
+        },
+      };
+      client.write(JSON.stringify(msg));
+    });
+    client.on('data', () => {
+      client.end();
+      resolve();
+    });
+    client.on('error', reject);
+  });
+}
+
+// Session state update helper
+async function updateSessionState(
+  socketPath: string,
+  id: string,
+  state: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const client = net.createConnection(socketPath, () => {
+      client.write(JSON.stringify({ cmd: 'state', id, state }));
+    });
+    client.on('data', () => {
+      client.end();
+      resolve();
+    });
+    client.on('error', reject);
+  });
+}
+
 // Export fixtures
+type DaemonFixture = {
+  start: () => Promise<{ wsUrl: string; socketPath: string }>;
+  injectSession: (s: { id: string; label: string; state: string; directory?: string }) => Promise<void>;
+  updateSessionState: (id: string, state: string) => Promise<void>;
+};
+
 type Fixtures = {
   mockGitHub: MockGitHubServer;
   startDaemonWithPRs: () => Promise<{ wsUrl: string; socketPath: string }>;
+  daemon: DaemonFixture;
 };
 
 export const test = base.extend<Fixtures>({
@@ -200,7 +255,7 @@ export const test = base.extend<Fixtures>({
       // Kill any existing daemons to avoid interference
       try {
         await new Promise<void>((resolve) => {
-          spawn('pkill', ['-f', 'cm daemon'], { stdio: 'ignore' }).on('close', () => resolve());
+          spawn('pkill', ['-f', 'attn daemon'], { stdio: 'ignore' }).on('close', () => resolve());
         });
         await new Promise(resolve => setTimeout(resolve, 500)); // Wait for cleanup
       } catch (err) {
@@ -219,6 +274,47 @@ export const test = base.extend<Fixtures>({
     // Cleanup after test
     if (daemon) {
       daemon.stop();
+    }
+  },
+
+  // Session testing fixture with injection helpers
+  daemon: async ({ mockGitHub }, use) => {
+    let daemonInstance: { proc: ChildProcess; socketPath: string; stop: () => void } | null = null;
+    let socketPath = '';
+
+    const fixture: DaemonFixture = {
+      start: async () => {
+        // Kill any existing daemons
+        try {
+          await new Promise<void>((resolve) => {
+            spawn('pkill', ['-f', 'attn daemon'], { stdio: 'ignore' }).on('close', () => resolve());
+          });
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch {
+          // Ignore
+        }
+
+        daemonInstance = await startDaemon(mockGitHub.url);
+        socketPath = daemonInstance.socketPath;
+        return {
+          wsUrl: `ws://127.0.0.1:${TEST_DAEMON_PORT}/ws`,
+          socketPath,
+        };
+      },
+      injectSession: async (s) => {
+        if (!socketPath) throw new Error('Daemon not started');
+        await injectTestSession(socketPath, s);
+      },
+      updateSessionState: async (id, state) => {
+        if (!socketPath) throw new Error('Daemon not started');
+        await updateSessionState(socketPath, id, state);
+      },
+    };
+
+    await use(fixture);
+
+    if (daemonInstance) {
+      daemonInstance.stop();
     }
   },
 });

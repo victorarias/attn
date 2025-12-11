@@ -29,9 +29,10 @@ const (
 	CmdFetchPRDetails  = "fetch_pr_details"
 	CmdRefreshPRs      = "refresh_prs"
 	CmdClearSessions   = "clear_sessions"
-	MsgApprovePR       = "approve_pr"
-	MsgMergePR         = "merge_pr"
-	MsgInjectTestPR    = "inject_test_pr"
+	MsgApprovePR          = "approve_pr"
+	MsgMergePR            = "merge_pr"
+	MsgInjectTestPR       = "inject_test_pr"
+	MsgInjectTestSession  = "inject_test_session"
 )
 
 // WebSocket Events (daemon -> client)
@@ -186,6 +187,12 @@ type MergePRMessage struct {
 type InjectTestPRMessage struct {
 	Cmd string `json:"cmd"`
 	PR  *PR    `json:"pr"`
+}
+
+// InjectTestSessionMessage injects a test session into the daemon (for E2E tests)
+type InjectTestSessionMessage struct {
+	Cmd     string   `json:"cmd"`
+	Session *Session `json:"session"`
 }
 
 // PRActionResultMessage is sent back to client after PR action completes
@@ -424,6 +431,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case MsgInjectTestPR:
 		var msg InjectTestPRMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case MsgInjectTestSession:
+		var msg InjectTestSessionMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

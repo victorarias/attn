@@ -113,45 +113,51 @@ export function Dashboard({
             ) : (
               <>
                 {waitingSessions.length > 0 && (
-                  <div className="session-group">
+                  <div className="session-group" data-testid="session-group-waiting">
                     <div className="group-label">Waiting for input</div>
                     {waitingSessions.map((s) => (
                       <div
                         key={s.id}
                         className="session-row clickable"
+                        data-testid={`session-${s.id}`}
+                        data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
-                        <span className="state-dot waiting-input" />
+                        <span className="state-dot waiting-input" data-testid="state-indicator" />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}
                   </div>
                 )}
                 {workingSessions.length > 0 && (
-                  <div className="session-group">
+                  <div className="session-group" data-testid="session-group-working">
                     <div className="group-label">Working</div>
                     {workingSessions.map((s) => (
                       <div
                         key={s.id}
                         className="session-row clickable"
+                        data-testid={`session-${s.id}`}
+                        data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
-                        <span className="state-dot working" />
+                        <span className="state-dot working" data-testid="state-indicator" />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}
                   </div>
                 )}
                 {idleSessions.length > 0 && (
-                  <div className="session-group">
+                  <div className="session-group" data-testid="session-group-idle">
                     <div className="group-label">Idle</div>
                     {idleSessions.map((s) => (
                       <div
                         key={s.id}
                         className="session-row clickable"
+                        data-testid={`session-${s.id}`}
+                        data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
-                        <span className="state-dot idle" />
+                        <span className="state-dot idle" data-testid="state-indicator" />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}
