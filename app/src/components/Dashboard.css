@@ -114,6 +114,50 @@
   border-radius: 10px;
 }
 
+.card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.refresh-btn {
+  background: transparent;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 150ms;
+}
+
+.refresh-btn:hover {
+  background: #1a1a1d;
+  color: #e8e8e8;
+}
+
+.refresh-btn:active {
+  transform: rotate(-30deg);
+}
+
+.refresh-indicator {
+  color: #ff6b35;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .card-body {
   padding: 12px;
   overflow-y: auto;
