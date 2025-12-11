@@ -30,7 +30,7 @@ func TestDaemon_RegisterAndQuery(t *testing.T) {
 	c := client.New(sockPath)
 
 	// Register a session
-	err := c.Register("sess-1", "drumstick", "/home/user/project", "main:1.%42")
+	err := c.Register("sess-1", "drumstick", "/home/user/project")
 	if err != nil {
 		t.Fatalf("Register error: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestDaemon_StateUpdate(t *testing.T) {
 	c := client.New(sockPath)
 
 	// Register
-	c.Register("sess-1", "test", "/tmp", "main:1.%0")
+	c.Register("sess-1", "test", "/tmp")
 
 	// Update state
 	err := c.UpdateState("sess-1", protocol.StateWaiting)
@@ -91,7 +91,7 @@ func TestDaemon_Unregister(t *testing.T) {
 
 	c := client.New(sockPath)
 
-	c.Register("sess-1", "test", "/tmp", "main:1.%0")
+	c.Register("sess-1", "test", "/tmp")
 	c.Unregister("sess-1")
 
 	sessions, _ := c.Query("")
@@ -113,9 +113,9 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 	c := client.New(sockPath)
 
 	// Register multiple sessions (all start as waiting)
-	c.Register("1", "one", "/tmp/1", "main:1.%0")
-	c.Register("2", "two", "/tmp/2", "main:2.%1")
-	c.Register("3", "three", "/tmp/3", "main:3.%2")
+	c.Register("1", "one", "/tmp/1")
+	c.Register("2", "two", "/tmp/2")
+	c.Register("3", "three", "/tmp/3")
 
 	// Update one to working
 	c.UpdateState("2", protocol.StateWorking)
@@ -149,7 +149,7 @@ func TestDaemon_SocketCleanup(t *testing.T) {
 
 	// Should still work (stale socket removed)
 	c := client.New(sockPath)
-	err := c.Register("1", "test", "/tmp", "main:1.%0")
+	err := c.Register("1", "test", "/tmp")
 	if err != nil {
 		t.Fatalf("Register error after stale socket cleanup: %v", err)
 	}

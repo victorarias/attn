@@ -10,10 +10,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/victorarias/claude-manager/internal/classifier"
 	"github.com/victorarias/claude-manager/internal/github"
 	"github.com/victorarias/claude-manager/internal/logging"
 	"github.com/victorarias/claude-manager/internal/protocol"
 	"github.com/victorarias/claude-manager/internal/store"
+	"github.com/victorarias/claude-manager/internal/transcript"
 )
 
 // Daemon manages Claude sessions
@@ -193,6 +195,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:
 		d.handleState(conn, msg.(*protocol.StateMessage))
+	case protocol.CmdStop:
+		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos:
 		d.handleTodos(conn, msg.(*protocol.TodosMessage))
 	case protocol.CmdQuery:
@@ -225,7 +229,6 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		ID:         msg.ID,
 		Label:      msg.Label,
 		Directory:  msg.Dir,
-		TmuxTarget: msg.Tmux,
 		State:      protocol.StateWaiting,
 		StateSince: time.Now(),
 		LastSeen:   time.Now(),
@@ -278,6 +281,64 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 			})
 			break
 		}
+	}
+}
+
+func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
+	d.store.Touch(msg.ID)
+	d.sendOK(conn)
+
+	// Async classification
+	go d.classifySessionState(msg.ID, msg.TranscriptPath)
+}
+
+func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
+	session := d.store.Get(sessionID)
+	if session == nil {
+		return
+	}
+
+	// Check pending todos first (fast path)
+	if len(session.Todos) > 0 {
+		d.updateAndBroadcastState(sessionID, protocol.StateWaitingInput)
+		return
+	}
+
+	// Parse transcript for last assistant message
+	lastMessage, err := transcript.ExtractLastAssistantMessage(transcriptPath, 500)
+	if err != nil {
+		d.logf("transcript parse error for %s: %v", sessionID, err)
+		// Default to waiting_input on error (safer)
+		d.updateAndBroadcastState(sessionID, protocol.StateWaitingInput)
+		return
+	}
+
+	if lastMessage == "" {
+		d.updateAndBroadcastState(sessionID, protocol.StateIdle)
+		return
+	}
+
+	// Classify with LLM
+	state, err := classifier.Classify(lastMessage, 30*time.Second)
+	if err != nil {
+		d.logf("classifier error for %s: %v", sessionID, err)
+		// Default to waiting_input on error
+		state = protocol.StateWaitingInput
+	}
+
+	d.updateAndBroadcastState(sessionID, state)
+}
+
+func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
+	d.store.UpdateState(sessionID, state)
+
+	// Broadcast to WebSocket clients
+	session := d.store.Get(sessionID)
+	if session != nil {
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:   protocol.EventSessionStateChanged,
+			Session: session,
+		})
 	}
 }
 
