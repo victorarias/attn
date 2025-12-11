@@ -4,8 +4,7 @@ export interface DaemonSession {
   id: string;
   label: string;
   directory: string;
-  tmux_target: string;
-  state: 'working' | 'waiting';
+  state: 'working' | 'waiting_input' | 'idle';
   state_since: string;
   todos: string[] | null;
   last_seen: string;
@@ -48,7 +47,7 @@ interface WebSocketEvent {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '1';
+const PROTOCOL_VERSION = '2';
 
 interface PRActionResult {
   success: boolean;
