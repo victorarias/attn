@@ -8,9 +8,111 @@
 
 **Tech Stack:** Go (daemon), TypeScript/React (frontend), Claude CLI (classification)
 
+**Color Scheme:**
+- 🟡 Yellow = `waiting_input` (needs user response)
+- 🟢 Green = `working` (Claude is active)
+- ⚪ Grey = `idle` (finished, nothing to do)
+
 ---
 
-## Task 1: Update Protocol Types
+## Task 1: Remove TUI Dashboard
+
+**Files:**
+- Delete: `internal/dashboard/model.go`
+- Delete: `internal/dashboard/model_test.go`
+- Modify: `cmd/cm/main.go`
+
+**Step 1: Delete the dashboard package**
+
+```bash
+rm -rf internal/dashboard/
+```
+
+**Step 2: Remove dashboard imports and code from main.go**
+
+Remove the import:
+```go
+// Remove this line:
+"github.com/victorarias/claude-manager/internal/dashboard"
+```
+
+Remove the bubbletea import:
+```go
+// Remove this line:
+tea "github.com/charmbracelet/bubbletea"
+```
+
+**Step 3: Remove `-d` flag handling from parseArgs**
+
+In `parseArgs`, remove the dashboard case:
+```go
+// Remove:
+case "-d":
+    dashboard = true
+```
+
+Update function signature:
+```go
+func parseArgs(args []string) (label string, yolo bool, remaining []string) {
+```
+
+**Step 4: Remove dashboard subcommand from main()**
+
+Remove:
+```go
+// Remove this block:
+if dashboardFlag {
+    runDashboard()
+    return
+}
+
+// And this case:
+case "dashboard":
+    runDashboard()
+    return
+```
+
+**Step 5: Remove runDashboard function**
+
+Delete the entire `runDashboard()` function.
+
+**Step 6: Update printHelp to remove dashboard references**
+
+Remove these lines from the help text:
+```go
+%s -d                 Open dashboard
+%s dashboard          Open dashboard (alias)
+```
+
+**Step 7: Update runWrapperWithFlags call**
+
+```go
+// Change from:
+label, yolo, dashboardFlag, args := parseArgs(os.Args[1:])
+
+// To:
+label, yolo, args := parseArgs(os.Args[1:])
+```
+
+**Step 8: Run build to verify**
+
+```bash
+go build ./cmd/cm
+```
+
+**Step 9: Commit**
+
+```bash
+git add -A
+git commit -m "refactor: remove TUI dashboard
+
+The Tauri app replaces the terminal-based dashboard.
+Removes internal/dashboard package and related CLI flags."
+```
+
+---
+
+## Task 2: Update Protocol Types
 
 **Files:**
 - Modify: `internal/protocol/types.go`
@@ -112,7 +214,7 @@ git commit -m "feat(protocol): add three-state model and stop command
 
 ---
 
-## Task 2: Update Hooks to Send Stop Command
+## Task 3: Update Hooks to Send Stop Command
 
 **Files:**
 - Modify: `internal/hooks/hooks.go`
@@ -185,7 +287,7 @@ from stdin and sends stop command to daemon for async classification."
 
 ---
 
-## Task 3: Add Hook-Stop Command
+## Task 4: Add Hook-Stop Command
 
 **Files:**
 - Create: `cmd/cm/hook_stop.go`
@@ -279,7 +381,7 @@ stop command to daemon for async state classification."
 
 ---
 
-## Task 4: Add Transcript Parser
+## Task 5: Add Transcript Parser
 
 **Files:**
 - Create: `internal/transcript/parser.go`
@@ -448,7 +550,7 @@ of the most recent assistant message for state classification."
 
 ---
 
-## Task 5: Add LLM Classifier
+## Task 6: Add LLM Classifier
 
 **Files:**
 - Create: `internal/classifier/classifier.go`
@@ -649,7 +751,7 @@ or idle. Includes prompt building and response parsing."
 
 ---
 
-## Task 6: Add Stop Handler to Daemon
+## Task 7: Add Stop Handler to Daemon
 
 **Files:**
 - Modify: `internal/daemon/daemon.go`
@@ -778,7 +880,7 @@ When Stop hook fires, daemon asynchronously:
 
 ---
 
-## Task 7: Update Client Register (Remove Tmux)
+## Task 8: Update Client Register (Remove Tmux)
 
 **Files:**
 - Modify: `internal/client/client.go`
@@ -818,7 +920,7 @@ git commit -m "refactor(client): remove tmux parameter from Register"
 
 ---
 
-## Task 8: Update Daemon Tests
+## Task 9: Update Daemon Tests
 
 **Files:**
 - Modify: `internal/daemon/daemon_test.go`
@@ -895,7 +997,7 @@ git commit -m "test(daemon): update tests for three-state model
 
 ---
 
-## Task 9: Update Frontend Types
+## Task 10: Update Frontend Types
 
 **Files:**
 - Modify: `app/src/hooks/useDaemonSocket.ts`
@@ -935,7 +1037,7 @@ git commit -m "feat(app): update session types for three-state model
 
 ---
 
-## Task 10: Update AttentionDrawer Component
+## Task 11: Update AttentionDrawer Component
 
 **Files:**
 - Modify: `app/src/components/AttentionDrawer.tsx`
@@ -961,15 +1063,24 @@ interface AttentionDrawerProps {
 
 The parent component should filter to only show `waiting_input` sessions in the attention drawer. Update the filtering logic where `AttentionDrawer` is used.
 
-**Step 3: Update CSS for visual distinction (if showing both)**
+**Step 3: Update CSS for visual distinction**
+
+Note: The AttentionDrawer only shows waiting_input sessions. The main sidebar/home list shows all sessions with these colors:
 
 ```css
+/* Yellow for waiting_input - needs user response */
 .item-dot.session.waiting-input {
-  background: #f59e0b; /* amber for waiting */
+  background: #f59e0b;
 }
 
+/* Green for working - Claude is active */
+.item-dot.session.working {
+  background: #22c55e;
+}
+
+/* Grey for idle - finished, nothing to do */
 .item-dot.session.idle {
-  background: #22c55e; /* green for done */
+  background: #6b7280;
 }
 ```
 
@@ -985,36 +1096,44 @@ Idle sessions show green indicator."
 
 ---
 
-## Task 11: Update Dashboard Session Filtering
+## Task 12: Update Sidebar Session Colors
 
 **Files:**
 - Modify: `app/src/components/Dashboard.tsx`
+- Modify: `app/src/components/Sidebar.tsx` (if exists)
 
-**Step 1: Read the current Dashboard implementation**
-
-Look for where `waitingSessions` is computed and update the filter:
+**Step 1: Update waitingSessions filter for attention drawer**
 
 ```typescript
 const waitingSessions = sessions.filter(s => s.state === 'waiting_input' && !s.muted);
 ```
 
-**Step 2: Update any other state references**
+**Step 2: Update session list rendering to use correct colors**
 
-Search for `'waiting'` and replace with appropriate new states.
+For each session in the sidebar/home list, apply the correct class based on state:
+- `waiting_input` → yellow dot
+- `working` → green dot
+- `idle` → grey dot
 
-**Step 3: Commit**
+**Step 3: Search and replace old state references**
+
+Search for `'waiting'` and replace with `'waiting_input'` where appropriate.
+
+**Step 4: Commit**
 
 ```bash
-git add app/src/components/Dashboard.tsx
-git commit -m "feat(app): filter attention drawer to waiting_input only
+git add app/src/components/Dashboard.tsx app/src/components/Sidebar.tsx
+git commit -m "feat(app): update session colors for three-state model
 
-Only sessions actively waiting for input appear in attention drawer.
-Idle sessions are not attention-requiring."
+- Yellow = waiting_input (needs attention)
+- Green = working (active)
+- Grey = idle (finished)
+- Only waiting_input sessions appear in attention drawer"
 ```
 
 ---
 
-## Task 12: Build and Test End-to-End
+## Task 13: Build and Test End-to-End
 
 **Step 1: Build the Go binary**
 
@@ -1063,10 +1182,11 @@ when neither todos nor explicit questions determine the state."
 
 | File | Change |
 |------|--------|
+| `internal/dashboard/` | **Deleted**: TUI dashboard no longer needed |
+| `cmd/cm/main.go` | Remove dashboard, add _hook-stop |
 | `internal/protocol/types.go` | Add states, StopMessage, remove tmux, bump version |
 | `internal/hooks/hooks.go` | Update Stop hook to call _hook-stop |
 | `cmd/cm/hook_stop.go` | New file: handles Stop hook input |
-| `cmd/cm/main.go` | Add _hook-stop subcommand |
 | `internal/client/client.go` | Add SendStop, remove tmux from Register |
 | `internal/transcript/parser.go` | New file: JSONL transcript parser |
 | `internal/classifier/classifier.go` | New file: LLM classification |
@@ -1074,4 +1194,4 @@ when neither todos nor explicit questions determine the state."
 | `internal/daemon/daemon_test.go` | Update tests for new model |
 | `app/src/hooks/useDaemonSocket.ts` | Update types, protocol version |
 | `app/src/components/AttentionDrawer.tsx` | Update for new states |
-| `app/src/components/Dashboard.tsx` | Filter to waiting_input only |
+| `app/src/components/Dashboard.tsx` | Session colors: yellow/green/grey |
