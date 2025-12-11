@@ -9,13 +9,14 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "1"
+const ProtocolVersion = "2"
 
 // Commands
 const (
 	CmdRegister        = "register"
 	CmdUnregister      = "unregister"
 	CmdState           = "state"
+	CmdStop            = "stop"
 	CmdTodos           = "todos"
 	CmdQuery           = "query"
 	CmdHeartbeat       = "heartbeat"
@@ -49,8 +50,10 @@ const (
 
 // States
 const (
-	StateWorking = "working"
-	StateWaiting = "waiting"
+	StateWorking      = "working"
+	StateWaitingInput = "waiting_input"
+	StateIdle         = "idle"
+	StateWaiting      = "waiting" // Keep for backward compat
 )
 
 // PR reasons (why it needs attention)
@@ -73,7 +76,6 @@ type RegisterMessage struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	Dir   string `json:"dir"`
-	Tmux  string `json:"tmux"`
 }
 
 // UnregisterMessage removes a session from tracking
@@ -87,6 +89,13 @@ type StateMessage struct {
 	Cmd   string `json:"cmd"`
 	ID    string `json:"id"`
 	State string `json:"state"`
+}
+
+// StopMessage triggers classification of idle vs waiting_input
+type StopMessage struct {
+	Cmd            string `json:"cmd"`
+	ID             string `json:"id"`
+	TranscriptPath string `json:"transcript_path"`
 }
 
 // TodosMessage updates a session's todo list
@@ -201,7 +210,6 @@ type Session struct {
 	ID         string    `json:"id"`
 	Label      string    `json:"label"`
 	Directory  string    `json:"directory"`
-	TmuxTarget string    `json:"tmux_target"`
 	State      string    `json:"state"`
 	StateSince time.Time `json:"state_since"`
 	Todos      []string  `json:"todos,omitempty"`
@@ -304,6 +312,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdState:
 		var msg StateMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdStop:
+		var msg StopMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
