@@ -10,7 +10,7 @@ interface AttentionDrawerProps {
   waitingSessions: Array<{
     id: string;
     label: string;
-    state: 'working' | 'waiting';
+    state: 'working' | 'waiting_input' | 'idle';
   }>;
   prs: DaemonPR[];
   onSelectSession: (id: string) => void;
@@ -60,7 +60,7 @@ export function AttentionDrawer({
                 className="attention-item clickable"
                 onClick={() => onSelectSession(s.id)}
               >
-                <span className="item-dot session" />
+                <span className={`item-dot session ${s.state.replace('_', '-')}`} />
                 <span className="item-name">{s.label}</span>
               </div>
             ))}
