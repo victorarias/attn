@@ -168,6 +168,15 @@ export function useDaemonSocket({
               }
             }
             break;
+
+          case 'refresh_prs_result': {
+            const resolve = pendingActionsRef.current.get('refresh_prs');
+            if (resolve) {
+              resolve({ success: data.success ?? false, error: data.error });
+              pendingActionsRef.current.delete('refresh_prs');
+            }
+            break;
+          }
         }
       } catch (err) {
         console.error('[Daemon] Parse error:', err);
@@ -272,10 +281,27 @@ export function useDaemonSocket({
   }, [onReposUpdate]);
 
   // Request daemon to refresh PRs from GitHub
-  const sendRefreshPRs = useCallback(() => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ cmd: 'refresh_prs' }));
+  const sendRefreshPRs = useCallback((): Promise<PRActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'refresh_prs';
+      pendingActionsRef.current.set(key, resolve);
+
+      ws.send(JSON.stringify({ cmd: 'refresh_prs' }));
+
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Refresh timed out'));
+        }
+      }, 30000);
+    });
   }, []);
 
   return {

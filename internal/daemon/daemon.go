@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -464,4 +465,28 @@ func (d *Daemon) RefreshPRs() {
 		return
 	}
 	d.doPRPoll()
+}
+
+// doRefreshPRsWithResult triggers PR refresh and returns any error
+func (d *Daemon) doRefreshPRsWithResult() error {
+	if d.ghClient == nil || !d.ghClient.IsAvailable() {
+		return fmt.Errorf("GitHub client not available")
+	}
+
+	prs, err := d.ghClient.FetchAll()
+	if err != nil {
+		return fmt.Errorf("failed to fetch PRs: %w", err)
+	}
+
+	d.store.SetPRs(prs)
+
+	// Broadcast to WebSocket clients
+	allPRs := d.store.ListPRs("")
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event: protocol.EventPRsUpdated,
+		PRs:   allPRs,
+	})
+
+	d.logf("PR refresh: %d PRs fetched", len(prs))
+	return nil
 }

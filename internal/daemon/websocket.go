@@ -231,7 +231,20 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 
 	case protocol.CmdRefreshPRs:
 		d.logf("Refreshing PRs on request")
-		go d.RefreshPRs()
+		go func() {
+			err := d.doRefreshPRsWithResult()
+			result := protocol.RefreshPRsResultMessage{
+				Event:   protocol.EventRefreshPRsResult,
+				Success: err == nil,
+			}
+			if err != nil {
+				result.Error = err.Error()
+				d.logf("Refresh PRs failed: %v", err)
+			} else {
+				d.logf("Refresh PRs succeeded")
+			}
+			d.sendToClient(client, result)
+		}()
 	}
 }
 

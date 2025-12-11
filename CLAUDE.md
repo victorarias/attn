@@ -45,6 +45,38 @@ Claude Manager (`cm`) tracks multiple Claude Code sessions and surfaces which on
 
 All IPC uses JSON over unix socket at `~/.{binary}.sock` (paths derived from binary name via `internal/config`). Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates.
 
+### Async WebSocket Pattern (REQUIRED for any async operation)
+
+When the frontend triggers an async operation via WebSocket that expects a response:
+
+**DO NOT** fire-and-forget with optimistic UI or silent timeouts.
+
+**DO** implement the request/result event pattern:
+
+1. **Daemon side** (`internal/daemon/websocket.go`):
+   - Handle the command (e.g., `refresh_prs`)
+   - Send a `*_result` event when complete (e.g., `refresh_prs_result`)
+   - Include `success: bool` and `error?: string` in the result
+
+2. **Protocol** (`internal/protocol/types.go`):
+   - Define the result event constant (e.g., `EventRefreshPRsResult`)
+   - Define the result message struct with success/error fields
+
+3. **Frontend hook** (`app/src/hooks/useDaemonSocket.ts`):
+   - Return a `Promise` from the send function
+   - Store pending request in `pendingActionsRef` Map with unique key
+   - Listen for result event, resolve/reject the Promise
+   - Set timeout (e.g., 30s) that rejects with error
+
+4. **Frontend UI**:
+   - Show loading state while Promise is pending
+   - Show error toast/message if Promise rejects
+   - Clear loading state on resolve or reject
+
+**Example**: See `sendPRAction` in `useDaemonSocket.ts` for the canonical implementation.
+
+**Why**: Silent failures frustrate users. Every async operation must have clear success/failure feedback.
+
 ## Tauri App Development
 
 ### Running the App

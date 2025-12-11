@@ -18,6 +18,7 @@ interface DashboardProps {
   prs: DaemonPR[];
   isLoading: boolean;
   isRefreshing?: boolean;
+  refreshError?: string | null;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onRefreshPRs?: () => void;
@@ -29,6 +30,7 @@ export function Dashboard({
   prs,
   isLoading,
   isRefreshing,
+  refreshError,
   onSelectSession,
   onNewSession,
   onRefreshPRs,
@@ -151,24 +153,29 @@ export function Dashboard({
           <div className="card-header">
             <h2>Pull Requests</h2>
             <div className="card-header-actions">
-              {isRefreshing ? (
-                <span className="refresh-indicator" title="Refreshing...">
-                  <svg className="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              <button
+                className={`refresh-btn ${isRefreshing ? 'refreshing' : ''} ${refreshError ? 'error' : ''}`}
+                onClick={onRefreshPRs}
+                disabled={isRefreshing}
+                title={refreshError || 'Refresh PRs (⌘R)'}
+              >
+                {isRefreshing ? (
+                  <span className="refresh-dots">
+                    <span /><span /><span />
+                  </span>
+                ) : refreshError ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
                   </svg>
-                </span>
-              ) : (
-                <button
-                  className="refresh-btn"
-                  onClick={onRefreshPRs}
-                  title="Refresh PRs (⌘R)"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
                     <path d="M21 3v5h-5" />
                   </svg>
-                </button>
-              )}
+                )}
+              </button>
               <span className="card-count">{prs.filter((p) => !p.muted && !isRepoMuted(p.repo)).length}</span>
             </div>
           </div>
