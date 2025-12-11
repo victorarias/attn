@@ -42,6 +42,7 @@ const (
 	EventReposUpdated        = "repos_updated"
 	EventInitialState        = "initial_state"
 	MsgPRActionResult        = "pr_action_result"
+	EventRefreshPRsResult    = "refresh_prs_result"
 )
 
 // States
@@ -177,6 +178,13 @@ type PRActionResultMessage struct {
 	Action  string `json:"action"` // "approve" or "merge"
 	Repo    string `json:"repo"`
 	Number  int    `json:"number"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// RefreshPRsResultMessage is sent back to client after PR refresh completes
+type RefreshPRsResultMessage struct {
+	Event   string `json:"event"`
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
 }

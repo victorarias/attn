@@ -39,6 +39,7 @@ function App() {
 
   // Track PR refresh state for progress indicator
   const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   // Ensure daemon is running before connecting
   useEffect(() => {
@@ -57,23 +58,27 @@ function App() {
     ensureDaemon();
   }, []);
 
-  // Wrap PR update to clear refresh state
-  const handlePRsUpdate = useCallback((newPRs: typeof prs) => {
-    setPRs(newPRs);
-    setIsRefreshingPRs(false);
-  }, [setPRs]);
-
   // Connect to daemon WebSocket
   const { sendPRAction, sendMutePR, sendMuteRepo, sendRefreshPRs, connectionError, hasReceivedInitialState } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
-    onPRsUpdate: handlePRsUpdate,
+    onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
   });
 
-  // Refresh PRs with progress indicator
-  const handleRefreshPRs = useCallback(() => {
+  // Refresh PRs with proper async handling
+  const handleRefreshPRs = useCallback(async () => {
     setIsRefreshingPRs(true);
-    sendRefreshPRs();
+    setRefreshError(null);
+    try {
+      const result = await sendRefreshPRs();
+      if (!result.success) {
+        setRefreshError(result.error || 'Refresh failed');
+      }
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
+    } finally {
+      setIsRefreshingPRs(false);
+    }
   }, [sendRefreshPRs]);
 
   // Handle deep-link spawn requests (attn://spawn?cwd=/path&label=name)
@@ -309,6 +314,7 @@ function App() {
           prs={prs}
           isLoading={!hasReceivedInitialState}
           isRefreshing={isRefreshingPRs}
+          refreshError={refreshError}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onRefreshPRs={handleRefreshPRs}
