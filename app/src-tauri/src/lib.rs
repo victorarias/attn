@@ -51,7 +51,7 @@ fn start_daemon() -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn list_directory(path: String) -> Result<Vec<String>, String> {
+async fn list_directory(path: String, prefix: Option<String>) -> Result<Vec<String>, String> {
     use std::fs;
     use std::path::Path;
 
@@ -67,12 +67,21 @@ async fn list_directory(path: String) -> Result<Vec<String>, String> {
     let entries = fs::read_dir(&dir_path)
         .map_err(|e| format!("Cannot read directory: {}", e))?;
 
+    let prefix_lower = prefix.map(|p| p.to_lowercase());
+
     let mut directories: Vec<String> = entries
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let metadata = entry.metadata().ok()?;
             if metadata.is_dir() {
-                Some(entry.file_name().to_string_lossy().to_string())
+                let name = entry.file_name().to_string_lossy().to_string();
+                // Filter by prefix if provided
+                if let Some(ref p) = prefix_lower {
+                    if !name.to_lowercase().starts_with(p) {
+                        return None;
+                    }
+                }
+                Some(name)
             } else {
                 None
             }

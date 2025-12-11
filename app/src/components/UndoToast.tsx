@@ -1,24 +1,25 @@
 // app/src/components/UndoToast.tsx
-import { useState, useEffect, useCallback } from 'react';
-import { useMuteStore } from '../store/mutes';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useDaemonContext } from '../contexts/DaemonContext';
 import './UndoToast.css';
 
 export function UndoToast() {
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
   const [countdown, setCountdown] = useState(5);
-  const { undoStack, processUndo } = useMuteStore();
+  const { lastMuted, clearLastMuted, sendMutePR, sendMuteRepo } = useDaemonContext();
+  const lastTimestampRef = useRef<number | null>(null);
 
-  // Watch for new mutes by tracking the latest item's timestamp
-  const latestItem = undoStack[undoStack.length - 1];
+  // Watch for new mutes by tracking the lastMuted timestamp
   useEffect(() => {
-    if (latestItem) {
-      const itemType = latestItem.type === 'pr' ? 'PR' : 'Repository';
+    if (lastMuted && lastMuted.timestamp !== lastTimestampRef.current) {
+      lastTimestampRef.current = lastMuted.timestamp;
+      const itemType = lastMuted.type === 'pr' ? 'PR' : 'Repository';
       setMessage(`${itemType} muted`);
       setVisible(true);
       setCountdown(5);
     }
-  }, [latestItem?.timestamp]);
+  }, [lastMuted]);
 
   // Countdown timer
   useEffect(() => {
@@ -28,6 +29,7 @@ export function UndoToast() {
       setCountdown(prev => {
         if (prev <= 1) {
           setVisible(false);
+          clearLastMuted();
           return 5;
         }
         return prev - 1;
@@ -35,14 +37,20 @@ export function UndoToast() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [visible]);
+  }, [visible, clearLastMuted]);
 
   const handleUndo = useCallback(() => {
-    const undone = processUndo();
-    if (undone) {
+    if (lastMuted) {
+      // Toggle the mute back (unmute)
+      if (lastMuted.type === 'pr') {
+        sendMutePR(lastMuted.id);
+      } else {
+        sendMuteRepo(lastMuted.id);
+      }
+      clearLastMuted();
       setVisible(false);
     }
-  }, [processUndo]);
+  }, [lastMuted, sendMutePR, sendMuteRepo, clearLastMuted]);
 
   if (!visible) return null;
 

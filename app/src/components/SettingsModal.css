@@ -1,0 +1,119 @@
+/* app/src/components/SettingsModal.css */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+
+.settings-modal {
+  width: 480px;
+  max-height: 80vh;
+  background: #111113;
+  border: 1px solid #2a2a2d;
+  border-radius: 8px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-header {
+  padding: 16px;
+  border-bottom: 1px solid #2a2a2d;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.settings-header h2 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e8e8e8;
+  margin: 0;
+}
+
+.settings-close {
+  background: transparent;
+  border: none;
+  color: #555;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.settings-close:hover {
+  color: #e8e8e8;
+}
+
+.settings-body {
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.settings-body h3 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #555;
+  margin: 0 0 12px 0;
+}
+
+.settings-empty {
+  color: #555;
+  font-size: 13px;
+  margin: 0;
+}
+
+.muted-repos-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.muted-repo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+
+.muted-repo-item:hover {
+  background: #1a1a1d;
+}
+
+.muted-repo-name {
+  font-size: 13px;
+  color: #e8e8e8;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.unmute-btn {
+  background: #252528;
+  border: 1px solid #3a3a3d;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #bbb;
+  cursor: pointer;
+  transition: all 150ms ease-out;
+}
+
+.unmute-btn:hover {
+  background: #111113;
+  color: #e8e8e8;
+  border-color: #4a4a4d;
+}
+
+.unmute-btn:focus {
+  outline: 2px solid #ff6b35;
+  outline-offset: 1px;
+}

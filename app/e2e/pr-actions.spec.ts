@@ -140,4 +140,96 @@ test.describe('PR Actions', () => {
     expect(mockGitHub.hasApproveRequest('test/repo', 50)).toBe(true);
     expect(mockGitHub.hasApproveRequest('test/repo', 51)).toBe(false);
   });
+
+  test('mute repo via UI hides all PRs from that repo', async ({ page, mockGitHub, startDaemonWithPRs }) => {
+    // 1. Setup: add multiple PRs to the same repo
+    mockGitHub.addPR({
+      repo: 'test/mute-repo',
+      number: 60,
+      title: 'PR to be muted via repo',
+      role: 'reviewer',
+    });
+    mockGitHub.addPR({
+      repo: 'test/mute-repo',
+      number: 61,
+      title: 'Another PR to be muted',
+      role: 'author',
+    });
+    // Add a PR from a different repo that should NOT be muted
+    mockGitHub.addPR({
+      repo: 'test/other-repo',
+      number: 70,
+      title: 'PR from other repo',
+      role: 'reviewer',
+    });
+
+    // 2. Start daemon
+    await startDaemonWithPRs();
+
+    // 3. Wait for page to load
+    await page.goto('/');
+
+    // Wait for PR cards to appear
+    await page.waitForSelector('[data-testid="pr-card"]', { timeout: 15000 });
+
+    // 4. Verify all PRs are visible initially
+    const pr60 = page.locator('[data-testid="pr-card"]').filter({ hasText: 'PR to be muted via repo' });
+    const pr61 = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Another PR to be muted' });
+    const pr70 = page.locator('[data-testid="pr-card"]').filter({ hasText: 'PR from other repo' });
+
+    await expect(pr60).toBeVisible();
+    await expect(pr61).toBeVisible();
+    await expect(pr70).toBeVisible();
+
+    // 5. Click the repo mute button for test/mute-repo
+    // The mute button is in the repo header
+    const repoHeader = page.locator('.repo-header').filter({ hasText: 'mute-repo' });
+    const muteRepoButton = repoHeader.locator('.repo-mute-btn');
+    await muteRepoButton.click();
+
+    // 6. Both PRs from test/mute-repo should disappear
+    await expect(pr60).not.toBeVisible({ timeout: 5000 });
+    await expect(pr61).not.toBeVisible({ timeout: 5000 });
+
+    // 7. PR from test/other-repo should still be visible
+    await expect(pr70).toBeVisible();
+  });
+
+  test('undo mute PR restores the PR', async ({ page, mockGitHub, startDaemonWithPRs }) => {
+    // 1. Setup: add PR to mock GitHub
+    mockGitHub.addPR({
+      repo: 'test/repo',
+      number: 80,
+      title: 'Undo Test PR',
+      role: 'reviewer',
+    });
+
+    // 2. Start daemon
+    await startDaemonWithPRs();
+
+    // 3. Wait for page to load
+    await page.goto('/');
+
+    // Wait for PR card to appear
+    const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Undo Test PR' });
+    await expect(prCard).toBeVisible({ timeout: 15000 });
+
+    // 4. Click the mute button
+    const muteButton = prCard.locator('[data-testid="mute-button"]');
+    await muteButton.click();
+
+    // 5. PR card should disappear
+    await expect(prCard).not.toBeVisible({ timeout: 5000 });
+
+    // 6. Undo toast should appear
+    const undoToast = page.locator('.undo-toast');
+    await expect(undoToast).toBeVisible({ timeout: 2000 });
+
+    // 7. Click the undo button
+    const undoButton = undoToast.locator('.toast-undo-btn');
+    await undoButton.click();
+
+    // 8. PR card should reappear
+    await expect(prCard).toBeVisible({ timeout: 5000 });
+  });
 });

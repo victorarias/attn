@@ -1,7 +1,7 @@
 // app/src/components/AttentionDrawer.tsx
 import { DaemonSession, DaemonPR } from '../hooks/useDaemonSocket';
 import { PRActions } from './PRActions';
-import { useMuteStore } from '../store/mutes';
+import { useDaemonStore } from '../store/daemonSessions';
 import './AttentionDrawer.css';
 
 interface AttentionDrawerProps {
@@ -25,20 +25,19 @@ export function AttentionDrawer({
   prs,
   onSelectSession,
 }: AttentionDrawerProps) {
-  const { mutedPRs, mutedRepos } = useMuteStore();
+  const { isRepoMuted } = useDaemonStore();
 
   const waitingDaemonSessions = daemonSessions.filter((s) => s.state === 'waiting');
+  // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
   const reviewPRs = prs.filter((p) =>
     p.role === 'reviewer' &&
     !p.muted &&
-    !mutedPRs.has(p.id) &&
-    !mutedRepos.has(p.repo)
+    !isRepoMuted(p.repo)
   );
   const authorPRs = prs.filter((p) =>
     p.role === 'author' &&
     !p.muted &&
-    !mutedPRs.has(p.id) &&
-    !mutedRepos.has(p.repo)
+    !isRepoMuted(p.repo)
   );
 
   const totalItems = waitingSessions.length + waitingDaemonSessions.length + reviewPRs.length + authorPRs.length;
@@ -103,12 +102,17 @@ export function AttentionDrawer({
                   rel="noopener noreferrer"
                   className="pr-link"
                 >
-                  <span className="item-dot pr" />
-                  <span className="item-name">
-                    {pr.repo.split('/')[1]} #{pr.number}
-                  </span>
+                  <div className="pr-meta">
+                    <span className="item-dot pr" />
+                    <span className="pr-repo">{pr.repo.split('/')[1]}</span>
+                    <span className="pr-number">#{pr.number}</span>
+                  </div>
+                  <span className="pr-title-full">{pr.title}</span>
                 </a>
-                <PRActions repo={pr.repo} number={pr.number} prId={pr.id} compact />
+                <div className="pr-footer">
+                  <span />
+                  <PRActions repo={pr.repo} number={pr.number} prId={pr.id} compact />
+                </div>
               </div>
             ))}
           </div>
@@ -129,13 +133,17 @@ export function AttentionDrawer({
                   rel="noopener noreferrer"
                   className="pr-link"
                 >
-                  <span className="item-dot pr" />
-                  <span className="item-name">
-                    {pr.repo.split('/')[1]} #{pr.number}
-                  </span>
-                  <span className="item-reason">{pr.reason.replace(/_/g, ' ')}</span>
+                  <div className="pr-meta">
+                    <span className="item-dot pr" />
+                    <span className="pr-repo">{pr.repo.split('/')[1]}</span>
+                    <span className="pr-number">#{pr.number}</span>
+                  </div>
+                  <span className="pr-title-full">{pr.title}</span>
                 </a>
-                <PRActions repo={pr.repo} number={pr.number} prId={pr.id} compact />
+                <div className="pr-footer">
+                  <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
+                  <PRActions repo={pr.repo} number={pr.number} prId={pr.id} compact />
+                </div>
               </div>
             ))}
           </div>

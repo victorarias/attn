@@ -41,6 +41,20 @@ Claude Manager (`cm`) tracks multiple Claude Code sessions and surfaces which on
 
 6. **Protocol** (`internal/protocol`): Message types and parsing. States: "working" or "waiting".
 
+### Protocol Versioning
+
+**Rule:** When changing the protocol (adding/modifying commands, events, or message structures), increment `ProtocolVersion` in `internal/protocol/types.go`.
+
+The app checks protocol version on WebSocket connect and shows an error banner if mismatched. This prevents silent failures when the daemon is running old code.
+
+**After protocol changes:**
+1. Increment `ProtocolVersion` in `internal/protocol/types.go`
+2. Run `make install` to install new binary
+3. Kill the running daemon: `pkill -f "cm daemon"` (or restart the app)
+4. The app will auto-start a new daemon with updated code
+
+**Why:** The daemon runs as a background process and survives `make install`. Without version checking, old daemon + new app = mysterious failures with no logs.
+
 ### Communication
 
 All IPC uses JSON over unix socket at `~/.{binary}.sock` (paths derived from binary name via `internal/config`). Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates.

@@ -49,6 +49,12 @@ func NewClient(baseURL string) (*Client, error) {
 		return nil, fmt.Errorf("no GitHub token available")
 	}
 
+	// SAFETY: Refuse to use real GitHub API with test token
+	// This prevents accidental real API calls in tests
+	if token == "test-token" && baseURL == "https://api.github.com" {
+		return nil, fmt.Errorf("refusing to use real GitHub API with test token - set GITHUB_API_URL to mock server")
+	}
+
 	return &Client{
 		baseURL: baseURL,
 		token:   token,
