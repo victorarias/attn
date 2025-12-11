@@ -42,9 +42,16 @@ export function useFilesystemSuggestions(inputPath: string): UseFilesystemSugges
     let prefix: string;
 
     // Expand ~ to home directory
-    const expandedPath = path.startsWith('~')
-      ? path.replace('~', homePath)
-      : path;
+    let expandedPath: string;
+    if (path === '~') {
+      expandedPath = homePath;
+    } else if (path.startsWith('~/')) {
+      expandedPath = homePath + path.slice(1); // ~/foo -> /Users/x/foo
+    } else if (path.startsWith('~')) {
+      expandedPath = homePath + '/' + path.slice(1); // ~foo -> /Users/x/foo
+    } else {
+      expandedPath = path;
+    }
 
     if (expandedPath.endsWith('/')) {
       // User typed "/Users/" - query that directory
@@ -66,18 +73,18 @@ export function useFilesystemSuggestions(inputPath: string): UseFilesystemSugges
     setError(null);
 
     try {
-      const dirs = await invoke<string[]>('list_directory', { path: dirToQuery });
+      // Pass prefix to Rust side so filtering happens before truncation
+      const dirs = await invoke<string[]>('list_directory', {
+        path: dirToQuery,
+        prefix: prefix || null,
+      });
 
-      // Filter by prefix if present
-      const filtered = prefix
-        ? dirs.filter(d => d.toLowerCase().startsWith(prefix))
-        : dirs;
-
-      setSuggestions(filtered.map(name => ({
+      setSuggestions(dirs.map(name => ({
         name,
         path: dirToQuery + name,
       })));
     } catch (e) {
+      console.error('[fs-suggestions] error:', e);
       setError(String(e));
       setSuggestions([]);
     } finally {

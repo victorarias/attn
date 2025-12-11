@@ -1,7 +1,6 @@
 // app/src/components/PRActions.tsx
 import { useState } from 'react';
 import { useDaemonContext } from '../contexts/DaemonContext';
-import { useMuteStore } from '../store/mutes';
 import './PRActions.css';
 
 interface ActionState {
@@ -16,11 +15,11 @@ interface PRActionsProps {
   prId: string;
   compact?: boolean;
   onMuted?: () => void;
+  onActionComplete?: (prId: string, action: 'approve' | 'merge') => void;
 }
 
-export function PRActions({ repo, number, prId, compact = false, onMuted }: PRActionsProps) {
-  const { sendPRAction } = useDaemonContext();
-  const { mutePR } = useMuteStore();
+export function PRActions({ repo, number, prId, compact = false, onMuted, onActionComplete }: PRActionsProps) {
+  const { sendPRAction, sendMutePR } = useDaemonContext();
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
   const [approveState, setApproveState] = useState<ActionState>({ loading: false, success: false, error: null });
   const [mergeState, setMergeState] = useState<ActionState>({ loading: false, success: false, error: null });
@@ -33,7 +32,11 @@ export function PRActions({ repo, number, prId, compact = false, onMuted }: PRAc
       const result = await sendPRAction('approve', repo, number);
       if (result.success) {
         setApproveState({ loading: false, success: true, error: null });
-        setTimeout(() => setApproveState({ loading: false, success: false, error: null }), 2000);
+        // After showing checkmark briefly, notify parent to fade out
+        setTimeout(() => {
+          setApproveState({ loading: false, success: false, error: null });
+          onActionComplete?.(prId, 'approve');
+        }, 1500);
       } else {
         setApproveState({ loading: false, success: false, error: result.error || 'Failed' });
       }
@@ -56,7 +59,11 @@ export function PRActions({ repo, number, prId, compact = false, onMuted }: PRAc
       const result = await sendPRAction('merge', repo, number, 'squash');
       if (result.success) {
         setMergeState({ loading: false, success: true, error: null });
-        setTimeout(() => setMergeState({ loading: false, success: false, error: null }), 2000);
+        // After showing checkmark briefly, notify parent to fade out
+        setTimeout(() => {
+          setMergeState({ loading: false, success: false, error: null });
+          onActionComplete?.(prId, 'merge');
+        }, 1500);
       } else {
         setMergeState({ loading: false, success: false, error: result.error || 'Failed' });
       }
@@ -69,7 +76,7 @@ export function PRActions({ repo, number, prId, compact = false, onMuted }: PRAc
   const handleMute = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    mutePR(prId);
+    sendMutePR(prId);
     onMuted?.();
   };
 

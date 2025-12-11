@@ -353,3 +353,322 @@ func TestDaemon_InjectTestPR(t *testing.T) {
 		t.Errorf("Expected State=waiting, got State=%s", prs[0].State)
 	}
 }
+
+func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
+	// Use unique port to avoid conflicts
+	wsPort := "19850"
+	os.Setenv("CM_WS_PORT", wsPort)
+	defer os.Unsetenv("CM_WS_PORT")
+
+	// Use /tmp directly to avoid long socket paths
+	sockPath := filepath.Join("/tmp", "cm-test-mute-pr.sock")
+	os.Remove(sockPath) // Clean up any existing socket
+
+	d := NewForTesting(sockPath)
+
+	// Start daemon in background
+	go func() {
+		if err := d.Start(); err != nil {
+			t.Logf("Daemon start error: %v", err)
+		}
+	}()
+	defer func() {
+		d.Stop()
+		os.Remove(sockPath)
+	}()
+
+	// Wait for daemon to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Inject test PR via unix socket
+	testPR := &protocol.PR{
+		ID:          "owner/repo#123",
+		Repo:        "owner/repo",
+		Number:      123,
+		Title:       "Test PR",
+		URL:         "https://github.com/owner/repo/pull/123",
+		Role:        protocol.PRRoleAuthor,
+		State:       protocol.StateWaiting,
+		Reason:      protocol.PRReasonReadyToMerge,
+		LastUpdated: time.Now(),
+		LastPolled:  time.Now(),
+		Muted:       false,
+	}
+	msg := protocol.InjectTestPRMessage{
+		Cmd: protocol.MsgInjectTestPR,
+		PR:  testPR,
+	}
+	msgJSON, _ := json.Marshal(msg)
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("Dial error: %v", err)
+	}
+	conn.Write(msgJSON)
+	conn.Close()
+
+	// Connect to WebSocket
+	ctx := context.Background()
+	wsURL := "ws://127.0.0.1:" + wsPort + "/ws"
+	var wsConn *websocket.Conn
+	maxRetries := 20
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var dialErr error
+		wsConn, _, dialErr = websocket.Dial(ctx, wsURL, nil)
+		if dialErr == nil {
+			break
+		}
+		if i == maxRetries-1 {
+			t.Fatalf("WebSocket dial error after %d retries: %v", maxRetries, dialErr)
+		}
+	}
+	defer wsConn.Close(websocket.StatusNormalClosure, "")
+
+	// Read initial state
+	_, initialData, err := wsConn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read initial state error: %v", err)
+	}
+
+	// Verify PR is not muted in initial state
+	var initialState protocol.WebSocketEvent
+	json.Unmarshal(initialData, &initialState)
+	if len(initialState.PRs) != 1 {
+		t.Fatalf("Expected 1 PR in initial state, got %d", len(initialState.PRs))
+	}
+	if initialState.PRs[0].Muted {
+		t.Error("Expected PR to not be muted initially")
+	}
+
+	// Send mute_pr command
+	muteCmd := map[string]interface{}{
+		"cmd": "mute_pr",
+		"id":  "owner/repo#123",
+	}
+	muteJSON, _ := json.Marshal(muteCmd)
+	err = wsConn.Write(ctx, websocket.MessageText, muteJSON)
+	if err != nil {
+		t.Fatalf("Write mute command error: %v", err)
+	}
+
+	// Read prs_updated broadcast
+	_, updateData, err := wsConn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read update error: %v", err)
+	}
+
+	var updateEvent protocol.WebSocketEvent
+	json.Unmarshal(updateData, &updateEvent)
+	if updateEvent.Event != protocol.EventPRsUpdated {
+		t.Errorf("Expected event=%s, got event=%s", protocol.EventPRsUpdated, updateEvent.Event)
+	}
+	if len(updateEvent.PRs) != 1 {
+		t.Fatalf("Expected 1 PR in update, got %d", len(updateEvent.PRs))
+	}
+	if !updateEvent.PRs[0].Muted {
+		t.Error("Expected PR to be muted after mute command")
+	}
+
+	// Send mute_pr again to toggle back
+	err = wsConn.Write(ctx, websocket.MessageText, muteJSON)
+	if err != nil {
+		t.Fatalf("Write second mute command error: %v", err)
+	}
+
+	// Read second prs_updated broadcast
+	_, updateData2, err := wsConn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read second update error: %v", err)
+	}
+
+	var updateEvent2 protocol.WebSocketEvent
+	json.Unmarshal(updateData2, &updateEvent2)
+	if updateEvent2.PRs[0].Muted {
+		t.Error("Expected PR to be unmuted after second mute command (toggle)")
+	}
+}
+
+func TestDaemon_MuteRepo_ViaWebSocket(t *testing.T) {
+	// Use unique port to avoid conflicts
+	wsPort := "19851"
+	os.Setenv("CM_WS_PORT", wsPort)
+	defer os.Unsetenv("CM_WS_PORT")
+
+	// Use /tmp directly to avoid long socket paths
+	sockPath := filepath.Join("/tmp", "cm-test-mute-repo.sock")
+	os.Remove(sockPath) // Clean up any existing socket
+
+	d := NewForTesting(sockPath)
+
+	// Start daemon in background
+	go func() {
+		if err := d.Start(); err != nil {
+			t.Logf("Daemon start error: %v", err)
+		}
+	}()
+	defer func() {
+		d.Stop()
+		os.Remove(sockPath)
+	}()
+
+	// Wait for daemon to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Connect to WebSocket
+	ctx := context.Background()
+	wsURL := "ws://127.0.0.1:" + wsPort + "/ws"
+	var wsConn *websocket.Conn
+	maxRetries := 20
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var dialErr error
+		wsConn, _, dialErr = websocket.Dial(ctx, wsURL, nil)
+		if dialErr == nil {
+			break
+		}
+		if i == maxRetries-1 {
+			t.Fatalf("WebSocket dial error after %d retries: %v", maxRetries, dialErr)
+		}
+	}
+	defer wsConn.Close(websocket.StatusNormalClosure, "")
+
+	// Read initial state
+	_, initialData, err := wsConn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read initial state error: %v", err)
+	}
+
+	// Verify repos array exists in initial state (will be empty since no repos muted yet)
+	var initialState protocol.WebSocketEvent
+	json.Unmarshal(initialData, &initialState)
+	// Note: Repos can be empty but should be present (may be nil if JSON doesn't include empty arrays)
+	// This is fine - we just test that after muting, we get updates
+
+	// Send mute_repo command
+	muteCmd := map[string]interface{}{
+		"cmd":  "mute_repo",
+		"repo": "owner/test-repo",
+	}
+	muteJSON, _ := json.Marshal(muteCmd)
+	err = wsConn.Write(ctx, websocket.MessageText, muteJSON)
+	if err != nil {
+		t.Fatalf("Write mute_repo command error: %v", err)
+	}
+
+	// Read repos_updated broadcast
+	_, updateData, err := wsConn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read update error: %v", err)
+	}
+
+	var updateEvent protocol.WebSocketEvent
+	json.Unmarshal(updateData, &updateEvent)
+	if updateEvent.Event != protocol.EventReposUpdated {
+		t.Errorf("Expected event=%s, got event=%s", protocol.EventReposUpdated, updateEvent.Event)
+	}
+	if len(updateEvent.Repos) != 1 {
+		t.Fatalf("Expected 1 repo state in update, got %d", len(updateEvent.Repos))
+	}
+	if updateEvent.Repos[0].Repo != "owner/test-repo" {
+		t.Errorf("Expected repo=owner/test-repo, got repo=%s", updateEvent.Repos[0].Repo)
+	}
+	if !updateEvent.Repos[0].Muted {
+		t.Error("Expected repo to be muted after mute_repo command")
+	}
+
+	// Send mute_repo again to toggle back
+	err = wsConn.Write(ctx, websocket.MessageText, muteJSON)
+	if err != nil {
+		t.Fatalf("Write second mute_repo command error: %v", err)
+	}
+
+	// Read second repos_updated broadcast
+	_, updateData2, err := wsConn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read second update error: %v", err)
+	}
+
+	var updateEvent2 protocol.WebSocketEvent
+	json.Unmarshal(updateData2, &updateEvent2)
+	if updateEvent2.Repos[0].Muted {
+		t.Error("Expected repo to be unmuted after second mute_repo command (toggle)")
+	}
+}
+
+func TestDaemon_InitialState_IncludesRepoStates(t *testing.T) {
+	// Use unique port to avoid conflicts
+	wsPort := "19852"
+	os.Setenv("CM_WS_PORT", wsPort)
+	defer os.Unsetenv("CM_WS_PORT")
+
+	// Use /tmp directly to avoid long socket paths
+	sockPath := filepath.Join("/tmp", "cm-test-initial-repos.sock")
+	os.Remove(sockPath) // Clean up any existing socket
+
+	d := NewForTesting(sockPath)
+
+	// Start daemon in background
+	go func() {
+		if err := d.Start(); err != nil {
+			t.Logf("Daemon start error: %v", err)
+		}
+	}()
+	defer func() {
+		d.Stop()
+		os.Remove(sockPath)
+	}()
+
+	// Wait for daemon to start
+	time.Sleep(200 * time.Millisecond)
+
+	// First, toggle a repo mute via unix socket to set up state
+	c := client.New(sockPath)
+	err := c.ToggleMuteRepo("owner/test-repo")
+	if err != nil {
+		t.Fatalf("ToggleMuteRepo error: %v", err)
+	}
+
+	// Connect to WebSocket
+	ctx := context.Background()
+	wsURL := "ws://127.0.0.1:" + wsPort + "/ws"
+	var wsConn *websocket.Conn
+	maxRetries := 20
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var dialErr error
+		wsConn, _, dialErr = websocket.Dial(ctx, wsURL, nil)
+		if dialErr == nil {
+			break
+		}
+		if i == maxRetries-1 {
+			t.Fatalf("WebSocket dial error after %d retries: %v", maxRetries, dialErr)
+		}
+	}
+	defer wsConn.Close(websocket.StatusNormalClosure, "")
+
+	// Read initial state
+	_, initialData, err := wsConn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read initial state error: %v", err)
+	}
+
+	var initialState protocol.WebSocketEvent
+	json.Unmarshal(initialData, &initialState)
+
+	// Verify initial state includes repos
+	if initialState.Event != protocol.EventInitialState {
+		t.Errorf("Expected event=%s, got event=%s", protocol.EventInitialState, initialState.Event)
+	}
+	if initialState.Repos == nil {
+		t.Fatal("Expected Repos array in initial state")
+	}
+	if len(initialState.Repos) != 1 {
+		t.Fatalf("Expected 1 repo in initial state, got %d", len(initialState.Repos))
+	}
+	if initialState.Repos[0].Repo != "owner/test-repo" {
+		t.Errorf("Expected repo=owner/test-repo, got repo=%s", initialState.Repos[0].Repo)
+	}
+	if !initialState.Repos[0].Muted {
+		t.Error("Expected repo to be muted in initial state")
+	}
+}

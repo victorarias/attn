@@ -23,7 +23,9 @@ func TestNewClient_UsesEnvToken(t *testing.T) {
 }
 
 func TestNewClient_DefaultsToGitHubAPI(t *testing.T) {
-	os.Setenv("GITHUB_TOKEN", "test-token")
+	// Use a real-looking token (not "test-token") since test-token is blocked
+	// when targeting real GitHub API
+	os.Setenv("GITHUB_TOKEN", "ghp_xxxxxxxxxxxx")
 	defer os.Unsetenv("GITHUB_TOKEN")
 
 	client, err := NewClient("")
@@ -33,6 +35,21 @@ func TestNewClient_DefaultsToGitHubAPI(t *testing.T) {
 
 	if client.baseURL != "https://api.github.com" {
 		t.Errorf("baseURL = %q, want %q", client.baseURL, "https://api.github.com")
+	}
+}
+
+func TestNewClient_BlocksTestTokenWithRealAPI(t *testing.T) {
+	os.Setenv("GITHUB_TOKEN", "test-token")
+	defer os.Unsetenv("GITHUB_TOKEN")
+
+	// Should fail because test-token + real API is blocked
+	_, err := NewClient("")
+	if err == nil {
+		t.Fatal("NewClient should fail when test-token is used with real GitHub API")
+	}
+
+	if !contains(err.Error(), "refusing to use real GitHub API") {
+		t.Errorf("Error message = %q, should mention refusing to use real API", err.Error())
 	}
 }
 
@@ -448,7 +465,8 @@ func TestClient_MergePR_InvalidMethod(t *testing.T) {
 	os.Setenv("GITHUB_TOKEN", "test-token")
 	defer os.Unsetenv("GITHUB_TOKEN")
 
-	client, _ := NewClient("")
+	// Use a mock URL so we can create the client (test-token + real API is blocked)
+	client, _ := NewClient("http://localhost:9999")
 	err := client.MergePR("owner/repo", 42, "invalid")
 	if err == nil {
 		t.Fatal("MergePR should return error for invalid merge method")
