@@ -29,7 +29,6 @@ export function Dashboard({
   onSelectSession,
   onNewSession,
 }: DashboardProps) {
-  void isLoading; // TODO: Will be used in Task 4 for skeleton loader
   const waitingSessions = sessions.filter((s) => s.state === 'waiting');
   const workingSessions = sessions.filter((s) => s.state === 'working');
 
@@ -150,7 +149,26 @@ export function Dashboard({
             <span className="card-count">{prs.filter((p) => !p.muted && !isRepoMuted(p.repo)).length}</span>
           </div>
           <div className="card-body scrollable">
-            {prsByRepo.size === 0 ? (
+            {isLoading ? (
+              <div className="pr-loading">
+                <div className="pr-loading-status">Fetching PRs...</div>
+                <div className="pr-skeleton-row">
+                  <div className="pr-skeleton-dot" />
+                  <div className="pr-skeleton-number" />
+                  <div className="pr-skeleton-title" />
+                </div>
+                <div className="pr-skeleton-row">
+                  <div className="pr-skeleton-dot" />
+                  <div className="pr-skeleton-number" />
+                  <div className="pr-skeleton-title" />
+                </div>
+                <div className="pr-skeleton-row">
+                  <div className="pr-skeleton-dot" />
+                  <div className="pr-skeleton-number" />
+                  <div className="pr-skeleton-title" />
+                </div>
+              </div>
+            ) : prsByRepo.size === 0 ? (
               <div className="card-empty">No PRs need attention</div>
             ) : (
               Array.from(prsByRepo.entries()).map(([repo, repoPRs]) => {
