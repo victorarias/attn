@@ -17,8 +17,10 @@ interface DashboardProps {
   daemonSessions: DaemonSession[];
   prs: DaemonPR[];
   isLoading: boolean;
+  isRefreshing?: boolean;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
+  onRefreshPRs?: () => void;
 }
 
 export function Dashboard({
@@ -26,8 +28,10 @@ export function Dashboard({
   daemonSessions: _daemonSessions,
   prs,
   isLoading,
+  isRefreshing,
   onSelectSession,
   onNewSession,
+  onRefreshPRs,
 }: DashboardProps) {
   const waitingSessions = sessions.filter((s) => s.state === 'waiting');
   const workingSessions = sessions.filter((s) => s.state === 'working');
@@ -146,7 +150,27 @@ export function Dashboard({
         <div className="dashboard-card">
           <div className="card-header">
             <h2>Pull Requests</h2>
-            <span className="card-count">{prs.filter((p) => !p.muted && !isRepoMuted(p.repo)).length}</span>
+            <div className="card-header-actions">
+              {isRefreshing ? (
+                <span className="refresh-indicator" title="Refreshing...">
+                  <svg className="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                </span>
+              ) : (
+                <button
+                  className="refresh-btn"
+                  onClick={onRefreshPRs}
+                  title="Refresh PRs (⌘R)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                    <path d="M21 3v5h-5" />
+                  </svg>
+                </button>
+              )}
+              <span className="card-count">{prs.filter((p) => !p.muted && !isRepoMuted(p.repo)).length}</span>
+            </div>
           </div>
           <div className="card-body scrollable">
             {isLoading ? (
@@ -246,6 +270,7 @@ export function Dashboard({
       <footer className="dashboard-footer">
         <span className="shortcut"><kbd>⌘N</kbd> new session</span>
         <span className="shortcut"><kbd>⌘1-9</kbd> switch session</span>
+        <span className="shortcut"><kbd>⌘R</kbd> refresh PRs</span>
       </footer>
 
       <SettingsModal
