@@ -11,7 +11,6 @@ func TestRegisterMessage_Marshal(t *testing.T) {
 		ID:    "abc123",
 		Label: "drumstick",
 		Dir:   "/home/user/projects/drumstick",
-		Tmux:  "projects:2.%42",
 	}
 
 	data, err := json.Marshal(msg)

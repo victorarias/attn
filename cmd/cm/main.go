@@ -106,6 +106,15 @@ func main() {
 			}
 			runHookTodo(args[1])
 			return
+		case "_hook-stop":
+			if len(args) < 2 {
+				os.Exit(1)
+			}
+			if err := runHookStop(args[1]); err != nil {
+				fmt.Fprintf(os.Stderr, "hook-stop error: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "help":
 			printHelp()
 			return
@@ -165,18 +174,13 @@ func runWrapperWithFlags(label string, yolo bool, claudeArgs []string) {
 		logDebug("daemon already running")
 	}
 
-	// Get tmux target
-	logTrace("getting tmux target...")
-	tmuxTarget := getTmuxTarget()
-	logDebug("tmuxTarget: %s", tmuxTarget)
-
 	// Get current directory
 	dir, _ := os.Getwd()
 	logDebug("working directory: %s", dir)
 
 	// Register with daemon
 	logInfo("registering session with daemon...")
-	if err := c.Register(sessionID, label, dir, tmuxTarget); err != nil {
+	if err := c.Register(sessionID, label, dir); err != nil {
 		logWarn("could not register with daemon: %v", err)
 	} else {
 		logDebug("registered successfully")
@@ -266,22 +270,6 @@ func runWrapperWithFlags(label string, yolo bool, claudeArgs []string) {
 	}
 
 	logInfo("=== runWrapper completed successfully ===")
-}
-
-func getTmuxTarget() string {
-	if os.Getenv("TMUX") == "" {
-		logTrace("not in tmux session")
-		return ""
-	}
-	cmd := exec.Command("tmux", "display", "-p", "#{session_name}:#{window_index}.#{pane_id}")
-	output, err := cmd.Output()
-	if err != nil {
-		logTrace("tmux display failed: %v", err)
-		return ""
-	}
-	result := strings.TrimSpace(string(output))
-	logTrace("tmux target: %s", result)
-	return result
 }
 
 func startDaemonBackground() {
