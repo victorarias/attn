@@ -79,9 +79,11 @@ export function Sidebar({
           <div
             key={session.id}
             className={`session-item ${selectedId === session.id ? 'selected' : ''}`}
+            data-testid={`sidebar-session-${session.id}`}
+            data-state={session.state}
             onClick={() => onSelectSession(session.id)}
           >
-            <span className={`state-indicator ${session.state.replace('_', '-')}`} />
+            <span className={`state-indicator ${session.state}`} data-testid="state-indicator" />
             <span className="session-label">{session.label}</span>
             <span className="session-shortcut">⌘{index + 1}</span>
             <button

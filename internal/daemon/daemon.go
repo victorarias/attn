@@ -219,6 +219,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleFetchPRDetails(conn, msg.(*protocol.FetchPRDetailsMessage))
 	case protocol.MsgInjectTestPR:
 		d.handleInjectTestPR(conn, msg.(*protocol.InjectTestPRMessage))
+	case protocol.MsgInjectTestSession:
+		d.handleInjectTestSession(conn, msg.(*protocol.InjectTestSessionMessage))
 	default:
 		d.sendError(conn, "unknown command")
 	}
@@ -517,6 +519,23 @@ func (d *Daemon) handleInjectTestPR(conn net.Conn, msg *protocol.InjectTestPRMes
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventPRsUpdated,
 		PRs:   allPRs,
+	})
+}
+
+func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTestSessionMessage) {
+	if msg.Session == nil {
+		d.sendError(conn, "Session cannot be nil")
+		return
+	}
+
+	// Add session directly to store
+	d.store.Add(msg.Session)
+	d.sendOK(conn)
+
+	// Broadcast to WebSocket clients
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:   protocol.EventSessionRegistered,
+		Session: msg.Session,
 	})
 }
 
