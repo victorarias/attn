@@ -25,12 +25,19 @@ export interface DaemonPR {
   muted: boolean;
 }
 
+export interface RepoState {
+  repo: string;
+  muted: boolean;
+  collapsed: boolean;
+}
+
 interface WebSocketEvent {
   event: string;
   protocol_version?: string;
   session?: DaemonSession;
   sessions?: DaemonSession[];
   prs?: DaemonPR[];
+  repos?: RepoState[];
   // PR action result fields
   action?: string;
   repo?: string;
@@ -51,6 +58,7 @@ interface PRActionResult {
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
+  onReposUpdate: (repos: RepoState[]) => void;
   wsUrl?: string;
 }
 
@@ -60,13 +68,17 @@ const DEFAULT_WS_URL = `ws://127.0.0.1:${import.meta.env.VITE_DAEMON_PORT || '98
 export function useDaemonSocket({
   onSessionsUpdate,
   onPRsUpdate,
+  onReposUpdate,
   wsUrl = DEFAULT_WS_URL,
 }: UseDaemonSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const sessionsRef = useRef<DaemonSession[]>([]);
+  const prsRef = useRef<DaemonPR[]>([]);
+  const reposRef = useRef<RepoState[]>([]);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const pendingActionsRef = useRef<Map<string, (result: PRActionResult) => void>>(new Map());
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -96,8 +108,14 @@ export function useDaemonSocket({
               onSessionsUpdate(data.sessions);
             }
             if (data.prs) {
+              prsRef.current = data.prs;
               onPRsUpdate(data.prs);
             }
+            if (data.repos) {
+              reposRef.current = data.repos;
+              onReposUpdate(data.repos);
+            }
+            setHasReceivedInitialState(true);
             break;
 
           case 'session_registered':
@@ -128,7 +146,15 @@ export function useDaemonSocket({
 
           case 'prs_updated':
             if (data.prs) {
+              prsRef.current = data.prs;
               onPRsUpdate(data.prs);
+            }
+            break;
+
+          case 'repos_updated':
+            if (data.repos) {
+              reposRef.current = data.repos;
+              onReposUpdate(data.repos);
             }
             break;
 
@@ -160,7 +186,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate]);
 
   useEffect(() => {
     connect();
@@ -208,9 +234,49 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Mute a PR with optimistic update
+  const sendMutePR = useCallback((prId: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Optimistic update - toggle PR muted state immediately
+    const updatedPRs = prsRef.current.map(pr =>
+      pr.id === prId ? { ...pr, muted: !pr.muted } : pr
+    );
+    prsRef.current = updatedPRs;
+    onPRsUpdate(updatedPRs);
+
+    ws.send(JSON.stringify({ cmd: 'mute_pr', id: prId }));
+  }, [onPRsUpdate]);
+
+  // Mute a repo with optimistic update
+  const sendMuteRepo = useCallback((repo: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Optimistic update - toggle repo muted state immediately
+    const existingRepo = reposRef.current.find(r => r.repo === repo);
+    let updatedRepos: RepoState[];
+    if (existingRepo) {
+      updatedRepos = reposRef.current.map(r =>
+        r.repo === repo ? { ...r, muted: !r.muted } : r
+      );
+    } else {
+      // Repo doesn't exist in state yet, add it as muted
+      updatedRepos = [...reposRef.current, { repo, muted: true, collapsed: false }];
+    }
+    reposRef.current = updatedRepos;
+    onReposUpdate(updatedRepos);
+
+    ws.send(JSON.stringify({ cmd: 'mute_repo', repo }));
+  }, [onReposUpdate]);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
+    hasReceivedInitialState,
     sendPRAction,
+    sendMutePR,
+    sendMuteRepo,
   };
 }
