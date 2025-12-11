@@ -23,6 +23,8 @@ Set `DEBUG=debug` or `DEBUG=trace` for verbose logging:
 DEBUG=debug cm -s test
 ```
 
+**Daemon logs:** `~/.cm/daemon.log` (path derived from binary name, e.g., `~/.attn/daemon.log` for attn)
+
 ## Architecture
 
 Claude Manager (`cm`) tracks multiple Claude Code sessions and surfaces which ones need attention via tmux status bar or an interactive dashboard.
@@ -40,6 +42,14 @@ Claude Manager (`cm`) tracks multiple Claude Code sessions and surfaces which on
 5. **Client** (`internal/client`): Sends JSON messages to daemon over unix socket.
 
 6. **Protocol** (`internal/protocol`): Message types and parsing. States: "working" or "waiting".
+
+### GitHub PR Monitoring
+
+The daemon polls GitHub every 90 seconds for PRs that need attention (using `gh` CLI):
+- PRs where you're a requested reviewer
+- Your PRs with review comments, CI failures, or merge conflicts
+
+The store (`internal/store`) tracks both sessions and PRs with mute states. PR actions (approve, merge) are handled via WebSocket commands to the daemon.
 
 ### Protocol Versioning
 
@@ -126,6 +136,14 @@ When modifying `app/src/components/Terminal.tsx`:
 4. **Use VS Code's resize debouncing** - Y-axis immediate, X-axis 100ms debounced (text reflow is expensive)
 
 See `docs/plans/2025-12-09-node-pty-sidecar-design.md` for architecture details.
+
+### E2E Testing
+
+```bash
+cd app
+pnpm run test:e2e          # Run all E2E tests
+pnpm run test:e2e -- --ui  # Run with Playwright UI
+```
 
 ## When Something Is Broken
 
