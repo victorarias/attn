@@ -32,7 +32,7 @@ func Generate(sessionID, socketPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`echo '{"cmd":"state","id":"%s","state":"waiting"}' | nc -U %s`, sessionID, socketPath),
+							Command: fmt.Sprintf(`~/.local/bin/attn _hook-stop "%s"`, sessionID),
 						},
 					},
 				},
