@@ -26,6 +26,7 @@ const (
 	CmdCollapseRepo    = "collapse_repo"
 	CmdQueryRepos      = "query_repos"
 	CmdFetchPRDetails  = "fetch_pr_details"
+	CmdRefreshPRs      = "refresh_prs"
 	MsgApprovePR       = "approve_pr"
 	MsgMergePR         = "merge_pr"
 	MsgInjectTestPR    = "inject_test_pr"
@@ -38,6 +39,7 @@ const (
 	EventSessionStateChanged = "session_state_changed"
 	EventSessionTodosUpdated = "session_todos_updated"
 	EventPRsUpdated          = "prs_updated"
+	EventReposUpdated        = "repos_updated"
 	EventInitialState        = "initial_state"
 	MsgPRActionResult        = "pr_action_result"
 )
@@ -143,6 +145,11 @@ type FetchPRDetailsMessage struct {
 	Repo string `json:"repo"`
 }
 
+// RefreshPRsMessage requests daemon to refresh all PRs from GitHub
+type RefreshPRsMessage struct {
+	Cmd string `json:"cmd"`
+}
+
 // ApprovePRMessage requests approval of a PR
 type ApprovePRMessage struct {
 	Cmd    string `json:"cmd"`
@@ -243,11 +250,12 @@ type Response struct {
 
 // WebSocketEvent is sent from daemon to connected WebSocket clients
 type WebSocketEvent struct {
-	Event           string     `json:"event"`
-	ProtocolVersion string     `json:"protocol_version,omitempty"`
-	Session         *Session   `json:"session,omitempty"`
-	Sessions        []*Session `json:"sessions,omitempty"`
-	PRs             []*PR      `json:"prs,omitempty"`
+	Event           string       `json:"event"`
+	ProtocolVersion string       `json:"protocol_version,omitempty"`
+	Session         *Session     `json:"session,omitempty"`
+	Sessions        []*Session   `json:"sessions,omitempty"`
+	PRs             []*PR        `json:"prs,omitempty"`
+	Repos           []*RepoState `json:"repos,omitempty"`
 }
 
 // ParseMessage parses a JSON message and returns the command type and parsed message
@@ -351,6 +359,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdFetchPRDetails:
 		var msg FetchPRDetailsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdRefreshPRs:
+		var msg RefreshPRsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

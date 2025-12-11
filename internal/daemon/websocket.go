@@ -118,6 +118,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		ProtocolVersion: protocol.ProtocolVersion,
 		Sessions:        d.store.List(""),
 		PRs:             d.store.ListPRs(""),
+		Repos:           d.store.ListRepoStates(),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -217,7 +218,37 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			// Trigger PR refresh after action
 			d.RefreshPRs()
 		}()
+
+	case protocol.CmdMutePR:
+		muteMsg := msg.(*protocol.MutePRMessage)
+		d.store.ToggleMutePR(muteMsg.ID)
+		d.broadcastPRs()
+
+	case protocol.CmdMuteRepo:
+		muteMsg := msg.(*protocol.MuteRepoMessage)
+		d.store.ToggleMuteRepo(muteMsg.Repo)
+		d.broadcastRepoStates()
+
+	case protocol.CmdRefreshPRs:
+		d.logf("Refreshing PRs on request")
+		go d.RefreshPRs()
 	}
+}
+
+// broadcastPRs sends updated PR list to all WebSocket clients
+func (d *Daemon) broadcastPRs() {
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event: protocol.EventPRsUpdated,
+		PRs:   d.store.ListPRs(""),
+	})
+}
+
+// broadcastRepoStates sends updated repo states to all WebSocket clients
+func (d *Daemon) broadcastRepoStates() {
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event: protocol.EventReposUpdated,
+		Repos: d.store.ListRepoStates(),
+	})
 }
 
 func (d *Daemon) sendToClient(client *wsClient, message interface{}) {

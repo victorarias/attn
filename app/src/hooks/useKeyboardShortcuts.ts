@@ -11,6 +11,7 @@ interface KeyboardShortcutsConfig {
   onPrevSession: () => void;
   onNextSession: () => void;
   onToggleSidebar?: () => void;
+  onRefreshPRs?: () => void;
   enabled: boolean;
 }
 
@@ -24,6 +25,7 @@ export function useKeyboardShortcuts({
   onPrevSession,
   onNextSession,
   onToggleSidebar,
+  onRefreshPRs,
   enabled,
 }: KeyboardShortcutsConfig) {
   const handleKeyDown = useCallback(
@@ -95,6 +97,13 @@ export function useKeyboardShortcuts({
         onToggleSidebar();
         return;
       }
+
+      // ⌘R - Refresh PRs
+      if (isMeta && e.key === 'r' && onRefreshPRs) {
+        e.preventDefault();
+        onRefreshPRs();
+        return;
+      }
     },
     [
       enabled,
@@ -107,6 +116,7 @@ export function useKeyboardShortcuts({
       onPrevSession,
       onNextSession,
       onToggleSidebar,
+      onRefreshPRs,
     ]
   );
 

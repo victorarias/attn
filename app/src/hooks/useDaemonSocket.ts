@@ -271,6 +271,13 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'mute_repo', repo }));
   }, [onReposUpdate]);
 
+  // Request daemon to refresh PRs from GitHub
+  const sendRefreshPRs = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'refresh_prs' }));
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -278,5 +285,6 @@ export function useDaemonSocket({
     sendPRAction,
     sendMutePR,
     sendMuteRepo,
+    sendRefreshPRs,
   };
 }

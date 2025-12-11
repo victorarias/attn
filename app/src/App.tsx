@@ -55,7 +55,7 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, connectionError, hasReceivedInitialState } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendRefreshPRs, connectionError, hasReceivedInitialState } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -273,6 +273,7 @@ function App() {
     onPrevSession: handlePrevSession,
     onNextSession: handleNextSession,
     onToggleSidebar: toggleSidebarCollapse,
+    onRefreshPRs: sendRefreshPRs,
     enabled: true,
   });
 
