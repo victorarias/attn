@@ -233,12 +233,16 @@
   flex-shrink: 0;
 }
 
-.state-dot.waiting {
-  background: #ff6b35;
+.state-dot.waiting-input {
+  background: #f59e0b;
 }
 
 .state-dot.working {
   background: #22c55e;
+}
+
+.state-dot.idle {
+  background: #555;
 }
 
 .session-name {

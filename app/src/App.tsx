@@ -233,14 +233,14 @@ function App() {
   );
 
   // Calculate attention count for drawer badge
-  const waitingLocalSessions = enrichedLocalSessions.filter((s) => s.state === 'waiting');
+  const waitingLocalSessions = enrichedLocalSessions.filter((s) => s.state === 'waiting_input');
   // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
   const activePRs = prs.filter((p) => !p.muted && !isRepoMuted(p.repo));
   const attentionCount = waitingLocalSessions.length + activePRs.length;
 
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
-    const waiting = enrichedLocalSessions.find((s) => s.state === 'waiting');
+    const waiting = enrichedLocalSessions.find((s) => s.state === 'waiting_input');
     if (waiting) {
       handleSelectSession(waiting.id);
     }
