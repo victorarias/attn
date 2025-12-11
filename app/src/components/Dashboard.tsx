@@ -1,8 +1,10 @@
 // app/src/components/Dashboard.tsx
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { DaemonSession, DaemonPR } from '../hooks/useDaemonSocket';
 import { PRActions } from './PRActions';
-import { useMuteStore } from '../store/mutes';
+import { SettingsModal } from './SettingsModal';
+import { useDaemonContext } from '../contexts/DaemonContext';
+import { useDaemonStore } from '../store/daemonSessions';
 import './Dashboard.css';
 
 interface DashboardProps {
@@ -14,6 +16,7 @@ interface DashboardProps {
   }>;
   daemonSessions: DaemonSession[];
   prs: DaemonPR[];
+  isLoading: boolean;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
 }
@@ -22,25 +25,43 @@ export function Dashboard({
   sessions,
   daemonSessions: _daemonSessions,
   prs,
+  isLoading,
   onSelectSession,
   onNewSession,
 }: DashboardProps) {
+  void isLoading; // TODO: Will be used in Task 4 for skeleton loader
   const waitingSessions = sessions.filter((s) => s.state === 'waiting');
   const workingSessions = sessions.filter((s) => s.state === 'working');
 
   // Group PRs by repo
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
-  const { mutedPRs, mutedRepos, muteRepo } = useMuteStore();
+  const [fadingPRs, setFadingPRs] = useState<Set<string>>(new Set());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const { sendMuteRepo } = useDaemonContext();
+  const { isRepoMuted, repoStates } = useDaemonStore();
+
+  // Get list of muted repos for settings modal
+  const mutedRepos = useMemo(() =>
+    repoStates.filter(r => r.muted).map(r => r.repo),
+    [repoStates]
+  );
+
+  // Handle PR action completion (approve/merge success)
+  const handleActionComplete = useCallback((prId: string) => {
+    // Add to fading set to trigger CSS animation
+    setFadingPRs(prev => new Set(prev).add(prId));
+  }, []);
 
   const prsByRepo = useMemo(() => {
-    const activePRs = prs.filter((p) => !p.muted && !mutedPRs.has(p.id) && !mutedRepos.has(p.repo));
+    // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
+    const activePRs = prs.filter((p) => !p.muted && !isRepoMuted(p.repo));
     const grouped = new Map<string, DaemonPR[]>();
     for (const pr of activePRs) {
       const existing = grouped.get(pr.repo) || [];
       grouped.set(pr.repo, [...existing, pr]);
     }
     return grouped;
-  }, [prs, mutedPRs, mutedRepos]);
+  }, [prs, isRepoMuted, repoStates]);
 
   const toggleRepo = (repo: string) => {
     setCollapsedRepos((prev) => {
@@ -57,8 +78,20 @@ export function Dashboard({
   return (
     <div className="dashboard">
       <header className="dashboard-header">
-        <h1>attn</h1>
-        <span className="dashboard-subtitle">attention hub</span>
+        <div className="header-left">
+          <h1>attn</h1>
+          <span className="dashboard-subtitle">attention hub</span>
+        </div>
+        <button
+          className="settings-btn"
+          onClick={() => setSettingsOpen(true)}
+          title="Settings"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
       </header>
 
       <div className="dashboard-grid">
@@ -114,7 +147,7 @@ export function Dashboard({
         <div className="dashboard-card">
           <div className="card-header">
             <h2>Pull Requests</h2>
-            <span className="card-count">{prs.filter((p) => !p.muted && !mutedPRs.has(p.id) && !mutedRepos.has(p.repo)).length}</span>
+            <span className="card-count">{prs.filter((p) => !p.muted && !isRepoMuted(p.repo)).length}</span>
           </div>
           <div className="card-body scrollable">
             {prsByRepo.size === 0 ? (
@@ -144,7 +177,7 @@ export function Dashboard({
                         className="repo-mute-btn"
                         onClick={(e) => {
                           e.stopPropagation();
-                          muteRepo(repo);
+                          sendMuteRepo(repo);
                         }}
                         title="Mute all PRs from this repo"
                       >
@@ -154,7 +187,11 @@ export function Dashboard({
                     {!isCollapsed && (
                       <div className="repo-prs">
                         {repoPRs.map((pr) => (
-                          <div key={pr.id} className="pr-row" data-testid="pr-card">
+                          <div
+                            key={pr.id}
+                            className={`pr-row ${fadingPRs.has(pr.id) ? 'fading-out' : ''}`}
+                            data-testid="pr-card"
+                          >
                             <a
                               href={pr.url}
                               target="_blank"
@@ -170,7 +207,12 @@ export function Dashboard({
                                 <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
                               )}
                             </a>
-                            <PRActions repo={pr.repo} number={pr.number} prId={pr.id} />
+                            <PRActions
+                              repo={pr.repo}
+                              number={pr.number}
+                              prId={pr.id}
+                              onActionComplete={handleActionComplete}
+                            />
                           </div>
                         ))}
                       </div>
@@ -187,6 +229,13 @@ export function Dashboard({
         <span className="shortcut"><kbd>⌘N</kbd> new session</span>
         <span className="shortcut"><kbd>⌘1-9</kbd> switch session</span>
       </footer>
+
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        mutedRepos={mutedRepos}
+        onUnmuteRepo={sendMuteRepo}
+      />
     </div>
   );
 }

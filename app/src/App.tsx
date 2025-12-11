@@ -15,7 +15,6 @@ import { useDaemonSocket } from './hooks/useDaemonSocket';
 import { useDaemonStore } from './store/daemonSessions';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocationHistory } from './hooks/useLocationHistory';
-import { useMuteStore } from './store/mutes';
 import './App.css';
 
 function App() {
@@ -34,6 +33,8 @@ function App() {
     setDaemonSessions,
     prs,
     setPRs,
+    setRepoStates,
+    isRepoMuted,
   } = useDaemonStore();
 
   // Ensure daemon is running before connecting
@@ -54,9 +55,10 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, connectionError } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, connectionError, hasReceivedInitialState } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
+    onReposUpdate: setRepoStates,
   });
 
   // Handle deep-link spawn requests (attn://spawn?cwd=/path&label=name)
@@ -218,8 +220,8 @@ function App() {
   // Calculate attention count for drawer badge
   const waitingLocalSessions = enrichedLocalSessions.filter((s) => s.state === 'waiting');
   const waitingExternalSessions = externalDaemonSessions.filter((s) => s.state === 'waiting');
-  const { mutedPRs, mutedRepos } = useMuteStore();
-  const activePRs = prs.filter((p) => !p.muted && !mutedPRs.has(p.id) && !mutedRepos.has(p.repo));
+  // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
+  const activePRs = prs.filter((p) => !p.muted && !isRepoMuted(p.repo));
   const attentionCount = waitingLocalSessions.length + waitingExternalSessions.length + activePRs.length;
 
   // Keyboard shortcut handlers
@@ -275,7 +277,7 @@ function App() {
   });
 
   return (
-    <DaemonProvider sendPRAction={sendPRAction}>
+    <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo}>
     <div className="app">
       {/* Error banner for version mismatch */}
       {connectionError && (
@@ -289,6 +291,7 @@ function App() {
           sessions={enrichedLocalSessions}
           daemonSessions={externalDaemonSessions}
           prs={prs}
+          isLoading={!hasReceivedInitialState}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
         />
