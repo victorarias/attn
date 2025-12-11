@@ -136,9 +136,26 @@
   flex-shrink: 0;
 }
 
+/* Default session dot (legacy support) */
 .item-dot.session {
   background: #ff6b35;
   box-shadow: 0 0 8px rgba(255, 107, 53, 0.4);
+}
+
+/* State-specific session dots */
+.item-dot.session.waiting-input {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+.item-dot.session.working {
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+}
+
+.item-dot.session.idle {
+  background: #6b7280;
+  box-shadow: 0 0 8px rgba(107, 114, 128, 0.3);
 }
 
 .item-dot.pr {
