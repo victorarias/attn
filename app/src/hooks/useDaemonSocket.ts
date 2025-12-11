@@ -99,7 +99,7 @@ export function useDaemonSocket({
             // Check protocol version on initial connection
             if (data.protocol_version && data.protocol_version !== PROTOCOL_VERSION) {
               console.error(`[Daemon] Protocol version mismatch: daemon=${data.protocol_version}, client=${PROTOCOL_VERSION}`);
-              setConnectionError(`Version mismatch: Please update your cm binary (daemon v${data.protocol_version}, app v${PROTOCOL_VERSION})`);
+              setConnectionError(`Version mismatch: Please run 'make install' (daemon v${data.protocol_version}, app v${PROTOCOL_VERSION})`);
               ws.close();
               return;
             }
@@ -141,6 +141,13 @@ export function useDaemonSocket({
                 s.id === data.session!.id ? data.session! : s
               );
               onSessionsUpdate(sessionsRef.current);
+            }
+            break;
+
+          case 'sessions_updated':
+            if (data.sessions) {
+              sessionsRef.current = data.sessions;
+              onSessionsUpdate(data.sessions);
             }
             break;
 
@@ -304,6 +311,14 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Clear all sessions from daemon
+  const sendClearSessions = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    ws.send(JSON.stringify({ cmd: 'clear_sessions' }));
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -312,5 +327,6 @@ export function useDaemonSocket({
     sendMutePR,
     sendMuteRepo,
     sendRefreshPRs,
+    sendClearSessions,
   };
 }

@@ -1,5 +1,5 @@
 // app/src/components/AttentionDrawer.tsx
-import { DaemonSession, DaemonPR } from '../hooks/useDaemonSocket';
+import { DaemonPR } from '../hooks/useDaemonSocket';
 import { PRActions } from './PRActions';
 import { useDaemonStore } from '../store/daemonSessions';
 import './AttentionDrawer.css';
@@ -12,7 +12,6 @@ interface AttentionDrawerProps {
     label: string;
     state: 'working' | 'waiting';
   }>;
-  daemonSessions: DaemonSession[];
   prs: DaemonPR[];
   onSelectSession: (id: string) => void;
 }
@@ -21,13 +20,10 @@ export function AttentionDrawer({
   isOpen,
   onClose,
   waitingSessions,
-  daemonSessions,
   prs,
   onSelectSession,
 }: AttentionDrawerProps) {
   const { isRepoMuted } = useDaemonStore();
-
-  const waitingDaemonSessions = daemonSessions.filter((s) => s.state === 'waiting');
   // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
   const reviewPRs = prs.filter((p) =>
     p.role === 'reviewer' &&
@@ -40,7 +36,7 @@ export function AttentionDrawer({
     !isRepoMuted(p.repo)
   );
 
-  const totalItems = waitingSessions.length + waitingDaemonSessions.length + reviewPRs.length + authorPRs.length;
+  const totalItems = waitingSessions.length + reviewPRs.length + authorPRs.length;
 
   return (
     <div className={`attention-drawer ${isOpen ? 'open' : ''}`}>
@@ -71,21 +67,6 @@ export function AttentionDrawer({
           </div>
         )}
 
-        {/* Waiting Sessions (external) */}
-        {waitingDaemonSessions.length > 0 && (
-          <div className="drawer-section">
-            <div className="section-title">
-              Other Sessions Waiting
-              <span className="section-count">{waitingDaemonSessions.length}</span>
-            </div>
-            {waitingDaemonSessions.map((s) => (
-              <div key={s.id} className="attention-item">
-                <span className="item-dot session" />
-                <span className="item-name">{s.label}</span>
-              </div>
-            ))}
-          </div>
-        )}
 
         {/* PRs - Review Requested */}
         {reviewPRs.length > 0 && (

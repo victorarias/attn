@@ -13,7 +13,7 @@ import (
 func TestIntegration_DaemonAndClient(t *testing.T) {
 	// Build the binary
 	tmpDir := t.TempDir()
-	binPath := filepath.Join(tmpDir, "cm")
+	binPath := filepath.Join(tmpDir, "attn")
 
 	cmd := exec.Command("go", "build", "-o", binPath, "../cmd/cm")
 	if err := cmd.Run(); err != nil {

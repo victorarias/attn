@@ -59,11 +59,20 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendRefreshPRs, connectionError, hasReceivedInitialState } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendRefreshPRs, sendClearSessions, connectionError, hasReceivedInitialState } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
   });
+
+  // Clear stale daemon sessions on app start
+  const hasClearedSessions = useRef(false);
+  useEffect(() => {
+    if (hasReceivedInitialState && !hasClearedSessions.current) {
+      hasClearedSessions.current = true;
+      sendClearSessions();
+    }
+  }, [hasReceivedInitialState, sendClearSessions]);
 
   // Refresh PRs with proper async handling
   const handleRefreshPRs = useCallback(async () => {
@@ -104,20 +113,6 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, [createSession]);
-
-  // Filter out daemon sessions that match local sessions (by directory)
-  // These are sessions we spawned ourselves
-  const localDirs = new Set(sessions.map((s) => s.cwd));
-
-  // Also deduplicate by directory (keep most recent by picking last)
-  const seenDirs = new Map<string, typeof daemonSessions[0]>();
-  for (const ds of daemonSessions) {
-    seenDirs.set(ds.directory, ds);
-  }
-
-  const externalDaemonSessions = Array.from(seenDirs.values()).filter(
-    (ds) => !localDirs.has(ds.directory)
-  );
 
   // Enrich local sessions with daemon state (working/waiting from hooks)
   const enrichedLocalSessions = sessions.map((s) => {
@@ -239,10 +234,9 @@ function App() {
 
   // Calculate attention count for drawer badge
   const waitingLocalSessions = enrichedLocalSessions.filter((s) => s.state === 'waiting');
-  const waitingExternalSessions = externalDaemonSessions.filter((s) => s.state === 'waiting');
   // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
   const activePRs = prs.filter((p) => !p.muted && !isRepoMuted(p.repo));
-  const attentionCount = waitingLocalSessions.length + waitingExternalSessions.length + activePRs.length;
+  const attentionCount = waitingLocalSessions.length + activePRs.length;
 
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
@@ -310,7 +304,6 @@ function App() {
       <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
         <Dashboard
           sessions={enrichedLocalSessions}
-          daemonSessions={externalDaemonSessions}
           prs={prs}
           isLoading={!hasReceivedInitialState}
           isRefreshing={isRefreshingPRs}
@@ -358,7 +351,6 @@ function App() {
           isOpen={drawerOpen}
           onClose={closeDrawer}
           waitingSessions={waitingLocalSessions}
-          daemonSessions={externalDaemonSessions}
           prs={prs}
           onSelectSession={handleSelectSession}
         />

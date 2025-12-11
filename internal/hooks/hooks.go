@@ -54,7 +54,7 @@ func Generate(sessionID, socketPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`~/.local/bin/cm _hook-todo "%s"`, sessionID),
+							Command: fmt.Sprintf(`~/.local/bin/attn _hook-todo "%s"`, sessionID),
 						},
 					},
 				},

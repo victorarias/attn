@@ -12,7 +12,7 @@ pub struct PtyState {
 fn socket_path() -> Result<PathBuf, String> {
     dirs::home_dir()
         .ok_or_else(|| "Could not determine home directory".to_string())
-        .map(|home| home.join(".cm-pty.sock"))
+        .map(|home| home.join(".attn-pty.sock"))
 }
 
 fn write_frame(stream: &mut UnixStream, data: &serde_json::Value) -> std::io::Result<()> {

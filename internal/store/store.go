@@ -147,6 +147,14 @@ func (s *Store) Remove(id string) {
 	s.markDirty()
 }
 
+// ClearSessions removes all sessions from the store
+func (s *Store) ClearSessions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions = make(map[string]*protocol.Session)
+	s.markDirty()
+}
+
 // List returns sessions, optionally filtered by state, sorted by label
 func (s *Store) List(stateFilter string) []*protocol.Session {
 	s.mu.RLock()
