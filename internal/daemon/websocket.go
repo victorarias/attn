@@ -343,6 +343,21 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			go d.fetchPRDetailsImmediate(visitedMsg.ID)
 		}
 		d.broadcastPRs()
+
+	case protocol.CmdListWorktrees:
+		listMsg := msg.(*protocol.ListWorktreesMessage)
+		d.logf("Listing worktrees for %s", listMsg.MainRepo)
+		d.handleListWorktreesWS(client, listMsg)
+
+	case protocol.CmdCreateWorktree:
+		createMsg := msg.(*protocol.CreateWorktreeMessage)
+		d.logf("Creating worktree %s in %s", createMsg.Branch, createMsg.MainRepo)
+		d.handleCreateWorktreeWS(client, createMsg)
+
+	case protocol.CmdDeleteWorktree:
+		deleteMsg := msg.(*protocol.DeleteWorktreeMessage)
+		d.logf("Deleting worktree %s", deleteMsg.Path)
+		d.handleDeleteWorktreeWS(client, deleteMsg)
 	}
 }
 
