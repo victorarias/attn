@@ -21,6 +21,7 @@ interface DashboardProps {
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onRefreshPRs?: () => void;
+  onOpenPR?: (pr: DaemonPR) => void;
 }
 
 export function Dashboard({
@@ -32,6 +33,7 @@ export function Dashboard({
   onSelectSession,
   onNewSession,
   onRefreshPRs,
+  onOpenPR,
 }: DashboardProps) {
   const waitingSessions = sessions.filter((s) => s.state === 'waiting_input');
   const workingSessions = sessions.filter((s) => s.state === 'working');
@@ -308,6 +310,7 @@ export function Dashboard({
                               number={pr.number}
                               prId={pr.id}
                               onActionComplete={handleActionComplete}
+                              onOpen={onOpenPR ? () => onOpenPR(pr) : undefined}
                             />
                           </div>
                         );})}
