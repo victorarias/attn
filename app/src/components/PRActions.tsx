@@ -1,5 +1,6 @@
 // app/src/components/PRActions.tsx
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useDaemonContext } from '../contexts/DaemonContext';
 import './PRActions.css';
 
@@ -130,7 +131,7 @@ export function PRActions({ repo, number, prId, compact = false, onMuted, onActi
         </button>
       </div>
 
-      {showMergeConfirm && (
+      {showMergeConfirm && createPortal(
         <div className="merge-confirm-overlay" onClick={() => setShowMergeConfirm(false)}>
           <div className="merge-confirm-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
@@ -148,7 +149,8 @@ export function PRActions({ repo, number, prId, compact = false, onMuted, onActi
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

@@ -48,6 +48,18 @@ func Generate(sessionID, socketPath string) string {
 					},
 				},
 			},
+			"PreToolUse": {
+				{
+					// PreToolUse fires BEFORE tool executes - set waiting_input when Claude asks a question
+					Matcher: "AskUserQuestion",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf(`~/.local/bin/attn _hook-asking "%s"`, sessionID),
+						},
+					},
+				},
+			},
 			"PostToolUse": {
 				{
 					Matcher: "TodoWrite",
@@ -55,6 +67,16 @@ func Generate(sessionID, socketPath string) string {
 						{
 							Type:    "command",
 							Command: fmt.Sprintf(`~/.local/bin/attn _hook-todo "%s"`, sessionID),
+						},
+					},
+				},
+				{
+					// PostToolUse fires AFTER user responds - set back to working
+					Matcher: "AskUserQuestion",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf(`~/.local/bin/attn _hook-answered "%s"`, sessionID),
 						},
 					},
 				},

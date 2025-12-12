@@ -22,6 +22,7 @@ interface DaemonContextType {
   ) => Promise<PRActionResult>;
   sendMutePR: (prId: string) => void;
   sendMuteRepo: (repo: string) => void;
+  sendPRVisited: (prId: string) => void;
   lastMuted: LastMuted | null;
   clearLastMuted: () => void;
 }
@@ -33,11 +34,13 @@ export function DaemonProvider({
   sendPRAction,
   sendMutePR: sendMutePRProp,
   sendMuteRepo: sendMuteRepoProp,
+  sendPRVisited,
 }: {
   children: ReactNode;
   sendPRAction: DaemonContextType['sendPRAction'];
   sendMutePR: (prId: string) => void;
   sendMuteRepo: (repo: string) => void;
+  sendPRVisited: (prId: string) => void;
 }) {
   const [lastMuted, setLastMuted] = useState<LastMuted | null>(null);
 
@@ -57,7 +60,7 @@ export function DaemonProvider({
   }, []);
 
   return (
-    <DaemonContext.Provider value={{ sendPRAction, sendMutePR, sendMuteRepo, lastMuted, clearLastMuted }}>
+    <DaemonContext.Provider value={{ sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, lastMuted, clearLastMuted }}>
       {children}
     </DaemonContext.Provider>
   );

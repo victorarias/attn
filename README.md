@@ -15,7 +15,7 @@ Running multiple Claude sessions means losing track of which ones need your inpu
 ## Installation
 
 ```bash
-go install github.com/victorarias/claude-manager/cmd/cm@latest
+go install github.com/victorarias/claude-manager/cmd/attn@latest
 ```
 
 Or build from source:
@@ -23,19 +23,19 @@ Or build from source:
 ```bash
 git clone https://github.com/victorarias/claude-manager.git
 cd claude-manager
-go build -o cm ./cmd/cm
-mv cm ~/bin/  # or anywhere in your PATH
+go build -o attn ./cmd/attn
+mv attn ~/bin/  # or anywhere in your PATH
 ```
 
 ## Usage
 
 ```bash
-cm                # Start Claude with directory name as label
-cm -s drumstick   # Start Claude with explicit label
-cm -d             # Open dashboard
-cm status         # Output for tmux status bar
-cm list           # List all sessions (JSON)
-cm daemon         # Run daemon in foreground
+attn                # Start Claude with directory name as label
+attn -s drumstick   # Start Claude with explicit label
+attn -d             # Open dashboard
+attn status         # Output for tmux status bar
+attn list           # List all sessions (JSON)
+attn daemon         # Run daemon in foreground
 ```
 
 ## tmux Setup
@@ -44,15 +44,15 @@ Add to your `.tmux.conf`:
 
 ```tmux
 set -g status-interval 5
-set -g status-right '#(cm status)'
+set -g status-right '#(attn status)'
 ```
 
 ## How It Works
 
-1. `cm` wraps `claude` and installs hooks that report state changes
+1. `attn` wraps `claude` and installs hooks that report state changes
 2. A background daemon tracks all sessions
-3. `cm status` queries the daemon for waiting sessions
-4. `cm -d` opens an interactive dashboard
+3. `attn status` queries the daemon for waiting sessions
+4. `attn -d` opens an interactive dashboard
 
 ## Architecture
 

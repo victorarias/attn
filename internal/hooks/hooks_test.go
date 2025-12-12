@@ -85,3 +85,7 @@ func TestGenerateHooks_HasUserPromptSubmitHook(t *testing.T) {
 		t.Error("hooks should include UserPromptSubmit event for working state")
 	}
 }
+
+// NOTE: AskUserQuestion PostToolUse hook was removed because it fires
+// AFTER the user responds, not when the question is displayed.
+// See: https://github.com/anthropics/claude-code/issues/10168

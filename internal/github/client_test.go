@@ -289,8 +289,8 @@ func TestClient_FetchAll(t *testing.T) {
 	if len(prs) != 2 {
 		t.Fatalf("got %d PRs, want 2", len(prs))
 	}
-	if callCount != 2 {
-		t.Errorf("API called %d times, want 2", callCount)
+	if callCount != 3 {
+		t.Errorf("API called %d times, want 3", callCount)
 	}
 }
 

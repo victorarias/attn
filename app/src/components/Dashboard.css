@@ -533,3 +533,62 @@
 .pr-skeleton-row:nth-child(4) .pr-skeleton-title::after {
   animation-delay: 0.45s;
 }
+
+/* === PR STATUS BADGES === */
+.pr-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Approved badge - green checkmark */
+.badge-approved {
+  color: #22c55e;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* Has changes badge - explicit label */
+.badge-changes {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: #3b82f620;
+  color: #3b82f6;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+/* CI Status indicator */
+.ci-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ci-status.success {
+  background: #22c55e;
+}
+
+.ci-status.failure {
+  background: #ef4444;
+}
+
+.ci-status.pending {
+  background: #f59e0b;
+}
+
+/* APPROVED STATE - dimmed row for PRs user has approved without new changes */
+.pr-row.approved {
+  opacity: 0.5;
+}
+
+.pr-row.approved:hover {
+  opacity: 0.8;
+}

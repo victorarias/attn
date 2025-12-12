@@ -22,6 +22,13 @@ export interface DaemonPR {
   reason: string;
   last_updated: string;
   muted: boolean;
+  // Interaction tracking (Plan 2)
+  head_sha?: string;
+  comment_count?: number;
+  approved_by_me?: boolean;
+  has_new_changes?: boolean;
+  ci_status?: string;
+  review_status?: string;
 }
 
 export interface RepoState {
@@ -47,7 +54,7 @@ interface WebSocketEvent {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '2';
+const PROTOCOL_VERSION = '3';
 
 interface PRActionResult {
   success: boolean;
@@ -75,6 +82,7 @@ export function useDaemonSocket({
   const prsRef = useRef<DaemonPR[]>([]);
   const reposRef = useRef<RepoState[]>([]);
   const reconnectTimeoutRef = useRef<number | null>(null);
+  const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
   const pendingActionsRef = useRef<Map<string, (result: PRActionResult) => void>>(new Map());
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
@@ -87,6 +95,7 @@ export function useDaemonSocket({
     ws.onopen = () => {
       console.log('[Daemon] WebSocket connected');
       setConnectionError(null);
+      reconnectDelayRef.current = 1000; // Reset to 1s on successful connect
     };
 
     ws.onmessage = (event) => {
@@ -190,9 +199,12 @@ export function useDaemonSocket({
     };
 
     ws.onclose = () => {
-      console.log('[Daemon] WebSocket disconnected, reconnecting in 3s...');
+      const delay = reconnectDelayRef.current;
+      console.log(`[Daemon] WebSocket disconnected, reconnecting in ${delay}ms...`);
       wsRef.current = null;
-      reconnectTimeoutRef.current = window.setTimeout(connect, 3000);
+      reconnectTimeoutRef.current = window.setTimeout(connect, delay);
+      // Exponential backoff: 1s -> 1.5s -> 2.25s -> ... -> max 5s
+      reconnectDelayRef.current = Math.min(delay * 1.5, 5000);
     };
 
     ws.onerror = (err) => {
@@ -318,6 +330,21 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'clear_sessions' }));
   }, []);
 
+  // Mark a PR as visited (clears HasNewChanges flag)
+  const sendPRVisited = useCallback((prId: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Optimistic update - clear has_new_changes immediately
+    const updatedPRs = prsRef.current.map(pr =>
+      pr.id === prId ? { ...pr, has_new_changes: false } : pr
+    );
+    prsRef.current = updatedPRs;
+    onPRsUpdate(updatedPRs);
+
+    ws.send(JSON.stringify({ cmd: 'pr_visited', id: prId }));
+  }, [onPRsUpdate]);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -327,5 +354,6 @@ export function useDaemonSocket({
     sendMuteRepo,
     sendRefreshPRs,
     sendClearSessions,
+    sendPRVisited,
   };
 }

@@ -41,7 +41,7 @@ export function Dashboard({
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
   const [fadingPRs, setFadingPRs] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { sendMuteRepo } = useDaemonContext();
+  const { sendMuteRepo, sendPRVisited } = useDaemonContext();
   const { isRepoMuted, repoStates } = useDaemonStore();
 
   // Get list of muted repos for settings modal
@@ -51,9 +51,13 @@ export function Dashboard({
   );
 
   // Handle PR action completion (approve/merge success)
-  const handleActionComplete = useCallback((prId: string) => {
-    // Add to fading set to trigger CSS animation
-    setFadingPRs(prev => new Set(prev).add(prId));
+  // Only fade out on merge - approved PRs stay visible (dimmed)
+  const handleActionComplete = useCallback((prId: string, action: 'approve' | 'merge') => {
+    if (action === 'merge') {
+      // Add to fading set to trigger CSS animation
+      setFadingPRs(prev => new Set(prev).add(prId));
+    }
+    // For approve, the PR stays visible but will be dimmed via approved_by_me flag
   }, []);
 
   const prsByRepo = useMemo(() => {
@@ -196,7 +200,7 @@ export function Dashboard({
                   </svg>
                 )}
               </button>
-              <span className="card-count">{prs.filter((p) => !p.muted && !isRepoMuted(p.repo)).length}</span>
+              <span className="card-count">{prs.filter((p) => !p.muted && !isRepoMuted(p.repo) && (!p.approved_by_me || p.has_new_changes)).length}</span>
             </div>
           </div>
           <div className="card-body scrollable">
@@ -255,10 +259,13 @@ export function Dashboard({
                     </div>
                     {!isCollapsed && (
                       <div className="repo-prs">
-                        {repoPRs.map((pr) => (
+                        {repoPRs.map((pr) => {
+                          // Determine if this is an approved PR without changes (should be dimmed)
+                          const isApprovedNoChanges = pr.approved_by_me && !pr.has_new_changes;
+                          return (
                           <div
                             key={pr.id}
-                            className={`pr-row ${fadingPRs.has(pr.id) ? 'fading-out' : ''}`}
+                            className={`pr-row ${fadingPRs.has(pr.id) ? 'fading-out' : ''} ${isApprovedNoChanges ? 'approved' : ''}`}
                             data-testid="pr-card"
                           >
                             <a
@@ -266,6 +273,7 @@ export function Dashboard({
                               target="_blank"
                               rel="noopener noreferrer"
                               className="pr-link"
+                              onClick={() => sendPRVisited(pr.id)}
                             >
                               <span className={`pr-role ${pr.role}`}>
                                 {pr.role === 'reviewer' ? '👀' : '✏️'}
@@ -276,6 +284,17 @@ export function Dashboard({
                                 <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
                               )}
                             </a>
+                            <div className="pr-badges">
+                              {pr.has_new_changes && (
+                                <span className="badge-changes" title="New commits/comments since your last visit">updated</span>
+                              )}
+                              {pr.approved_by_me && (
+                                <span className="badge-approved" title="You approved this PR">✓</span>
+                              )}
+                              {pr.ci_status && pr.ci_status !== 'none' && (
+                                <span className={`ci-status ${pr.ci_status}`} title={`CI ${pr.ci_status}`}></span>
+                              )}
+                            </div>
                             <PRActions
                               repo={pr.repo}
                               number={pr.number}
@@ -283,7 +302,7 @@ export function Dashboard({
                               onActionComplete={handleActionComplete}
                             />
                           </div>
-                        ))}
+                        );})}
                       </div>
                     )}
                   </div>

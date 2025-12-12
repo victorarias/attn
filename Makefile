@@ -2,7 +2,7 @@
 
 BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
-BUILD_DIR=./cmd/cm
+BUILD_DIR=./cmd/attn
 
 build:
 	go build -o $(BINARY_NAME) $(BUILD_DIR)

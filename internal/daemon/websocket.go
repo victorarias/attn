@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -324,8 +325,20 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		visitedMsg := msg.(*protocol.PRVisitedMessage)
 		d.logf("Marking PR %s as visited", visitedMsg.ID)
 		d.store.MarkPRVisited(visitedMsg.ID)
-		d.store.SetPRHot(visitedMsg.ID)
-		go d.fetchPRDetailsImmediate(visitedMsg.ID)
+		// Make all PRs from the same repo HOT so user sees fresh status
+		// PR ID format: "owner/repo#number" → extract repo as "owner/repo"
+		if idx := strings.LastIndex(visitedMsg.ID, "#"); idx > 0 {
+			repo := visitedMsg.ID[:idx]
+			for _, pr := range d.store.ListPRs("") {
+				if pr.Repo == repo {
+					d.store.SetPRHot(pr.ID)
+					go d.fetchPRDetailsImmediate(pr.ID)
+				}
+			}
+		} else {
+			d.store.SetPRHot(visitedMsg.ID)
+			go d.fetchPRDetailsImmediate(visitedMsg.ID)
+		}
 		d.broadcastPRs()
 	}
 }

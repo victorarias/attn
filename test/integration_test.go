@@ -15,7 +15,7 @@ func TestIntegration_DaemonAndClient(t *testing.T) {
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "attn")
 
-	cmd := exec.Command("go", "build", "-o", binPath, "../cmd/cm")
+	cmd := exec.Command("go", "build", "-o", binPath, "../cmd/attn")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("build failed: %v", err)
 	}

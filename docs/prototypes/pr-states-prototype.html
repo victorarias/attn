@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PR States Prototype - attn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0b;
+      color: #e8e8e8;
+      padding: 40px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-size: 12px;
+      color: #555;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 40px;
+    }
+
+    .card {
+      background: #111113;
+      border: 1px solid #2a2a2d;
+      border-radius: 8px;
+      max-width: 500px;
+      margin-bottom: 40px;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px;
+      border-bottom: 1px solid #2a2a2d;
+    }
+
+    .card-header h2 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #555;
+    }
+
+    .card-count {
+      background: #ff6b35;
+      color: #000;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    .card-body {
+      padding: 12px;
+    }
+
+    /* PR Repo Group */
+    .pr-repo-group {
+      margin-bottom: 8px;
+    }
+
+    .repo-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .repo-header:hover {
+      background: #1a1a1d;
+    }
+
+    .collapse-icon {
+      color: #555;
+      font-size: 10px;
+    }
+
+    .repo-name {
+      font-weight: 600;
+      flex: 1;
+    }
+
+    .repo-counts {
+      display: flex;
+      gap: 8px;
+    }
+
+    .repo-counts .count {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .count.review {
+      background: #ff6b3520;
+      color: #ff6b35;
+    }
+
+    .count.author {
+      background: #22c55e20;
+      color: #22c55e;
+    }
+
+    /* PR List */
+    .repo-prs {
+      margin-left: 18px;
+      border-left: 1px solid #2a2a2d;
+      padding-left: 12px;
+    }
+
+    .pr-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      transition: all 0.2s ease-out;
+      /* For gap fix animation */
+      max-height: 50px;
+      overflow: hidden;
+    }
+
+    .pr-row:hover {
+      background: #1a1a1d;
+    }
+
+    /* APPROVED STATE - dimmed row */
+    .pr-row.approved {
+      opacity: 0.5;
+    }
+
+    .pr-row.approved:hover {
+      opacity: 0.8;
+    }
+
+    .pr-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      font-size: 12px;
+      color: #888;
+      text-decoration: none;
+      overflow: hidden;
+    }
+
+    .pr-row:hover .pr-link {
+      color: #e8e8e8;
+    }
+
+    .pr-role {
+      font-size: 12px;
+    }
+
+    .pr-number {
+      color: #555;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+    }
+
+    .pr-title {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* === NEW: STATUS BADGES === */
+    .pr-badges {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    /* Approved badge - green checkmark */
+    .badge-approved {
+      color: #22c55e;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1;
+    }
+
+    /* Has changes badge - explicit label */
+    .badge-changes {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: #3b82f620;
+      color: #3b82f6;
+      padding: 2px 6px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+
+    /* CI Status indicator */
+    .ci-status {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .ci-status.success {
+      background: #22c55e;
+    }
+
+    .ci-status.failure {
+      background: #ef4444;
+    }
+
+    .ci-status.pending {
+      background: #f59e0b;
+      animation: ci-pending 1s ease-in-out infinite;
+    }
+
+    @keyframes ci-pending {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Gap fix - fading out animation */
+    .pr-row.fading-out {
+      opacity: 0;
+      max-height: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      margin: 0;
+      pointer-events: none;
+    }
+
+    /* Legend */
+    .legend {
+      margin-top: 40px;
+      padding: 20px;
+      background: #111113;
+      border: 1px solid #2a2a2d;
+      border-radius: 8px;
+      max-width: 500px;
+    }
+
+    .legend h3 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #555;
+      margin-bottom: 16px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: #888;
+    }
+
+    .legend-item:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Demo controls */
+    .demo-controls {
+      margin-top: 40px;
+      display: flex;
+      gap: 12px;
+    }
+
+    .demo-btn {
+      background: #1a1a1d;
+      border: 1px solid #2a2a2d;
+      border-radius: 4px;
+      color: #888;
+      font-size: 12px;
+      padding: 8px 16px;
+      cursor: pointer;
+      transition: all 150ms;
+    }
+
+    .demo-btn:hover {
+      background: #2a2a2d;
+      color: #e8e8e8;
+    }
+
+    .section-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+      padding: 0 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>attn</h1>
+  <div class="subtitle">PR States Prototype</div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>Pull Requests</h2>
+      <span class="card-count">2</span> <!-- Only counts PRs needing attention -->
+    </div>
+    <div class="card-body">
+      <div class="pr-repo-group">
+        <div class="repo-header">
+          <span class="collapse-icon">▾</span>
+          <span class="repo-name">claude-manager</span>
+          <span class="repo-counts">
+            <span class="count review">2 review</span>
+            <span class="count author">1 yours</span>
+          </span>
+        </div>
+        <div class="repo-prs">
+          <!-- Needs attention: review requested, CI passing -->
+          <div class="section-label">Needs attention</div>
+          <div class="pr-row" data-testid="pr-needs-attention">
+            <a href="#" class="pr-link">
+              <span class="pr-role">👀</span>
+              <span class="pr-number">#42</span>
+              <span class="pr-title">feat: add user authentication flow</span>
+            </a>
+            <div class="pr-badges">
+              <span class="ci-status success" title="CI passing"></span>
+            </div>
+          </div>
+
+          <!-- Needs attention: CI failing -->
+          <div class="pr-row" data-testid="pr-ci-failing">
+            <a href="#" class="pr-link">
+              <span class="pr-role">✏️</span>
+              <span class="pr-number">#38</span>
+              <span class="pr-title">fix: resolve memory leak in daemon</span>
+            </a>
+            <div class="pr-badges">
+              <span class="ci-status failure" title="CI failing"></span>
+            </div>
+          </div>
+
+          <!-- Approved but has new changes - NEEDS RE-REVIEW -->
+          <div class="section-label" style="margin-top: 12px;">Has changes since review</div>
+          <div class="pr-row" data-testid="pr-has-changes">
+            <a href="#" class="pr-link">
+              <span class="pr-role">👀</span>
+              <span class="pr-number">#45</span>
+              <span class="pr-title">refactor: extract config module</span>
+            </a>
+            <div class="pr-badges">
+              <span class="badge-changes" title="New commits since you reviewed">updated</span>
+              <span class="badge-approved" title="You approved">✓</span>
+              <span class="ci-status pending" title="CI running"></span>
+            </div>
+          </div>
+
+          <!-- Approved, no changes - doesn't need attention -->
+          <div class="section-label" style="margin-top: 12px;">Approved, awaiting merge</div>
+          <div class="pr-row approved" data-testid="pr-approved">
+            <a href="#" class="pr-link">
+              <span class="pr-role">👀</span>
+              <span class="pr-number">#41</span>
+              <span class="pr-title">docs: update README with examples</span>
+            </a>
+            <div class="pr-badges">
+              <span class="badge-approved" title="You approved">✓</span>
+              <span class="ci-status success" title="CI passing"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <h3>Badge Legend</h3>
+    <div class="legend-item">
+      <span class="badge-approved">✓</span>
+      <span>You approved this PR</span>
+    </div>
+    <div class="legend-item">
+      <span class="badge-changes">updated</span>
+      <span>New commits/comments since your last interaction</span>
+    </div>
+    <div class="legend-item">
+      <span class="ci-status success"></span>
+      <span>CI passing</span>
+    </div>
+    <div class="legend-item">
+      <span class="ci-status failure"></span>
+      <span>CI failing</span>
+    </div>
+    <div class="legend-item">
+      <span class="ci-status pending"></span>
+      <span>CI running</span>
+    </div>
+    <div class="legend-item">
+      <div class="pr-row approved" style="padding: 4px 8px; background: #1a1a1d; border-radius: 4px;">
+        <span style="font-size: 12px; color: #888;">Dimmed row</span>
+      </div>
+      <span>Approved, no changes (doesn't count as "needs attention")</span>
+    </div>
+  </div>
+
+  <div class="demo-controls">
+    <button class="demo-btn" onclick="simulateFadeOut()">Demo: PR merged (gap fix)</button>
+    <button class="demo-btn" onclick="resetDemo()">Reset</button>
+  </div>
+
+  <script>
+    function simulateFadeOut() {
+      const pr = document.querySelector('[data-testid="pr-approved"]');
+      if (pr) {
+        pr.classList.add('fading-out');
+      }
+    }
+
+    function resetDemo() {
+      const pr = document.querySelector('[data-testid="pr-approved"]');
+      if (pr) {
+        pr.classList.remove('fading-out');
+      }
+    }
+  </script>
+</body>
+</html>
