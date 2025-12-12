@@ -29,6 +29,8 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const newBranchRef = useRef<HTMLDivElement>(null);
   const { getRecentLocations, addToHistory } = useLocationHistory();
   const { suggestions: fsSuggestions, loading, currentDir } = useFilesystemSuggestions(inputValue);
 
@@ -66,6 +68,25 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
   useEffect(() => {
     setSelectedIndex(0);
   }, [inputValue]);
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (!resultsRef.current) return;
+    const selectedEl = resultsRef.current.querySelector(`[data-index="${selectedIndex}"]`);
+    if (selectedEl) {
+      selectedEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [selectedIndex]);
+
+  // Scroll new branch input into view when it appears
+  useEffect(() => {
+    if (showNewBranch) {
+      // Small delay to ensure DOM is updated
+      setTimeout(() => {
+        newBranchRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      }, 50);
+    }
+  }, [showNewBranch]);
 
   // Focus input when opened
   useEffect(() => {
@@ -178,8 +199,8 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
     }
   }, [selectedRepo, newBranchName, onCreateWorktree, addToHistory, onSelect, onClose, creating]);
 
-  // Total items in worktree mode: 1 (main) + worktrees count
-  const worktreeItemCount = 1 + (worktrees?.length || 0);
+  // Total items in worktree mode: 1 (main) + worktrees count + 1 (new branch)
+  const worktreeItemCount = 1 + (worktrees?.length || 0) + 1;
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -219,8 +240,11 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
         // Enter to select
         if (e.key === 'Enter' && !showNewBranch) {
           e.preventDefault();
+          const newBranchIndex = 1 + (worktrees?.length || 0);
           if (selectedIndex === 0) {
             handleMainBranchSelect();
+          } else if (selectedIndex === newBranchIndex) {
+            setShowNewBranch(true);
           } else {
             const worktreeIndex = selectedIndex - 1;
             if (worktrees && worktrees[worktreeIndex]) {
@@ -328,7 +352,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
           )}
         </div>
 
-        <div className="picker-results">
+        <div className="picker-results" ref={resultsRef}>
           {worktreeMode && selectedRepo ? (
             <>
               <div className="picker-section">
@@ -337,6 +361,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
                 {/* Main branch option */}
                 <div
                   className={`picker-item ${selectedIndex === 0 ? 'selected' : ''}`}
+                  data-index={0}
                   onClick={handleMainBranchSelect}
                   onMouseEnter={() => setSelectedIndex(0)}
                 >
@@ -353,6 +378,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
                   <div
                     key={wt.path}
                     className={`picker-item ${selectedIndex === index + 1 ? 'selected' : ''}`}
+                    data-index={index + 1}
                     onClick={() => handleWorktreeSelect(wt.path)}
                     onMouseEnter={() => setSelectedIndex(index + 1)}
                   >
@@ -368,7 +394,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
 
               {/* New branch section */}
               {showNewBranch ? (
-                <div className="picker-section">
+                <div className="picker-section" ref={newBranchRef}>
                   <div className="picker-section-title">New Branch</div>
                   <div className="picker-new-branch">
                     <input
@@ -397,16 +423,23 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
                   </div>
                 </div>
               ) : (
-                <div
-                  className="picker-item picker-new-branch-trigger"
-                  onClick={() => setShowNewBranch(true)}
-                >
-                  <div className="picker-shortcut">n</div>
-                  <div className="picker-icon">+</div>
-                  <div className="picker-info">
-                    <div className="picker-name">New branch...</div>
-                  </div>
-                </div>
+                (() => {
+                  const newBranchIndex = 1 + (worktrees?.length || 0);
+                  return (
+                    <div
+                      className={`picker-item picker-new-branch-trigger ${selectedIndex === newBranchIndex ? 'selected' : ''}`}
+                      data-index={newBranchIndex}
+                      onClick={() => setShowNewBranch(true)}
+                      onMouseEnter={() => setSelectedIndex(newBranchIndex)}
+                    >
+                      <div className="picker-shortcut">n</div>
+                      <div className="picker-icon">+</div>
+                      <div className="picker-info">
+                        <div className="picker-name">New branch...</div>
+                      </div>
+                    </div>
+                  );
+                })()
               )}
             </>
           ) : (
@@ -419,6 +452,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
                     <div
                       key={item.path}
                       className={`picker-item ${index === selectedIndex ? 'selected' : ''}`}
+                      data-index={index}
                       onClick={() => handleSelect(item.path)}
                       onMouseEnter={() => setSelectedIndex(index)}
                     >
@@ -441,6 +475,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
                       <div
                         key={loc.path}
                         className={`picker-item ${globalIndex === selectedIndex ? 'selected' : ''}`}
+                        data-index={globalIndex}
                         onClick={() => handleSelect(loc.path)}
                         onMouseEnter={() => setSelectedIndex(globalIndex)}
                       >
