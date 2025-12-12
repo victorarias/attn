@@ -57,7 +57,7 @@ interface WebSocketEvent {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '4';
+const PROTOCOL_VERSION = '5';
 
 interface PRActionResult {
   success: boolean;
