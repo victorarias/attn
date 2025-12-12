@@ -9,7 +9,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "2"
+const ProtocolVersion = "3"
 
 // Commands
 const (
@@ -29,6 +29,7 @@ const (
 	CmdFetchPRDetails  = "fetch_pr_details"
 	CmdRefreshPRs      = "refresh_prs"
 	CmdClearSessions   = "clear_sessions"
+	CmdPRVisited       = "pr_visited"
 	MsgApprovePR          = "approve_pr"
 	MsgMergePR            = "merge_pr"
 	MsgInjectTestPR       = "inject_test_pr"
@@ -69,6 +70,22 @@ const (
 const (
 	PRRoleAuthor   = "author"
 	PRRoleReviewer = "reviewer"
+)
+
+// PR heat states (for detail refresh scheduling)
+const (
+	HeatStateHot  = "hot"
+	HeatStateWarm = "warm"
+	HeatStateCold = "cold"
+)
+
+// Heat state timing constants
+const (
+	HeatHotDuration  = 3 * time.Minute  // Stay hot for 3 min after activity
+	HeatWarmDuration = 10 * time.Minute // Stay warm for 10 min total
+	HeatHotInterval  = 30 * time.Second // Refresh hot PRs every 30s
+	HeatWarmInterval = 2 * time.Minute  // Refresh warm PRs every 2 min
+	HeatColdInterval = 10 * time.Minute // Refresh cold PRs every 10 min
 )
 
 // RegisterMessage registers a new session with the daemon
@@ -168,6 +185,12 @@ type ClearSessionsMessage struct {
 	Cmd string `json:"cmd"`
 }
 
+// PRVisitedMessage marks a PR as visited by the user
+type PRVisitedMessage struct {
+	Cmd string `json:"cmd"`
+	ID  string `json:"id"` // PR ID (owner/repo#number)
+}
+
 // ApprovePRMessage requests approval of a PR
 type ApprovePRMessage struct {
 	Cmd    string `json:"cmd"`
@@ -214,14 +237,15 @@ type RefreshPRsResultMessage struct {
 
 // Session represents a tracked Claude session
 type Session struct {
-	ID         string    `json:"id"`
-	Label      string    `json:"label"`
-	Directory  string    `json:"directory"`
-	State      string    `json:"state"`
-	StateSince time.Time `json:"state_since"`
-	Todos      []string  `json:"todos,omitempty"`
-	LastSeen   time.Time `json:"last_seen"`
-	Muted      bool      `json:"muted"`
+	ID             string    `json:"id"`
+	Label          string    `json:"label"`
+	Directory      string    `json:"directory"`
+	State          string    `json:"state"`
+	StateSince     time.Time `json:"state_since"`
+	StateUpdatedAt time.Time `json:"state_updated_at"` // For race condition prevention
+	Todos          []string  `json:"todos,omitempty"`
+	LastSeen       time.Time `json:"last_seen"`
+	Muted          bool      `json:"muted"`
 }
 
 // PR represents a tracked GitHub pull request
@@ -244,6 +268,14 @@ type PR struct {
 	MergeableState   string    `json:"mergeable_state"`    // clean, blocked, dirty, unstable
 	CIStatus         string    `json:"ci_status"`          // success, failure, pending, none
 	ReviewStatus     string    `json:"review_status"`      // approved, changes_requested, pending, none
+	// Interaction tracking (Plan 2)
+	HeadSHA       string `json:"head_sha"`        // current commit SHA for change detection
+	CommentCount  int    `json:"comment_count"`   // for change detection
+	ApprovedByMe  bool   `json:"approved_by_me"`  // true if user approved this PR
+	HasNewChanges bool   `json:"has_new_changes"` // true if PR changed since last visit
+	// Heat state for detail refresh scheduling
+	HeatState          string    `json:"heat_state"`            // hot, warm, cold
+	LastHeatActivityAt time.Time `json:"last_heat_activity_at"` // when heat was last triggered
 }
 
 // NeedsDetailRefresh returns true if PR details should be re-fetched
@@ -410,6 +442,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdClearSessions:
 		var msg ClearSessionsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdPRVisited:
+		var msg PRVisitedMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
