@@ -1,8 +1,8 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
-	"os"
 	"sort"
 	"sync"
 	"time"
@@ -11,148 +11,145 @@ import (
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
 
-// Store manages session state in memory with optional persistence
+// Store manages session state in SQLite
 type Store struct {
-	mu       sync.RWMutex
-	sessions map[string]*protocol.Session
-	prs      map[string]*protocol.PR
-	repos    map[string]*protocol.RepoState
-	path     string // path to state file (empty = no persistence)
-	dirty    bool   // tracks unsaved changes
+	mu sync.RWMutex
+	db *sql.DB
 }
 
-// New creates a new session store
+// New creates a new in-memory store (backed by SQLite :memory:)
 func New() *Store {
-	return &Store{
-		sessions: make(map[string]*protocol.Session),
-		prs:      make(map[string]*protocol.PR),
-		repos:    make(map[string]*protocol.RepoState),
+	db, err := OpenDB(":memory:")
+	if err != nil {
+		return &Store{}
 	}
+	return &Store{db: db}
 }
 
-// NewWithPersistence creates a store that persists to disk
+// NewWithDB creates a store backed by SQLite
+func NewWithDB(dbPath string) (*Store, error) {
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+
+// NewWithPersistence creates a store that persists to SQLite (replaces JSON persistence)
 func NewWithPersistence(path string) *Store {
-	s := &Store{
-		sessions: make(map[string]*protocol.Session),
-		prs:      make(map[string]*protocol.PR),
-		repos:    make(map[string]*protocol.RepoState),
-		path:     path,
+	// Use the new DBPath from config instead of the legacy state path
+	dbPath := config.DBPath()
+	store, err := NewWithDB(dbPath)
+	if err != nil {
+		// Fallback to in-memory if DB fails
+		return New()
 	}
-	s.Load() // load existing state if any
-	return s
+	return store
 }
 
-// DefaultStatePath returns the default state file path
+// DefaultStatePath returns the default state file path (legacy, for cleanup)
 func DefaultStatePath() string {
 	return config.StatePath()
 }
 
-type persistedState struct {
-	Sessions []*protocol.Session   `json:"sessions"`
-	PRs      []*protocol.PR        `json:"prs,omitempty"`
-	Repos    []*protocol.RepoState `json:"repos,omitempty"`
-}
-
-// Load loads sessions from disk
-func (s *Store) Load() error {
-	if s.path == "" {
-		return nil
-	}
-
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // no state file yet
-		}
-		return err
-	}
-
-	var state persistedState
-	if err := json.Unmarshal(data, &state); err != nil {
-		// Try legacy format (just sessions array)
-		var sessions []*protocol.Session
-		if err := json.Unmarshal(data, &sessions); err != nil {
-			return err
-		}
-		state.Sessions = sessions
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, session := range state.Sessions {
-		s.sessions[session.ID] = session
-	}
-	for _, pr := range state.PRs {
-		s.prs[pr.ID] = pr
-	}
-	for _, repo := range state.Repos {
-		s.repos[repo.Repo] = repo
+// Close closes the database connection
+func (s *Store) Close() error {
+	if s.db != nil {
+		return s.db.Close()
 	}
 	return nil
-}
-
-// Save persists sessions to disk if path is configured
-func (s *Store) Save() {
-	if s.path == "" {
-		return
-	}
-
-	// Read state under lock
-	s.mu.RLock()
-	state := persistedState{
-		Sessions: make([]*protocol.Session, 0, len(s.sessions)),
-		PRs:      make([]*protocol.PR, 0, len(s.prs)),
-		Repos:    make([]*protocol.RepoState, 0, len(s.repos)),
-	}
-	for _, session := range s.sessions {
-		state.Sessions = append(state.Sessions, session)
-	}
-	for _, pr := range s.prs {
-		state.PRs = append(state.PRs, pr)
-	}
-	for _, repo := range s.repos {
-		state.Repos = append(state.Repos, repo)
-	}
-	s.mu.RUnlock()
-
-	// Write to file without lock
-	data, err := json.Marshal(state)
-	if err != nil {
-		return
-	}
-
-	os.WriteFile(s.path, data, 0600)
 }
 
 // Add adds a session to the store
 func (s *Store) Add(session *protocol.Session) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sessions[session.ID] = session
-	s.markDirty()
+
+	if s.db == nil {
+		return
+	}
+
+	todosJSON, _ := json.Marshal(session.Todos)
+	_, _ = s.db.Exec(`
+		INSERT OR REPLACE INTO sessions
+		(id, label, directory, state, state_since, state_updated_at, todos, last_seen, muted)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		session.ID,
+		session.Label,
+		session.Directory,
+		session.State,
+		session.StateSince.Format(time.RFC3339),
+		session.StateUpdatedAt.Format(time.RFC3339),
+		string(todosJSON),
+		session.LastSeen.Format(time.RFC3339),
+		boolToInt(session.Muted),
+	)
 }
 
 // Get retrieves a session by ID
 func (s *Store) Get(id string) *protocol.Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.sessions[id]
+
+	if s.db == nil {
+		return nil
+	}
+
+	var session protocol.Session
+	var todosJSON string
+	var stateSince, stateUpdatedAt, lastSeen string
+	var muted int
+
+	err := s.db.QueryRow(`
+		SELECT id, label, directory, state, state_since, state_updated_at, todos, last_seen, muted
+		FROM sessions WHERE id = ?`, id).Scan(
+		&session.ID,
+		&session.Label,
+		&session.Directory,
+		&session.State,
+		&stateSince,
+		&stateUpdatedAt,
+		&todosJSON,
+		&lastSeen,
+		&muted,
+	)
+	if err != nil {
+		return nil
+	}
+
+	session.StateSince, _ = time.Parse(time.RFC3339, stateSince)
+	session.StateUpdatedAt, _ = time.Parse(time.RFC3339, stateUpdatedAt)
+	session.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
+	session.Muted = muted == 1
+	if todosJSON != "" && todosJSON != "null" {
+		json.Unmarshal([]byte(todosJSON), &session.Todos)
+	}
+
+	return &session
 }
 
 // Remove removes a session from the store
 func (s *Store) Remove(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.sessions, id)
-	s.markDirty()
+
+	if s.db == nil {
+		return
+	}
+
+	s.db.Exec("DELETE FROM sessions WHERE id = ?", id)
 }
 
 // ClearSessions removes all sessions from the store
 func (s *Store) ClearSessions() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sessions = make(map[string]*protocol.Session)
-	s.markDirty()
+
+	if s.db == nil {
+		return
+	}
+
+	s.db.Exec("DELETE FROM sessions")
 }
 
 // List returns sessions, optionally filtered by state, sorted by label
@@ -160,17 +157,59 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var result []*protocol.Session
-	for _, session := range s.sessions {
-		if stateFilter == "" || session.State == stateFilter {
-			result = append(result, session)
-		}
+	if s.db == nil {
+		return nil
 	}
 
-	// Sort by label for stable ordering
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Label < result[j].Label
-	})
+	var rows *sql.Rows
+	var err error
+
+	if stateFilter == "" {
+		rows, err = s.db.Query(`
+			SELECT id, label, directory, state, state_since, state_updated_at, todos, last_seen, muted
+			FROM sessions ORDER BY label`)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT id, label, directory, state, state_since, state_updated_at, todos, last_seen, muted
+			FROM sessions WHERE state = ? ORDER BY label`, stateFilter)
+	}
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var result []*protocol.Session
+	for rows.Next() {
+		var session protocol.Session
+		var todosJSON string
+		var stateSince, stateUpdatedAt, lastSeen string
+		var muted int
+
+		err := rows.Scan(
+			&session.ID,
+			&session.Label,
+			&session.Directory,
+			&session.State,
+			&stateSince,
+			&stateUpdatedAt,
+			&todosJSON,
+			&lastSeen,
+			&muted,
+		)
+		if err != nil {
+			continue
+		}
+
+		session.StateSince, _ = time.Parse(time.RFC3339, stateSince)
+		session.StateUpdatedAt, _ = time.Parse(time.RFC3339, stateUpdatedAt)
+		session.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
+		session.Muted = muted == 1
+		if todosJSON != "" && todosJSON != "null" {
+			json.Unmarshal([]byte(todosJSON), &session.Todos)
+		}
+
+		result = append(result, &session)
+	}
 
 	return result
 }
@@ -180,11 +219,41 @@ func (s *Store) UpdateState(id, state string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if session, ok := s.sessions[id]; ok {
-		session.State = state
-		session.StateSince = time.Now()
-		s.markDirty()
+	if s.db == nil {
+		return
 	}
+
+	now := time.Now().Format(time.RFC3339)
+	s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
+		state, now, now, id)
+}
+
+// UpdateStateWithTimestamp updates a session's state only if the provided timestamp
+// is newer than the current StateUpdatedAt. Returns true if updated, false if rejected.
+func (s *Store) UpdateStateWithTimestamp(id, state string, updatedAt time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return false
+	}
+
+	// Get current state_updated_at
+	var currentUpdatedAt string
+	err := s.db.QueryRow("SELECT state_updated_at FROM sessions WHERE id = ?", id).Scan(&currentUpdatedAt)
+	if err != nil {
+		return false
+	}
+
+	current, _ := time.Parse(time.RFC3339, currentUpdatedAt)
+	if !updatedAt.After(current) {
+		return false
+	}
+
+	ts := updatedAt.Format(time.RFC3339)
+	_, err = s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
+		state, ts, ts, id)
+	return err == nil
 }
 
 // UpdateTodos updates a session's todo list
@@ -192,10 +261,12 @@ func (s *Store) UpdateTodos(id string, todos []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if session, ok := s.sessions[id]; ok {
-		session.Todos = todos
-		s.markDirty()
+	if s.db == nil {
+		return
 	}
+
+	todosJSON, _ := json.Marshal(todos)
+	s.db.Exec("UPDATE sessions SET todos = ? WHERE id = ?", string(todosJSON), id)
 }
 
 // Touch updates a session's last seen time
@@ -203,9 +274,12 @@ func (s *Store) Touch(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if session, ok := s.sessions[id]; ok {
-		session.LastSeen = time.Now()
+	if s.db == nil {
+		return
 	}
+
+	now := time.Now().Format(time.RFC3339)
+	s.db.Exec("UPDATE sessions SET last_seen = ? WHERE id = ?", now, id)
 }
 
 // ToggleMute toggles a session's muted state
@@ -213,57 +287,207 @@ func (s *Store) ToggleMute(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if session, ok := s.sessions[id]; ok {
-		session.Muted = !session.Muted
-		s.markDirty()
+	if s.db == nil {
+		return
 	}
+
+	s.db.Exec("UPDATE sessions SET muted = NOT muted WHERE id = ?", id)
 }
 
-// SetPRs replaces all PRs, preserving muted state and detail fields
+// SetPRs replaces all PRs, preserving muted state, detail fields, and computing HasNewChanges
 func (s *Store) SetPRs(prs []*protocol.PR) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Preserve state from existing PRs
-	for _, pr := range prs {
-		if existing, ok := s.prs[pr.ID]; ok {
-			pr.Muted = existing.Muted
-			// Preserve detail fields if PR hasn't been updated since last fetch
-			if existing.DetailsFetched && !existing.DetailsFetchedAt.Before(pr.LastUpdated) {
-				pr.DetailsFetched = existing.DetailsFetched
-				pr.DetailsFetchedAt = existing.DetailsFetchedAt
-				pr.Mergeable = existing.Mergeable
-				pr.MergeableState = existing.MergeableState
-				pr.CIStatus = existing.CIStatus
-				pr.ReviewStatus = existing.ReviewStatus
+	if s.db == nil {
+		return
+	}
+
+	// Get existing PRs to preserve muted state and details
+	existing := make(map[string]*protocol.PR)
+	rows, err := s.db.Query(`SELECT id, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var pr protocol.PR
+			var muted, detailsFetched, approvedByMe int
+			var detailsFetchedAt, mergeableState, ciStatus, reviewStatus, headSHA sql.NullString
+			var heatState, lastHeatActivityAt sql.NullString
+			var mergeable sql.NullInt64
+			var commentCount int
+
+			rows.Scan(&pr.ID, &muted, &detailsFetched, &detailsFetchedAt, &mergeable, &mergeableState, &ciStatus, &reviewStatus, &headSHA, &commentCount, &approvedByMe, &heatState, &lastHeatActivityAt)
+			pr.Muted = muted == 1
+			pr.DetailsFetched = detailsFetched == 1
+			if detailsFetchedAt.Valid {
+				pr.DetailsFetchedAt, _ = time.Parse(time.RFC3339, detailsFetchedAt.String)
+			}
+			if mergeable.Valid {
+				m := mergeable.Int64 == 1
+				pr.Mergeable = &m
+			}
+			pr.MergeableState = mergeableState.String
+			pr.CIStatus = ciStatus.String
+			pr.ReviewStatus = reviewStatus.String
+			pr.HeadSHA = headSHA.String
+			pr.CommentCount = commentCount
+			pr.ApprovedByMe = approvedByMe == 1
+			pr.HeatState = heatState.String
+			if pr.HeatState == "" {
+				pr.HeatState = protocol.HeatStateCold
+			}
+			if lastHeatActivityAt.Valid {
+				pr.LastHeatActivityAt, _ = time.Parse(time.RFC3339, lastHeatActivityAt.String)
+			}
+			existing[pr.ID] = &pr
+		}
+	}
+
+	// Get interaction data for HasNewChanges computation
+	interactions := make(map[string]struct {
+		lastSeenSHA          string
+		lastSeenCommentCount int
+	})
+	interRows, err := s.db.Query(`SELECT pr_id, last_seen_sha, last_seen_comment_count FROM pr_interactions`)
+	if err == nil {
+		defer interRows.Close()
+		for interRows.Next() {
+			var prID string
+			var lastSHA sql.NullString
+			var lastComments sql.NullInt64
+			interRows.Scan(&prID, &lastSHA, &lastComments)
+			interactions[prID] = struct {
+				lastSeenSHA          string
+				lastSeenCommentCount int
+			}{
+				lastSeenSHA:          lastSHA.String,
+				lastSeenCommentCount: int(lastComments.Int64),
 			}
 		}
 	}
 
-	// Replace all PRs
-	s.prs = make(map[string]*protocol.PR)
+	// Delete all PRs and re-insert
+	s.db.Exec("DELETE FROM prs")
+
 	for _, pr := range prs {
-		s.prs[pr.ID] = pr
+		// Preserve state from existing
+		if ex, ok := existing[pr.ID]; ok {
+			pr.Muted = ex.Muted
+			if ex.DetailsFetched && !ex.DetailsFetchedAt.Before(pr.LastUpdated) {
+				pr.DetailsFetched = ex.DetailsFetched
+				pr.DetailsFetchedAt = ex.DetailsFetchedAt
+				pr.Mergeable = ex.Mergeable
+				pr.MergeableState = ex.MergeableState
+				pr.CIStatus = ex.CIStatus
+				pr.ReviewStatus = ex.ReviewStatus
+			}
+			// Preserve HeadSHA from existing if not set
+			if pr.HeadSHA == "" {
+				pr.HeadSHA = ex.HeadSHA
+			}
+			// Preserve heat state
+			if pr.HeatState == "" || pr.HeatState == protocol.HeatStateCold {
+				pr.HeatState = ex.HeatState
+				pr.LastHeatActivityAt = ex.LastHeatActivityAt
+			}
+		}
+
+		// Compute HasNewChanges based on interaction tracking
+		if inter, ok := interactions[pr.ID]; ok {
+			// PR has been visited before - check for changes
+			if pr.HeadSHA != "" && inter.lastSeenSHA != "" && pr.HeadSHA != inter.lastSeenSHA {
+				pr.HasNewChanges = true
+			}
+			if pr.CommentCount > inter.lastSeenCommentCount {
+				pr.HasNewChanges = true
+			}
+		}
+		// If no interaction record, HasNewChanges stays false (first time seeing this PR)
+
+		var mergeableVal *int
+		if pr.Mergeable != nil {
+			v := boolToInt(*pr.Mergeable)
+			mergeableVal = &v
+		}
+
+		// Ensure heat_state has a default value (NOT NULL column)
+		heatState := pr.HeatState
+		if heatState == "" {
+			heatState = protocol.HeatStateCold
+		}
+
+		s.db.Exec(`
+			INSERT INTO prs (id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, comment_count, approved_by_me, heat_state, last_heat_activity_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Role, pr.State, pr.Reason,
+			pr.LastUpdated.Format(time.RFC3339), pr.LastPolled.Format(time.RFC3339),
+			boolToInt(pr.Muted), boolToInt(pr.DetailsFetched), nullTimeString(pr.DetailsFetchedAt),
+			mergeableVal, nullString(pr.MergeableState), nullString(pr.CIStatus), nullString(pr.ReviewStatus),
+			nullString(pr.HeadSHA), pr.CommentCount, boolToInt(pr.ApprovedByMe),
+			heatState, nullTimeString(pr.LastHeatActivityAt),
+		)
 	}
-	s.markDirty()
 }
 
 // AddPR adds or updates a single PR
 func (s *Store) AddPR(pr *protocol.PR) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.prs[pr.ID] = pr
-	s.markDirty()
+
+	if s.db == nil {
+		return
+	}
+
+	var mergeableVal *int
+	if pr.Mergeable != nil {
+		v := boolToInt(*pr.Mergeable)
+		mergeableVal = &v
+	}
+
+	// Ensure heat_state has a default value (NOT NULL column)
+	heatState := pr.HeatState
+	if heatState == "" {
+		heatState = protocol.HeatStateCold
+	}
+
+	s.db.Exec(`
+		INSERT OR REPLACE INTO prs (id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, comment_count, approved_by_me, heat_state, last_heat_activity_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Role, pr.State, pr.Reason,
+		pr.LastUpdated.Format(time.RFC3339), pr.LastPolled.Format(time.RFC3339),
+		boolToInt(pr.Muted), boolToInt(pr.DetailsFetched), nullTimeString(pr.DetailsFetchedAt),
+		mergeableVal, nullString(pr.MergeableState), nullString(pr.CIStatus), nullString(pr.ReviewStatus),
+		nullString(pr.HeadSHA), pr.CommentCount, boolToInt(pr.ApprovedByMe),
+		heatState, nullTimeString(pr.LastHeatActivityAt),
+	)
 }
 
-// ListPRs returns PRs, optionally filtered by state, sorted by repo/number
+// ListPRs returns PRs, optionally filtered by state, sorted by ID
 func (s *Store) ListPRs(stateFilter string) []*protocol.PR {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	if s.db == nil {
+		return nil
+	}
+
+	var rows *sql.Rows
+	var err error
+
+	if stateFilter == "" {
+		rows, err = s.db.Query(`SELECT id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs`)
+	} else {
+		rows, err = s.db.Query(`SELECT id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE state = ?`, stateFilter)
+	}
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
 	var result []*protocol.PR
-	for _, pr := range s.prs {
-		if stateFilter == "" || pr.State == stateFilter {
+	for rows.Next() {
+		pr := scanPR(rows)
+		if pr != nil {
 			result = append(result, pr)
 		}
 	}
@@ -280,17 +504,24 @@ func (s *Store) ToggleMutePR(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if pr, ok := s.prs[id]; ok {
-		pr.Muted = !pr.Muted
-		s.markDirty()
+	if s.db == nil {
+		return
 	}
+
+	s.db.Exec("UPDATE prs SET muted = NOT muted WHERE id = ?", id)
 }
 
 // GetPR returns a PR by ID
 func (s *Store) GetPR(id string) *protocol.PR {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.prs[id]
+
+	if s.db == nil {
+		return nil
+	}
+
+	row := s.db.QueryRow(`SELECT id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE id = ?`, id)
+	return scanPRRow(row)
 }
 
 // UpdatePRDetails updates the detail fields for a PR
@@ -298,15 +529,19 @@ func (s *Store) UpdatePRDetails(id string, mergeable *bool, mergeableState, ciSt
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if pr, ok := s.prs[id]; ok {
-		pr.DetailsFetched = true
-		pr.DetailsFetchedAt = time.Now()
-		pr.Mergeable = mergeable
-		pr.MergeableState = mergeableState
-		pr.CIStatus = ciStatus
-		pr.ReviewStatus = reviewStatus
-		s.markDirty()
+	if s.db == nil {
+		return
 	}
+
+	var mergeableVal *int
+	if mergeable != nil {
+		v := boolToInt(*mergeable)
+		mergeableVal = &v
+	}
+
+	now := time.Now().Format(time.RFC3339)
+	s.db.Exec(`UPDATE prs SET details_fetched = 1, details_fetched_at = ?, mergeable = ?, mergeable_state = ?, ci_status = ?, review_status = ? WHERE id = ?`,
+		now, mergeableVal, mergeableState, ciStatus, reviewStatus, id)
 }
 
 // ListPRsByRepo returns all PRs for a specific repo
@@ -314,62 +549,48 @@ func (s *Store) ListPRsByRepo(repo string) []*protocol.PR {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	if s.db == nil {
+		return nil
+	}
+
+	rows, err := s.db.Query(`SELECT id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE repo = ?`, repo)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
 	var result []*protocol.PR
-	for _, pr := range s.prs {
-		if pr.Repo == repo {
+	for rows.Next() {
+		pr := scanPR(rows)
+		if pr != nil {
 			result = append(result, pr)
 		}
 	}
 	return result
 }
 
-// IsDirty returns whether the store has unsaved changes
-func (s *Store) IsDirty() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.dirty
-}
-
-// ClearDirty clears the dirty flag (called after successful save)
-func (s *Store) ClearDirty() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.dirty = false
-}
-
-// markDirty sets the dirty flag
-func (s *Store) markDirty() {
-	s.dirty = true
-}
-
-// StartPersistence runs a background loop that saves state when dirty
-func (s *Store) StartPersistence(interval time.Duration, done <-chan struct{}) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-done:
-			// Final save on shutdown
-			if s.IsDirty() {
-				s.Save()
-				s.ClearDirty()
-			}
-			return
-		case <-ticker.C:
-			if s.IsDirty() {
-				s.Save()
-				s.ClearDirty()
-			}
-		}
-	}
-}
-
 // GetRepoState returns the state for a repo, or nil if not set
 func (s *Store) GetRepoState(repo string) *protocol.RepoState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.repos[repo]
+
+	if s.db == nil {
+		return nil
+	}
+
+	var state protocol.RepoState
+	var muted, collapsed int
+
+	err := s.db.QueryRow("SELECT repo, muted, collapsed FROM repos WHERE repo = ?", repo).Scan(
+		&state.Repo, &muted, &collapsed,
+	)
+	if err != nil {
+		return nil
+	}
+
+	state.Muted = muted == 1
+	state.Collapsed = collapsed == 1
+	return &state
 }
 
 // ToggleMuteRepo toggles a repo's muted state
@@ -377,13 +598,13 @@ func (s *Store) ToggleMuteRepo(repo string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	state, ok := s.repos[repo]
-	if !ok {
-		state = &protocol.RepoState{Repo: repo}
-		s.repos[repo] = state
+	if s.db == nil {
+		return
 	}
-	state.Muted = !state.Muted
-	s.markDirty()
+
+	// Insert if not exists, then toggle
+	s.db.Exec("INSERT OR IGNORE INTO repos (repo, muted, collapsed) VALUES (?, 0, 0)", repo)
+	s.db.Exec("UPDATE repos SET muted = NOT muted WHERE repo = ?", repo)
 }
 
 // SetRepoCollapsed sets a repo's collapsed state
@@ -391,13 +612,12 @@ func (s *Store) SetRepoCollapsed(repo string, collapsed bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	state, ok := s.repos[repo]
-	if !ok {
-		state = &protocol.RepoState{Repo: repo}
-		s.repos[repo] = state
+	if s.db == nil {
+		return
 	}
-	state.Collapsed = collapsed
-	s.markDirty()
+
+	s.db.Exec("INSERT OR IGNORE INTO repos (repo, muted, collapsed) VALUES (?, 0, 0)", repo)
+	s.db.Exec("UPDATE repos SET collapsed = ? WHERE repo = ?", boolToInt(collapsed), repo)
 }
 
 // ListRepoStates returns all repo states
@@ -405,9 +625,237 @@ func (s *Store) ListRepoStates() []*protocol.RepoState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]*protocol.RepoState, 0, len(s.repos))
-	for _, state := range s.repos {
-		result = append(result, state)
+	if s.db == nil {
+		return nil
+	}
+
+	rows, err := s.db.Query("SELECT repo, muted, collapsed FROM repos")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var result []*protocol.RepoState
+	for rows.Next() {
+		var state protocol.RepoState
+		var muted, collapsed int
+
+		err := rows.Scan(&state.Repo, &muted, &collapsed)
+		if err != nil {
+			continue
+		}
+
+		state.Muted = muted == 1
+		state.Collapsed = collapsed == 1
+		result = append(result, &state)
 	}
 	return result
+}
+
+// MarkPRVisited marks a PR as visited by the user, updating the interaction record
+// and clearing HasNewChanges for subsequent polls
+func (s *Store) MarkPRVisited(prID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	// Get current PR state
+	var headSHA sql.NullString
+	var commentCount int
+	err := s.db.QueryRow("SELECT head_sha, comment_count FROM prs WHERE id = ?", prID).Scan(&headSHA, &commentCount)
+	if err != nil {
+		return
+	}
+
+	// Upsert interaction record
+	now := time.Now().Format(time.RFC3339)
+	s.db.Exec(`
+		INSERT INTO pr_interactions (pr_id, last_visited_at, last_seen_sha, last_seen_comment_count)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(pr_id) DO UPDATE SET
+			last_visited_at = excluded.last_visited_at,
+			last_seen_sha = excluded.last_seen_sha,
+			last_seen_comment_count = excluded.last_seen_comment_count`,
+		prID, now, headSHA.String, commentCount,
+	)
+}
+
+// MarkPRApproved marks a PR as approved by the user
+func (s *Store) MarkPRApproved(prID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	// Get current PR state for updating interaction
+	var headSHA sql.NullString
+	var commentCount int
+	err := s.db.QueryRow("SELECT head_sha, comment_count FROM prs WHERE id = ?", prID).Scan(&headSHA, &commentCount)
+	if err != nil {
+		return
+	}
+
+	// Upsert interaction record with approval timestamp
+	now := time.Now().Format(time.RFC3339)
+	s.db.Exec(`
+		INSERT INTO pr_interactions (pr_id, last_visited_at, last_approved_at, last_seen_sha, last_seen_comment_count)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(pr_id) DO UPDATE SET
+			last_visited_at = excluded.last_visited_at,
+			last_approved_at = excluded.last_approved_at,
+			last_seen_sha = excluded.last_seen_sha,
+			last_seen_comment_count = excluded.last_seen_comment_count`,
+		prID, now, now, headSHA.String, commentCount,
+	)
+
+	// Also update the PR's approved_by_me flag
+	s.db.Exec("UPDATE prs SET approved_by_me = 1 WHERE id = ?", prID)
+}
+
+// Legacy methods for compatibility - these are no-ops with SQLite
+
+// IsDirty returns false - SQLite doesn't need dirty tracking
+func (s *Store) IsDirty() bool {
+	return false
+}
+
+// ClearDirty is a no-op with SQLite
+func (s *Store) ClearDirty() {}
+
+// Save is a no-op with SQLite - data is already persisted
+func (s *Store) Save() {}
+
+// Load is a no-op with SQLite - data is loaded on demand
+func (s *Store) Load() error {
+	return nil
+}
+
+// StartPersistence is a no-op with SQLite
+func (s *Store) StartPersistence(interval time.Duration, done <-chan struct{}) {
+	// Just wait for done signal
+	<-done
+}
+
+// Helper functions
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func nullString(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func nullTimeString(t time.Time) interface{} {
+	if t.IsZero() {
+		return nil
+	}
+	return t.Format(time.RFC3339)
+}
+
+func scanPR(rows *sql.Rows) *protocol.PR {
+	var pr protocol.PR
+	var muted, detailsFetched, approvedByMe int
+	var lastUpdated, lastPolled string
+	var detailsFetchedAt, mergeableState, ciStatus, reviewStatus, headSHA sql.NullString
+	var heatState, lastHeatActivityAt sql.NullString
+	var mergeable sql.NullInt64
+	var commentCount int
+
+	err := rows.Scan(
+		&pr.ID, &pr.Repo, &pr.Number, &pr.Title, &pr.URL, &pr.Role, &pr.State, &pr.Reason,
+		&lastUpdated, &lastPolled, &muted, &detailsFetched, &detailsFetchedAt,
+		&mergeable, &mergeableState, &ciStatus, &reviewStatus,
+		&headSHA, &commentCount, &approvedByMe,
+		&heatState, &lastHeatActivityAt,
+	)
+	if err != nil {
+		return nil
+	}
+
+	pr.LastUpdated, _ = time.Parse(time.RFC3339, lastUpdated)
+	pr.LastPolled, _ = time.Parse(time.RFC3339, lastPolled)
+	pr.Muted = muted == 1
+	pr.DetailsFetched = detailsFetched == 1
+	if detailsFetchedAt.Valid {
+		pr.DetailsFetchedAt, _ = time.Parse(time.RFC3339, detailsFetchedAt.String)
+	}
+	if mergeable.Valid {
+		m := mergeable.Int64 == 1
+		pr.Mergeable = &m
+	}
+	pr.MergeableState = mergeableState.String
+	pr.CIStatus = ciStatus.String
+	pr.ReviewStatus = reviewStatus.String
+	pr.HeadSHA = headSHA.String
+	pr.CommentCount = commentCount
+	pr.ApprovedByMe = approvedByMe == 1
+	pr.HeatState = heatState.String
+	if pr.HeatState == "" {
+		pr.HeatState = protocol.HeatStateCold
+	}
+	if lastHeatActivityAt.Valid {
+		pr.LastHeatActivityAt, _ = time.Parse(time.RFC3339, lastHeatActivityAt.String)
+	}
+
+	return &pr
+}
+
+func scanPRRow(row *sql.Row) *protocol.PR {
+	var pr protocol.PR
+	var muted, detailsFetched, approvedByMe int
+	var lastUpdated, lastPolled string
+	var detailsFetchedAt, mergeableState, ciStatus, reviewStatus, headSHA sql.NullString
+	var heatState, lastHeatActivityAt sql.NullString
+	var mergeable sql.NullInt64
+	var commentCount int
+
+	err := row.Scan(
+		&pr.ID, &pr.Repo, &pr.Number, &pr.Title, &pr.URL, &pr.Role, &pr.State, &pr.Reason,
+		&lastUpdated, &lastPolled, &muted, &detailsFetched, &detailsFetchedAt,
+		&mergeable, &mergeableState, &ciStatus, &reviewStatus,
+		&headSHA, &commentCount, &approvedByMe,
+		&heatState, &lastHeatActivityAt,
+	)
+	if err != nil {
+		return nil
+	}
+
+	pr.LastUpdated, _ = time.Parse(time.RFC3339, lastUpdated)
+	pr.LastPolled, _ = time.Parse(time.RFC3339, lastPolled)
+	pr.Muted = muted == 1
+	pr.DetailsFetched = detailsFetched == 1
+	if detailsFetchedAt.Valid {
+		pr.DetailsFetchedAt, _ = time.Parse(time.RFC3339, detailsFetchedAt.String)
+	}
+	if mergeable.Valid {
+		m := mergeable.Int64 == 1
+		pr.Mergeable = &m
+	}
+	pr.MergeableState = mergeableState.String
+	pr.CIStatus = ciStatus.String
+	pr.ReviewStatus = reviewStatus.String
+	pr.HeadSHA = headSHA.String
+	pr.CommentCount = commentCount
+	pr.ApprovedByMe = approvedByMe == 1
+	pr.HeatState = heatState.String
+	if pr.HeatState == "" {
+		pr.HeatState = protocol.HeatStateCold
+	}
+	if lastHeatActivityAt.Valid {
+		pr.LastHeatActivityAt, _ = time.Parse(time.RFC3339, lastHeatActivityAt.String)
+	}
+
+	return &pr
 }
