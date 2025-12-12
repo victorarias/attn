@@ -27,6 +27,7 @@ export interface DaemonPR {
   muted: boolean;
   // Interaction tracking (Plan 2)
   head_sha?: string;
+  head_branch?: string;
   comment_count?: number;
   approved_by_me?: boolean;
   has_new_changes?: boolean;
@@ -47,6 +48,8 @@ export interface RepoState {
   collapsed: boolean;
 }
 
+export type DaemonSettings = Record<string, string>;
+
 interface WebSocketEvent {
   event: string;
   protocol_version?: string;
@@ -55,6 +58,7 @@ interface WebSocketEvent {
   prs?: DaemonPR[];
   repos?: RepoState[];
   worktrees?: DaemonWorktree[];
+  settings?: DaemonSettings;
   // PR action result fields
   action?: string;
   repo?: string;
@@ -67,7 +71,7 @@ interface WebSocketEvent {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '5';
+const PROTOCOL_VERSION = '6';
 
 interface PRActionResult {
   success: boolean;
@@ -85,6 +89,7 @@ interface UseDaemonSocketOptions {
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
+  onSettingsUpdate?: (settings: DaemonSettings) => void;
   wsUrl?: string;
 }
 
@@ -96,12 +101,14 @@ export function useDaemonSocket({
   onPRsUpdate,
   onReposUpdate,
   onWorktreesUpdate,
+  onSettingsUpdate,
   wsUrl = DEFAULT_WS_URL,
 }: UseDaemonSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const sessionsRef = useRef<DaemonSession[]>([]);
   const prsRef = useRef<DaemonPR[]>([]);
   const reposRef = useRef<RepoState[]>([]);
+  const settingsRef = useRef<DaemonSettings>({});
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
   const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
@@ -143,6 +150,10 @@ export function useDaemonSocket({
             if (data.repos) {
               reposRef.current = data.repos;
               onReposUpdate(data.repos);
+            }
+            if (data.settings) {
+              settingsRef.current = data.settings;
+              onSettingsUpdate?.(data.settings);
             }
             setHasReceivedInitialState(true);
             break;
@@ -191,6 +202,13 @@ export function useDaemonSocket({
             if (data.repos) {
               reposRef.current = data.repos;
               onReposUpdate(data.repos);
+            }
+            break;
+
+          case 'settings_updated':
+            if (data.settings) {
+              settingsRef.current = data.settings;
+              onSettingsUpdate?.(data.settings);
             }
             break;
 
@@ -268,7 +286,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onWorktreesUpdate]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onWorktreesUpdate, onSettingsUpdate]);
 
   useEffect(() => {
     connect();
@@ -460,10 +478,23 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Set a setting value with optimistic update
+  const sendSetSetting = useCallback((key: string, value: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Optimistic update
+    settingsRef.current = { ...settingsRef.current, [key]: value };
+    onSettingsUpdate?.(settingsRef.current);
+
+    ws.send(JSON.stringify({ cmd: 'set_setting', key, value }));
+  }, [onSettingsUpdate]);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
     hasReceivedInitialState,
+    settings: settingsRef.current,
     sendPRAction,
     sendMutePR,
     sendMuteRepo,
@@ -473,5 +504,6 @@ export function useDaemonSocket({
     sendListWorktrees,
     sendCreateWorktree,
     sendDeleteWorktree,
+    sendSetSetting,
   };
 }

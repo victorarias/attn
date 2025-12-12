@@ -527,7 +527,7 @@ func (d *Daemon) handleFetchPRDetails(conn net.Conn, msg *protocol.FetchPRDetail
 				d.logf("Failed to fetch details for %s: %v", pr.ID, err)
 				continue
 			}
-			d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA)
+			d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA, details.HeadBranch)
 		}
 	}
 
@@ -633,7 +633,7 @@ func (d *Daemon) doDetailRefresh() {
 			d.store.SetPRHot(pr.ID)
 		}
 
-		d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA)
+		d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA, details.HeadBranch)
 		refreshedCount++
 	}
 
@@ -675,7 +675,7 @@ func (d *Daemon) fetchAllPRDetails() {
 			continue
 		}
 
-		d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA)
+		d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA, details.HeadBranch)
 		refreshedCount++
 	}
 
@@ -781,7 +781,7 @@ func (d *Daemon) fetchPRDetailsImmediate(prID string) {
 		return
 	}
 
-	d.store.UpdatePRDetails(prID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA)
+	d.store.UpdatePRDetails(prID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA, details.HeadBranch)
 	d.logf("Immediate fetch complete for %s (heat=hot)", prID)
 }
 

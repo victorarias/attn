@@ -4,9 +4,9 @@
 .attention-drawer {
   position: fixed;
   top: 0;
-  right: -420px;
+  right: -600px;
   bottom: 0;
-  width: 420px;
+  width: 600px;
   background: linear-gradient(180deg, #0d0d0f 0%, #111113 100%);
   border-left: 1px solid #1f1f22;
   display: flex;

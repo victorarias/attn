@@ -1,0 +1,99 @@
+/* app/src/components/WorktreeCleanupPrompt.css */
+
+.worktree-cleanup-prompt {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.cleanup-content {
+  background: #1a1a1d;
+  border: 1px solid #2a2a2d;
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  min-width: 320px;
+  text-align: center;
+}
+
+.cleanup-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.cleanup-message {
+  font-size: 14px;
+  color: #e8e8e8;
+  margin-bottom: 16px;
+}
+
+.cleanup-branch {
+  color: #a78bfa;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+}
+
+.cleanup-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.cleanup-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+
+.cleanup-btn.keep {
+  background: #2a2a2d;
+  color: #e8e8e8;
+  border-color: #3a3a3d;
+}
+
+.cleanup-btn.keep:hover {
+  background: #3a3a3d;
+}
+
+.cleanup-btn.delete {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.cleanup-btn.delete:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.cleanup-btn.always {
+  background: none;
+  color: #666;
+  border: none;
+}
+
+.cleanup-btn.always:hover {
+  color: #888;
+}

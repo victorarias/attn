@@ -3,6 +3,7 @@ import { useEffect, useCallback } from 'react';
 
 interface KeyboardShortcutsConfig {
   onNewSession: () => void;
+  onNewWorktreeSession?: () => void;
   onCloseSession: () => void;
   onToggleDrawer: () => void;
   onGoToDashboard: () => void;
@@ -17,6 +18,7 @@ interface KeyboardShortcutsConfig {
 
 export function useKeyboardShortcuts({
   onNewSession,
+  onNewWorktreeSession,
   onCloseSession,
   onToggleDrawer,
   onGoToDashboard,
@@ -34,8 +36,15 @@ export function useKeyboardShortcuts({
 
       const isMeta = e.metaKey || e.ctrlKey;
 
+      // ⌘⇧N - New worktree session (check shift first)
+      if (isMeta && e.shiftKey && e.key.toLowerCase() === 'n' && onNewWorktreeSession) {
+        e.preventDefault();
+        onNewWorktreeSession();
+        return;
+      }
+
       // ⌘N - New session
-      if (isMeta && e.key === 'n') {
+      if (isMeta && !e.shiftKey && e.key === 'n') {
         e.preventDefault();
         onNewSession();
         return;
@@ -108,6 +117,7 @@ export function useKeyboardShortcuts({
     [
       enabled,
       onNewSession,
+      onNewWorktreeSession,
       onCloseSession,
       onToggleDrawer,
       onGoToDashboard,

@@ -9,9 +9,10 @@ import { AttentionDrawer } from './components/AttentionDrawer';
 import { DrawerTrigger } from './components/DrawerTrigger';
 import { LocationPicker } from './components/LocationPicker';
 import { UndoToast } from './components/UndoToast';
+import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { useSessionStore } from './store/sessions';
-import { useDaemonSocket } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree } from './hooks/useDaemonSocket';
 import { useDaemonStore } from './store/daemonSessions';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocationHistory } from './hooks/useLocationHistory';
@@ -41,6 +42,19 @@ function App() {
   const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
+  // Settings state
+  const [settings, setSettings] = useState<Record<string, string>>({});
+
+  // Worktrees state for LocationPicker
+  const [worktrees, setWorktrees] = useState<DaemonWorktree[]>([]);
+
+  // Worktree cleanup prompt state
+  const [closedWorktree, setClosedWorktree] = useState<{ path: string; branch?: string } | null>(null);
+  const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(() => {
+    const stored = localStorage.getItem('alwaysKeepWorktrees');
+    return stored === 'true';
+  });
+
   // Ensure daemon is running before connecting
   useEffect(() => {
     async function ensureDaemon() {
@@ -59,10 +73,12 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, connectionError, hasReceivedInitialState } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, connectionError, hasReceivedInitialState } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
+    onSettingsUpdate: setSettings,
+    onWorktreesUpdate: setWorktrees,
   });
 
   // Clear stale daemon sessions on app start
@@ -163,11 +179,18 @@ function App() {
 
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [worktreeFlowMode, setWorktreeFlowMode] = useState(false);
   const { addToHistory } = useLocationHistory();
 
   // No auto-creation - user clicks "+" to start a session
 
   const handleNewSession = useCallback(() => {
+    setWorktreeFlowMode(false);
+    setLocationPickerOpen(true);
+  }, []);
+
+  const handleNewWorktreeSession = useCallback(() => {
+    setWorktreeFlowMode(true);
     setLocationPickerOpen(true);
   }, []);
 
@@ -188,14 +211,27 @@ function App() {
 
   const closeLocationPicker = useCallback(() => {
     setLocationPickerOpen(false);
+    setWorktreeFlowMode(false);
   }, []);
 
   const handleCloseSession = useCallback(
     (id: string) => {
+      // Check if session is a worktree and last in directory
+      const session = enrichedLocalSessions.find(s => s.id === id);
+      if (session?.isWorktree && session.cwd) {
+        const sessionsInSameDir = enrichedLocalSessions.filter(s => s.cwd === session.cwd);
+        const isLastSession = sessionsInSameDir.length === 1;
+
+        if (isLastSession && !alwaysKeepWorktrees) {
+          // Show cleanup prompt
+          setClosedWorktree({ path: session.cwd, branch: session.branch });
+        }
+      }
+
       terminalRefs.current.delete(id);
       closeSession(id);
     },
-    [closeSession]
+    [closeSession, enrichedLocalSessions, alwaysKeepWorktrees]
   );
 
   const handleSelectSession = useCallback(
@@ -212,22 +248,90 @@ function App() {
   );
 
   // Handle opening a PR in a worktree
-  // TODO: Requires repo-to-local-path mapping and gh CLI integration
   const handleOpenPR = useCallback(
-    (pr: { repo: string; number: number; title: string }) => {
-      // For now, log the intent - full implementation requires:
-      // 1. Mapping GitHub repo (owner/repo) to local path
-      // 2. Fetching PR branch name from GitHub (gh pr view --json headRefName)
-      // 3. Creating worktree if needed, or reusing existing
-      // 4. Creating session in worktree directory
+    async (pr: { repo: string; number: number; title: string; head_branch?: string }) => {
       console.log(`[App] Open PR requested: ${pr.repo}#${pr.number} - ${pr.title}`);
-      console.log('[App] TODO: Implement repo->local path mapping for worktree creation');
 
-      // Placeholder: Show alert with info
-      alert(`Open PR: ${pr.repo}#${pr.number}\n\nThis feature requires configuration to map GitHub repos to local paths.\n\nComing soon!`);
+      // Check if projects_directory is configured
+      const projectsDir = settings.projects_directory;
+      if (!projectsDir) {
+        alert('Please configure your Projects Directory in Settings first.\n\nThis tells the app where to find your local git repositories.');
+        return;
+      }
+
+      // Check if PR has head_branch
+      if (!pr.head_branch) {
+        alert('PR branch information not available.\n\nTry refreshing PRs (⌘R) to fetch branch details.');
+        return;
+      }
+
+      // Extract repo name from owner/repo format
+      const repoName = pr.repo.split('/')[1] || pr.repo;
+      const localRepoPath = `${projectsDir}/${repoName}`;
+
+      console.log(`[App] Creating worktree for ${pr.repo}#${pr.number} branch ${pr.head_branch} in ${localRepoPath}`);
+
+      try {
+        // Create worktree via daemon
+        const result = await sendCreateWorktree(localRepoPath, pr.head_branch);
+
+        if (result.success && result.path) {
+          console.log(`[App] Worktree created at ${result.path}`);
+
+          // Create a new session in the worktree directory
+          const label = `${repoName}#${pr.number}`;
+          const sessionId = await createSession(label, result.path);
+
+          // Fit terminal after view becomes visible
+          setTimeout(() => {
+            const handle = terminalRefs.current.get(sessionId);
+            handle?.fit();
+            handle?.focus();
+          }, 100);
+        } else {
+          throw new Error(result.error || 'Failed to create worktree');
+        }
+      } catch (err) {
+        console.error('[App] Failed to open PR:', err);
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+
+        // Check for common errors
+        if (errorMsg.includes('not a git repository') || errorMsg.includes('does not exist')) {
+          alert(`Could not find local repository at:\n${localRepoPath}\n\nMake sure the repository is cloned in your Projects Directory.`);
+        } else if (errorMsg.includes('already exists')) {
+          // Worktree already exists - find it and create session there
+          const worktreePath = `${localRepoPath}/../${repoName}-${pr.head_branch}`;
+          console.log(`[App] Worktree may already exist, trying to create session at ${worktreePath}`);
+          alert(`A worktree for this branch may already exist.\n\nError: ${errorMsg}`);
+        } else {
+          alert(`Failed to open PR: ${errorMsg}`);
+        }
+      }
     },
-    []
+    [settings, sendCreateWorktree, createSession]
   );
+
+  // Worktree cleanup prompt handlers
+  const handleWorktreeKeep = useCallback(() => {
+    setClosedWorktree(null);
+  }, []);
+
+  const handleWorktreeDelete = useCallback(async () => {
+    if (closedWorktree) {
+      try {
+        await sendDeleteWorktree(closedWorktree.path);
+      } catch (err) {
+        console.error('[App] Failed to delete worktree:', err);
+      }
+    }
+    setClosedWorktree(null);
+  }, [closedWorktree, sendDeleteWorktree]);
+
+  const handleWorktreeAlwaysKeep = useCallback(() => {
+    setAlwaysKeepWorktrees(true);
+    localStorage.setItem('alwaysKeepWorktrees', 'true');
+    setClosedWorktree(null);
+  }, []);
 
   const handleTerminalReady = useCallback(
     (sessionId: string) => (terminal: XTerm) => {
@@ -301,6 +405,7 @@ function App() {
   // Use keyboard shortcuts hook
   useKeyboardShortcuts({
     onNewSession: handleNewSession,
+    onNewWorktreeSession: handleNewWorktreeSession,
     onCloseSession: handleCloseCurrentSession,
     onToggleDrawer: toggleDrawer,
     onGoToDashboard: goToDashboard,
@@ -330,10 +435,12 @@ function App() {
           isLoading={!hasReceivedInitialState}
           isRefreshing={isRefreshingPRs}
           refreshError={refreshError}
+          settings={settings}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onRefreshPRs={handleRefreshPRs}
           onOpenPR={handleOpenPR}
+          onSetSetting={sendSetSetting}
         />
       </div>
 
@@ -383,8 +490,21 @@ function App() {
         isOpen={locationPickerOpen}
         onClose={closeLocationPicker}
         onSelect={handleLocationSelect}
+        worktrees={worktrees}
+        onListWorktrees={sendListWorktrees}
+        onCreateWorktree={sendCreateWorktree}
+        worktreeFlowMode={worktreeFlowMode}
+        projectsDirectory={settings.projects_directory}
       />
       <UndoToast />
+      <WorktreeCleanupPrompt
+        isVisible={closedWorktree !== null}
+        worktreePath={closedWorktree?.path || ''}
+        branchName={closedWorktree?.branch}
+        onKeep={handleWorktreeKeep}
+        onDelete={handleWorktreeDelete}
+        onAlwaysKeep={handleWorktreeAlwaysKeep}
+      />
     </div>
     </DaemonProvider>
   );

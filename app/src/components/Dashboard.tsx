@@ -1,6 +1,6 @@
 // app/src/components/Dashboard.tsx
 import { useState, useMemo, useCallback } from 'react';
-import { DaemonPR } from '../hooks/useDaemonSocket';
+import { DaemonPR, DaemonSettings } from '../hooks/useDaemonSocket';
 import { PRActions } from './PRActions';
 import { SettingsModal } from './SettingsModal';
 import { useDaemonContext } from '../contexts/DaemonContext';
@@ -18,10 +18,12 @@ interface DashboardProps {
   isLoading: boolean;
   isRefreshing?: boolean;
   refreshError?: string | null;
+  settings: DaemonSettings;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onRefreshPRs?: () => void;
   onOpenPR?: (pr: DaemonPR) => void;
+  onSetSetting: (key: string, value: string) => void;
 }
 
 export function Dashboard({
@@ -30,10 +32,12 @@ export function Dashboard({
   isLoading,
   isRefreshing,
   refreshError,
+  settings,
   onSelectSession,
   onNewSession,
   onRefreshPRs,
   onOpenPR,
+  onSetSetting,
 }: DashboardProps) {
   const waitingSessions = sessions.filter((s) => s.state === 'waiting_input');
   const workingSessions = sessions.filter((s) => s.state === 'working');
@@ -335,6 +339,8 @@ export function Dashboard({
         onClose={() => setSettingsOpen(false)}
         mutedRepos={mutedRepos}
         onUnmuteRepo={sendMuteRepo}
+        settings={settings}
+        onSetSetting={onSetSetting}
       />
     </div>
   );
