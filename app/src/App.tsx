@@ -211,6 +211,24 @@ function App() {
     [setActiveSession]
   );
 
+  // Handle opening a PR in a worktree
+  // TODO: Requires repo-to-local-path mapping and gh CLI integration
+  const handleOpenPR = useCallback(
+    (pr: { repo: string; number: number; title: string }) => {
+      // For now, log the intent - full implementation requires:
+      // 1. Mapping GitHub repo (owner/repo) to local path
+      // 2. Fetching PR branch name from GitHub (gh pr view --json headRefName)
+      // 3. Creating worktree if needed, or reusing existing
+      // 4. Creating session in worktree directory
+      console.log(`[App] Open PR requested: ${pr.repo}#${pr.number} - ${pr.title}`);
+      console.log('[App] TODO: Implement repo->local path mapping for worktree creation');
+
+      // Placeholder: Show alert with info
+      alert(`Open PR: ${pr.repo}#${pr.number}\n\nThis feature requires configuration to map GitHub repos to local paths.\n\nComing soon!`);
+    },
+    []
+  );
+
   const handleTerminalReady = useCallback(
     (sessionId: string) => (terminal: XTerm) => {
       connectTerminal(sessionId, terminal);
@@ -315,6 +333,7 @@ function App() {
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onRefreshPRs={handleRefreshPRs}
+          onOpenPR={handleOpenPR}
         />
       </div>
 
