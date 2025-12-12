@@ -6,6 +6,33 @@ interface LocalSession {
   state: 'working' | 'waiting_input' | 'idle';
   branch?: string;
   isWorktree?: boolean;
+  cwd?: string;
+}
+
+interface SessionGroup {
+  directory: string;
+  label: string;
+  branch?: string;
+  sessions: LocalSession[];
+}
+
+function groupSessionsByDirectory(sessions: LocalSession[]): SessionGroup[] {
+  const groups = new Map<string, SessionGroup>();
+
+  for (const session of sessions) {
+    const key = session.cwd || session.id;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        directory: key,
+        label: key.split('/').pop() || key,
+        branch: session.branch,
+        sessions: [],
+      });
+    }
+    groups.get(key)!.sessions.push(session);
+  }
+
+  return Array.from(groups.values());
 }
 
 interface SidebarProps {
@@ -77,35 +104,79 @@ export function Sidebar({
       </div>
 
       <div className="session-list">
-        {sessions.map((session, index) => (
-          <div
-            key={session.id}
-            className={`session-item ${selectedId === session.id ? 'selected' : ''}`}
-            data-testid={`sidebar-session-${session.id}`}
-            data-state={session.state}
-            onClick={() => onSelectSession(session.id)}
-          >
-            <span className={`state-indicator ${session.state}`} data-testid="state-indicator" />
-            <span className="session-label">
-              {session.label}
-              {session.branch && (
-                <span className="session-branch"> · {session.branch}</span>
-              )}
-            </span>
-            {session.isWorktree && <span className="worktree-indicator">⎇</span>}
-            <span className="session-shortcut">⌘{index + 1}</span>
-            <button
-              className="close-session-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                onCloseSession(session.id);
-              }}
-              title="Close session (⌘W)"
-            >
-              ×
-            </button>
-          </div>
-        ))}
+        {groupSessionsByDirectory(sessions).map((group) => {
+          const isSingleSession = group.sessions.length === 1;
+
+          if (isSingleSession) {
+            const session = group.sessions[0];
+            const globalIndex = sessions.findIndex(s => s.id === session.id);
+            return (
+              <div
+                key={session.id}
+                className={`session-item ${selectedId === session.id ? 'selected' : ''}`}
+                data-testid={`sidebar-session-${session.id}`}
+                data-state={session.state}
+                onClick={() => onSelectSession(session.id)}
+              >
+                <span className={`state-indicator ${session.state}`} data-testid="state-indicator" />
+                <span className="session-label">
+                  {session.label}
+                  {session.branch && (
+                    <span className="session-branch"> · {session.branch}</span>
+                  )}
+                </span>
+                {session.isWorktree && <span className="worktree-indicator">⎇</span>}
+                <span className="session-shortcut">⌘{globalIndex + 1}</span>
+                <button
+                  className="close-session-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCloseSession(session.id);
+                  }}
+                  title="Close session (⌘W)"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <div key={group.directory} className="session-group">
+              <div className="session-group-header">
+                {group.label}
+                {group.branch && <span className="session-branch"> · {group.branch}</span>}
+              </div>
+              {group.sessions.map((session) => {
+                const globalIndex = sessions.findIndex(s => s.id === session.id);
+                return (
+                  <div
+                    key={session.id}
+                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''}`}
+                    data-testid={`sidebar-session-${session.id}`}
+                    data-state={session.state}
+                    onClick={() => onSelectSession(session.id)}
+                  >
+                    <span className={`state-indicator ${session.state}`} data-testid="state-indicator" />
+                    <span className="session-label">{session.label}</span>
+                    {session.isWorktree && <span className="worktree-indicator">⎇</span>}
+                    <span className="session-shortcut">⌘{globalIndex + 1}</span>
+                    <button
+                      className="close-session-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCloseSession(session.id);
+                      }}
+                      title="Close session (⌘W)"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
 
       <div className="sidebar-footer">
