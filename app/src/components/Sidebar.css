@@ -122,6 +122,18 @@
   white-space: nowrap;
 }
 
+.session-branch {
+  color: #888;
+  font-size: 11px;
+}
+
+.worktree-indicator {
+  color: #888;
+  font-size: 12px;
+  margin-left: auto;
+  margin-right: 4px;
+}
+
 .session-shortcut {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;

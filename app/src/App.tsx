@@ -120,6 +120,8 @@ function App() {
     return {
       ...s,
       state: daemonSession?.state ?? s.state,
+      branch: daemonSession?.branch,
+      isWorktree: daemonSession?.is_worktree,
     };
   });
 
