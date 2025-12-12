@@ -717,6 +717,115 @@ func (s *Store) MarkPRApproved(prID string) {
 	s.db.Exec("UPDATE prs SET approved_by_me = 1 WHERE id = ?", prID)
 }
 
+// SetPRHot sets a PR to hot state and updates last activity time
+func (s *Store) SetPRHot(prID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	now := time.Now().Format(time.RFC3339)
+	s.db.Exec(`UPDATE prs SET heat_state = ?, last_heat_activity_at = ? WHERE id = ?`,
+		protocol.HeatStateHot, now, prID)
+}
+
+// DecayHeatStates transitions PRs from hot→warm→cold based on elapsed time
+func (s *Store) DecayHeatStates() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	now := time.Now()
+	warmThreshold := now.Add(-protocol.HeatHotDuration).Format(time.RFC3339)
+	coldThreshold := now.Add(-protocol.HeatWarmDuration).Format(time.RFC3339)
+
+	// Hot → Warm (after 3 min)
+	s.db.Exec(`UPDATE prs SET heat_state = ? WHERE heat_state = ? AND last_heat_activity_at < ?`,
+		protocol.HeatStateWarm, protocol.HeatStateHot, warmThreshold)
+
+	// Warm → Cold (after 10 min)
+	s.db.Exec(`UPDATE prs SET heat_state = ? WHERE heat_state = ? AND last_heat_activity_at < ?`,
+		protocol.HeatStateCold, protocol.HeatStateWarm, coldThreshold)
+}
+
+// GetPRsNeedingDetailRefresh returns visible PRs that need detail refresh based on heat state
+func (s *Store) GetPRsNeedingDetailRefresh() []*protocol.PR {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil
+	}
+
+	// Get muted repos
+	mutedRepos := make(map[string]bool)
+	repoRows, _ := s.db.Query("SELECT repo FROM repos WHERE muted = 1")
+	if repoRows != nil {
+		defer repoRows.Close()
+		for repoRows.Next() {
+			var repo string
+			repoRows.Scan(&repo)
+			mutedRepos[repo] = true
+		}
+	}
+
+	now := time.Now()
+	var result []*protocol.PR
+
+	rows, err := s.db.Query(`
+		SELECT id, repo, number, title, url, role, state, reason, last_updated, last_polled,
+		       muted, details_fetched, details_fetched_at, mergeable, mergeable_state,
+		       ci_status, review_status, head_sha, comment_count, approved_by_me,
+		       heat_state, last_heat_activity_at
+		FROM prs
+		WHERE muted = 0`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		pr := scanPR(rows)
+		if pr == nil {
+			continue
+		}
+
+		// Skip muted repos
+		if mutedRepos[pr.Repo] {
+			continue
+		}
+
+		// Check if refresh needed based on heat state
+		elapsed := now.Sub(pr.DetailsFetchedAt)
+		needsRefresh := false
+
+		switch pr.HeatState {
+		case protocol.HeatStateHot:
+			needsRefresh = elapsed > protocol.HeatHotInterval
+		case protocol.HeatStateWarm:
+			needsRefresh = elapsed > protocol.HeatWarmInterval
+		default: // cold
+			needsRefresh = elapsed > protocol.HeatColdInterval
+		}
+
+		// Also refresh if details were never fetched
+		if !pr.DetailsFetched {
+			needsRefresh = true
+		}
+
+		if needsRefresh {
+			result = append(result, pr)
+		}
+	}
+
+	return result
+}
+
 // Legacy methods for compatibility - these are no-ops with SQLite
 
 // IsDirty returns false - SQLite doesn't need dirty tracking
