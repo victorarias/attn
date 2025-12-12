@@ -17,9 +17,10 @@ interface PRActionsProps {
   compact?: boolean;
   onMuted?: () => void;
   onActionComplete?: (prId: string, action: 'approve' | 'merge') => void;
+  onOpen?: () => void;
 }
 
-export function PRActions({ repo, number, prId, compact = false, onMuted, onActionComplete }: PRActionsProps) {
+export function PRActions({ repo, number, prId, compact = false, onMuted, onActionComplete, onOpen }: PRActionsProps) {
   const { sendPRAction, sendMutePR } = useDaemonContext();
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
   const [approveState, setApproveState] = useState<ActionState>({ loading: false, success: false, error: null });
@@ -81,6 +82,12 @@ export function PRActions({ repo, number, prId, compact = false, onMuted, onActi
     onMuted?.();
   };
 
+  const handleOpen = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onOpen?.();
+  };
+
   const renderButton = (
     action: string,
     state: { loading?: boolean; success?: boolean; error?: string | null } | undefined,
@@ -118,6 +125,17 @@ export function PRActions({ repo, number, prId, compact = false, onMuted, onActi
   return (
     <>
       <div className={`pr-actions ${compact ? 'compact' : ''}`}>
+        {onOpen && (
+          <button
+            className={`pr-action-btn ${compact ? 'compact' : ''}`}
+            data-testid="open-button"
+            data-action="open"
+            onClick={handleOpen}
+            title="Open in worktree"
+          >
+            {compact ? '↗' : 'Open'}
+          </button>
+        )}
         {renderButton('approve', approveState, handleApprove, 'Approve', '✓')}
         {renderButton('merge', mergeState, handleMerge, 'Merge', '⇋')}
         <button

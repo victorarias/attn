@@ -66,6 +66,12 @@
   border-color: #a78bfa;
 }
 
+.pr-action-btn[data-action="open"]:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  border-color: #3b82f6;
+}
+
 .pr-action-btn[data-action="mute"]:hover {
   background: rgba(85, 85, 85, 0.2);
 }
