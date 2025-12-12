@@ -358,69 +358,47 @@ func (c *Client) FetchPRDetails(repo string, number int) (*PRDetails, error) {
 		HeadSHA:        prData.Head.SHA,
 	}
 
-	// Fetch CI status from both check-runs and check-suites
-	// Check-runs: individual jobs from GitHub Actions
-	// Check-suites: app-level status (gh-compliance, GetPort.io, etc.)
+	// Fetch CI status from check-runs (actual executed checks)
+	// We only use check-runs, not check-suites, because:
+	// - Check-suites can be registered but never run (gh-compliance, GetPort.io)
+	// - The status API considers branch protection required checks that may not exist
+	// - Check-runs represent actual CI jobs that have started/completed
 	if prData.Head.SHA != "" {
-		var allPending, allSuccess, hasFailure bool = false, true, false
-
-		// Fetch check-runs (GitHub Actions jobs)
 		ciPath := fmt.Sprintf("/repos/%s/commits/%s/check-runs", repo, prData.Head.SHA)
 		ciBody, err := c.doRequest("GET", ciPath, nil)
 		if err == nil {
 			var ciData struct {
 				CheckRuns []struct {
 					Conclusion *string `json:"conclusion"`
-					Status     string  `json:"status"`
 				} `json:"check_runs"`
 			}
 			if json.Unmarshal(ciBody, &ciData) == nil {
-				for _, run := range ciData.CheckRuns {
-					// If conclusion is nil, check is still running
-					if run.Conclusion == nil {
-						allPending = true
-						allSuccess = false
-					} else if *run.Conclusion != "success" && *run.Conclusion != "skipped" && *run.Conclusion != "neutral" {
-						hasFailure = true
-						allSuccess = false
+				if len(ciData.CheckRuns) == 0 {
+					details.CIStatus = "none"
+				} else {
+					allSuccess := true
+					hasPending := false
+					hasFailure := false
+					for _, run := range ciData.CheckRuns {
+						if run.Conclusion == nil {
+							hasPending = true
+							allSuccess = false
+						} else if *run.Conclusion != "success" && *run.Conclusion != "skipped" && *run.Conclusion != "neutral" {
+							hasFailure = true
+							allSuccess = false
+						}
+					}
+					if hasFailure {
+						details.CIStatus = "failure"
+					} else if hasPending {
+						details.CIStatus = "pending"
+					} else if allSuccess {
+						details.CIStatus = "success"
+					} else {
+						details.CIStatus = "none"
 					}
 				}
 			}
-		}
-
-		// Fetch check-suites (app-level: gh-compliance, GetPort.io, etc.)
-		suitesPath := fmt.Sprintf("/repos/%s/commits/%s/check-suites", repo, prData.Head.SHA)
-		suitesBody, err := c.doRequest("GET", suitesPath, nil)
-		if err == nil {
-			var suitesData struct {
-				CheckSuites []struct {
-					Conclusion *string `json:"conclusion"`
-					Status     string  `json:"status"`
-				} `json:"check_suites"`
-			}
-			if json.Unmarshal(suitesBody, &suitesData) == nil {
-				for _, suite := range suitesData.CheckSuites {
-					// If conclusion is nil, suite is still running
-					if suite.Conclusion == nil {
-						allPending = true
-						allSuccess = false
-					} else if *suite.Conclusion != "success" && *suite.Conclusion != "skipped" && *suite.Conclusion != "neutral" {
-						hasFailure = true
-						allSuccess = false
-					}
-				}
-			}
-		}
-
-		// Determine overall status
-		if hasFailure {
-			details.CIStatus = "failure"
-		} else if allPending {
-			details.CIStatus = "pending"
-		} else if allSuccess {
-			details.CIStatus = "success"
-		} else {
-			details.CIStatus = "none"
 		}
 	}
 
