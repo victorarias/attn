@@ -155,7 +155,7 @@ func TestClient_SocketPath(t *testing.T) {
 	defer os.Unsetenv("HOME")
 
 	path := DefaultSocketPath()
-	expected := "/home/testuser/.attn.sock"
+	expected := "/home/testuser/.attn/attn.sock"
 	if path != expected {
 		t.Errorf("DefaultSocketPath() = %q, want %q", path, expected)
 	}

@@ -65,3 +65,81 @@ func TestExtractLastAssistantMessage_NoAssistant(t *testing.T) {
 		t.Errorf("expected empty string, got %q", result)
 	}
 }
+
+// Tests for Claude Code's actual transcript format (content is an array)
+func TestExtractLastAssistantMessage_ClaudeCodeFormat(t *testing.T) {
+	// Claude Code uses content as an array of blocks with type and text fields
+	content := `{"type":"user","message":{"role":"user","content":"test"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Let me think..."},{"type":"text","text":"How would you like to proceed with the video description feature? I need your input on next steps."}]}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessage(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "How would you like to proceed with the video description feature? I need your input on next steps."
+	if result != expected {
+		t.Errorf("got %q, want %q", result, expected)
+	}
+}
+
+func TestExtractLastAssistantMessage_ClaudeCodeFormat_MultipleTextBlocks(t *testing.T) {
+	// Claude might have multiple text blocks in a single message
+	content := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"First paragraph."},{"type":"text","text":"Second paragraph."}]}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessage(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "First paragraph.\nSecond paragraph."
+	if result != expected {
+		t.Errorf("got %q, want %q", result, expected)
+	}
+}
+
+func TestExtractLastAssistantMessage_ClaudeCodeFormat_OnlyThinking(t *testing.T) {
+	// If a message only has thinking blocks, we should get empty string
+	content := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Just thinking here..."}]}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessage(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Only thinking block, no text, should return empty
+	if result != "" {
+		t.Errorf("expected empty string for thinking-only message, got %q", result)
+	}
+}
+
+func TestExtractLastAssistantMessage_MessageRoleAsAssistant(t *testing.T) {
+	// Test detection by message.role instead of type
+	content := `{"message":{"role":"assistant","content":[{"type":"text","text":"Hello from assistant"}]}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessage(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "Hello from assistant"
+	if result != expected {
+		t.Errorf("got %q, want %q", result, expected)
+	}
+}

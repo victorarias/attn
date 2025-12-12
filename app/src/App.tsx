@@ -59,7 +59,7 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendRefreshPRs, sendClearSessions, connectionError, hasReceivedInitialState } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, connectionError, hasReceivedInitialState } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -236,7 +236,9 @@ function App() {
   const waitingLocalSessions = enrichedLocalSessions.filter((s) => s.state === 'waiting_input');
   // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
   const activePRs = prs.filter((p) => !p.muted && !isRepoMuted(p.repo));
-  const attentionCount = waitingLocalSessions.length + activePRs.length;
+  // PRs needing attention exclude approved PRs without new changes
+  const prsNeedingAttention = activePRs.filter((p) => !p.approved_by_me || p.has_new_changes);
+  const attentionCount = waitingLocalSessions.length + prsNeedingAttention.length;
 
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
@@ -292,7 +294,7 @@ function App() {
   });
 
   return (
-    <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo}>
+    <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo} sendPRVisited={sendPRVisited}>
     <div className="app">
       {/* Error banner for version mismatch */}
       {connectionError && (

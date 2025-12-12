@@ -1,8 +1,6 @@
 package store
 
 import (
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -225,62 +223,58 @@ func TestStore_ToggleMutePR(t *testing.T) {
 }
 
 func TestStore_DirtyFlag(t *testing.T) {
+	// With SQLite, dirty tracking is no longer needed since
+	// every operation persists immediately. IsDirty() always returns false.
 	s := New()
 
 	if s.IsDirty() {
-		t.Error("new store should not be dirty")
+		t.Error("IsDirty should always return false with SQLite")
 	}
 
 	s.Add(&protocol.Session{ID: "test", Label: "test"})
 
-	if !s.IsDirty() {
-		t.Error("store should be dirty after Add")
+	// Still false - no dirty tracking with SQLite
+	if s.IsDirty() {
+		t.Error("IsDirty should still return false after Add (SQLite persists immediately)")
 	}
 
-	s.ClearDirty()
+	s.ClearDirty() // No-op with SQLite
 
 	if s.IsDirty() {
-		t.Error("store should not be dirty after ClearDirty")
+		t.Error("IsDirty should still return false")
 	}
 }
 
-func TestStore_BackgroundPersistence(t *testing.T) {
-	// Create temp file for state
-	tmpFile, err := os.CreateTemp("", "store-test-*.json")
+func TestStore_SQLitePersistence(t *testing.T) {
+	// Create temp directory for SQLite DB
+	tmpDir := t.TempDir()
+	dbPath := tmpDir + "/test.db"
+
+	// Create store with SQLite
+	s, err := NewWithDB(dbPath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("NewWithDB error: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
 
-	s := NewWithPersistence(tmpFile.Name())
-	done := make(chan struct{})
+	// Add a session (persisted immediately with SQLite)
+	s.Add(&protocol.Session{ID: "sqlite-test", Label: "sqlite-test"})
 
-	// Start background persistence with short interval
-	go s.StartPersistence(50*time.Millisecond, done)
+	// Close and reopen to verify persistence
+	s.Close()
 
-	// Add a session (marks dirty)
-	s.Add(&protocol.Session{ID: "bg-test", Label: "bg-test"})
-
-	// Wait for persistence to run
-	time.Sleep(100 * time.Millisecond)
-
-	// Stop persistence
-	close(done)
-
-	// Verify file was written
-	data, err := os.ReadFile(tmpFile.Name())
+	s2, err := NewWithDB(dbPath)
 	if err != nil {
-		t.Fatalf("failed to read state file: %v", err)
+		t.Fatalf("NewWithDB reopen error: %v", err)
 	}
+	defer s2.Close()
 
-	if !strings.Contains(string(data), "bg-test") {
-		t.Error("state file should contain bg-test session")
+	// Verify session persisted
+	got := s2.Get("sqlite-test")
+	if got == nil {
+		t.Error("session should persist across store reopens")
 	}
-
-	// Verify dirty flag was cleared
-	if s.IsDirty() {
-		t.Error("dirty flag should be cleared after save")
+	if got != nil && got.Label != "sqlite-test" {
+		t.Errorf("Label = %q, want sqlite-test", got.Label)
 	}
 }
 

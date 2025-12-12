@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as pty from 'node-pty';
 import * as fs from 'fs';
 
-const SOCKET_PATH = path.join(os.homedir(), '.cm-pty.sock');
+const SOCKET_PATH = path.join(os.homedir(), '.attn-pty.sock');
 
 interface Session {
   pty: pty.IPty;
@@ -43,10 +43,10 @@ function handleMessage(socket: net.Socket, socketId: symbol, msg: any): void {
         return;
       }
 
-      // Spawn cm (Claude Manager) wrapper which registers with daemon and sets up hooks
+      // Spawn attn (Attention Manager) wrapper which registers with daemon and sets up hooks
       // Use fish login shell to ensure PATH includes ~/.local/bin
       // Set TERM=xterm-256color for proper xterm.js compatibility
-      const ptyProcess = pty.spawn('/opt/homebrew/bin/fish', ['-l', '-c', 'set -x TERM xterm-256color; cm -y'], {
+      const ptyProcess = pty.spawn('/opt/homebrew/bin/fish', ['-l', '-c', 'set -x TERM xterm-256color; attn -y'], {
         name: 'xterm-256color',
         cols: msg.cols || 80,
         rows: msg.rows || 24,

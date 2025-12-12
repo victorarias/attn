@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { DaemonSession, DaemonPR, RepoState } from '../hooks/useDaemonSocket';
 
 interface DaemonStore {
-  // Sessions from daemon (cm-tracked sessions)
+  // Sessions from daemon (attn-tracked sessions)
   daemonSessions: DaemonSession[];
   setDaemonSessions: (sessions: DaemonSession[]) => void;
 

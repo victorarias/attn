@@ -45,26 +45,54 @@ func ParseResponse(response string) string {
 	return "idle"
 }
 
+// LogFunc is a function type for logging
+type LogFunc func(format string, args ...interface{})
+
+// DefaultLogger is a no-op logger
+var DefaultLogger LogFunc = func(format string, args ...interface{}) {}
+
+// SetLogger sets the logger function
+func SetLogger(fn LogFunc) {
+	DefaultLogger = fn
+}
+
 // Classify calls Claude CLI to classify the text
 // Returns "waiting_input" or "idle"
 func Classify(text string, timeout time.Duration) (string, error) {
 	if text == "" {
+		DefaultLogger("classifier: empty text, returning idle")
 		return "idle", nil
 	}
+
+	// Truncate text for logging (first 200 chars)
+	logText := text
+	if len(logText) > 200 {
+		logText = logText[:200] + "..."
+	}
+	DefaultLogger("classifier: input text (truncated): %s", logText)
 
 	prompt := BuildPrompt(text)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "claude", "-p", prompt, "--print")
+	DefaultLogger("classifier: calling claude CLI with %d second timeout (using haiku)", int(timeout.Seconds()))
+	cmd := exec.CommandContext(ctx, "claude", "-p", prompt, "--print", "--model", "haiku", "--no-session-persistence")
 	var stdout, stderr bytes.Buffer
+	cmd.Stdin = nil // Explicitly close stdin to prevent hanging
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		DefaultLogger("classifier: claude CLI error: %v, stderr: %s, stdout: %s", err, stderr.String(), stdout.String())
 		return "waiting_input", fmt.Errorf("claude cli: %w: %s", err, stderr.String())
 	}
 
-	return ParseResponse(stdout.String()), nil
+	response := stdout.String()
+	DefaultLogger("classifier: claude CLI response: %s", strings.TrimSpace(response))
+
+	result := ParseResponse(response)
+	DefaultLogger("classifier: parsed result: %s", result)
+
+	return result, nil
 }

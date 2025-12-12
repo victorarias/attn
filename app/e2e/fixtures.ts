@@ -101,17 +101,22 @@ class MockGitHubServer {
 // Test port - different from production (9849) to avoid conflicts
 const TEST_DAEMON_PORT = '19849';
 
-// Daemon launcher
-async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketPath: string; stop: () => void }> {
-  const socketPath = path.join(os.homedir(), '.attn.sock');
+// Daemon launcher - creates isolated temp directory for DB and socket
+async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketPath: string; tempDir: string; stop: () => void }> {
+  // Create temp directory for test isolation
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-e2e-'));
+  const socketPath = path.join(tempDir, 'attn.sock');
+  const dbPath = path.join(tempDir, 'attn.db');
   const attnPath = path.join(os.homedir(), '.local', 'bin', 'attn');
+
+  console.log(`[E2E] Test isolation: tempDir=${tempDir}, socket=${socketPath}, db=${dbPath}`);
 
   // Verify attn binary exists
   if (!fs.existsSync(attnPath)) {
     throw new Error(`attn binary not found at ${attnPath}. Run 'make install' first.`);
   }
 
-  // Clean up any existing socket
+  // Clean up any existing socket (shouldn't exist in temp dir, but just in case)
   if (fs.existsSync(socketPath)) {
     try {
       fs.unlinkSync(socketPath);
@@ -123,7 +128,9 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
   const proc = spawn(attnPath, ['daemon'], {
     env: {
       ...process.env,
-      CM_WS_PORT: TEST_DAEMON_PORT, // Use test port to avoid conflicts with production daemon
+      ATTN_WS_PORT: TEST_DAEMON_PORT, // Use test port to avoid conflicts with production daemon
+      ATTN_SOCKET_PATH: socketPath, // Test isolation: separate socket
+      ATTN_DB_PATH: dbPath, // Test isolation: separate database
       GITHUB_API_URL: ghUrl,
       GITHUB_TOKEN: 'test-token',
     },
@@ -166,11 +173,16 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
   return {
     proc,
     socketPath,
+    tempDir,
     stop() {
       proc.kill();
+      // Clean up temp directory and all contents
       try {
-        fs.unlinkSync(socketPath);
-      } catch {}
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        console.log(`[E2E] Cleaned up temp dir: ${tempDir}`);
+      } catch (err) {
+        console.warn(`[E2E] Failed to cleanup temp dir: ${err}`);
+      }
       console.log('Daemon stopped');
     },
   };
@@ -249,15 +261,16 @@ export const test = base.extend<Fixtures>({
 
   // This fixture returns a function that test code calls AFTER adding PRs
   startDaemonWithPRs: async ({ mockGitHub }, use) => {
-    let daemon: { proc: ChildProcess; socketPath: string; stop: () => void } | null = null;
+    let daemon: { proc: ChildProcess; socketPath: string; tempDir: string; stop: () => void } | null = null;
 
     const startFn = async () => {
-      // Kill any existing daemons to avoid interference
+      // Kill any existing TEST daemons (on test port) to avoid interference
+      // Note: We no longer kill all daemons since tests are now isolated with temp dirs
       try {
         await new Promise<void>((resolve) => {
-          spawn('pkill', ['-f', 'attn daemon'], { stdio: 'ignore' }).on('close', () => resolve());
+          spawn('pkill', ['-f', `ATTN_WS_PORT=${TEST_DAEMON_PORT}`], { stdio: 'ignore' }).on('close', () => resolve());
         });
-        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for cleanup
+        await new Promise(resolve => setTimeout(resolve, 300)); // Wait for cleanup
       } catch (err) {
         // Ignore errors if no daemons running
       }
@@ -279,17 +292,18 @@ export const test = base.extend<Fixtures>({
 
   // Session testing fixture with injection helpers
   daemon: async ({ mockGitHub }, use) => {
-    let daemonInstance: { proc: ChildProcess; socketPath: string; stop: () => void } | null = null;
+    let daemonInstance: { proc: ChildProcess; socketPath: string; tempDir: string; stop: () => void } | null = null;
     let socketPath = '';
 
     const fixture: DaemonFixture = {
       start: async () => {
-        // Kill any existing daemons
+        // Kill any existing TEST daemons (on test port) to avoid interference
+        // Note: We no longer kill all daemons since tests are now isolated with temp dirs
         try {
           await new Promise<void>((resolve) => {
-            spawn('pkill', ['-f', 'attn daemon'], { stdio: 'ignore' }).on('close', () => resolve());
+            spawn('pkill', ['-f', `ATTN_WS_PORT=${TEST_DAEMON_PORT}`], { stdio: 'ignore' }).on('close', () => resolve());
           });
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 300));
         } catch {
           // Ignore
         }
