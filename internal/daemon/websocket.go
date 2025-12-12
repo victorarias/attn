@@ -130,6 +130,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Sessions:        d.store.List(""),
 		PRs:             d.store.ListPRs(""),
 		Repos:           d.store.ListRepoStates(),
+		Settings:        d.store.GetAllSettings(),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -358,6 +359,19 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		deleteMsg := msg.(*protocol.DeleteWorktreeMessage)
 		d.logf("Deleting worktree %s", deleteMsg.Path)
 		d.handleDeleteWorktreeWS(client, deleteMsg)
+
+	case protocol.CmdGetSettings:
+		d.logf("Getting settings")
+		d.sendToClient(client, &protocol.WebSocketEvent{
+			Event:    protocol.EventSettingsUpdated,
+			Settings: d.store.GetAllSettings(),
+		})
+
+	case protocol.CmdSetSetting:
+		setMsg := msg.(*protocol.SetSettingMessage)
+		d.logf("Setting %s = %s", setMsg.Key, setMsg.Value)
+		d.store.SetSetting(setMsg.Key, setMsg.Value)
+		d.broadcastSettings()
 	}
 }
 
@@ -374,6 +388,14 @@ func (d *Daemon) broadcastRepoStates() {
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventReposUpdated,
 		Repos: d.store.ListRepoStates(),
+	})
+}
+
+// broadcastSettings sends updated settings to all WebSocket clients
+func (d *Daemon) broadcastSettings() {
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:    protocol.EventSettingsUpdated,
+		Settings: d.store.GetAllSettings(),
 	})
 }
 

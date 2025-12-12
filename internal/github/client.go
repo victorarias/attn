@@ -330,6 +330,7 @@ type PRDetails struct {
 	CIStatus       string
 	ReviewStatus   string
 	HeadSHA        string // Current commit SHA for change detection
+	HeadBranch     string // Branch name (for worktree creation)
 }
 
 // FetchPRDetails fetches detailed status for a PR
@@ -346,6 +347,7 @@ func (c *Client) FetchPRDetails(repo string, number int) (*PRDetails, error) {
 		MergeableState string `json:"mergeable_state"`
 		Head           struct {
 			SHA string `json:"sha"`
+			Ref string `json:"ref"`
 		} `json:"head"`
 	}
 	if err := json.Unmarshal(prBody, &prData); err != nil {
@@ -356,6 +358,7 @@ func (c *Client) FetchPRDetails(repo string, number int) (*PRDetails, error) {
 		Mergeable:      prData.Mergeable,
 		MergeableState: prData.MergeableState,
 		HeadSHA:        prData.Head.SHA,
+		HeadBranch:     prData.Head.Ref,
 	}
 
 	// Derive CI status from mergeable_state (no extra API call needed)

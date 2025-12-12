@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS prs (
 	ci_status TEXT,
 	review_status TEXT,
 	head_sha TEXT,
+	head_branch TEXT,
 	comment_count INTEGER NOT NULL DEFAULT 0,
 	approved_by_me INTEGER NOT NULL DEFAULT 0,
 	heat_state TEXT NOT NULL DEFAULT 'cold',
@@ -69,6 +70,11 @@ CREATE TABLE IF NOT EXISTS worktrees (
 	branch TEXT NOT NULL,
 	main_repo TEXT NOT NULL,
 	created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+	key TEXT PRIMARY KEY,
+	value TEXT
 );
 `
 
@@ -109,6 +115,7 @@ func migrateDB(db *sql.DB) error {
 		alter string
 	}{
 		{"SELECT head_sha FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN head_sha TEXT"},
+		{"SELECT head_branch FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN head_branch TEXT"},
 		{"SELECT comment_count FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN comment_count INTEGER NOT NULL DEFAULT 0"},
 		{"SELECT approved_by_me FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN approved_by_me INTEGER NOT NULL DEFAULT 0"},
 		{"SELECT heat_state FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN heat_state TEXT NOT NULL DEFAULT 'cold'"},

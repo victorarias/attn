@@ -14,9 +14,11 @@ interface LocationPickerProps {
   worktrees?: DaemonWorktree[];
   onListWorktrees?: (mainRepo: string) => void;
   onCreateWorktree?: (mainRepo: string, branch: string) => Promise<{ success: boolean; path?: string }>;
+  worktreeFlowMode?: boolean;
+  projectsDirectory?: string;
 }
 
-export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWorktrees, onCreateWorktree }: LocationPickerProps) {
+export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWorktrees, onCreateWorktree, worktreeFlowMode, projectsDirectory }: LocationPickerProps) {
   const [inputValue, setInputValue] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [homePath, setHomePath] = useState('/Users');
@@ -68,15 +70,22 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
   // Focus input when opened
   useEffect(() => {
     if (isOpen) {
-      setInputValue('');
       setSelectedIndex(0);
       setWorktreeMode(false);
       setSelectedRepo(null);
       setNewBranchName('');
       setShowNewBranch(false);
+
+      // If worktreeFlowMode and projectsDirectory set, pre-populate and browse
+      if (worktreeFlowMode && projectsDirectory) {
+        setInputValue(projectsDirectory.replace(homePath, '~'));
+      } else {
+        setInputValue('');
+      }
+
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [isOpen]);
+  }, [isOpen, worktreeFlowMode, projectsDirectory, homePath]);
 
   const handleSelect = useCallback(
     async (path: string) => {

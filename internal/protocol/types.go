@@ -9,7 +9,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "5"
+const ProtocolVersion = "6"
 
 // Commands
 const (
@@ -33,6 +33,8 @@ const (
 	CmdListWorktrees   = "list_worktrees"
 	CmdCreateWorktree  = "create_worktree"
 	CmdDeleteWorktree  = "delete_worktree"
+	CmdGetSettings     = "get_settings"
+	CmdSetSetting      = "set_setting"
 	MsgApprovePR          = "approve_pr"
 	MsgMergePR            = "merge_pr"
 	MsgInjectTestPR       = "inject_test_pr"
@@ -57,6 +59,7 @@ const (
 	EventWorktreesUpdated      = "worktrees_updated"
 	EventCreateWorktreeResult  = "create_worktree_result"
 	EventDeleteWorktreeResult  = "delete_worktree_result"
+	EventSettingsUpdated       = "settings_updated"
 )
 
 // States
@@ -243,6 +246,18 @@ type DeleteWorktreeResultMessage struct {
 	Error   string `json:"error,omitempty"`
 }
 
+// GetSettingsMessage requests all settings
+type GetSettingsMessage struct {
+	Cmd string `json:"cmd"`
+}
+
+// SetSettingMessage sets a setting value
+type SetSettingMessage struct {
+	Cmd   string `json:"cmd"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // ApprovePRMessage requests approval of a PR
 type ApprovePRMessage struct {
 	Cmd    string `json:"cmd"`
@@ -325,6 +340,7 @@ type PR struct {
 	ReviewStatus     string    `json:"review_status"`      // approved, changes_requested, pending, none
 	// Interaction tracking (Plan 2)
 	HeadSHA       string `json:"head_sha"`        // current commit SHA for change detection
+	HeadBranch    string `json:"head_branch"`     // branch name (for worktree creation)
 	CommentCount  int    `json:"comment_count"`   // for change detection
 	ApprovedByMe  bool   `json:"approved_by_me"`  // true if user approved this PR
 	HasNewChanges bool   `json:"has_new_changes"` // true if PR changed since last visit
@@ -375,13 +391,14 @@ type Response struct {
 
 // WebSocketEvent is sent from daemon to connected WebSocket clients
 type WebSocketEvent struct {
-	Event           string       `json:"event"`
-	ProtocolVersion string       `json:"protocol_version,omitempty"`
-	Session         *Session     `json:"session,omitempty"`
-	Sessions        []*Session   `json:"sessions,omitempty"`
-	PRs             []*PR        `json:"prs,omitempty"`
-	Repos           []*RepoState `json:"repos,omitempty"`
-	Worktrees       []*Worktree  `json:"worktrees,omitempty"`
+	Event           string            `json:"event"`
+	ProtocolVersion string            `json:"protocol_version,omitempty"`
+	Session         *Session          `json:"session,omitempty"`
+	Sessions        []*Session        `json:"sessions,omitempty"`
+	PRs             []*PR             `json:"prs,omitempty"`
+	Repos           []*RepoState      `json:"repos,omitempty"`
+	Worktrees       []*Worktree       `json:"worktrees,omitempty"`
+	Settings        map[string]string `json:"settings,omitempty"`
 }
 
 // ParseMessage parses a JSON message and returns the command type and parsed message
@@ -534,6 +551,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdDeleteWorktree:
 		var msg DeleteWorktreeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdGetSettings:
+		var msg GetSettingsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSetSetting:
+		var msg SetSettingMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

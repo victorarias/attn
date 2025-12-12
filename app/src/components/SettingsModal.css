@@ -117,3 +117,69 @@
   outline: 2px solid #ff6b35;
   outline-offset: 1px;
 }
+
+/* Settings sections */
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-description {
+  font-size: 12px;
+  color: #888;
+  margin: 0 0 12px 0;
+  line-height: 1.4;
+}
+
+/* Projects directory input */
+.projects-dir-input {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-input {
+  flex: 1;
+  background: #0d0d0e;
+  border: 1px solid #2a2a2d;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: #e8e8e8;
+  outline: none;
+}
+
+.settings-input:focus {
+  border-color: #4a4a4d;
+}
+
+.settings-input::placeholder {
+  color: #555;
+}
+
+.browse-btn {
+  background: #252528;
+  border: 1px solid #3a3a3d;
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #bbb;
+  cursor: pointer;
+  transition: all 150ms ease-out;
+  white-space: nowrap;
+}
+
+.browse-btn:hover {
+  background: #111113;
+  color: #e8e8e8;
+  border-color: #4a4a4d;
+}
+
+.browse-btn:focus {
+  outline: 2px solid #ff6b35;
+  outline-offset: 1px;
+}
