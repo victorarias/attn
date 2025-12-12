@@ -186,3 +186,71 @@
   font-size: 10px;
   margin-right: 4px;
 }
+
+.picker-shortcut {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: #1a1a1d;
+  color: #555;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.picker-item:hover .picker-shortcut,
+.picker-item.selected .picker-shortcut {
+  background: #3b82f6;
+  color: white;
+}
+
+.picker-new-branch-trigger {
+  border-top: 1px solid #2a2a2d;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.picker-branch-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: #0d0d0e;
+  border: 1px solid #2a2a2d;
+  border-radius: 6px;
+  color: #e8e8e8;
+  font-size: 14px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.picker-branch-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.picker-new-branch {
+  padding: 8px;
+}
+
+.picker-branch-input.error {
+  border-color: #ef4444;
+}
+
+.picker-branch-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.picker-creating {
+  color: #9ca3af;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.picker-error {
+  color: #ef4444;
+  font-size: 12px;
+  margin-top: 6px;
+}
