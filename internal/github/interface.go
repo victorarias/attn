@@ -1,6 +1,10 @@
 package github
 
-import "github.com/victorarias/claude-manager/internal/protocol"
+import (
+	"time"
+
+	"github.com/victorarias/claude-manager/internal/protocol"
+)
 
 // GitHubClient defines the interface for all GitHub operations
 type GitHubClient interface {
@@ -9,6 +13,8 @@ type GitHubClient interface {
 	FetchPRDetails(repo string, number int) (*PRDetails, error)
 	ApprovePR(repo string, number int) error
 	MergePR(repo string, number int, method string) error
+	IsRateLimited(resource string) (bool, time.Time)
+	GetRateLimit(resource string) *RateLimitInfo
 }
 
 // Ensure Client implements the interface

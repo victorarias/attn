@@ -60,6 +60,7 @@ const (
 	EventCreateWorktreeResult  = "create_worktree_result"
 	EventDeleteWorktreeResult  = "delete_worktree_result"
 	EventSettingsUpdated       = "settings_updated"
+	EventRateLimited           = "rate_limited"
 )
 
 // States
@@ -302,6 +303,13 @@ type RefreshPRsResultMessage struct {
 	Error   string `json:"error,omitempty"`
 }
 
+// RateLimitedMessage is broadcast when GitHub rate limit is reached
+type RateLimitedMessage struct {
+	Event    string    `json:"event"`
+	Resource string    `json:"resource"` // "core" or "search"
+	ResetAt  time.Time `json:"reset_at"`
+}
+
 // Session represents a tracked Claude session
 type Session struct {
 	ID             string    `json:"id"`
@@ -399,6 +407,9 @@ type WebSocketEvent struct {
 	Repos           []*RepoState      `json:"repos,omitempty"`
 	Worktrees       []*Worktree       `json:"worktrees,omitempty"`
 	Settings        map[string]string `json:"settings,omitempty"`
+	// Rate limiting
+	RateLimitResource string    `json:"rate_limit_resource,omitempty"` // "core" or "search"
+	RateLimitResetAt  time.Time `json:"rate_limit_reset_at,omitempty"`
 }
 
 // ParseMessage parses a JSON message and returns the command type and parsed message

@@ -128,6 +128,12 @@ func LogPath() string {
 	return filepath.Join(attnDir(), "daemon.log")
 }
 
+// PIDPath returns the PID file path (same directory as socket)
+func PIDPath() string {
+	socketPath := SocketPath()
+	return filepath.Join(filepath.Dir(socketPath), "attn.pid")
+}
+
 // Log levels
 const (
 	LogError = iota

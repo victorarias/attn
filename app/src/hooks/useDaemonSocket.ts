@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
+import type { DaemonSessionState } from '../types/sessionState';
 
 export interface DaemonSession {
   id: string;
@@ -7,7 +8,7 @@ export interface DaemonSession {
   branch?: string;
   is_worktree?: boolean;
   main_repo?: string;
-  state: 'working' | 'waiting_input' | 'idle';
+  state: DaemonSessionState;
   state_since: string;
   todos: string[] | null;
   last_seen: string;
@@ -67,6 +68,14 @@ interface WebSocketEvent {
   error?: string;
   // Worktree action result fields
   path?: string;
+  // Rate limiting fields
+  rate_limit_resource?: string;
+  rate_limit_reset_at?: string;
+}
+
+export interface RateLimitState {
+  resource: string;
+  resetAt: Date;
 }
 
 // Protocol version - must match daemon's ProtocolVersion
@@ -114,6 +123,7 @@ export function useDaemonSocket({
   const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
+  const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -262,6 +272,24 @@ export function useDaemonSocket({
                 pendingAction.resolve({ success: true, path: data.path });
               } else {
                 pendingAction.reject(new Error(data.error || 'Worktree action failed'));
+              }
+            }
+            break;
+
+          case 'rate_limited':
+            if (data.rate_limit_resource && data.rate_limit_reset_at) {
+              const resetAt = new Date(data.rate_limit_reset_at);
+              // Only set if reset is in the future
+              if (resetAt > new Date()) {
+                setRateLimit({
+                  resource: data.rate_limit_resource,
+                  resetAt,
+                });
+                // Auto-clear when reset time passes
+                const msUntilReset = resetAt.getTime() - Date.now();
+                setTimeout(() => {
+                  setRateLimit(null);
+                }, msUntilReset + 1000); // Add 1s buffer
               }
             }
             break;
@@ -495,6 +523,7 @@ export function useDaemonSocket({
     connectionError,
     hasReceivedInitialState,
     settings: settingsRef.current,
+    rateLimit,
     sendPRAction,
     sendMutePR,
     sendMuteRepo,

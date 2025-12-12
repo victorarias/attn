@@ -1,6 +1,6 @@
 // app/src/components/Dashboard.tsx
-import { useState, useMemo, useCallback } from 'react';
-import { DaemonPR, DaemonSettings } from '../hooks/useDaemonSocket';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { DaemonPR, DaemonSettings, RateLimitState } from '../hooks/useDaemonSocket';
 import { PRActions } from './PRActions';
 import { SettingsModal } from './SettingsModal';
 import { useDaemonContext } from '../contexts/DaemonContext';
@@ -18,6 +18,7 @@ interface DashboardProps {
   isLoading: boolean;
   isRefreshing?: boolean;
   refreshError?: string | null;
+  rateLimit?: RateLimitState | null;
   settings: DaemonSettings;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
@@ -32,6 +33,7 @@ export function Dashboard({
   isLoading,
   isRefreshing,
   refreshError,
+  rateLimit,
   settings,
   onSelectSession,
   onNewSession,
@@ -42,6 +44,12 @@ export function Dashboard({
   const waitingSessions = sessions.filter((s) => s.state === 'waiting_input');
   const workingSessions = sessions.filter((s) => s.state === 'working');
   const idleSessions = sessions.filter((s) => s.state === 'idle');
+
+  // Debug: log session states
+  if (sessions.length > 0) {
+    console.log('[Dashboard] sessions:', sessions.map(s => ({ id: s.id, state: s.state })));
+    console.log('[Dashboard] waiting:', waitingSessions.length, 'working:', workingSessions.length, 'idle:', idleSessions.length);
+  }
 
   // Group PRs by repo
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
@@ -97,6 +105,34 @@ export function Dashboard({
     });
   };
 
+  // Rate limit countdown
+  const [rateLimitCountdown, setRateLimitCountdown] = useState<string | null>(null);
+  useEffect(() => {
+    if (!rateLimit) {
+      setRateLimitCountdown(null);
+      return;
+    }
+
+    const updateCountdown = () => {
+      const now = Date.now();
+      const resetTime = rateLimit.resetAt.getTime();
+      const diff = resetTime - now;
+
+      if (diff <= 0) {
+        setRateLimitCountdown(null);
+        return;
+      }
+
+      const minutes = Math.floor(diff / 60000);
+      const seconds = Math.floor((diff % 60000) / 1000);
+      setRateLimitCountdown(`${minutes}m ${seconds}s`);
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, [rateLimit]);
+
   return (
     <div className="dashboard">
       <header className="dashboard-header">
@@ -115,6 +151,17 @@ export function Dashboard({
           </svg>
         </button>
       </header>
+
+      {/* Rate limit banner */}
+      {rateLimitCountdown && (
+        <div className="rate-limit-banner">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span>GitHub rate limited. Resuming in {rateLimitCountdown}</span>
+        </div>
+      )}
 
       <div className="dashboard-grid">
         {/* Sessions Card */}
