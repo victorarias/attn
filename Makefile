@@ -19,9 +19,11 @@ install: build
 	-xattr -d com.apple.quarantine $(INSTALL_DIR)/$(BINARY_NAME) 2>/dev/null || true
 	@# Ad-hoc sign the binary to satisfy Gatekeeper
 	codesign -s - -f $(INSTALL_DIR)/$(BINARY_NAME)
-	@# Kill running daemon so app auto-restarts it with new code
+	@# Kill running daemon and restart with new code
 	-pkill -f "$(BINARY_NAME) daemon" 2>/dev/null || true
-	@echo "Installed $(BINARY_NAME) to $(INSTALL_DIR)"
+	@sleep 0.2
+	@nohup $(INSTALL_DIR)/$(BINARY_NAME) daemon >/dev/null 2>&1 &
+	@echo "Installed $(BINARY_NAME) to $(INSTALL_DIR) (daemon restarted)"
 
 clean:
 	rm -f $(BINARY_NAME)
