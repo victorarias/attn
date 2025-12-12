@@ -525,7 +525,7 @@ func (s *Store) GetPR(id string) *protocol.PR {
 }
 
 // UpdatePRDetails updates the detail fields for a PR
-func (s *Store) UpdatePRDetails(id string, mergeable *bool, mergeableState, ciStatus, reviewStatus string) {
+func (s *Store) UpdatePRDetails(id string, mergeable *bool, mergeableState, ciStatus, reviewStatus, headSHA string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -540,8 +540,8 @@ func (s *Store) UpdatePRDetails(id string, mergeable *bool, mergeableState, ciSt
 	}
 
 	now := time.Now().Format(time.RFC3339)
-	s.db.Exec(`UPDATE prs SET details_fetched = 1, details_fetched_at = ?, mergeable = ?, mergeable_state = ?, ci_status = ?, review_status = ? WHERE id = ?`,
-		now, mergeableVal, mergeableState, ciStatus, reviewStatus, id)
+	s.db.Exec(`UPDATE prs SET details_fetched = 1, details_fetched_at = ?, mergeable = ?, mergeable_state = ?, ci_status = ?, review_status = ?, head_sha = ? WHERE id = ?`,
+		now, mergeableVal, mergeableState, ciStatus, reviewStatus, headSHA, id)
 }
 
 // ListPRsByRepo returns all PRs for a specific repo
