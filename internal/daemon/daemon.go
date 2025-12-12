@@ -619,6 +619,47 @@ func (d *Daemon) doDetailRefresh() {
 	}
 }
 
+// fetchAllPRDetails fetches details for all visible PRs (called on app launch)
+func (d *Daemon) fetchAllPRDetails() {
+	if d.ghClient == nil || !d.ghClient.IsAvailable() {
+		return
+	}
+
+	// Get all visible PRs (not muted)
+	allPRs := d.store.ListPRs("")
+	if len(allPRs) == 0 {
+		return
+	}
+
+	d.logf("App launch: fetching details for %d PRs", len(allPRs))
+
+	refreshedCount := 0
+	for _, pr := range allPRs {
+		// Skip muted PRs and PRs from muted repos
+		if pr.Muted {
+			continue
+		}
+		repoState := d.store.GetRepoState(pr.Repo)
+		if repoState != nil && repoState.Muted {
+			continue
+		}
+
+		details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
+		if err != nil {
+			d.logf("Failed to fetch details for %s: %v", pr.ID, err)
+			continue
+		}
+
+		d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA)
+		refreshedCount++
+	}
+
+	if refreshedCount > 0 {
+		d.logf("App launch: updated %d PRs", refreshedCount)
+		d.broadcastPRs()
+	}
+}
+
 func (d *Daemon) handleInjectTestPR(conn net.Conn, msg *protocol.InjectTestPRMessage) {
 	if msg.PR == nil {
 		d.sendError(conn, "PR cannot be nil")
