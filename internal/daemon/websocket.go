@@ -139,6 +139,9 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 	case client.send <- data:
 	default:
 	}
+
+	// Fetch details for all PRs in background (app launch)
+	go d.fetchAllPRDetails()
 }
 
 func (d *Daemon) wsWritePump(client *wsClient) {
