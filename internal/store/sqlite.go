@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY,
 	label TEXT NOT NULL,
 	directory TEXT NOT NULL,
+	branch TEXT,
+	is_worktree INTEGER NOT NULL DEFAULT 0,
+	main_repo TEXT,
 	state TEXT NOT NULL DEFAULT 'idle',
 	state_since TEXT NOT NULL,
 	state_updated_at TEXT NOT NULL,
@@ -104,6 +107,9 @@ func migrateDB(db *sql.DB) error {
 		{"SELECT heat_state FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN heat_state TEXT NOT NULL DEFAULT 'cold'"},
 		{"SELECT last_heat_activity_at FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN last_heat_activity_at TEXT"},
 		{"SELECT last_seen_ci_status FROM pr_interactions LIMIT 1", "ALTER TABLE pr_interactions ADD COLUMN last_seen_ci_status TEXT"},
+		{"SELECT branch FROM sessions LIMIT 1", "ALTER TABLE sessions ADD COLUMN branch TEXT"},
+		{"SELECT is_worktree FROM sessions LIMIT 1", "ALTER TABLE sessions ADD COLUMN is_worktree INTEGER NOT NULL DEFAULT 0"},
+		{"SELECT main_repo FROM sessions LIMIT 1", "ALTER TABLE sessions ADD COLUMN main_repo TEXT"},
 	}
 
 	for _, m := range migrations {
