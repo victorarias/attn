@@ -245,6 +245,12 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleInjectTestPR(conn, msg.(*protocol.InjectTestPRMessage))
 	case protocol.MsgInjectTestSession:
 		d.handleInjectTestSession(conn, msg.(*protocol.InjectTestSessionMessage))
+	case protocol.CmdListWorktrees:
+		d.handleListWorktrees(conn, msg.(*protocol.ListWorktreesMessage))
+	case protocol.CmdCreateWorktree:
+		d.handleCreateWorktree(conn, msg.(*protocol.CreateWorktreeMessage))
+	case protocol.CmdDeleteWorktree:
+		d.handleDeleteWorktree(conn, msg.(*protocol.DeleteWorktreeMessage))
 	default:
 		d.sendError(conn, "unknown command")
 	}
