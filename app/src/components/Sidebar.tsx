@@ -4,6 +4,8 @@ interface LocalSession {
   id: string;
   label: string;
   state: 'working' | 'waiting_input' | 'idle';
+  branch?: string;
+  isWorktree?: boolean;
 }
 
 interface SidebarProps {
@@ -84,7 +86,13 @@ export function Sidebar({
             onClick={() => onSelectSession(session.id)}
           >
             <span className={`state-indicator ${session.state}`} data-testid="state-indicator" />
-            <span className="session-label">{session.label}</span>
+            <span className="session-label">
+              {session.label}
+              {session.branch && (
+                <span className="session-branch"> · {session.branch}</span>
+              )}
+            </span>
+            {session.isWorktree && <span className="worktree-indicator">⎇</span>}
             <span className="session-shortcut">⌘{index + 1}</span>
             <button
               className="close-session-btn"
