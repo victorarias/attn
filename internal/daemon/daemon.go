@@ -13,6 +13,7 @@ import (
 
 	"github.com/victorarias/claude-manager/internal/classifier"
 	"github.com/victorarias/claude-manager/internal/config"
+	"github.com/victorarias/claude-manager/internal/git"
 	"github.com/victorarias/claude-manager/internal/github"
 	"github.com/victorarias/claude-manager/internal/logging"
 	"github.com/victorarias/claude-manager/internal/protocol"
@@ -119,6 +120,9 @@ func (d *Daemon) Start() error {
 
 	// Start PR polling
 	go d.pollPRs()
+
+	// Start branch monitoring
+	go d.monitorBranches()
 
 	for {
 		select {
@@ -249,10 +253,25 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	d.logf("session registered: id=%s label=%s dir=%s", msg.ID, msg.Label, msg.Dir)
 	now := time.Now()
+
+	// Get branch info
+	branchInfo, _ := git.GetBranchInfo(msg.Dir)
+	branch := ""
+	isWorktree := false
+	mainRepo := ""
+	if branchInfo != nil {
+		branch = branchInfo.Branch
+		isWorktree = branchInfo.IsWorktree
+		mainRepo = branchInfo.MainRepo
+	}
+
 	session := &protocol.Session{
 		ID:             msg.ID,
 		Label:          msg.Label,
 		Directory:      msg.Dir,
+		Branch:         branch,
+		IsWorktree:     isWorktree,
+		MainRepo:       mainRepo,
 		State:          protocol.StateWaiting,
 		StateSince:     now,
 		StateUpdatedAt: now,
@@ -758,4 +777,51 @@ func (d *Daemon) fetchPRDetailsImmediate(prID string) {
 
 	d.store.UpdatePRDetails(prID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA)
 	d.logf("Immediate fetch complete for %s (heat=hot)", prID)
+}
+
+// monitorBranches polls git branch info for all sessions every 5 seconds
+func (d *Daemon) monitorBranches() {
+	d.log("Branch monitoring started (5s interval)")
+
+	// Initial check
+	d.checkAllBranches()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.done:
+			return
+		case <-ticker.C:
+			d.checkAllBranches()
+		}
+	}
+}
+
+func (d *Daemon) checkAllBranches() {
+	sessions := d.store.List("")
+	changed := false
+
+	for _, session := range sessions {
+		info, err := git.GetBranchInfo(session.Directory)
+		if err != nil {
+			continue
+		}
+
+		if info.Branch != session.Branch || info.IsWorktree != session.IsWorktree {
+			d.store.UpdateBranch(session.ID, info.Branch, info.IsWorktree, info.MainRepo)
+			changed = true
+			d.logf("Branch changed: session=%s branch=%s isWorktree=%v", session.ID, info.Branch, info.IsWorktree)
+		}
+	}
+
+	if changed {
+		// Broadcast all sessions with updated branch info
+		sessions = d.store.List("")
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:    protocol.EventSessionsUpdated,
+			Sessions: sessions,
+		})
+	}
 }
