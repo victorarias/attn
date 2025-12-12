@@ -77,6 +77,17 @@
   padding: 8px;
 }
 
+.session-group {
+  margin-bottom: 8px;
+}
+
+.session-group-header {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: #888;
+  font-family: 'JetBrains Mono', monospace;
+}
+
 .session-item {
   display: flex;
   align-items: center;
@@ -94,6 +105,10 @@
 
 .session-item.selected {
   background: #1a1a1d;
+}
+
+.session-item.grouped {
+  padding-left: 24px;
 }
 
 .state-indicator {
