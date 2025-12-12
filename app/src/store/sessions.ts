@@ -2,11 +2,12 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Terminal } from '@xterm/xterm';
+import type { UISessionState } from '../types/sessionState';
 
 export interface Session {
   id: string;
   label: string;
-  state: 'working' | 'waiting_input' | 'idle';
+  state: UISessionState;
   terminal: Terminal | null;
   cwd: string;
   branch?: string;
@@ -34,14 +35,14 @@ const pendingConnections = new Set<string>();
 interface TestSession {
   id: string;
   label: string;
-  state: 'working' | 'waiting_input' | 'idle';
+  state: UISessionState;
   cwd: string;
 }
 
 declare global {
   interface Window {
     __TEST_INJECT_SESSION?: (session: TestSession) => void;
-    __TEST_UPDATE_SESSION_STATE?: (id: string, state: 'working' | 'waiting_input' | 'idle') => void;
+    __TEST_UPDATE_SESSION_STATE?: (id: string, state: UISessionState) => void;
   }
 }
 

@@ -119,12 +119,12 @@ export function Sidebar({
                 onClick={() => onSelectSession(session.id)}
               >
                 <span className={`state-indicator ${session.state}`} data-testid="state-indicator" />
-                <span className="session-label">
-                  {session.label}
+                <div className="session-info">
+                  <span className="session-label">{session.label}</span>
                   {session.branch && (
-                    <span className="session-branch"> · {session.branch}</span>
+                    <span className="session-branch">{session.branch}</span>
                   )}
-                </span>
+                </div>
                 {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                 <span className="session-shortcut">⌘{globalIndex + 1}</span>
                 <button
@@ -144,8 +144,10 @@ export function Sidebar({
           return (
             <div key={group.directory} className="session-group">
               <div className="session-group-header">
-                {group.label}
-                {group.branch && <span className="session-branch"> · {group.branch}</span>}
+                <span className="session-label">{group.label}</span>
+                {group.branch && (
+                  <span className="session-branch">{group.branch}</span>
+                )}
               </div>
               {group.sessions.map((session) => {
                 const globalIndex = sessions.findIndex(s => s.id === session.id);
