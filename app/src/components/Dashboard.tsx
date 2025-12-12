@@ -50,26 +50,34 @@ export function Dashboard({
     [repoStates]
   );
 
+  // PRs that are fully hidden (after fade animation)
+  const [hiddenPRs, setHiddenPRs] = useState<Set<string>>(new Set());
+
   // Handle PR action completion (approve/merge success)
   // Only fade out on merge - approved PRs stay visible (dimmed)
   const handleActionComplete = useCallback((prId: string, action: 'approve' | 'merge') => {
     if (action === 'merge') {
       // Add to fading set to trigger CSS animation
       setFadingPRs(prev => new Set(prev).add(prId));
+      // After animation completes, fully hide the PR
+      setTimeout(() => {
+        setHiddenPRs(prev => new Set(prev).add(prId));
+      }, 350); // Slightly longer than 0.3s animation
     }
     // For approve, the PR stays visible but will be dimmed via approved_by_me flag
   }, []);
 
   const prsByRepo = useMemo(() => {
     // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
-    const activePRs = prs.filter((p) => !p.muted && !isRepoMuted(p.repo));
+    // Also filter out merged PRs after fade animation completes
+    const activePRs = prs.filter((p) => !p.muted && !isRepoMuted(p.repo) && !hiddenPRs.has(p.id));
     const grouped = new Map<string, DaemonPR[]>();
     for (const pr of activePRs) {
       const existing = grouped.get(pr.repo) || [];
       grouped.set(pr.repo, [...existing, pr]);
     }
     return grouped;
-  }, [prs, isRepoMuted, repoStates]);
+  }, [prs, isRepoMuted, repoStates, hiddenPRs]);
 
   const toggleRepo = (repo: string) => {
     setCollapsedRepos((prev) => {
