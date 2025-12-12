@@ -60,7 +60,7 @@
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 20px;
   flex: 1;
-  overflow-y: auto;
+  min-height: 0; /* Allow grid to shrink below content size */
 }
 
 .dashboard-card {
@@ -69,7 +69,8 @@
   border-radius: 8px;
   display: flex;
   flex-direction: column;
-  max-height: 400px;
+  min-height: 0; /* Allow card to shrink for scrolling */
+  overflow: hidden;
 }
 
 .card-header {
