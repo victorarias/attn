@@ -9,7 +9,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "4"
+const ProtocolVersion = "5"
 
 // Commands
 const (
@@ -30,6 +30,9 @@ const (
 	CmdRefreshPRs      = "refresh_prs"
 	CmdClearSessions   = "clear_sessions"
 	CmdPRVisited       = "pr_visited"
+	CmdListWorktrees   = "list_worktrees"
+	CmdCreateWorktree  = "create_worktree"
+	CmdDeleteWorktree  = "delete_worktree"
 	MsgApprovePR          = "approve_pr"
 	MsgMergePR            = "merge_pr"
 	MsgInjectTestPR       = "inject_test_pr"
@@ -49,6 +52,11 @@ const (
 	MsgPRActionResult        = "pr_action_result"
 	EventRefreshPRsResult    = "refresh_prs_result"
 	EventBranchChanged       = "branch_changed"
+	EventWorktreeCreated       = "worktree_created"
+	EventWorktreeDeleted       = "worktree_deleted"
+	EventWorktreesUpdated      = "worktrees_updated"
+	EventCreateWorktreeResult  = "create_worktree_result"
+	EventDeleteWorktreeResult  = "delete_worktree_result"
 )
 
 // States
@@ -192,6 +200,49 @@ type PRVisitedMessage struct {
 	ID  string `json:"id"` // PR ID (owner/repo#number)
 }
 
+// ListWorktreesMessage requests worktrees for a repo
+type ListWorktreesMessage struct {
+	Cmd      string `json:"cmd"`
+	MainRepo string `json:"main_repo"`
+}
+
+// CreateWorktreeMessage creates a new worktree
+type CreateWorktreeMessage struct {
+	Cmd      string `json:"cmd"`
+	MainRepo string `json:"main_repo"`
+	Branch   string `json:"branch"`
+	Path     string `json:"path,omitempty"` // Auto-generated if empty
+}
+
+// DeleteWorktreeMessage removes a worktree
+type DeleteWorktreeMessage struct {
+	Cmd  string `json:"cmd"`
+	Path string `json:"path"`
+}
+
+// WorktreeCreatedEvent is broadcast when a worktree is created
+type WorktreeCreatedEvent struct {
+	Path     string `json:"path"`
+	Branch   string `json:"branch"`
+	MainRepo string `json:"main_repo"`
+}
+
+// CreateWorktreeResultMessage is sent back after worktree creation
+type CreateWorktreeResultMessage struct {
+	Event   string `json:"event"`
+	Path    string `json:"path,omitempty"` // Path if successful
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// DeleteWorktreeResultMessage is sent back after worktree deletion
+type DeleteWorktreeResultMessage struct {
+	Event   string `json:"event"`
+	Path    string `json:"path"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
 // ApprovePRMessage requests approval of a PR
 type ApprovePRMessage struct {
 	Cmd    string `json:"cmd"`
@@ -298,6 +349,14 @@ func (pr *PR) NeedsDetailRefresh() bool {
 	return false
 }
 
+// Worktree for protocol (used in WebSocket events)
+type Worktree struct {
+	Path      string `json:"path"`
+	Branch    string `json:"branch"`
+	MainRepo  string `json:"main_repo"`
+	CreatedAt string `json:"created_at"`
+}
+
 // RepoState tracks per-repo UI state
 type RepoState struct {
 	Repo      string `json:"repo"`
@@ -322,6 +381,7 @@ type WebSocketEvent struct {
 	Sessions        []*Session   `json:"sessions,omitempty"`
 	PRs             []*PR        `json:"prs,omitempty"`
 	Repos           []*RepoState `json:"repos,omitempty"`
+	Worktrees       []*Worktree  `json:"worktrees,omitempty"`
 }
 
 // ParseMessage parses a JSON message and returns the command type and parsed message
@@ -453,6 +513,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdPRVisited:
 		var msg PRVisitedMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdListWorktrees:
+		var msg ListWorktreesMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCreateWorktree:
+		var msg CreateWorktreeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDeleteWorktree:
+		var msg DeleteWorktreeMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
