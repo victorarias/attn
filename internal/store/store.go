@@ -72,11 +72,14 @@ func (s *Store) Add(session *protocol.Session) {
 	todosJSON, _ := json.Marshal(session.Todos)
 	_, _ = s.db.Exec(`
 		INSERT OR REPLACE INTO sessions
-		(id, label, directory, state, state_since, state_updated_at, todos, last_seen, muted)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Label,
 		session.Directory,
+		session.Branch,
+		boolToInt(session.IsWorktree),
+		session.MainRepo,
 		session.State,
 		session.StateSince.Format(time.RFC3339),
 		session.StateUpdatedAt.Format(time.RFC3339),
@@ -98,14 +101,18 @@ func (s *Store) Get(id string) *protocol.Session {
 	var session protocol.Session
 	var todosJSON string
 	var stateSince, stateUpdatedAt, lastSeen string
-	var muted int
+	var muted, isWorktree int
+	var branch, mainRepo sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, directory, state, state_since, state_updated_at, todos, last_seen, muted
+		SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
 		&session.Directory,
+		&branch,
+		&isWorktree,
+		&mainRepo,
 		&session.State,
 		&stateSince,
 		&stateUpdatedAt,
@@ -117,6 +124,9 @@ func (s *Store) Get(id string) *protocol.Session {
 		return nil
 	}
 
+	session.Branch = branch.String
+	session.IsWorktree = isWorktree == 1
+	session.MainRepo = mainRepo.String
 	session.StateSince, _ = time.Parse(time.RFC3339, stateSince)
 	session.StateUpdatedAt, _ = time.Parse(time.RFC3339, stateUpdatedAt)
 	session.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
@@ -166,11 +176,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, directory, state, state_since, state_updated_at, todos, last_seen, muted
+			SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
 			FROM sessions ORDER BY label`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, directory, state, state_since, state_updated_at, todos, last_seen, muted
+			SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
 			FROM sessions WHERE state = ? ORDER BY label`, stateFilter)
 	}
 	if err != nil {
@@ -183,12 +193,16 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var session protocol.Session
 		var todosJSON string
 		var stateSince, stateUpdatedAt, lastSeen string
-		var muted int
+		var muted, isWorktree int
+		var branch, mainRepo sql.NullString
 
 		err := rows.Scan(
 			&session.ID,
 			&session.Label,
 			&session.Directory,
+			&branch,
+			&isWorktree,
+			&mainRepo,
 			&session.State,
 			&stateSince,
 			&stateUpdatedAt,
@@ -200,6 +214,9 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			continue
 		}
 
+		session.Branch = branch.String
+		session.IsWorktree = isWorktree == 1
+		session.MainRepo = mainRepo.String
 		session.StateSince, _ = time.Parse(time.RFC3339, stateSince)
 		session.StateUpdatedAt, _ = time.Parse(time.RFC3339, stateUpdatedAt)
 		session.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
@@ -267,6 +284,19 @@ func (s *Store) UpdateTodos(id string, todos []string) {
 
 	todosJSON, _ := json.Marshal(todos)
 	s.db.Exec("UPDATE sessions SET todos = ? WHERE id = ?", string(todosJSON), id)
+}
+
+// UpdateBranch updates a session's branch information
+func (s *Store) UpdateBranch(id, branch string, isWorktree bool, mainRepo string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	s.db.Exec(`UPDATE sessions SET branch = ?, is_worktree = ?, main_repo = ? WHERE id = ?`,
+		branch, boolToInt(isWorktree), mainRepo, id)
 }
 
 // Touch updates a session's last seen time
