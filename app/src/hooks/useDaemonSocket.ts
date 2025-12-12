@@ -34,6 +34,13 @@ export interface DaemonPR {
   review_status?: string;
 }
 
+export interface DaemonWorktree {
+  path: string;
+  branch: string;
+  main_repo: string;
+  created_at: string;
+}
+
 export interface RepoState {
   repo: string;
   muted: boolean;
@@ -47,12 +54,15 @@ interface WebSocketEvent {
   sessions?: DaemonSession[];
   prs?: DaemonPR[];
   repos?: RepoState[];
+  worktrees?: DaemonWorktree[];
   // PR action result fields
   action?: string;
   repo?: string;
   number?: number;
   success?: boolean;
   error?: string;
+  // Worktree action result fields
+  path?: string;
 }
 
 // Protocol version - must match daemon's ProtocolVersion
@@ -64,10 +74,17 @@ interface PRActionResult {
   error?: string;
 }
 
+interface WorktreeActionResult {
+  success: boolean;
+  path?: string;
+  error?: string;
+}
+
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
+  onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
   wsUrl?: string;
 }
 
@@ -78,6 +95,7 @@ export function useDaemonSocket({
   onSessionsUpdate,
   onPRsUpdate,
   onReposUpdate,
+  onWorktreesUpdate,
   wsUrl = DEFAULT_WS_URL,
 }: UseDaemonSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -86,7 +104,7 @@ export function useDaemonSocket({
   const reposRef = useRef<RepoState[]>([]);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
-  const pendingActionsRef = useRef<Map<string, (result: PRActionResult) => void>>(new Map());
+  const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
 
@@ -179,22 +197,56 @@ export function useDaemonSocket({
           case 'pr_action_result':
             if (data.action && data.repo && data.number !== undefined) {
               const key = `${data.repo}#${data.number}:${data.action}`;
-              const resolve = pendingActionsRef.current.get(key);
-              if (resolve) {
-                resolve({ success: data.success ?? false, error: data.error });
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
                 pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve({ success: true });
+                } else {
+                  pending.reject(new Error(data.error || 'PR action failed'));
+                }
               }
             }
             break;
 
           case 'refresh_prs_result': {
-            const resolve = pendingActionsRef.current.get('refresh_prs');
-            if (resolve) {
-              resolve({ success: data.success ?? false, error: data.error });
+            const pending = pendingActionsRef.current.get('refresh_prs');
+            if (pending) {
               pendingActionsRef.current.delete('refresh_prs');
+              if (data.success) {
+                pending.resolve({ success: true });
+              } else {
+                pending.reject(new Error(data.error || 'Refresh failed'));
+              }
             }
             break;
           }
+
+          case 'worktrees_updated':
+            if (data.worktrees) {
+              onWorktreesUpdate?.(data.worktrees);
+            }
+            break;
+
+          case 'worktree_created':
+          case 'worktree_deleted':
+            // These events are informational, UI updates handled via worktrees_updated
+            break;
+
+          case 'create_worktree_result':
+          case 'delete_worktree_result':
+            // Handle async result for pending worktree actions
+            const actionKey = `worktree_${data.event}`;
+            const pendingAction = pendingActionsRef.current.get(actionKey);
+            if (pendingAction) {
+              pendingActionsRef.current.delete(actionKey);
+              if (data.success) {
+                pendingAction.resolve({ success: true, path: data.path });
+              } else {
+                pendingAction.reject(new Error(data.error || 'Worktree action failed'));
+              }
+            }
+            break;
         }
       } catch (err) {
         console.error('[Daemon] Parse error:', err);
@@ -216,7 +268,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onWorktreesUpdate]);
 
   useEffect(() => {
     connect();
@@ -243,7 +295,7 @@ export function useDaemonSocket({
       }
 
       const key = `${repo}#${number}:${action}`;
-      pendingActionsRef.current.set(key, resolve);
+      pendingActionsRef.current.set(key, { resolve, reject });
 
       const msg = {
         cmd: `${action}_pr`,
@@ -311,7 +363,7 @@ export function useDaemonSocket({
       }
 
       const key = 'refresh_prs';
-      pendingActionsRef.current.set(key, resolve);
+      pendingActionsRef.current.set(key, { resolve, reject });
 
       ws.send(JSON.stringify({ cmd: 'refresh_prs' }));
 
@@ -348,6 +400,66 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'pr_visited', id: prId }));
   }, [onPRsUpdate]);
 
+  const sendListWorktrees = useCallback((mainRepo: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'list_worktrees', main_repo: mainRepo }));
+  }, []);
+
+  const sendCreateWorktree = useCallback((mainRepo: string, branch: string, path?: string): Promise<WorktreeActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const actionKey = 'worktree_create_worktree_result';
+      pendingActionsRef.current.set(actionKey, { resolve, reject });
+
+      // Set timeout for action
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(actionKey)) {
+          pendingActionsRef.current.delete(actionKey);
+          reject(new Error('Create worktree timed out'));
+        }
+      }, 30000);
+
+      ws.send(JSON.stringify({
+        cmd: 'create_worktree',
+        main_repo: mainRepo,
+        branch,
+        ...(path && { path }),
+      }));
+    });
+  }, []);
+
+  const sendDeleteWorktree = useCallback((path: string): Promise<WorktreeActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const actionKey = 'worktree_delete_worktree_result';
+      pendingActionsRef.current.set(actionKey, { resolve, reject });
+
+      // Set timeout for action
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(actionKey)) {
+          pendingActionsRef.current.delete(actionKey);
+          reject(new Error('Delete worktree timed out'));
+        }
+      }, 30000);
+
+      ws.send(JSON.stringify({
+        cmd: 'delete_worktree',
+        path,
+      }));
+    });
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -358,5 +470,8 @@ export function useDaemonSocket({
     sendRefreshPRs,
     sendClearSessions,
     sendPRVisited,
+    sendListWorktrees,
+    sendCreateWorktree,
+    sendDeleteWorktree,
   };
 }
