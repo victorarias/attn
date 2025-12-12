@@ -573,6 +573,50 @@ func (d *Daemon) doPRPoll() {
 		}
 	}
 	d.logf("PR poll: %d PRs (%d waiting)", len(prs), waiting)
+
+	// Run detail refresh after list poll
+	d.doDetailRefresh()
+}
+
+// doDetailRefresh fetches details for PRs that need refresh based on heat state
+func (d *Daemon) doDetailRefresh() {
+	if d.ghClient == nil || !d.ghClient.IsAvailable() {
+		return
+	}
+
+	// First decay heat states
+	d.store.DecayHeatStates()
+
+	// Get PRs needing refresh
+	prs := d.store.GetPRsNeedingDetailRefresh()
+	if len(prs) == 0 {
+		return
+	}
+
+	d.logf("Detail refresh: %d PRs need refresh", len(prs))
+
+	refreshedCount := 0
+	for _, pr := range prs {
+		details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
+		if err != nil {
+			d.logf("Failed to fetch details for %s: %v", pr.ID, err)
+			continue
+		}
+
+		// Check if SHA changed (new commits) - triggers hot state
+		if pr.HeadSHA != "" && details.HeadSHA != pr.HeadSHA {
+			d.store.SetPRHot(pr.ID)
+		}
+
+		d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA)
+		refreshedCount++
+	}
+
+	if refreshedCount > 0 {
+		d.logf("Detail refresh: updated %d PRs", refreshedCount)
+		// Broadcast updated PRs
+		d.broadcastPRs()
+	}
 }
 
 func (d *Daemon) handleInjectTestPR(conn net.Conn, msg *protocol.InjectTestPRMessage) {
