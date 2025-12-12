@@ -358,48 +358,22 @@ func (c *Client) FetchPRDetails(repo string, number int) (*PRDetails, error) {
 		HeadSHA:        prData.Head.SHA,
 	}
 
-	// Fetch CI status from check-runs (actual executed checks)
-	// We only use check-runs, not check-suites, because:
-	// - Check-suites can be registered but never run (gh-compliance, GetPort.io)
-	// - The status API considers branch protection required checks that may not exist
-	// - Check-runs represent actual CI jobs that have started/completed
-	if prData.Head.SHA != "" {
-		ciPath := fmt.Sprintf("/repos/%s/commits/%s/check-runs", repo, prData.Head.SHA)
-		ciBody, err := c.doRequest("GET", ciPath, nil)
-		if err == nil {
-			var ciData struct {
-				CheckRuns []struct {
-					Conclusion *string `json:"conclusion"`
-				} `json:"check_runs"`
-			}
-			if json.Unmarshal(ciBody, &ciData) == nil {
-				if len(ciData.CheckRuns) == 0 {
-					details.CIStatus = "none"
-				} else {
-					allSuccess := true
-					hasPending := false
-					hasFailure := false
-					for _, run := range ciData.CheckRuns {
-						if run.Conclusion == nil {
-							hasPending = true
-							allSuccess = false
-						} else if *run.Conclusion != "success" && *run.Conclusion != "skipped" && *run.Conclusion != "neutral" {
-							hasFailure = true
-							allSuccess = false
-						}
-					}
-					if hasFailure {
-						details.CIStatus = "failure"
-					} else if hasPending {
-						details.CIStatus = "pending"
-					} else if allSuccess {
-						details.CIStatus = "success"
-					} else {
-						details.CIStatus = "none"
-					}
-				}
-			}
-		}
+	// Derive CI status from mergeable_state (no extra API call needed)
+	// This is more accurate than check-runs because it accounts for:
+	// - Required status checks from branch protection/rulesets
+	// - Merge conflicts
+	// - All blocking conditions GitHub enforces
+	switch prData.MergeableState {
+	case "clean":
+		details.CIStatus = "success" // Ready to merge
+	case "blocked":
+		details.CIStatus = "pending" // Required checks not passed
+	case "dirty":
+		details.CIStatus = "failure" // Merge conflicts
+	case "unstable":
+		details.CIStatus = "pending" // CI failing but not blocking
+	default:
+		details.CIStatus = "none"
 	}
 
 	// Fetch review status
