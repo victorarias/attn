@@ -347,21 +347,24 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 	interactions := make(map[string]struct {
 		lastSeenSHA          string
 		lastSeenCommentCount int
+		lastSeenCIStatus     string
 	})
-	interRows, err := s.db.Query(`SELECT pr_id, last_seen_sha, last_seen_comment_count FROM pr_interactions`)
+	interRows, err := s.db.Query(`SELECT pr_id, last_seen_sha, last_seen_comment_count, last_seen_ci_status FROM pr_interactions`)
 	if err == nil {
 		defer interRows.Close()
 		for interRows.Next() {
 			var prID string
-			var lastSHA sql.NullString
+			var lastSHA, lastCIStatus sql.NullString
 			var lastComments sql.NullInt64
-			interRows.Scan(&prID, &lastSHA, &lastComments)
+			interRows.Scan(&prID, &lastSHA, &lastComments, &lastCIStatus)
 			interactions[prID] = struct {
 				lastSeenSHA          string
 				lastSeenCommentCount int
+				lastSeenCIStatus     string
 			}{
 				lastSeenSHA:          lastSHA.String,
 				lastSeenCommentCount: int(lastComments.Int64),
+				lastSeenCIStatus:     lastCIStatus.String,
 			}
 		}
 	}
@@ -400,6 +403,13 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 			}
 			if pr.CommentCount > inter.lastSeenCommentCount {
 				pr.HasNewChanges = true
+			}
+			// CI status changes only matter for authored or approved PRs
+			if (pr.Role == protocol.PRRoleAuthor || pr.ApprovedByMe) && pr.CIStatus != "" {
+				// CI finished (was pending, now success/failure)
+				if inter.lastSeenCIStatus == "pending" && (pr.CIStatus == "success" || pr.CIStatus == "failure") {
+					pr.HasNewChanges = true
+				}
 			}
 		}
 		// If no interaction record, HasNewChanges stays false (first time seeing this PR)
@@ -663,9 +673,9 @@ func (s *Store) MarkPRVisited(prID string) {
 	}
 
 	// Get current PR state
-	var headSHA sql.NullString
+	var headSHA, ciStatus sql.NullString
 	var commentCount int
-	err := s.db.QueryRow("SELECT head_sha, comment_count FROM prs WHERE id = ?", prID).Scan(&headSHA, &commentCount)
+	err := s.db.QueryRow("SELECT head_sha, comment_count, ci_status FROM prs WHERE id = ?", prID).Scan(&headSHA, &commentCount, &ciStatus)
 	if err != nil {
 		return
 	}
@@ -673,13 +683,14 @@ func (s *Store) MarkPRVisited(prID string) {
 	// Upsert interaction record
 	now := time.Now().Format(time.RFC3339)
 	s.db.Exec(`
-		INSERT INTO pr_interactions (pr_id, last_visited_at, last_seen_sha, last_seen_comment_count)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO pr_interactions (pr_id, last_visited_at, last_seen_sha, last_seen_comment_count, last_seen_ci_status)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(pr_id) DO UPDATE SET
 			last_visited_at = excluded.last_visited_at,
 			last_seen_sha = excluded.last_seen_sha,
-			last_seen_comment_count = excluded.last_seen_comment_count`,
-		prID, now, headSHA.String, commentCount,
+			last_seen_comment_count = excluded.last_seen_comment_count,
+			last_seen_ci_status = excluded.last_seen_ci_status`,
+		prID, now, headSHA.String, commentCount, ciStatus.String,
 	)
 }
 
@@ -693,9 +704,9 @@ func (s *Store) MarkPRApproved(prID string) {
 	}
 
 	// Get current PR state for updating interaction
-	var headSHA sql.NullString
+	var headSHA, ciStatus sql.NullString
 	var commentCount int
-	err := s.db.QueryRow("SELECT head_sha, comment_count FROM prs WHERE id = ?", prID).Scan(&headSHA, &commentCount)
+	err := s.db.QueryRow("SELECT head_sha, comment_count, ci_status FROM prs WHERE id = ?", prID).Scan(&headSHA, &commentCount, &ciStatus)
 	if err != nil {
 		return
 	}
@@ -703,14 +714,15 @@ func (s *Store) MarkPRApproved(prID string) {
 	// Upsert interaction record with approval timestamp
 	now := time.Now().Format(time.RFC3339)
 	s.db.Exec(`
-		INSERT INTO pr_interactions (pr_id, last_visited_at, last_approved_at, last_seen_sha, last_seen_comment_count)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO pr_interactions (pr_id, last_visited_at, last_approved_at, last_seen_sha, last_seen_comment_count, last_seen_ci_status)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(pr_id) DO UPDATE SET
 			last_visited_at = excluded.last_visited_at,
 			last_approved_at = excluded.last_approved_at,
 			last_seen_sha = excluded.last_seen_sha,
-			last_seen_comment_count = excluded.last_seen_comment_count`,
-		prID, now, now, headSHA.String, commentCount,
+			last_seen_comment_count = excluded.last_seen_comment_count,
+			last_seen_ci_status = excluded.last_seen_ci_status`,
+		prID, now, now, headSHA.String, commentCount, ciStatus.String,
 	)
 
 	// Also update the PR's approved_by_me flag
