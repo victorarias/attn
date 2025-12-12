@@ -29,7 +29,7 @@ Attention Manager (`attn`) tracks multiple Claude Code sessions and surfaces whi
 
 ### Core Flow
 
-1. **Wrapper** (`cmd/cm/main.go`): CLI entry point that wraps `claude` command. Parses attn-specific flags (`-s`, `-y`, `-d`), passes unknown flags through to claude. Registers session with daemon, writes temporary hooks config, executes claude with `--settings` pointing to hooks.
+1. **Wrapper** (`cmd/attn/main.go`): CLI entry point that wraps `claude` command. Parses attn-specific flags (`-s`, `-y`, `-d`), passes unknown flags through to claude. Registers session with daemon, writes temporary hooks config, executes claude with `--settings` pointing to hooks.
 
 2. **Hooks** (`internal/hooks`): Generates Claude Code hooks JSON that reports state changes back to daemon via unix socket using `nc`. Three hooks: Stop (waiting), UserPromptSubmit (working), PostToolUse/TodoWrite (update todos).
 
@@ -39,7 +39,11 @@ Attention Manager (`attn`) tracks multiple Claude Code sessions and surfaces whi
 
 5. **Client** (`internal/client`): Sends JSON messages to daemon over unix socket.
 
-6. **Protocol** (`internal/protocol`): Message types and parsing. States: "working" or "waiting".
+6. **Protocol** (`internal/protocol`): Message types and parsing. Three states: "working" (actively generating), "waiting_input" (needs user attention), and "idle" (completed task).
+
+7. **Classifier** (`internal/classifier`): Uses `claude -p` to classify Claude's final message and determine if it's waiting for input or idle. Called via Stop hook when Claude stops generating.
+
+8. **Transcript Parser** (`internal/transcript`): Parses Claude Code JSONL transcripts to extract the last assistant message for classification.
 
 ### GitHub PR Monitoring
 
@@ -64,7 +68,7 @@ The app checks protocol version on WebSocket connect and shows an error banner i
 
 ### Communication
 
-All IPC uses JSON over unix socket at `~/.attn.sock`. Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates.
+All IPC uses JSON over unix socket at `~/.attn.sock`. Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates. WebSocket at `ws://localhost:21152` for real-time updates to the Tauri app.
 
 ### Async WebSocket Pattern (REQUIRED for any async operation)
 
@@ -123,6 +127,20 @@ Communication flow:
 Frontend (React) → Tauri Commands → Rust pty_bridge → Unix Socket → pty-server (node-pty)
 ```
 
+### Frontend Architecture
+
+Key app components:
+- **App.tsx**: Main layout with sidebar and dashboard
+- **Sidebar.tsx**: Session/PR list with state indicators (green=working, orange=waiting_input, gray=idle)
+- **Dashboard.tsx**: Central area with terminal tabs
+- **Terminal.tsx**: xterm.js integration with PTY bridge
+- **AttentionDrawer.tsx**: Quick view of items needing attention
+
+State management:
+- **store/daemonSessions.ts**: Zustand store for session/PR state from daemon
+- **store/sessions.ts**: Local terminal session management
+- **hooks/useDaemonSocket.ts**: WebSocket connection to daemon
+
 ### Terminal Component (xterm.js)
 
 When modifying `app/src/components/Terminal.tsx`:
@@ -138,8 +156,9 @@ See `docs/plans/2025-12-09-node-pty-sidecar-design.md` for architecture details.
 
 ```bash
 cd app
-pnpm run test:e2e          # Run all E2E tests
-pnpm run test:e2e -- --ui  # Run with Playwright UI
+pnpm run e2e               # Run all E2E tests
+pnpm run e2e:headed        # Run with browser visible
+pnpm run e2e -- --ui       # Run with Playwright UI
 ```
 
 ## When Something Is Broken
