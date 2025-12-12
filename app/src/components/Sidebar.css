@@ -1,6 +1,6 @@
 /* app/src/components/Sidebar.css */
 .sidebar {
-  width: 200px;
+  width: 240px;
   height: 100%;
   background: #111113;
   border-right: 1px solid #2a2a2d;
@@ -82,6 +82,9 @@
 }
 
 .session-group-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   padding: 4px 12px;
   font-size: 11px;
   color: #888;
@@ -90,7 +93,7 @@
 
 .session-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 8px 10px;
   border-radius: 6px;
@@ -116,6 +119,7 @@
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-top: 6px;
 }
 
 .state-indicator.waiting-input {
@@ -130,16 +134,26 @@
   background: #555;
 }
 
-.session-label {
+.session-info {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .session-branch {
-  color: #888;
+  color: #666;
   font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .worktree-indicator {
