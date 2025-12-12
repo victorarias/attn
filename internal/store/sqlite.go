@@ -63,6 +63,13 @@ CREATE TABLE IF NOT EXISTS pr_interactions (
 	last_seen_comment_count INTEGER,
 	last_seen_ci_status TEXT
 );
+
+CREATE TABLE IF NOT EXISTS worktrees (
+	path TEXT PRIMARY KEY,
+	branch TEXT NOT NULL,
+	main_repo TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
 `
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
