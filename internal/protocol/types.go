@@ -9,7 +9,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "3"
+const ProtocolVersion = "4"
 
 // Commands
 const (
@@ -48,6 +48,7 @@ const (
 	EventInitialState        = "initial_state"
 	MsgPRActionResult        = "pr_action_result"
 	EventRefreshPRsResult    = "refresh_prs_result"
+	EventBranchChanged       = "branch_changed"
 )
 
 // States
@@ -240,6 +241,9 @@ type Session struct {
 	ID             string    `json:"id"`
 	Label          string    `json:"label"`
 	Directory      string    `json:"directory"`
+	Branch         string    `json:"branch,omitempty"`      // Current git branch
+	IsWorktree     bool      `json:"is_worktree,omitempty"` // True if in a git worktree
+	MainRepo       string    `json:"main_repo,omitempty"`   // Path to main repo if worktree
 	State          string    `json:"state"`
 	StateSince     time.Time `json:"state_since"`
 	StateUpdatedAt time.Time `json:"state_updated_at"` // For race condition prevention
