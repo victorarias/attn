@@ -9,6 +9,8 @@ export interface Session {
   state: 'working' | 'waiting_input' | 'idle';
   terminal: Terminal | null;
   cwd: string;
+  branch?: string;
+  isWorktree?: boolean;
 }
 
 interface SessionStore {

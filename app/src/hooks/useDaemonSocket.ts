@@ -4,6 +4,9 @@ export interface DaemonSession {
   id: string;
   label: string;
   directory: string;
+  branch?: string;
+  is_worktree?: boolean;
+  main_repo?: string;
   state: 'working' | 'waiting_input' | 'idle';
   state_since: string;
   todos: string[] | null;
@@ -54,7 +57,7 @@ interface WebSocketEvent {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '3';
+const PROTOCOL_VERSION = '4';
 
 interface PRActionResult {
   success: boolean;
