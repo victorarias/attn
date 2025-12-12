@@ -685,3 +685,36 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 	d.logf("PR refresh: %d PRs fetched", len(prs))
 	return nil
 }
+
+// fetchPRDetailsImmediate fetches details for a single PR immediately and sets it hot
+func (d *Daemon) fetchPRDetailsImmediate(prID string) {
+	if d.ghClient == nil || !d.ghClient.IsAvailable() {
+		return
+	}
+
+	pr := d.store.GetPR(prID)
+	if pr == nil {
+		return
+	}
+
+	// Skip if muted
+	if pr.Muted {
+		return
+	}
+	// Skip if repo is muted
+	repoState := d.store.GetRepoState(pr.Repo)
+	if repoState != nil && repoState.Muted {
+		return
+	}
+
+	d.store.SetPRHot(prID)
+
+	details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
+	if err != nil {
+		d.logf("Immediate fetch failed for %s: %v", prID, err)
+		return
+	}
+
+	d.store.UpdatePRDetails(prID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA)
+	d.logf("Immediate fetch complete for %s (heat=hot)", prID)
+}
