@@ -124,6 +124,10 @@ type searchItem struct {
 	HTMLURL       string `json:"html_url"`
 	Draft         bool   `json:"draft"`
 	RepositoryURL string `json:"repository_url"`
+	Comments      int    `json:"comments"` // Comment count for change detection
+	PullRequest   *struct {
+		URL string `json:"url"` // PR API URL to fetch head SHA
+	} `json:"pull_request"`
 }
 
 // extractRepoFromURL extracts "owner/repo" from repository_url
@@ -161,16 +165,17 @@ func (c *Client) SearchAuthoredPRs() ([]*protocol.PR, error) {
 
 		repo := extractRepoFromURL(item.RepositoryURL)
 		prs = append(prs, &protocol.PR{
-			ID:          fmt.Sprintf("%s#%d", repo, item.Number),
-			Repo:        repo,
-			Number:      item.Number,
-			Title:       item.Title,
-			URL:         item.HTMLURL,
-			Role:        protocol.PRRoleAuthor,
-			State:       protocol.StateWaiting,
-			Reason:      "",
-			LastUpdated: time.Now(),
-			LastPolled:  time.Now(),
+			ID:           fmt.Sprintf("%s#%d", repo, item.Number),
+			Repo:         repo,
+			Number:       item.Number,
+			Title:        item.Title,
+			URL:          item.HTMLURL,
+			Role:         protocol.PRRoleAuthor,
+			State:        protocol.StateWaiting,
+			Reason:       "",
+			LastUpdated:  time.Now(),
+			LastPolled:   time.Now(),
+			CommentCount: item.Comments,
 		})
 	}
 
@@ -200,37 +205,120 @@ func (c *Client) SearchReviewRequestedPRs() ([]*protocol.PR, error) {
 
 		repo := extractRepoFromURL(item.RepositoryURL)
 		prs = append(prs, &protocol.PR{
-			ID:          fmt.Sprintf("%s#%d", repo, item.Number),
-			Repo:        repo,
-			Number:      item.Number,
-			Title:       item.Title,
-			URL:         item.HTMLURL,
-			Role:        protocol.PRRoleReviewer,
-			State:       protocol.StateWaiting,
-			Reason:      protocol.PRReasonReviewNeeded,
-			LastUpdated: time.Now(),
-			LastPolled:  time.Now(),
+			ID:           fmt.Sprintf("%s#%d", repo, item.Number),
+			Repo:         repo,
+			Number:       item.Number,
+			Title:        item.Title,
+			URL:          item.HTMLURL,
+			Role:         protocol.PRRoleReviewer,
+			State:        protocol.StateWaiting,
+			Reason:       protocol.PRReasonReviewNeeded,
+			LastUpdated:  time.Now(),
+			LastPolled:   time.Now(),
+			CommentCount: item.Comments,
 		})
 	}
 
 	return prs, nil
 }
 
-// FetchAll fetches all PRs (authored + review requests)
-func (c *Client) FetchAll() ([]*protocol.PR, error) {
-	var allPRs []*protocol.PR
+// SearchReviewedByMePRs searches for open PRs where authenticated user has submitted a review
+// This catches PRs the user has approved (no longer in review-requested:@me)
+func (c *Client) SearchReviewedByMePRs() ([]*protocol.PR, error) {
+	query := url.QueryEscape("is:pr is:open reviewed-by:@me")
+	path := fmt.Sprintf("/search/issues?q=%s&per_page=50", query)
 
+	body, err := c.doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result searchResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	var prs []*protocol.PR
+	for _, item := range result.Items {
+		if item.Draft {
+			continue
+		}
+
+		repo := extractRepoFromURL(item.RepositoryURL)
+		prs = append(prs, &protocol.PR{
+			ID:           fmt.Sprintf("%s#%d", repo, item.Number),
+			Repo:         repo,
+			Number:       item.Number,
+			Title:        item.Title,
+			URL:          item.HTMLURL,
+			Role:         protocol.PRRoleReviewer,
+			State:        protocol.StateWaiting,
+			Reason:       protocol.PRReasonReviewNeeded,
+			LastUpdated:  time.Now(),
+			LastPolled:   time.Now(),
+			CommentCount: item.Comments,
+			ApprovedByMe: true, // Will be refined based on actual review state
+		})
+	}
+
+	return prs, nil
+}
+
+// FetchAll fetches all PRs (authored + review requests + reviewed-by-me)
+func (c *Client) FetchAll() ([]*protocol.PR, error) {
+	prMap := make(map[string]*protocol.PR)
+
+	// 1. Authored PRs
 	authored, err := c.SearchAuthoredPRs()
 	if err != nil {
 		return nil, fmt.Errorf("fetch authored: %w", err)
 	}
-	allPRs = append(allPRs, authored...)
+	for _, pr := range authored {
+		prMap[pr.ID] = pr
+	}
 
-	reviews, err := c.SearchReviewRequestedPRs()
+	// 2. Review-requested PRs (user needs to review)
+	reviewRequested, err := c.SearchReviewRequestedPRs()
 	if err != nil {
 		return nil, fmt.Errorf("fetch review requests: %w", err)
 	}
-	allPRs = append(allPRs, reviews...)
+	reviewRequestedSet := make(map[string]bool)
+	for _, pr := range reviewRequested {
+		reviewRequestedSet[pr.ID] = true
+		if existing, ok := prMap[pr.ID]; ok {
+			// Already in map (authored), keep author role
+			existing.CommentCount = pr.CommentCount
+		} else {
+			prMap[pr.ID] = pr
+		}
+	}
+
+	// 3. Reviewed-by-me PRs (user has already reviewed, may have approved)
+	reviewedByMe, err := c.SearchReviewedByMePRs()
+	if err != nil {
+		// Non-fatal: reviewed-by-me is enhancement, not critical
+		reviewedByMe = nil
+	}
+	for _, pr := range reviewedByMe {
+		if existing, ok := prMap[pr.ID]; ok {
+			// Already in map - just update comment count
+			existing.CommentCount = pr.CommentCount
+			// If not in review-requested, user has completed their review
+			if !reviewRequestedSet[pr.ID] && existing.Role == protocol.PRRoleReviewer {
+				existing.ApprovedByMe = true
+			}
+		} else {
+			// PR only in reviewed-by-me = user approved and is no longer requested
+			pr.ApprovedByMe = true
+			prMap[pr.ID] = pr
+		}
+	}
+
+	// Convert map to slice
+	var allPRs []*protocol.PR
+	for _, pr := range prMap {
+		allPRs = append(allPRs, pr)
+	}
 
 	return allPRs, nil
 }
@@ -241,6 +329,7 @@ type PRDetails struct {
 	MergeableState string
 	CIStatus       string
 	ReviewStatus   string
+	HeadSHA        string // Current commit SHA for change detection
 }
 
 // FetchPRDetails fetches detailed status for a PR
@@ -266,21 +355,72 @@ func (c *Client) FetchPRDetails(repo string, number int) (*PRDetails, error) {
 	details := &PRDetails{
 		Mergeable:      prData.Mergeable,
 		MergeableState: prData.MergeableState,
+		HeadSHA:        prData.Head.SHA,
 	}
 
-	// Fetch CI status
+	// Fetch CI status from both check-runs and check-suites
+	// Check-runs: individual jobs from GitHub Actions
+	// Check-suites: app-level status (gh-compliance, GetPort.io, etc.)
 	if prData.Head.SHA != "" {
+		var allPending, allSuccess, hasFailure bool = false, true, false
+
+		// Fetch check-runs (GitHub Actions jobs)
 		ciPath := fmt.Sprintf("/repos/%s/commits/%s/check-runs", repo, prData.Head.SHA)
 		ciBody, err := c.doRequest("GET", ciPath, nil)
 		if err == nil {
 			var ciData struct {
 				CheckRuns []struct {
 					Conclusion *string `json:"conclusion"`
+					Status     string  `json:"status"`
 				} `json:"check_runs"`
 			}
 			if json.Unmarshal(ciBody, &ciData) == nil {
-				details.CIStatus = computeCIStatus(ciData.CheckRuns)
+				for _, run := range ciData.CheckRuns {
+					// If conclusion is nil, check is still running
+					if run.Conclusion == nil {
+						allPending = true
+						allSuccess = false
+					} else if *run.Conclusion != "success" && *run.Conclusion != "skipped" && *run.Conclusion != "neutral" {
+						hasFailure = true
+						allSuccess = false
+					}
+				}
 			}
+		}
+
+		// Fetch check-suites (app-level: gh-compliance, GetPort.io, etc.)
+		suitesPath := fmt.Sprintf("/repos/%s/commits/%s/check-suites", repo, prData.Head.SHA)
+		suitesBody, err := c.doRequest("GET", suitesPath, nil)
+		if err == nil {
+			var suitesData struct {
+				CheckSuites []struct {
+					Conclusion *string `json:"conclusion"`
+					Status     string  `json:"status"`
+				} `json:"check_suites"`
+			}
+			if json.Unmarshal(suitesBody, &suitesData) == nil {
+				for _, suite := range suitesData.CheckSuites {
+					// If conclusion is nil, suite is still running
+					if suite.Conclusion == nil {
+						allPending = true
+						allSuccess = false
+					} else if *suite.Conclusion != "success" && *suite.Conclusion != "skipped" && *suite.Conclusion != "neutral" {
+						hasFailure = true
+						allSuccess = false
+					}
+				}
+			}
+		}
+
+		// Determine overall status
+		if hasFailure {
+			details.CIStatus = "failure"
+		} else if allPending {
+			details.CIStatus = "pending"
+		} else if allSuccess {
+			details.CIStatus = "success"
+		} else {
+			details.CIStatus = "none"
 		}
 	}
 
@@ -299,30 +439,6 @@ func (c *Client) FetchPRDetails(repo string, number int) (*PRDetails, error) {
 	return details, nil
 }
 
-func computeCIStatus(checkRuns []struct{ Conclusion *string `json:"conclusion"` }) string {
-	if len(checkRuns) == 0 {
-		return "none"
-	}
-
-	allSuccess := true
-	hasPending := false
-	for _, run := range checkRuns {
-		if run.Conclusion == nil {
-			hasPending = true
-			allSuccess = false
-		} else if *run.Conclusion != "success" {
-			allSuccess = false
-		}
-	}
-
-	if allSuccess {
-		return "success"
-	}
-	if hasPending {
-		return "pending"
-	}
-	return "failure"
-}
 
 func computeReviewStatus(reviews []struct{ State string `json:"state"` }) string {
 	if len(reviews) == 0 {
