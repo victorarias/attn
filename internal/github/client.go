@@ -3,6 +3,7 @@ package github
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,17 +11,33 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
+
+// ErrRateLimited is returned when GitHub rate limit is exceeded
+var ErrRateLimited = errors.New("GitHub rate limit exceeded")
+
+// RateLimitInfo contains rate limit state for a resource
+type RateLimitInfo struct {
+	Resource  string    // "core" or "search"
+	Remaining int       // Requests remaining
+	ResetAt   time.Time // When the limit resets
+}
 
 // Client is an HTTP client for the GitHub API
 type Client struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
+
+	// Rate limit tracking
+	rateLimitsMu sync.RWMutex
+	rateLimits   map[string]*RateLimitInfo // keyed by resource ("core", "search")
 }
 
 // NewClient creates a new GitHub API client.
@@ -61,6 +78,7 @@ func NewClient(baseURL string) (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		rateLimits: make(map[string]*RateLimitInfo),
 	}, nil
 }
 
@@ -100,9 +118,19 @@ func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error
 	}
 	defer resp.Body.Close()
 
+	// Parse rate limit headers
+	c.parseRateLimitHeaders(resp)
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	// Check for rate limit error
+	if resp.StatusCode == 403 || resp.StatusCode == 429 {
+		if remaining := resp.Header.Get("X-RateLimit-Remaining"); remaining == "0" {
+			return nil, fmt.Errorf("%w: %s", ErrRateLimited, string(respBody))
+		}
 	}
 
 	if resp.StatusCode >= 400 {
@@ -110,6 +138,75 @@ func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error
 	}
 
 	return respBody, nil
+}
+
+// parseRateLimitHeaders extracts rate limit info from response headers
+func (c *Client) parseRateLimitHeaders(resp *http.Response) {
+	resource := resp.Header.Get("X-RateLimit-Resource")
+	if resource == "" {
+		resource = "core" // Default to core if not specified
+	}
+
+	remainingStr := resp.Header.Get("X-RateLimit-Remaining")
+	resetStr := resp.Header.Get("X-RateLimit-Reset")
+
+	if remainingStr == "" || resetStr == "" {
+		return // No rate limit headers
+	}
+
+	remaining, err := strconv.Atoi(remainingStr)
+	if err != nil {
+		return
+	}
+
+	resetUnix, err := strconv.ParseInt(resetStr, 10, 64)
+	if err != nil {
+		return
+	}
+
+	c.rateLimitsMu.Lock()
+	c.rateLimits[resource] = &RateLimitInfo{
+		Resource:  resource,
+		Remaining: remaining,
+		ResetAt:   time.Unix(resetUnix, 0),
+	}
+	c.rateLimitsMu.Unlock()
+}
+
+// IsRateLimited checks if a resource is rate limited
+// Returns true if limited and the time when the limit resets
+func (c *Client) IsRateLimited(resource string) (bool, time.Time) {
+	c.rateLimitsMu.RLock()
+	defer c.rateLimitsMu.RUnlock()
+
+	info, ok := c.rateLimits[resource]
+	if !ok {
+		return false, time.Time{}
+	}
+
+	// Check if we're below threshold (5 requests remaining)
+	// and the reset time hasn't passed yet
+	if info.Remaining < 5 && time.Now().Before(info.ResetAt) {
+		return true, info.ResetAt
+	}
+
+	return false, time.Time{}
+}
+
+// GetRateLimit returns the current rate limit info for a resource
+func (c *Client) GetRateLimit(resource string) *RateLimitInfo {
+	c.rateLimitsMu.RLock()
+	defer c.rateLimitsMu.RUnlock()
+
+	if info, ok := c.rateLimits[resource]; ok {
+		// Return a copy to avoid race conditions
+		return &RateLimitInfo{
+			Resource:  info.Resource,
+			Remaining: info.Remaining,
+			ResetAt:   info.ResetAt,
+		}
+	}
+	return nil
 }
 
 // searchResult represents GitHub search API response

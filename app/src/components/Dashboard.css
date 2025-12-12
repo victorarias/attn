@@ -55,6 +55,24 @@
   outline-offset: 1px;
 }
 
+/* Rate limit banner */
+.rate-limit-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin-bottom: 20px;
+  background: rgba(255, 107, 53, 0.1);
+  border: 1px solid rgba(255, 107, 53, 0.3);
+  border-radius: 6px;
+  color: #ff6b35;
+  font-size: 13px;
+}
+
+.rate-limit-banner svg {
+  flex-shrink: 0;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));

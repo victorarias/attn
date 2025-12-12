@@ -3,12 +3,16 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/victorarias/claude-manager/internal/classifier"
@@ -24,6 +28,7 @@ import (
 // Daemon manages Claude sessions
 type Daemon struct {
 	socketPath string
+	pidPath    string
 	store      *store.Store
 	listener   net.Listener
 	httpServer *http.Server
@@ -64,8 +69,12 @@ func New(socketPath string) *Daemon {
 		logger.Infof("Removed legacy state file: %s", legacyPath)
 	}
 
+	// Derive PID path from socket path directory
+	pidPath := filepath.Join(filepath.Dir(socketPath), "attn.pid")
+
 	return &Daemon{
 		socketPath: socketPath,
+		pidPath:    pidPath,
 		store:      sessionStore,
 		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
@@ -76,8 +85,10 @@ func New(socketPath string) *Daemon {
 
 // NewForTesting creates a daemon with a non-persistent store for tests
 func NewForTesting(socketPath string) *Daemon {
+	pidPath := filepath.Join(filepath.Dir(socketPath), "attn.pid")
 	return &Daemon{
 		socketPath: socketPath,
+		pidPath:    pidPath,
 		store:      store.New(),
 		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
@@ -88,8 +99,10 @@ func NewForTesting(socketPath string) *Daemon {
 
 // NewWithGitHubClient creates a daemon with a custom GitHub client for testing
 func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemon {
+	pidPath := filepath.Join(filepath.Dir(socketPath), "attn.pid")
 	return &Daemon{
 		socketPath: socketPath,
+		pidPath:    pidPath,
 		store:      store.New(),
 		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
@@ -100,6 +113,11 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 
 // Start starts the daemon
 func (d *Daemon) Start() error {
+	// Acquire PID lock (kills any existing daemon)
+	if err := d.acquirePIDLock(); err != nil {
+		return fmt.Errorf("acquire PID lock: %w", err)
+	}
+
 	// Remove stale socket
 	os.Remove(d.socketPath)
 
@@ -159,6 +177,7 @@ func (d *Daemon) Stop() {
 		d.listener.Close()
 	}
 	os.Remove(d.socketPath)
+	d.releasePIDLock()
 	if d.logger != nil {
 		d.logger.Close()
 	}
@@ -193,6 +212,62 @@ func (d *Daemon) log(msg string) {
 func (d *Daemon) logf(format string, args ...interface{}) {
 	if d.logger != nil {
 		d.logger.Infof(format, args...)
+	}
+}
+
+// acquirePIDLock ensures only one daemon instance runs at a time.
+// If another daemon is running, it sends SIGTERM and waits for it to exit.
+func (d *Daemon) acquirePIDLock() error {
+	// Check if PID file exists
+	data, err := os.ReadFile(d.pidPath)
+	if err == nil {
+		// PID file exists, check if process is running
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err == nil && pid > 0 {
+			// Check if process exists by sending signal 0
+			process, err := os.FindProcess(pid)
+			if err == nil {
+				err = process.Signal(syscall.Signal(0))
+				if err == nil {
+					// Process is running, try to kill it gracefully
+					d.logf("Found existing daemon (PID %d), sending SIGTERM", pid)
+					process.Signal(syscall.SIGTERM)
+
+					// Wait up to 2 seconds for graceful shutdown
+					deadline := time.Now().Add(2 * time.Second)
+					for time.Now().Before(deadline) {
+						time.Sleep(100 * time.Millisecond)
+						if err := process.Signal(syscall.Signal(0)); err != nil {
+							// Process exited
+							d.logf("Previous daemon exited gracefully")
+							break
+						}
+					}
+
+					// Check if still running, force kill
+					if err := process.Signal(syscall.Signal(0)); err == nil {
+						d.logf("Previous daemon didn't exit, sending SIGKILL")
+						process.Signal(syscall.SIGKILL)
+						time.Sleep(100 * time.Millisecond)
+					}
+				}
+			}
+		}
+	}
+
+	// Write our PID
+	pid := os.Getpid()
+	if err := os.WriteFile(d.pidPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
+		return fmt.Errorf("write PID file: %w", err)
+	}
+	d.logf("Acquired PID lock (PID %d, file %s)", pid, d.pidPath)
+	return nil
+}
+
+// releasePIDLock removes the PID file
+func (d *Daemon) releasePIDLock() {
+	if err := os.Remove(d.pidPath); err != nil && !os.IsNotExist(err) {
+		d.logf("Failed to remove PID file: %v", err)
 	}
 }
 
@@ -440,6 +515,15 @@ func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, u
 	}
 }
 
+// broadcastRateLimited broadcasts a rate limit event to WebSocket clients
+func (d *Daemon) broadcastRateLimited(resource string, resetAt time.Time) {
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:             protocol.EventRateLimited,
+		RateLimitResource: resource,
+		RateLimitResetAt:  resetAt,
+	})
+}
+
 func (d *Daemon) handleTodos(conn net.Conn, msg *protocol.TodosMessage) {
 	d.store.UpdateTodos(msg.ID, msg.Todos)
 	d.store.Touch(msg.ID)
@@ -575,9 +659,28 @@ func (d *Daemon) pollPRs() {
 }
 
 func (d *Daemon) doPRPoll() {
+	// Check if rate limited before polling
+	if limited, resetAt := d.ghClient.IsRateLimited("search"); limited {
+		d.logf("PR poll skipped: search API rate limited until %s", resetAt.Format(time.RFC3339))
+		d.broadcastRateLimited("search", resetAt)
+		return
+	}
+
 	prs, err := d.ghClient.FetchAll()
 	if err != nil {
-		d.logf("PR poll error: %v", err)
+		// Check if it's a rate limit error
+		if errors.Is(err, github.ErrRateLimited) {
+			// Get reset time from client state
+			if info := d.ghClient.GetRateLimit("search"); info != nil {
+				d.logf("PR poll rate limited until %s", info.ResetAt.Format(time.RFC3339))
+				d.broadcastRateLimited("search", info.ResetAt)
+			} else {
+				d.logf("PR poll rate limited (unknown reset time)")
+				d.broadcastRateLimited("search", time.Now().Add(60*time.Second))
+			}
+		} else {
+			d.logf("PR poll error: %v", err)
+		}
 		return
 	}
 

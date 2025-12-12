@@ -87,15 +87,41 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
     }
   }, [isOpen, worktreeFlowMode, projectsDirectory, homePath]);
 
+  // Global Escape key handler (in case input doesn't have focus)
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (worktreeMode) {
+          setWorktreeMode(false);
+          setSelectedRepo(null);
+          setShowNewBranch(false);
+          setNewBranchName('');
+        } else {
+          onClose();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isOpen, worktreeMode, onClose]);
+
   const handleSelect = useCallback(
     async (path: string) => {
+      console.log('[LocationPicker] handleSelect:', path);
       // Check if path is a git repo by checking for .git
       try {
         const entries = await readDir(path);
+        console.log('[LocationPicker] entries:', entries.map(e => e.name));
         const isGitRepo = entries.some(e => e.name === '.git');
+        console.log('[LocationPicker] isGitRepo:', isGitRepo, 'onListWorktrees:', !!onListWorktrees);
 
         if (isGitRepo && onListWorktrees) {
           // Enter worktree mode
+          console.log('[LocationPicker] Entering worktree mode');
           setSelectedRepo(path);
           setWorktreeMode(true);
           onListWorktrees(path);
@@ -103,6 +129,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
         }
       } catch (e) {
         // Not a readable directory, proceed with selection
+        console.log('[LocationPicker] readDir error:', e);
       }
 
       // Not a git repo, just select it
@@ -151,8 +178,14 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
     }
   }, [selectedRepo, newBranchName, onCreateWorktree, addToHistory, onSelect, onClose, creating]);
 
+  // Total items in worktree mode: 1 (main) + worktrees count
+  const worktreeItemCount = 1 + (worktrees?.length || 0);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Stop propagation for all keys to prevent global shortcuts from firing
+      e.stopPropagation();
+
       // Worktree mode keyboard handling
       if (worktreeMode) {
         if (e.key === 'Escape') {
@@ -164,9 +197,36 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
           return;
         }
 
-        if (e.key === 'n') {
+        if (e.key === 'n' && !showNewBranch) {
           e.preventDefault();
           setShowNewBranch(true);
+          return;
+        }
+
+        // Arrow key navigation
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSelectedIndex((prev) => Math.min(prev + 1, worktreeItemCount - 1));
+          return;
+        }
+
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedIndex((prev) => Math.max(prev - 1, 0));
+          return;
+        }
+
+        // Enter to select
+        if (e.key === 'Enter' && !showNewBranch) {
+          e.preventDefault();
+          if (selectedIndex === 0) {
+            handleMainBranchSelect();
+          } else {
+            const worktreeIndex = selectedIndex - 1;
+            if (worktrees && worktrees[worktreeIndex]) {
+              handleWorktreeSelect(worktrees[worktreeIndex].path);
+            }
+          }
           return;
         }
 
@@ -238,7 +298,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
         return;
       }
     },
-    [worktreeMode, worktrees, handleMainBranchSelect, handleWorktreeSelect, allSuggestions, selectedIndex, inputValue, handleSelect, onClose, homePath, fsSuggestions.length, totalSuggestions]
+    [worktreeMode, worktrees, worktreeItemCount, showNewBranch, handleMainBranchSelect, handleWorktreeSelect, allSuggestions, selectedIndex, inputValue, handleSelect, onClose, homePath, fsSuggestions.length, totalSuggestions]
   );
 
   if (!isOpen) return null;
@@ -410,7 +470,8 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
         <div className="picker-footer">
           {worktreeMode ? (
             <>
-              <span className="shortcut"><kbd>1-9</kbd> quick select</span>
+              <span className="shortcut"><kbd>↑↓</kbd> navigate</span>
+              <span className="shortcut"><kbd>Enter</kbd> select</span>
               <span className="shortcut"><kbd>n</kbd> new branch</span>
               <span className="shortcut"><kbd>Esc</kbd> back</span>
             </>

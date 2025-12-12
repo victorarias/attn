@@ -13,6 +13,7 @@ import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket, DaemonWorktree } from './hooks/useDaemonSocket';
+import { normalizeSessionState } from './types/sessionState';
 import { useDaemonStore } from './store/daemonSessions';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocationHistory } from './hooks/useLocationHistory';
@@ -73,7 +74,7 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, connectionError, hasReceivedInitialState } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -133,9 +134,10 @@ function App() {
   // Enrich local sessions with daemon state (working/waiting from hooks)
   const enrichedLocalSessions = sessions.map((s) => {
     const daemonSession = daemonSessions.find((ds) => ds.directory === s.cwd);
+    const rawState = daemonSession?.state ?? s.state;
     return {
       ...s,
-      state: daemonSession?.state ?? s.state,
+      state: normalizeSessionState(rawState),
       branch: daemonSession?.branch,
       isWorktree: daemonSession?.is_worktree,
     };
@@ -415,7 +417,7 @@ function App() {
     onNextSession: handleNextSession,
     onToggleSidebar: toggleSidebarCollapse,
     onRefreshPRs: handleRefreshPRs,
-    enabled: true,
+    enabled: !locationPickerOpen,
   });
 
   return (
@@ -435,6 +437,7 @@ function App() {
           isLoading={!hasReceivedInitialState}
           isRefreshing={isRefreshingPRs}
           refreshError={refreshError}
+          rateLimit={rateLimit}
           settings={settings}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
