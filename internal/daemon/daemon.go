@@ -8,9 +8,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/victorarias/claude-manager/internal/classifier"
+	"github.com/victorarias/claude-manager/internal/config"
 	"github.com/victorarias/claude-manager/internal/github"
 	"github.com/victorarias/claude-manager/internal/logging"
 	"github.com/victorarias/claude-manager/internal/protocol"
@@ -34,6 +36,11 @@ type Daemon struct {
 func New(socketPath string) *Daemon {
 	logger, _ := logging.New(logging.DefaultLogPath())
 
+	// Wire up classifier logger to daemon logger
+	classifier.SetLogger(func(format string, args ...interface{}) {
+		logger.Infof(format, args...)
+	})
+
 	var ghClient github.GitHubClient
 	client, err := github.NewClient("")
 	if err != nil {
@@ -42,9 +49,23 @@ func New(socketPath string) *Daemon {
 		ghClient = client
 	}
 
+	// Create SQLite-backed store
+	sessionStore, err := store.NewWithDB(config.DBPath())
+	if err != nil {
+		logger.Infof("Failed to open DB at %s: %v (using in-memory)", config.DBPath(), err)
+		sessionStore = store.New() // Fallback to in-memory
+	}
+
+	// Clean up legacy JSON state file if it exists
+	legacyPath := config.StatePath()
+	if _, err := os.Stat(legacyPath); err == nil {
+		os.Remove(legacyPath)
+		logger.Infof("Removed legacy state file: %s", legacyPath)
+	}
+
 	return &Daemon{
 		socketPath: socketPath,
-		store:      store.NewWithPersistence(store.DefaultStatePath()),
+		store:      sessionStore,
 		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
 		logger:     logger,
@@ -94,8 +115,7 @@ func (d *Daemon) Start() error {
 	// Start HTTP server for WebSocket
 	go d.startHTTPServer()
 
-	// Start background persistence (3 second interval)
-	go d.store.StartPersistence(3*time.Second, d.done)
+	// Note: No background persistence needed - SQLite persists immediately
 
 	// Start PR polling
 	go d.pollPRs()
@@ -144,7 +164,7 @@ func (d *Daemon) startHTTPServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", d.handleWS)
 
-	port := os.Getenv("CM_WS_PORT")
+	port := os.Getenv("ATTN_WS_PORT")
 	if port == "" {
 		port = "9849"
 	}
@@ -227,13 +247,16 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 }
 
 func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
+	d.logf("session registered: id=%s label=%s dir=%s", msg.ID, msg.Label, msg.Dir)
+	now := time.Now()
 	session := &protocol.Session{
-		ID:         msg.ID,
-		Label:      msg.Label,
-		Directory:  msg.Dir,
-		State:      protocol.StateWaiting,
-		StateSince: time.Now(),
-		LastSeen:   time.Now(),
+		ID:             msg.ID,
+		Label:          msg.Label,
+		Directory:      msg.Dir,
+		State:          protocol.StateWaiting,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
 	}
 	d.store.Add(session)
 	d.sendOK(conn)
@@ -269,24 +292,26 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 }
 
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
+	d.logf("state update: id=%s state=%s", msg.ID, msg.State)
 	d.store.UpdateState(msg.ID, msg.State)
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
-	sessions := d.store.List("")
-	for _, s := range sessions {
-		if s.ID == msg.ID {
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:   protocol.EventSessionStateChanged,
-				Session: s,
-			})
-			break
-		}
+	session := d.store.Get(msg.ID)
+	if session != nil {
+		d.logf("broadcasting state change (from hook): session=%s state=%s clients=%d", msg.ID, msg.State, d.wsHub.ClientCount())
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:   protocol.EventSessionStateChanged,
+			Session: session,
+		})
+	} else {
+		d.logf("handleState: session %s not found, no broadcast", msg.ID)
 	}
 }
 
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
+	d.logf("handleStop: session=%s, transcript_path=%s", msg.ID, msg.TranscriptPath)
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
 
@@ -295,40 +320,66 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 }
 
 func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
+	// Capture timestamp BEFORE starting classification
+	// This prevents slow classifier results from overwriting newer state updates
+	classificationStartTime := time.Now()
+	d.logf("classifySessionState: starting for session=%s, transcript=%s", sessionID, transcriptPath)
+
 	session := d.store.Get(sessionID)
 	if session == nil {
+		d.logf("classifySessionState: session %s not found, aborting", sessionID)
 		return
 	}
 
 	// Check pending todos first (fast path)
-	if len(session.Todos) > 0 {
-		d.updateAndBroadcastState(sessionID, protocol.StateWaitingInput)
+	// Todos are stored as "[✓] task" (completed), "[→] task" (in_progress), "[ ] task" (pending)
+	pendingCount := 0
+	for _, todo := range session.Todos {
+		if !strings.HasPrefix(todo, "[✓]") {
+			pendingCount++
+		}
+	}
+	d.logf("classifySessionState: session %s has %d total todos, %d pending", sessionID, len(session.Todos), pendingCount)
+	if pendingCount > 0 {
+		d.logf("classifySessionState: session %s has pending todos, setting waiting_input", sessionID)
+		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateWaitingInput, classificationStartTime)
 		return
 	}
 
 	// Parse transcript for last assistant message
+	d.logf("classifySessionState: parsing transcript for session %s", sessionID)
 	lastMessage, err := transcript.ExtractLastAssistantMessage(transcriptPath, 500)
 	if err != nil {
-		d.logf("transcript parse error for %s: %v", sessionID, err)
+		d.logf("classifySessionState: transcript parse error for %s: %v", sessionID, err)
 		// Default to waiting_input on error (safer)
-		d.updateAndBroadcastState(sessionID, protocol.StateWaitingInput)
+		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateWaitingInput, classificationStartTime)
 		return
 	}
 
 	if lastMessage == "" {
-		d.updateAndBroadcastState(sessionID, protocol.StateIdle)
+		d.logf("classifySessionState: empty last message for session %s, setting idle", sessionID)
+		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateIdle, classificationStartTime)
 		return
 	}
 
-	// Classify with LLM
+	// Log truncated message
+	logMsg := lastMessage
+	if len(logMsg) > 100 {
+		logMsg = logMsg[:100] + "..."
+	}
+	d.logf("classifySessionState: last message for session %s: %s", sessionID, logMsg)
+
+	// Classify with LLM (can be slow - 30+ seconds)
+	d.logf("classifySessionState: calling classifier for session %s", sessionID)
 	state, err := classifier.Classify(lastMessage, 30*time.Second)
 	if err != nil {
-		d.logf("classifier error for %s: %v", sessionID, err)
+		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)
 		// Default to waiting_input on error
 		state = protocol.StateWaitingInput
 	}
 
-	d.updateAndBroadcastState(sessionID, state)
+	d.logf("classifySessionState: session %s classified as %s", sessionID, state)
+	d.updateAndBroadcastStateWithTimestamp(sessionID, state, classificationStartTime)
 }
 
 func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
@@ -337,10 +388,30 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 	// Broadcast to WebSocket clients
 	session := d.store.Get(sessionID)
 	if session != nil {
+		d.logf("broadcasting state change: session=%s state=%s clients=%d", sessionID, state, d.wsHub.ClientCount())
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:   protocol.EventSessionStateChanged,
 			Session: session,
 		})
+	}
+}
+
+// updateAndBroadcastStateWithTimestamp updates state only if the timestamp is newer
+// than the current state. Used by classifier to prevent stale results from overwriting
+// newer state updates that arrived during classification.
+func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) {
+	if d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt) {
+		// Broadcast to WebSocket clients
+		session := d.store.Get(sessionID)
+		if session != nil {
+			d.logf("broadcasting state change (timestamped): session=%s state=%s clients=%d", sessionID, state, d.wsHub.ClientCount())
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event:   protocol.EventSessionStateChanged,
+				Session: session,
+			})
+		}
+	} else {
+		d.logf("state update discarded: session=%s state=%s (newer state exists)", sessionID, state)
 	}
 }
 
@@ -431,7 +502,7 @@ func (d *Daemon) handleFetchPRDetails(conn net.Conn, msg *protocol.FetchPRDetail
 				d.logf("Failed to fetch details for %s: %v", pr.ID, err)
 				continue
 			}
-			d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus)
+			d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA)
 		}
 	}
 
