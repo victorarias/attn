@@ -1,0 +1,106 @@
+// internal/git/worktree_test.go
+package git
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestListWorktrees(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
+
+	// Create a worktree
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	runGit(t, mainDir, "worktree", "add", "-b", "feature", wtDir)
+
+	worktrees, err := ListWorktrees(mainDir)
+	if err != nil {
+		t.Fatalf("ListWorktrees failed: %v", err)
+	}
+
+	// Should have 2: main + worktree
+	if len(worktrees) < 1 {
+		t.Errorf("expected at least 1 worktree, got %d", len(worktrees))
+	}
+
+	// Find the feature worktree
+	found := false
+	for _, wt := range worktrees {
+		if wt.Branch == "feature" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to find feature worktree")
+	}
+}
+
+func TestCreateWorktree(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
+
+	wtDir := filepath.Join(t.TempDir(), "new-wt")
+	err := CreateWorktree(mainDir, "new-feature", wtDir)
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	// Verify worktree exists
+	if _, err := os.Stat(wtDir); os.IsNotExist(err) {
+		t.Error("worktree directory was not created")
+	}
+
+	// Verify branch
+	info, err := GetBranchInfo(wtDir)
+	if err != nil {
+		t.Fatalf("GetBranchInfo failed: %v", err)
+	}
+	if info.Branch != "new-feature" {
+		t.Errorf("expected branch new-feature, got %s", info.Branch)
+	}
+}
+
+func TestDeleteWorktree(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
+
+	wtDir := filepath.Join(t.TempDir(), "wt-to-delete")
+	runGit(t, mainDir, "worktree", "add", "-b", "temp", wtDir)
+
+	err := DeleteWorktree(mainDir, wtDir)
+	if err != nil {
+		t.Fatalf("DeleteWorktree failed: %v", err)
+	}
+
+	// Directory might still exist but shouldn't be a worktree
+	worktrees, _ := ListWorktrees(mainDir)
+	for _, wt := range worktrees {
+		if wt.Path == wtDir {
+			t.Error("worktree should have been removed")
+		}
+	}
+}
+
+func TestGenerateWorktreePath(t *testing.T) {
+	tests := []struct {
+		mainRepo string
+		branch   string
+		expected string
+	}{
+		{"/Users/me/projects/repo", "feature", "/Users/me/projects/repo--feature"},
+		{"/Users/me/projects/repo", "fix/bug-123", "/Users/me/projects/repo--fix-bug-123"},
+	}
+
+	for _, tt := range tests {
+		got := GenerateWorktreePath(tt.mainRepo, tt.branch)
+		if got != tt.expected {
+			t.Errorf("GenerateWorktreePath(%q, %q) = %q, want %q", tt.mainRepo, tt.branch, got, tt.expected)
+		}
+	}
+}
