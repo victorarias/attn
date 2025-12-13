@@ -15,6 +15,7 @@ import {
 } from './pty-protocol.js';
 
 const SOCKET_PATH = path.join(os.homedir(), '.attn-pty.sock');
+const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB max buffer to prevent memory exhaustion
 
 interface Session {
   pty: pty.IPty;
@@ -170,6 +171,13 @@ const server = net.createServer((socket) => {
 
   socket.on('data', (chunk) => {
     buffer = Buffer.concat([buffer, chunk]);
+
+    // Prevent memory exhaustion from malicious/misbehaving clients
+    if (buffer.length > MAX_BUFFER_SIZE) {
+      console.error('[pty-server] Buffer overflow, disconnecting client');
+      socket.destroy(new Error('Buffer overflow'));
+      return;
+    }
 
     while (buffer.length >= 4) {
       const len = buffer.readUInt32BE(0);

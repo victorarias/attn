@@ -296,29 +296,6 @@ func TestStore_ToggleMutePR(t *testing.T) {
 	}
 }
 
-func TestStore_DirtyFlag(t *testing.T) {
-	// With SQLite, dirty tracking is no longer needed since
-	// every operation persists immediately. IsDirty() always returns false.
-	s := New()
-
-	if s.IsDirty() {
-		t.Error("IsDirty should always return false with SQLite")
-	}
-
-	s.Add(&protocol.Session{ID: "test", Label: "test"})
-
-	// Still false - no dirty tracking with SQLite
-	if s.IsDirty() {
-		t.Error("IsDirty should still return false after Add (SQLite persists immediately)")
-	}
-
-	s.ClearDirty() // No-op with SQLite
-
-	if s.IsDirty() {
-		t.Error("IsDirty should still return false")
-	}
-}
-
 func TestStore_SQLitePersistence(t *testing.T) {
 	// Create temp directory for SQLite DB
 	tmpDir := t.TempDir()
