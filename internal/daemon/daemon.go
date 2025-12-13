@@ -36,6 +36,7 @@ type Daemon struct {
 	done       chan struct{}
 	logger     *logging.Logger
 	ghClient   github.GitHubClient
+	classifier Classifier // Optional, uses package-level classifier.Classify if nil
 }
 
 // New creates a new daemon
@@ -472,7 +473,12 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 
 	// Classify with LLM (can be slow - 30+ seconds)
 	d.logf("classifySessionState: calling classifier for session %s", sessionID)
-	state, err := classifier.Classify(lastMessage, 30*time.Second)
+	var state string
+	if d.classifier != nil {
+		state, err = d.classifier.Classify(lastMessage, 30*time.Second)
+	} else {
+		state, err = classifier.Classify(lastMessage, 30*time.Second)
+	}
 	if err != nil {
 		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)
 		// Default to waiting_input on error
