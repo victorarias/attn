@@ -152,7 +152,9 @@ func (s *Store) Get(id string) *protocol.Session {
 	session.LastSeen = lastSeen
 	session.Muted = muted == 1
 	if todosJSON != "" && todosJSON != "null" {
-		json.Unmarshal([]byte(todosJSON), &session.Todos)
+		if err := json.Unmarshal([]byte(todosJSON), &session.Todos); err != nil {
+			log.Printf("[store] Get: failed to unmarshal todos for session %s: %v", id, err)
+		}
 	}
 
 	return &session
@@ -254,7 +256,9 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		session.LastSeen = lastSeen
 		session.Muted = muted == 1
 		if todosJSON != "" && todosJSON != "null" {
-			json.Unmarshal([]byte(todosJSON), &session.Todos)
+			if err := json.Unmarshal([]byte(todosJSON), &session.Todos); err != nil {
+				log.Printf("[store] List: failed to unmarshal todos for session %s: %v", session.ID, err)
+			}
 		}
 
 		result = append(result, &session)
@@ -329,7 +333,12 @@ func (s *Store) UpdateStateWithTimestamp(id, state string, updatedAt time.Time) 
 		return false
 	}
 
-	current, _ := time.Parse(time.RFC3339, currentUpdatedAt)
+	current, err := time.Parse(time.RFC3339, currentUpdatedAt)
+	if err != nil {
+		log.Printf("[store] UpdateStateWithTimestamp: failed to parse timestamp for session %s: %v", id, err)
+		// If we can't parse current timestamp, accept the update to avoid stuck state
+		current = time.Time{}
+	}
 	if !updatedAt.After(current) {
 		return false
 	}
@@ -429,7 +438,10 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 			var mergeable sql.NullInt64
 			var commentCount int
 
-			rows.Scan(&pr.ID, &muted, &detailsFetched, &detailsFetchedAt, &mergeable, &mergeableState, &ciStatus, &reviewStatus, &headSHA, &headBranch, &commentCount, &approvedByMe, &heatState, &lastHeatActivityAt)
+			if err := rows.Scan(&pr.ID, &muted, &detailsFetched, &detailsFetchedAt, &mergeable, &mergeableState, &ciStatus, &reviewStatus, &headSHA, &headBranch, &commentCount, &approvedByMe, &heatState, &lastHeatActivityAt); err != nil {
+				log.Printf("[store] SetPRs: failed to scan existing PR: %v", err)
+				continue
+			}
 			pr.Muted = muted == 1
 			pr.DetailsFetched = detailsFetched == 1
 			if detailsFetchedAt.Valid {
@@ -482,7 +494,10 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 			var prID string
 			var lastSHA, lastCIStatus sql.NullString
 			var lastComments sql.NullInt64
-			interRows.Scan(&prID, &lastSHA, &lastComments, &lastCIStatus)
+			if err := interRows.Scan(&prID, &lastSHA, &lastComments, &lastCIStatus); err != nil {
+				log.Printf("[store] SetPRs: failed to scan pr_interactions: %v", err)
+				continue
+			}
 			interactions[prID] = struct {
 				lastSeenSHA          string
 				lastSeenCommentCount int
@@ -907,12 +922,17 @@ func (s *Store) GetPRsNeedingDetailRefresh() []*protocol.PR {
 
 	// Get muted repos
 	mutedRepos := make(map[string]bool)
-	repoRows, _ := s.db.Query("SELECT repo FROM repos WHERE muted = 1")
-	if repoRows != nil {
+	repoRows, err := s.db.Query("SELECT repo FROM repos WHERE muted = 1")
+	if err != nil {
+		log.Printf("[store] GetPRsNeedingDetailRefresh: failed to query muted repos: %v", err)
+	} else {
 		defer repoRows.Close()
 		for repoRows.Next() {
 			var repo string
-			repoRows.Scan(&repo)
+			if err := repoRows.Scan(&repo); err != nil {
+				log.Printf("[store] GetPRsNeedingDetailRefresh: failed to scan repo: %v", err)
+				continue
+			}
 			mutedRepos[repo] = true
 		}
 	}
