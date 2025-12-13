@@ -65,6 +65,40 @@ interface UseDaemonSocketOptions {
 // Default WebSocket port, can be overridden via VITE_DAEMON_PORT env var
 const DEFAULT_WS_URL = `ws://127.0.0.1:${import.meta.env.VITE_DAEMON_PORT || '9849'}/ws`;
 
+// ============================================================================
+// Async Pattern Guide
+// ============================================================================
+//
+// Operations use two patterns depending on failure impact:
+//
+// 1. PROMISE-BASED (for mutations that can fail):
+//    - sendPRAction (approve/merge): Can fail due to conflicts, permissions
+//    - sendRefreshPRs: Can fail due to rate limits, network
+//    - sendCreateWorktree: Can fail due to existing branch, disk space
+//    - sendDeleteWorktree: Can fail due to uncommitted changes
+//    Pattern: Return Promise, use pendingActionsRef, show loading state
+//
+// 2. OPTIMISTIC FIRE-AND-FORGET (for toggles that rarely fail):
+//    - sendMutePR: Toggle mute state
+//    - sendMuteRepo: Toggle repo mute state
+//    - sendPRVisited: Clear notification flag
+//    - sendSetSetting: Update user preference
+//    - sendClearSessions: Dev/admin action
+//    - sendUnregisterSession: Session cleanup
+//    - sendListWorktrees: Query operation
+//    Pattern: Update UI immediately, assume success
+//
+// Why optimistic? These operations are simple state toggles that only fail
+// if the daemon is down (which triggers reconnect anyway). Adding Promise
+// handling would add complexity without improving UX.
+//
+// To convert a fire-and-forget to Promise-based:
+// 1. Add a result event in daemon (e.g., "mute_pr_result")
+// 2. Add event handling in onmessage switch
+// 3. Return Promise and store in pendingActionsRef
+// 4. Update caller to handle loading/error states
+// ============================================================================
+
 export function useDaemonSocket({
   onSessionsUpdate,
   onPRsUpdate,
