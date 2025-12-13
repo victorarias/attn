@@ -21,14 +21,18 @@ type wsClient struct {
 	slowCount int // tracks consecutive failed sends
 }
 
+// BroadcastListener is called for each broadcast event (for testing)
+type BroadcastListener func(event *protocol.WebSocketEvent)
+
 // wsHub manages all WebSocket connections
 type wsHub struct {
-	clients    map[*wsClient]bool
-	broadcast  chan []byte
-	register   chan *wsClient
-	unregister chan *wsClient
-	mu         sync.RWMutex
-	logf       func(format string, args ...interface{})
+	clients           map[*wsClient]bool
+	broadcast         chan []byte
+	register          chan *wsClient
+	unregister        chan *wsClient
+	mu                sync.RWMutex
+	logf              func(format string, args ...interface{})
+	broadcastListener BroadcastListener // Optional listener for testing
 }
 
 const maxSlowCount = 3 // disconnect after this many consecutive failed sends
@@ -89,6 +93,11 @@ func (h *wsHub) run() {
 
 // Broadcast sends an event to all connected clients
 func (h *wsHub) Broadcast(event *protocol.WebSocketEvent) {
+	// Call listener if set (for testing)
+	if h.broadcastListener != nil {
+		h.broadcastListener(event)
+	}
+
 	data, err := json.Marshal(event)
 	if err != nil {
 		h.logf("WebSocket broadcast marshal error: %v", err)
