@@ -20,6 +20,7 @@ const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB max buffer to prevent memory exhaust
 interface Session {
   pty: pty.IPty;
   socketId: symbol;
+  dataDisposable?: { dispose(): void }; // IDisposable from onData listener
 }
 
 const sessions = new Map<string, Session>();
@@ -74,9 +75,7 @@ function handleMessage(socket: net.Socket, socketId: symbol, msg: PtyCommand): v
         env: { ...process.env, TERM: 'xterm-256color' } as { [key: string]: string },
       });
 
-      sessions.set(msg.id, { pty: ptyProcess, socketId });
-
-      ptyProcess.onData((data) => {
+      const dataDisposable = ptyProcess.onData((data) => {
         const event: PtyDataEvent = {
           event: PTY_EVENTS.DATA,
           id: msg.id,
@@ -85,7 +84,15 @@ function handleMessage(socket: net.Socket, socketId: symbol, msg: PtyCommand): v
         writeFrame(socket, event);
       });
 
+      sessions.set(msg.id, { pty: ptyProcess, socketId, dataDisposable });
+
       ptyProcess.onExit(({ exitCode }) => {
+        // Clean up the data listener before removing from sessions
+        const session = sessions.get(msg.id);
+        if (session?.dataDisposable) {
+          session.dataDisposable.dispose();
+        }
+
         const event: PtyExitEvent = {
           event: PTY_EVENTS.EXIT,
           id: msg.id,
@@ -153,6 +160,9 @@ function handleMessage(socket: net.Socket, socketId: symbol, msg: PtyCommand): v
 
       const session = sessions.get(msg.id);
       if (session) {
+        if (session.dataDisposable) {
+          session.dataDisposable.dispose();
+        }
         session.pty.kill();
         sessions.delete(msg.id);
       }
@@ -200,6 +210,9 @@ const server = net.createServer((socket) => {
     // Kill only sessions for this socket
     for (const [id, session] of sessions) {
       if (session.socketId === socketId) {
+        if (session.dataDisposable) {
+          session.dataDisposable.dispose();
+        }
         session.pty.kill();
         sessions.delete(id);
       }

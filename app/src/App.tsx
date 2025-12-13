@@ -18,6 +18,7 @@ import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocationHistory } from './hooks/useLocationHistory';
+import { getRepoName } from './utils/repo';
 import './App.css';
 
 function App() {
@@ -275,8 +276,7 @@ function App() {
         return;
       }
 
-      // Extract repo name from owner/repo format
-      const repoName = pr.repo.split('/')[1] || pr.repo;
+      const repoName = getRepoName(pr.repo);
       const localRepoPath = `${projectsDir}/${repoName}`;
 
       console.log(`[App] Creating worktree for ${pr.repo}#${pr.number} branch ${pr.head_branch} in ${localRepoPath}`);
