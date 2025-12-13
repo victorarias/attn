@@ -25,7 +25,9 @@ export function usePRsNeedingAttention(
   prs: DaemonPR[],
   hiddenPRs?: Set<string>
 ): FilteredPRs {
-  const { isRepoMuted } = useDaemonStore();
+  // Subscribe to both isRepoMuted function AND repoStates array
+  // The function reference is stable, so we need repoStates to trigger recalculation
+  const { isRepoMuted, repoStates } = useDaemonStore();
 
   return useMemo(() => {
     // Base filter: not individually muted, not repo muted, not hidden
@@ -43,5 +45,5 @@ export function usePRsNeedingAttention(
     const yourPRs = needsAttention.filter((p) => p.role === 'author');
 
     return { activePRs, needsAttention, reviewRequested, yourPRs };
-  }, [prs, isRepoMuted, hiddenPRs]);
+  }, [prs, isRepoMuted, repoStates, hiddenPRs]);
 }
