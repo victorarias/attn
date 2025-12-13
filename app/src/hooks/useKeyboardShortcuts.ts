@@ -1,5 +1,5 @@
 // app/src/hooks/useKeyboardShortcuts.ts
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 
 interface KeyboardShortcutsConfig {
   onNewSession: () => void;
@@ -13,6 +13,7 @@ interface KeyboardShortcutsConfig {
   onNextSession: () => void;
   onToggleSidebar?: () => void;
   onRefreshPRs?: () => void;
+  onOpenBranchPicker?: () => void;
   enabled: boolean;
 }
 
@@ -28,13 +29,43 @@ export function useKeyboardShortcuts({
   onNextSession,
   onToggleSidebar,
   onRefreshPRs,
+  onOpenBranchPicker,
   enabled,
 }: KeyboardShortcutsConfig) {
+  // Track if we're in chord mode (Cmd+K was pressed)
+  const chordModeRef = useRef(false);
+  const chordTimeoutRef = useRef<number | null>(null);
+
+  const clearChordMode = useCallback(() => {
+    chordModeRef.current = false;
+    if (chordTimeoutRef.current) {
+      clearTimeout(chordTimeoutRef.current);
+      chordTimeoutRef.current = null;
+    }
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!enabled) return;
 
       const isMeta = e.metaKey || e.ctrlKey;
+
+      // Handle chord mode second key
+      if (chordModeRef.current) {
+        clearChordMode();
+
+        // Cmd+K, B - Open branch picker
+        if (e.key.toLowerCase() === 'b' && onOpenBranchPicker) {
+          e.preventDefault();
+          onOpenBranchPicker();
+          return;
+        }
+
+        // Cmd+K, K or any other key - Toggle drawer (fallback)
+        e.preventDefault();
+        onToggleDrawer();
+        return;
+      }
 
       // ⌘⇧N - New worktree session (check shift first)
       if (isMeta && e.shiftKey && e.key.toLowerCase() === 'n' && onNewWorktreeSession) {
@@ -57,8 +88,23 @@ export function useKeyboardShortcuts({
         return;
       }
 
-      // ⌘K or ⌘. - Toggle drawer
-      if (isMeta && (e.key === 'k' || e.key === '.')) {
+      // ⌘K - Enter chord mode (or toggle drawer after timeout)
+      if (isMeta && e.key === 'k') {
+        e.preventDefault();
+        chordModeRef.current = true;
+
+        // If no second key within 500ms, toggle drawer
+        chordTimeoutRef.current = window.setTimeout(() => {
+          if (chordModeRef.current) {
+            chordModeRef.current = false;
+            onToggleDrawer();
+          }
+        }, 500);
+        return;
+      }
+
+      // ⌘. - Toggle drawer (immediate, no chord)
+      if (isMeta && e.key === '.') {
         e.preventDefault();
         onToggleDrawer();
         return;
@@ -127,11 +173,16 @@ export function useKeyboardShortcuts({
       onNextSession,
       onToggleSidebar,
       onRefreshPRs,
+      onOpenBranchPicker,
+      clearChordMode,
     ]
   );
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleKeyDown]);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      clearChordMode();
+    };
+  }, [handleKeyDown, clearChordMode]);
 }

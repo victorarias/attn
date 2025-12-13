@@ -8,6 +8,7 @@ import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { DrawerTrigger } from './components/DrawerTrigger';
 import { LocationPicker } from './components/LocationPicker';
+import { BranchPicker } from './components/BranchPicker';
 import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { DaemonProvider } from './contexts/DaemonContext';
@@ -74,7 +75,7 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, sendGetRecentLocations, sendListBranches, sendDeleteBranch, sendSwitchBranch, sendCreateBranch, sendCreateWorktreeFromBranch, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, sendGetRecentLocations, sendListBranches, sendDeleteBranch, sendSwitchBranch, sendCreateBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -182,6 +183,9 @@ function App() {
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [worktreeFlowMode, setWorktreeFlowMode] = useState(false);
+
+  // Branch picker state management
+  const [branchPickerOpen, setBranchPickerOpen] = useState(false);
 
   // No auto-creation - user clicks "+" to start a session
 
@@ -421,6 +425,16 @@ function App() {
     onNextSession: handleNextSession,
     onToggleSidebar: toggleSidebarCollapse,
     onRefreshPRs: handleRefreshPRs,
+    onOpenBranchPicker: () => {
+      // Only open if we have an active session with git
+      const localSession = sessions.find(s => s.id === activeSessionId);
+      if (localSession) {
+        const daemonSession = daemonSessions.find(ds => ds.directory === localSession.cwd);
+        if (daemonSession && (daemonSession.branch || daemonSession.main_repo)) {
+          setBranchPickerOpen(true);
+        }
+      }
+    },
     enabled: !locationPickerOpen,
   });
 
@@ -509,6 +523,25 @@ function App() {
         onSwitchBranch={sendSwitchBranch}
         onCreateBranch={sendCreateBranch}
         onCreateWorktreeFromBranch={sendCreateWorktreeFromBranch}
+      />
+      <BranchPicker
+        isOpen={branchPickerOpen}
+        onClose={() => setBranchPickerOpen(false)}
+        session={(() => {
+          const localSession = sessions.find(s => s.id === activeSessionId);
+          if (!localSession) return null;
+          return daemonSessions.find(ds => ds.directory === localSession.cwd) || null;
+        })()}
+        onListBranches={sendListBranches}
+        onListRemoteBranches={sendListRemoteBranches}
+        onFetchRemotes={sendFetchRemotes}
+        onSwitchBranch={sendSwitchBranch}
+        onCheckDirty={sendCheckDirty}
+        onStash={sendStash}
+        onCommitWIP={sendCommitWIP}
+        onCheckAttnStash={sendCheckAttnStash}
+        onStashPop={sendStashPop}
+        onGetDefaultBranch={sendGetDefaultBranch}
       />
       <UndoToast />
       <WorktreeCleanupPrompt
