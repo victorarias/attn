@@ -10,16 +10,19 @@ import (
 	"github.com/victorarias/claude-manager/internal/store"
 )
 
-func (d *Daemon) handleListWorktrees(conn net.Conn, msg *protocol.ListWorktreesMessage) {
+// Core worktree operations - shared between Unix socket and WebSocket handlers
+
+// doListWorktrees fetches worktrees from store and git, merges them, returns protocol type
+func (d *Daemon) doListWorktrees(mainRepo string) []*protocol.Worktree {
 	// Get from registry first
-	worktrees := d.store.ListWorktreesByRepo(msg.MainRepo)
+	worktrees := d.store.ListWorktreesByRepo(mainRepo)
 
 	// Also scan git for any we don't have
-	gitWorktrees, err := git.ListWorktrees(msg.MainRepo)
+	gitWorktrees, err := git.ListWorktrees(mainRepo)
 	if err == nil {
 		for _, gwt := range gitWorktrees {
 			// Skip main repo
-			if gwt.Path == msg.MainRepo {
+			if gwt.Path == mainRepo {
 				continue
 			}
 			// Add if not in registry
@@ -34,7 +37,7 @@ func (d *Daemon) handleListWorktrees(conn net.Conn, msg *protocol.ListWorktreesM
 				newWt := &store.Worktree{
 					Path:      gwt.Path,
 					Branch:    gwt.Branch,
-					MainRepo:  msg.MainRepo,
+					MainRepo:  mainRepo,
 					CreatedAt: time.Now(),
 				}
 				d.store.AddWorktree(newWt)
@@ -53,28 +56,21 @@ func (d *Daemon) handleListWorktrees(conn net.Conn, msg *protocol.ListWorktreesM
 			CreatedAt: wt.CreatedAt.Format(time.RFC3339),
 		}
 	}
-
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorktreesUpdated,
-		Worktrees: protoWorktrees,
-	})
-	d.sendOK(conn)
+	return protoWorktrees
 }
 
-func (d *Daemon) handleCreateWorktree(conn net.Conn, msg *protocol.CreateWorktreeMessage) {
+// doCreateWorktree creates a git worktree and registers it in the store.
+// Returns the created worktree path and any error.
+func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, error) {
 	path := msg.Path
 	if path == "" {
 		path = git.GenerateWorktreePath(msg.MainRepo, msg.Branch)
 	}
 
-	// Create the worktree
-	err := git.CreateWorktree(msg.MainRepo, msg.Branch, path)
-	if err != nil {
-		d.sendError(conn, err.Error())
-		return
+	if err := git.CreateWorktree(msg.MainRepo, msg.Branch, path); err != nil {
+		return "", err
 	}
 
-	// Register in store
 	wt := &store.Worktree{
 		Path:      path,
 		Branch:    msg.Branch,
@@ -83,9 +79,7 @@ func (d *Daemon) handleCreateWorktree(conn net.Conn, msg *protocol.CreateWorktre
 	}
 	d.store.AddWorktree(wt)
 
-	d.sendOK(conn)
-
-	// Broadcast created event
+	// Broadcast created event to all clients
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventWorktreeCreated,
 		Worktrees: []*protocol.Worktree{{
@@ -95,86 +89,78 @@ func (d *Daemon) handleCreateWorktree(conn net.Conn, msg *protocol.CreateWorktre
 			CreatedAt: wt.CreatedAt.Format(time.RFC3339),
 		}},
 	})
+
+	return path, nil
 }
 
-func (d *Daemon) handleDeleteWorktree(conn net.Conn, msg *protocol.DeleteWorktreeMessage) {
+// doDeleteWorktree removes a worktree from git and the store.
+// Also cleans up any sessions in that directory.
+func (d *Daemon) doDeleteWorktree(path string) error {
 	// Remove any sessions in this directory (they're stale if we're deleting the worktree)
-	d.store.RemoveSessionsInDirectory(msg.Path)
+	d.store.RemoveSessionsInDirectory(path)
 
-	wt := d.store.GetWorktree(msg.Path)
+	wt := d.store.GetWorktree(path)
 	if wt == nil {
-		d.sendError(conn, "worktree not found in registry")
-		return
+		return &worktreeNotFoundError{path: path}
 	}
 
-	// Delete the worktree
-	err := git.DeleteWorktree(wt.MainRepo, msg.Path)
+	if err := git.DeleteWorktree(wt.MainRepo, path); err != nil {
+		return err
+	}
+
+	d.store.RemoveWorktree(path)
+
+	// Broadcast deleted event to all clients
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event: protocol.EventWorktreeDeleted,
+		Worktrees: []*protocol.Worktree{{
+			Path: path,
+		}},
+	})
+
+	return nil
+}
+
+type worktreeNotFoundError struct {
+	path string
+}
+
+func (e *worktreeNotFoundError) Error() string {
+	return "worktree not found in registry: " + e.path
+}
+
+// Unix socket handlers
+
+func (d *Daemon) handleListWorktrees(conn net.Conn, msg *protocol.ListWorktreesMessage) {
+	protoWorktrees := d.doListWorktrees(msg.MainRepo)
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorktreesUpdated,
+		Worktrees: protoWorktrees,
+	})
+	d.sendOK(conn)
+}
+
+func (d *Daemon) handleCreateWorktree(conn net.Conn, msg *protocol.CreateWorktreeMessage) {
+	_, err := d.doCreateWorktree(msg)
 	if err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
-
-	// Remove from store
-	d.store.RemoveWorktree(msg.Path)
-
 	d.sendOK(conn)
+}
 
-	// Broadcast deleted event
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventWorktreeDeleted,
-		Worktrees: []*protocol.Worktree{{
-			Path: msg.Path,
-		}},
-	})
+func (d *Daemon) handleDeleteWorktree(conn net.Conn, msg *protocol.DeleteWorktreeMessage) {
+	if err := d.doDeleteWorktree(msg.Path); err != nil {
+		d.sendError(conn, err.Error())
+		return
+	}
+	d.sendOK(conn)
 }
 
 // WebSocket handlers for async result pattern
 
 func (d *Daemon) handleListWorktreesWS(client *wsClient, msg *protocol.ListWorktreesMessage) {
-	// Get from registry first
-	worktrees := d.store.ListWorktreesByRepo(msg.MainRepo)
-
-	// Also scan git for any we don't have
-	gitWorktrees, err := git.ListWorktrees(msg.MainRepo)
-	if err == nil {
-		for _, gwt := range gitWorktrees {
-			// Skip main repo
-			if gwt.Path == msg.MainRepo {
-				continue
-			}
-			// Add if not in registry
-			found := false
-			for _, wt := range worktrees {
-				if wt.Path == gwt.Path {
-					found = true
-					break
-				}
-			}
-			if !found {
-				newWt := &store.Worktree{
-					Path:      gwt.Path,
-					Branch:    gwt.Branch,
-					MainRepo:  msg.MainRepo,
-					CreatedAt: time.Now(),
-				}
-				d.store.AddWorktree(newWt)
-				worktrees = append(worktrees, newWt)
-			}
-		}
-	}
-
-	// Convert to protocol type
-	protoWorktrees := make([]*protocol.Worktree, len(worktrees))
-	for i, wt := range worktrees {
-		protoWorktrees[i] = &protocol.Worktree{
-			Path:      wt.Path,
-			Branch:    wt.Branch,
-			MainRepo:  wt.MainRepo,
-			CreatedAt: wt.CreatedAt.Format(time.RFC3339),
-		}
-	}
-
-	// Send to requesting client
+	protoWorktrees := d.doListWorktrees(msg.MainRepo)
 	d.sendToClient(client, &protocol.WebSocketEvent{
 		Event:     protocol.EventWorktreesUpdated,
 		Worktrees: protoWorktrees,
@@ -183,13 +169,7 @@ func (d *Daemon) handleListWorktreesWS(client *wsClient, msg *protocol.ListWorkt
 
 func (d *Daemon) handleCreateWorktreeWS(client *wsClient, msg *protocol.CreateWorktreeMessage) {
 	go func() {
-		path := msg.Path
-		if path == "" {
-			path = git.GenerateWorktreePath(msg.MainRepo, msg.Branch)
-		}
-
-		// Create the worktree
-		err := git.CreateWorktree(msg.MainRepo, msg.Branch, path)
+		path, err := d.doCreateWorktree(msg)
 		result := protocol.CreateWorktreeResultMessage{
 			Event:   protocol.EventCreateWorktreeResult,
 			Path:    path,
@@ -200,25 +180,6 @@ func (d *Daemon) handleCreateWorktreeWS(client *wsClient, msg *protocol.CreateWo
 			d.logf("Create worktree failed for %s: %v", msg.Branch, err)
 		} else {
 			d.logf("Create worktree succeeded: %s at %s", msg.Branch, path)
-			// Register in store
-			wt := &store.Worktree{
-				Path:      path,
-				Branch:    msg.Branch,
-				MainRepo:  msg.MainRepo,
-				CreatedAt: time.Now(),
-			}
-			d.store.AddWorktree(wt)
-
-			// Broadcast created event to all clients
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event: protocol.EventWorktreeCreated,
-				Worktrees: []*protocol.Worktree{{
-					Path:      wt.Path,
-					Branch:    wt.Branch,
-					MainRepo:  wt.MainRepo,
-					CreatedAt: wt.CreatedAt.Format(time.RFC3339),
-				}},
-			})
 		}
 		d.sendToClient(client, result)
 	}()
@@ -226,45 +187,25 @@ func (d *Daemon) handleCreateWorktreeWS(client *wsClient, msg *protocol.CreateWo
 
 func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWorktreeMessage) {
 	go func() {
+		// Broadcast updated sessions list (doDeleteWorktree removes sessions internally)
+		defer func() {
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event:    protocol.EventSessionsUpdated,
+				Sessions: d.store.List(""),
+			})
+		}()
+
+		err := d.doDeleteWorktree(msg.Path)
 		result := protocol.DeleteWorktreeResultMessage{
-			Event: protocol.EventDeleteWorktreeResult,
-			Path:  msg.Path,
+			Event:   protocol.EventDeleteWorktreeResult,
+			Path:    msg.Path,
+			Success: err == nil,
 		}
-
-		// Remove any sessions in this directory (they're stale if we're deleting the worktree)
-		d.store.RemoveSessionsInDirectory(msg.Path)
-		// Broadcast updated sessions list
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:    protocol.EventSessionsUpdated,
-			Sessions: d.store.List(""),
-		})
-
-		wt := d.store.GetWorktree(msg.Path)
-		if wt == nil {
-			result.Success = false
-			result.Error = "worktree not found in registry"
-			d.sendToClient(client, result)
-			return
-		}
-
-		// Delete the worktree
-		err := git.DeleteWorktree(wt.MainRepo, msg.Path)
-		result.Success = err == nil
 		if err != nil {
 			result.Error = err.Error()
 			d.logf("Delete worktree failed for %s: %v", msg.Path, err)
 		} else {
 			d.logf("Delete worktree succeeded: %s", msg.Path)
-			// Remove from store
-			d.store.RemoveWorktree(msg.Path)
-
-			// Broadcast deleted event to all clients
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event: protocol.EventWorktreeDeleted,
-				Worktrees: []*protocol.Worktree{{
-					Path: msg.Path,
-				}},
-			})
 		}
 		d.sendToClient(client, result)
 	}()
