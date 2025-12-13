@@ -8,15 +8,29 @@
 
 All HIGH priority items have been evaluated using **adversarial sub-agent analysis** to determine true status. This prevents the cycle of "marking done but not done" or "doing work that was already done".
 
-| Issue | Original Priority | Final Status | Rationale |
-|-------|------------------|--------------|-----------|
-| Worktree Handler Duplication | HIGH | ✅ ALREADY FIXED | do* helpers exist and are used by both handlers |
-| Silent Error Handling in Store | HIGH | ✅ FIXED | 6 locations fixed (commit 822b340) |
-| WebSocket Broadcast Drops | HIGH | ✅ ALREADY FIXED | Verified in beads app-7fn |
-| Split LocationPicker.tsx | MED | ❌ NOT NEEDED | Cohesive modal state machine, splitting would create prop drilling |
-| Logger Mutex Race | LOW | ❌ NOT A BUG | Proper mutex protection exists at lines 50-51 |
-| PTY Retry with Backoff | LOW | ❌ YAGNI | One-time connection, daemon WebSocket has retry |
-| Integration Tests for Hooks | LOW | ❌ YAGNI | Testing pyramid complete, would require running Claude CLI |
+| # | Issue | Priority | Final Status | Rationale |
+|---|-------|----------|--------------|-----------|
+| 1 | Worktree Handler Duplication | HIGH | ✅ FIXED | do* helpers exist (app-18d, app-9jw) |
+| 2 | Type Duplication Go/TS | HIGH | ✅ FIXED | generated.ts from TypeSpec (app-z7p) |
+| 3 | PTY Protocol Types | HIGH | ✅ FIXED | Shared types defined (app-dfp) |
+| 4 | Silent Error Handling | HIGH | ✅ FIXED | 6 locations fixed (commit 822b340) |
+| 5 | WebSocket Backpressure | HIGH | ✅ FIXED | Drop slow clients (app-7fn, app-aoh) |
+| 6 | Dead Code usePRActions | HIGH | ✅ FIXED | File deleted |
+| 7 | PR Filtering Duplicated | MED | ✅ FIXED | usePRsNeedingAttention hook (app-4po) |
+| 8 | StateIndicator Duplicated | MED | ✅ FIXED | Unified component (app-6jl) |
+| 9 | LocationPicker Complexity | MED | ❌ NOT NEEDED | Cohesive modal state machine |
+| 10 | Protocol Naming | MED | ✅ FIXED | Standardized (app-zhv, app-2y6) |
+| 11 | State Naming | MED | ✅ FIXED | Consistent waiting_input (app-e2v) |
+| 12 | Database Migrations | MED | ✅ FIXED | Migration system added (app-iu3) |
+| 13 | PTY Silent Errors | MED | ✅ FIXED | Error responses added (app-kce) |
+| 14 | PTY Buffer Limit | MED | ✅ FIXED | 1MB limit added (app-7zf) |
+| 15 | Frontend Unit Tests | MED | ✅ FIXED | Vitest setup (app-g6x) |
+| 16 | Request/Response Pattern | MED | ✅ FIXED | Documented in CLAUDE.md |
+| 17 | Store Legacy Methods | LOW | ✅ FIXED | Removed in commit 6cd094a |
+| 19 | Duplicate ActionState | LOW | ✅ FIXED | Unified (app-yxy) |
+| 21 | Logger Mutex Race | LOW | ❌ NOT A BUG | Already properly synchronized |
+| 25 | PTY Retry | LOW | ❌ YAGNI | One-time connection |
+| 34 | Hooks Integration Tests | LOW | ❌ YAGNI | Testing pyramid complete |
 
 ## Executive Summary
 
@@ -58,9 +72,11 @@ func (d *Daemon) doDeleteWorktree(path string) error { ... }
 
 ---
 
-### 2. Type Duplication Across Go/TypeScript (6 structs × 2)
+### 2. Type Duplication Across Go/TypeScript (6 structs × 2) — ✅ FIXED
 
-**Locations:**
+**Status (2025-12-13):** FIXED. TypeSpec schema at `internal/protocol/schema/main.tsp` is single source of truth. Generated files: `internal/protocol/generated.go` (Go) and `app/src/types/generated.ts` (TypeScript, 47KB). Beads: app-z7p, app-aku, app-rs6.
+
+**Original Locations:**
 - Go: `internal/protocol/types.go` (Session, PR, Worktree, RepoState, Response, WebSocketEvent)
 - TypeScript: `app/src/hooks/useDaemonSocket.ts` (DaemonSession, DaemonPR, DaemonWorktree, RepoState, WebSocketEvent)
 
@@ -73,9 +89,11 @@ func (d *Daemon) doDeleteWorktree(path string) error { ... }
 
 ---
 
-### 3. PTY Protocol Has No Shared Types
+### 3. PTY Protocol Has No Shared Types — ✅ FIXED
 
-**Locations:**
+**Status (2025-12-13):** FIXED. Shared PTY protocol types defined. Bead: app-dfp.
+
+**Original Locations:**
 - Node.js: `app/pty-server/src/index.ts` - hardcoded strings: `'spawn'`, `'write'`, `'resize'`, `'kill'`
 - Rust: `app/src-tauri/src/pty_bridge.rs` - hardcoded strings: `"spawn"`, `"write"`, etc.
 
@@ -131,11 +149,13 @@ func (s *Store) UpdateState(id, state string) error {
 
 ---
 
-### 5. WebSocket Broadcast Drops Messages Silently
+### 5. WebSocket Broadcast Drops Messages Silently — ✅ FIXED
 
-**Location:** `internal/daemon/websocket.go:78-83`
+**Status (2025-12-13):** FIXED. Now drops slow clients instead of messages. Beads: app-7fn, app-aoh.
 
-**Problem:**
+**Location:** `internal/daemon/websocket.go`
+
+**Original Problem:**
 ```go
 select {
 case h.broadcast <- data:
@@ -173,9 +193,11 @@ func (c *wsClient) trySend(data []byte) bool {
 
 ---
 
-### 6. Dead Code: usePRActions.ts (180 lines)
+### 6. Dead Code: usePRActions.ts (180 lines) — ✅ FIXED
 
-**Location:** `app/src/hooks/usePRActions.ts`
+**Status (2025-12-13):** FIXED. File deleted.
+
+**Original Location:** `app/src/hooks/usePRActions.ts`
 
 **Problem:** Complete hook implementation (180 lines) that is **never imported** anywhere in the codebase. Grep confirms only the file itself references `usePRActions`.
 
@@ -187,9 +209,11 @@ func (c *wsClient) trySend(data []byte) bool {
 
 ## MEDIUM PRIORITY Issues
 
-### 7. PR Filtering Logic Duplicated (3 locations)
+### 7. PR Filtering Logic Duplicated (3 locations) — ✅ FIXED
 
-**Locations:**
+**Status (2025-12-13):** FIXED. Extracted to `usePRsNeedingAttention` hook. Bead: app-4po.
+
+**Original Locations:**
 - `app/src/App.tsx:373` - attention count calculation
 - `app/src/components/Dashboard.tsx:87` - prsByRepo grouping
 - `app/src/components/AttentionDrawer.tsx:28-37` - drawer filtering
@@ -206,9 +230,11 @@ export function usePRsNeedingAttention(prs: DaemonPR[], isRepoMuted: (repo: stri
 
 ---
 
-### 8. State Indicator Components Duplicated (6 instances)
+### 8. State Indicator Components Duplicated (6 instances) — ✅ FIXED
 
-**Locations:**
+**Status (2025-12-13):** FIXED. Unified `StateIndicator` component created. Bead: app-6jl.
+
+**Original Locations:**
 - `Sidebar.tsx:121,162` - uses `state-indicator` class
 - `Dashboard.tsx:191,208,225` - uses `state-dot` class
 - `AttentionDrawer.tsx:65` - uses `item-dot` class
@@ -257,11 +283,13 @@ LocationPicker/
 
 ---
 
-### 10. Inconsistent Protocol Naming (Cmd vs Msg prefix)
+### 10. Inconsistent Protocol Naming (Cmd vs Msg prefix) — ✅ FIXED
+
+**Status (2025-12-13):** FIXED. Standardized naming convention. Beads: app-zhv, app-2y6.
 
 **Location:** `internal/protocol/types.go`
 
-**Problem:** Mixed prefixes without clear pattern:
+**Original Problem:** Mixed prefixes without clear pattern:
 - `CmdRegister`, `CmdMutePR`, `CmdRefreshPRs` (most commands)
 - `MsgApprovePR`, `MsgMergePR` (PR actions only)
 - `EventRefreshPRsResult` but `MsgPRActionResult`
@@ -286,9 +314,11 @@ const (
 
 ---
 
-### 11. Session State Naming Inconsistency
+### 11. Session State Naming Inconsistency — ✅ FIXED
 
-**Locations:**
+**Status (2025-12-13):** FIXED. Consistent `waiting_input` everywhere. Bead: app-e2v.
+
+**Original Locations:**
 - Go: `StateWaitingInput = "waiting_input"` (protocol/types.go:69)
 - TypeScript: `'waiting'` used in some places (useDaemonSocket.ts:25)
 - Normalizer: `sessionState.ts:6-7` converts `'waiting'` → `'waiting_input'`
@@ -303,11 +333,13 @@ const (
 
 ---
 
-### 12. No Database Migrations
+### 12. No Database Migrations — ✅ FIXED
+
+**Status (2025-12-13):** FIXED. Migration system added. Bead: app-iu3.
 
 **Location:** `internal/store/sqlite.go`
 
-**Problem:** Schema hardcoded in `createTables()`. No version tracking. Adding a column requires manual intervention.
+**Original Problem:** Schema hardcoded in `createTables()`. No version tracking. Adding a column requires manual intervention.
 
 **Solution:** Add migrations system:
 ```go
@@ -344,11 +376,13 @@ func (s *Store) migrate() error {
 
 ---
 
-### 13. PTY Server Silent Validation Errors
+### 13. PTY Server Silent Validation Errors — ✅ FIXED
 
-**Location:** `app/pty-server/src/index.ts:29-44`
+**Status (2025-12-13):** FIXED. Error responses now sent to client. Bead: app-kce.
 
-**Problem:** Validation errors logged but not sent back to client:
+**Location:** `app/pty-server/src/index.ts`
+
+**Original Problem:** Validation errors logged but not sent back to client:
 ```typescript
 if (!msg.id || typeof msg.id !== 'string') {
     console.error('[pty-server] spawn: missing or invalid id');
@@ -366,11 +400,13 @@ if (!msg.id || typeof msg.id !== 'string') {
 
 ---
 
-### 14. Unbounded Buffer in PTY Server
+### 14. Unbounded Buffer in PTY Server — ✅ FIXED
 
-**Location:** `app/pty-server/src/index.ts:139-142`
+**Status (2025-12-13):** FIXED. 1MB buffer limit added. Bead: app-7zf.
 
-**Problem:**
+**Location:** `app/pty-server/src/index.ts`
+
+**Original Problem:**
 ```typescript
 let buffer = Buffer.alloc(0);
 // ...
@@ -396,11 +432,13 @@ socket.on('data', (chunk) => {
 
 ---
 
-### 15. Missing Frontend Unit Tests
+### 15. Missing Frontend Unit Tests — ✅ FIXED
 
-**Location:** `app/src/` (entire directory)
+**Status (2025-12-13):** FIXED. Vitest setup with tests for hooks and components. Bead: app-g6x.
 
-**Problem:** No Jest/Vitest setup. Only E2E tests exist in `app/e2e/`.
+**Location:** `app/src/`
+
+**Original Problem:** No Jest/Vitest setup. Only E2E tests exist in `app/e2e/`.
 
 **Solution:** Add testing infrastructure:
 ```bash
@@ -420,11 +458,13 @@ export default defineConfig({
 
 ---
 
-### 16. Request/Response Pattern Inconsistency
+### 16. Request/Response Pattern Inconsistency — ✅ FIXED
+
+**Status (2025-12-13):** FIXED. Async WebSocket pattern documented in CLAUDE.md. All mutations now use Promise-based pattern.
 
 **Location:** `app/src/hooks/useDaemonSocket.ts`
 
-**Problem:** Some operations fire-and-forget, others use Promise:
+**Original Problem:** Some operations fire-and-forget, others use Promise:
 
 | Fire-and-Forget | Promise-based |
 |-----------------|---------------|
@@ -447,9 +487,11 @@ sendCreateWorktree(repo: string, branch: string): Promise<{ path: string }>
 
 ## LOW PRIORITY Issues
 
-### 17. Store Legacy Methods (dead code)
+### 17. Store Legacy Methods (dead code) — ✅ FIXED
 
-**Location:** `internal/store/store.go:966-987`
+**Status (2025-12-13):** FIXED. Legacy methods removed in commit 6cd094a.
+
+**Original Location:** `internal/store/store.go:966-987`
 
 **Problem:** `IsDirty()`, `ClearDirty()`, `Save()`, `Load()`, `StartPersistence()` are all no-ops with comments "for compatibility".
 
@@ -486,9 +528,11 @@ interface DashboardProps {
 
 ---
 
-### 19. Duplicate ActionState Interface (3 locations)
+### 19. Duplicate ActionState Interface (3 locations) — ✅ FIXED
 
-**Locations:**
+**Status (2025-12-13):** FIXED. Unified ActionState interface. Bead: app-yxy.
+
+**Original Locations:**
 - `app/src/components/PRActions.tsx:7-11`
 - `app/src/hooks/usePRActions.ts:4-8` (dead code)
 - `app/src/contexts/DaemonContext.tsx:4-6`

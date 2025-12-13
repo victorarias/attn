@@ -1,8 +1,17 @@
 # Technical Strategy: Evolving Toward an Agent Orchestrator
 
 **Date:** 2025-12-13
-**Status:** Proposed
+**Status:** IMPLEMENTED (Phases 1-4 complete as of 2025-12-13)
 **Vision:** Evolve from "Claude session manager" to "agent orchestrator" supporting multiple agents, integrations, and richer UI
+
+## Implementation Status
+
+| Phase | Status | Key Beads |
+|-------|--------|-----------|
+| Phase 1: Isolate Adapters | ✅ DONE | app-jam (GitHub), app-4o2 (Claude) |
+| Phase 2: Attention Abstraction | ✅ DONE | app-261 (AttentionSource interface) |
+| Phase 3: Type Generation | ✅ DONE | app-z7p (TypeSpec→TS), app-aku (migration) |
+| Phase 4: Test Harness | ✅ DONE | app-w0q (daemon test harness) |
 
 ## Executive Summary
 
