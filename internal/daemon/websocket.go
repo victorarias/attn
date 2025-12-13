@@ -26,6 +26,30 @@ type wsClient struct {
 	conn      *websocket.Conn
 	send      chan []byte
 	slowCount int // tracks consecutive failed sends
+
+	// Git status subscription state
+	gitStatusDir    string
+	gitStatusTicker *time.Ticker
+	gitStatusStop   chan struct{}
+	gitStatusHash   string // hash of last sent status for dedup
+	gitStatusMu     sync.Mutex
+}
+
+// stopGitStatusPoll stops any active git status polling for this client
+func (c *wsClient) stopGitStatusPoll() {
+	c.gitStatusMu.Lock()
+	defer c.gitStatusMu.Unlock()
+
+	if c.gitStatusTicker != nil {
+		c.gitStatusTicker.Stop()
+		c.gitStatusTicker = nil
+	}
+	if c.gitStatusStop != nil {
+		close(c.gitStatusStop)
+		c.gitStatusStop = nil
+	}
+	c.gitStatusDir = ""
+	c.gitStatusHash = ""
 }
 
 // BroadcastListener is called for each broadcast event (for testing)
@@ -67,6 +91,8 @@ func (h *wsHub) run() {
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
+				// Cleanup git status subscription
+				client.stopGitStatusPoll()
 			}
 			h.mu.Unlock()
 
