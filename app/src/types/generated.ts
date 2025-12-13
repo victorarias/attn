@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, ApprovePRMessage, ClearSessionsMessage, CollapseRepoMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, GetSettingsMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoState, Response, Session, SessionState, SetSettingMessage, StateMessage, StopMessage, TodosMessage, UnregisterMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, ApprovePRMessage, ClearSessionsMessage, CollapseRepoMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, GetRecentLocationsMessage, GetSettingsMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoState, Response, Session, SessionState, SetSettingMessage, StateMessage, StopMessage, TodosMessage, UnregisterMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const clearSessionsMessage = Convert.toClearSessionsMessage(json);
@@ -10,6 +10,7 @@
 //   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
 //   const fetchPRDetailsMessage = Convert.toFetchPRDetailsMessage(json);
+//   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
 //   const getSettingsMessage = Convert.toGetSettingsMessage(json);
 //   const heartbeatMessage = Convert.toHeartbeatMessage(json);
 //   const heatState = Convert.toHeatState(json);
@@ -28,6 +29,8 @@
 //   const queryPRsMessage = Convert.toQueryPRsMessage(json);
 //   const queryReposMessage = Convert.toQueryReposMessage(json);
 //   const rateLimitedMessage = Convert.toRateLimitedMessage(json);
+//   const recentLocation = Convert.toRecentLocation(json);
+//   const recentLocationsResultMessage = Convert.toRecentLocationsResultMessage(json);
 //   const refreshPRsMessage = Convert.toRefreshPRsMessage(json);
 //   const refreshPRsResultMessage = Convert.toRefreshPRsResultMessage(json);
 //   const registerMessage = Convert.toRegisterMessage(json);
@@ -132,6 +135,16 @@ export interface FetchPRDetailsMessage {
 
 export enum FetchPRDetailsMessageCmd {
     FetchPRDetails = "fetch_pr_details",
+}
+
+export interface GetRecentLocationsMessage {
+    cmd:    GetRecentLocationsMessageCmd;
+    limit?: number;
+    [property: string]: any;
+}
+
+export enum GetRecentLocationsMessageCmd {
+    GetRecentLocations = "get_recent_locations",
 }
 
 export interface GetSettingsMessage {
@@ -379,6 +392,34 @@ export enum RateLimitedMessageEvent {
     RateLimited = "rate_limited",
 }
 
+export interface RecentLocation {
+    label:     string;
+    last_seen: string;
+    path:      string;
+    use_count: number;
+    [property: string]: any;
+}
+
+export interface RecentLocationsResultMessage {
+    error?:    string;
+    event:     RecentLocationsResultMessageEvent;
+    locations: LocationElement[];
+    success:   boolean;
+    [property: string]: any;
+}
+
+export enum RecentLocationsResultMessageEvent {
+    RecentLocationsResult = "recent_locations_result",
+}
+
+export interface LocationElement {
+    label:     string;
+    last_seen: string;
+    path:      string;
+    use_count: number;
+    [property: string]: any;
+}
+
 export interface RefreshPRsMessage {
     cmd: RefreshPRsMessageCmd;
     [property: string]: any;
@@ -511,6 +552,7 @@ export interface WebSocketEvent {
     prs?:                 PRElement[];
     rate_limit_reset_at?: string;
     rate_limit_resource?: string;
+    recent_locations?:    LocationElement[];
     repos?:               RepoElement[];
     session?:             SessionElement;
     sessions?:            SessionElement[];
@@ -613,6 +655,14 @@ export class Convert {
 
     public static fetchPRDetailsMessageToJson(value: FetchPRDetailsMessage): string {
         return JSON.stringify(uncast(value, r("FetchPRDetailsMessage")), null, 2);
+    }
+
+    public static toGetRecentLocationsMessage(json: string): GetRecentLocationsMessage {
+        return cast(JSON.parse(json), r("GetRecentLocationsMessage"));
+    }
+
+    public static getRecentLocationsMessageToJson(value: GetRecentLocationsMessage): string {
+        return JSON.stringify(uncast(value, r("GetRecentLocationsMessage")), null, 2);
     }
 
     public static toGetSettingsMessage(json: string): GetSettingsMessage {
@@ -757,6 +807,22 @@ export class Convert {
 
     public static rateLimitedMessageToJson(value: RateLimitedMessage): string {
         return JSON.stringify(uncast(value, r("RateLimitedMessage")), null, 2);
+    }
+
+    public static toRecentLocation(json: string): RecentLocation {
+        return cast(JSON.parse(json), r("RecentLocation"));
+    }
+
+    public static recentLocationToJson(value: RecentLocation): string {
+        return JSON.stringify(uncast(value, r("RecentLocation")), null, 2);
+    }
+
+    public static toRecentLocationsResultMessage(json: string): RecentLocationsResultMessage {
+        return cast(JSON.parse(json), r("RecentLocationsResultMessage"));
+    }
+
+    public static recentLocationsResultMessageToJson(value: RecentLocationsResultMessage): string {
+        return JSON.stringify(uncast(value, r("RecentLocationsResultMessage")), null, 2);
     }
 
     public static toRefreshPRsMessage(json: string): RefreshPRsMessage {
@@ -1072,6 +1138,10 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("FetchPRDetailsMessageCmd") },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
+    "GetRecentLocationsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetRecentLocationsMessageCmd") },
+        { json: "limit", js: "limit", typ: u(undefined, 0) },
+    ], "any"),
     "GetSettingsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetSettingsMessageCmd") },
     ], "any"),
@@ -1204,6 +1274,24 @@ const typeMap: any = {
         { json: "reset_at", js: "reset_at", typ: "" },
         { json: "resource", js: "resource", typ: "" },
     ], "any"),
+    "RecentLocation": o([
+        { json: "label", js: "label", typ: "" },
+        { json: "last_seen", js: "last_seen", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "use_count", js: "use_count", typ: 0 },
+    ], "any"),
+    "RecentLocationsResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("RecentLocationsResultMessageEvent") },
+        { json: "locations", js: "locations", typ: a(r("LocationElement")) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "LocationElement": o([
+        { json: "label", js: "label", typ: "" },
+        { json: "last_seen", js: "last_seen", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "use_count", js: "use_count", typ: 0 },
+    ], "any"),
     "RefreshPRsMessage": o([
         { json: "cmd", js: "cmd", typ: r("RefreshPRsMessageCmd") },
     ], "any"),
@@ -1280,6 +1368,7 @@ const typeMap: any = {
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "rate_limit_reset_at", js: "rate_limit_reset_at", typ: u(undefined, "") },
         { json: "rate_limit_resource", js: "rate_limit_resource", typ: u(undefined, "") },
+        { json: "recent_locations", js: "recent_locations", typ: u(undefined, a(r("LocationElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
@@ -1328,6 +1417,9 @@ const typeMap: any = {
     ],
     "FetchPRDetailsMessageCmd": [
         "fetch_pr_details",
+    ],
+    "GetRecentLocationsMessageCmd": [
+        "get_recent_locations",
     ],
     "GetSettingsMessageCmd": [
         "get_settings",
@@ -1387,6 +1479,9 @@ const typeMap: any = {
     ],
     "RateLimitedMessageEvent": [
         "rate_limited",
+    ],
+    "RecentLocationsResultMessageEvent": [
+        "recent_locations_result",
     ],
     "RefreshPRsMessageCmd": [
         "refresh_prs",

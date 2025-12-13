@@ -92,6 +92,13 @@ model RepoState {
   collapsed: boolean;
 }
 
+model RecentLocation {
+  path: string;
+  label: string;
+  last_seen: string;    // ISO timestamp
+  use_count: int32;
+}
+
 // ============================================================================
 // Command Messages (Client → Daemon)
 // ============================================================================
@@ -235,6 +242,11 @@ model InjectTestSessionMessage {
   session: Session;
 }
 
+model GetRecentLocationsMessage {
+  cmd: "get_recent_locations";
+  limit?: int32;  // Default 20
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -281,6 +293,13 @@ model DeleteWorktreeResultMessage {
   error?: string;
 }
 
+model RecentLocationsResultMessage {
+  event: "recent_locations_result";
+  locations: RecentLocation[];
+  success: boolean;
+  error?: string;
+}
+
 // ============================================================================
 // Response Types
 // ============================================================================
@@ -301,6 +320,7 @@ model WebSocketEvent {
   prs?: PR[];
   repos?: RepoState[];
   worktrees?: Worktree[];
+  recent_locations?: RecentLocation[];
   settings?: Record<string>;
   // Rate limiting
   rate_limit_resource?: string;

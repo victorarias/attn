@@ -362,6 +362,11 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		}
 	}
 	d.store.Add(session)
+
+	// Track this location in recent locations
+	label := filepath.Base(msg.Dir)
+	d.store.UpsertRecentLocation(msg.Dir, label)
+
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients

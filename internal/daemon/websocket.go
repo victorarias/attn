@@ -439,6 +439,20 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			Event:    protocol.EventSessionsUpdated,
 			Sessions: protocol.SessionsToValues(d.store.List("")),
 		})
+
+	case protocol.CmdGetRecentLocations:
+		locMsg := msg.(*protocol.GetRecentLocationsMessage)
+		limit := 20
+		if locMsg.Limit != nil {
+			limit = int(*locMsg.Limit)
+		}
+		d.logf("Getting recent locations (limit=%d)", limit)
+		locations := d.store.GetRecentLocations(limit)
+		d.sendToClient(client, &protocol.WebSocketEvent{
+			Event:           protocol.EventRecentLocationsResult,
+			RecentLocations: protocol.RecentLocationsToValues(locations),
+			Success:         protocol.Ptr(true),
+		})
 	}
 }
 

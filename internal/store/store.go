@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -1049,6 +1050,115 @@ func (s *Store) GetAllSettings() map[string]string {
 		}
 	}
 	return result
+}
+
+// Recent Locations methods
+
+// UpsertRecentLocation adds or updates a location in the recent locations table
+func (s *Store) UpsertRecentLocation(path, label string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	now := time.Now().Format(time.RFC3339)
+	s.execLog(`
+		INSERT INTO recent_locations (path, label, last_seen, use_count)
+		VALUES (?, ?, ?, 1)
+		ON CONFLICT(path) DO UPDATE SET
+			label = excluded.label,
+			last_seen = excluded.last_seen,
+			use_count = use_count + 1`,
+		path, label, now)
+}
+
+// GetRecentLocations returns recent locations that still exist on disk, sorted by last_seen DESC
+func (s *Store) GetRecentLocations(limit int) []*protocol.RecentLocation {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil
+	}
+
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := s.db.Query(`
+		SELECT path, label, last_seen, use_count
+		FROM recent_locations
+		ORDER BY last_seen DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var result []*protocol.RecentLocation
+	var toDelete []string
+
+	for rows.Next() {
+		var loc protocol.RecentLocation
+		if err := rows.Scan(&loc.Path, &loc.Label, &loc.LastSeen, &loc.UseCount); err != nil {
+			continue
+		}
+
+		// Validate path still exists
+		if _, err := os.Stat(loc.Path); os.IsNotExist(err) {
+			toDelete = append(toDelete, loc.Path)
+			continue
+		}
+
+		result = append(result, &loc)
+	}
+
+	// Clean up non-existent paths (async, don't block the read)
+	if len(toDelete) > 0 {
+		go func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			for _, path := range toDelete {
+				s.execLog("DELETE FROM recent_locations WHERE path = ?", path)
+			}
+		}()
+	}
+
+	return result
+}
+
+// CleanupStaleLocations removes entries older than the given duration
+func (s *Store) CleanupStaleLocations(maxAge time.Duration) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return 0
+	}
+
+	cutoff := time.Now().Add(-maxAge).Format(time.RFC3339)
+	result, err := s.db.Exec("DELETE FROM recent_locations WHERE last_seen < ?", cutoff)
+	if err != nil {
+		log.Printf("[store] CleanupStaleLocations: failed: %v", err)
+		return 0
+	}
+
+	affected, _ := result.RowsAffected()
+	return int(affected)
+}
+
+// RemoveRecentLocation removes a specific location from recent locations
+func (s *Store) RemoveRecentLocation(path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	s.execLog("DELETE FROM recent_locations WHERE path = ?", path)
 }
 
 // Helper functions

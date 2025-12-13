@@ -17,7 +17,6 @@ import { normalizeSessionState } from './types/sessionState';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { useLocationHistory } from './hooks/useLocationHistory';
 import { getRepoName } from './utils/repo';
 import './App.css';
 
@@ -75,7 +74,7 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, sendGetRecentLocations, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -183,7 +182,6 @@ function App() {
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [worktreeFlowMode, setWorktreeFlowMode] = useState(false);
-  const { addToHistory, removeFromHistory } = useLocationHistory();
 
   // No auto-creation - user clicks "+" to start a session
 
@@ -199,7 +197,7 @@ function App() {
 
   const handleLocationSelect = useCallback(
     async (path: string) => {
-      addToHistory(path);
+      // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
       const sessionId = await createSession(folderName, path);
       // Fit terminal after view becomes visible
@@ -209,7 +207,7 @@ function App() {
         handle?.focus();
       }, 100);
     },
-    [addToHistory, createSession]
+    [createSession]
   );
 
   const closeLocationPicker = useCallback(() => {
@@ -330,13 +328,13 @@ function App() {
     if (closedWorktree) {
       try {
         await sendDeleteWorktree(closedWorktree.path);
-        removeFromHistory(closedWorktree.path);
+        // Note: Deleted paths are automatically filtered by daemon on next fetch
       } catch (err) {
         console.error('[App] Failed to delete worktree:', err);
       }
     }
     setClosedWorktree(null);
-  }, [closedWorktree, sendDeleteWorktree, removeFromHistory]);
+  }, [closedWorktree, sendDeleteWorktree]);
 
   const handleWorktreeAlwaysKeep = useCallback(() => {
     setAlwaysKeepWorktrees(true);
@@ -505,6 +503,7 @@ function App() {
         onDeleteWorktree={sendDeleteWorktree}
         worktreeFlowMode={worktreeFlowMode}
         projectsDirectory={settings.projects_directory}
+        onGetRecentLocations={sendGetRecentLocations}
       />
       <UndoToast />
       <WorktreeCleanupPrompt

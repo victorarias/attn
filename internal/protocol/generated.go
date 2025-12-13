@@ -87,6 +87,14 @@ type FetchPRDetailsMessage struct {
 	Repo string `json:"repo"`
 }
 
+type GetRecentLocationsMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Limit corresponds to the JSON schema field "limit".
+	Limit *int `json:"limit,omitempty"`
+}
+
 type GetSettingsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -311,6 +319,34 @@ type RateLimitedMessage struct {
 	Resource string `json:"resource"`
 }
 
+type RecentLocation struct {
+	// Label corresponds to the JSON schema field "label".
+	Label string `json:"label"`
+
+	// LastSeen corresponds to the JSON schema field "last_seen".
+	LastSeen string `json:"last_seen"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// UseCount corresponds to the JSON schema field "use_count".
+	UseCount int `json:"use_count"`
+}
+
+type RecentLocationsResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Locations corresponds to the JSON schema field "locations".
+	Locations []RecentLocation `json:"locations"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type RefreshPRsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -483,6 +519,9 @@ type WebSocketEvent struct {
 
 	// RateLimitResource corresponds to the JSON schema field "rate_limit_resource".
 	RateLimitResource *string `json:"rate_limit_resource,omitempty"`
+
+	// RecentLocations corresponds to the JSON schema field "recent_locations".
+	RecentLocations []RecentLocation `json:"recent_locations,omitempty"`
 
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty"`

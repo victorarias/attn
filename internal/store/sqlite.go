@@ -97,6 +97,12 @@ var migrations = []migration{
 	{8, "add branch to sessions", "ALTER TABLE sessions ADD COLUMN branch TEXT"},
 	{9, "add is_worktree to sessions", "ALTER TABLE sessions ADD COLUMN is_worktree INTEGER NOT NULL DEFAULT 0"},
 	{10, "add main_repo to sessions", "ALTER TABLE sessions ADD COLUMN main_repo TEXT"},
+	{11, "create recent_locations table", `CREATE TABLE IF NOT EXISTS recent_locations (
+		path TEXT PRIMARY KEY,
+		label TEXT NOT NULL,
+		last_seen TEXT NOT NULL,
+		use_count INTEGER NOT NULL DEFAULT 1
+	)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

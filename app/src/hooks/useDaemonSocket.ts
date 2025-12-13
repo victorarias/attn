@@ -5,6 +5,7 @@ import type {
   Worktree as GeneratedWorktree,
   RepoState as GeneratedRepoState,
   WebSocketEvent as GeneratedWebSocketEvent,
+  RecentLocation as GeneratedRecentLocation,
   SessionState,
   PRRole,
   HeatState,
@@ -16,6 +17,7 @@ export type DaemonSession = GeneratedSession;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
 export type RepoState = GeneratedRepoState;
+export type RecentLocation = GeneratedRecentLocation;
 export type DaemonSettings = Record<string, string>;
 
 // Re-export enums and useful types
@@ -40,7 +42,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '6';
+const PROTOCOL_VERSION = '7';
 
 interface PRActionResult {
   success: boolean;
@@ -50,6 +52,12 @@ interface PRActionResult {
 interface WorktreeActionResult {
   success: boolean;
   path?: string;
+  error?: string;
+}
+
+interface RecentLocationsResult {
+  success: boolean;
+  locations: RecentLocation[];
   error?: string;
 }
 
@@ -287,6 +295,22 @@ export function useDaemonSocket({
               }
             }
             break;
+
+          case 'recent_locations_result': {
+            const pending = pendingActionsRef.current.get('get_recent_locations');
+            if (pending) {
+              pendingActionsRef.current.delete('get_recent_locations');
+              if (data.success) {
+                pending.resolve({
+                  success: true,
+                  locations: data.recent_locations || [],
+                });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to get recent locations'));
+              }
+            }
+            break;
+          }
         }
       } catch (err) {
         console.error('[Daemon] Parse error:', err);
@@ -520,6 +544,30 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'set_setting', key, value }));
   }, [onSettingsUpdate]);
 
+  // Get recent locations from daemon
+  const sendGetRecentLocations = useCallback((limit?: number): Promise<RecentLocationsResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'get_recent_locations';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'get_recent_locations', ...(limit && { limit }) }));
+
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get recent locations timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -537,5 +585,6 @@ export function useDaemonSocket({
     sendCreateWorktree,
     sendDeleteWorktree,
     sendSetSetting,
+    sendGetRecentLocations,
   };
 }
