@@ -123,14 +123,24 @@ func TestIsDirty(t *testing.T) {
 	// Clean up the modification
 	runGit(t, dir, "checkout", "file.txt")
 
-	// Untracked file
+	// Untracked file - should NOT be considered dirty (doesn't block checkout)
 	writeFile(t, dir, "untracked.txt", "new")
 	dirty, err = IsDirty(dir)
 	if err != nil {
 		t.Fatalf("IsDirty failed: %v", err)
 	}
+	if dirty {
+		t.Error("Expected untracked files to NOT be considered dirty")
+	}
+
+	// Staged file - should be dirty
+	runGit(t, dir, "add", "untracked.txt")
+	dirty, err = IsDirty(dir)
+	if err != nil {
+		t.Fatalf("IsDirty failed: %v", err)
+	}
 	if !dirty {
-		t.Error("Expected dirty repo (untracked file) to return true")
+		t.Error("Expected staged file to be considered dirty")
 	}
 }
 

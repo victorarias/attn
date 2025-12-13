@@ -54,7 +54,8 @@ func FindAttnStash(repoDir, branch string) (bool, string, error) {
 	return false, "", nil
 }
 
-// IsDirty returns true if the working directory has uncommitted changes.
+// IsDirty returns true if the working directory has changes that would block checkout.
+// This excludes untracked files (??), which don't block git checkout.
 func IsDirty(repoDir string) (bool, error) {
 	cmd := exec.Command("git", "status", "--porcelain")
 	cmd.Dir = repoDir
@@ -62,7 +63,15 @@ func IsDirty(repoDir string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("git status failed: %w", err)
 	}
-	return len(strings.TrimSpace(string(out))) > 0, nil
+
+	// Check each line - untracked files start with "??"
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		if len(line) >= 2 && !strings.HasPrefix(line, "??") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // CommitWIP stages all changes and commits with "WIP" message.
