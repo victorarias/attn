@@ -317,9 +317,9 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleQueryRepos(conn, msg.(*protocol.QueryReposMessage))
 	case protocol.CmdFetchPRDetails:
 		d.handleFetchPRDetails(conn, msg.(*protocol.FetchPRDetailsMessage))
-	case protocol.MsgInjectTestPR:
+	case protocol.CmdInjectTestPR:
 		d.handleInjectTestPR(conn, msg.(*protocol.InjectTestPRMessage))
-	case protocol.MsgInjectTestSession:
+	case protocol.CmdInjectTestSession:
 		d.handleInjectTestSession(conn, msg.(*protocol.InjectTestSessionMessage))
 	case protocol.CmdListWorktrees:
 		d.handleListWorktrees(conn, msg.(*protocol.ListWorktreesMessage))
@@ -333,31 +333,31 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 }
 
 func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
-	d.logf("session registered: id=%s label=%s dir=%s", msg.ID, msg.Label, msg.Dir)
-	now := time.Now()
+	d.logf("session registered: id=%s label=%s dir=%s", msg.ID, protocol.Deref(msg.Label), msg.Dir)
 
 	// Get branch info
 	branchInfo, _ := git.GetBranchInfo(msg.Dir)
-	branch := ""
-	isWorktree := false
-	mainRepo := ""
-	if branchInfo != nil {
-		branch = branchInfo.Branch
-		isWorktree = branchInfo.IsWorktree
-		mainRepo = branchInfo.MainRepo
-	}
 
+	nowStr := string(protocol.TimestampNow())
 	session := &protocol.Session{
 		ID:             msg.ID,
-		Label:          msg.Label,
+		Label:          protocol.Deref(msg.Label),
 		Directory:      msg.Dir,
-		Branch:         branch,
-		IsWorktree:     isWorktree,
-		MainRepo:       mainRepo,
-		State:          protocol.StateWaiting,
-		StateSince:     now,
-		StateUpdatedAt: now,
-		LastSeen:       now,
+		State:          protocol.SessionStateWaitingInput,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	}
+	if branchInfo != nil {
+		if branchInfo.Branch != "" {
+			session.Branch = protocol.Ptr(branchInfo.Branch)
+		}
+		if branchInfo.IsWorktree {
+			session.IsWorktree = protocol.Ptr(true)
+		}
+		if branchInfo.MainRepo != "" {
+			session.MainRepo = protocol.Ptr(branchInfo.MainRepo)
+		}
 	}
 	d.store.Add(session)
 	d.sendOK(conn)
@@ -518,10 +518,11 @@ func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, u
 
 // broadcastRateLimited broadcasts a rate limit event to WebSocket clients
 func (d *Daemon) broadcastRateLimited(resource string, resetAt time.Time) {
+	resetAtStr := string(protocol.NewTimestamp(resetAt))
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:             protocol.EventRateLimited,
-		RateLimitResource: resource,
-		RateLimitResetAt:  resetAt,
+		RateLimitResource: protocol.Ptr(resource),
+		RateLimitResetAt:  protocol.Ptr(resetAtStr),
 	})
 }
 
@@ -544,10 +545,10 @@ func (d *Daemon) handleTodos(conn net.Conn, msg *protocol.TodosMessage) {
 }
 
 func (d *Daemon) handleQuery(conn net.Conn, msg *protocol.QueryMessage) {
-	sessions := d.store.List(msg.Filter)
+	sessions := d.store.List(protocol.Deref(msg.Filter))
 	resp := protocol.Response{
-		OK:       true,
-		Sessions: sessions,
+		Ok:       true,
+		Sessions: protocol.SessionsToValues(sessions),
 	}
 	json.NewEncoder(conn).Encode(resp)
 }
@@ -563,10 +564,10 @@ func (d *Daemon) handleMute(conn net.Conn, msg *protocol.MuteMessage) {
 }
 
 func (d *Daemon) handleQueryPRs(conn net.Conn, msg *protocol.QueryPRsMessage) {
-	prs := d.store.ListPRs(msg.Filter)
+	prs := d.store.ListPRs(protocol.Deref(msg.Filter))
 	resp := protocol.Response{
-		OK:  true,
-		PRs: prs,
+		Ok:  true,
+		Prs: protocol.PRsToValues(prs),
 	}
 	json.NewEncoder(conn).Encode(resp)
 }
@@ -589,8 +590,8 @@ func (d *Daemon) handleCollapseRepo(conn net.Conn, msg *protocol.CollapseRepoMes
 func (d *Daemon) handleQueryRepos(conn net.Conn, msg *protocol.QueryReposMessage) {
 	repos := d.store.ListRepoStates()
 	resp := protocol.Response{
-		OK:    true,
-		Repos: repos,
+		Ok:    true,
+		Repos: protocol.RepoStatesToValues(repos),
 	}
 	json.NewEncoder(conn).Encode(resp)
 }
@@ -619,19 +620,19 @@ func (d *Daemon) handleFetchPRDetails(conn net.Conn, msg *protocol.FetchPRDetail
 	// Return updated PRs
 	updatedPRs := d.store.ListPRsByRepo(msg.Repo)
 	resp := protocol.Response{
-		OK:  true,
-		PRs: updatedPRs,
+		Ok:  true,
+		Prs: protocol.PRsToValues(updatedPRs),
 	}
 	json.NewEncoder(conn).Encode(resp)
 }
 
 func (d *Daemon) sendOK(conn net.Conn) {
-	resp := protocol.Response{OK: true}
+	resp := protocol.Response{Ok: true}
 	json.NewEncoder(conn).Encode(resp)
 }
 
 func (d *Daemon) sendError(conn net.Conn, errMsg string) {
-	resp := protocol.Response{OK: false, Error: errMsg}
+	resp := protocol.Response{Ok: false, Error: protocol.Ptr(errMsg)}
 	json.NewEncoder(conn).Encode(resp)
 }
 
@@ -691,13 +692,13 @@ func (d *Daemon) doPRPoll() {
 	allPRs := d.store.ListPRs("")
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventPRsUpdated,
-		PRs:   allPRs,
+		Prs:   protocol.PRsToValues(allPRs),
 	})
 
 	// Count waiting (non-muted) PRs for logging
 	waiting := 0
 	for _, pr := range allPRs {
-		if pr.State == protocol.StateWaiting && !pr.Muted {
+		if pr.State == protocol.PRStateWaiting && !pr.Muted {
 			waiting++
 		}
 	}
@@ -733,7 +734,8 @@ func (d *Daemon) doDetailRefresh() {
 		}
 
 		// Check if SHA changed (new commits) - triggers hot state
-		if pr.HeadSHA != "" && details.HeadSHA != pr.HeadSHA {
+		prHeadSHA := protocol.Deref(pr.HeadSHA)
+		if prHeadSHA != "" && details.HeadSHA != prHeadSHA {
 			d.store.SetPRHot(pr.ID)
 		}
 
@@ -790,37 +792,37 @@ func (d *Daemon) fetchAllPRDetails() {
 }
 
 func (d *Daemon) handleInjectTestPR(conn net.Conn, msg *protocol.InjectTestPRMessage) {
-	if msg.PR == nil {
-		d.sendError(conn, "PR cannot be nil")
+	if msg.PR.ID == "" {
+		d.sendError(conn, "PR ID cannot be empty")
 		return
 	}
 
 	// Add PR directly to store
-	d.store.AddPR(msg.PR)
+	d.store.AddPR(&msg.PR)
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
 	allPRs := d.store.ListPRs("")
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventPRsUpdated,
-		PRs:   allPRs,
+		Prs:   protocol.PRsToValues(allPRs),
 	})
 }
 
 func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTestSessionMessage) {
-	if msg.Session == nil {
-		d.sendError(conn, "Session cannot be nil")
+	if msg.Session.ID == "" {
+		d.sendError(conn, "Session ID cannot be empty")
 		return
 	}
 
 	// Add session directly to store
-	d.store.Add(msg.Session)
+	d.store.Add(&msg.Session)
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:   protocol.EventSessionRegistered,
-		Session: msg.Session,
+		Session: &msg.Session,
 	})
 }
 
@@ -849,7 +851,7 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 	allPRs := d.store.ListPRs("")
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventPRsUpdated,
-		PRs:   allPRs,
+		Prs:   protocol.PRsToValues(allPRs),
 	})
 
 	d.logf("PR refresh: %d PRs fetched", len(prs))
@@ -919,7 +921,7 @@ func (d *Daemon) checkAllBranches() {
 			continue
 		}
 
-		if info.Branch != session.Branch || info.IsWorktree != session.IsWorktree {
+		if info.Branch != protocol.Deref(session.Branch) || info.IsWorktree != protocol.Deref(session.IsWorktree) {
 			d.store.UpdateBranch(session.ID, info.Branch, info.IsWorktree, info.MainRepo)
 			changed = true
 			d.logf("Branch changed: session=%s branch=%s isWorktree=%v", session.ID, info.Branch, info.IsWorktree)
@@ -931,7 +933,7 @@ func (d *Daemon) checkAllBranches() {
 		sessions = d.store.List("")
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:    protocol.EventSessionsUpdated,
-			Sessions: sessions,
+			Sessions: protocol.SessionsToValues(sessions),
 		})
 	}
 }

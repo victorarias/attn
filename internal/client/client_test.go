@@ -41,12 +41,12 @@ func TestClient_Register(t *testing.T) {
 			return
 		}
 		reg := msg.(*protocol.RegisterMessage)
-		if reg.Label != "test-session" {
+		if protocol.Deref(reg.Label) != "test-session" {
 			return
 		}
 
 		// Send response
-		resp := protocol.Response{OK: true}
+		resp := protocol.Response{Ok: true}
 		json.NewEncoder(conn).Encode(resp)
 	}()
 
@@ -83,16 +83,16 @@ func TestClient_UpdateState(t *testing.T) {
 			return
 		}
 		state := msg.(*protocol.StateMessage)
-		if state.State != protocol.StateWaiting {
+		if state.State != protocol.StateWaitingInput {
 			return
 		}
 
-		resp := protocol.Response{OK: true}
+		resp := protocol.Response{Ok: true}
 		json.NewEncoder(conn).Encode(resp)
 	}()
 
 	c := New(sockPath)
-	err = c.UpdateState("sess-123", protocol.StateWaiting)
+	err = c.UpdateState("sess-123", protocol.StateWaitingInput)
 	if err != nil {
 		t.Fatalf("UpdateState error: %v", err)
 	}
@@ -119,17 +119,17 @@ func TestClient_Query(t *testing.T) {
 		conn.Read(buf)
 
 		resp := protocol.Response{
-			OK: true,
-			Sessions: []*protocol.Session{
-				{ID: "1", Label: "one", State: protocol.StateWaiting},
-				{ID: "2", Label: "two", State: protocol.StateWaiting},
+			Ok: true,
+			Sessions: []protocol.Session{
+				{ID: "1", Label: "one", State: protocol.SessionStateWaitingInput},
+				{ID: "2", Label: "two", State: protocol.SessionStateWaitingInput},
 			},
 		}
 		json.NewEncoder(conn).Encode(resp)
 	}()
 
 	c := New(sockPath)
-	sessions, err := c.Query(protocol.StateWaiting)
+	sessions, err := c.Query(protocol.StateWaitingInput)
 	if err != nil {
 		t.Fatalf("Query error: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestClient_Unregister(t *testing.T) {
 			return
 		}
 
-		resp := protocol.Response{OK: true}
+		resp := protocol.Response{Ok: true}
 		json.NewEncoder(conn).Encode(resp)
 	}()
 
@@ -230,7 +230,7 @@ func TestClient_UpdateTodos(t *testing.T) {
 			return
 		}
 
-		resp := protocol.Response{OK: true}
+		resp := protocol.Response{Ok: true}
 		json.NewEncoder(conn).Encode(resp)
 	}()
 
@@ -270,7 +270,7 @@ func TestClient_Heartbeat(t *testing.T) {
 			return
 		}
 
-		resp := protocol.Response{OK: true}
+		resp := protocol.Response{Ok: true}
 		json.NewEncoder(conn).Encode(resp)
 	}()
 

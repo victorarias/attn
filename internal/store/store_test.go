@@ -14,9 +14,9 @@ func TestStore_AddAndGet(t *testing.T) {
 		ID:         "abc123",
 		Label:      "drumstick",
 		Directory:  "/home/user/project",
-		State:      protocol.StateWorking,
-		StateSince: time.Now(),
-		LastSeen:   time.Now(),
+		State:      protocol.SessionStateWorking,
+		StateSince: protocol.TimestampNow().String(),
+		LastSeen:   protocol.TimestampNow().String(),
 	}
 
 	s.Add(session)
@@ -49,21 +49,21 @@ func TestStore_Remove(t *testing.T) {
 func TestStore_List(t *testing.T) {
 	s := New()
 
-	s.Add(&protocol.Session{ID: "1", Label: "one", State: protocol.StateWorking})
-	s.Add(&protocol.Session{ID: "2", Label: "two", State: protocol.StateWaiting})
-	s.Add(&protocol.Session{ID: "3", Label: "three", State: protocol.StateWaiting})
+	s.Add(&protocol.Session{ID: "1", Label: "one", State: protocol.SessionStateWorking})
+	s.Add(&protocol.Session{ID: "2", Label: "two", State: protocol.SessionStateWaitingInput})
+	s.Add(&protocol.Session{ID: "3", Label: "three", State: protocol.SessionStateWaitingInput})
 
 	all := s.List("")
 	if len(all) != 3 {
 		t.Errorf("List() returned %d sessions, want 3", len(all))
 	}
 
-	waiting := s.List(protocol.StateWaiting)
+	waiting := s.List(string(protocol.SessionStateWaitingInput))
 	if len(waiting) != 2 {
-		t.Errorf("List(waiting) returned %d sessions, want 2", len(waiting))
+		t.Errorf("List(waiting_input) returned %d sessions, want 2", len(waiting))
 	}
 
-	working := s.List(protocol.StateWorking)
+	working := s.List(string(protocol.SessionStateWorking))
 	if len(working) != 1 {
 		t.Errorf("List(working) returned %d sessions, want 1", len(working))
 	}
@@ -74,19 +74,19 @@ func TestStore_UpdateState(t *testing.T) {
 
 	s.Add(&protocol.Session{
 		ID:         "abc123",
-		State:      protocol.StateWorking,
-		StateSince: time.Now().Add(-5 * time.Minute),
+		State:      protocol.SessionStateWorking,
+		StateSince: protocol.NewTimestamp(time.Now().Add(-5 * time.Minute)).String(),
 	})
 
-	before := s.Get("abc123").StateSince
+	before := protocol.Timestamp(s.Get("abc123").StateSince).Time()
 
-	s.UpdateState("abc123", protocol.StateWaiting)
+	s.UpdateState("abc123", string(protocol.SessionStateWaitingInput))
 
 	got := s.Get("abc123")
-	if got.State != protocol.StateWaiting {
-		t.Errorf("State = %q, want %q", got.State, protocol.StateWaiting)
+	if got.State != protocol.SessionStateWaitingInput {
+		t.Errorf("State = %q, want %q", got.State, protocol.SessionStateWaitingInput)
 	}
-	if !got.StateSince.After(before) {
+	if !protocol.Timestamp(got.StateSince).Time().After(before) {
 		t.Error("StateSince should be updated")
 	}
 }
@@ -118,16 +118,16 @@ func TestStore_Touch(t *testing.T) {
 	now := time.Now()
 	s.Add(&protocol.Session{
 		ID:       "abc123",
-		LastSeen: now.Add(-5 * time.Minute),
+		LastSeen: protocol.NewTimestamp(now.Add(-5 * time.Minute)).String(),
 	})
 
-	before := s.Get("abc123").LastSeen
+	before := protocol.Timestamp(s.Get("abc123").LastSeen).Time()
 
 	time.Sleep(10 * time.Millisecond) // Ensure time passes
 	s.Touch("abc123")
 
 	got := s.Get("abc123")
-	if !got.LastSeen.After(before) {
+	if !protocol.Timestamp(got.LastSeen).Time().After(before) {
 		t.Error("LastSeen should be updated after Touch")
 	}
 }
@@ -164,7 +164,7 @@ func TestStore_SetAndListPRs(t *testing.T) {
 	s := New()
 
 	prs := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.StateWaiting, Muted: false},
+		{ID: "owner/repo#1", State: protocol.PRStateWaiting, Muted: false},
 		{ID: "owner/repo#2", State: protocol.StateWorking, Muted: false},
 	}
 
@@ -175,7 +175,7 @@ func TestStore_SetAndListPRs(t *testing.T) {
 		t.Errorf("ListPRs('') returned %d PRs, want 2", len(all))
 	}
 
-	waiting := s.ListPRs(protocol.StateWaiting)
+	waiting := s.ListPRs(protocol.PRStateWaiting)
 	if len(waiting) != 1 {
 		t.Errorf("ListPRs(waiting) returned %d PRs, want 1", len(waiting))
 	}
@@ -186,7 +186,7 @@ func TestStore_SetPRs_PreservesMuted(t *testing.T) {
 
 	// Initial PRs
 	prs := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.StateWaiting, Muted: false},
+		{ID: "owner/repo#1", State: protocol.PRStateWaiting, Muted: false},
 	}
 	s.SetPRs(prs)
 
@@ -211,7 +211,7 @@ func TestStore_SetPRs_PreservesApprovedByMe(t *testing.T) {
 
 	// Initial PR
 	prs := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.StateWaiting},
+		{ID: "owner/repo#1", State: protocol.PRStateWaiting},
 	}
 	s.SetPRs(prs)
 
@@ -226,7 +226,7 @@ func TestStore_SetPRs_PreservesApprovedByMe(t *testing.T) {
 
 	// Set PRs again (simulating poll after approval action)
 	prs2 := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.StateWaiting}, // ApprovedByMe not set in incoming data
+		{ID: "owner/repo#1", State: protocol.PRStateWaiting}, // ApprovedByMe not set in incoming data
 	}
 	s.SetPRs(prs2)
 
@@ -242,7 +242,7 @@ func TestStore_SetPRs_PreservesDetailFields(t *testing.T) {
 
 	// Initial PR
 	prs := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.StateWaiting},
+		{ID: "owner/repo#1", State: protocol.PRStateWaiting},
 	}
 	s.SetPRs(prs)
 
@@ -252,31 +252,31 @@ func TestStore_SetPRs_PreservesDetailFields(t *testing.T) {
 
 	// Verify details are set
 	pr := s.GetPR("owner/repo#1")
-	if pr.CIStatus != "success" {
-		t.Fatalf("CIStatus should be 'success', got '%s'", pr.CIStatus)
+	if protocol.Deref(pr.CIStatus) != "success" {
+		t.Fatalf("CIStatus should be 'success', got '%s'", protocol.Deref(pr.CIStatus))
 	}
 
 	// Set PRs again (simulating poll after an action like approve)
 	// The incoming PR has a NEWER LastUpdated than DetailsFetchedAt
 	// This is what happens in real scenario - GitHub returns updated timestamp
 	prs2 := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.StateWorking, LastUpdated: time.Now().Add(time.Hour)}, // No detail fields, but newer timestamp
+		{ID: "owner/repo#1", State: protocol.StateWorking, LastUpdated: protocol.NewTimestamp(time.Now().Add(time.Hour)).String()}, // No detail fields, but newer timestamp
 	}
 	s.SetPRs(prs2)
 
 	// Details should be preserved
 	pr = s.GetPR("owner/repo#1")
-	if pr.CIStatus != "success" {
-		t.Errorf("CIStatus should still be 'success' after SetPRs, got '%s'", pr.CIStatus)
+	if protocol.Deref(pr.CIStatus) != "success" {
+		t.Errorf("CIStatus should still be 'success' after SetPRs, got '%s'", protocol.Deref(pr.CIStatus))
 	}
-	if pr.ReviewStatus != "approved" {
-		t.Errorf("ReviewStatus should still be 'approved' after SetPRs, got '%s'", pr.ReviewStatus)
+	if protocol.Deref(pr.ReviewStatus) != "approved" {
+		t.Errorf("ReviewStatus should still be 'approved' after SetPRs, got '%s'", protocol.Deref(pr.ReviewStatus))
 	}
-	if pr.MergeableState != "clean" {
-		t.Errorf("MergeableState should still be 'clean' after SetPRs, got '%s'", pr.MergeableState)
+	if protocol.Deref(pr.MergeableState) != "clean" {
+		t.Errorf("MergeableState should still be 'clean' after SetPRs, got '%s'", protocol.Deref(pr.MergeableState))
 	}
-	if pr.HeadSHA != "abc123" {
-		t.Errorf("HeadSHA should still be 'abc123' after SetPRs, got '%s'", pr.HeadSHA)
+	if protocol.Deref(pr.HeadSHA) != "abc123" {
+		t.Errorf("HeadSHA should still be 'abc123' after SetPRs, got '%s'", protocol.Deref(pr.HeadSHA))
 	}
 }
 
@@ -284,7 +284,7 @@ func TestStore_ToggleMutePR(t *testing.T) {
 	s := New()
 
 	prs := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.StateWaiting, Muted: false},
+		{ID: "owner/repo#1", State: protocol.PRStateWaiting, Muted: false},
 	}
 	s.SetPRs(prs)
 

@@ -164,24 +164,24 @@ export enum InjectTestPRMessageCmd {
 }
 
 export interface PRElement {
-    approved_by_me?:        boolean;
+    approved_by_me:         boolean;
     ci_status?:             string;
     comment_count?:         number;
-    details_fetched?:       boolean;
+    details_fetched:        boolean;
     details_fetched_at?:    string;
-    has_new_changes?:       boolean;
+    has_new_changes:        boolean;
     head_branch?:           string;
     head_sha?:              string;
     heat_state?:            HeatState;
     id:                     string;
     last_heat_activity_at?: string;
-    last_polled?:           string;
-    last_updated?:          string;
+    last_polled:            string;
+    last_updated:           string;
     mergeable?:             boolean;
     mergeable_state?:       string;
-    muted?:                 boolean;
+    muted:                  boolean;
     number:                 number;
-    reason?:                string;
+    reason:                 string;
     repo:                   string;
     review_status?:         string;
     role:                   PRRole;
@@ -213,18 +213,18 @@ export enum InjectTestSessionMessageCmd {
 }
 
 export interface SessionElement {
-    branch?:           string;
-    directory:         string;
-    id:                string;
-    is_worktree?:      boolean;
-    label:             string;
-    last_seen?:        string;
-    main_repo?:        string;
-    muted?:            boolean;
-    state:             SessionState;
-    state_since?:      string;
-    state_updated_at?: string;
-    todos?:            string[];
+    branch?:          string;
+    directory:        string;
+    id:               string;
+    is_worktree?:     boolean;
+    label:            string;
+    last_seen:        string;
+    main_repo?:       string;
+    muted:            boolean;
+    state:            SessionState;
+    state_since:      string;
+    state_updated_at: string;
+    todos?:           string[];
     [property: string]: any;
 }
 
@@ -287,24 +287,24 @@ export enum MuteRepoMessageCmd {
 }
 
 export interface PR {
-    approved_by_me?:        boolean;
+    approved_by_me:         boolean;
     ci_status?:             string;
     comment_count?:         number;
-    details_fetched?:       boolean;
+    details_fetched:        boolean;
     details_fetched_at?:    string;
-    has_new_changes?:       boolean;
+    has_new_changes:        boolean;
     head_branch?:           string;
     head_sha?:              string;
     heat_state?:            HeatState;
     id:                     string;
     last_heat_activity_at?: string;
-    last_polled?:           string;
-    last_updated?:          string;
+    last_polled:            string;
+    last_updated:           string;
     mergeable?:             boolean;
     mergeable_state?:       string;
-    muted?:                 boolean;
+    muted:                  boolean;
     number:                 number;
-    reason?:                string;
+    reason:                 string;
     repo:                   string;
     review_status?:         string;
     role:                   PRRole;
@@ -412,9 +412,9 @@ export enum RegisterMessageCmd {
 }
 
 export interface RepoState {
-    collapsed?: boolean;
-    muted?:     boolean;
-    repo:       string;
+    collapsed: boolean;
+    muted:     boolean;
+    repo:      string;
     [property: string]: any;
 }
 
@@ -428,25 +428,25 @@ export interface Response {
 }
 
 export interface RepoElement {
-    collapsed?: boolean;
-    muted?:     boolean;
-    repo:       string;
+    collapsed: boolean;
+    muted:     boolean;
+    repo:      string;
     [property: string]: any;
 }
 
 export interface Session {
-    branch?:           string;
-    directory:         string;
-    id:                string;
-    is_worktree?:      boolean;
-    label:             string;
-    last_seen?:        string;
-    main_repo?:        string;
-    muted?:            boolean;
-    state:             SessionState;
-    state_since?:      string;
-    state_updated_at?: string;
-    todos?:            string[];
+    branch?:          string;
+    directory:        string;
+    id:               string;
+    is_worktree?:     boolean;
+    label:            string;
+    last_seen:        string;
+    main_repo?:       string;
+    muted:            boolean;
+    state:            SessionState;
+    state_since:      string;
+    state_updated_at: string;
+    todos?:           string[];
     [property: string]: any;
 }
 
@@ -1082,24 +1082,24 @@ const typeMap: any = {
         { json: "pr", js: "pr", typ: r("PRElement") },
     ], "any"),
     "PRElement": o([
-        { json: "approved_by_me", js: "approved_by_me", typ: u(undefined, true) },
+        { json: "approved_by_me", js: "approved_by_me", typ: true },
         { json: "ci_status", js: "ci_status", typ: u(undefined, "") },
         { json: "comment_count", js: "comment_count", typ: u(undefined, 0) },
-        { json: "details_fetched", js: "details_fetched", typ: u(undefined, true) },
+        { json: "details_fetched", js: "details_fetched", typ: true },
         { json: "details_fetched_at", js: "details_fetched_at", typ: u(undefined, "") },
-        { json: "has_new_changes", js: "has_new_changes", typ: u(undefined, true) },
+        { json: "has_new_changes", js: "has_new_changes", typ: true },
         { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
         { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
         { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
         { json: "id", js: "id", typ: "" },
         { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
-        { json: "last_polled", js: "last_polled", typ: u(undefined, "") },
-        { json: "last_updated", js: "last_updated", typ: u(undefined, "") },
+        { json: "last_polled", js: "last_polled", typ: "" },
+        { json: "last_updated", js: "last_updated", typ: "" },
         { json: "mergeable", js: "mergeable", typ: u(undefined, true) },
         { json: "mergeable_state", js: "mergeable_state", typ: u(undefined, "") },
-        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "muted", js: "muted", typ: true },
         { json: "number", js: "number", typ: 0 },
-        { json: "reason", js: "reason", typ: u(undefined, "") },
+        { json: "reason", js: "reason", typ: "" },
         { json: "repo", js: "repo", typ: "" },
         { json: "review_status", js: "review_status", typ: u(undefined, "") },
         { json: "role", js: "role", typ: r("PRRole") },
@@ -1117,12 +1117,12 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
         { json: "label", js: "label", typ: "" },
-        { json: "last_seen", js: "last_seen", typ: u(undefined, "") },
+        { json: "last_seen", js: "last_seen", typ: "" },
         { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
-        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "muted", js: "muted", typ: true },
         { json: "state", js: "state", typ: r("SessionState") },
-        { json: "state_since", js: "state_since", typ: u(undefined, "") },
-        { json: "state_updated_at", js: "state_updated_at", typ: u(undefined, "") },
+        { json: "state_since", js: "state_since", typ: "" },
+        { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
     ], "any"),
     "ListWorktreesMessage": o([
@@ -1148,24 +1148,24 @@ const typeMap: any = {
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
     "PR": o([
-        { json: "approved_by_me", js: "approved_by_me", typ: u(undefined, true) },
+        { json: "approved_by_me", js: "approved_by_me", typ: true },
         { json: "ci_status", js: "ci_status", typ: u(undefined, "") },
         { json: "comment_count", js: "comment_count", typ: u(undefined, 0) },
-        { json: "details_fetched", js: "details_fetched", typ: u(undefined, true) },
+        { json: "details_fetched", js: "details_fetched", typ: true },
         { json: "details_fetched_at", js: "details_fetched_at", typ: u(undefined, "") },
-        { json: "has_new_changes", js: "has_new_changes", typ: u(undefined, true) },
+        { json: "has_new_changes", js: "has_new_changes", typ: true },
         { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
         { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
         { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
         { json: "id", js: "id", typ: "" },
         { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
-        { json: "last_polled", js: "last_polled", typ: u(undefined, "") },
-        { json: "last_updated", js: "last_updated", typ: u(undefined, "") },
+        { json: "last_polled", js: "last_polled", typ: "" },
+        { json: "last_updated", js: "last_updated", typ: "" },
         { json: "mergeable", js: "mergeable", typ: u(undefined, true) },
         { json: "mergeable_state", js: "mergeable_state", typ: u(undefined, "") },
-        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "muted", js: "muted", typ: true },
         { json: "number", js: "number", typ: 0 },
-        { json: "reason", js: "reason", typ: u(undefined, "") },
+        { json: "reason", js: "reason", typ: "" },
         { json: "repo", js: "repo", typ: "" },
         { json: "review_status", js: "review_status", typ: u(undefined, "") },
         { json: "role", js: "role", typ: r("PRRole") },
@@ -1217,8 +1217,8 @@ const typeMap: any = {
         { json: "label", js: "label", typ: u(undefined, "") },
     ], "any"),
     "RepoState": o([
-        { json: "collapsed", js: "collapsed", typ: u(undefined, true) },
-        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "collapsed", js: "collapsed", typ: true },
+        { json: "muted", js: "muted", typ: true },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
     "Response": o([
@@ -1229,8 +1229,8 @@ const typeMap: any = {
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
     ], "any"),
     "RepoElement": o([
-        { json: "collapsed", js: "collapsed", typ: u(undefined, true) },
-        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "collapsed", js: "collapsed", typ: true },
+        { json: "muted", js: "muted", typ: true },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
     "Session": o([
@@ -1239,12 +1239,12 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
         { json: "label", js: "label", typ: "" },
-        { json: "last_seen", js: "last_seen", typ: u(undefined, "") },
+        { json: "last_seen", js: "last_seen", typ: "" },
         { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
-        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "muted", js: "muted", typ: true },
         { json: "state", js: "state", typ: r("SessionState") },
-        { json: "state_since", js: "state_since", typ: u(undefined, "") },
-        { json: "state_updated_at", js: "state_updated_at", typ: u(undefined, "") },
+        { json: "state_since", js: "state_since", typ: "" },
+        { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
     ], "any"),
     "SetSettingMessage": o([

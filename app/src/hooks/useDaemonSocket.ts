@@ -1,65 +1,28 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import type { DaemonSessionState } from '../types/sessionState';
+import type {
+  Session as GeneratedSession,
+  PR as GeneratedPR,
+  Worktree as GeneratedWorktree,
+  RepoState as GeneratedRepoState,
+  WebSocketEvent as GeneratedWebSocketEvent,
+  SessionState,
+  PRRole,
+  HeatState,
+} from '../types/generated';
 
-export interface DaemonSession {
-  id: string;
-  label: string;
-  directory: string;
-  branch?: string;
-  is_worktree?: boolean;
-  main_repo?: string;
-  state: DaemonSessionState;
-  state_since: string;
-  todos: string[] | null;
-  last_seen: string;
-  muted: boolean;
-}
-
-export interface DaemonPR {
-  id: string;
-  repo: string;
-  number: number;
-  title: string;
-  url: string;
-  role: 'author' | 'reviewer';
-  state: 'working' | 'waiting';
-  reason: string;
-  last_updated: string;
-  muted: boolean;
-  // Interaction tracking (Plan 2)
-  head_sha?: string;
-  head_branch?: string;
-  comment_count?: number;
-  approved_by_me?: boolean;
-  has_new_changes?: boolean;
-  ci_status?: string;
-  review_status?: string;
-}
-
-export interface DaemonWorktree {
-  path: string;
-  branch: string;
-  main_repo: string;
-  created_at: string;
-}
-
-export interface RepoState {
-  repo: string;
-  muted: boolean;
-  collapsed: boolean;
-}
-
+// Re-export types from generated for consumers
+// Use type aliases to maintain backward compatibility
+export type DaemonSession = GeneratedSession;
+export type DaemonPR = GeneratedPR;
+export type DaemonWorktree = GeneratedWorktree;
+export type RepoState = GeneratedRepoState;
 export type DaemonSettings = Record<string, string>;
 
-interface WebSocketEvent {
-  event: string;
-  protocol_version?: string;
-  session?: DaemonSession;
-  sessions?: DaemonSession[];
-  prs?: DaemonPR[];
-  repos?: RepoState[];
-  worktrees?: DaemonWorktree[];
-  settings?: DaemonSettings;
+// Re-export enums and useful types
+export { SessionState, PRRole, HeatState };
+
+// Extended WebSocketEvent with action result fields (generated allows extra properties)
+type WebSocketEvent = GeneratedWebSocketEvent & {
   // PR action result fields
   action?: string;
   repo?: string;
@@ -68,10 +31,7 @@ interface WebSocketEvent {
   error?: string;
   // Worktree action result fields
   path?: string;
-  // Rate limiting fields
-  rate_limit_resource?: string;
-  rate_limit_reset_at?: string;
-}
+};
 
 export interface RateLimitState {
   resource: string;

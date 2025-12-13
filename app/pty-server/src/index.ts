@@ -3,6 +3,16 @@ import * as os from 'os';
 import * as path from 'path';
 import * as pty from 'node-pty';
 import * as fs from 'fs';
+import {
+  PTY_COMMANDS,
+  PTY_EVENTS,
+  PtyCommand,
+  PtyDataEvent,
+  PtyExitEvent,
+  PtySpawnedEvent,
+  PtyErrorEvent,
+  PtyEvent,
+} from './pty-protocol.js';
 
 const SOCKET_PATH = path.join(os.homedir(), '.attn-pty.sock');
 
@@ -14,7 +24,7 @@ interface Session {
 const sessions = new Map<string, Session>();
 
 // Frame protocol: [4-byte length][JSON payload]
-function writeFrame(socket: net.Socket, data: object): void {
+function writeFrame(socket: net.Socket, data: PtyEvent): void {
   const json = JSON.stringify(data);
   const buf = Buffer.alloc(4 + Buffer.byteLength(json));
   buf.writeUInt32BE(Buffer.byteLength(json), 0);
@@ -22,24 +32,33 @@ function writeFrame(socket: net.Socket, data: object): void {
   socket.write(buf);
 }
 
-function handleMessage(socket: net.Socket, socketId: symbol, msg: any): void {
+function sendError(socket: net.Socket, cmd: string, error: string): void {
+  const event: PtyErrorEvent = {
+    event: PTY_EVENTS.ERROR,
+    cmd,
+    error,
+  };
+  writeFrame(socket, event);
+}
+
+function handleMessage(socket: net.Socket, socketId: symbol, msg: PtyCommand): void {
   switch (msg.cmd) {
-    case 'spawn': {
+    case PTY_COMMANDS.SPAWN: {
       // Validate required fields
       if (!msg.id || typeof msg.id !== 'string') {
-        console.error('[pty-server] spawn: missing or invalid id');
+        sendError(socket, PTY_COMMANDS.SPAWN, 'missing or invalid id');
         return;
       }
       if (msg.cols !== undefined && (typeof msg.cols !== 'number' || msg.cols <= 0)) {
-        console.error('[pty-server] spawn: invalid cols');
+        sendError(socket, PTY_COMMANDS.SPAWN, 'invalid cols');
         return;
       }
       if (msg.rows !== undefined && (typeof msg.rows !== 'number' || msg.rows <= 0)) {
-        console.error('[pty-server] spawn: invalid rows');
+        sendError(socket, PTY_COMMANDS.SPAWN, 'invalid rows');
         return;
       }
       if (msg.cwd !== undefined && typeof msg.cwd !== 'string') {
-        console.error('[pty-server] spawn: invalid cwd');
+        sendError(socket, PTY_COMMANDS.SPAWN, 'invalid cwd');
         return;
       }
 
@@ -57,30 +76,41 @@ function handleMessage(socket: net.Socket, socketId: symbol, msg: any): void {
       sessions.set(msg.id, { pty: ptyProcess, socketId });
 
       ptyProcess.onData((data) => {
-        writeFrame(socket, {
-          event: 'data',
+        const event: PtyDataEvent = {
+          event: PTY_EVENTS.DATA,
           id: msg.id,
           data: Buffer.from(data).toString('base64'),
-        });
+        };
+        writeFrame(socket, event);
       });
 
       ptyProcess.onExit(({ exitCode }) => {
-        writeFrame(socket, { event: 'exit', id: msg.id, code: exitCode });
+        const event: PtyExitEvent = {
+          event: PTY_EVENTS.EXIT,
+          id: msg.id,
+          code: exitCode,
+        };
+        writeFrame(socket, event);
         sessions.delete(msg.id);
       });
 
-      writeFrame(socket, { event: 'spawned', id: msg.id, pid: ptyProcess.pid });
+      const spawnedEvent: PtySpawnedEvent = {
+        event: PTY_EVENTS.SPAWNED,
+        id: msg.id,
+        pid: ptyProcess.pid,
+      };
+      writeFrame(socket, spawnedEvent);
       break;
     }
 
-    case 'write': {
+    case PTY_COMMANDS.WRITE: {
       // Validate required fields
       if (!msg.id || typeof msg.id !== 'string') {
-        console.error('[pty-server] write: missing or invalid id');
+        sendError(socket, PTY_COMMANDS.WRITE, 'missing or invalid id');
         return;
       }
       if (!msg.data || typeof msg.data !== 'string') {
-        console.error('[pty-server] write: missing or invalid data');
+        sendError(socket, PTY_COMMANDS.WRITE, 'missing or invalid data');
         return;
       }
 
@@ -91,18 +121,18 @@ function handleMessage(socket: net.Socket, socketId: symbol, msg: any): void {
       break;
     }
 
-    case 'resize': {
+    case PTY_COMMANDS.RESIZE: {
       // Validate required fields
       if (!msg.id || typeof msg.id !== 'string') {
-        console.error('[pty-server] resize: missing or invalid id');
+        sendError(socket, PTY_COMMANDS.RESIZE, 'missing or invalid id');
         return;
       }
       if (typeof msg.cols !== 'number' || msg.cols <= 0) {
-        console.error('[pty-server] resize: missing or invalid cols');
+        sendError(socket, PTY_COMMANDS.RESIZE, 'missing or invalid cols');
         return;
       }
       if (typeof msg.rows !== 'number' || msg.rows <= 0) {
-        console.error('[pty-server] resize: missing or invalid rows');
+        sendError(socket, PTY_COMMANDS.RESIZE, 'missing or invalid rows');
         return;
       }
 
@@ -113,10 +143,10 @@ function handleMessage(socket: net.Socket, socketId: symbol, msg: any): void {
       break;
     }
 
-    case 'kill': {
+    case PTY_COMMANDS.KILL: {
       // Validate required fields
       if (!msg.id || typeof msg.id !== 'string') {
-        console.error('[pty-server] kill: missing or invalid id');
+        sendError(socket, PTY_COMMANDS.KILL, 'missing or invalid id');
         return;
       }
 
@@ -149,7 +179,7 @@ const server = net.createServer((socket) => {
       buffer = buffer.subarray(4 + len);
 
       try {
-        const msg = JSON.parse(json);
+        const msg = JSON.parse(json) as PtyCommand;
         handleMessage(socket, socketId, msg);
       } catch (e) {
         console.error('[pty-server] Parse error:', e);

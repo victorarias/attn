@@ -22,7 +22,7 @@ func (s *Store) AddWorktree(wt *Worktree) {
 		return
 	}
 
-	_, _ = s.db.Exec(`
+	s.execLog(`
 		INSERT OR REPLACE INTO worktrees (path, branch, main_repo, created_at)
 		VALUES (?, ?, ?, ?)`,
 		wt.Path, wt.Branch, wt.MainRepo, wt.CreatedAt.Format(time.RFC3339),
@@ -63,7 +63,7 @@ func (s *Store) RemoveWorktree(path string) {
 		return
 	}
 
-	s.db.Exec("DELETE FROM worktrees WHERE path = ?", path)
+	s.execLog("DELETE FROM worktrees WHERE path = ?", path)
 }
 
 // ListWorktreesByRepo returns all worktrees for a main repo

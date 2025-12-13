@@ -11,24 +11,24 @@ import (
 const maxLabels = 3
 
 // Format formats sessions for tmux status bar (backwards compatible)
-func Format(sessions []*protocol.Session) string {
+func Format(sessions []protocol.Session) string {
 	return FormatWithPRs(sessions, nil)
 }
 
 // FormatWithPRs formats sessions and PRs for status bar
-func FormatWithPRs(sessions []*protocol.Session, prs []*protocol.PR) string {
+func FormatWithPRs(sessions []protocol.Session, prs []protocol.PR) string {
 	// Filter to waiting sessions (non-muted)
-	var waitingSessions []*protocol.Session
+	var waitingSessions []protocol.Session
 	for _, s := range sessions {
-		if s.State == protocol.StateWaiting && !s.Muted {
+		if s.State == protocol.SessionStateWaitingInput && !s.Muted {
 			waitingSessions = append(waitingSessions, s)
 		}
 	}
 
 	// Filter to waiting PRs (non-muted)
-	var waitingPRs []*protocol.PR
+	var waitingPRs []protocol.PR
 	for _, pr := range prs {
-		if pr.State == protocol.StateWaiting && !pr.Muted {
+		if pr.State == protocol.PRStateWaiting && !pr.Muted {
 			waitingPRs = append(waitingPRs, pr)
 		}
 	}
@@ -44,7 +44,9 @@ func FormatWithPRs(sessions []*protocol.Session, prs []*protocol.PR) string {
 	if len(waitingSessions) > 0 {
 		// Sort by StateSince (oldest first)
 		sort.Slice(waitingSessions, func(i, j int) bool {
-			return waitingSessions[i].StateSince.Before(waitingSessions[j].StateSince)
+			ti := protocol.Timestamp(waitingSessions[i].StateSince).Time()
+			tj := protocol.Timestamp(waitingSessions[j].StateSince).Time()
+			return ti.Before(tj)
 		})
 
 		// Format labels (max 3)
@@ -90,7 +92,7 @@ func FormatWithPRs(sessions []*protocol.Session, prs []*protocol.PR) string {
 }
 
 // FormatWithPRsAndRepos formats status with repo-aware PR display
-func FormatWithPRsAndRepos(sessions []*protocol.Session, prs []*protocol.PR, repos []*protocol.RepoState) string {
+func FormatWithPRsAndRepos(sessions []protocol.Session, prs []protocol.PR, repos []protocol.RepoState) string {
 	// Build muted repos set
 	mutedRepos := make(map[string]bool)
 	for _, r := range repos {
@@ -102,7 +104,7 @@ func FormatWithPRsAndRepos(sessions []*protocol.Session, prs []*protocol.PR, rep
 	// Count sessions
 	sessionWaiting := 0
 	for _, s := range sessions {
-		if s.State == protocol.StateWaiting && !s.Muted {
+		if s.State == protocol.SessionStateWaitingInput && !s.Muted {
 			sessionWaiting++
 		}
 	}
@@ -114,7 +116,7 @@ func FormatWithPRsAndRepos(sessions []*protocol.Session, prs []*protocol.PR, rep
 		if pr.Muted || mutedRepos[pr.Repo] {
 			continue
 		}
-		if pr.State == protocol.StateWaiting {
+		if pr.State == protocol.PRStateWaiting {
 			prWaiting++
 			repoCount[pr.Repo]++
 		}

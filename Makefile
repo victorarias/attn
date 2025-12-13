@@ -29,13 +29,13 @@ clean:
 	rm -f $(BINARY_NAME)
 	rm -f $(INSTALL_DIR)/$(BINARY_NAME)
 
-# Type generation pipeline: TypeSpec -> JSON Schema -> quicktype -> Go/TypeScript
+# Type generation pipeline: TypeSpec -> JSON Schema -> go-jsonschema/quicktype
 generate-types:
 	cd internal/protocol/schema && pnpm exec tsp compile .
-	npx quicktype \
-		--src internal/protocol/schema/tsp-output/json-schema/*.json \
-		--src-lang schema --lang go --package protocol \
-		-o internal/protocol/generated.go
+	$(HOME)/go/bin/go-jsonschema -p protocol --only-models --tags json --resolve-extension json \
+		--capitalization ID --capitalization URL --capitalization SHA --capitalization PR --capitalization CI \
+		-o internal/protocol/generated.go \
+		internal/protocol/schema/tsp-output/json-schema/*.json
 	npx quicktype \
 		--src internal/protocol/schema/tsp-output/json-schema/*.json \
 		--src-lang schema --lang typescript \
