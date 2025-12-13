@@ -1,0 +1,1414 @@
+// To parse this data:
+//
+//   import { Convert, ApprovePRMessage, ClearSessionsMessage, CollapseRepoMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, GetSettingsMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoState, Response, Session, SessionState, SetSettingMessage, StateMessage, StopMessage, TodosMessage, UnregisterMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
+//
+//   const approvePRMessage = Convert.toApprovePRMessage(json);
+//   const clearSessionsMessage = Convert.toClearSessionsMessage(json);
+//   const collapseRepoMessage = Convert.toCollapseRepoMessage(json);
+//   const createWorktreeMessage = Convert.toCreateWorktreeMessage(json);
+//   const createWorktreeResultMessage = Convert.toCreateWorktreeResultMessage(json);
+//   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
+//   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
+//   const fetchPRDetailsMessage = Convert.toFetchPRDetailsMessage(json);
+//   const getSettingsMessage = Convert.toGetSettingsMessage(json);
+//   const heartbeatMessage = Convert.toHeartbeatMessage(json);
+//   const heatState = Convert.toHeatState(json);
+//   const injectTestPRMessage = Convert.toInjectTestPRMessage(json);
+//   const injectTestSessionMessage = Convert.toInjectTestSessionMessage(json);
+//   const listWorktreesMessage = Convert.toListWorktreesMessage(json);
+//   const mergePRMessage = Convert.toMergePRMessage(json);
+//   const muteMessage = Convert.toMuteMessage(json);
+//   const mutePRMessage = Convert.toMutePRMessage(json);
+//   const muteRepoMessage = Convert.toMuteRepoMessage(json);
+//   const pR = Convert.toPR(json);
+//   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
+//   const pRRole = Convert.toPRRole(json);
+//   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
+//   const queryMessage = Convert.toQueryMessage(json);
+//   const queryPRsMessage = Convert.toQueryPRsMessage(json);
+//   const queryReposMessage = Convert.toQueryReposMessage(json);
+//   const rateLimitedMessage = Convert.toRateLimitedMessage(json);
+//   const refreshPRsMessage = Convert.toRefreshPRsMessage(json);
+//   const refreshPRsResultMessage = Convert.toRefreshPRsResultMessage(json);
+//   const registerMessage = Convert.toRegisterMessage(json);
+//   const repoState = Convert.toRepoState(json);
+//   const response = Convert.toResponse(json);
+//   const session = Convert.toSession(json);
+//   const sessionState = Convert.toSessionState(json);
+//   const setSettingMessage = Convert.toSetSettingMessage(json);
+//   const stateMessage = Convert.toStateMessage(json);
+//   const stopMessage = Convert.toStopMessage(json);
+//   const todosMessage = Convert.toTodosMessage(json);
+//   const unregisterMessage = Convert.toUnregisterMessage(json);
+//   const webSocketEvent = Convert.toWebSocketEvent(json);
+//   const worktree = Convert.toWorktree(json);
+//   const worktreeCreatedEvent = Convert.toWorktreeCreatedEvent(json);
+//
+// These functions will throw an error if the JSON doesn't
+// match the expected interface, even if the JSON is valid.
+
+export interface ApprovePRMessage {
+    cmd:    ApprovePRMessageCmd;
+    number: number;
+    repo:   string;
+    [property: string]: any;
+}
+
+export enum ApprovePRMessageCmd {
+    ApprovePR = "approve_pr",
+}
+
+export interface ClearSessionsMessage {
+    cmd: ClearSessionsMessageCmd;
+    [property: string]: any;
+}
+
+export enum ClearSessionsMessageCmd {
+    ClearSessions = "clear_sessions",
+}
+
+export interface CollapseRepoMessage {
+    cmd:       CollapseRepoMessageCmd;
+    collapsed: boolean;
+    repo:      string;
+    [property: string]: any;
+}
+
+export enum CollapseRepoMessageCmd {
+    CollapseRepo = "collapse_repo",
+}
+
+export interface CreateWorktreeMessage {
+    branch:    string;
+    cmd:       CreateWorktreeMessageCmd;
+    main_repo: string;
+    path?:     string;
+    [property: string]: any;
+}
+
+export enum CreateWorktreeMessageCmd {
+    CreateWorktree = "create_worktree",
+}
+
+export interface CreateWorktreeResultMessage {
+    error?:  string;
+    event:   CreateWorktreeResultMessageEvent;
+    path?:   string;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum CreateWorktreeResultMessageEvent {
+    CreateWorktreeResult = "create_worktree_result",
+}
+
+export interface DeleteWorktreeMessage {
+    cmd:  DeleteWorktreeMessageCmd;
+    path: string;
+    [property: string]: any;
+}
+
+export enum DeleteWorktreeMessageCmd {
+    DeleteWorktree = "delete_worktree",
+}
+
+export interface DeleteWorktreeResultMessage {
+    error?:  string;
+    event:   DeleteWorktreeResultMessageEvent;
+    path:    string;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum DeleteWorktreeResultMessageEvent {
+    DeleteWorktreeResult = "delete_worktree_result",
+}
+
+export interface FetchPRDetailsMessage {
+    cmd:  FetchPRDetailsMessageCmd;
+    repo: string;
+    [property: string]: any;
+}
+
+export enum FetchPRDetailsMessageCmd {
+    FetchPRDetails = "fetch_pr_details",
+}
+
+export interface GetSettingsMessage {
+    cmd: GetSettingsMessageCmd;
+    [property: string]: any;
+}
+
+export enum GetSettingsMessageCmd {
+    GetSettings = "get_settings",
+}
+
+export interface HeartbeatMessage {
+    cmd: HeartbeatMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum HeartbeatMessageCmd {
+    Heartbeat = "heartbeat",
+}
+
+export interface InjectTestPRMessage {
+    cmd: InjectTestPRMessageCmd;
+    pr:  PRElement;
+    [property: string]: any;
+}
+
+export enum InjectTestPRMessageCmd {
+    InjectTestPR = "inject_test_pr",
+}
+
+export interface PRElement {
+    approved_by_me?:        boolean;
+    ci_status?:             string;
+    comment_count?:         number;
+    details_fetched?:       boolean;
+    details_fetched_at?:    string;
+    has_new_changes?:       boolean;
+    head_branch?:           string;
+    head_sha?:              string;
+    heat_state?:            HeatState;
+    id:                     string;
+    last_heat_activity_at?: string;
+    last_polled?:           string;
+    last_updated?:          string;
+    mergeable?:             boolean;
+    mergeable_state?:       string;
+    muted?:                 boolean;
+    number:                 number;
+    reason?:                string;
+    repo:                   string;
+    review_status?:         string;
+    role:                   PRRole;
+    state:                  string;
+    title:                  string;
+    url:                    string;
+    [property: string]: any;
+}
+
+export enum HeatState {
+    Cold = "cold",
+    Hot = "hot",
+    Warm = "warm",
+}
+
+export enum PRRole {
+    Author = "author",
+    Reviewer = "reviewer",
+}
+
+export interface InjectTestSessionMessage {
+    cmd:     InjectTestSessionMessageCmd;
+    session: SessionElement;
+    [property: string]: any;
+}
+
+export enum InjectTestSessionMessageCmd {
+    InjectTestSession = "inject_test_session",
+}
+
+export interface SessionElement {
+    branch?:           string;
+    directory:         string;
+    id:                string;
+    is_worktree?:      boolean;
+    label:             string;
+    last_seen?:        string;
+    main_repo?:        string;
+    muted?:            boolean;
+    state:             SessionState;
+    state_since?:      string;
+    state_updated_at?: string;
+    todos?:            string[];
+    [property: string]: any;
+}
+
+export enum SessionState {
+    Idle = "idle",
+    WaitingInput = "waiting_input",
+    Working = "working",
+}
+
+export interface ListWorktreesMessage {
+    cmd:       ListWorktreesMessageCmd;
+    main_repo: string;
+    [property: string]: any;
+}
+
+export enum ListWorktreesMessageCmd {
+    ListWorktrees = "list_worktrees",
+}
+
+export interface MergePRMessage {
+    cmd:    MergePRMessageCmd;
+    method: string;
+    number: number;
+    repo:   string;
+    [property: string]: any;
+}
+
+export enum MergePRMessageCmd {
+    MergePR = "merge_pr",
+}
+
+export interface MuteMessage {
+    cmd: MuteMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum MuteMessageCmd {
+    Mute = "mute",
+}
+
+export interface MutePRMessage {
+    cmd: MutePRMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum MutePRMessageCmd {
+    MutePR = "mute_pr",
+}
+
+export interface MuteRepoMessage {
+    cmd:  MuteRepoMessageCmd;
+    repo: string;
+    [property: string]: any;
+}
+
+export enum MuteRepoMessageCmd {
+    MuteRepo = "mute_repo",
+}
+
+export interface PR {
+    approved_by_me?:        boolean;
+    ci_status?:             string;
+    comment_count?:         number;
+    details_fetched?:       boolean;
+    details_fetched_at?:    string;
+    has_new_changes?:       boolean;
+    head_branch?:           string;
+    head_sha?:              string;
+    heat_state?:            HeatState;
+    id:                     string;
+    last_heat_activity_at?: string;
+    last_polled?:           string;
+    last_updated?:          string;
+    mergeable?:             boolean;
+    mergeable_state?:       string;
+    muted?:                 boolean;
+    number:                 number;
+    reason?:                string;
+    repo:                   string;
+    review_status?:         string;
+    role:                   PRRole;
+    state:                  string;
+    title:                  string;
+    url:                    string;
+    [property: string]: any;
+}
+
+export interface PRActionResultMessage {
+    action:  string;
+    error?:  string;
+    event:   PRActionResultMessageEvent;
+    number:  number;
+    repo:    string;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum PRActionResultMessageEvent {
+    PRActionResult = "pr_action_result",
+}
+
+export interface PRVisitedMessage {
+    cmd: PRVisitedMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum PRVisitedMessageCmd {
+    PRVisited = "pr_visited",
+}
+
+export interface QueryMessage {
+    cmd:     QueryMessageCmd;
+    filter?: string;
+    [property: string]: any;
+}
+
+export enum QueryMessageCmd {
+    Query = "query",
+}
+
+export interface QueryPRsMessage {
+    cmd:     QueryPRsMessageCmd;
+    filter?: string;
+    [property: string]: any;
+}
+
+export enum QueryPRsMessageCmd {
+    QueryPrs = "query_prs",
+}
+
+export interface QueryReposMessage {
+    cmd:     QueryReposMessageCmd;
+    filter?: string;
+    [property: string]: any;
+}
+
+export enum QueryReposMessageCmd {
+    QueryRepos = "query_repos",
+}
+
+export interface RateLimitedMessage {
+    event:    RateLimitedMessageEvent;
+    reset_at: string;
+    resource: string;
+    [property: string]: any;
+}
+
+export enum RateLimitedMessageEvent {
+    RateLimited = "rate_limited",
+}
+
+export interface RefreshPRsMessage {
+    cmd: RefreshPRsMessageCmd;
+    [property: string]: any;
+}
+
+export enum RefreshPRsMessageCmd {
+    RefreshPrs = "refresh_prs",
+}
+
+export interface RefreshPRsResultMessage {
+    error?:  string;
+    event:   RefreshPRsResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum RefreshPRsResultMessageEvent {
+    RefreshPrsResult = "refresh_prs_result",
+}
+
+export interface RegisterMessage {
+    cmd:    RegisterMessageCmd;
+    dir:    string;
+    id:     string;
+    label?: string;
+    [property: string]: any;
+}
+
+export enum RegisterMessageCmd {
+    Register = "register",
+}
+
+export interface RepoState {
+    collapsed?: boolean;
+    muted?:     boolean;
+    repo:       string;
+    [property: string]: any;
+}
+
+export interface Response {
+    error?:    string;
+    ok:        boolean;
+    prs?:      PRElement[];
+    repos?:    RepoElement[];
+    sessions?: SessionElement[];
+    [property: string]: any;
+}
+
+export interface RepoElement {
+    collapsed?: boolean;
+    muted?:     boolean;
+    repo:       string;
+    [property: string]: any;
+}
+
+export interface Session {
+    branch?:           string;
+    directory:         string;
+    id:                string;
+    is_worktree?:      boolean;
+    label:             string;
+    last_seen?:        string;
+    main_repo?:        string;
+    muted?:            boolean;
+    state:             SessionState;
+    state_since?:      string;
+    state_updated_at?: string;
+    todos?:            string[];
+    [property: string]: any;
+}
+
+export interface SetSettingMessage {
+    cmd:   SetSettingMessageCmd;
+    key:   string;
+    value: string;
+    [property: string]: any;
+}
+
+export enum SetSettingMessageCmd {
+    SetSetting = "set_setting",
+}
+
+export interface StateMessage {
+    cmd:   StateMessageCmd;
+    id:    string;
+    state: string;
+    [property: string]: any;
+}
+
+export enum StateMessageCmd {
+    State = "state",
+}
+
+export interface StopMessage {
+    cmd:             StopMessageCmd;
+    id:              string;
+    transcript_path: string;
+    [property: string]: any;
+}
+
+export enum StopMessageCmd {
+    Stop = "stop",
+}
+
+export interface TodosMessage {
+    cmd:   TodosMessageCmd;
+    id:    string;
+    todos: string[];
+    [property: string]: any;
+}
+
+export enum TodosMessageCmd {
+    Todos = "todos",
+}
+
+export interface UnregisterMessage {
+    cmd: UnregisterMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum UnregisterMessageCmd {
+    Unregister = "unregister",
+}
+
+export interface WebSocketEvent {
+    event:                string;
+    protocol_version?:    string;
+    prs?:                 PRElement[];
+    rate_limit_reset_at?: string;
+    rate_limit_resource?: string;
+    repos?:               RepoElement[];
+    session?:             SessionElement;
+    sessions?:            SessionElement[];
+    settings?:            { [key: string]: any };
+    worktrees?:           WorktreeElement[];
+    [property: string]: any;
+}
+
+export interface WorktreeElement {
+    branch:      string;
+    created_at?: string;
+    main_repo:   string;
+    path:        string;
+    [property: string]: any;
+}
+
+export interface Worktree {
+    branch:      string;
+    created_at?: string;
+    main_repo:   string;
+    path:        string;
+    [property: string]: any;
+}
+
+export interface WorktreeCreatedEvent {
+    branch:    string;
+    event:     WorktreeCreatedEventEvent;
+    main_repo: string;
+    path:      string;
+    [property: string]: any;
+}
+
+export enum WorktreeCreatedEventEvent {
+    WorktreeCreated = "worktree_created",
+}
+
+// Converts JSON strings to/from your types
+// and asserts the results of JSON.parse at runtime
+export class Convert {
+    public static toApprovePRMessage(json: string): ApprovePRMessage {
+        return cast(JSON.parse(json), r("ApprovePRMessage"));
+    }
+
+    public static approvePRMessageToJson(value: ApprovePRMessage): string {
+        return JSON.stringify(uncast(value, r("ApprovePRMessage")), null, 2);
+    }
+
+    public static toClearSessionsMessage(json: string): ClearSessionsMessage {
+        return cast(JSON.parse(json), r("ClearSessionsMessage"));
+    }
+
+    public static clearSessionsMessageToJson(value: ClearSessionsMessage): string {
+        return JSON.stringify(uncast(value, r("ClearSessionsMessage")), null, 2);
+    }
+
+    public static toCollapseRepoMessage(json: string): CollapseRepoMessage {
+        return cast(JSON.parse(json), r("CollapseRepoMessage"));
+    }
+
+    public static collapseRepoMessageToJson(value: CollapseRepoMessage): string {
+        return JSON.stringify(uncast(value, r("CollapseRepoMessage")), null, 2);
+    }
+
+    public static toCreateWorktreeMessage(json: string): CreateWorktreeMessage {
+        return cast(JSON.parse(json), r("CreateWorktreeMessage"));
+    }
+
+    public static createWorktreeMessageToJson(value: CreateWorktreeMessage): string {
+        return JSON.stringify(uncast(value, r("CreateWorktreeMessage")), null, 2);
+    }
+
+    public static toCreateWorktreeResultMessage(json: string): CreateWorktreeResultMessage {
+        return cast(JSON.parse(json), r("CreateWorktreeResultMessage"));
+    }
+
+    public static createWorktreeResultMessageToJson(value: CreateWorktreeResultMessage): string {
+        return JSON.stringify(uncast(value, r("CreateWorktreeResultMessage")), null, 2);
+    }
+
+    public static toDeleteWorktreeMessage(json: string): DeleteWorktreeMessage {
+        return cast(JSON.parse(json), r("DeleteWorktreeMessage"));
+    }
+
+    public static deleteWorktreeMessageToJson(value: DeleteWorktreeMessage): string {
+        return JSON.stringify(uncast(value, r("DeleteWorktreeMessage")), null, 2);
+    }
+
+    public static toDeleteWorktreeResultMessage(json: string): DeleteWorktreeResultMessage {
+        return cast(JSON.parse(json), r("DeleteWorktreeResultMessage"));
+    }
+
+    public static deleteWorktreeResultMessageToJson(value: DeleteWorktreeResultMessage): string {
+        return JSON.stringify(uncast(value, r("DeleteWorktreeResultMessage")), null, 2);
+    }
+
+    public static toFetchPRDetailsMessage(json: string): FetchPRDetailsMessage {
+        return cast(JSON.parse(json), r("FetchPRDetailsMessage"));
+    }
+
+    public static fetchPRDetailsMessageToJson(value: FetchPRDetailsMessage): string {
+        return JSON.stringify(uncast(value, r("FetchPRDetailsMessage")), null, 2);
+    }
+
+    public static toGetSettingsMessage(json: string): GetSettingsMessage {
+        return cast(JSON.parse(json), r("GetSettingsMessage"));
+    }
+
+    public static getSettingsMessageToJson(value: GetSettingsMessage): string {
+        return JSON.stringify(uncast(value, r("GetSettingsMessage")), null, 2);
+    }
+
+    public static toHeartbeatMessage(json: string): HeartbeatMessage {
+        return cast(JSON.parse(json), r("HeartbeatMessage"));
+    }
+
+    public static heartbeatMessageToJson(value: HeartbeatMessage): string {
+        return JSON.stringify(uncast(value, r("HeartbeatMessage")), null, 2);
+    }
+
+    public static toHeatState(json: string): HeatState {
+        return cast(JSON.parse(json), r("HeatState"));
+    }
+
+    public static heatStateToJson(value: HeatState): string {
+        return JSON.stringify(uncast(value, r("HeatState")), null, 2);
+    }
+
+    public static toInjectTestPRMessage(json: string): InjectTestPRMessage {
+        return cast(JSON.parse(json), r("InjectTestPRMessage"));
+    }
+
+    public static injectTestPRMessageToJson(value: InjectTestPRMessage): string {
+        return JSON.stringify(uncast(value, r("InjectTestPRMessage")), null, 2);
+    }
+
+    public static toInjectTestSessionMessage(json: string): InjectTestSessionMessage {
+        return cast(JSON.parse(json), r("InjectTestSessionMessage"));
+    }
+
+    public static injectTestSessionMessageToJson(value: InjectTestSessionMessage): string {
+        return JSON.stringify(uncast(value, r("InjectTestSessionMessage")), null, 2);
+    }
+
+    public static toListWorktreesMessage(json: string): ListWorktreesMessage {
+        return cast(JSON.parse(json), r("ListWorktreesMessage"));
+    }
+
+    public static listWorktreesMessageToJson(value: ListWorktreesMessage): string {
+        return JSON.stringify(uncast(value, r("ListWorktreesMessage")), null, 2);
+    }
+
+    public static toMergePRMessage(json: string): MergePRMessage {
+        return cast(JSON.parse(json), r("MergePRMessage"));
+    }
+
+    public static mergePRMessageToJson(value: MergePRMessage): string {
+        return JSON.stringify(uncast(value, r("MergePRMessage")), null, 2);
+    }
+
+    public static toMuteMessage(json: string): MuteMessage {
+        return cast(JSON.parse(json), r("MuteMessage"));
+    }
+
+    public static muteMessageToJson(value: MuteMessage): string {
+        return JSON.stringify(uncast(value, r("MuteMessage")), null, 2);
+    }
+
+    public static toMutePRMessage(json: string): MutePRMessage {
+        return cast(JSON.parse(json), r("MutePRMessage"));
+    }
+
+    public static mutePRMessageToJson(value: MutePRMessage): string {
+        return JSON.stringify(uncast(value, r("MutePRMessage")), null, 2);
+    }
+
+    public static toMuteRepoMessage(json: string): MuteRepoMessage {
+        return cast(JSON.parse(json), r("MuteRepoMessage"));
+    }
+
+    public static muteRepoMessageToJson(value: MuteRepoMessage): string {
+        return JSON.stringify(uncast(value, r("MuteRepoMessage")), null, 2);
+    }
+
+    public static toPR(json: string): PR {
+        return cast(JSON.parse(json), r("PR"));
+    }
+
+    public static pRToJson(value: PR): string {
+        return JSON.stringify(uncast(value, r("PR")), null, 2);
+    }
+
+    public static toPRActionResultMessage(json: string): PRActionResultMessage {
+        return cast(JSON.parse(json), r("PRActionResultMessage"));
+    }
+
+    public static pRActionResultMessageToJson(value: PRActionResultMessage): string {
+        return JSON.stringify(uncast(value, r("PRActionResultMessage")), null, 2);
+    }
+
+    public static toPRRole(json: string): PRRole {
+        return cast(JSON.parse(json), r("PRRole"));
+    }
+
+    public static pRRoleToJson(value: PRRole): string {
+        return JSON.stringify(uncast(value, r("PRRole")), null, 2);
+    }
+
+    public static toPRVisitedMessage(json: string): PRVisitedMessage {
+        return cast(JSON.parse(json), r("PRVisitedMessage"));
+    }
+
+    public static pRVisitedMessageToJson(value: PRVisitedMessage): string {
+        return JSON.stringify(uncast(value, r("PRVisitedMessage")), null, 2);
+    }
+
+    public static toQueryMessage(json: string): QueryMessage {
+        return cast(JSON.parse(json), r("QueryMessage"));
+    }
+
+    public static queryMessageToJson(value: QueryMessage): string {
+        return JSON.stringify(uncast(value, r("QueryMessage")), null, 2);
+    }
+
+    public static toQueryPRsMessage(json: string): QueryPRsMessage {
+        return cast(JSON.parse(json), r("QueryPRsMessage"));
+    }
+
+    public static queryPRsMessageToJson(value: QueryPRsMessage): string {
+        return JSON.stringify(uncast(value, r("QueryPRsMessage")), null, 2);
+    }
+
+    public static toQueryReposMessage(json: string): QueryReposMessage {
+        return cast(JSON.parse(json), r("QueryReposMessage"));
+    }
+
+    public static queryReposMessageToJson(value: QueryReposMessage): string {
+        return JSON.stringify(uncast(value, r("QueryReposMessage")), null, 2);
+    }
+
+    public static toRateLimitedMessage(json: string): RateLimitedMessage {
+        return cast(JSON.parse(json), r("RateLimitedMessage"));
+    }
+
+    public static rateLimitedMessageToJson(value: RateLimitedMessage): string {
+        return JSON.stringify(uncast(value, r("RateLimitedMessage")), null, 2);
+    }
+
+    public static toRefreshPRsMessage(json: string): RefreshPRsMessage {
+        return cast(JSON.parse(json), r("RefreshPRsMessage"));
+    }
+
+    public static refreshPRsMessageToJson(value: RefreshPRsMessage): string {
+        return JSON.stringify(uncast(value, r("RefreshPRsMessage")), null, 2);
+    }
+
+    public static toRefreshPRsResultMessage(json: string): RefreshPRsResultMessage {
+        return cast(JSON.parse(json), r("RefreshPRsResultMessage"));
+    }
+
+    public static refreshPRsResultMessageToJson(value: RefreshPRsResultMessage): string {
+        return JSON.stringify(uncast(value, r("RefreshPRsResultMessage")), null, 2);
+    }
+
+    public static toRegisterMessage(json: string): RegisterMessage {
+        return cast(JSON.parse(json), r("RegisterMessage"));
+    }
+
+    public static registerMessageToJson(value: RegisterMessage): string {
+        return JSON.stringify(uncast(value, r("RegisterMessage")), null, 2);
+    }
+
+    public static toRepoState(json: string): RepoState {
+        return cast(JSON.parse(json), r("RepoState"));
+    }
+
+    public static repoStateToJson(value: RepoState): string {
+        return JSON.stringify(uncast(value, r("RepoState")), null, 2);
+    }
+
+    public static toResponse(json: string): Response {
+        return cast(JSON.parse(json), r("Response"));
+    }
+
+    public static responseToJson(value: Response): string {
+        return JSON.stringify(uncast(value, r("Response")), null, 2);
+    }
+
+    public static toSession(json: string): Session {
+        return cast(JSON.parse(json), r("Session"));
+    }
+
+    public static sessionToJson(value: Session): string {
+        return JSON.stringify(uncast(value, r("Session")), null, 2);
+    }
+
+    public static toSessionState(json: string): SessionState {
+        return cast(JSON.parse(json), r("SessionState"));
+    }
+
+    public static sessionStateToJson(value: SessionState): string {
+        return JSON.stringify(uncast(value, r("SessionState")), null, 2);
+    }
+
+    public static toSetSettingMessage(json: string): SetSettingMessage {
+        return cast(JSON.parse(json), r("SetSettingMessage"));
+    }
+
+    public static setSettingMessageToJson(value: SetSettingMessage): string {
+        return JSON.stringify(uncast(value, r("SetSettingMessage")), null, 2);
+    }
+
+    public static toStateMessage(json: string): StateMessage {
+        return cast(JSON.parse(json), r("StateMessage"));
+    }
+
+    public static stateMessageToJson(value: StateMessage): string {
+        return JSON.stringify(uncast(value, r("StateMessage")), null, 2);
+    }
+
+    public static toStopMessage(json: string): StopMessage {
+        return cast(JSON.parse(json), r("StopMessage"));
+    }
+
+    public static stopMessageToJson(value: StopMessage): string {
+        return JSON.stringify(uncast(value, r("StopMessage")), null, 2);
+    }
+
+    public static toTodosMessage(json: string): TodosMessage {
+        return cast(JSON.parse(json), r("TodosMessage"));
+    }
+
+    public static todosMessageToJson(value: TodosMessage): string {
+        return JSON.stringify(uncast(value, r("TodosMessage")), null, 2);
+    }
+
+    public static toUnregisterMessage(json: string): UnregisterMessage {
+        return cast(JSON.parse(json), r("UnregisterMessage"));
+    }
+
+    public static unregisterMessageToJson(value: UnregisterMessage): string {
+        return JSON.stringify(uncast(value, r("UnregisterMessage")), null, 2);
+    }
+
+    public static toWebSocketEvent(json: string): WebSocketEvent {
+        return cast(JSON.parse(json), r("WebSocketEvent"));
+    }
+
+    public static webSocketEventToJson(value: WebSocketEvent): string {
+        return JSON.stringify(uncast(value, r("WebSocketEvent")), null, 2);
+    }
+
+    public static toWorktree(json: string): Worktree {
+        return cast(JSON.parse(json), r("Worktree"));
+    }
+
+    public static worktreeToJson(value: Worktree): string {
+        return JSON.stringify(uncast(value, r("Worktree")), null, 2);
+    }
+
+    public static toWorktreeCreatedEvent(json: string): WorktreeCreatedEvent {
+        return cast(JSON.parse(json), r("WorktreeCreatedEvent"));
+    }
+
+    public static worktreeCreatedEventToJson(value: WorktreeCreatedEvent): string {
+        return JSON.stringify(uncast(value, r("WorktreeCreatedEvent")), null, 2);
+    }
+}
+
+function invalidValue(typ: any, val: any, key: any, parent: any = ''): never {
+    const prettyTyp = prettyTypeName(typ);
+    const parentText = parent ? ` on ${parent}` : '';
+    const keyText = key ? ` for key "${key}"` : '';
+    throw Error(`Invalid value${keyText}${parentText}. Expected ${prettyTyp} but got ${JSON.stringify(val)}`);
+}
+
+function prettyTypeName(typ: any): string {
+    if (Array.isArray(typ)) {
+        if (typ.length === 2 && typ[0] === undefined) {
+            return `an optional ${prettyTypeName(typ[1])}`;
+        } else {
+            return `one of [${typ.map(a => { return prettyTypeName(a); }).join(", ")}]`;
+        }
+    } else if (typeof typ === "object" && typ.literal !== undefined) {
+        return typ.literal;
+    } else {
+        return typeof typ;
+    }
+}
+
+function jsonToJSProps(typ: any): any {
+    if (typ.jsonToJS === undefined) {
+        const map: any = {};
+        typ.props.forEach((p: any) => map[p.json] = { key: p.js, typ: p.typ });
+        typ.jsonToJS = map;
+    }
+    return typ.jsonToJS;
+}
+
+function jsToJSONProps(typ: any): any {
+    if (typ.jsToJSON === undefined) {
+        const map: any = {};
+        typ.props.forEach((p: any) => map[p.js] = { key: p.json, typ: p.typ });
+        typ.jsToJSON = map;
+    }
+    return typ.jsToJSON;
+}
+
+function transform(val: any, typ: any, getProps: any, key: any = '', parent: any = ''): any {
+    function transformPrimitive(typ: string, val: any): any {
+        if (typeof typ === typeof val) return val;
+        return invalidValue(typ, val, key, parent);
+    }
+
+    function transformUnion(typs: any[], val: any): any {
+        // val must validate against one typ in typs
+        const l = typs.length;
+        for (let i = 0; i < l; i++) {
+            const typ = typs[i];
+            try {
+                return transform(val, typ, getProps);
+            } catch (_) {}
+        }
+        return invalidValue(typs, val, key, parent);
+    }
+
+    function transformEnum(cases: string[], val: any): any {
+        if (cases.indexOf(val) !== -1) return val;
+        return invalidValue(cases.map(a => { return l(a); }), val, key, parent);
+    }
+
+    function transformArray(typ: any, val: any): any {
+        // val must be an array with no invalid elements
+        if (!Array.isArray(val)) return invalidValue(l("array"), val, key, parent);
+        return val.map(el => transform(el, typ, getProps));
+    }
+
+    function transformDate(val: any): any {
+        if (val === null) {
+            return null;
+        }
+        const d = new Date(val);
+        if (isNaN(d.valueOf())) {
+            return invalidValue(l("Date"), val, key, parent);
+        }
+        return d;
+    }
+
+    function transformObject(props: { [k: string]: any }, additional: any, val: any): any {
+        if (val === null || typeof val !== "object" || Array.isArray(val)) {
+            return invalidValue(l(ref || "object"), val, key, parent);
+        }
+        const result: any = {};
+        Object.getOwnPropertyNames(props).forEach(key => {
+            const prop = props[key];
+            const v = Object.prototype.hasOwnProperty.call(val, key) ? val[key] : undefined;
+            result[prop.key] = transform(v, prop.typ, getProps, key, ref);
+        });
+        Object.getOwnPropertyNames(val).forEach(key => {
+            if (!Object.prototype.hasOwnProperty.call(props, key)) {
+                result[key] = transform(val[key], additional, getProps, key, ref);
+            }
+        });
+        return result;
+    }
+
+    if (typ === "any") return val;
+    if (typ === null) {
+        if (val === null) return val;
+        return invalidValue(typ, val, key, parent);
+    }
+    if (typ === false) return invalidValue(typ, val, key, parent);
+    let ref: any = undefined;
+    while (typeof typ === "object" && typ.ref !== undefined) {
+        ref = typ.ref;
+        typ = typeMap[typ.ref];
+    }
+    if (Array.isArray(typ)) return transformEnum(typ, val);
+    if (typeof typ === "object") {
+        return typ.hasOwnProperty("unionMembers") ? transformUnion(typ.unionMembers, val)
+            : typ.hasOwnProperty("arrayItems")    ? transformArray(typ.arrayItems, val)
+            : typ.hasOwnProperty("props")         ? transformObject(getProps(typ), typ.additional, val)
+            : invalidValue(typ, val, key, parent);
+    }
+    // Numbers can be parsed by Date but shouldn't be.
+    if (typ === Date && typeof val !== "number") return transformDate(val);
+    return transformPrimitive(typ, val);
+}
+
+function cast<T>(val: any, typ: any): T {
+    return transform(val, typ, jsonToJSProps);
+}
+
+function uncast<T>(val: T, typ: any): any {
+    return transform(val, typ, jsToJSONProps);
+}
+
+function l(typ: any) {
+    return { literal: typ };
+}
+
+function a(typ: any) {
+    return { arrayItems: typ };
+}
+
+function u(...typs: any[]) {
+    return { unionMembers: typs };
+}
+
+function o(props: any[], additional: any) {
+    return { props, additional };
+}
+
+function m(additional: any) {
+    return { props: [], additional };
+}
+
+function r(name: string) {
+    return { ref: name };
+}
+
+const typeMap: any = {
+    "ApprovePRMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
+        { json: "number", js: "number", typ: 0 },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "ClearSessionsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ClearSessionsMessageCmd") },
+    ], "any"),
+    "CollapseRepoMessage": o([
+        { json: "cmd", js: "cmd", typ: r("CollapseRepoMessageCmd") },
+        { json: "collapsed", js: "collapsed", typ: true },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "CreateWorktreeMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("CreateWorktreeMessageCmd") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+        { json: "path", js: "path", typ: u(undefined, "") },
+    ], "any"),
+    "CreateWorktreeResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("CreateWorktreeResultMessageEvent") },
+        { json: "path", js: "path", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "DeleteWorktreeMessage": o([
+        { json: "cmd", js: "cmd", typ: r("DeleteWorktreeMessageCmd") },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "DeleteWorktreeResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("DeleteWorktreeResultMessageEvent") },
+        { json: "path", js: "path", typ: "" },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "FetchPRDetailsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("FetchPRDetailsMessageCmd") },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "GetSettingsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetSettingsMessageCmd") },
+    ], "any"),
+    "HeartbeatMessage": o([
+        { json: "cmd", js: "cmd", typ: r("HeartbeatMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "InjectTestPRMessage": o([
+        { json: "cmd", js: "cmd", typ: r("InjectTestPRMessageCmd") },
+        { json: "pr", js: "pr", typ: r("PRElement") },
+    ], "any"),
+    "PRElement": o([
+        { json: "approved_by_me", js: "approved_by_me", typ: u(undefined, true) },
+        { json: "ci_status", js: "ci_status", typ: u(undefined, "") },
+        { json: "comment_count", js: "comment_count", typ: u(undefined, 0) },
+        { json: "details_fetched", js: "details_fetched", typ: u(undefined, true) },
+        { json: "details_fetched_at", js: "details_fetched_at", typ: u(undefined, "") },
+        { json: "has_new_changes", js: "has_new_changes", typ: u(undefined, true) },
+        { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
+        { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
+        { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
+        { json: "id", js: "id", typ: "" },
+        { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
+        { json: "last_polled", js: "last_polled", typ: u(undefined, "") },
+        { json: "last_updated", js: "last_updated", typ: u(undefined, "") },
+        { json: "mergeable", js: "mergeable", typ: u(undefined, true) },
+        { json: "mergeable_state", js: "mergeable_state", typ: u(undefined, "") },
+        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "number", js: "number", typ: 0 },
+        { json: "reason", js: "reason", typ: u(undefined, "") },
+        { json: "repo", js: "repo", typ: "" },
+        { json: "review_status", js: "review_status", typ: u(undefined, "") },
+        { json: "role", js: "role", typ: r("PRRole") },
+        { json: "state", js: "state", typ: "" },
+        { json: "title", js: "title", typ: "" },
+        { json: "url", js: "url", typ: "" },
+    ], "any"),
+    "InjectTestSessionMessage": o([
+        { json: "cmd", js: "cmd", typ: r("InjectTestSessionMessageCmd") },
+        { json: "session", js: "session", typ: r("SessionElement") },
+    ], "any"),
+    "SessionElement": o([
+        { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "directory", js: "directory", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
+        { json: "label", js: "label", typ: "" },
+        { json: "last_seen", js: "last_seen", typ: u(undefined, "") },
+        { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
+        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "state", js: "state", typ: r("SessionState") },
+        { json: "state_since", js: "state_since", typ: u(undefined, "") },
+        { json: "state_updated_at", js: "state_updated_at", typ: u(undefined, "") },
+        { json: "todos", js: "todos", typ: u(undefined, a("")) },
+    ], "any"),
+    "ListWorktreesMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ListWorktreesMessageCmd") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+    ], "any"),
+    "MergePRMessage": o([
+        { json: "cmd", js: "cmd", typ: r("MergePRMessageCmd") },
+        { json: "method", js: "method", typ: "" },
+        { json: "number", js: "number", typ: 0 },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "MuteMessage": o([
+        { json: "cmd", js: "cmd", typ: r("MuteMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "MutePRMessage": o([
+        { json: "cmd", js: "cmd", typ: r("MutePRMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "MuteRepoMessage": o([
+        { json: "cmd", js: "cmd", typ: r("MuteRepoMessageCmd") },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "PR": o([
+        { json: "approved_by_me", js: "approved_by_me", typ: u(undefined, true) },
+        { json: "ci_status", js: "ci_status", typ: u(undefined, "") },
+        { json: "comment_count", js: "comment_count", typ: u(undefined, 0) },
+        { json: "details_fetched", js: "details_fetched", typ: u(undefined, true) },
+        { json: "details_fetched_at", js: "details_fetched_at", typ: u(undefined, "") },
+        { json: "has_new_changes", js: "has_new_changes", typ: u(undefined, true) },
+        { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
+        { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
+        { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
+        { json: "id", js: "id", typ: "" },
+        { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
+        { json: "last_polled", js: "last_polled", typ: u(undefined, "") },
+        { json: "last_updated", js: "last_updated", typ: u(undefined, "") },
+        { json: "mergeable", js: "mergeable", typ: u(undefined, true) },
+        { json: "mergeable_state", js: "mergeable_state", typ: u(undefined, "") },
+        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "number", js: "number", typ: 0 },
+        { json: "reason", js: "reason", typ: u(undefined, "") },
+        { json: "repo", js: "repo", typ: "" },
+        { json: "review_status", js: "review_status", typ: u(undefined, "") },
+        { json: "role", js: "role", typ: r("PRRole") },
+        { json: "state", js: "state", typ: "" },
+        { json: "title", js: "title", typ: "" },
+        { json: "url", js: "url", typ: "" },
+    ], "any"),
+    "PRActionResultMessage": o([
+        { json: "action", js: "action", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("PRActionResultMessageEvent") },
+        { json: "number", js: "number", typ: 0 },
+        { json: "repo", js: "repo", typ: "" },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "PRVisitedMessage": o([
+        { json: "cmd", js: "cmd", typ: r("PRVisitedMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "QueryMessage": o([
+        { json: "cmd", js: "cmd", typ: r("QueryMessageCmd") },
+        { json: "filter", js: "filter", typ: u(undefined, "") },
+    ], "any"),
+    "QueryPRsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("QueryPRsMessageCmd") },
+        { json: "filter", js: "filter", typ: u(undefined, "") },
+    ], "any"),
+    "QueryReposMessage": o([
+        { json: "cmd", js: "cmd", typ: r("QueryReposMessageCmd") },
+        { json: "filter", js: "filter", typ: u(undefined, "") },
+    ], "any"),
+    "RateLimitedMessage": o([
+        { json: "event", js: "event", typ: r("RateLimitedMessageEvent") },
+        { json: "reset_at", js: "reset_at", typ: "" },
+        { json: "resource", js: "resource", typ: "" },
+    ], "any"),
+    "RefreshPRsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("RefreshPRsMessageCmd") },
+    ], "any"),
+    "RefreshPRsResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("RefreshPRsResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "RegisterMessage": o([
+        { json: "cmd", js: "cmd", typ: r("RegisterMessageCmd") },
+        { json: "dir", js: "dir", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "label", js: "label", typ: u(undefined, "") },
+    ], "any"),
+    "RepoState": o([
+        { json: "collapsed", js: "collapsed", typ: u(undefined, true) },
+        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "Response": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "ok", js: "ok", typ: true },
+        { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
+        { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
+        { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+    ], "any"),
+    "RepoElement": o([
+        { json: "collapsed", js: "collapsed", typ: u(undefined, true) },
+        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "Session": o([
+        { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "directory", js: "directory", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
+        { json: "label", js: "label", typ: "" },
+        { json: "last_seen", js: "last_seen", typ: u(undefined, "") },
+        { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
+        { json: "muted", js: "muted", typ: u(undefined, true) },
+        { json: "state", js: "state", typ: r("SessionState") },
+        { json: "state_since", js: "state_since", typ: u(undefined, "") },
+        { json: "state_updated_at", js: "state_updated_at", typ: u(undefined, "") },
+        { json: "todos", js: "todos", typ: u(undefined, a("")) },
+    ], "any"),
+    "SetSettingMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SetSettingMessageCmd") },
+        { json: "key", js: "key", typ: "" },
+        { json: "value", js: "value", typ: "" },
+    ], "any"),
+    "StateMessage": o([
+        { json: "cmd", js: "cmd", typ: r("StateMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+        { json: "state", js: "state", typ: "" },
+    ], "any"),
+    "StopMessage": o([
+        { json: "cmd", js: "cmd", typ: r("StopMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+        { json: "transcript_path", js: "transcript_path", typ: "" },
+    ], "any"),
+    "TodosMessage": o([
+        { json: "cmd", js: "cmd", typ: r("TodosMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+        { json: "todos", js: "todos", typ: a("") },
+    ], "any"),
+    "UnregisterMessage": o([
+        { json: "cmd", js: "cmd", typ: r("UnregisterMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "WebSocketEvent": o([
+        { json: "event", js: "event", typ: "" },
+        { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
+        { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
+        { json: "rate_limit_reset_at", js: "rate_limit_reset_at", typ: u(undefined, "") },
+        { json: "rate_limit_resource", js: "rate_limit_resource", typ: u(undefined, "") },
+        { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
+        { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
+        { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+        { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
+    ], "any"),
+    "WorktreeElement": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "created_at", js: "created_at", typ: u(undefined, "") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "Worktree": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "created_at", js: "created_at", typ: u(undefined, "") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "WorktreeCreatedEvent": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "event", js: "event", typ: r("WorktreeCreatedEventEvent") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "ApprovePRMessageCmd": [
+        "approve_pr",
+    ],
+    "ClearSessionsMessageCmd": [
+        "clear_sessions",
+    ],
+    "CollapseRepoMessageCmd": [
+        "collapse_repo",
+    ],
+    "CreateWorktreeMessageCmd": [
+        "create_worktree",
+    ],
+    "CreateWorktreeResultMessageEvent": [
+        "create_worktree_result",
+    ],
+    "DeleteWorktreeMessageCmd": [
+        "delete_worktree",
+    ],
+    "DeleteWorktreeResultMessageEvent": [
+        "delete_worktree_result",
+    ],
+    "FetchPRDetailsMessageCmd": [
+        "fetch_pr_details",
+    ],
+    "GetSettingsMessageCmd": [
+        "get_settings",
+    ],
+    "HeartbeatMessageCmd": [
+        "heartbeat",
+    ],
+    "InjectTestPRMessageCmd": [
+        "inject_test_pr",
+    ],
+    "HeatState": [
+        "cold",
+        "hot",
+        "warm",
+    ],
+    "PRRole": [
+        "author",
+        "reviewer",
+    ],
+    "InjectTestSessionMessageCmd": [
+        "inject_test_session",
+    ],
+    "SessionState": [
+        "idle",
+        "waiting_input",
+        "working",
+    ],
+    "ListWorktreesMessageCmd": [
+        "list_worktrees",
+    ],
+    "MergePRMessageCmd": [
+        "merge_pr",
+    ],
+    "MuteMessageCmd": [
+        "mute",
+    ],
+    "MutePRMessageCmd": [
+        "mute_pr",
+    ],
+    "MuteRepoMessageCmd": [
+        "mute_repo",
+    ],
+    "PRActionResultMessageEvent": [
+        "pr_action_result",
+    ],
+    "PRVisitedMessageCmd": [
+        "pr_visited",
+    ],
+    "QueryMessageCmd": [
+        "query",
+    ],
+    "QueryPRsMessageCmd": [
+        "query_prs",
+    ],
+    "QueryReposMessageCmd": [
+        "query_repos",
+    ],
+    "RateLimitedMessageEvent": [
+        "rate_limited",
+    ],
+    "RefreshPRsMessageCmd": [
+        "refresh_prs",
+    ],
+    "RefreshPRsResultMessageEvent": [
+        "refresh_prs_result",
+    ],
+    "RegisterMessageCmd": [
+        "register",
+    ],
+    "SetSettingMessageCmd": [
+        "set_setting",
+    ],
+    "StateMessageCmd": [
+        "state",
+    ],
+    "StopMessageCmd": [
+        "stop",
+    ],
+    "TodosMessageCmd": [
+        "todos",
+    ],
+    "UnregisterMessageCmd": [
+        "unregister",
+    ],
+    "WorktreeCreatedEventEvent": [
+        "worktree_created",
+    ],
+};
