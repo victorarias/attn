@@ -103,6 +103,14 @@ model Branch {
   name: string;
 }
 
+model GitFileChange {
+  path: string;
+  status: string;        // "modified", "added", "deleted", "renamed", "untracked"
+  additions?: int32;     // Line additions (not available for untracked)
+  deletions?: int32;     // Line deletions (not available for untracked)
+  old_path?: string;     // For renames
+}
+
 // ============================================================================
 // Command Messages (Client → Daemon)
 // ============================================================================
@@ -324,6 +332,22 @@ model ListRemoteBranchesMessage {
   repo: string;
 }
 
+model SubscribeGitStatusMessage {
+  cmd: "subscribe_git_status";
+  directory: string;
+}
+
+model UnsubscribeGitStatusMessage {
+  cmd: "unsubscribe_git_status";
+}
+
+model GetFileDiffMessage {
+  cmd: "get_file_diff";
+  directory: string;
+  path: string;
+  staged?: boolean;  // If true, show staged diff instead of working tree
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -455,6 +479,25 @@ model FetchRemotesResultMessage {
 model ListRemoteBranchesResultMessage {
   event: "list_remote_branches_result";
   branches: Branch[];
+  success: boolean;
+  error?: string;
+}
+
+model GitStatusUpdateMessage {
+  event: "git_status_update";
+  directory: string;
+  staged: GitFileChange[];
+  unstaged: GitFileChange[];
+  untracked: GitFileChange[];
+  error?: string;
+}
+
+model FileDiffResultMessage {
+  event: "file_diff_result";
+  directory: string;
+  path: string;
+  original: string;
+  modified: string;
   success: boolean;
   error?: string;
 }

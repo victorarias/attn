@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, ApprovePRMessage, Branch, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetRecentLocationsMessage, GetSettingsMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoState, Response, Session, SessionState, SetSettingMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, ApprovePRMessage, Branch, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoState, Response, Session, SessionState, SetSettingMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const branch = Convert.toBranch(json);
@@ -25,10 +25,14 @@
 //   const fetchPRDetailsMessage = Convert.toFetchPRDetailsMessage(json);
 //   const fetchRemotesMessage = Convert.toFetchRemotesMessage(json);
 //   const fetchRemotesResultMessage = Convert.toFetchRemotesResultMessage(json);
+//   const fileDiffResultMessage = Convert.toFileDiffResultMessage(json);
 //   const getDefaultBranchMessage = Convert.toGetDefaultBranchMessage(json);
 //   const getDefaultBranchResultMessage = Convert.toGetDefaultBranchResultMessage(json);
+//   const getFileDiffMessage = Convert.toGetFileDiffMessage(json);
 //   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
 //   const getSettingsMessage = Convert.toGetSettingsMessage(json);
+//   const gitFileChange = Convert.toGitFileChange(json);
+//   const gitStatusUpdateMessage = Convert.toGitStatusUpdateMessage(json);
 //   const heartbeatMessage = Convert.toHeartbeatMessage(json);
 //   const heatState = Convert.toHeatState(json);
 //   const injectTestPRMessage = Convert.toInjectTestPRMessage(json);
@@ -65,10 +69,12 @@
 //   const stashResultMessage = Convert.toStashResultMessage(json);
 //   const stateMessage = Convert.toStateMessage(json);
 //   const stopMessage = Convert.toStopMessage(json);
+//   const subscribeGitStatusMessage = Convert.toSubscribeGitStatusMessage(json);
 //   const switchBranchMessage = Convert.toSwitchBranchMessage(json);
 //   const switchBranchResultMessage = Convert.toSwitchBranchResultMessage(json);
 //   const todosMessage = Convert.toTodosMessage(json);
 //   const unregisterMessage = Convert.toUnregisterMessage(json);
+//   const unsubscribeGitStatusMessage = Convert.toUnsubscribeGitStatusMessage(json);
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
 //   const worktree = Convert.toWorktree(json);
 //   const worktreeCreatedEvent = Convert.toWorktreeCreatedEvent(json);
@@ -332,6 +338,21 @@ export enum FetchRemotesResultMessageEvent {
     FetchRemotesResult = "fetch_remotes_result",
 }
 
+export interface FileDiffResultMessage {
+    directory: string;
+    error?:    string;
+    event:     FileDiffResultMessageEvent;
+    modified:  string;
+    original:  string;
+    path:      string;
+    success:   boolean;
+    [property: string]: any;
+}
+
+export enum FileDiffResultMessageEvent {
+    FileDiffResult = "file_diff_result",
+}
+
 export interface GetDefaultBranchMessage {
     cmd:  GetDefaultBranchMessageCmd;
     repo: string;
@@ -354,6 +375,18 @@ export enum GetDefaultBranchResultMessageEvent {
     GetDefaultBranchResult = "get_default_branch_result",
 }
 
+export interface GetFileDiffMessage {
+    cmd:       GetFileDiffMessageCmd;
+    directory: string;
+    path:      string;
+    staged?:   boolean;
+    [property: string]: any;
+}
+
+export enum GetFileDiffMessageCmd {
+    GetFileDiff = "get_file_diff",
+}
+
 export interface GetRecentLocationsMessage {
     cmd:    GetRecentLocationsMessageCmd;
     limit?: number;
@@ -371,6 +404,38 @@ export interface GetSettingsMessage {
 
 export enum GetSettingsMessageCmd {
     GetSettings = "get_settings",
+}
+
+export interface GitFileChange {
+    additions?: number;
+    deletions?: number;
+    old_path?:  string;
+    path:       string;
+    status:     string;
+    [property: string]: any;
+}
+
+export interface GitStatusUpdateMessage {
+    directory: string;
+    error?:    string;
+    event:     GitStatusUpdateMessageEvent;
+    staged:    StagedElement[];
+    unstaged:  StagedElement[];
+    untracked: StagedElement[];
+    [property: string]: any;
+}
+
+export enum GitStatusUpdateMessageEvent {
+    GitStatusUpdate = "git_status_update",
+}
+
+export interface StagedElement {
+    additions?: number;
+    deletions?: number;
+    old_path?:  string;
+    path:       string;
+    status:     string;
+    [property: string]: any;
 }
 
 export interface HeartbeatMessage {
@@ -817,6 +882,16 @@ export enum StopMessageCmd {
     Stop = "stop",
 }
 
+export interface SubscribeGitStatusMessage {
+    cmd:       SubscribeGitStatusMessageCmd;
+    directory: string;
+    [property: string]: any;
+}
+
+export enum SubscribeGitStatusMessageCmd {
+    SubscribeGitStatus = "subscribe_git_status",
+}
+
 export interface SwitchBranchMessage {
     branch:    string;
     cmd:       SwitchBranchMessageCmd;
@@ -859,6 +934,15 @@ export interface UnregisterMessage {
 
 export enum UnregisterMessageCmd {
     Unregister = "unregister",
+}
+
+export interface UnsubscribeGitStatusMessage {
+    cmd: UnsubscribeGitStatusMessageCmd;
+    [property: string]: any;
+}
+
+export enum UnsubscribeGitStatusMessageCmd {
+    UnsubscribeGitStatus = "unsubscribe_git_status",
 }
 
 export interface WebSocketEvent {
@@ -1099,6 +1183,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("FetchRemotesResultMessage")), null, 2);
     }
 
+    public static toFileDiffResultMessage(json: string): FileDiffResultMessage {
+        return cast(JSON.parse(json), r("FileDiffResultMessage"));
+    }
+
+    public static fileDiffResultMessageToJson(value: FileDiffResultMessage): string {
+        return JSON.stringify(uncast(value, r("FileDiffResultMessage")), null, 2);
+    }
+
     public static toGetDefaultBranchMessage(json: string): GetDefaultBranchMessage {
         return cast(JSON.parse(json), r("GetDefaultBranchMessage"));
     }
@@ -1115,6 +1207,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("GetDefaultBranchResultMessage")), null, 2);
     }
 
+    public static toGetFileDiffMessage(json: string): GetFileDiffMessage {
+        return cast(JSON.parse(json), r("GetFileDiffMessage"));
+    }
+
+    public static getFileDiffMessageToJson(value: GetFileDiffMessage): string {
+        return JSON.stringify(uncast(value, r("GetFileDiffMessage")), null, 2);
+    }
+
     public static toGetRecentLocationsMessage(json: string): GetRecentLocationsMessage {
         return cast(JSON.parse(json), r("GetRecentLocationsMessage"));
     }
@@ -1129,6 +1229,22 @@ export class Convert {
 
     public static getSettingsMessageToJson(value: GetSettingsMessage): string {
         return JSON.stringify(uncast(value, r("GetSettingsMessage")), null, 2);
+    }
+
+    public static toGitFileChange(json: string): GitFileChange {
+        return cast(JSON.parse(json), r("GitFileChange"));
+    }
+
+    public static gitFileChangeToJson(value: GitFileChange): string {
+        return JSON.stringify(uncast(value, r("GitFileChange")), null, 2);
+    }
+
+    public static toGitStatusUpdateMessage(json: string): GitStatusUpdateMessage {
+        return cast(JSON.parse(json), r("GitStatusUpdateMessage"));
+    }
+
+    public static gitStatusUpdateMessageToJson(value: GitStatusUpdateMessage): string {
+        return JSON.stringify(uncast(value, r("GitStatusUpdateMessage")), null, 2);
     }
 
     public static toHeartbeatMessage(json: string): HeartbeatMessage {
@@ -1419,6 +1535,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("StopMessage")), null, 2);
     }
 
+    public static toSubscribeGitStatusMessage(json: string): SubscribeGitStatusMessage {
+        return cast(JSON.parse(json), r("SubscribeGitStatusMessage"));
+    }
+
+    public static subscribeGitStatusMessageToJson(value: SubscribeGitStatusMessage): string {
+        return JSON.stringify(uncast(value, r("SubscribeGitStatusMessage")), null, 2);
+    }
+
     public static toSwitchBranchMessage(json: string): SwitchBranchMessage {
         return cast(JSON.parse(json), r("SwitchBranchMessage"));
     }
@@ -1449,6 +1573,14 @@ export class Convert {
 
     public static unregisterMessageToJson(value: UnregisterMessage): string {
         return JSON.stringify(uncast(value, r("UnregisterMessage")), null, 2);
+    }
+
+    public static toUnsubscribeGitStatusMessage(json: string): UnsubscribeGitStatusMessage {
+        return cast(JSON.parse(json), r("UnsubscribeGitStatusMessage"));
+    }
+
+    public static unsubscribeGitStatusMessageToJson(value: UnsubscribeGitStatusMessage): string {
+        return JSON.stringify(uncast(value, r("UnsubscribeGitStatusMessage")), null, 2);
     }
 
     public static toWebSocketEvent(json: string): WebSocketEvent {
@@ -1749,6 +1881,15 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("FetchRemotesResultMessageEvent") },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "FileDiffResultMessage": o([
+        { json: "directory", js: "directory", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("FileDiffResultMessageEvent") },
+        { json: "modified", js: "modified", typ: "" },
+        { json: "original", js: "original", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "GetDefaultBranchMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetDefaultBranchMessageCmd") },
         { json: "repo", js: "repo", typ: "" },
@@ -1759,12 +1900,40 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("GetDefaultBranchResultMessageEvent") },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "GetFileDiffMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetFileDiffMessageCmd") },
+        { json: "directory", js: "directory", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "staged", js: "staged", typ: u(undefined, true) },
+    ], "any"),
     "GetRecentLocationsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetRecentLocationsMessageCmd") },
         { json: "limit", js: "limit", typ: u(undefined, 0) },
     ], "any"),
     "GetSettingsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetSettingsMessageCmd") },
+    ], "any"),
+    "GitFileChange": o([
+        { json: "additions", js: "additions", typ: u(undefined, 0) },
+        { json: "deletions", js: "deletions", typ: u(undefined, 0) },
+        { json: "old_path", js: "old_path", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+        { json: "status", js: "status", typ: "" },
+    ], "any"),
+    "GitStatusUpdateMessage": o([
+        { json: "directory", js: "directory", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("GitStatusUpdateMessageEvent") },
+        { json: "staged", js: "staged", typ: a(r("StagedElement")) },
+        { json: "unstaged", js: "unstaged", typ: a(r("StagedElement")) },
+        { json: "untracked", js: "untracked", typ: a(r("StagedElement")) },
+    ], "any"),
+    "StagedElement": o([
+        { json: "additions", js: "additions", typ: u(undefined, 0) },
+        { json: "deletions", js: "deletions", typ: u(undefined, 0) },
+        { json: "old_path", js: "old_path", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+        { json: "status", js: "status", typ: "" },
     ], "any"),
     "HeartbeatMessage": o([
         { json: "cmd", js: "cmd", typ: r("HeartbeatMessageCmd") },
@@ -2007,6 +2176,10 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "transcript_path", js: "transcript_path", typ: "" },
     ], "any"),
+    "SubscribeGitStatusMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SubscribeGitStatusMessageCmd") },
+        { json: "directory", js: "directory", typ: "" },
+    ], "any"),
     "SwitchBranchMessage": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "cmd", js: "cmd", typ: r("SwitchBranchMessageCmd") },
@@ -2026,6 +2199,9 @@ const typeMap: any = {
     "UnregisterMessage": o([
         { json: "cmd", js: "cmd", typ: r("UnregisterMessageCmd") },
         { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "UnsubscribeGitStatusMessage": o([
+        { json: "cmd", js: "cmd", typ: r("UnsubscribeGitStatusMessageCmd") },
     ], "any"),
     "WebSocketEvent": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
@@ -2132,17 +2308,26 @@ const typeMap: any = {
     "FetchRemotesResultMessageEvent": [
         "fetch_remotes_result",
     ],
+    "FileDiffResultMessageEvent": [
+        "file_diff_result",
+    ],
     "GetDefaultBranchMessageCmd": [
         "get_default_branch",
     ],
     "GetDefaultBranchResultMessageEvent": [
         "get_default_branch_result",
     ],
+    "GetFileDiffMessageCmd": [
+        "get_file_diff",
+    ],
     "GetRecentLocationsMessageCmd": [
         "get_recent_locations",
     ],
     "GetSettingsMessageCmd": [
         "get_settings",
+    ],
+    "GitStatusUpdateMessageEvent": [
+        "git_status_update",
     ],
     "HeartbeatMessageCmd": [
         "heartbeat",
@@ -2242,6 +2427,9 @@ const typeMap: any = {
     "StopMessageCmd": [
         "stop",
     ],
+    "SubscribeGitStatusMessageCmd": [
+        "subscribe_git_status",
+    ],
     "SwitchBranchMessageCmd": [
         "switch_branch",
     ],
@@ -2253,6 +2441,9 @@ const typeMap: any = {
     ],
     "UnregisterMessageCmd": [
         "unregister",
+    ],
+    "UnsubscribeGitStatusMessageCmd": [
+        "unsubscribe_git_status",
     ],
     "WorktreeCreatedEventEvent": [
         "worktree_created",

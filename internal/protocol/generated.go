@@ -261,6 +261,29 @@ type FetchRemotesResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type FileDiffResultMessage struct {
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Modified corresponds to the JSON schema field "modified".
+	Modified string `json:"modified"`
+
+	// Original corresponds to the JSON schema field "original".
+	Original string `json:"original"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type GetDefaultBranchMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -283,6 +306,20 @@ type GetDefaultBranchResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type GetFileDiffMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Staged corresponds to the JSON schema field "staged".
+	Staged *bool `json:"staged,omitempty"`
+}
+
 type GetRecentLocationsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -294,6 +331,43 @@ type GetRecentLocationsMessage struct {
 type GetSettingsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
+}
+
+type GitFileChange struct {
+	// Additions corresponds to the JSON schema field "additions".
+	Additions *int `json:"additions,omitempty"`
+
+	// Deletions corresponds to the JSON schema field "deletions".
+	Deletions *int `json:"deletions,omitempty"`
+
+	// OldPath corresponds to the JSON schema field "old_path".
+	OldPath *string `json:"old_path,omitempty"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status string `json:"status"`
+}
+
+type GitStatusUpdateMessage struct {
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Staged corresponds to the JSON schema field "staged".
+	Staged []GitFileChange `json:"staged"`
+
+	// Unstaged corresponds to the JSON schema field "unstaged".
+	Unstaged []GitFileChange `json:"unstaged"`
+
+	// Untracked corresponds to the JSON schema field "untracked".
+	Untracked []GitFileChange `json:"untracked"`
 }
 
 type HeartbeatMessage struct {
@@ -752,6 +826,14 @@ type StopMessage struct {
 	TranscriptPath string `json:"transcript_path"`
 }
 
+type SubscribeGitStatusMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+}
+
 type SwitchBranchMessage struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch string `json:"branch"`
@@ -794,6 +876,11 @@ type UnregisterMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+}
+
+type UnsubscribeGitStatusMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
 }
 
 type WebSocketEvent struct {
