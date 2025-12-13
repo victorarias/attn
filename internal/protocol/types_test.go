@@ -9,7 +9,7 @@ func TestRegisterMessage_Marshal(t *testing.T) {
 	msg := RegisterMessage{
 		Cmd:   "register",
 		ID:    "abc123",
-		Label: "drumstick",
+		Label: Ptr("drumstick"),
 		Dir:   "/home/user/projects/drumstick",
 	}
 
@@ -26,8 +26,8 @@ func TestRegisterMessage_Marshal(t *testing.T) {
 	if decoded.ID != msg.ID {
 		t.Errorf("ID mismatch: got %q, want %q", decoded.ID, msg.ID)
 	}
-	if decoded.Label != msg.Label {
-		t.Errorf("Label mismatch: got %q, want %q", decoded.Label, msg.Label)
+	if Deref(decoded.Label) != Deref(msg.Label) {
+		t.Errorf("Label mismatch: got %q, want %q", Deref(decoded.Label), Deref(msg.Label))
 	}
 }
 
@@ -56,7 +56,7 @@ func TestStateMessage_Marshal(t *testing.T) {
 func TestQueryMessage_Marshal(t *testing.T) {
 	msg := QueryMessage{
 		Cmd:    "query",
-		Filter: "waiting",
+		Filter: Ptr("waiting"),
 	}
 
 	data, err := json.Marshal(msg)
@@ -69,7 +69,7 @@ func TestQueryMessage_Marshal(t *testing.T) {
 		t.Fatalf("unmarshal error: %v", err)
 	}
 
-	if decoded.Filter != "waiting" {
-		t.Errorf("Filter mismatch: got %q, want %q", decoded.Filter, msg.Filter)
+	if Deref(decoded.Filter) != "waiting" {
+		t.Errorf("Filter mismatch: got %q, want %q", Deref(decoded.Filter), Deref(msg.Filter))
 	}
 }

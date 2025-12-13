@@ -13,7 +13,7 @@ import (
 // Core worktree operations - shared between Unix socket and WebSocket handlers
 
 // doListWorktrees fetches worktrees from store and git, merges them, returns protocol type
-func (d *Daemon) doListWorktrees(mainRepo string) []*protocol.Worktree {
+func (d *Daemon) doListWorktrees(mainRepo string) []protocol.Worktree {
 	// Get from registry first
 	worktrees := d.store.ListWorktreesByRepo(mainRepo)
 
@@ -47,13 +47,13 @@ func (d *Daemon) doListWorktrees(mainRepo string) []*protocol.Worktree {
 	}
 
 	// Convert to protocol type
-	protoWorktrees := make([]*protocol.Worktree, len(worktrees))
+	protoWorktrees := make([]protocol.Worktree, len(worktrees))
 	for i, wt := range worktrees {
-		protoWorktrees[i] = &protocol.Worktree{
+		protoWorktrees[i] = protocol.Worktree{
 			Path:      wt.Path,
 			Branch:    wt.Branch,
 			MainRepo:  wt.MainRepo,
-			CreatedAt: wt.CreatedAt.Format(time.RFC3339),
+			CreatedAt: protocol.Ptr(wt.CreatedAt.Format(time.RFC3339)),
 		}
 	}
 	return protoWorktrees
@@ -62,7 +62,7 @@ func (d *Daemon) doListWorktrees(mainRepo string) []*protocol.Worktree {
 // doCreateWorktree creates a git worktree and registers it in the store.
 // Returns the created worktree path and any error.
 func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, error) {
-	path := msg.Path
+	path := protocol.Deref(msg.Path)
 	if path == "" {
 		path = git.GenerateWorktreePath(msg.MainRepo, msg.Branch)
 	}
@@ -82,11 +82,11 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 	// Broadcast created event to all clients
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventWorktreeCreated,
-		Worktrees: []*protocol.Worktree{{
+		Worktrees: []protocol.Worktree{{
 			Path:      wt.Path,
 			Branch:    wt.Branch,
 			MainRepo:  wt.MainRepo,
-			CreatedAt: wt.CreatedAt.Format(time.RFC3339),
+			CreatedAt: protocol.Ptr(wt.CreatedAt.Format(time.RFC3339)),
 		}},
 	})
 
@@ -113,7 +113,7 @@ func (d *Daemon) doDeleteWorktree(path string) error {
 	// Broadcast deleted event to all clients
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventWorktreeDeleted,
-		Worktrees: []*protocol.Worktree{{
+		Worktrees: []protocol.Worktree{{
 			Path: path,
 		}},
 	})
@@ -172,11 +172,11 @@ func (d *Daemon) handleCreateWorktreeWS(client *wsClient, msg *protocol.CreateWo
 		path, err := d.doCreateWorktree(msg)
 		result := protocol.CreateWorktreeResultMessage{
 			Event:   protocol.EventCreateWorktreeResult,
-			Path:    path,
+			Path:    protocol.Ptr(path),
 			Success: err == nil,
 		}
 		if err != nil {
-			result.Error = err.Error()
+			result.Error = protocol.Ptr(err.Error())
 			d.logf("Create worktree failed for %s: %v", msg.Branch, err)
 		} else {
 			d.logf("Create worktree succeeded: %s at %s", msg.Branch, path)
@@ -191,7 +191,7 @@ func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWo
 		defer func() {
 			d.wsHub.Broadcast(&protocol.WebSocketEvent{
 				Event:    protocol.EventSessionsUpdated,
-				Sessions: d.store.List(""),
+				Sessions: protocol.SessionsToValues(d.store.List("")),
 			})
 		}()
 
@@ -202,7 +202,7 @@ func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWo
 			Success: err == nil,
 		}
 		if err != nil {
-			result.Error = err.Error()
+			result.Error = protocol.Ptr(err.Error())
 			d.logf("Delete worktree failed for %s: %v", msg.Path, err)
 		} else {
 			d.logf("Delete worktree succeeded: %s", msg.Path)

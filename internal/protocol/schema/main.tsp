@@ -34,18 +34,19 @@ model Session {
   id: string;
   label: string;
   directory: string;
-  branch?: string;
-  is_worktree?: boolean;
-  main_repo?: string;
+  branch?: string;              // Optional: might not be in git repo
+  is_worktree?: boolean;        // Optional: false if not worktree
+  main_repo?: string;           // Optional: only set if worktree
   state: SessionState;
-  state_since?: string; // ISO timestamp
-  state_updated_at?: string; // ISO timestamp
-  todos?: string[];
-  last_seen?: string; // ISO timestamp
-  muted?: boolean;
+  state_since: string;          // ISO timestamp, always set
+  state_updated_at: string;     // ISO timestamp, always set
+  todos?: string[];             // Optional: can be empty/absent
+  last_seen: string;            // ISO timestamp, always set
+  muted: boolean;               // Always has value (defaults false)
 }
 
 model PR {
+  // Core identity - always present
   id: string;
   repo: string;
   number: int32;
@@ -53,24 +54,27 @@ model PR {
   url: string;
   role: PRRole;
   state: string;
-  reason?: string;
-  last_updated?: string; // ISO timestamp
-  last_polled?: string; // ISO timestamp
-  muted?: boolean;
-  // Detailed status
-  details_fetched?: boolean;
-  details_fetched_at?: string; // ISO timestamp
-  mergeable?: boolean;
-  mergeable_state?: string;
-  ci_status?: string;
-  review_status?: string;
+  reason: string;               // Why it needs attention
+  last_updated: string;         // ISO timestamp
+  last_polled: string;          // ISO timestamp
+  muted: boolean;
+
+  // Detailed status (fetched on-demand via gh api)
+  details_fetched: boolean;     // Always has value
+  details_fetched_at?: string;  // ISO timestamp, only set if fetched
+  mergeable?: boolean;          // nil=unknown, true/false
+  mergeable_state?: string;     // clean, blocked, dirty, unstable
+  ci_status?: string;           // success, failure, pending, none
+  review_status?: string;       // approved, changes_requested, pending, none
+
   // Interaction tracking
   head_sha?: string;
   head_branch?: string;
   comment_count?: int32;
-  approved_by_me?: boolean;
-  has_new_changes?: boolean;
-  // Heat state
+  approved_by_me: boolean;      // Always has value
+  has_new_changes: boolean;     // Always has value
+
+  // Heat state for detail refresh scheduling
   heat_state?: HeatState;
   last_heat_activity_at?: string; // ISO timestamp
 }
@@ -84,8 +88,8 @@ model Worktree {
 
 model RepoState {
   repo: string;
-  muted?: boolean;
-  collapsed?: boolean;
+  muted: boolean;
+  collapsed: boolean;
 }
 
 // ============================================================================

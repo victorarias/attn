@@ -53,6 +53,13 @@ func DefaultStatePath() string {
 	return config.StatePath()
 }
 
+// execLog executes a query and logs any error (for operations where we don't propagate errors yet)
+func (s *Store) execLog(query string, args ...interface{}) {
+	if _, err := s.db.Exec(query, args...); err != nil {
+		log.Printf("[store] exec error: %v (query: %.50s...)", err, query)
+	}
+}
+
 // Close closes the database connection
 func (s *Store) Close() error {
 	if s.db != nil {
@@ -81,14 +88,14 @@ func (s *Store) Add(session *protocol.Session) {
 		session.ID,
 		session.Label,
 		session.Directory,
-		session.Branch,
-		boolToInt(session.IsWorktree),
-		session.MainRepo,
-		session.State,
-		session.StateSince.Format(time.RFC3339),
-		session.StateUpdatedAt.Format(time.RFC3339),
+		protocol.Deref(session.Branch),
+		boolToInt(protocol.Deref(session.IsWorktree)),
+		protocol.Deref(session.MainRepo),
+		string(session.State),
+		session.StateSince,
+		session.StateUpdatedAt,
 		string(todosJSON),
-		session.LastSeen.Format(time.RFC3339),
+		session.LastSeen,
 		boolToInt(session.Muted),
 	)
 	if err != nil {
@@ -131,12 +138,18 @@ func (s *Store) Get(id string) *protocol.Session {
 		return nil
 	}
 
-	session.Branch = branch.String
-	session.IsWorktree = isWorktree == 1
-	session.MainRepo = mainRepo.String
-	session.StateSince, _ = time.Parse(time.RFC3339, stateSince)
-	session.StateUpdatedAt, _ = time.Parse(time.RFC3339, stateUpdatedAt)
-	session.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
+	if branch.Valid && branch.String != "" {
+		session.Branch = protocol.Ptr(branch.String)
+	}
+	if isWorktree == 1 {
+		session.IsWorktree = protocol.Ptr(true)
+	}
+	if mainRepo.Valid && mainRepo.String != "" {
+		session.MainRepo = protocol.Ptr(mainRepo.String)
+	}
+	session.StateSince = stateSince
+	session.StateUpdatedAt = stateUpdatedAt
+	session.LastSeen = lastSeen
 	session.Muted = muted == 1
 	if todosJSON != "" && todosJSON != "null" {
 		json.Unmarshal([]byte(todosJSON), &session.Todos)
@@ -227,12 +240,18 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			continue
 		}
 
-		session.Branch = branch.String
-		session.IsWorktree = isWorktree == 1
-		session.MainRepo = mainRepo.String
-		session.StateSince, _ = time.Parse(time.RFC3339, stateSince)
-		session.StateUpdatedAt, _ = time.Parse(time.RFC3339, stateUpdatedAt)
-		session.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
+		if branch.Valid && branch.String != "" {
+			session.Branch = protocol.Ptr(branch.String)
+		}
+		if isWorktree == 1 {
+			session.IsWorktree = protocol.Ptr(true)
+		}
+		if mainRepo.Valid && mainRepo.String != "" {
+			session.MainRepo = protocol.Ptr(mainRepo.String)
+		}
+		session.StateSince = stateSince
+		session.StateUpdatedAt = stateUpdatedAt
+		session.LastSeen = lastSeen
 		session.Muted = muted == 1
 		if todosJSON != "" && todosJSON != "null" {
 			json.Unmarshal([]byte(todosJSON), &session.Todos)
@@ -414,25 +433,37 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 			pr.Muted = muted == 1
 			pr.DetailsFetched = detailsFetched == 1
 			if detailsFetchedAt.Valid {
-				pr.DetailsFetchedAt, _ = time.Parse(time.RFC3339, detailsFetchedAt.String)
+				pr.DetailsFetchedAt = protocol.Ptr(detailsFetchedAt.String)
 			}
 			if mergeable.Valid {
 				m := mergeable.Int64 == 1
 				pr.Mergeable = &m
 			}
-			pr.MergeableState = mergeableState.String
-			pr.CIStatus = ciStatus.String
-			pr.ReviewStatus = reviewStatus.String
-			pr.HeadSHA = headSHA.String
-			pr.HeadBranch = headBranch.String
-			pr.CommentCount = commentCount
+			if mergeableState.Valid {
+				pr.MergeableState = protocol.Ptr(mergeableState.String)
+			}
+			if ciStatus.Valid {
+				pr.CIStatus = protocol.Ptr(ciStatus.String)
+			}
+			if reviewStatus.Valid {
+				pr.ReviewStatus = protocol.Ptr(reviewStatus.String)
+			}
+			if headSHA.Valid {
+				pr.HeadSHA = protocol.Ptr(headSHA.String)
+			}
+			if headBranch.Valid {
+				pr.HeadBranch = protocol.Ptr(headBranch.String)
+			}
+			pr.CommentCount = protocol.Ptr(commentCount)
 			pr.ApprovedByMe = approvedByMe == 1
-			pr.HeatState = heatState.String
-			if pr.HeatState == "" {
-				pr.HeatState = protocol.HeatStateCold
+			if heatState.Valid && heatState.String != "" {
+				hs := protocol.HeatState(heatState.String)
+				pr.HeatState = &hs
+			} else {
+				pr.HeatState = protocol.Ptr(protocol.HeatStateCold)
 			}
 			if lastHeatActivityAt.Valid {
-				pr.LastHeatActivityAt, _ = time.Parse(time.RFC3339, lastHeatActivityAt.String)
+				pr.LastHeatActivityAt = protocol.Ptr(lastHeatActivityAt.String)
 			}
 			existing[pr.ID] = &pr
 		}
@@ -465,7 +496,7 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 	}
 
 	// Delete all PRs and re-insert
-	s.db.Exec("DELETE FROM prs")
+	s.execLog("DELETE FROM prs")
 
 	for _, pr := range prs {
 		// Preserve state from existing
@@ -483,14 +514,14 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 				pr.ReviewStatus = ex.ReviewStatus
 			}
 			// Preserve HeadSHA and HeadBranch from existing if not set
-			if pr.HeadSHA == "" {
+			if protocol.Deref(pr.HeadSHA) == "" {
 				pr.HeadSHA = ex.HeadSHA
 			}
-			if pr.HeadBranch == "" {
+			if protocol.Deref(pr.HeadBranch) == "" {
 				pr.HeadBranch = ex.HeadBranch
 			}
 			// Preserve heat state
-			if pr.HeatState == "" || pr.HeatState == protocol.HeatStateCold {
+			if pr.HeatState == nil || *pr.HeatState == protocol.HeatStateCold {
 				pr.HeatState = ex.HeatState
 				pr.LastHeatActivityAt = ex.LastHeatActivityAt
 			}
@@ -499,16 +530,18 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 		// Compute HasNewChanges based on interaction tracking
 		if inter, ok := interactions[pr.ID]; ok {
 			// PR has been visited before - check for changes
-			if pr.HeadSHA != "" && inter.lastSeenSHA != "" && pr.HeadSHA != inter.lastSeenSHA {
+			headSHA := protocol.Deref(pr.HeadSHA)
+			if headSHA != "" && inter.lastSeenSHA != "" && headSHA != inter.lastSeenSHA {
 				pr.HasNewChanges = true
 			}
-			if pr.CommentCount > inter.lastSeenCommentCount {
+			if protocol.Deref(pr.CommentCount) > inter.lastSeenCommentCount {
 				pr.HasNewChanges = true
 			}
 			// CI status changes only matter for authored or approved PRs
-			if (pr.Role == protocol.PRRoleAuthor || pr.ApprovedByMe) && pr.CIStatus != "" {
+			ciStatus := protocol.Deref(pr.CIStatus)
+			if (pr.Role == protocol.PRRoleAuthor || pr.ApprovedByMe) && ciStatus != "" {
 				// CI finished (was pending, now success/failure)
-				if inter.lastSeenCIStatus == "pending" && (pr.CIStatus == "success" || pr.CIStatus == "failure") {
+				if inter.lastSeenCIStatus == "pending" && (ciStatus == "success" || ciStatus == "failure") {
 					pr.HasNewChanges = true
 				}
 			}
@@ -522,20 +555,17 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 		}
 
 		// Ensure heat_state has a default value (NOT NULL column)
-		heatState := pr.HeatState
-		if heatState == "" {
-			heatState = protocol.HeatStateCold
-		}
+		heatState := protocol.DerefOr(pr.HeatState, protocol.HeatStateCold)
 
-		s.db.Exec(`
+		s.execLog(`
 			INSERT INTO prs (id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Role, pr.State, pr.Reason,
-			pr.LastUpdated.Format(time.RFC3339), pr.LastPolled.Format(time.RFC3339),
-			boolToInt(pr.Muted), boolToInt(pr.DetailsFetched), nullTimeString(pr.DetailsFetchedAt),
-			mergeableVal, nullString(pr.MergeableState), nullString(pr.CIStatus), nullString(pr.ReviewStatus),
-			nullString(pr.HeadSHA), nullString(pr.HeadBranch), pr.CommentCount, boolToInt(pr.ApprovedByMe),
-			heatState, nullTimeString(pr.LastHeatActivityAt),
+			pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, string(pr.Role), pr.State, pr.Reason,
+			pr.LastUpdated, pr.LastPolled,
+			boolToInt(pr.Muted), boolToInt(pr.DetailsFetched), nullPtrString(pr.DetailsFetchedAt),
+			mergeableVal, nullPtrString(pr.MergeableState), nullPtrString(pr.CIStatus), nullPtrString(pr.ReviewStatus),
+			nullPtrString(pr.HeadSHA), nullPtrString(pr.HeadBranch), protocol.Deref(pr.CommentCount), boolToInt(pr.ApprovedByMe),
+			string(heatState), nullPtrString(pr.LastHeatActivityAt),
 		)
 	}
 }
@@ -556,20 +586,17 @@ func (s *Store) AddPR(pr *protocol.PR) {
 	}
 
 	// Ensure heat_state has a default value (NOT NULL column)
-	heatState := pr.HeatState
-	if heatState == "" {
-		heatState = protocol.HeatStateCold
-	}
+	heatState := protocol.DerefOr(pr.HeatState, protocol.HeatStateCold)
 
-	s.db.Exec(`
+	s.execLog(`
 		INSERT OR REPLACE INTO prs (id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Role, pr.State, pr.Reason,
-		pr.LastUpdated.Format(time.RFC3339), pr.LastPolled.Format(time.RFC3339),
-		boolToInt(pr.Muted), boolToInt(pr.DetailsFetched), nullTimeString(pr.DetailsFetchedAt),
-		mergeableVal, nullString(pr.MergeableState), nullString(pr.CIStatus), nullString(pr.ReviewStatus),
-		nullString(pr.HeadSHA), nullString(pr.HeadBranch), pr.CommentCount, boolToInt(pr.ApprovedByMe),
-		heatState, nullTimeString(pr.LastHeatActivityAt),
+		pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, string(pr.Role), pr.State, pr.Reason,
+		pr.LastUpdated, pr.LastPolled,
+		boolToInt(pr.Muted), boolToInt(pr.DetailsFetched), nullPtrString(pr.DetailsFetchedAt),
+		mergeableVal, nullPtrString(pr.MergeableState), nullPtrString(pr.CIStatus), nullPtrString(pr.ReviewStatus),
+		nullPtrString(pr.HeadSHA), nullPtrString(pr.HeadBranch), protocol.Deref(pr.CommentCount), boolToInt(pr.ApprovedByMe),
+		string(heatState), nullPtrString(pr.LastHeatActivityAt),
 	)
 }
 
@@ -654,7 +681,7 @@ func (s *Store) UpdatePRDetails(id string, mergeable *bool, mergeableState, ciSt
 	}
 
 	now := time.Now().Format(time.RFC3339)
-	s.db.Exec(`UPDATE prs SET details_fetched = 1, details_fetched_at = ?, mergeable = ?, mergeable_state = ?, ci_status = ?, review_status = ?, head_sha = ?, head_branch = ? WHERE id = ?`,
+	s.execLog(`UPDATE prs SET details_fetched = 1, details_fetched_at = ?, mergeable = ?, mergeable_state = ?, ci_status = ?, review_status = ?, head_sha = ?, head_branch = ? WHERE id = ?`,
 		now, mergeableVal, mergeableState, ciStatus, reviewStatus, headSHA, headBranch, id)
 }
 
@@ -717,8 +744,8 @@ func (s *Store) ToggleMuteRepo(repo string) {
 	}
 
 	// Insert if not exists, then toggle
-	s.db.Exec("INSERT OR IGNORE INTO repos (repo, muted, collapsed) VALUES (?, 0, 0)", repo)
-	s.db.Exec("UPDATE repos SET muted = NOT muted WHERE repo = ?", repo)
+	s.execLog("INSERT OR IGNORE INTO repos (repo, muted, collapsed) VALUES (?, 0, 0)", repo)
+	s.execLog("UPDATE repos SET muted = NOT muted WHERE repo = ?", repo)
 }
 
 // SetRepoCollapsed sets a repo's collapsed state
@@ -730,8 +757,8 @@ func (s *Store) SetRepoCollapsed(repo string, collapsed bool) {
 		return
 	}
 
-	s.db.Exec("INSERT OR IGNORE INTO repos (repo, muted, collapsed) VALUES (?, 0, 0)", repo)
-	s.db.Exec("UPDATE repos SET collapsed = ? WHERE repo = ?", boolToInt(collapsed), repo)
+	s.execLog("INSERT OR IGNORE INTO repos (repo, muted, collapsed) VALUES (?, 0, 0)", repo)
+	s.execLog("UPDATE repos SET collapsed = ? WHERE repo = ?", boolToInt(collapsed), repo)
 }
 
 // ListRepoStates returns all repo states
@@ -786,7 +813,7 @@ func (s *Store) MarkPRVisited(prID string) {
 
 	// Upsert interaction record
 	now := time.Now().Format(time.RFC3339)
-	s.db.Exec(`
+	s.execLog(`
 		INSERT INTO pr_interactions (pr_id, last_visited_at, last_seen_sha, last_seen_comment_count, last_seen_ci_status)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(pr_id) DO UPDATE SET
@@ -817,7 +844,7 @@ func (s *Store) MarkPRApproved(prID string) {
 
 	// Upsert interaction record with approval timestamp
 	now := time.Now().Format(time.RFC3339)
-	s.db.Exec(`
+	s.execLog(`
 		INSERT INTO pr_interactions (pr_id, last_visited_at, last_approved_at, last_seen_sha, last_seen_comment_count, last_seen_ci_status)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(pr_id) DO UPDATE SET
@@ -830,7 +857,7 @@ func (s *Store) MarkPRApproved(prID string) {
 	)
 
 	// Also update the PR's approved_by_me flag
-	s.db.Exec("UPDATE prs SET approved_by_me = 1 WHERE id = ?", prID)
+	s.execLog("UPDATE prs SET approved_by_me = 1 WHERE id = ?", prID)
 }
 
 // SetPRHot sets a PR to hot state and updates last activity time
@@ -843,7 +870,7 @@ func (s *Store) SetPRHot(prID string) {
 	}
 
 	now := time.Now().Format(time.RFC3339)
-	s.db.Exec(`UPDATE prs SET heat_state = ?, last_heat_activity_at = ? WHERE id = ?`,
+	s.execLog(`UPDATE prs SET heat_state = ?, last_heat_activity_at = ? WHERE id = ?`,
 		protocol.HeatStateHot, now, prID)
 }
 
@@ -861,11 +888,11 @@ func (s *Store) DecayHeatStates() {
 	coldThreshold := now.Add(-protocol.HeatWarmDuration).Format(time.RFC3339)
 
 	// Hot → Warm (after 3 min)
-	s.db.Exec(`UPDATE prs SET heat_state = ? WHERE heat_state = ? AND last_heat_activity_at < ?`,
+	s.execLog(`UPDATE prs SET heat_state = ? WHERE heat_state = ? AND last_heat_activity_at < ?`,
 		protocol.HeatStateWarm, protocol.HeatStateHot, warmThreshold)
 
 	// Warm → Cold (after 10 min)
-	s.db.Exec(`UPDATE prs SET heat_state = ? WHERE heat_state = ? AND last_heat_activity_at < ?`,
+	s.execLog(`UPDATE prs SET heat_state = ? WHERE heat_state = ? AND last_heat_activity_at < ?`,
 		protocol.HeatStateCold, protocol.HeatStateWarm, coldThreshold)
 }
 
@@ -917,10 +944,12 @@ func (s *Store) GetPRsNeedingDetailRefresh() []*protocol.PR {
 		}
 
 		// Check if refresh needed based on heat state
-		elapsed := now.Sub(pr.DetailsFetchedAt)
+		detailsFetchedAt := protocol.Timestamp(protocol.Deref(pr.DetailsFetchedAt)).Time()
+		elapsed := now.Sub(detailsFetchedAt)
 		needsRefresh := false
 
-		switch pr.HeatState {
+		heatState := protocol.DerefOr(pr.HeatState, protocol.HeatStateCold)
+		switch heatState {
 		case protocol.HeatStateHot:
 			needsRefresh = elapsed > protocol.HeatHotInterval
 		case protocol.HeatStateWarm:
@@ -970,7 +999,7 @@ func (s *Store) SetSetting(key, value string) {
 		return
 	}
 
-	s.db.Exec(`
+	s.execLog(`
 		INSERT INTO settings (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 		key, value)
@@ -1042,11 +1071,11 @@ func nullString(s string) interface{} {
 	return s
 }
 
-func nullTimeString(t time.Time) interface{} {
-	if t.IsZero() {
+func nullPtrString(s *string) interface{} {
+	if s == nil || *s == "" {
 		return nil
 	}
-	return t.Format(time.RFC3339)
+	return *s
 }
 
 func scanPR(rows *sql.Rows) *protocol.PR {
@@ -1069,30 +1098,42 @@ func scanPR(rows *sql.Rows) *protocol.PR {
 		return nil
 	}
 
-	pr.LastUpdated, _ = time.Parse(time.RFC3339, lastUpdated)
-	pr.LastPolled, _ = time.Parse(time.RFC3339, lastPolled)
+	pr.LastUpdated = lastUpdated
+	pr.LastPolled = lastPolled
 	pr.Muted = muted == 1
 	pr.DetailsFetched = detailsFetched == 1
 	if detailsFetchedAt.Valid {
-		pr.DetailsFetchedAt, _ = time.Parse(time.RFC3339, detailsFetchedAt.String)
+		pr.DetailsFetchedAt = protocol.Ptr(detailsFetchedAt.String)
 	}
 	if mergeable.Valid {
 		m := mergeable.Int64 == 1
 		pr.Mergeable = &m
 	}
-	pr.MergeableState = mergeableState.String
-	pr.CIStatus = ciStatus.String
-	pr.ReviewStatus = reviewStatus.String
-	pr.HeadSHA = headSHA.String
-	pr.HeadBranch = headBranch.String
-	pr.CommentCount = commentCount
+	if mergeableState.Valid {
+		pr.MergeableState = protocol.Ptr(mergeableState.String)
+	}
+	if ciStatus.Valid {
+		pr.CIStatus = protocol.Ptr(ciStatus.String)
+	}
+	if reviewStatus.Valid {
+		pr.ReviewStatus = protocol.Ptr(reviewStatus.String)
+	}
+	if headSHA.Valid {
+		pr.HeadSHA = protocol.Ptr(headSHA.String)
+	}
+	if headBranch.Valid {
+		pr.HeadBranch = protocol.Ptr(headBranch.String)
+	}
+	pr.CommentCount = protocol.Ptr(commentCount)
 	pr.ApprovedByMe = approvedByMe == 1
-	pr.HeatState = heatState.String
-	if pr.HeatState == "" {
-		pr.HeatState = protocol.HeatStateCold
+	if heatState.Valid && heatState.String != "" {
+		hs := protocol.HeatState(heatState.String)
+		pr.HeatState = &hs
+	} else {
+		pr.HeatState = protocol.Ptr(protocol.HeatStateCold)
 	}
 	if lastHeatActivityAt.Valid {
-		pr.LastHeatActivityAt, _ = time.Parse(time.RFC3339, lastHeatActivityAt.String)
+		pr.LastHeatActivityAt = protocol.Ptr(lastHeatActivityAt.String)
 	}
 
 	return &pr
@@ -1118,30 +1159,42 @@ func scanPRRow(row *sql.Row) *protocol.PR {
 		return nil
 	}
 
-	pr.LastUpdated, _ = time.Parse(time.RFC3339, lastUpdated)
-	pr.LastPolled, _ = time.Parse(time.RFC3339, lastPolled)
+	pr.LastUpdated = lastUpdated
+	pr.LastPolled = lastPolled
 	pr.Muted = muted == 1
 	pr.DetailsFetched = detailsFetched == 1
 	if detailsFetchedAt.Valid {
-		pr.DetailsFetchedAt, _ = time.Parse(time.RFC3339, detailsFetchedAt.String)
+		pr.DetailsFetchedAt = protocol.Ptr(detailsFetchedAt.String)
 	}
 	if mergeable.Valid {
 		m := mergeable.Int64 == 1
 		pr.Mergeable = &m
 	}
-	pr.MergeableState = mergeableState.String
-	pr.CIStatus = ciStatus.String
-	pr.ReviewStatus = reviewStatus.String
-	pr.HeadSHA = headSHA.String
-	pr.HeadBranch = headBranch.String
-	pr.CommentCount = commentCount
+	if mergeableState.Valid {
+		pr.MergeableState = protocol.Ptr(mergeableState.String)
+	}
+	if ciStatus.Valid {
+		pr.CIStatus = protocol.Ptr(ciStatus.String)
+	}
+	if reviewStatus.Valid {
+		pr.ReviewStatus = protocol.Ptr(reviewStatus.String)
+	}
+	if headSHA.Valid {
+		pr.HeadSHA = protocol.Ptr(headSHA.String)
+	}
+	if headBranch.Valid {
+		pr.HeadBranch = protocol.Ptr(headBranch.String)
+	}
+	pr.CommentCount = protocol.Ptr(commentCount)
 	pr.ApprovedByMe = approvedByMe == 1
-	pr.HeatState = heatState.String
-	if pr.HeatState == "" {
-		pr.HeatState = protocol.HeatStateCold
+	if heatState.Valid && heatState.String != "" {
+		hs := protocol.HeatState(heatState.String)
+		pr.HeatState = &hs
+	} else {
+		pr.HeatState = protocol.Ptr(protocol.HeatStateCold)
 	}
 	if lastHeatActivityAt.Valid {
-		pr.LastHeatActivityAt, _ = time.Parse(time.RFC3339, lastHeatActivityAt.String)
+		pr.LastHeatActivityAt = protocol.Ptr(lastHeatActivityAt.String)
 	}
 
 	return &pr

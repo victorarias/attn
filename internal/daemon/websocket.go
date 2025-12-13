@@ -144,13 +144,18 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) sendInitialState(client *wsClient) {
+	// Convert settings to interface{} map for generated type
+	settings := make(map[string]interface{})
+	for k, v := range d.store.GetAllSettings() {
+		settings[k] = v
+	}
 	event := &protocol.WebSocketEvent{
 		Event:           protocol.EventInitialState,
-		ProtocolVersion: protocol.ProtocolVersion,
-		Sessions:        d.store.List(""),
-		PRs:             d.store.ListPRs(""),
-		Repos:           d.store.ListRepoStates(),
-		Settings:        d.store.GetAllSettings(),
+		ProtocolVersion: protocol.Ptr(protocol.ProtocolVersion),
+		Sessions:        protocol.SessionsToValues(d.store.List("")),
+		Prs:             protocol.PRsToValues(d.store.ListPRs("")),
+		Repos:           protocol.RepoStatesToValues(d.store.ListRepoStates()),
+		Settings:        settings,
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -234,20 +239,20 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	d.logf("WebSocket parsed cmd: %s", cmd)
 
 	switch cmd {
-	case protocol.MsgApprovePR:
+	case protocol.CmdApprovePR:
 		appMsg := msg.(*protocol.ApprovePRMessage)
 		d.logf("Processing approve for %s#%d", appMsg.Repo, appMsg.Number)
 		go func() {
 			err := d.ghClient.ApprovePR(appMsg.Repo, appMsg.Number)
 			result := protocol.PRActionResultMessage{
-				Event:   protocol.MsgPRActionResult,
+				Event:   protocol.EventPRActionResult,
 				Action:  "approve",
 				Repo:    appMsg.Repo,
 				Number:  appMsg.Number,
 				Success: err == nil,
 			}
 			if err != nil {
-				result.Error = err.Error()
+				result.Error = protocol.Ptr(err.Error())
 				d.logf("Approve failed for %s#%d: %v", appMsg.Repo, appMsg.Number, err)
 			} else {
 				d.logf("Approve succeeded for %s#%d", appMsg.Repo, appMsg.Number)
@@ -263,19 +268,19 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			d.RefreshPRs()
 		}()
 
-	case protocol.MsgMergePR:
+	case protocol.CmdMergePR:
 		mergeMsg := msg.(*protocol.MergePRMessage)
 		go func() {
 			err := d.ghClient.MergePR(mergeMsg.Repo, mergeMsg.Number, mergeMsg.Method)
 			result := protocol.PRActionResultMessage{
-				Event:   protocol.MsgPRActionResult,
+				Event:   protocol.EventPRActionResult,
 				Action:  "merge",
 				Repo:    mergeMsg.Repo,
 				Number:  mergeMsg.Number,
 				Success: err == nil,
 			}
 			if err != nil {
-				result.Error = err.Error()
+				result.Error = protocol.Ptr(err.Error())
 			}
 			d.sendToClient(client, result)
 			// Trigger PR refresh after action
@@ -328,7 +333,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 				Success: err == nil,
 			}
 			if err != nil {
-				result.Error = err.Error()
+				result.Error = protocol.Ptr(err.Error())
 				d.logf("Refresh PRs failed: %v", err)
 			} else {
 				d.logf("Refresh PRs succeeded")
@@ -342,7 +347,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		// Broadcast empty sessions list to all clients
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:    protocol.EventSessionsUpdated,
-			Sessions: d.store.List(""),
+			Sessions: protocol.SessionsToValues(d.store.List("")),
 		})
 
 	case protocol.CmdPRVisited:
@@ -382,9 +387,13 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 
 	case protocol.CmdGetSettings:
 		d.logf("Getting settings")
+		settings := make(map[string]interface{})
+		for k, v := range d.store.GetAllSettings() {
+			settings[k] = v
+		}
 		d.sendToClient(client, &protocol.WebSocketEvent{
 			Event:    protocol.EventSettingsUpdated,
-			Settings: d.store.GetAllSettings(),
+			Settings: settings,
 		})
 
 	case protocol.CmdSetSetting:
@@ -400,7 +409,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		// Broadcast updated sessions list
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:    protocol.EventSessionsUpdated,
-			Sessions: d.store.List(""),
+			Sessions: protocol.SessionsToValues(d.store.List("")),
 		})
 	}
 }
@@ -409,7 +418,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 func (d *Daemon) broadcastPRs() {
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventPRsUpdated,
-		PRs:   d.store.ListPRs(""),
+		Prs:   protocol.PRsToValues(d.store.ListPRs("")),
 	})
 }
 
@@ -417,15 +426,19 @@ func (d *Daemon) broadcastPRs() {
 func (d *Daemon) broadcastRepoStates() {
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventReposUpdated,
-		Repos: d.store.ListRepoStates(),
+		Repos: protocol.RepoStatesToValues(d.store.ListRepoStates()),
 	})
 }
 
 // broadcastSettings sends updated settings to all WebSocket clients
 func (d *Daemon) broadcastSettings() {
+	settings := make(map[string]interface{})
+	for k, v := range d.store.GetAllSettings() {
+		settings[k] = v
+	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:    protocol.EventSettingsUpdated,
-		Settings: d.store.GetAllSettings(),
+		Settings: settings,
 	})
 }
 

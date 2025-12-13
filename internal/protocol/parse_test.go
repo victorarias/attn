@@ -79,7 +79,7 @@ func TestParseRegister(t *testing.T) {
 	if msg.ID != "abc123" {
 		t.Errorf("ID = %q, want %q", msg.ID, "abc123")
 	}
-	if msg.Label != "drumstick" {
-		t.Errorf("Label = %q, want %q", msg.Label, "drumstick")
+	if Deref(msg.Label) != "drumstick" {
+		t.Errorf("Label = %q, want %q", Deref(msg.Label), "drumstick")
 	}
 }

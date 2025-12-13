@@ -164,7 +164,18 @@ pnpm run e2e -- --ui       # Run with Playwright UI
 ## Task Tracking
 
 Use `bd` (beads) for tracking work items, not inline markdown TODOs or TodoWrite.
-Design plans in `docs/plans/` are separate artifacts, not task tracking.
+
+### Executing Plans
+
+When working on a design plan from `docs/plans/`:
+
+1. **Create an epic** for the plan (link to plan doc in description)
+2. **Create child tasks** for the initial steps
+3. **Add dependencies** when order matters (`bd dep add`)
+4. **Add discovered tasks** as work progresses - don't plan everything upfront
+5. **Close tasks** as completed; epic auto-closes when all children are done
+
+Use `bd ready` to see unblocked work.
 
 ## When Something Is Broken
 

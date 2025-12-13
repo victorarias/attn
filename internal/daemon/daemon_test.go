@@ -64,13 +64,13 @@ func TestDaemon_StateUpdate(t *testing.T) {
 	c.Register("sess-1", "test", "/tmp")
 
 	// Update state
-	err := c.UpdateState("sess-1", protocol.StateWaiting)
+	err := c.UpdateState("sess-1", protocol.StateWaitingInput)
 	if err != nil {
 		t.Fatalf("UpdateState error: %v", err)
 	}
 
 	// Query waiting
-	sessions, err := c.Query(protocol.StateWaiting)
+	sessions, err := c.Query(protocol.StateWaitingInput)
 	if err != nil {
 		t.Fatalf("Query error: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 
 	c := client.New(sockPath)
 
-	// Register multiple sessions (all start as waiting)
+	// Register multiple sessions (all start as waiting_input)
 	c.Register("1", "one", "/tmp/1")
 	c.Register("2", "two", "/tmp/2")
 	c.Register("3", "three", "/tmp/3")
@@ -120,10 +120,10 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 	// Update one to working
 	c.UpdateState("2", protocol.StateWorking)
 
-	// Query waiting (sessions 1 and 3)
-	waiting, _ := c.Query(protocol.StateWaiting)
+	// Query waiting_input (sessions 1 and 3)
+	waiting, _ := c.Query(protocol.StateWaitingInput)
 	if len(waiting) != 2 {
-		t.Errorf("got %d waiting, want 2", len(waiting))
+		t.Errorf("got %d waiting_input, want 2", len(waiting))
 	}
 
 	// Query working (session 2)
@@ -258,7 +258,7 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 
 	// Verify response
 	if !response.Success {
-		t.Errorf("Expected success=true, got success=%v, error=%s", response.Success, response.Error)
+		t.Errorf("Expected success=true, got success=%v, error=%s", response.Success, protocol.Deref(response.Error))
 	}
 	if response.Action != "approve" {
 		t.Errorf("Expected action=approve, got action=%s", response.Action)
@@ -290,23 +290,23 @@ func TestDaemon_InjectTestPR(t *testing.T) {
 	c := client.New(sockPath)
 
 	// Create test PR data
-	testPR := &protocol.PR{
+	testPR := protocol.PR{
 		ID:          "owner/repo#123",
 		Repo:        "owner/repo",
 		Number:      123,
 		Title:       "Test PR for E2E",
 		URL:         "https://github.com/owner/repo/pull/123",
 		Role:        protocol.PRRoleAuthor,
-		State:       protocol.StateWaiting,
+		State:       protocol.PRStateWaiting,
 		Reason:      protocol.PRReasonReadyToMerge,
-		LastUpdated: time.Now(),
-		LastPolled:  time.Now(),
+		LastUpdated: protocol.TimestampNow().String(),
+		LastPolled:  protocol.TimestampNow().String(),
 		Muted:       false,
 	}
 
 	// Send inject_test_pr message
 	msg := protocol.InjectTestPRMessage{
-		Cmd: protocol.MsgInjectTestPR,
+		Cmd: protocol.CmdInjectTestPR,
 		PR:  testPR,
 	}
 	msgJSON, _ := json.Marshal(msg)
@@ -329,8 +329,8 @@ func TestDaemon_InjectTestPR(t *testing.T) {
 		t.Fatalf("Decode response error: %v", err)
 	}
 
-	if !resp.OK {
-		t.Fatalf("Expected OK=true, got OK=%v, Error=%s", resp.OK, resp.Error)
+	if !resp.Ok {
+		t.Fatalf("Expected Ok=true, got Ok=%v, Error=%s", resp.Ok, protocol.Deref(resp.Error))
 	}
 
 	// Verify PR was added using query_prs
@@ -349,7 +349,7 @@ func TestDaemon_InjectTestPR(t *testing.T) {
 	if prs[0].Title != "Test PR for E2E" {
 		t.Errorf("Expected Title='Test PR for E2E', got Title=%s", prs[0].Title)
 	}
-	if prs[0].State != protocol.StateWaiting {
+	if prs[0].State != protocol.PRStateWaiting {
 		t.Errorf("Expected State=waiting, got State=%s", prs[0].State)
 	}
 }
@@ -381,21 +381,21 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Inject test PR via unix socket
-	testPR := &protocol.PR{
+	testPR := protocol.PR{
 		ID:          "owner/repo#123",
 		Repo:        "owner/repo",
 		Number:      123,
 		Title:       "Test PR",
 		URL:         "https://github.com/owner/repo/pull/123",
 		Role:        protocol.PRRoleAuthor,
-		State:       protocol.StateWaiting,
+		State:       protocol.PRStateWaiting,
 		Reason:      protocol.PRReasonReadyToMerge,
-		LastUpdated: time.Now(),
-		LastPolled:  time.Now(),
+		LastUpdated: protocol.TimestampNow().String(),
+		LastPolled:  protocol.TimestampNow().String(),
 		Muted:       false,
 	}
 	msg := protocol.InjectTestPRMessage{
-		Cmd: protocol.MsgInjectTestPR,
+		Cmd: protocol.CmdInjectTestPR,
 		PR:  testPR,
 	}
 	msgJSON, _ := json.Marshal(msg)
@@ -433,10 +433,10 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 	// Verify PR is not muted in initial state
 	var initialState protocol.WebSocketEvent
 	json.Unmarshal(initialData, &initialState)
-	if len(initialState.PRs) != 1 {
-		t.Fatalf("Expected 1 PR in initial state, got %d", len(initialState.PRs))
+	if len(initialState.Prs) != 1 {
+		t.Fatalf("Expected 1 PR in initial state, got %d", len(initialState.Prs))
 	}
-	if initialState.PRs[0].Muted {
+	if initialState.Prs[0].Muted {
 		t.Error("Expected PR to not be muted initially")
 	}
 
@@ -462,10 +462,10 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 	if updateEvent.Event != protocol.EventPRsUpdated {
 		t.Errorf("Expected event=%s, got event=%s", protocol.EventPRsUpdated, updateEvent.Event)
 	}
-	if len(updateEvent.PRs) != 1 {
-		t.Fatalf("Expected 1 PR in update, got %d", len(updateEvent.PRs))
+	if len(updateEvent.Prs) != 1 {
+		t.Fatalf("Expected 1 PR in update, got %d", len(updateEvent.Prs))
 	}
-	if !updateEvent.PRs[0].Muted {
+	if !updateEvent.Prs[0].Muted {
 		t.Error("Expected PR to be muted after mute command")
 	}
 
@@ -483,7 +483,7 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 
 	var updateEvent2 protocol.WebSocketEvent
 	json.Unmarshal(updateData2, &updateEvent2)
-	if updateEvent2.PRs[0].Muted {
+	if updateEvent2.Prs[0].Muted {
 		t.Error("Expected PR to be unmuted after second mute command (toggle)")
 	}
 }
@@ -731,7 +731,7 @@ func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
 	}
 
 	// Update state to waiting_input via unix socket
-	err = c.UpdateState("test-session", protocol.StateWaiting)
+	err = c.UpdateState("test-session", protocol.StateWaitingInput)
 	if err != nil {
 		t.Fatalf("UpdateState error: %v", err)
 	}
@@ -754,8 +754,8 @@ func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
 	if event.Session.ID != "test-session" {
 		t.Errorf("Expected session id=test-session, got id=%s", event.Session.ID)
 	}
-	if event.Session.State != protocol.StateWaiting {
-		t.Errorf("Expected state=%s, got state=%s", protocol.StateWaiting, event.Session.State)
+	if event.Session.State != protocol.SessionStateWaitingInput {
+		t.Errorf("Expected state=%s, got state=%s", protocol.SessionStateWaitingInput, event.Session.State)
 	}
 }
 
@@ -812,7 +812,7 @@ func TestDaemon_StateTransitions_AllStates(t *testing.T) {
 	}
 
 	// Test all three states: working → waiting_input → idle → working
-	states := []string{protocol.StateWaiting, protocol.StateIdle, protocol.StateWorking}
+	states := []string{protocol.StateWaitingInput, protocol.StateIdle, protocol.StateWorking}
 
 	for _, expectedState := range states {
 		err = c.UpdateState("test-session", expectedState)
@@ -832,7 +832,8 @@ func TestDaemon_StateTransitions_AllStates(t *testing.T) {
 		if event.Event != protocol.EventSessionStateChanged {
 			t.Errorf("Expected event=%s for state %s, got event=%s", protocol.EventSessionStateChanged, expectedState, event.Event)
 		}
-		if event.Session.State != expectedState {
+		// Compare state - need to handle string/SessionState conversion
+		if string(event.Session.State) != expectedState {
 			t.Errorf("Expected state=%s, got state=%s", expectedState, event.Session.State)
 		}
 	}
@@ -924,8 +925,8 @@ func TestDaemon_InjectTestSession_BroadcastsToWebSocket(t *testing.T) {
 	if event.Session.ID != "injected-session" {
 		t.Errorf("Expected session id=injected-session, got id=%s", event.Session.ID)
 	}
-	if event.Session.State != protocol.StateWorking {
-		t.Errorf("Expected state=%s, got state=%s", protocol.StateWorking, event.Session.State)
+	if event.Session.State != protocol.SessionStateWorking {
+		t.Errorf("Expected state=%s, got state=%s", protocol.SessionStateWorking, event.Session.State)
 	}
 }
 
@@ -969,8 +970,8 @@ func TestDaemon_StopCommand_PendingTodos_SetsWaitingInput(t *testing.T) {
 	json.NewDecoder(conn).Decode(&resp)
 	conn.Close()
 
-	if !resp.OK {
-		t.Fatalf("Todos update failed: %s", resp.Error)
+	if !resp.Ok {
+		t.Fatalf("Todos update failed: %s", protocol.Deref(resp.Error))
 	}
 
 	// Send stop command (should classify as waiting_input due to pending todos)
@@ -999,8 +1000,8 @@ func TestDaemon_StopCommand_PendingTodos_SetsWaitingInput(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("Expected 1 session, got %d", len(sessions))
 	}
-	if sessions[0].State != protocol.StateWaitingInput {
-		t.Errorf("Expected state=%s (due to pending todos), got state=%s", protocol.StateWaitingInput, sessions[0].State)
+	if sessions[0].State != protocol.SessionStateWaitingInput {
+		t.Errorf("Expected state=%s (due to pending todos), got state=%s", protocol.SessionStateWaitingInput, sessions[0].State)
 	}
 }
 
@@ -1050,8 +1051,8 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 	json.NewDecoder(conn).Decode(&resp)
 	conn.Close()
 
-	if !resp.OK {
-		t.Fatalf("Todos update failed: %s", resp.Error)
+	if !resp.Ok {
+		t.Fatalf("Todos update failed: %s", protocol.Deref(resp.Error))
 	}
 
 	// Verify todos were stored correctly

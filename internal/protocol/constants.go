@@ -1,0 +1,315 @@
+package protocol
+
+import (
+	"encoding/json"
+	"errors"
+	"time"
+)
+
+// ProtocolVersion is the version of the daemon-client protocol.
+// Increment this when making breaking changes to the protocol.
+// Client and daemon must have matching versions.
+const ProtocolVersion = "6"
+
+// Commands
+const (
+	CmdRegister        = "register"
+	CmdUnregister      = "unregister"
+	CmdState           = "state"
+	CmdStop            = "stop"
+	CmdTodos           = "todos"
+	CmdQuery           = "query"
+	CmdHeartbeat       = "heartbeat"
+	CmdMute            = "mute"
+	CmdQueryPRs        = "query_prs"
+	CmdMutePR          = "mute_pr"
+	CmdMuteRepo        = "mute_repo"
+	CmdCollapseRepo    = "collapse_repo"
+	CmdQueryRepos      = "query_repos"
+	CmdFetchPRDetails  = "fetch_pr_details"
+	CmdRefreshPRs      = "refresh_prs"
+	CmdClearSessions   = "clear_sessions"
+	CmdPRVisited       = "pr_visited"
+	CmdListWorktrees   = "list_worktrees"
+	CmdCreateWorktree  = "create_worktree"
+	CmdDeleteWorktree  = "delete_worktree"
+	CmdGetSettings       = "get_settings"
+	CmdSetSetting        = "set_setting"
+	CmdApprovePR         = "approve_pr"
+	CmdMergePR           = "merge_pr"
+	CmdInjectTestPR      = "inject_test_pr"
+	CmdInjectTestSession = "inject_test_session"
+)
+
+// WebSocket Events (daemon -> client)
+const (
+	EventSessionRegistered    = "session_registered"
+	EventSessionUnregistered  = "session_unregistered"
+	EventSessionStateChanged  = "session_state_changed"
+	EventSessionTodosUpdated  = "session_todos_updated"
+	EventSessionsUpdated      = "sessions_updated"
+	EventPRsUpdated           = "prs_updated"
+	EventReposUpdated         = "repos_updated"
+	EventInitialState         = "initial_state"
+	EventPRActionResult       = "pr_action_result"
+	EventRefreshPRsResult     = "refresh_prs_result"
+	EventBranchChanged        = "branch_changed"
+	EventWorktreeCreated      = "worktree_created"
+	EventWorktreeDeleted      = "worktree_deleted"
+	EventWorktreesUpdated     = "worktrees_updated"
+	EventCreateWorktreeResult = "create_worktree_result"
+	EventDeleteWorktreeResult = "delete_worktree_result"
+	EventSettingsUpdated      = "settings_updated"
+	EventRateLimited          = "rate_limited"
+)
+
+// Session states (values for SessionState enum)
+const (
+	StateWorking      = "working"
+	StateWaitingInput = "waiting_input"
+	StateIdle         = "idle"
+)
+
+// PR states (values for PR.State field, distinct from session states)
+const (
+	PRStateWaiting = "waiting" // PR needs attention
+)
+
+// PR reasons (why it needs attention)
+const (
+	PRReasonReadyToMerge     = "ready_to_merge"
+	PRReasonCIFailed         = "ci_failed"
+	PRReasonChangesRequested = "changes_requested"
+	PRReasonReviewNeeded     = "review_needed"
+)
+
+// Heat state timing constants
+const (
+	HeatHotDuration  = 3 * time.Minute  // Stay hot for 3 min after activity
+	HeatWarmDuration = 10 * time.Minute // Stay warm for 10 min total
+	HeatHotInterval  = 30 * time.Second // Refresh hot PRs every 30s
+	HeatWarmInterval = 2 * time.Minute  // Refresh warm PRs every 2 min
+	HeatColdInterval = 10 * time.Minute // Refresh cold PRs every 10 min
+)
+
+// NeedsDetailRefresh returns true if PR details should be re-fetched
+func (pr *PR) NeedsDetailRefresh() bool {
+	if !pr.DetailsFetched {
+		return true
+	}
+	// Parse timestamps for comparison
+	lastUpdated := Timestamp(pr.LastUpdated).Time()
+	detailsFetchedAt := Timestamp(Deref(pr.DetailsFetchedAt)).Time()
+
+	// Invalidate if PR was updated after we fetched details
+	if lastUpdated.After(detailsFetchedAt) {
+		return true
+	}
+	// Invalidate if details are older than 5 minutes
+	if time.Since(detailsFetchedAt) > 5*time.Minute {
+		return true
+	}
+	return false
+}
+
+// ParseMessage parses a JSON message and returns the command type and parsed message
+func ParseMessage(data []byte) (string, interface{}, error) {
+	// First, extract just the command
+	var peek struct {
+		Cmd string `json:"cmd"`
+	}
+	if err := json.Unmarshal(data, &peek); err != nil {
+		return "", nil, err
+	}
+	if peek.Cmd == "" {
+		return "", nil, errors.New("missing cmd field")
+	}
+
+	// Parse based on command type
+	switch peek.Cmd {
+	case CmdRegister:
+		var msg RegisterMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdUnregister:
+		var msg UnregisterMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdState:
+		var msg StateMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdStop:
+		var msg StopMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdTodos:
+		var msg TodosMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdQuery:
+		var msg QueryMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdHeartbeat:
+		var msg HeartbeatMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdMute:
+		var msg MuteMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdQueryPRs:
+		var msg QueryPRsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdMutePR:
+		var msg MutePRMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdMuteRepo:
+		var msg MuteRepoMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCollapseRepo:
+		var msg CollapseRepoMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdQueryRepos:
+		var msg QueryReposMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdFetchPRDetails:
+		var msg FetchPRDetailsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdRefreshPRs:
+		var msg RefreshPRsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdClearSessions:
+		var msg ClearSessionsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdPRVisited:
+		var msg PRVisitedMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdListWorktrees:
+		var msg ListWorktreesMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCreateWorktree:
+		var msg CreateWorktreeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDeleteWorktree:
+		var msg DeleteWorktreeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdGetSettings:
+		var msg GetSettingsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSetSetting:
+		var msg SetSettingMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdApprovePR:
+		var msg ApprovePRMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdMergePR:
+		var msg MergePRMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdInjectTestPR:
+		var msg InjectTestPRMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdInjectTestSession:
+		var msg InjectTestSessionMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	default:
+		return "", nil, errors.New("unknown command: " + peek.Cmd)
+	}
+}

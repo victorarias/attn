@@ -268,11 +268,11 @@ func (c *Client) SearchAuthoredPRs() ([]*protocol.PR, error) {
 			Title:        item.Title,
 			URL:          item.HTMLURL,
 			Role:         protocol.PRRoleAuthor,
-			State:        protocol.StateWaiting,
+			State:        protocol.PRStateWaiting,
 			Reason:       "",
-			LastUpdated:  time.Now(),
-			LastPolled:   time.Now(),
-			CommentCount: item.Comments,
+			LastUpdated:  string(protocol.TimestampNow()),
+			LastPolled:   string(protocol.TimestampNow()),
+			CommentCount: protocol.Ptr(item.Comments),
 		})
 	}
 
@@ -308,11 +308,11 @@ func (c *Client) SearchReviewRequestedPRs() ([]*protocol.PR, error) {
 			Title:        item.Title,
 			URL:          item.HTMLURL,
 			Role:         protocol.PRRoleReviewer,
-			State:        protocol.StateWaiting,
+			State:        protocol.PRStateWaiting,
 			Reason:       protocol.PRReasonReviewNeeded,
-			LastUpdated:  time.Now(),
-			LastPolled:   time.Now(),
-			CommentCount: item.Comments,
+			LastUpdated:  string(protocol.TimestampNow()),
+			LastPolled:   string(protocol.TimestampNow()),
+			CommentCount: protocol.Ptr(item.Comments),
 		})
 	}
 
@@ -349,11 +349,11 @@ func (c *Client) SearchReviewedByMePRs() ([]*protocol.PR, error) {
 			Title:        item.Title,
 			URL:          item.HTMLURL,
 			Role:         protocol.PRRoleReviewer,
-			State:        protocol.StateWaiting,
+			State:        protocol.PRStateWaiting,
 			Reason:       protocol.PRReasonReviewNeeded,
-			LastUpdated:  time.Now(),
-			LastPolled:   time.Now(),
-			CommentCount: item.Comments,
+			LastUpdated:  string(protocol.TimestampNow()),
+			LastPolled:   string(protocol.TimestampNow()),
+			CommentCount: protocol.Ptr(item.Comments),
 			ApprovedByMe: true, // Will be refined based on actual review state
 		})
 	}

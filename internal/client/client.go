@@ -46,8 +46,12 @@ func (c *Client) send(msg interface{}) (*protocol.Response, error) {
 		return nil, fmt.Errorf("receive response: %w", err)
 	}
 
-	if !resp.OK {
-		return nil, fmt.Errorf("daemon error: %s", resp.Error)
+	if !resp.Ok {
+		errMsg := ""
+		if resp.Error != nil {
+			errMsg = *resp.Error
+		}
+		return nil, fmt.Errorf("daemon error: %s", errMsg)
 	}
 
 	return &resp, nil
@@ -58,7 +62,7 @@ func (c *Client) Register(id, label, dir string) error {
 	msg := protocol.RegisterMessage{
 		Cmd:   protocol.CmdRegister,
 		ID:    id,
-		Label: label,
+		Label: protocol.Ptr(label),
 		Dir:   dir,
 	}
 	_, err := c.send(msg)
@@ -109,10 +113,14 @@ func (c *Client) UpdateTodos(id string, todos []string) error {
 }
 
 // Query returns sessions matching the filter
-func (c *Client) Query(filter string) ([]*protocol.Session, error) {
+func (c *Client) Query(filter string) ([]protocol.Session, error) {
+	var filterPtr *string
+	if filter != "" {
+		filterPtr = &filter
+	}
 	msg := protocol.QueryMessage{
 		Cmd:    protocol.CmdQuery,
-		Filter: filter,
+		Filter: filterPtr,
 	}
 	resp, err := c.send(msg)
 	if err != nil {
@@ -142,16 +150,20 @@ func (c *Client) ToggleMute(id string) error {
 }
 
 // QueryPRs returns PRs matching the filter
-func (c *Client) QueryPRs(filter string) ([]*protocol.PR, error) {
+func (c *Client) QueryPRs(filter string) ([]protocol.PR, error) {
+	var filterPtr *string
+	if filter != "" {
+		filterPtr = &filter
+	}
 	msg := protocol.QueryPRsMessage{
 		Cmd:    protocol.CmdQueryPRs,
-		Filter: filter,
+		Filter: filterPtr,
 	}
 	resp, err := c.send(msg)
 	if err != nil {
 		return nil, err
 	}
-	return resp.PRs, nil
+	return resp.Prs, nil
 }
 
 // ToggleMutePR toggles a PR's muted state
@@ -186,7 +198,7 @@ func (c *Client) SetRepoCollapsed(repo string, collapsed bool) error {
 }
 
 // QueryRepos returns all repo states
-func (c *Client) QueryRepos() ([]*protocol.RepoState, error) {
+func (c *Client) QueryRepos() ([]protocol.RepoState, error) {
 	msg := map[string]string{
 		"cmd": protocol.CmdQueryRepos,
 	}
@@ -198,7 +210,7 @@ func (c *Client) QueryRepos() ([]*protocol.RepoState, error) {
 }
 
 // FetchPRDetails requests the daemon to fetch PR details for a repo
-func (c *Client) FetchPRDetails(repo string) ([]*protocol.PR, error) {
+func (c *Client) FetchPRDetails(repo string) ([]protocol.PR, error) {
 	msg := protocol.FetchPRDetailsMessage{
 		Cmd:  protocol.CmdFetchPRDetails,
 		Repo: repo,
@@ -207,7 +219,7 @@ func (c *Client) FetchPRDetails(repo string) ([]*protocol.PR, error) {
 	if err != nil {
 		return nil, err
 	}
-	return resp.PRs, nil
+	return resp.Prs, nil
 }
 
 // IsRunning checks if the daemon is running
