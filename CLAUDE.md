@@ -55,16 +55,72 @@ The store (`internal/store`) tracks both sessions and PRs with mute states. PR a
 
 ### Protocol Versioning
 
-**Rule:** When changing the protocol (adding/modifying commands, events, or message structures), increment `ProtocolVersion` in `internal/protocol/types.go`.
+**Rule:** When changing the protocol (adding/modifying commands, events, or message structures), increment `ProtocolVersion` in `internal/protocol/constants.go`.
 
 The app checks protocol version on WebSocket connect and shows an error banner if mismatched. This prevents silent failures when the daemon is running old code.
 
 **After protocol changes:**
-1. Increment `ProtocolVersion` in `internal/protocol/types.go`
+1. Increment `ProtocolVersion` in `internal/protocol/constants.go`
 2. Run `make install` (kills daemon automatically)
 3. The app will auto-start a new daemon with updated code
 
 **Why:** The daemon runs as a background process and survives `make install`. Without version checking, old daemon + new app = mysterious failures with no logs.
+
+### Adding New Protocol Types (TypeSpec Workflow)
+
+Types are defined once in TypeSpec and generated for Go and TypeScript. **Never hand-edit generated files.**
+
+**Source of truth:** `internal/protocol/schema/main.tsp`
+
+**Generated files:**
+- `internal/protocol/generated.go` (Go structs)
+- `app/src/types/generated.ts` (TypeScript interfaces)
+
+**Workflow for adding a new command/event:**
+
+1. **Define types in TypeSpec** (`internal/protocol/schema/main.tsp`):
+   ```tsp
+   // Command message (client → daemon)
+   model GetRecentLocationsMessage {
+     cmd: "get_recent_locations";
+     limit?: int32;
+   }
+
+   // Result event (daemon → client)
+   model RecentLocationsResultMessage {
+     event: "recent_locations_result";
+     locations: RecentLocation[];
+     success: boolean;
+     error?: string;
+   }
+   ```
+
+2. **Generate types:**
+   ```bash
+   make generate-types
+   ```
+
+3. **Add command constant** (`internal/protocol/constants.go`):
+   ```go
+   const CmdGetRecentLocations = "get_recent_locations"
+   const EventRecentLocationsResult = "recent_locations_result"
+   ```
+
+4. **Add parse case** in `ParseMessage()` (`internal/protocol/constants.go`):
+   ```go
+   case CmdGetRecentLocations:
+       var msg GetRecentLocationsMessage
+       if err := json.Unmarshal(data, &msg); err != nil {
+           return "", nil, err
+       }
+       return peek.Cmd, &msg, nil
+   ```
+
+5. **Increment protocol version** if breaking change (`internal/protocol/constants.go`)
+
+6. **Run `make install`** to rebuild and restart daemon
+
+**CI check:** `make check-types` verifies generated files match the schema.
 
 ### Communication
 

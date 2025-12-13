@@ -9,7 +9,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "6"
+const ProtocolVersion = "7"
 
 // Commands
 const (
@@ -37,8 +37,9 @@ const (
 	CmdSetSetting        = "set_setting"
 	CmdApprovePR         = "approve_pr"
 	CmdMergePR           = "merge_pr"
-	CmdInjectTestPR      = "inject_test_pr"
-	CmdInjectTestSession = "inject_test_session"
+	CmdInjectTestPR        = "inject_test_pr"
+	CmdInjectTestSession   = "inject_test_session"
+	CmdGetRecentLocations  = "get_recent_locations"
 )
 
 // WebSocket Events (daemon -> client)
@@ -59,8 +60,9 @@ const (
 	EventWorktreesUpdated     = "worktrees_updated"
 	EventCreateWorktreeResult = "create_worktree_result"
 	EventDeleteWorktreeResult = "delete_worktree_result"
-	EventSettingsUpdated      = "settings_updated"
-	EventRateLimited          = "rate_limited"
+	EventSettingsUpdated        = "settings_updated"
+	EventRateLimited            = "rate_limited"
+	EventRecentLocationsResult  = "recent_locations_result"
 )
 
 // Session states (values for SessionState enum)
@@ -304,6 +306,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdInjectTestSession:
 		var msg InjectTestSessionMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdGetRecentLocations:
+		var msg GetRecentLocationsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

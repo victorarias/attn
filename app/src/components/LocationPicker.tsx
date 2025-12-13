@@ -2,9 +2,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { homeDir } from '@tauri-apps/api/path';
 import { readDir } from '@tauri-apps/plugin-fs';
-import { useLocationHistory } from '../hooks/useLocationHistory';
 import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
-import type { DaemonWorktree } from '../hooks/useDaemonSocket';
+import type { DaemonWorktree, RecentLocation } from '../hooks/useDaemonSocket';
 import './LocationPicker.css';
 
 interface LocationPickerProps {
@@ -17,9 +16,10 @@ interface LocationPickerProps {
   onDeleteWorktree?: (path: string) => Promise<{ success: boolean }>;
   worktreeFlowMode?: boolean;
   projectsDirectory?: string;
+  onGetRecentLocations?: () => Promise<{ locations: RecentLocation[] }>;
 }
 
-export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWorktrees, onCreateWorktree, onDeleteWorktree, worktreeFlowMode, projectsDirectory }: LocationPickerProps) {
+export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWorktrees, onCreateWorktree, onDeleteWorktree, worktreeFlowMode, projectsDirectory, onGetRecentLocations }: LocationPickerProps) {
   const [inputValue, setInputValue] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [homePath, setHomePath] = useState('/Users');
@@ -32,10 +32,10 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
   const [deleteConfirmIndex, setDeleteConfirmIndex] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [recentLocations, setRecentLocations] = useState<RecentLocation[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const newBranchRef = useRef<HTMLDivElement>(null);
-  const { getRecentLocations, addToHistory, removeFromHistory } = useLocationHistory();
   const { suggestions: fsSuggestions, loading, currentDir } = useFilesystemSuggestions(inputValue);
 
   // Get home directory on mount
@@ -45,7 +45,19 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
     }).catch(() => {});
   }, []);
 
-  const recentLocations = getRecentLocations();
+  // Fetch recent locations from daemon when picker opens
+  useEffect(() => {
+    if (isOpen && onGetRecentLocations) {
+      onGetRecentLocations()
+        .then((result) => {
+          setRecentLocations(result.locations);
+        })
+        .catch((err) => {
+          console.error('[LocationPicker] Failed to fetch recent locations:', err);
+          setRecentLocations([]);
+        });
+    }
+  }, [isOpen, onGetRecentLocations]);
 
   // Filter recent locations based on input
   const filteredRecent = inputValue
@@ -161,29 +173,29 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
       }
 
       // Not a git repo, just select it
-      addToHistory(path);
+      // Note: Location is automatically tracked by daemon when session registers
       onSelect(path);
       onClose();
     },
-    [addToHistory, onSelect, onClose, onListWorktrees]
+    [onSelect, onClose, onListWorktrees]
   );
 
   const handleWorktreeSelect = useCallback(
     (worktreePath: string) => {
-      addToHistory(worktreePath);
+      // Note: Location is automatically tracked by daemon when session registers
       onSelect(worktreePath);
       onClose();
     },
-    [addToHistory, onSelect, onClose]
+    [onSelect, onClose]
   );
 
   const handleMainBranchSelect = useCallback(() => {
     if (selectedRepo) {
-      addToHistory(selectedRepo);
+      // Note: Location is automatically tracked by daemon when session registers
       onSelect(selectedRepo);
       onClose();
     }
-  }, [selectedRepo, addToHistory, onSelect, onClose]);
+  }, [selectedRepo, onSelect, onClose]);
 
   const handleNewBranch = useCallback(async () => {
     if (!selectedRepo || !newBranchName || !onCreateWorktree || creating) return;
@@ -193,7 +205,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
     try {
       const result = await onCreateWorktree(selectedRepo, newBranchName);
       if (result.success && result.path) {
-        addToHistory(result.path);
+        // Note: Location is automatically tracked by daemon when session registers
         onSelect(result.path);
         onClose();
       } else {
@@ -204,7 +216,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
     } finally {
       setCreating(false);
     }
-  }, [selectedRepo, newBranchName, onCreateWorktree, addToHistory, onSelect, onClose, creating]);
+  }, [selectedRepo, newBranchName, onCreateWorktree, onSelect, onClose, creating]);
 
   const handleDeleteWorktree = useCallback(async () => {
     if (deleteConfirmIndex === null || !worktrees || !onDeleteWorktree || deleting) return;
@@ -218,7 +230,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
     try {
       const result = await onDeleteWorktree(worktree.path);
       if (result.success) {
-        removeFromHistory(worktree.path);
+        // Note: Deleted paths are automatically filtered by daemon on next fetch
         setDeleteConfirmIndex(null);
         // Refresh worktree list
         if (selectedRepo && onListWorktrees) {
@@ -232,7 +244,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
     } finally {
       setDeleting(false);
     }
-  }, [deleteConfirmIndex, worktrees, onDeleteWorktree, deleting, removeFromHistory, selectedRepo, onListWorktrees]);
+  }, [deleteConfirmIndex, worktrees, onDeleteWorktree, deleting, selectedRepo, onListWorktrees]);
 
   // Total items in worktree mode: 1 (main) + worktrees count + 1 (new branch)
   const worktreeItemCount = 1 + (worktrees?.length || 0) + 1;

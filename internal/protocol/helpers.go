@@ -110,3 +110,16 @@ func RepoStatesToValues(repos []*RepoState) []RepoState {
 	}
 	return result
 }
+
+func RecentLocationsToValues(locs []*RecentLocation) []RecentLocation {
+	if locs == nil {
+		return nil
+	}
+	result := make([]RecentLocation, len(locs))
+	for i, l := range locs {
+		if l != nil {
+			result[i] = *l
+		}
+	}
+	return result
+}
