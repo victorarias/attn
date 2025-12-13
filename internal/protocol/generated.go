@@ -466,6 +466,9 @@ type UnregisterMessage struct {
 }
 
 type WebSocketEvent struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
@@ -492,6 +495,9 @@ type WebSocketEvent struct {
 
 	// Settings corresponds to the JSON schema field "settings".
 	Settings map[string]interface{} `json:"settings,omitempty"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success *bool `json:"success,omitempty"`
 
 	// Worktrees corresponds to the JSON schema field "worktrees".
 	Worktrees []Worktree `json:"worktrees,omitempty"`

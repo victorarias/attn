@@ -188,6 +188,7 @@ func (d *Daemon) Stop() {
 func (d *Daemon) startHTTPServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", d.handleWS)
+	mux.HandleFunc("/health", d.handleHealth)
 
 	port := os.Getenv("ATTN_WS_PORT")
 	if port == "" {
@@ -942,4 +943,22 @@ func (d *Daemon) checkAllBranches() {
 			Sessions: protocol.SessionsToValues(sessions),
 		})
 	}
+}
+
+// handleHealth returns daemon health status
+func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
+	sessions := d.store.List("")
+	prs := d.store.ListPRs("")
+
+	health := map[string]interface{}{
+		"status":          "ok",
+		"protocol":        protocol.ProtocolVersion,
+		"sessions":        len(sessions),
+		"prs":             len(prs),
+		"ws_clients":      d.wsHub.ClientCount(),
+		"github_available": d.ghClient != nil && d.ghClient.IsAvailable(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(health)
 }
