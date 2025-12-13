@@ -41,13 +41,17 @@ export function useLocationHistory() {
             const validEntries: LocationEntry[] = [];
             for (const entry of parsed) {
               try {
+                // Check if the path exists - filter out deleted directories
                 const pathExists = await exists(entry.path);
                 if (pathExists) {
                   validEntries.push(entry);
+                } else {
+                  console.log('[LocationHistory] Filtering out non-existent path:', entry.path);
                 }
-              } catch {
-                // If we can't check, keep the entry
-                validEntries.push(entry);
+              } catch (err) {
+                // If we can't check, DON'T keep the entry - safer to remove it
+                // This prevents deleted worktrees from lingering if exists() fails
+                console.warn('[LocationHistory] Could not check path, removing:', entry.path, err);
               }
             }
             setHistory(validEntries);
@@ -97,7 +101,15 @@ export function useLocationHistory() {
   }, []);
 
   const removeFromHistory = useCallback((path: string) => {
-    setHistory((prev) => prev.filter((e) => e.path !== path));
+    setHistory((prev) => {
+      const newHistory = prev.filter((e) => e.path !== path);
+      // Save immediately when removing (don't wait for debounce)
+      // This ensures the file is updated before another component reads it
+      writeTextFile(HISTORY_FILE, JSON.stringify(newHistory, null, 2), {
+        baseDir: BaseDirectory.AppData,
+      }).catch((e) => console.error('Failed to save location history after removal:', e));
+      return newHistory;
+    });
   }, []);
 
   const getRecentLocations = useCallback(() => {
