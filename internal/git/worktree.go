@@ -16,7 +16,13 @@ type WorktreeEntry struct {
 }
 
 // ListWorktrees returns all worktrees for a repository
+// Runs prune first to clean up any stale worktree entries
 func ListWorktrees(repoDir string) ([]WorktreeEntry, error) {
+	// Prune stale worktrees first to ensure clean listing
+	pruneCmd := exec.Command("git", "worktree", "prune")
+	pruneCmd.Dir = repoDir
+	_ = pruneCmd.Run() // Best effort - don't fail if prune fails
+
 	cmd := exec.Command("git", "worktree", "list", "--porcelain")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
@@ -67,6 +73,7 @@ func CreateWorktreeFromBranch(repoDir, branch, path string) error {
 
 // DeleteWorktree removes a worktree
 // If the worktree directory doesn't exist, it prunes stale entries instead
+// Always runs prune after removal to ensure git metadata is fully cleaned
 func DeleteWorktree(repoDir, path string) error {
 	// Check if directory exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -85,6 +92,13 @@ func DeleteWorktree(repoDir, path string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree remove failed: %s", out)
 	}
+
+	// Always prune after removal to ensure git metadata is fully cleaned
+	// This prevents the worktree from reappearing in subsequent list operations
+	pruneCmd := exec.Command("git", "worktree", "prune")
+	pruneCmd.Dir = repoDir
+	_ = pruneCmd.Run() // Best effort - don't fail if prune fails
+
 	return nil
 }
 
