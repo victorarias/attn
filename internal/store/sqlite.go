@@ -2,20 +2,20 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const schema = `
+// baseSchema creates the core tables. Column additions are handled by migrations.
+// This schema represents the initial state (version 0).
+const baseSchema = `
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY,
 	label TEXT NOT NULL,
 	directory TEXT NOT NULL,
-	branch TEXT,
-	is_worktree INTEGER NOT NULL DEFAULT 0,
-	main_repo TEXT,
 	state TEXT NOT NULL DEFAULT 'idle',
 	state_since TEXT NOT NULL,
 	state_updated_at TEXT NOT NULL,
@@ -41,13 +41,7 @@ CREATE TABLE IF NOT EXISTS prs (
 	mergeable INTEGER,
 	mergeable_state TEXT,
 	ci_status TEXT,
-	review_status TEXT,
-	head_sha TEXT,
-	head_branch TEXT,
-	comment_count INTEGER NOT NULL DEFAULT 0,
-	approved_by_me INTEGER NOT NULL DEFAULT 0,
-	heat_state TEXT NOT NULL DEFAULT 'cold',
-	last_heat_activity_at TEXT
+	review_status TEXT
 );
 
 CREATE TABLE IF NOT EXISTS repos (
@@ -61,8 +55,7 @@ CREATE TABLE IF NOT EXISTS pr_interactions (
 	last_visited_at TEXT,
 	last_approved_at TEXT,
 	last_seen_sha TEXT,
-	last_seen_comment_count INTEGER,
-	last_seen_ci_status TEXT
+	last_seen_comment_count INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS worktrees (
@@ -76,7 +69,35 @@ CREATE TABLE IF NOT EXISTS settings (
 	key TEXT PRIMARY KEY,
 	value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+	version INTEGER PRIMARY KEY,
+	applied_at TEXT NOT NULL
+);
 `
+
+// migration represents a database schema migration
+type migration struct {
+	version int
+	desc    string
+	sql     string
+}
+
+// migrations defines all schema migrations in order.
+// Each migration is applied exactly once, tracked in schema_migrations table.
+// To add a new migration: append to this slice with the next version number.
+var migrations = []migration{
+	{1, "add head_sha to prs", "ALTER TABLE prs ADD COLUMN head_sha TEXT"},
+	{2, "add head_branch to prs", "ALTER TABLE prs ADD COLUMN head_branch TEXT"},
+	{3, "add comment_count to prs", "ALTER TABLE prs ADD COLUMN comment_count INTEGER NOT NULL DEFAULT 0"},
+	{4, "add approved_by_me to prs", "ALTER TABLE prs ADD COLUMN approved_by_me INTEGER NOT NULL DEFAULT 0"},
+	{5, "add heat_state to prs", "ALTER TABLE prs ADD COLUMN heat_state TEXT NOT NULL DEFAULT 'cold'"},
+	{6, "add last_heat_activity_at to prs", "ALTER TABLE prs ADD COLUMN last_heat_activity_at TEXT"},
+	{7, "add last_seen_ci_status to pr_interactions", "ALTER TABLE pr_interactions ADD COLUMN last_seen_ci_status TEXT"},
+	{8, "add branch to sessions", "ALTER TABLE sessions ADD COLUMN branch TEXT"},
+	{9, "add is_worktree to sessions", "ALTER TABLE sessions ADD COLUMN is_worktree INTEGER NOT NULL DEFAULT 0"},
+	{10, "add main_repo to sessions", "ALTER TABLE sessions ADD COLUMN main_repo TEXT"},
+}
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
 // It also creates the schema if the database is new.
@@ -92,13 +113,13 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	// Create schema
-	if _, err := db.Exec(schema); err != nil {
+	// Create base schema (includes schema_migrations table)
+	if _, err := db.Exec(baseSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
 
-	// Run migrations for existing databases
+	// Run versioned migrations
 	if err := migrateDB(db); err != nil {
 		db.Close()
 		return nil, err
@@ -107,34 +128,61 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-// migrateDB adds new columns to existing tables (SQLite doesn't support IF NOT EXISTS for columns)
+// migrateDB runs all pending migrations in order.
+// It tracks applied migrations in the schema_migrations table.
 func migrateDB(db *sql.DB) error {
-	// Check if head_sha column exists in prs table
-	migrations := []struct {
-		check string
-		alter string
-	}{
-		{"SELECT head_sha FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN head_sha TEXT"},
-		{"SELECT head_branch FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN head_branch TEXT"},
-		{"SELECT comment_count FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN comment_count INTEGER NOT NULL DEFAULT 0"},
-		{"SELECT approved_by_me FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN approved_by_me INTEGER NOT NULL DEFAULT 0"},
-		{"SELECT heat_state FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN heat_state TEXT NOT NULL DEFAULT 'cold'"},
-		{"SELECT last_heat_activity_at FROM prs LIMIT 1", "ALTER TABLE prs ADD COLUMN last_heat_activity_at TEXT"},
-		{"SELECT last_seen_ci_status FROM pr_interactions LIMIT 1", "ALTER TABLE pr_interactions ADD COLUMN last_seen_ci_status TEXT"},
-		{"SELECT branch FROM sessions LIMIT 1", "ALTER TABLE sessions ADD COLUMN branch TEXT"},
-		{"SELECT is_worktree FROM sessions LIMIT 1", "ALTER TABLE sessions ADD COLUMN is_worktree INTEGER NOT NULL DEFAULT 0"},
-		{"SELECT main_repo FROM sessions LIMIT 1", "ALTER TABLE sessions ADD COLUMN main_repo TEXT"},
+	// Get current schema version
+	currentVersion, err := getCurrentVersion(db)
+	if err != nil {
+		return fmt.Errorf("getting schema version: %w", err)
 	}
 
+	// Run pending migrations
 	for _, m := range migrations {
-		_, err := db.Exec(m.check)
+		if m.version <= currentVersion {
+			continue
+		}
+
+		// Execute migration in a transaction
+		tx, err := db.Begin()
 		if err != nil {
-			// Column doesn't exist, add it
-			if _, err := db.Exec(m.alter); err != nil {
-				return err
-			}
+			return fmt.Errorf("starting transaction for migration %d: %w", m.version, err)
+		}
+
+		if _, err := tx.Exec(m.sql); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+		}
+
+		// Record migration
+		if _, err := tx.Exec(
+			"INSERT INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
+			m.version,
+		); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("recording migration %d: %w", m.version, err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("committing migration %d: %w", m.version, err)
 		}
 	}
 
 	return nil
+}
+
+// getCurrentVersion returns the highest applied migration version, or 0 if none.
+func getCurrentVersion(db *sql.DB) (int, error) {
+	var version int
+	err := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version)
+	if err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
+// GetSchemaVersion returns the current schema version for the database.
+// Exported for testing and diagnostics.
+func GetSchemaVersion(db *sql.DB) (int, error) {
+	return getCurrentVersion(db)
 }
