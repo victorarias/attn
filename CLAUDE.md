@@ -161,6 +161,11 @@ pnpm run e2e:headed        # Run with browser visible
 pnpm run e2e -- --ui       # Run with Playwright UI
 ```
 
+## Task Tracking
+
+Use `bd` (beads) for tracking work items, not inline markdown TODOs or TodoWrite.
+Design plans in `docs/plans/` are separate artifacts, not task tracking.
+
 ## When Something Is Broken
 
 1. **Diagnose WHY** before proposing fixes - understand the root cause
