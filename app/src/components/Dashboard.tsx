@@ -7,6 +7,7 @@ import { SettingsModal } from './SettingsModal';
 import { StateIndicator } from './StateIndicator';
 import { useDaemonContext } from '../contexts/DaemonContext';
 import { useDaemonStore } from '../store/daemonSessions';
+import { getRepoName } from '../utils/repo';
 import './Dashboard.css';
 
 interface DashboardProps {
@@ -291,7 +292,7 @@ export function Dashboard({
               <div className="card-empty">No PRs need attention</div>
             ) : (
               Array.from(prsByRepo.entries()).map(([repo, repoPRs]) => {
-                const repoName = repo.split('/')[1] || repo;
+                const repoName = getRepoName(repo);
                 const isCollapsed = collapsedRepos.has(repo);
                 const reviewCount = repoPRs.filter((p) => p.role === 'reviewer').length;
                 const authorCount = repoPRs.filter((p) => p.role === 'author').length;

@@ -3,6 +3,7 @@ import { DaemonPR } from '../hooks/useDaemonSocket';
 import { usePRsNeedingAttention } from '../hooks/usePRsNeedingAttention';
 import { PRActions } from './PRActions';
 import { StateIndicator } from './StateIndicator';
+import { getRepoName } from '../utils/repo';
 import './AttentionDrawer.css';
 
 interface AttentionDrawerProps {
@@ -77,7 +78,7 @@ export function AttentionDrawer({
                 >
                   <div className="pr-meta">
                     <StateIndicator state="waiting_input" size="sm" kind="pr" />
-                    <span className="pr-repo">{pr.repo.split('/')[1]}</span>
+                    <span className="pr-repo">{getRepoName(pr.repo)}</span>
                     <span className="pr-number">#{pr.number}</span>
                   </div>
                   <span className="pr-title-full">{pr.title}</span>
@@ -108,7 +109,7 @@ export function AttentionDrawer({
                 >
                   <div className="pr-meta">
                     <StateIndicator state="waiting_input" size="sm" kind="pr" />
-                    <span className="pr-repo">{pr.repo.split('/')[1]}</span>
+                    <span className="pr-repo">{getRepoName(pr.repo)}</span>
                     <span className="pr-number">#{pr.number}</span>
                   </div>
                   <span className="pr-title-full">{pr.title}</span>
