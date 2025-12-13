@@ -14,11 +14,12 @@ interface LocationPickerProps {
   worktrees?: DaemonWorktree[];
   onListWorktrees?: (mainRepo: string) => void;
   onCreateWorktree?: (mainRepo: string, branch: string) => Promise<{ success: boolean; path?: string }>;
+  onDeleteWorktree?: (path: string) => Promise<{ success: boolean }>;
   worktreeFlowMode?: boolean;
   projectsDirectory?: string;
 }
 
-export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWorktrees, onCreateWorktree, worktreeFlowMode, projectsDirectory }: LocationPickerProps) {
+export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWorktrees, onCreateWorktree, onDeleteWorktree, worktreeFlowMode, projectsDirectory }: LocationPickerProps) {
   const [inputValue, setInputValue] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [homePath, setHomePath] = useState('/Users');
@@ -28,10 +29,13 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
   const [showNewBranch, setShowNewBranch] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleteConfirmIndex, setDeleteConfirmIndex] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const newBranchRef = useRef<HTMLDivElement>(null);
-  const { getRecentLocations, addToHistory } = useLocationHistory();
+  const { getRecentLocations, addToHistory, removeFromHistory } = useLocationHistory();
   const { suggestions: fsSuggestions, loading, currentDir } = useFilesystemSuggestions(inputValue);
 
   // Get home directory on mount
@@ -96,6 +100,9 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
       setSelectedRepo(null);
       setNewBranchName('');
       setShowNewBranch(false);
+      setDeleteConfirmIndex(null);
+      setDeleting(false);
+      setDeleteError(null);
 
       // If worktreeFlowMode and projectsDirectory set, pre-populate and browse
       if (worktreeFlowMode && projectsDirectory) {
@@ -199,6 +206,34 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
     }
   }, [selectedRepo, newBranchName, onCreateWorktree, addToHistory, onSelect, onClose, creating]);
 
+  const handleDeleteWorktree = useCallback(async () => {
+    if (deleteConfirmIndex === null || !worktrees || !onDeleteWorktree || deleting) return;
+
+    const worktreeIndex = deleteConfirmIndex - 1; // Index 0 is main branch
+    const worktree = worktrees[worktreeIndex];
+    if (!worktree) return;
+
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const result = await onDeleteWorktree(worktree.path);
+      if (result.success) {
+        removeFromHistory(worktree.path);
+        setDeleteConfirmIndex(null);
+        // Refresh worktree list
+        if (selectedRepo && onListWorktrees) {
+          onListWorktrees(selectedRepo);
+        }
+      } else {
+        setDeleteError('Failed to delete worktree');
+      }
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete worktree');
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleteConfirmIndex, worktrees, onDeleteWorktree, deleting, removeFromHistory, selectedRepo, onListWorktrees]);
+
   // Total items in worktree mode: 1 (main) + worktrees count + 1 (new branch)
   const worktreeItemCount = 1 + (worktrees?.length || 0) + 1;
 
@@ -209,12 +244,37 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
 
       // Worktree mode keyboard handling
       if (worktreeMode) {
+        const newBranchIndex = 1 + (worktrees?.length || 0);
+
+        // Delete confirmation mode handling
+        if (deleteConfirmIndex !== null) {
+          if (e.key === 'Escape' || e.key === 'n') {
+            e.preventDefault();
+            setDeleteConfirmIndex(null);
+            setDeleteError(null);
+            return;
+          }
+          if ((e.key === 'Enter' || e.key === 'y') && !deleting) {
+            e.preventDefault();
+            handleDeleteWorktree();
+            return;
+          }
+          return; // Block other keys during confirmation
+        }
+
         if (e.key === 'Escape') {
           e.preventDefault();
           setWorktreeMode(false);
           setSelectedRepo(null);
           setShowNewBranch(false);
           setNewBranchName('');
+          return;
+        }
+
+        // 'd' to delete selected worktree (not main branch or new branch)
+        if (e.key === 'd' && !showNewBranch && selectedIndex > 0 && selectedIndex < newBranchIndex && onDeleteWorktree) {
+          e.preventDefault();
+          setDeleteConfirmIndex(selectedIndex);
           return;
         }
 
@@ -240,7 +300,6 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
         // Enter to select
         if (e.key === 'Enter' && !showNewBranch) {
           e.preventDefault();
-          const newBranchIndex = 1 + (worktrees?.length || 0);
           if (selectedIndex === 0) {
             handleMainBranchSelect();
           } else if (selectedIndex === newBranchIndex) {
@@ -322,7 +381,7 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
         return;
       }
     },
-    [worktreeMode, worktrees, worktreeItemCount, showNewBranch, handleMainBranchSelect, handleWorktreeSelect, allSuggestions, selectedIndex, inputValue, handleSelect, onClose, homePath, fsSuggestions.length, totalSuggestions]
+    [worktreeMode, worktrees, worktreeItemCount, showNewBranch, handleMainBranchSelect, handleWorktreeSelect, handleDeleteWorktree, deleteConfirmIndex, deleting, onDeleteWorktree, allSuggestions, selectedIndex, inputValue, handleSelect, onClose, homePath, fsSuggestions.length, totalSuggestions]
   );
 
   if (!isOpen) return null;
@@ -374,22 +433,43 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
                 </div>
 
                 {/* Worktree options */}
-                {worktrees?.map((wt, index) => (
-                  <div
-                    key={wt.path}
-                    className={`picker-item ${selectedIndex === index + 1 ? 'selected' : ''}`}
-                    data-index={index + 1}
-                    onClick={() => handleWorktreeSelect(wt.path)}
-                    onMouseEnter={() => setSelectedIndex(index + 1)}
-                  >
-                    <div className="picker-shortcut">{index + 2}</div>
-                    <div className="picker-icon">⎇</div>
-                    <div className="picker-info">
-                      <div className="picker-name">{wt.branch}</div>
-                      <div className="picker-path">{wt.path}</div>
+                {worktrees?.map((wt, index) => {
+                  const isConfirmingDelete = deleteConfirmIndex === index + 1;
+                  return (
+                    <div
+                      key={wt.path}
+                      className={`picker-item ${selectedIndex === index + 1 ? 'selected' : ''} ${isConfirmingDelete ? 'delete-confirm' : ''}`}
+                      data-index={index + 1}
+                      onClick={() => isConfirmingDelete ? undefined : handleWorktreeSelect(wt.path)}
+                      onMouseEnter={() => setSelectedIndex(index + 1)}
+                    >
+                      {isConfirmingDelete ? (
+                        <>
+                          <div className="picker-icon delete-icon">🗑</div>
+                          <div className="picker-info">
+                            <div className="picker-name delete-prompt">
+                              {deleting ? 'Deleting...' : `Delete ${wt.branch}?`}
+                            </div>
+                            {deleteError ? (
+                              <div className="picker-path delete-error">{deleteError}</div>
+                            ) : (
+                              <div className="picker-path">[Enter/y] confirm · [Esc/n] cancel</div>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="picker-shortcut">{index + 2}</div>
+                          <div className="picker-icon">⎇</div>
+                          <div className="picker-info">
+                            <div className="picker-name">{wt.branch}</div>
+                            <div className="picker-path">{wt.path}</div>
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* New branch section */}
@@ -507,7 +587,8 @@ export function LocationPicker({ isOpen, onClose, onSelect, worktrees, onListWor
             <>
               <span className="shortcut"><kbd>↑↓</kbd> navigate</span>
               <span className="shortcut"><kbd>Enter</kbd> select</span>
-              <span className="shortcut"><kbd>n</kbd> new branch</span>
+              <span className="shortcut"><kbd>n</kbd> new</span>
+              <span className="shortcut"><kbd>d</kbd> delete</span>
               <span className="shortcut"><kbd>Esc</kbd> back</span>
             </>
           ) : (

@@ -431,6 +431,14 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'clear_sessions' }));
   }, []);
 
+  // Unregister a single session from daemon
+  const sendUnregisterSession = useCallback((sessionId: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    ws.send(JSON.stringify({ cmd: 'unregister', id: sessionId }));
+  }, []);
+
   // Mark a PR as visited (clears HasNewChanges flag)
   const sendPRVisited = useCallback((prId: string) => {
     const ws = wsRef.current;
@@ -529,6 +537,7 @@ export function useDaemonSocket({
     sendMuteRepo,
     sendRefreshPRs,
     sendClearSessions,
+    sendUnregisterSession,
     sendPRVisited,
     sendListWorktrees,
     sendCreateWorktree,

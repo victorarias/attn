@@ -372,6 +372,16 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.logf("Setting %s = %s", setMsg.Key, setMsg.Value)
 		d.store.SetSetting(setMsg.Key, setMsg.Value)
 		d.broadcastSettings()
+
+	case protocol.CmdUnregister:
+		unregMsg := msg.(*protocol.UnregisterMessage)
+		d.logf("Unregistering session %s via WebSocket", unregMsg.ID)
+		d.store.Remove(unregMsg.ID)
+		// Broadcast updated sessions list
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:    protocol.EventSessionsUpdated,
+			Sessions: d.store.List(""),
+		})
 	}
 }
 

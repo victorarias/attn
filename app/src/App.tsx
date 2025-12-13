@@ -74,7 +74,7 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -182,7 +182,7 @@ function App() {
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [worktreeFlowMode, setWorktreeFlowMode] = useState(false);
-  const { addToHistory } = useLocationHistory();
+  const { addToHistory, removeFromHistory } = useLocationHistory();
 
   // No auto-creation - user clicks "+" to start a session
 
@@ -230,10 +230,18 @@ function App() {
         }
       }
 
+      // Unregister from daemon by finding the daemon session with matching directory
+      if (session?.cwd) {
+        const daemonSession = daemonSessions.find(ds => ds.directory === session.cwd);
+        if (daemonSession) {
+          sendUnregisterSession(daemonSession.id);
+        }
+      }
+
       terminalRefs.current.delete(id);
       closeSession(id);
     },
-    [closeSession, enrichedLocalSessions, alwaysKeepWorktrees]
+    [closeSession, enrichedLocalSessions, alwaysKeepWorktrees, daemonSessions, sendUnregisterSession]
   );
 
   const handleSelectSession = useCallback(
@@ -322,12 +330,13 @@ function App() {
     if (closedWorktree) {
       try {
         await sendDeleteWorktree(closedWorktree.path);
+        removeFromHistory(closedWorktree.path);
       } catch (err) {
         console.error('[App] Failed to delete worktree:', err);
       }
     }
     setClosedWorktree(null);
-  }, [closedWorktree, sendDeleteWorktree]);
+  }, [closedWorktree, sendDeleteWorktree, removeFromHistory]);
 
   const handleWorktreeAlwaysKeep = useCallback(() => {
     setAlwaysKeepWorktrees(true);
@@ -496,6 +505,7 @@ function App() {
         worktrees={worktrees}
         onListWorktrees={sendListWorktrees}
         onCreateWorktree={sendCreateWorktree}
+        onDeleteWorktree={sendDeleteWorktree}
         worktreeFlowMode={worktreeFlowMode}
         projectsDirectory={settings.projects_directory}
       />
