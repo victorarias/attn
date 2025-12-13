@@ -137,6 +137,11 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 // migrateDB runs all pending migrations in order.
 // It tracks applied migrations in the schema_migrations table.
 func migrateDB(db *sql.DB) error {
+	// Detect and handle legacy databases (created before migration system existed)
+	if err := seedLegacyDB(db); err != nil {
+		return fmt.Errorf("seeding legacy db: %w", err)
+	}
+
 	// Get current schema version
 	currentVersion, err := getCurrentVersion(db)
 	if err != nil {
@@ -172,6 +177,57 @@ func migrateDB(db *sql.DB) error {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("committing migration %d: %w", m.version, err)
 		}
+	}
+
+	return nil
+}
+
+// seedLegacyDB detects databases created before the migration system existed
+// and seeds schema_migrations to prevent duplicate column errors.
+// Legacy DBs have all columns (up to migration 10) but no migration history.
+func seedLegacyDB(db *sql.DB) error {
+	// Check if schema_migrations is empty
+	currentVersion, err := getCurrentVersion(db)
+	if err != nil {
+		return err
+	}
+	if currentVersion > 0 {
+		return nil // Already has migration history
+	}
+
+	// Check if this is a legacy DB by looking for a column that only exists
+	// in legacy DBs (head_sha was in the original schema before migrations)
+	var colCount int
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('prs') WHERE name = 'head_sha'
+	`).Scan(&colCount)
+	if err != nil {
+		return err
+	}
+	if colCount == 0 {
+		return nil // Fresh DB, no legacy columns
+	}
+
+	// Legacy DB detected - seed migrations 1-10 (all columns that existed before migration system)
+	// Migration 11+ were added after the migration system, so they need to run normally
+	const legacyMaxVersion = 10
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	for v := 1; v <= legacyMaxVersion; v++ {
+		if _, err := tx.Exec(
+			"INSERT INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
+			v,
+		); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 
 	return nil

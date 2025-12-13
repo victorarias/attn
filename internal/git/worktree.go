@@ -102,6 +102,42 @@ func DeleteWorktree(repoDir, path string) error {
 	return nil
 }
 
+// GetMainRepoFromWorktree returns the main repo path for a worktree.
+// Worktrees have a .git file (not directory) pointing to the main repo's .git/worktrees/<name>.
+// Returns empty string if path is not a worktree or cannot be determined.
+func GetMainRepoFromWorktree(worktreePath string) string {
+	gitPath := filepath.Join(worktreePath, ".git")
+
+	// Check if .git is a file (worktree) vs directory (main repo)
+	info, err := os.Stat(gitPath)
+	if err != nil || info.IsDir() {
+		return "" // Not a worktree or doesn't exist
+	}
+
+	// Read the .git file content (e.g., "gitdir: /path/to/repo/.git/worktrees/branch")
+	content, err := os.ReadFile(gitPath)
+	if err != nil {
+		return ""
+	}
+
+	line := strings.TrimSpace(string(content))
+	if !strings.HasPrefix(line, "gitdir: ") {
+		return ""
+	}
+
+	gitdir := strings.TrimPrefix(line, "gitdir: ")
+	// gitdir is like: /path/to/main/repo/.git/worktrees/branch-name
+	// We need: /path/to/main/repo
+
+	// Find ".git/worktrees/" in the path
+	idx := strings.Index(gitdir, "/.git/worktrees/")
+	if idx == -1 {
+		return ""
+	}
+
+	return gitdir[:idx]
+}
+
 // GenerateWorktreePath generates a worktree path as sibling to main repo
 func GenerateWorktreePath(mainRepo, branch string) string {
 	repoName := filepath.Base(mainRepo)

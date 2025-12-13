@@ -21,6 +21,7 @@ interface LocationPickerProps {
   onListBranches?: (mainRepo: string) => Promise<{ branches: Branch[] }>;
   onDeleteBranch?: (mainRepo: string, branch: string, force?: boolean) => Promise<{ success: boolean }>;
   onSwitchBranch?: (mainRepo: string, branch: string) => Promise<{ success: boolean }>;
+  onCreateBranch?: (mainRepo: string, branch: string) => Promise<{ success: boolean }>;
   onCreateWorktreeFromBranch?: (mainRepo: string, branch: string) => Promise<{ success: boolean; path?: string }>;
 }
 
@@ -38,6 +39,7 @@ export function LocationPicker({
   onListBranches,
   onDeleteBranch,
   onSwitchBranch,
+  onCreateBranch,
   onCreateWorktreeFromBranch,
 }: LocationPickerProps) {
   const [inputValue, setInputValue] = useState('');
@@ -152,8 +154,8 @@ export function LocationPicker({
       setDeleteBranchConfirm(false);
       setForceDelete(false);
 
-      // If worktreeFlowMode and projectsDirectory set, pre-populate and browse
-      if (worktreeFlowMode && projectsDirectory) {
+      // Pre-populate with projectsDirectory if set
+      if (projectsDirectory) {
         setInputValue(projectsDirectory.replace(homePath, '~'));
       } else {
         setInputValue('');
@@ -268,6 +270,37 @@ export function LocationPicker({
     }
   }, [selectedRepo, newBranchName, onCreateWorktree, onSelect, onClose, creating]);
 
+  // Create branch + switch main repo to it + open session
+  const handleCreateBranchAndSwitch = useCallback(async () => {
+    if (!selectedRepo || !newBranchName || !onCreateBranch || !onSwitchBranch || creating) return;
+
+    setCreating(true);
+    setCreateError(null);
+    try {
+      // Step 1: Create the branch
+      const createResult = await onCreateBranch(selectedRepo, newBranchName);
+      if (!createResult.success) {
+        setCreateError('Failed to create branch');
+        return;
+      }
+
+      // Step 2: Switch main repo to it
+      const switchResult = await onSwitchBranch(selectedRepo, newBranchName);
+      if (!switchResult.success) {
+        setCreateError('Branch created but failed to switch (uncommitted changes?)');
+        return;
+      }
+
+      // Step 3: Open session in main repo
+      onSelect(selectedRepo);
+      onClose();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create branch');
+    } finally {
+      setCreating(false);
+    }
+  }, [selectedRepo, newBranchName, onCreateBranch, onSwitchBranch, onSelect, onClose, creating]);
+
   const handleDeleteWorktree = useCallback(async () => {
     if (deleteConfirmIndex === null || !worktrees || !onDeleteWorktree || deleting) return;
 
@@ -280,7 +313,6 @@ export function LocationPicker({
     try {
       const result = await onDeleteWorktree(worktree.path);
       if (result.success) {
-        // Note: Deleted paths are automatically filtered by daemon on next fetch
         setDeleteConfirmIndex(null);
         // Refresh worktree list
         if (selectedRepo && onListWorktrees) {
@@ -491,10 +523,24 @@ export function LocationPicker({
           return;
         }
 
-        // 'd' to delete selected worktree (not main branch, not branches, not new branch)
+        // 'd' to delete selected worktree (not main branch, not new branch)
         if (e.key === 'd' && !showNewBranch && selectedIndex >= worktreeStartIndex && selectedIndex < branchStartIndex && onDeleteWorktree) {
           e.preventDefault();
           setDeleteConfirmIndex(selectedIndex);
+          return;
+        }
+
+        // 'd' to delete selected branch (enter branch action mode and trigger delete)
+        if (e.key === 'd' && !showNewBranch && selectedIndex >= branchStartIndex && selectedIndex < newBranchIndex) {
+          e.preventDefault();
+          const branchIndex = selectedIndex - branchStartIndex;
+          if (branches[branchIndex]) {
+            setSelectedBranch(branches[branchIndex].name);
+            setBranchActionMode(true);
+            setBranchActionError(null);
+            setSelectedIndex(2); // Delete option
+            setDeleteBranchConfirm(true);
+          }
           return;
         }
 
@@ -825,9 +871,15 @@ export function LocationPicker({
                         if (e.key === 'Enter' && newBranchName && !creating) {
                           handleNewBranch();
                         }
+                        if (e.key === 'b' && e.ctrlKey && newBranchName && !creating) {
+                          e.preventDefault();
+                          handleCreateBranchAndSwitch();
+                        }
                         if (e.key === 'Escape') {
                           setShowNewBranch(false);
                           setCreateError(null);
+                          // Refocus main input
+                          setTimeout(() => inputRef.current?.focus(), 50);
                         }
                       }}
                       disabled={creating}
@@ -835,6 +887,12 @@ export function LocationPicker({
                     />
                     {creating && <div className="picker-creating">Creating...</div>}
                     {createError && <div className="picker-error">{createError}</div>}
+                    {newBranchName && !creating && (
+                      <div className="picker-branch-actions">
+                        <span className="picker-branch-hint"><kbd>Enter</kbd> new worktree</span>
+                        <span className="picker-branch-hint"><kbd>Ctrl+B</kbd> switch main</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (

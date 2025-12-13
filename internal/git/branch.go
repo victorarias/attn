@@ -75,6 +75,17 @@ func SwitchBranch(repoDir, branch string) error {
 	return nil
 }
 
+// CreateBranch creates a new branch from the current HEAD.
+// Uses: git branch <name>
+func CreateBranch(repoDir, branch string) error {
+	cmd := exec.Command("git", "branch", branch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git branch failed: %s", out)
+	}
+	return nil
+}
+
 // GetCurrentBranch returns the current branch name for the repository.
 func GetCurrentBranch(repoDir string) (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")

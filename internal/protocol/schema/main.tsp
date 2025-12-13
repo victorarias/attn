@@ -276,6 +276,12 @@ model CreateWorktreeFromBranchMessage {
   path?: string;
 }
 
+model CreateBranchMessage {
+  cmd: "create_branch";
+  main_repo: string;
+  branch: string;
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -345,6 +351,13 @@ model DeleteBranchResultMessage {
 
 model SwitchBranchResultMessage {
   event: "switch_branch_result";
+  branch: string;
+  success: boolean;
+  error?: string;
+}
+
+model CreateBranchResultMessage {
+  event: "create_branch_result";
   branch: string;
   success: boolean;
   error?: string;

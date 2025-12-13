@@ -62,6 +62,31 @@ type CreateWorktreeFromBranchMessage struct {
 	Path *string `json:"path,omitempty"`
 }
 
+type CreateBranchMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo string `json:"main_repo"`
+}
+
+type CreateBranchResultMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type CreateWorktreeMessage struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch string `json:"branch"`

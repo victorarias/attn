@@ -33,6 +33,11 @@ func (d *Daemon) doSwitchBranch(mainRepo, branch string) error {
 	return git.SwitchBranch(mainRepo, branch)
 }
 
+// doCreateBranch creates a new branch (without checking it out)
+func (d *Daemon) doCreateBranch(mainRepo, branch string) error {
+	return git.CreateBranch(mainRepo, branch)
+}
+
 // doCreateWorktreeFromBranch creates a worktree from an existing branch
 func (d *Daemon) doCreateWorktreeFromBranch(msg *protocol.CreateWorktreeFromBranchMessage) (string, error) {
 	path := protocol.Deref(msg.Path)
@@ -136,6 +141,24 @@ func (d *Daemon) handleCreateWorktreeFromBranchWS(client *wsClient, msg *protoco
 			d.logf("Create worktree from branch failed for %s: %v", msg.Branch, err)
 		} else {
 			d.logf("Create worktree from branch succeeded: %s at %s", msg.Branch, path)
+		}
+		d.sendToClient(client, result)
+	}()
+}
+
+func (d *Daemon) handleCreateBranchWS(client *wsClient, msg *protocol.CreateBranchMessage) {
+	go func() {
+		err := d.doCreateBranch(msg.MainRepo, msg.Branch)
+		result := protocol.CreateBranchResultMessage{
+			Event:   protocol.EventCreateBranchResult,
+			Branch:  msg.Branch,
+			Success: err == nil,
+		}
+		if err != nil {
+			result.Error = protocol.Ptr(err.Error())
+			d.logf("Create branch failed for %s: %v", msg.Branch, err)
+		} else {
+			d.logf("Create branch succeeded: %s", msg.Branch)
 		}
 		d.sendToClient(client, result)
 	}()

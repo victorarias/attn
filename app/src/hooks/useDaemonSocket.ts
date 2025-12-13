@@ -269,9 +269,8 @@ export function useDaemonSocket({
           }
 
           case 'worktrees_updated':
-            if (data.worktrees) {
-              onWorktreesUpdate?.(data.worktrees);
-            }
+            // Note: worktrees may be undefined due to Go's omitempty on empty arrays
+            onWorktreesUpdate?.(data.worktrees || []);
             break;
 
           case 'worktree_created':
@@ -365,6 +364,19 @@ export function useDaemonSocket({
                 pending.resolve({ success: true, branch: data.branch });
               } else {
                 pending.reject(new Error(data.error || 'Failed to switch branch'));
+              }
+            }
+            break;
+          }
+
+          case 'create_branch_result': {
+            const pending = pendingActionsRef.current.get('create_branch');
+            if (pending) {
+              pendingActionsRef.current.delete('create_branch');
+              if (data.success) {
+                pending.resolve({ success: true, branch: data.branch });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to create branch'));
               }
             }
             break;
@@ -695,6 +707,29 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Create a new branch (without checking it out)
+  const sendCreateBranch = useCallback((mainRepo: string, branch: string): Promise<BranchActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'create_branch';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'create_branch', main_repo: mainRepo, branch }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Create branch timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
   // Create worktree from existing branch
   const sendCreateWorktreeFromBranch = useCallback((mainRepo: string, branch: string, path?: string): Promise<WorktreeActionResult> => {
     return new Promise((resolve, reject) => {
@@ -744,6 +779,7 @@ export function useDaemonSocket({
     sendListBranches,
     sendDeleteBranch,
     sendSwitchBranch,
+    sendCreateBranch,
     sendCreateWorktreeFromBranch,
   };
 }

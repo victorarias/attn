@@ -44,6 +44,7 @@ const (
 	CmdDeleteBranch              = "delete_branch"
 	CmdSwitchBranch              = "switch_branch"
 	CmdCreateWorktreeFromBranch  = "create_worktree_from_branch"
+	CmdCreateBranch              = "create_branch"
 )
 
 // WebSocket Events (daemon -> client)
@@ -70,6 +71,7 @@ const (
 	EventBranchesResult               = "branches_result"
 	EventDeleteBranchResult           = "delete_branch_result"
 	EventSwitchBranchResult           = "switch_branch_result"
+	EventCreateBranchResult           = "create_branch_result"
 )
 
 // Session states (values for SessionState enum)
@@ -348,6 +350,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdCreateWorktreeFromBranch:
 		var msg CreateWorktreeFromBranchMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCreateBranch:
+		var msg CreateBranchMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

@@ -3,6 +3,7 @@ package daemon
 
 import (
 	"net"
+	"os"
 	"time"
 
 	"github.com/victorarias/claude-manager/internal/git"
@@ -93,6 +94,41 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 	return path, nil
 }
 
+// discoverWorktree tries to find a worktree from git state when it's not in the registry.
+// This handles cases where the DB was reset or the worktree was created manually.
+// Returns nil if the path is not a valid worktree or cannot be discovered.
+func (d *Daemon) discoverWorktree(path string) *store.Worktree {
+	// Get the main repo from the worktree's .git file
+	mainRepo := git.GetMainRepoFromWorktree(path)
+	if mainRepo == "" {
+		return nil
+	}
+
+	// List all worktrees from git to find matching entry
+	gitWorktrees, err := git.ListWorktrees(mainRepo)
+	if err != nil {
+		return nil
+	}
+
+	// Find the matching worktree
+	for _, gwt := range gitWorktrees {
+		if gwt.Path == path {
+			// Found it - register in store and return
+			wt := &store.Worktree{
+				Path:      gwt.Path,
+				Branch:    gwt.Branch,
+				MainRepo:  mainRepo,
+				CreatedAt: time.Now(),
+			}
+			d.store.AddWorktree(wt)
+			d.logf("Discovered worktree not in registry: %s (branch: %s, main: %s)", path, gwt.Branch, mainRepo)
+			return wt
+		}
+	}
+
+	return nil
+}
+
 // doDeleteWorktree removes a worktree from git and the store.
 // Also cleans up any sessions in that directory.
 func (d *Daemon) doDeleteWorktree(path string) error {
@@ -101,14 +137,45 @@ func (d *Daemon) doDeleteWorktree(path string) error {
 
 	wt := d.store.GetWorktree(path)
 	if wt == nil {
-		return &worktreeNotFoundError{path: path}
+		// Try to discover it from git state
+		wt = d.discoverWorktree(path)
+		if wt == nil {
+			// Check if the path exists on disk
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				// Path doesn't exist and not in registry - nothing to delete
+				// Broadcast deleted event anyway so UI removes it
+				d.logf("Worktree %s doesn't exist and not in registry, treating as already deleted", path)
+				d.wsHub.Broadcast(&protocol.WebSocketEvent{
+					Event: protocol.EventWorktreeDeleted,
+					Worktrees: []protocol.Worktree{{
+						Path: path,
+					}},
+				})
+				return nil
+			}
+			return &worktreeNotFoundError{path: path}
+		}
 	}
 
-	if err := git.DeleteWorktree(wt.MainRepo, path); err != nil {
+	// Save branch name before deleting worktree
+	branch := wt.Branch
+	mainRepo := wt.MainRepo
+
+	if err := git.DeleteWorktree(mainRepo, path); err != nil {
 		return err
 	}
 
 	d.store.RemoveWorktree(path)
+
+	// Also delete the branch (force=true since worktree is already deleted)
+	if branch != "" {
+		if err := git.DeleteBranch(mainRepo, branch, true); err != nil {
+			d.logf("Warning: worktree deleted but failed to delete branch %s: %v", branch, err)
+			// Don't fail the whole operation - worktree is already deleted
+		} else {
+			d.logf("Deleted branch %s along with worktree", branch)
+		}
+	}
 
 	// Broadcast deleted event to all clients
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{

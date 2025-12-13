@@ -473,6 +473,11 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		createMsg := msg.(*protocol.CreateWorktreeFromBranchMessage)
 		d.logf("Creating worktree from branch %s in %s", createMsg.Branch, createMsg.MainRepo)
 		d.handleCreateWorktreeFromBranchWS(client, createMsg)
+
+	case protocol.CmdCreateBranch:
+		createMsg := msg.(*protocol.CreateBranchMessage)
+		d.logf("Creating branch %s in %s", createMsg.Branch, createMsg.MainRepo)
+		d.handleCreateBranchWS(client, createMsg)
 	}
 }
 

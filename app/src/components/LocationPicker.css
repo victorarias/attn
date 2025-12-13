@@ -317,3 +317,26 @@
   background: #3b82f6;
   color: white;
 }
+
+/* Branch action hints */
+.picker-branch-actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.picker-branch-hint {
+  color: #555;
+}
+
+.picker-branch-hint kbd {
+  background: #1a1a1d;
+  border: 1px solid #2a2a2d;
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  margin-right: 4px;
+}
+
