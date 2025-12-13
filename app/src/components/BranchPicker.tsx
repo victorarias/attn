@@ -251,6 +251,12 @@ export function BranchPicker({
           return;
         }
 
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          setDirtyAction((prev) => (prev === 'stash' ? 'wip' : 'stash'));
+          return;
+        }
+
         if (e.key === '1' || e.key === 's') {
           e.preventDefault();
           setDirtyAction('stash');
