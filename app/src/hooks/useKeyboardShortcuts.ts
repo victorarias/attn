@@ -93,13 +93,13 @@ export function useKeyboardShortcuts({
         e.preventDefault();
         chordModeRef.current = true;
 
-        // If no second key within 500ms, toggle drawer
+        // If no second key within 1000ms, toggle drawer
         chordTimeoutRef.current = window.setTimeout(() => {
           if (chordModeRef.current) {
             chordModeRef.current = false;
             onToggleDrawer();
           }
-        }, 500);
+        }, 1000);
         return;
       }
 
@@ -179,9 +179,10 @@ export function useKeyboardShortcuts({
   );
 
   useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
+    // Use capture phase to get events before xterm
+    window.addEventListener('keydown', handleKeyDown, true);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
       clearChordMode();
     };
   }, [handleKeyDown, clearChordMode]);
