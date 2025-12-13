@@ -77,6 +77,42 @@ interface BranchActionResult {
   error?: string;
 }
 
+interface CheckDirtyResult {
+  success: boolean;
+  dirty?: boolean;
+  error?: string;
+}
+
+interface StashResult {
+  success: boolean;
+  error?: string;
+}
+
+interface StashPopResult {
+  success: boolean;
+  conflict?: boolean;
+  error?: string;
+}
+
+interface CheckAttnStashResult {
+  success: boolean;
+  found?: boolean;
+  stashRef?: string;
+  error?: string;
+}
+
+interface DefaultBranchResult {
+  success: boolean;
+  branch?: string;
+  error?: string;
+}
+
+interface RemoteBranchesResult {
+  success: boolean;
+  branches: Branch[];
+  error?: string;
+}
+
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
@@ -377,6 +413,110 @@ export function useDaemonSocket({
                 pending.resolve({ success: true, branch: data.branch });
               } else {
                 pending.reject(new Error(data.error || 'Failed to create branch'));
+              }
+            }
+            break;
+          }
+
+          case 'check_dirty_result': {
+            const pending = pendingActionsRef.current.get('check_dirty');
+            if (pending) {
+              pendingActionsRef.current.delete('check_dirty');
+              if (data.success) {
+                pending.resolve({ success: true, dirty: data.dirty });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to check dirty state'));
+              }
+            }
+            break;
+          }
+
+          case 'stash_result': {
+            const pending = pendingActionsRef.current.get('stash');
+            if (pending) {
+              pendingActionsRef.current.delete('stash');
+              if (data.success) {
+                pending.resolve({ success: true });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to stash'));
+              }
+            }
+            break;
+          }
+
+          case 'stash_pop_result': {
+            const pending = pendingActionsRef.current.get('stash_pop');
+            if (pending) {
+              pendingActionsRef.current.delete('stash_pop');
+              if (data.success) {
+                pending.resolve({ success: true });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to pop stash'));
+              }
+            }
+            break;
+          }
+
+          case 'check_attn_stash_result': {
+            const pending = pendingActionsRef.current.get('check_attn_stash');
+            if (pending) {
+              pendingActionsRef.current.delete('check_attn_stash');
+              if (data.success) {
+                pending.resolve({ success: true, found: data.found, stashRef: data.stash_ref });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to check stash'));
+              }
+            }
+            break;
+          }
+
+          case 'commit_wip_result': {
+            const pending = pendingActionsRef.current.get('commit_wip');
+            if (pending) {
+              pendingActionsRef.current.delete('commit_wip');
+              if (data.success) {
+                pending.resolve({ success: true });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to commit WIP'));
+              }
+            }
+            break;
+          }
+
+          case 'get_default_branch_result': {
+            const pending = pendingActionsRef.current.get('get_default_branch');
+            if (pending) {
+              pendingActionsRef.current.delete('get_default_branch');
+              if (data.success) {
+                pending.resolve({ success: true, branch: data.branch });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to get default branch'));
+              }
+            }
+            break;
+          }
+
+          case 'fetch_remotes_result': {
+            const pending = pendingActionsRef.current.get('fetch_remotes');
+            if (pending) {
+              pendingActionsRef.current.delete('fetch_remotes');
+              if (data.success) {
+                pending.resolve({ success: true });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to fetch remotes'));
+              }
+            }
+            break;
+          }
+
+          case 'list_remote_branches_result': {
+            const pending = pendingActionsRef.current.get('list_remote_branches');
+            if (pending) {
+              pendingActionsRef.current.delete('list_remote_branches');
+              if (data.success) {
+                pending.resolve({ success: true, branches: data.branches || [] });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to list remote branches'));
               }
             }
             break;
@@ -758,6 +898,190 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Check if repo has uncommitted changes
+  const sendCheckDirty = useCallback((repo: string): Promise<CheckDirtyResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'check_dirty';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'check_dirty', repo }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Check dirty timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  // Stash changes with message
+  const sendStash = useCallback((repo: string, message: string): Promise<StashResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'stash';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'stash', repo, message }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Stash timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  // Pop stash
+  const sendStashPop = useCallback((repo: string): Promise<StashPopResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'stash_pop';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'stash_pop', repo }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Stash pop timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  // Check for attn-created stash
+  const sendCheckAttnStash = useCallback((repo: string, branch: string): Promise<CheckAttnStashResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'check_attn_stash';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'check_attn_stash', repo, branch }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Check stash timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  // Commit all changes as WIP
+  const sendCommitWIP = useCallback((repo: string): Promise<StashResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'commit_wip';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'commit_wip', repo }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Commit WIP timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  // Get default branch name
+  const sendGetDefaultBranch = useCallback((repo: string): Promise<DefaultBranchResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'get_default_branch';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'get_default_branch', repo }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get default branch timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  // Fetch all remotes
+  const sendFetchRemotes = useCallback((repo: string): Promise<StashResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'fetch_remotes';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'fetch_remotes', repo }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Fetch remotes timed out'));
+        }
+      }, 60000); // Longer timeout for network operations
+    });
+  }, []);
+
+  // List remote branches
+  const sendListRemoteBranches = useCallback((repo: string): Promise<RemoteBranchesResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'list_remote_branches';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'list_remote_branches', repo }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('List remote branches timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -781,5 +1105,13 @@ export function useDaemonSocket({
     sendSwitchBranch,
     sendCreateBranch,
     sendCreateWorktreeFromBranch,
+    sendCheckDirty,
+    sendStash,
+    sendStashPop,
+    sendCheckAttnStash,
+    sendCommitWIP,
+    sendGetDefaultBranch,
+    sendFetchRemotes,
+    sendListRemoteBranches,
   };
 }
