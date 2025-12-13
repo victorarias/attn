@@ -864,8 +864,11 @@ export enum UnregisterMessageCmd {
 export interface WebSocketEvent {
     branch?:              string;
     branches?:            BranchElement[];
+    conflict?:            boolean;
+    dirty?:               boolean;
     error?:               string;
     event:                string;
+    found?:               boolean;
     protocol_version?:    string;
     prs?:                 PRElement[];
     rate_limit_reset_at?: string;
@@ -875,6 +878,7 @@ export interface WebSocketEvent {
     session?:             SessionElement;
     sessions?:            SessionElement[];
     settings?:            { [key: string]: any };
+    stash_ref?:           string;
     success?:             boolean;
     worktrees?:           WorktreeElement[];
     [property: string]: any;
@@ -2026,8 +2030,11 @@ const typeMap: any = {
     "WebSocketEvent": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "branches", js: "branches", typ: u(undefined, a(r("BranchElement"))) },
+        { json: "conflict", js: "conflict", typ: u(undefined, true) },
+        { json: "dirty", js: "dirty", typ: u(undefined, true) },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: "" },
+        { json: "found", js: "found", typ: u(undefined, true) },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "rate_limit_reset_at", js: "rate_limit_reset_at", typ: u(undefined, "") },
@@ -2037,6 +2044,7 @@ const typeMap: any = {
         { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
         { json: "success", js: "success", typ: u(undefined, true) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
     ], "any"),

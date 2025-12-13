@@ -490,4 +490,9 @@ model WebSocketEvent {
   error?: string;
   // Branch operations
   branch?: string;
+  // Stash operations
+  dirty?: boolean;
+  conflict?: boolean;
+  found?: boolean;
+  stash_ref?: string;
 }

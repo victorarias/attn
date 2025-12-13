@@ -803,11 +803,20 @@ type WebSocketEvent struct {
 	// Branches corresponds to the JSON schema field "branches".
 	Branches []Branch `json:"branches,omitempty"`
 
+	// Conflict corresponds to the JSON schema field "conflict".
+	Conflict *bool `json:"conflict,omitempty"`
+
+	// Dirty corresponds to the JSON schema field "dirty".
+	Dirty *bool `json:"dirty,omitempty"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
 
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
+
+	// Found corresponds to the JSON schema field "found".
+	Found *bool `json:"found,omitempty"`
 
 	// ProtocolVersion corresponds to the JSON schema field "protocol_version".
 	ProtocolVersion *string `json:"protocol_version,omitempty"`
@@ -835,6 +844,9 @@ type WebSocketEvent struct {
 
 	// Settings corresponds to the JSON schema field "settings".
 	Settings map[string]interface{} `json:"settings,omitempty"`
+
+	// StashRef corresponds to the JSON schema field "stash_ref".
+	StashRef *string `json:"stash_ref,omitempty"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success *bool `json:"success,omitempty"`

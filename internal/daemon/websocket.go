@@ -478,6 +478,31 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		createMsg := msg.(*protocol.CreateBranchMessage)
 		d.logf("Creating branch %s in %s", createMsg.Branch, createMsg.MainRepo)
 		d.handleCreateBranchWS(client, createMsg)
+
+	case protocol.CmdCheckDirty:
+		d.logf("Checking dirty state for %s", msg.(*protocol.CheckDirtyMessage).Repo)
+		d.handleCheckDirtyWS(client, msg.(*protocol.CheckDirtyMessage))
+	case protocol.CmdStash:
+		d.logf("Stashing changes in %s", msg.(*protocol.StashMessage).Repo)
+		d.handleStashWS(client, msg.(*protocol.StashMessage))
+	case protocol.CmdStashPop:
+		d.logf("Popping stash in %s", msg.(*protocol.StashPopMessage).Repo)
+		d.handleStashPopWS(client, msg.(*protocol.StashPopMessage))
+	case protocol.CmdCheckAttnStash:
+		d.logf("Checking for attn stash in %s for branch %s", msg.(*protocol.CheckAttnStashMessage).Repo, msg.(*protocol.CheckAttnStashMessage).Branch)
+		d.handleCheckAttnStashWS(client, msg.(*protocol.CheckAttnStashMessage))
+	case protocol.CmdCommitWIP:
+		d.logf("Committing WIP in %s", msg.(*protocol.CommitWIPMessage).Repo)
+		d.handleCommitWIPWS(client, msg.(*protocol.CommitWIPMessage))
+	case protocol.CmdGetDefaultBranch:
+		d.logf("Getting default branch for %s", msg.(*protocol.GetDefaultBranchMessage).Repo)
+		d.handleGetDefaultBranchWS(client, msg.(*protocol.GetDefaultBranchMessage))
+	case protocol.CmdFetchRemotes:
+		d.logf("Fetching remotes for %s", msg.(*protocol.FetchRemotesMessage).Repo)
+		d.handleFetchRemotesWS(client, msg.(*protocol.FetchRemotesMessage))
+	case protocol.CmdListRemoteBranches:
+		d.logf("Listing remote branches for %s", msg.(*protocol.ListRemoteBranchesMessage).Repo)
+		d.handleListRemoteBranchesWS(client, msg.(*protocol.ListRemoteBranchesMessage))
 	}
 }
 
