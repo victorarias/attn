@@ -1,3 +1,18 @@
+//! PTY Bridge - Tauri commands that communicate with the Node.js pty-server.
+//!
+//! # Protocol
+//! This bridge sends JSON commands to the pty-server over a Unix socket.
+//! The protocol is defined in `app/pty-server/src/pty-protocol.ts`.
+//!
+//! Commands (Rust → pty-server): spawn, write, resize, kill
+//! Events (pty-server → Rust): spawned, data, exit, error
+//!
+//! # Why not share constants with TypeScript?
+//! The Rust code is thin glue that rarely changes. Adding a Rust constants module
+//! would duplicate the TypeScript definitions without compile-time guarantees.
+//! Code generation (e.g., from a shared schema) would be overkill for 4 command names.
+//! If the protocol changes, update both this file and pty-protocol.ts.
+
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
