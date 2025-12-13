@@ -1,4 +1,4 @@
-.PHONY: build install test clean
+.PHONY: build install test clean generate-types check-types
 
 BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
@@ -28,3 +28,19 @@ install: build
 clean:
 	rm -f $(BINARY_NAME)
 	rm -f $(INSTALL_DIR)/$(BINARY_NAME)
+
+# Type generation pipeline: TypeSpec -> JSON Schema -> quicktype -> Go/TypeScript
+generate-types:
+	cd internal/protocol/schema && pnpm exec tsp compile .
+	npx quicktype \
+		--src internal/protocol/schema/tsp-output/json-schema/*.json \
+		--src-lang schema --lang go --package protocol \
+		-o internal/protocol/generated.go
+	npx quicktype \
+		--src internal/protocol/schema/tsp-output/json-schema/*.json \
+		--src-lang schema --lang typescript \
+		-o app/src/types/generated.ts
+
+# CI check: verify generated files are up-to-date
+check-types: generate-types
+	git diff --exit-code internal/protocol/generated.go app/src/types/generated.ts

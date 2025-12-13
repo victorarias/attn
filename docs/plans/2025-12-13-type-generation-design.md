@@ -1,7 +1,7 @@
 # Type Generation Pipeline Design
 
 **Date:** 2025-12-13
-**Status:** Approved
+**Status:** In Progress - Setup Complete
 
 ## Summary
 
@@ -92,6 +92,31 @@ check-types: generate-types
 - `generated.go` - for Go module compatibility
 - `generated.ts` - for frontend build
 - `tsp-output/` - NOT committed (gitignored)
+
+## Implementation Status
+
+### Completed (Step 1: Setup)
+- [x] TypeSpec definitions for all 41 types in `main.tsp`
+- [x] TypeSpec compiles to JSON Schema successfully
+- [x] Makefile targets: `generate-types` and `check-types`
+- [x] TypeScript types generated (`app/src/types/generated.ts`)
+
+### Not Yet Committed
+- `internal/protocol/generated.go` - conflicts with existing `types.go`
+
+### Migration Challenges Discovered
+The generated Go types differ from existing types in ways that require consumer updates:
+1. **Pointer types**: Optional fields use `*string`, `*bool` instead of plain types
+2. **Timestamps**: Uses `string` (ISO format) instead of `time.Time`
+3. **Enums**: Creates type aliases with enum values instead of string constants
+
+These are actually improvements (more type-safe, cleaner JSON serialization), but require updating all consumers (daemon, store, client, etc.).
+
+### Next Steps (Step 2: Parallel Migration)
+1. Create type aliases in `types.go` that redirect to generated types
+2. Or: migrate consumers to use generated types directly
+3. Update `parse.go` to work with generated types
+4. Add generated.go to git once migration complete
 
 ## Proof of Concept
 
