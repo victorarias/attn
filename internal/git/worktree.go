@@ -3,6 +3,7 @@ package git
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -65,7 +66,20 @@ func CreateWorktreeFromBranch(repoDir, branch, path string) error {
 }
 
 // DeleteWorktree removes a worktree
+// If the worktree directory doesn't exist, it prunes stale entries instead
 func DeleteWorktree(repoDir, path string) error {
+	// Check if directory exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		// Directory doesn't exist - prune stale worktree entries
+		cmd := exec.Command("git", "worktree", "prune")
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git worktree prune failed: %s", out)
+		}
+		return nil
+	}
+
+	// Directory exists - remove normally
 	cmd := exec.Command("git", "worktree", "remove", path)
 	cmd.Dir = repoDir
 	if out, err := cmd.CombinedOutput(); err != nil {

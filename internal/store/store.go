@@ -231,6 +231,35 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 	return result
 }
 
+// HasSessionInDirectory checks if there's an active session using the given directory
+func (s *Store) HasSessionInDirectory(directory string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return false
+	}
+
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE directory = ?`, directory).Scan(&count)
+	if err != nil {
+		return false
+	}
+	return count > 0
+}
+
+// RemoveSessionsInDirectory removes all sessions in the given directory
+func (s *Store) RemoveSessionsInDirectory(directory string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	s.db.Exec(`DELETE FROM sessions WHERE directory = ?`, directory)
+}
+
 // UpdateState updates a session's state
 func (s *Store) UpdateState(id, state string) {
 	s.mu.Lock()

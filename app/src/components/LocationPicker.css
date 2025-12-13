@@ -254,3 +254,26 @@
   font-size: 12px;
   margin-top: 6px;
 }
+
+/* Delete confirmation styles */
+.picker-item.delete-confirm {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.picker-item.delete-confirm.selected {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.delete-icon {
+  font-size: 16px;
+}
+
+.delete-prompt {
+  color: #ef4444;
+  font-weight: 500;
+}
+
+.delete-error {
+  color: #ef4444 !important;
+}

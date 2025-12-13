@@ -98,6 +98,9 @@ func (d *Daemon) handleCreateWorktree(conn net.Conn, msg *protocol.CreateWorktre
 }
 
 func (d *Daemon) handleDeleteWorktree(conn net.Conn, msg *protocol.DeleteWorktreeMessage) {
+	// Remove any sessions in this directory (they're stale if we're deleting the worktree)
+	d.store.RemoveSessionsInDirectory(msg.Path)
+
 	wt := d.store.GetWorktree(msg.Path)
 	if wt == nil {
 		d.sendError(conn, "worktree not found in registry")
@@ -223,12 +226,20 @@ func (d *Daemon) handleCreateWorktreeWS(client *wsClient, msg *protocol.CreateWo
 
 func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWorktreeMessage) {
 	go func() {
-		wt := d.store.GetWorktree(msg.Path)
 		result := protocol.DeleteWorktreeResultMessage{
 			Event: protocol.EventDeleteWorktreeResult,
 			Path:  msg.Path,
 		}
 
+		// Remove any sessions in this directory (they're stale if we're deleting the worktree)
+		d.store.RemoveSessionsInDirectory(msg.Path)
+		// Broadcast updated sessions list
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:    protocol.EventSessionsUpdated,
+			Sessions: d.store.List(""),
+		})
+
+		wt := d.store.GetWorktree(msg.Path)
 		if wt == nil {
 			result.Success = false
 			result.Error = "worktree not found in registry"

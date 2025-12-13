@@ -22,7 +22,7 @@ export function useLocationHistory() {
   const [loaded, setLoaded] = useState(false);
   const saveTimeoutRef = useRef<number | null>(null);
 
-  // Load from file on mount
+  // Load from file on mount and clean up stale entries
   useEffect(() => {
     async function loadHistory() {
       try {
@@ -37,7 +37,20 @@ export function useLocationHistory() {
           const content = await readTextFile(HISTORY_FILE, { baseDir: BaseDirectory.AppData });
           const parsed = JSON.parse(content);
           if (Array.isArray(parsed)) {
-            setHistory(parsed);
+            // Filter out entries where the path no longer exists
+            const validEntries: LocationEntry[] = [];
+            for (const entry of parsed) {
+              try {
+                const pathExists = await exists(entry.path);
+                if (pathExists) {
+                  validEntries.push(entry);
+                }
+              } catch {
+                // If we can't check, keep the entry
+                validEntries.push(entry);
+              }
+            }
+            setHistory(validEntries);
           }
         }
       } catch (e) {
@@ -83,9 +96,13 @@ export function useLocationHistory() {
     });
   }, []);
 
+  const removeFromHistory = useCallback((path: string) => {
+    setHistory((prev) => prev.filter((e) => e.path !== path));
+  }, []);
+
   const getRecentLocations = useCallback(() => {
     return [...history].sort((a, b) => b.lastUsed - a.lastUsed);
   }, [history]);
 
-  return { history, addToHistory, getRecentLocations };
+  return { history, addToHistory, removeFromHistory, getRecentLocations };
 }
