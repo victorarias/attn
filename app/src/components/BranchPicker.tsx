@@ -203,77 +203,86 @@ export function BranchPicker({
     }
   }, [repo, onStashPop, onClose]);
 
-  // Keyboard handling
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    e.stopPropagation();
+  // Keyboard handling - works globally when picker is open
+  useEffect(() => {
+    if (!isOpen) return;
 
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      if (state === 'dirty' || state === 'stash-restore') {
-        setState('picking');
-      } else {
-        onClose();
-      }
-      return;
-    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Capture phase handler - stop propagation to prevent global shortcuts
+      e.stopPropagation();
 
-    if (state === 'picking') {
-      if (e.key === 'ArrowDown') {
+      if (e.key === 'Escape') {
         e.preventDefault();
-        setSelectedIndex((prev) => Math.min(prev + 1, allItems.length - 1));
-        return;
-      }
-
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIndex((prev) => Math.max(prev - 1, 0));
-        return;
-      }
-
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const item = allItems[selectedIndex];
-        if (item) {
-          selectBranch(item.name);
+        if (state === 'dirty' || state === 'stash-restore') {
+          setState('picking');
+        } else {
+          onClose();
         }
         return;
       }
-    }
 
-    if (state === 'dirty') {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleDirtyConfirm();
-        return;
+      if (state === 'picking') {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSelectedIndex((prev) => Math.min(prev + 1, allItems.length - 1));
+          return;
+        }
+
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedIndex((prev) => Math.max(prev - 1, 0));
+          return;
+        }
+
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const item = allItems[selectedIndex];
+          if (item) {
+            selectBranch(item.name);
+          }
+          return;
+        }
       }
 
-      if (e.key === '1' || e.key === 's') {
-        e.preventDefault();
-        setDirtyAction('stash');
-        return;
+      if (state === 'dirty') {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleDirtyConfirm();
+          return;
+        }
+
+        if (e.key === '1' || e.key === 's') {
+          e.preventDefault();
+          setDirtyAction('stash');
+          return;
+        }
+
+        if (e.key === '2' || e.key === 'w') {
+          e.preventDefault();
+          setDirtyAction('wip');
+          return;
+        }
       }
 
-      if (e.key === '2' || e.key === 'w') {
-        e.preventDefault();
-        setDirtyAction('wip');
-        return;
-      }
-    }
+      if (state === 'stash-restore') {
+        if (e.key === 'Enter' || e.key === 'y') {
+          e.preventDefault();
+          handleStashPop();
+          return;
+        }
 
-    if (state === 'stash-restore') {
-      if (e.key === 'Enter' || e.key === 'y') {
-        e.preventDefault();
-        handleStashPop();
-        return;
+        if (e.key === 'n') {
+          e.preventDefault();
+          onClose();
+          return;
+        }
       }
+    };
 
-      if (e.key === 'n') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-    }
-  }, [state, allItems, selectedIndex, selectBranch, handleDirtyConfirm, handleStashPop, onClose]);
+    // Use capture phase to intercept before other handlers
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, state, allItems, selectedIndex, selectBranch, handleDirtyConfirm, handleStashPop, onClose]);
 
   if (!isOpen) return null;
 
@@ -307,7 +316,6 @@ export function BranchPicker({
                   setFilterText(e.target.value);
                   setSelectedIndex(0);
                 }}
-                onKeyDown={handleKeyDown}
               />
             </div>
 
@@ -389,7 +397,7 @@ export function BranchPicker({
         )}
 
         {state === 'dirty' && (
-          <div className="dirty-dialog" onKeyDown={handleKeyDown} tabIndex={0} ref={(el) => el?.focus()}>
+          <div className="dirty-dialog">
             <div className="dirty-dialog-title">Uncommitted changes detected</div>
 
             <div className="dirty-dialog-options">
@@ -432,7 +440,7 @@ export function BranchPicker({
         )}
 
         {state === 'stash-restore' && (
-          <div className="stash-dialog" onKeyDown={handleKeyDown} tabIndex={0} ref={(el) => el?.focus()}>
+          <div className="stash-dialog">
             <div className="stash-dialog-title">Found stashed changes</div>
             <div className="stash-dialog-description">
               You stashed changes when leaving this branch. Restore them?
