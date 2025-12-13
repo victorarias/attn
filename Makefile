@@ -1,4 +1,4 @@
-.PHONY: build install test clean generate-types check-types
+.PHONY: build install test test-all test-frontend clean generate-types check-types
 
 BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
@@ -9,6 +9,11 @@ build:
 
 test:
 	go test ./...
+
+test-frontend:
+	cd app && pnpm run test
+
+test-all: test test-frontend
 
 install: build
 	@mkdir -p $(INSTALL_DIR)
