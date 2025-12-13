@@ -206,6 +206,80 @@ func TestStore_SetPRs_PreservesMuted(t *testing.T) {
 	}
 }
 
+func TestStore_SetPRs_PreservesApprovedByMe(t *testing.T) {
+	s := New()
+
+	// Initial PR
+	prs := []*protocol.PR{
+		{ID: "owner/repo#1", State: protocol.StateWaiting},
+	}
+	s.SetPRs(prs)
+
+	// Mark as approved
+	s.MarkPRApproved("owner/repo#1")
+
+	// Verify it's approved
+	pr := s.GetPR("owner/repo#1")
+	if !pr.ApprovedByMe {
+		t.Fatal("PR should be marked as approved")
+	}
+
+	// Set PRs again (simulating poll after approval action)
+	prs2 := []*protocol.PR{
+		{ID: "owner/repo#1", State: protocol.StateWaiting}, // ApprovedByMe not set in incoming data
+	}
+	s.SetPRs(prs2)
+
+	// Should still be approved
+	pr = s.GetPR("owner/repo#1")
+	if !pr.ApprovedByMe {
+		t.Error("PR should still be approved after SetPRs")
+	}
+}
+
+func TestStore_SetPRs_PreservesDetailFields(t *testing.T) {
+	s := New()
+
+	// Initial PR
+	prs := []*protocol.PR{
+		{ID: "owner/repo#1", State: protocol.StateWaiting},
+	}
+	s.SetPRs(prs)
+
+	// Set detail fields (simulating fetchPRDetails)
+	mergeable := true
+	s.UpdatePRDetails("owner/repo#1", &mergeable, "clean", "success", "approved", "abc123", "feature-branch")
+
+	// Verify details are set
+	pr := s.GetPR("owner/repo#1")
+	if pr.CIStatus != "success" {
+		t.Fatalf("CIStatus should be 'success', got '%s'", pr.CIStatus)
+	}
+
+	// Set PRs again (simulating poll after an action like approve)
+	// The incoming PR has a NEWER LastUpdated than DetailsFetchedAt
+	// This is what happens in real scenario - GitHub returns updated timestamp
+	prs2 := []*protocol.PR{
+		{ID: "owner/repo#1", State: protocol.StateWorking, LastUpdated: time.Now().Add(time.Hour)}, // No detail fields, but newer timestamp
+	}
+	s.SetPRs(prs2)
+
+	// Details should be preserved
+	pr = s.GetPR("owner/repo#1")
+	if pr.CIStatus != "success" {
+		t.Errorf("CIStatus should still be 'success' after SetPRs, got '%s'", pr.CIStatus)
+	}
+	if pr.ReviewStatus != "approved" {
+		t.Errorf("ReviewStatus should still be 'approved' after SetPRs, got '%s'", pr.ReviewStatus)
+	}
+	if pr.MergeableState != "clean" {
+		t.Errorf("MergeableState should still be 'clean' after SetPRs, got '%s'", pr.MergeableState)
+	}
+	if pr.HeadSHA != "abc123" {
+		t.Errorf("HeadSHA should still be 'abc123' after SetPRs, got '%s'", pr.HeadSHA)
+	}
+}
+
 func TestStore_ToggleMutePR(t *testing.T) {
 	s := New()
 
