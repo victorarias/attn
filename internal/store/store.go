@@ -1031,30 +1031,6 @@ func (s *Store) GetAllSettings() map[string]string {
 	return result
 }
 
-// Legacy methods for compatibility - these are no-ops with SQLite
-
-// IsDirty returns false - SQLite doesn't need dirty tracking
-func (s *Store) IsDirty() bool {
-	return false
-}
-
-// ClearDirty is a no-op with SQLite
-func (s *Store) ClearDirty() {}
-
-// Save is a no-op with SQLite - data is already persisted
-func (s *Store) Save() {}
-
-// Load is a no-op with SQLite - data is loaded on demand
-func (s *Store) Load() error {
-	return nil
-}
-
-// StartPersistence is a no-op with SQLite
-func (s *Store) StartPersistence(interval time.Duration, done <-chan struct{}) {
-	// Just wait for done signal
-	<-done
-}
-
 // Helper functions
 
 func boolToInt(b bool) int {
