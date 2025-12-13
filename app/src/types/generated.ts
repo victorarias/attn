@@ -1,12 +1,17 @@
 // To parse this data:
 //
-//   import { Convert, ApprovePRMessage, ClearSessionsMessage, CollapseRepoMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, GetRecentLocationsMessage, GetSettingsMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoState, Response, Session, SessionState, SetSettingMessage, StateMessage, StopMessage, TodosMessage, UnregisterMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, ApprovePRMessage, Branch, BranchesResultMessage, ClearSessionsMessage, CollapseRepoMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, GetRecentLocationsMessage, GetSettingsMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoState, Response, Session, SessionState, SetSettingMessage, StateMessage, StopMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
+//   const branch = Convert.toBranch(json);
+//   const branchesResultMessage = Convert.toBranchesResultMessage(json);
 //   const clearSessionsMessage = Convert.toClearSessionsMessage(json);
 //   const collapseRepoMessage = Convert.toCollapseRepoMessage(json);
+//   const createWorktreeFromBranchMessage = Convert.toCreateWorktreeFromBranchMessage(json);
 //   const createWorktreeMessage = Convert.toCreateWorktreeMessage(json);
 //   const createWorktreeResultMessage = Convert.toCreateWorktreeResultMessage(json);
+//   const deleteBranchMessage = Convert.toDeleteBranchMessage(json);
+//   const deleteBranchResultMessage = Convert.toDeleteBranchResultMessage(json);
 //   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
 //   const fetchPRDetailsMessage = Convert.toFetchPRDetailsMessage(json);
@@ -16,6 +21,7 @@
 //   const heatState = Convert.toHeatState(json);
 //   const injectTestPRMessage = Convert.toInjectTestPRMessage(json);
 //   const injectTestSessionMessage = Convert.toInjectTestSessionMessage(json);
+//   const listBranchesMessage = Convert.toListBranchesMessage(json);
 //   const listWorktreesMessage = Convert.toListWorktreesMessage(json);
 //   const mergePRMessage = Convert.toMergePRMessage(json);
 //   const muteMessage = Convert.toMuteMessage(json);
@@ -41,6 +47,8 @@
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
 //   const stateMessage = Convert.toStateMessage(json);
 //   const stopMessage = Convert.toStopMessage(json);
+//   const switchBranchMessage = Convert.toSwitchBranchMessage(json);
+//   const switchBranchResultMessage = Convert.toSwitchBranchResultMessage(json);
 //   const todosMessage = Convert.toTodosMessage(json);
 //   const unregisterMessage = Convert.toUnregisterMessage(json);
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
@@ -61,6 +69,28 @@ export enum ApprovePRMessageCmd {
     ApprovePR = "approve_pr",
 }
 
+export interface Branch {
+    name: string;
+    [property: string]: any;
+}
+
+export interface BranchesResultMessage {
+    branches: BranchElement[];
+    error?:   string;
+    event:    BranchesResultMessageEvent;
+    success:  boolean;
+    [property: string]: any;
+}
+
+export interface BranchElement {
+    name: string;
+    [property: string]: any;
+}
+
+export enum BranchesResultMessageEvent {
+    BranchesResult = "branches_result",
+}
+
 export interface ClearSessionsMessage {
     cmd: ClearSessionsMessageCmd;
     [property: string]: any;
@@ -79,6 +109,18 @@ export interface CollapseRepoMessage {
 
 export enum CollapseRepoMessageCmd {
     CollapseRepo = "collapse_repo",
+}
+
+export interface CreateWorktreeFromBranchMessage {
+    branch:    string;
+    cmd:       CreateWorktreeFromBranchMessageCmd;
+    main_repo: string;
+    path?:     string;
+    [property: string]: any;
+}
+
+export enum CreateWorktreeFromBranchMessageCmd {
+    CreateWorktreeFromBranch = "create_worktree_from_branch",
 }
 
 export interface CreateWorktreeMessage {
@@ -103,6 +145,30 @@ export interface CreateWorktreeResultMessage {
 
 export enum CreateWorktreeResultMessageEvent {
     CreateWorktreeResult = "create_worktree_result",
+}
+
+export interface DeleteBranchMessage {
+    branch:    string;
+    cmd:       DeleteBranchMessageCmd;
+    force:     boolean;
+    main_repo: string;
+    [property: string]: any;
+}
+
+export enum DeleteBranchMessageCmd {
+    DeleteBranch = "delete_branch",
+}
+
+export interface DeleteBranchResultMessage {
+    branch:  string;
+    error?:  string;
+    event:   DeleteBranchResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum DeleteBranchResultMessageEvent {
+    DeleteBranchResult = "delete_branch_result",
 }
 
 export interface DeleteWorktreeMessage {
@@ -245,6 +311,16 @@ export enum SessionState {
     Idle = "idle",
     WaitingInput = "waiting_input",
     Working = "working",
+}
+
+export interface ListBranchesMessage {
+    cmd:       ListBranchesMessageCmd;
+    main_repo: string;
+    [property: string]: any;
+}
+
+export enum ListBranchesMessageCmd {
+    ListBranches = "list_branches",
 }
 
 export interface ListWorktreesMessage {
@@ -524,6 +600,29 @@ export enum StopMessageCmd {
     Stop = "stop",
 }
 
+export interface SwitchBranchMessage {
+    branch:    string;
+    cmd:       SwitchBranchMessageCmd;
+    main_repo: string;
+    [property: string]: any;
+}
+
+export enum SwitchBranchMessageCmd {
+    SwitchBranch = "switch_branch",
+}
+
+export interface SwitchBranchResultMessage {
+    branch:  string;
+    error?:  string;
+    event:   SwitchBranchResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum SwitchBranchResultMessageEvent {
+    SwitchBranchResult = "switch_branch_result",
+}
+
 export interface TodosMessage {
     cmd:   TodosMessageCmd;
     id:    string;
@@ -546,6 +645,8 @@ export enum UnregisterMessageCmd {
 }
 
 export interface WebSocketEvent {
+    branch?:              string;
+    branches?:            BranchElement[];
     error?:               string;
     event:                string;
     protocol_version?:    string;
@@ -601,6 +702,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ApprovePRMessage")), null, 2);
     }
 
+    public static toBranch(json: string): Branch {
+        return cast(JSON.parse(json), r("Branch"));
+    }
+
+    public static branchToJson(value: Branch): string {
+        return JSON.stringify(uncast(value, r("Branch")), null, 2);
+    }
+
+    public static toBranchesResultMessage(json: string): BranchesResultMessage {
+        return cast(JSON.parse(json), r("BranchesResultMessage"));
+    }
+
+    public static branchesResultMessageToJson(value: BranchesResultMessage): string {
+        return JSON.stringify(uncast(value, r("BranchesResultMessage")), null, 2);
+    }
+
     public static toClearSessionsMessage(json: string): ClearSessionsMessage {
         return cast(JSON.parse(json), r("ClearSessionsMessage"));
     }
@@ -617,6 +734,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("CollapseRepoMessage")), null, 2);
     }
 
+    public static toCreateWorktreeFromBranchMessage(json: string): CreateWorktreeFromBranchMessage {
+        return cast(JSON.parse(json), r("CreateWorktreeFromBranchMessage"));
+    }
+
+    public static createWorktreeFromBranchMessageToJson(value: CreateWorktreeFromBranchMessage): string {
+        return JSON.stringify(uncast(value, r("CreateWorktreeFromBranchMessage")), null, 2);
+    }
+
     public static toCreateWorktreeMessage(json: string): CreateWorktreeMessage {
         return cast(JSON.parse(json), r("CreateWorktreeMessage"));
     }
@@ -631,6 +756,22 @@ export class Convert {
 
     public static createWorktreeResultMessageToJson(value: CreateWorktreeResultMessage): string {
         return JSON.stringify(uncast(value, r("CreateWorktreeResultMessage")), null, 2);
+    }
+
+    public static toDeleteBranchMessage(json: string): DeleteBranchMessage {
+        return cast(JSON.parse(json), r("DeleteBranchMessage"));
+    }
+
+    public static deleteBranchMessageToJson(value: DeleteBranchMessage): string {
+        return JSON.stringify(uncast(value, r("DeleteBranchMessage")), null, 2);
+    }
+
+    public static toDeleteBranchResultMessage(json: string): DeleteBranchResultMessage {
+        return cast(JSON.parse(json), r("DeleteBranchResultMessage"));
+    }
+
+    public static deleteBranchResultMessageToJson(value: DeleteBranchResultMessage): string {
+        return JSON.stringify(uncast(value, r("DeleteBranchResultMessage")), null, 2);
     }
 
     public static toDeleteWorktreeMessage(json: string): DeleteWorktreeMessage {
@@ -703,6 +844,14 @@ export class Convert {
 
     public static injectTestSessionMessageToJson(value: InjectTestSessionMessage): string {
         return JSON.stringify(uncast(value, r("InjectTestSessionMessage")), null, 2);
+    }
+
+    public static toListBranchesMessage(json: string): ListBranchesMessage {
+        return cast(JSON.parse(json), r("ListBranchesMessage"));
+    }
+
+    public static listBranchesMessageToJson(value: ListBranchesMessage): string {
+        return JSON.stringify(uncast(value, r("ListBranchesMessage")), null, 2);
     }
 
     public static toListWorktreesMessage(json: string): ListWorktreesMessage {
@@ -905,6 +1054,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("StopMessage")), null, 2);
     }
 
+    public static toSwitchBranchMessage(json: string): SwitchBranchMessage {
+        return cast(JSON.parse(json), r("SwitchBranchMessage"));
+    }
+
+    public static switchBranchMessageToJson(value: SwitchBranchMessage): string {
+        return JSON.stringify(uncast(value, r("SwitchBranchMessage")), null, 2);
+    }
+
+    public static toSwitchBranchResultMessage(json: string): SwitchBranchResultMessage {
+        return cast(JSON.parse(json), r("SwitchBranchResultMessage"));
+    }
+
+    public static switchBranchResultMessageToJson(value: SwitchBranchResultMessage): string {
+        return JSON.stringify(uncast(value, r("SwitchBranchResultMessage")), null, 2);
+    }
+
     public static toTodosMessage(json: string): TodosMessage {
         return cast(JSON.parse(json), r("TodosMessage"));
     }
@@ -1104,6 +1269,18 @@ const typeMap: any = {
         { json: "number", js: "number", typ: 0 },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
+    "Branch": o([
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "BranchesResultMessage": o([
+        { json: "branches", js: "branches", typ: a(r("BranchElement")) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("BranchesResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "BranchElement": o([
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
     "ClearSessionsMessage": o([
         { json: "cmd", js: "cmd", typ: r("ClearSessionsMessageCmd") },
     ], "any"),
@@ -1111,6 +1288,12 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("CollapseRepoMessageCmd") },
         { json: "collapsed", js: "collapsed", typ: true },
         { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "CreateWorktreeFromBranchMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("CreateWorktreeFromBranchMessageCmd") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+        { json: "path", js: "path", typ: u(undefined, "") },
     ], "any"),
     "CreateWorktreeMessage": o([
         { json: "branch", js: "branch", typ: "" },
@@ -1122,6 +1305,18 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("CreateWorktreeResultMessageEvent") },
         { json: "path", js: "path", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "DeleteBranchMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("DeleteBranchMessageCmd") },
+        { json: "force", js: "force", typ: true },
+        { json: "main_repo", js: "main_repo", typ: "" },
+    ], "any"),
+    "DeleteBranchResultMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("DeleteBranchResultMessageEvent") },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "DeleteWorktreeMessage": o([
@@ -1196,6 +1391,10 @@ const typeMap: any = {
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
+    ], "any"),
+    "ListBranchesMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ListBranchesMessageCmd") },
+        { json: "main_repo", js: "main_repo", typ: "" },
     ], "any"),
     "ListWorktreesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListWorktreesMessageCmd") },
@@ -1352,6 +1551,17 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "transcript_path", js: "transcript_path", typ: "" },
     ], "any"),
+    "SwitchBranchMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("SwitchBranchMessageCmd") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+    ], "any"),
+    "SwitchBranchResultMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("SwitchBranchResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "TodosMessage": o([
         { json: "cmd", js: "cmd", typ: r("TodosMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -1362,6 +1572,8 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
     ], "any"),
     "WebSocketEvent": o([
+        { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "branches", js: "branches", typ: u(undefined, a(r("BranchElement"))) },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: "" },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
@@ -1397,17 +1609,29 @@ const typeMap: any = {
     "ApprovePRMessageCmd": [
         "approve_pr",
     ],
+    "BranchesResultMessageEvent": [
+        "branches_result",
+    ],
     "ClearSessionsMessageCmd": [
         "clear_sessions",
     ],
     "CollapseRepoMessageCmd": [
         "collapse_repo",
     ],
+    "CreateWorktreeFromBranchMessageCmd": [
+        "create_worktree_from_branch",
+    ],
     "CreateWorktreeMessageCmd": [
         "create_worktree",
     ],
     "CreateWorktreeResultMessageEvent": [
         "create_worktree_result",
+    ],
+    "DeleteBranchMessageCmd": [
+        "delete_branch",
+    ],
+    "DeleteBranchResultMessageEvent": [
+        "delete_branch_result",
     ],
     "DeleteWorktreeMessageCmd": [
         "delete_worktree",
@@ -1446,6 +1670,9 @@ const typeMap: any = {
         "idle",
         "waiting_input",
         "working",
+    ],
+    "ListBranchesMessageCmd": [
+        "list_branches",
     ],
     "ListWorktreesMessageCmd": [
         "list_worktrees",
@@ -1500,6 +1727,12 @@ const typeMap: any = {
     ],
     "StopMessageCmd": [
         "stop",
+    ],
+    "SwitchBranchMessageCmd": [
+        "switch_branch",
+    ],
+    "SwitchBranchResultMessageEvent": [
+        "switch_branch_result",
     ],
     "TodosMessageCmd": [
         "todos",

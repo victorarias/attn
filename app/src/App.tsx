@@ -74,7 +74,7 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, sendGetRecentLocations, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, sendGetRecentLocations, sendListBranches, sendDeleteBranch, sendSwitchBranch, sendCreateWorktreeFromBranch, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -504,6 +504,10 @@ function App() {
         worktreeFlowMode={worktreeFlowMode}
         projectsDirectory={settings.projects_directory}
         onGetRecentLocations={sendGetRecentLocations}
+        onListBranches={sendListBranches}
+        onDeleteBranch={sendDeleteBranch}
+        onSwitchBranch={sendSwitchBranch}
+        onCreateWorktreeFromBranch={sendCreateWorktreeFromBranch}
       />
       <UndoToast />
       <WorktreeCleanupPrompt

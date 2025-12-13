@@ -123,3 +123,16 @@ func RecentLocationsToValues(locs []*RecentLocation) []RecentLocation {
 	}
 	return result
 }
+
+func BranchesToValues(branches []*Branch) []Branch {
+	if branches == nil {
+		return nil
+	}
+	result := make([]Branch, len(branches))
+	for i, b := range branches {
+		if b != nil {
+			result[i] = *b
+		}
+	}
+	return result
+}

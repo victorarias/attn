@@ -453,6 +453,26 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			RecentLocations: protocol.RecentLocationsToValues(locations),
 			Success:         protocol.Ptr(true),
 		})
+
+	case protocol.CmdListBranches:
+		listMsg := msg.(*protocol.ListBranchesMessage)
+		d.logf("Listing branches for %s", listMsg.MainRepo)
+		d.handleListBranchesWS(client, listMsg)
+
+	case protocol.CmdDeleteBranch:
+		deleteMsg := msg.(*protocol.DeleteBranchMessage)
+		d.logf("Deleting branch %s (force=%v)", deleteMsg.Branch, deleteMsg.Force)
+		d.handleDeleteBranchWS(client, deleteMsg)
+
+	case protocol.CmdSwitchBranch:
+		switchMsg := msg.(*protocol.SwitchBranchMessage)
+		d.logf("Switching to branch %s in %s", switchMsg.Branch, switchMsg.MainRepo)
+		d.handleSwitchBranchWS(client, switchMsg)
+
+	case protocol.CmdCreateWorktreeFromBranch:
+		createMsg := msg.(*protocol.CreateWorktreeFromBranchMessage)
+		d.logf("Creating worktree from branch %s in %s", createMsg.Branch, createMsg.MainRepo)
+		d.handleCreateWorktreeFromBranchWS(client, createMsg)
 	}
 }
 

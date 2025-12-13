@@ -108,6 +108,15 @@
   padding: 8px 8px 4px;
 }
 
+.picker-section-header {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #555;
+  padding: 12px 8px 4px;
+}
+
 .picker-item {
   display: flex;
   align-items: center;
@@ -276,4 +285,35 @@
 
 .delete-error {
   color: #ef4444 !important;
+}
+
+/* Icon type colors */
+.picker-icon.main {
+  color: #22c55e;
+}
+
+.picker-icon.worktree {
+  color: #3b82f6;
+}
+
+.picker-icon.branch {
+  color: #6b7280;
+}
+
+.picker-icon.new {
+  color: #9ca3af;
+}
+
+.picker-icon.delete {
+  color: #ef4444;
+}
+
+/* Override background color when selected for colored icons */
+.picker-item.selected .picker-icon.main,
+.picker-item.selected .picker-icon.worktree,
+.picker-item.selected .picker-icon.branch,
+.picker-item.selected .picker-icon.new,
+.picker-item.selected .picker-icon.delete {
+  background: #3b82f6;
+  color: white;
 }

@@ -99,6 +99,10 @@ model RecentLocation {
   use_count: int32;
 }
 
+model Branch {
+  name: string;
+}
+
 // ============================================================================
 // Command Messages (Client → Daemon)
 // ============================================================================
@@ -247,6 +251,31 @@ model GetRecentLocationsMessage {
   limit?: int32;  // Default 20
 }
 
+model ListBranchesMessage {
+  cmd: "list_branches";
+  main_repo: string;
+}
+
+model DeleteBranchMessage {
+  cmd: "delete_branch";
+  main_repo: string;
+  branch: string;
+  force: boolean;
+}
+
+model SwitchBranchMessage {
+  cmd: "switch_branch";
+  main_repo: string;
+  branch: string;
+}
+
+model CreateWorktreeFromBranchMessage {
+  cmd: "create_worktree_from_branch";
+  main_repo: string;
+  branch: string;
+  path?: string;
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -300,6 +329,27 @@ model RecentLocationsResultMessage {
   error?: string;
 }
 
+model BranchesResultMessage {
+  event: "branches_result";
+  branches: Branch[];
+  success: boolean;
+  error?: string;
+}
+
+model DeleteBranchResultMessage {
+  event: "delete_branch_result";
+  branch: string;
+  success: boolean;
+  error?: string;
+}
+
+model SwitchBranchResultMessage {
+  event: "switch_branch_result";
+  branch: string;
+  success: boolean;
+  error?: string;
+}
+
 // ============================================================================
 // Response Types
 // ============================================================================
@@ -320,6 +370,7 @@ model WebSocketEvent {
   prs?: PR[];
   repos?: RepoState[];
   worktrees?: Worktree[];
+  branches?: Branch[];
   recent_locations?: RecentLocation[];
   settings?: Record<string>;
   // Rate limiting
@@ -328,4 +379,6 @@ model WebSocketEvent {
   // Result feedback (for settings validation, etc.)
   success?: boolean;
   error?: string;
+  // Branch operations
+  branch?: string;
 }

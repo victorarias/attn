@@ -6,6 +6,7 @@ import type {
   RepoState as GeneratedRepoState,
   WebSocketEvent as GeneratedWebSocketEvent,
   RecentLocation as GeneratedRecentLocation,
+  BranchElement as GeneratedBranch,
   SessionState,
   PRRole,
   HeatState,
@@ -18,6 +19,7 @@ export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
 export type RepoState = GeneratedRepoState;
 export type RecentLocation = GeneratedRecentLocation;
+export type Branch = GeneratedBranch;
 export type DaemonSettings = Record<string, string>;
 
 // Re-export enums and useful types
@@ -33,6 +35,8 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   error?: string;
   // Worktree action result fields
   path?: string;
+  // Branch action result fields
+  branch?: string;
 };
 
 export interface RateLimitState {
@@ -42,7 +46,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '7';
+const PROTOCOL_VERSION = '8';
 
 interface PRActionResult {
   success: boolean;
@@ -58,6 +62,18 @@ interface WorktreeActionResult {
 interface RecentLocationsResult {
   success: boolean;
   locations: RecentLocation[];
+  error?: string;
+}
+
+interface BranchesResult {
+  success: boolean;
+  branches: Branch[];
+  error?: string;
+}
+
+interface BranchActionResult {
+  success: boolean;
+  branch?: string;
   error?: string;
 }
 
@@ -307,6 +323,48 @@ export function useDaemonSocket({
                 });
               } else {
                 pending.reject(new Error(data.error || 'Failed to get recent locations'));
+              }
+            }
+            break;
+          }
+
+          case 'branches_result': {
+            const pending = pendingActionsRef.current.get('list_branches');
+            if (pending) {
+              pendingActionsRef.current.delete('list_branches');
+              if (data.success) {
+                pending.resolve({
+                  success: true,
+                  branches: data.branches || [],
+                });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to list branches'));
+              }
+            }
+            break;
+          }
+
+          case 'delete_branch_result': {
+            const pending = pendingActionsRef.current.get('delete_branch');
+            if (pending) {
+              pendingActionsRef.current.delete('delete_branch');
+              if (data.success) {
+                pending.resolve({ success: true, branch: data.branch });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to delete branch'));
+              }
+            }
+            break;
+          }
+
+          case 'switch_branch_result': {
+            const pending = pendingActionsRef.current.get('switch_branch');
+            if (pending) {
+              pendingActionsRef.current.delete('switch_branch');
+              if (data.success) {
+                pending.resolve({ success: true, branch: data.branch });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to switch branch'));
               }
             }
             break;
@@ -568,6 +626,103 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // List available branches (not checked out in any worktree)
+  const sendListBranches = useCallback((mainRepo: string): Promise<BranchesResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'list_branches';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'list_branches', main_repo: mainRepo }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('List branches timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  // Delete a branch
+  const sendDeleteBranch = useCallback((mainRepo: string, branch: string, force: boolean = false): Promise<BranchActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'delete_branch';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'delete_branch', main_repo: mainRepo, branch, force }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Delete branch timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  // Switch main repo to a different branch
+  const sendSwitchBranch = useCallback((mainRepo: string, branch: string): Promise<BranchActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'switch_branch';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'switch_branch', main_repo: mainRepo, branch }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Switch branch timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  // Create worktree from existing branch
+  const sendCreateWorktreeFromBranch = useCallback((mainRepo: string, branch: string, path?: string): Promise<WorktreeActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const actionKey = 'worktree_create_worktree_result';
+      pendingActionsRef.current.set(actionKey, { resolve, reject });
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(actionKey)) {
+          pendingActionsRef.current.delete(actionKey);
+          reject(new Error('Create worktree from branch timed out'));
+        }
+      }, 30000);
+
+      ws.send(JSON.stringify({
+        cmd: 'create_worktree_from_branch',
+        main_repo: mainRepo,
+        branch,
+        ...(path && { path }),
+      }));
+    });
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -586,5 +741,9 @@ export function useDaemonSocket({
     sendDeleteWorktree,
     sendSetSetting,
     sendGetRecentLocations,
+    sendListBranches,
+    sendDeleteBranch,
+    sendSwitchBranch,
+    sendCreateWorktreeFromBranch,
   };
 }
