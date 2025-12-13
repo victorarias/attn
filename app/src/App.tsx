@@ -180,6 +180,23 @@ function App() {
     setSidebarCollapsed((prev) => !prev);
   }, []);
 
+  // Auto-collapse sidebar when no sessions, auto-expand when first session is created
+  const prevSessionCountRef = useRef(sessions.length);
+  useEffect(() => {
+    const prevCount = prevSessionCountRef.current;
+    const currentCount = sessions.length;
+    prevSessionCountRef.current = currentCount;
+
+    if (currentCount === 0) {
+      // No sessions - collapse
+      setSidebarCollapsed(true);
+    } else if (prevCount === 0 && currentCount > 0) {
+      // First session created - expand
+      setSidebarCollapsed(false);
+    }
+    // Otherwise, respect user's manual toggle
+  }, [sessions.length]);
+
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [worktreeFlowMode, setWorktreeFlowMode] = useState(false);
