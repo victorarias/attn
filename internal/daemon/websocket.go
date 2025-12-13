@@ -16,8 +16,9 @@ import (
 
 // wsClient represents a connected WebSocket client
 type wsClient struct {
-	conn *websocket.Conn
-	send chan []byte
+	conn      *websocket.Conn
+	send      chan []byte
+	slowCount int // tracks consecutive failed sends
 }
 
 // wsHub manages all WebSocket connections
@@ -27,7 +28,10 @@ type wsHub struct {
 	register   chan *wsClient
 	unregister chan *wsClient
 	mu         sync.RWMutex
+	logf       func(format string, args ...interface{})
 }
+
+const maxSlowCount = 3 // disconnect after this many consecutive failed sends
 
 func newWSHub() *wsHub {
 	return &wsHub{
@@ -35,6 +39,7 @@ func newWSHub() *wsHub {
 		broadcast:  make(chan []byte, 256),
 		register:   make(chan *wsClient),
 		unregister: make(chan *wsClient),
+		logf:       func(format string, args ...interface{}) {}, // no-op by default
 	}
 }
 
@@ -55,15 +60,29 @@ func (h *wsHub) run() {
 			h.mu.Unlock()
 
 		case message := <-h.broadcast:
-			h.mu.RLock()
+			h.mu.Lock()
+			var toRemove []*wsClient
 			for client := range h.clients {
 				select {
 				case client.send <- message:
+					client.slowCount = 0 // reset on successful send
 				default:
-					// Client buffer full, skip
+					// Client buffer full
+					client.slowCount++
+					if client.slowCount >= maxSlowCount {
+						h.logf("WebSocket client too slow (%d missed), disconnecting", client.slowCount)
+						toRemove = append(toRemove, client)
+					} else {
+						h.logf("WebSocket client slow (%d/%d missed)", client.slowCount, maxSlowCount)
+					}
 				}
 			}
-			h.mu.RUnlock()
+			// Remove slow clients outside the iteration
+			for _, client := range toRemove {
+				delete(h.clients, client)
+				close(client.send)
+			}
+			h.mu.Unlock()
 		}
 	}
 }
@@ -72,14 +91,15 @@ func (h *wsHub) run() {
 func (h *wsHub) Broadcast(event *protocol.WebSocketEvent) {
 	data, err := json.Marshal(event)
 	if err != nil {
+		h.logf("WebSocket broadcast marshal error: %v", err)
 		return
 	}
 	select {
 	case h.broadcast <- data:
 		// Message queued for broadcast
 	default:
-		// Broadcast channel full, drop message - this is a problem!
-		// Log would help but we don't have logger access here
+		// Broadcast channel full - this indicates the hub is overwhelmed
+		h.logf("WebSocket broadcast channel full, dropping %s event", event.Event)
 	}
 }
 

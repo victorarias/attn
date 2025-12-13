@@ -128,7 +128,8 @@ func (d *Daemon) Start() error {
 	d.listener = listener
 	d.log("daemon started")
 
-	// Start WebSocket hub
+	// Start WebSocket hub with daemon's logger
+	d.wsHub.logf = d.logf
 	go d.wsHub.run()
 
 	// Start HTTP server for WebSocket

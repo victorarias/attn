@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -69,8 +70,11 @@ func (s *Store) Add(session *protocol.Session) {
 		return
 	}
 
-	todosJSON, _ := json.Marshal(session.Todos)
-	_, _ = s.db.Exec(`
+	todosJSON, err := json.Marshal(session.Todos)
+	if err != nil {
+		log.Printf("[store] Add: failed to marshal todos for session %s: %v", session.ID, err)
+	}
+	_, err = s.db.Exec(`
 		INSERT OR REPLACE INTO sessions
 		(id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -87,6 +91,9 @@ func (s *Store) Add(session *protocol.Session) {
 		session.LastSeen.Format(time.RFC3339),
 		boolToInt(session.Muted),
 	)
+	if err != nil {
+		log.Printf("[store] Add: failed to insert session %s: %v", session.ID, err)
+	}
 }
 
 // Get retrieves a session by ID
@@ -147,7 +154,10 @@ func (s *Store) Remove(id string) {
 		return
 	}
 
-	s.db.Exec("DELETE FROM sessions WHERE id = ?", id)
+	_, err := s.db.Exec("DELETE FROM sessions WHERE id = ?", id)
+	if err != nil {
+		log.Printf("[store] Remove: failed for session %s: %v", id, err)
+	}
 }
 
 // ClearSessions removes all sessions from the store
@@ -159,7 +169,10 @@ func (s *Store) ClearSessions() {
 		return
 	}
 
-	s.db.Exec("DELETE FROM sessions")
+	_, err := s.db.Exec("DELETE FROM sessions")
+	if err != nil {
+		log.Printf("[store] ClearSessions: failed: %v", err)
+	}
 }
 
 // List returns sessions, optionally filtered by state, sorted by label
@@ -257,7 +270,10 @@ func (s *Store) RemoveSessionsInDirectory(directory string) {
 		return
 	}
 
-	s.db.Exec(`DELETE FROM sessions WHERE directory = ?`, directory)
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE directory = ?`, directory)
+	if err != nil {
+		log.Printf("[store] RemoveSessionsInDirectory: failed for directory %s: %v", directory, err)
+	}
 }
 
 // UpdateState updates a session's state
@@ -270,8 +286,11 @@ func (s *Store) UpdateState(id, state string) {
 	}
 
 	now := time.Now().Format(time.RFC3339)
-	s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
+	_, err := s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
 		state, now, now, id)
+	if err != nil {
+		log.Printf("[store] UpdateState: failed for session %s: %v", id, err)
+	}
 }
 
 // UpdateStateWithTimestamp updates a session's state only if the provided timestamp
@@ -311,8 +330,15 @@ func (s *Store) UpdateTodos(id string, todos []string) {
 		return
 	}
 
-	todosJSON, _ := json.Marshal(todos)
-	s.db.Exec("UPDATE sessions SET todos = ? WHERE id = ?", string(todosJSON), id)
+	todosJSON, err := json.Marshal(todos)
+	if err != nil {
+		log.Printf("[store] UpdateTodos: failed to marshal todos for session %s: %v", id, err)
+		return
+	}
+	_, err = s.db.Exec("UPDATE sessions SET todos = ? WHERE id = ?", string(todosJSON), id)
+	if err != nil {
+		log.Printf("[store] UpdateTodos: failed for session %s: %v", id, err)
+	}
 }
 
 // UpdateBranch updates a session's branch information
@@ -324,8 +350,11 @@ func (s *Store) UpdateBranch(id, branch string, isWorktree bool, mainRepo string
 		return
 	}
 
-	s.db.Exec(`UPDATE sessions SET branch = ?, is_worktree = ?, main_repo = ? WHERE id = ?`,
+	_, err := s.db.Exec(`UPDATE sessions SET branch = ?, is_worktree = ?, main_repo = ? WHERE id = ?`,
 		branch, boolToInt(isWorktree), mainRepo, id)
+	if err != nil {
+		log.Printf("[store] UpdateBranch: failed for session %s: %v", id, err)
+	}
 }
 
 // Touch updates a session's last seen time
@@ -338,7 +367,10 @@ func (s *Store) Touch(id string) {
 	}
 
 	now := time.Now().Format(time.RFC3339)
-	s.db.Exec("UPDATE sessions SET last_seen = ? WHERE id = ?", now, id)
+	_, err := s.db.Exec("UPDATE sessions SET last_seen = ? WHERE id = ?", now, id)
+	if err != nil {
+		log.Printf("[store] Touch: failed for session %s: %v", id, err)
+	}
 }
 
 // ToggleMute toggles a session's muted state
@@ -350,7 +382,10 @@ func (s *Store) ToggleMute(id string) {
 		return
 	}
 
-	s.db.Exec("UPDATE sessions SET muted = NOT muted WHERE id = ?", id)
+	_, err := s.db.Exec("UPDATE sessions SET muted = NOT muted WHERE id = ?", id)
+	if err != nil {
+		log.Printf("[store] ToggleMute: failed for session %s: %v", id, err)
+	}
 }
 
 // SetPRs replaces all PRs, preserving muted state, detail fields, and computing HasNewChanges
@@ -581,7 +616,10 @@ func (s *Store) ToggleMutePR(id string) {
 		return
 	}
 
-	s.db.Exec("UPDATE prs SET muted = NOT muted WHERE id = ?", id)
+	_, err := s.db.Exec("UPDATE prs SET muted = NOT muted WHERE id = ?", id)
+	if err != nil {
+		log.Printf("[store] ToggleMutePR: failed for PR %s: %v", id, err)
+	}
 }
 
 // GetPR returns a PR by ID
