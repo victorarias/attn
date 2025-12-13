@@ -9,7 +9,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "7"
+const ProtocolVersion = "8"
 
 // Commands
 const (
@@ -37,9 +37,13 @@ const (
 	CmdSetSetting        = "set_setting"
 	CmdApprovePR         = "approve_pr"
 	CmdMergePR           = "merge_pr"
-	CmdInjectTestPR        = "inject_test_pr"
-	CmdInjectTestSession   = "inject_test_session"
-	CmdGetRecentLocations  = "get_recent_locations"
+	CmdInjectTestPR              = "inject_test_pr"
+	CmdInjectTestSession         = "inject_test_session"
+	CmdGetRecentLocations        = "get_recent_locations"
+	CmdListBranches              = "list_branches"
+	CmdDeleteBranch              = "delete_branch"
+	CmdSwitchBranch              = "switch_branch"
+	CmdCreateWorktreeFromBranch  = "create_worktree_from_branch"
 )
 
 // WebSocket Events (daemon -> client)
@@ -60,9 +64,12 @@ const (
 	EventWorktreesUpdated     = "worktrees_updated"
 	EventCreateWorktreeResult = "create_worktree_result"
 	EventDeleteWorktreeResult = "delete_worktree_result"
-	EventSettingsUpdated        = "settings_updated"
-	EventRateLimited            = "rate_limited"
-	EventRecentLocationsResult  = "recent_locations_result"
+	EventSettingsUpdated              = "settings_updated"
+	EventRateLimited                  = "rate_limited"
+	EventRecentLocationsResult        = "recent_locations_result"
+	EventBranchesResult               = "branches_result"
+	EventDeleteBranchResult           = "delete_branch_result"
+	EventSwitchBranchResult           = "switch_branch_result"
 )
 
 // Session states (values for SessionState enum)
@@ -313,6 +320,34 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdGetRecentLocations:
 		var msg GetRecentLocationsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdListBranches:
+		var msg ListBranchesMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDeleteBranch:
+		var msg DeleteBranchMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSwitchBranch:
+		var msg SwitchBranchMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCreateWorktreeFromBranch:
+		var msg CreateWorktreeFromBranchMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

@@ -13,6 +13,25 @@ type ApprovePRMessage struct {
 	Repo string `json:"repo"`
 }
 
+type Branch struct {
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type BranchesResultMessage struct {
+	// Branches corresponds to the JSON schema field "branches".
+	Branches []Branch `json:"branches"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type ClearSessionsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -27,6 +46,20 @@ type CollapseRepoMessage struct {
 
 	// Repo corresponds to the JSON schema field "repo".
 	Repo string `json:"repo"`
+}
+
+type CreateWorktreeFromBranchMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo string `json:"main_repo"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path *string `json:"path,omitempty"`
 }
 
 type CreateWorktreeMessage struct {
@@ -52,6 +85,34 @@ type CreateWorktreeResultMessage struct {
 
 	// Path corresponds to the JSON schema field "path".
 	Path *string `json:"path,omitempty"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type DeleteBranchMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Force corresponds to the JSON schema field "force".
+	Force bool `json:"force"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo string `json:"main_repo"`
+}
+
+type DeleteBranchResultMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
@@ -128,6 +189,14 @@ type InjectTestSessionMessage struct {
 
 	// Session corresponds to the JSON schema field "session".
 	Session Session `json:"session"`
+}
+
+type ListBranchesMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo string `json:"main_repo"`
 }
 
 type ListWorktreesMessage struct {
@@ -482,6 +551,31 @@ type StopMessage struct {
 	TranscriptPath string `json:"transcript_path"`
 }
 
+type SwitchBranchMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo string `json:"main_repo"`
+}
+
+type SwitchBranchResultMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type TodosMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -502,6 +596,12 @@ type UnregisterMessage struct {
 }
 
 type WebSocketEvent struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch *string `json:"branch,omitempty"`
+
+	// Branches corresponds to the JSON schema field "branches".
+	Branches []Branch `json:"branches,omitempty"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
 
