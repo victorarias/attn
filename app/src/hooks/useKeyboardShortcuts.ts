@@ -1,5 +1,5 @@
 // app/src/hooks/useKeyboardShortcuts.ts
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback } from 'react';
 
 interface KeyboardShortcutsConfig {
   onNewSession: () => void;
@@ -32,45 +32,23 @@ export function useKeyboardShortcuts({
   onOpenBranchPicker,
   enabled,
 }: KeyboardShortcutsConfig) {
-  // Track if we're in chord mode (Cmd+K was pressed)
-  const chordModeRef = useRef(false);
-  const chordTimeoutRef = useRef<number | null>(null);
-
-  const clearChordMode = useCallback(() => {
-    chordModeRef.current = false;
-    if (chordTimeoutRef.current) {
-      clearTimeout(chordTimeoutRef.current);
-      chordTimeoutRef.current = null;
-    }
-  }, []);
-
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!enabled) return;
 
       const isMeta = e.metaKey || e.ctrlKey;
 
-      // Handle chord mode second key
-      if (chordModeRef.current) {
-        clearChordMode();
-
-        // Cmd+K, B - Open branch picker
-        if (e.key.toLowerCase() === 'b' && onOpenBranchPicker) {
-          e.preventDefault();
-          onOpenBranchPicker();
-          return;
-        }
-
-        // Cmd+K, K or any other key - Toggle drawer (fallback)
-        e.preventDefault();
-        onToggleDrawer();
-        return;
-      }
-
       // ⌘⇧N - New worktree session (check shift first)
       if (isMeta && e.shiftKey && e.key.toLowerCase() === 'n' && onNewWorktreeSession) {
         e.preventDefault();
         onNewWorktreeSession();
+        return;
+      }
+
+      // ⌘⇧B - Toggle sidebar
+      if (isMeta && e.shiftKey && e.key.toLowerCase() === 'b' && onToggleSidebar) {
+        e.preventDefault();
+        onToggleSidebar();
         return;
       }
 
@@ -88,23 +66,8 @@ export function useKeyboardShortcuts({
         return;
       }
 
-      // ⌘K - Enter chord mode (or toggle drawer after timeout)
-      if (isMeta && e.key === 'k') {
-        e.preventDefault();
-        chordModeRef.current = true;
-
-        // If no second key within 1000ms, toggle drawer
-        chordTimeoutRef.current = window.setTimeout(() => {
-          if (chordModeRef.current) {
-            chordModeRef.current = false;
-            onToggleDrawer();
-          }
-        }, 1000);
-        return;
-      }
-
-      // ⌘. - Toggle drawer (immediate, no chord)
-      if (isMeta && e.key === '.') {
+      // ⌘K or ⌘. - Toggle drawer
+      if (isMeta && (e.key === 'k' || e.key === '.')) {
         e.preventDefault();
         onToggleDrawer();
         return;
@@ -146,10 +109,10 @@ export function useKeyboardShortcuts({
         return;
       }
 
-      // ⌘B - Toggle sidebar
-      if (isMeta && e.key === 'b' && onToggleSidebar) {
+      // ⌘B - Open branch picker
+      if (isMeta && !e.shiftKey && e.key === 'b' && onOpenBranchPicker) {
         e.preventDefault();
-        onToggleSidebar();
+        onOpenBranchPicker();
         return;
       }
 
@@ -174,7 +137,6 @@ export function useKeyboardShortcuts({
       onToggleSidebar,
       onRefreshPRs,
       onOpenBranchPicker,
-      clearChordMode,
     ]
   );
 
@@ -183,7 +145,6 @@ export function useKeyboardShortcuts({
     window.addEventListener('keydown', handleKeyDown, true);
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
-      clearChordMode();
     };
-  }, [handleKeyDown, clearChordMode]);
+  }, [handleKeyDown]);
 }
