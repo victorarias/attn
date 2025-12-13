@@ -471,7 +471,10 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 		// Preserve state from existing
 		if ex, ok := existing[pr.ID]; ok {
 			pr.Muted = ex.Muted
-			if ex.DetailsFetched && !ex.DetailsFetchedAt.Before(pr.LastUpdated) {
+			pr.ApprovedByMe = ex.ApprovedByMe // Always preserve approval state
+			if ex.DetailsFetched {
+				// Always preserve fetched details - they're more accurate than the basic list response
+				// The details will be re-fetched when the PR becomes "hot" again
 				pr.DetailsFetched = ex.DetailsFetched
 				pr.DetailsFetchedAt = ex.DetailsFetchedAt
 				pr.Mergeable = ex.Mergeable
