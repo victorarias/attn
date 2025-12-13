@@ -96,3 +96,78 @@ func GetCurrentBranch(repoDir string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// FetchRemotes fetches all remotes with prune.
+func FetchRemotes(repoDir string) error {
+	cmd := exec.Command("git", "fetch", "--all", "--prune")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git fetch failed: %s", out)
+	}
+	return nil
+}
+
+// ListRemoteBranches returns remote branches not checked out locally.
+func ListRemoteBranches(repoDir string) ([]string, error) {
+	// Get remote branches
+	cmd := exec.Command("git", "branch", "-r", "--format=%(refname:short)")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git branch -r failed: %w", err)
+	}
+
+	remoteBranches := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(remoteBranches) == 1 && remoteBranches[0] == "" {
+		return nil, nil
+	}
+
+	// Get local branches
+	localCmd := exec.Command("git", "branch", "--format=%(refname:short)")
+	localCmd.Dir = repoDir
+	localOut, err := localCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git branch failed: %w", err)
+	}
+
+	localBranches := make(map[string]bool)
+	for _, b := range strings.Split(strings.TrimSpace(string(localOut)), "\n") {
+		if b != "" {
+			localBranches[b] = true
+		}
+	}
+
+	// Filter out branches that exist locally, and remove origin/ prefix
+	var available []string
+	for _, remote := range remoteBranches {
+		// Skip HEAD pointer
+		if strings.Contains(remote, "HEAD") {
+			continue
+		}
+		// Remove origin/ prefix to get branch name
+		name := strings.TrimPrefix(remote, "origin/")
+		if !localBranches[name] {
+			available = append(available, name)
+		}
+	}
+
+	return available, nil
+}
+
+// CheckoutBranch checks out a branch, creating tracking branch if needed.
+func CheckoutBranch(repoDir, branch string) error {
+	// First try simple checkout
+	cmd := exec.Command("git", "checkout", branch)
+	cmd.Dir = repoDir
+	if _, err := cmd.CombinedOutput(); err == nil {
+		return nil
+	}
+
+	// If that failed, try creating tracking branch from origin
+	cmd = exec.Command("git", "checkout", "-b", branch, "origin/"+branch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout failed: %s", out)
+	}
+	return nil
+}
