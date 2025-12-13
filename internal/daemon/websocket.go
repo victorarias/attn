@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +14,11 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/victorarias/claude-manager/internal/protocol"
+)
+
+// Valid setting keys
+const (
+	SettingProjectsDirectory = "projects_directory"
 )
 
 // wsClient represents a connected WebSocket client
@@ -408,6 +415,18 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdSetSetting:
 		setMsg := msg.(*protocol.SetSettingMessage)
 		d.logf("Setting %s = %s", setMsg.Key, setMsg.Value)
+
+		// Validate setting
+		if err := d.validateSetting(setMsg.Key, setMsg.Value); err != nil {
+			d.logf("Setting validation failed: %v", err)
+			d.sendToClient(client, &protocol.WebSocketEvent{
+				Event:   protocol.EventSettingsUpdated,
+				Error:   protocol.Ptr(err.Error()),
+				Success: protocol.Ptr(false),
+			})
+			return
+		}
+
 		d.store.SetSetting(setMsg.Key, setMsg.Value)
 		d.broadcastSettings()
 
@@ -461,4 +480,53 @@ func (d *Daemon) sendToClient(client *wsClient, message interface{}) {
 	default:
 		// Client buffer full, skip
 	}
+}
+
+// validateSetting validates a setting key and value before storing
+func (d *Daemon) validateSetting(key, value string) error {
+	switch key {
+	case SettingProjectsDirectory:
+		return validateProjectsDirectory(value)
+	default:
+		return fmt.Errorf("unknown setting: %s", key)
+	}
+}
+
+// validateProjectsDirectory ensures the path is valid and usable
+func validateProjectsDirectory(path string) error {
+	if path == "" {
+		return fmt.Errorf("projects directory cannot be empty")
+	}
+
+	// Expand ~ to home directory
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		path = filepath.Join(home, path[2:])
+	}
+
+	// Must be absolute
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("projects directory must be an absolute path")
+	}
+
+	// Check if directory exists or can be created
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		// Try to create the directory
+		if err := os.MkdirAll(path, 0755); err != nil {
+			return fmt.Errorf("cannot create directory: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("cannot access directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("path exists but is not a directory")
+	}
+
+	return nil
 }

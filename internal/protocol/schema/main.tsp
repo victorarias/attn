@@ -305,4 +305,7 @@ model WebSocketEvent {
   // Rate limiting
   rate_limit_resource?: string;
   rate_limit_reset_at?: string; // ISO timestamp
+  // Result feedback (for settings validation, etc.)
+  success?: boolean;
+  error?: string;
 }

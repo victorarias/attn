@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -152,6 +153,79 @@ func TestDaemon_SocketCleanup(t *testing.T) {
 	err := c.Register("1", "test", "/tmp")
 	if err != nil {
 		t.Fatalf("Register error after stale socket cleanup: %v", err)
+	}
+}
+
+func TestDaemon_HealthEndpoint(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	// Use unique port
+	wsPort := "19851"
+	os.Setenv("ATTN_WS_PORT", wsPort)
+	defer os.Unsetenv("ATTN_WS_PORT")
+
+	d := NewForTesting(sockPath)
+	go d.Start()
+	defer d.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Register a session to verify it's counted
+	c := client.New(sockPath)
+	c.Register("test-1", "test", "/tmp")
+
+	// Hit the health endpoint
+	resp, err := http.Get("http://127.0.0.1:" + wsPort + "/health")
+	if err != nil {
+		t.Fatalf("Health check failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("Health status = %d, want 200", resp.StatusCode)
+	}
+
+	var health map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		t.Fatalf("Decode error: %v", err)
+	}
+
+	if health["status"] != "ok" {
+		t.Errorf("status = %v, want ok", health["status"])
+	}
+	if health["protocol"] != protocol.ProtocolVersion {
+		t.Errorf("protocol = %v, want %s", health["protocol"], protocol.ProtocolVersion)
+	}
+	// sessions should be 1.0 (float64 from JSON)
+	if sessions, ok := health["sessions"].(float64); !ok || sessions != 1 {
+		t.Errorf("sessions = %v, want 1", health["sessions"])
+	}
+}
+
+func TestDaemon_SettingsValidation(t *testing.T) {
+	// Test the validateSetting function directly
+	d := &Daemon{}
+
+	tests := []struct {
+		name    string
+		key     string
+		value   string
+		wantErr bool
+	}{
+		{"valid projects_directory", "projects_directory", t.TempDir(), false},
+		{"invalid key", "unknown_setting", "value", true},
+		{"empty projects_directory", "projects_directory", "", true},
+		{"relative path", "projects_directory", "relative/path", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := d.validateSetting(tt.key, tt.value)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateSetting(%q, %q) error = %v, wantErr %v", tt.key, tt.value, err, tt.wantErr)
+			}
+		})
 	}
 }
 

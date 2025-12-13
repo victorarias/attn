@@ -505,6 +505,7 @@ export enum UnregisterMessageCmd {
 }
 
 export interface WebSocketEvent {
+    error?:               string;
     event:                string;
     protocol_version?:    string;
     prs?:                 PRElement[];
@@ -514,6 +515,7 @@ export interface WebSocketEvent {
     session?:             SessionElement;
     sessions?:            SessionElement[];
     settings?:            { [key: string]: any };
+    success?:             boolean;
     worktrees?:           WorktreeElement[];
     [property: string]: any;
 }
@@ -1272,6 +1274,7 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
     ], "any"),
     "WebSocketEvent": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: "" },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
@@ -1281,6 +1284,7 @@ const typeMap: any = {
         { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "success", js: "success", typ: u(undefined, true) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
     ], "any"),
     "WorktreeElement": o([
