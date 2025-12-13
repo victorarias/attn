@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/victorarias/claude-manager/internal/attention"
 	"github.com/victorarias/claude-manager/internal/protocol"
 )
 
@@ -17,62 +18,50 @@ func Format(sessions []protocol.Session) string {
 
 // FormatWithPRs formats sessions and PRs for status bar
 func FormatWithPRs(sessions []protocol.Session, prs []protocol.PR) string {
-	// Filter to waiting sessions (non-muted)
-	var waitingSessions []protocol.Session
-	for _, s := range sessions {
-		if s.State == protocol.SessionStateWaitingInput && !s.Muted {
-			waitingSessions = append(waitingSessions, s)
-		}
-	}
+	// Use attention aggregator to get items needing attention
+	agg := attention.NewAggregator(nil) // No repo muting in this variant
+	result := agg.Aggregate(sessions, prs)
 
-	// Filter to waiting PRs (non-muted)
-	var waitingPRs []protocol.PR
-	for _, pr := range prs {
-		if pr.State == protocol.PRStateWaiting && !pr.Muted {
-			waitingPRs = append(waitingPRs, pr)
-		}
-	}
-
-	// If nothing waiting, return "✓ all clear"
-	if len(waitingSessions) == 0 && len(waitingPRs) == 0 {
+	if result.TotalCount == 0 {
 		return "✓ all clear"
 	}
 
 	var parts []string
 
 	// Sessions part
-	if len(waitingSessions) > 0 {
-		// Sort by StateSince (oldest first)
-		sort.Slice(waitingSessions, func(i, j int) bool {
-			ti := protocol.Timestamp(waitingSessions[i].StateSince).Time()
-			tj := protocol.Timestamp(waitingSessions[j].StateSince).Time()
-			return ti.Before(tj)
-		})
-
-		// Format labels (max 3)
+	sessionItems := result.Sessions()
+	if len(sessionItems) > 0 {
+		// Items are already sorted by Since (oldest first)
 		var labels []string
-		for i, s := range waitingSessions {
+		for i, item := range sessionItems {
 			if i >= maxLabels {
 				break
 			}
-			labels = append(labels, s.Label)
+			labels = append(labels, item.Label)
 		}
 
 		labelStr := strings.Join(labels, ", ")
-		if len(waitingSessions) > maxLabels {
+		if len(sessionItems) > maxLabels {
 			labelStr += ", ..."
 		}
-		parts = append(parts, fmt.Sprintf("%d waiting: %s", len(waitingSessions), labelStr))
+		parts = append(parts, fmt.Sprintf("%d waiting: %s", len(sessionItems), labelStr))
 	}
 
-	// PRs part
-	if len(waitingPRs) > 0 {
-		// Sort by ID
+	// PRs part - need original PR data for Number field
+	if result.PRCount > 0 {
+		// Filter PRs that need attention to get Number
+		var waitingPRs []protocol.PR
+		for _, pr := range prs {
+			if pr.State == protocol.PRStateWaiting && !pr.Muted {
+				waitingPRs = append(waitingPRs, pr)
+			}
+		}
+
+		// Sort by ID for consistent display
 		sort.Slice(waitingPRs, func(i, j int) bool {
 			return waitingPRs[i].ID < waitingPRs[j].ID
 		})
 
-		// Format PR numbers (max 3, show just #number for brevity)
 		var labels []string
 		for i, pr := range waitingPRs {
 			if i >= maxLabels {
@@ -93,48 +82,42 @@ func FormatWithPRs(sessions []protocol.Session, prs []protocol.PR) string {
 
 // FormatWithPRsAndRepos formats status with repo-aware PR display
 func FormatWithPRsAndRepos(sessions []protocol.Session, prs []protocol.PR, repos []protocol.RepoState) string {
-	// Build muted repos set
-	mutedRepos := make(map[string]bool)
-	for _, r := range repos {
-		if r.Muted {
-			mutedRepos[r.Repo] = true
-		}
-	}
+	// Use attention aggregator with repo muting
+	agg := attention.NewAggregator(repos)
+	result := agg.Aggregate(sessions, prs)
 
-	// Count sessions
-	sessionWaiting := 0
-	for _, s := range sessions {
-		if s.State == protocol.SessionStateWaitingInput && !s.Muted {
-			sessionWaiting++
-		}
-	}
-
-	// Group PRs by repo, excluding muted
-	repoCount := make(map[string]int)
-	prWaiting := 0
-	for _, pr := range prs {
-		if pr.Muted || mutedRepos[pr.Repo] {
-			continue
-		}
-		if pr.State == protocol.PRStateWaiting {
-			prWaiting++
-			repoCount[pr.Repo]++
-		}
-	}
-
-	if sessionWaiting == 0 && prWaiting == 0 {
+	if result.TotalCount == 0 {
 		return "✓ all clear"
 	}
 
 	var parts []string
 
 	// Sessions part (bold red in tmux)
-	if sessionWaiting > 0 {
-		parts = append(parts, fmt.Sprintf("#[fg=red,bold]%d sessions#[default]", sessionWaiting))
+	if result.SessionCount > 0 {
+		parts = append(parts, fmt.Sprintf("#[fg=red,bold]%d sessions#[default]", result.SessionCount))
 	}
 
-	// PRs part
-	if prWaiting > 0 {
+	// PRs part - group by repo for display
+	if result.PRCount > 0 {
+		// Build muted repos set for filtering
+		mutedRepos := make(map[string]bool)
+		for _, r := range repos {
+			if r.Muted {
+				mutedRepos[r.Repo] = true
+			}
+		}
+
+		// Count PRs by repo
+		repoCount := make(map[string]int)
+		for _, pr := range prs {
+			if pr.Muted || mutedRepos[pr.Repo] {
+				continue
+			}
+			if pr.State == protocol.PRStateWaiting {
+				repoCount[pr.Repo]++
+			}
+		}
+
 		var prPart string
 		if len(repoCount) <= 2 {
 			// Show repo names
@@ -153,7 +136,7 @@ func FormatWithPRsAndRepos(sessions []protocol.Session, prs []protocol.PR, repos
 			}
 			prPart = strings.Join(repoParts, " ")
 		} else {
-			prPart = fmt.Sprintf("%d PRs in %d repos", prWaiting, len(repoCount))
+			prPart = fmt.Sprintf("%d PRs in %d repos", result.PRCount, len(repoCount))
 		}
 		parts = append(parts, prPart)
 	}

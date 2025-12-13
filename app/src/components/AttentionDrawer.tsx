@@ -1,7 +1,8 @@
 // app/src/components/AttentionDrawer.tsx
 import { DaemonPR } from '../hooks/useDaemonSocket';
+import { usePRsNeedingAttention } from '../hooks/usePRsNeedingAttention';
 import { PRActions } from './PRActions';
-import { useDaemonStore } from '../store/daemonSessions';
+import { StateIndicator } from './StateIndicator';
 import './AttentionDrawer.css';
 
 interface AttentionDrawerProps {
@@ -23,18 +24,7 @@ export function AttentionDrawer({
   prs,
   onSelectSession,
 }: AttentionDrawerProps) {
-  const { isRepoMuted } = useDaemonStore();
-  // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
-  const reviewPRs = prs.filter((p) =>
-    p.role === 'reviewer' &&
-    !p.muted &&
-    !isRepoMuted(p.repo)
-  );
-  const authorPRs = prs.filter((p) =>
-    p.role === 'author' &&
-    !p.muted &&
-    !isRepoMuted(p.repo)
-  );
+  const { reviewRequested: reviewPRs, yourPRs: authorPRs } = usePRsNeedingAttention(prs);
 
   const totalItems = waitingSessions.length + reviewPRs.length + authorPRs.length;
 
@@ -62,7 +52,7 @@ export function AttentionDrawer({
                 data-state={s.state}
                 onClick={() => onSelectSession(s.id)}
               >
-                <span className={`item-dot session ${s.state.replace('_', '-')}`} data-testid="state-indicator" />
+                <StateIndicator state={s.state} size="sm" kind="session" />
                 <span className="item-name">{s.label}</span>
               </div>
             ))}
@@ -86,7 +76,7 @@ export function AttentionDrawer({
                   className="pr-link"
                 >
                   <div className="pr-meta">
-                    <span className="item-dot pr" />
+                    <StateIndicator state="waiting_input" size="sm" kind="pr" />
                     <span className="pr-repo">{pr.repo.split('/')[1]}</span>
                     <span className="pr-number">#{pr.number}</span>
                   </div>
@@ -117,7 +107,7 @@ export function AttentionDrawer({
                   className="pr-link"
                 >
                   <div className="pr-meta">
-                    <span className="item-dot pr" />
+                    <StateIndicator state="waiting_input" size="sm" kind="pr" />
                     <span className="pr-repo">{pr.repo.split('/')[1]}</span>
                     <span className="pr-number">#{pr.number}</span>
                   </div>

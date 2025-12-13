@@ -15,6 +15,7 @@ import { useSessionStore } from './store/sessions';
 import { useDaemonSocket, DaemonWorktree } from './hooks/useDaemonSocket';
 import { normalizeSessionState } from './types/sessionState';
 import { useDaemonStore } from './store/daemonSessions';
+import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useLocationHistory } from './hooks/useLocationHistory';
 import './App.css';
@@ -36,7 +37,6 @@ function App() {
     prs,
     setPRs,
     setRepoStates,
-    isRepoMuted,
   } = useDaemonStore();
 
   // Track PR refresh state for progress indicator
@@ -369,10 +369,7 @@ function App() {
 
   // Calculate attention count for drawer badge
   const waitingLocalSessions = enrichedLocalSessions.filter((s) => s.state === 'waiting_input');
-  // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
-  const activePRs = prs.filter((p) => !p.muted && !isRepoMuted(p.repo));
-  // PRs needing attention exclude approved PRs without new changes
-  const prsNeedingAttention = activePRs.filter((p) => !p.approved_by_me || p.has_new_changes);
+  const { needsAttention: prsNeedingAttention } = usePRsNeedingAttention(prs);
   const attentionCount = waitingLocalSessions.length + prsNeedingAttention.length;
 
   // Keyboard shortcut handlers

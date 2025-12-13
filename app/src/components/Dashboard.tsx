@@ -1,8 +1,10 @@
 // app/src/components/Dashboard.tsx
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { DaemonPR, DaemonSettings, RateLimitState } from '../hooks/useDaemonSocket';
+import { usePRsNeedingAttention } from '../hooks/usePRsNeedingAttention';
 import { PRActions } from './PRActions';
 import { SettingsModal } from './SettingsModal';
+import { StateIndicator } from './StateIndicator';
 import { useDaemonContext } from '../contexts/DaemonContext';
 import { useDaemonStore } from '../store/daemonSessions';
 import './Dashboard.css';
@@ -56,7 +58,7 @@ export function Dashboard({
   const [fadingPRs, setFadingPRs] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { sendMuteRepo, sendPRVisited } = useDaemonContext();
-  const { isRepoMuted, repoStates } = useDaemonStore();
+  const { repoStates } = useDaemonStore();
 
   // Get list of muted repos for settings modal
   const mutedRepos = useMemo(() =>
@@ -66,6 +68,9 @@ export function Dashboard({
 
   // PRs that are fully hidden (after fade animation)
   const [hiddenPRs, setHiddenPRs] = useState<Set<string>>(new Set());
+
+  // Use centralized PR filtering hook
+  const { activePRs, needsAttention } = usePRsNeedingAttention(prs, hiddenPRs);
 
   // Handle PR action completion (approve/merge success)
   // Only fade out on merge - approved PRs stay visible (dimmed)
@@ -81,17 +86,15 @@ export function Dashboard({
     // For approve, the PR stays visible but will be dimmed via approved_by_me flag
   }, []);
 
+  // Group active PRs by repo
   const prsByRepo = useMemo(() => {
-    // Filter PRs using daemon mute state (individual PR mutes in p.muted, repo mutes via isRepoMuted)
-    // Also filter out merged PRs after fade animation completes
-    const activePRs = prs.filter((p) => !p.muted && !isRepoMuted(p.repo) && !hiddenPRs.has(p.id));
     const grouped = new Map<string, DaemonPR[]>();
     for (const pr of activePRs) {
       const existing = grouped.get(pr.repo) || [];
       grouped.set(pr.repo, [...existing, pr]);
     }
     return grouped;
-  }, [prs, isRepoMuted, repoStates, hiddenPRs]);
+  }, [activePRs]);
 
   const toggleRepo = (repo: string) => {
     setCollapsedRepos((prev) => {
@@ -188,7 +191,7 @@ export function Dashboard({
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
-                        <span className="state-dot waiting-input" data-testid="state-indicator" />
+                        <StateIndicator state="waiting_input" size="sm" />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}
@@ -205,7 +208,7 @@ export function Dashboard({
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
-                        <span className="state-dot working" data-testid="state-indicator" />
+                        <StateIndicator state="working" size="sm" />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}
@@ -222,7 +225,7 @@ export function Dashboard({
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
-                        <span className="state-dot idle" data-testid="state-indicator" />
+                        <StateIndicator state="idle" size="sm" />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}
@@ -261,7 +264,7 @@ export function Dashboard({
                   </svg>
                 )}
               </button>
-              <span className="card-count">{prs.filter((p) => !p.muted && !isRepoMuted(p.repo) && (!p.approved_by_me || p.has_new_changes)).length}</span>
+              <span className="card-count">{needsAttention.length}</span>
             </div>
           </div>
           <div className="card-body scrollable">
