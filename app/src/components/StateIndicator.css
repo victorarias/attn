@@ -1,0 +1,42 @@
+/* app/src/components/StateIndicator.css */
+/* Unified state indicator component - replaces state-indicator, state-dot, item-dot */
+
+.state-indicator {
+  display: inline-block;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Sizes */
+.state-indicator--sm {
+  width: 6px;
+  height: 6px;
+}
+
+.state-indicator--md {
+  width: 8px;
+  height: 8px;
+}
+
+.state-indicator--lg {
+  width: 10px;
+  height: 10px;
+}
+
+/* Session states */
+.state-indicator--session.state-indicator--waiting-input {
+  background-color: #f59e0b; /* amber/orange */
+}
+
+.state-indicator--session.state-indicator--working {
+  background-color: #22c55e; /* green */
+}
+
+.state-indicator--session.state-indicator--idle {
+  background-color: #6b7280; /* gray */
+}
+
+/* PR states - PRs that need attention are always "waiting" */
+.state-indicator--pr {
+  background-color: #3b82f6; /* blue */
+}

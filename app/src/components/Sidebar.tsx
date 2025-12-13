@@ -1,4 +1,5 @@
 import './Sidebar.css';
+import { StateIndicator } from './StateIndicator';
 
 interface LocalSession {
   id: string;
@@ -118,7 +119,7 @@ export function Sidebar({
                 data-state={session.state}
                 onClick={() => onSelectSession(session.id)}
               >
-                <span className={`state-indicator ${session.state}`} data-testid="state-indicator" />
+                <StateIndicator state={session.state} size="md" />
                 <div className="session-info">
                   <span className="session-label">{session.label}</span>
                   {session.branch && (
@@ -159,7 +160,7 @@ export function Sidebar({
                     data-state={session.state}
                     onClick={() => onSelectSession(session.id)}
                   >
-                    <span className={`state-indicator ${session.state}`} data-testid="state-indicator" />
+                    <StateIndicator state={session.state} size="md" />
                     <span className="session-label">{session.label}</span>
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <span className="session-shortcut">⌘{globalIndex + 1}</span>
