@@ -170,13 +170,14 @@ export function BranchPicker({
 
   // Handle dirty state confirmation
   const handleDirtyConfirm = useCallback(async () => {
-    if (!repo || !targetBranch) return;
+    if (!repo || !targetBranch || !currentBranch) return;
 
     try {
       setState('loading');
 
       if (dirtyAction === 'stash') {
-        await onStash(repo, `attn: auto-stash before switching to ${targetBranch}`);
+        // Use currentBranch (source) so we can find it when returning
+        await onStash(repo, `attn: auto-stash from ${currentBranch}`);
       } else {
         await onCommitWIP(repo);
       }
@@ -186,7 +187,7 @@ export function BranchPicker({
       setError(err instanceof Error ? err.message : 'Failed to handle dirty state');
       setState('error');
     }
-  }, [repo, targetBranch, dirtyAction, onStash, onCommitWIP, performSwitch]);
+  }, [repo, targetBranch, currentBranch, dirtyAction, onStash, onCommitWIP, performSwitch]);
 
   // Handle stash restore
   const handleStashPop = useCallback(async () => {

@@ -30,7 +30,7 @@ func StashPop(repoDir string) error {
 
 // FindAttnStash looks for a stash created by attn for the given branch.
 // Returns (found, stashRef, error).
-// Looks for stashes with message "attn: auto-stash before switching to <branch>".
+// Looks for stashes with message "attn: auto-stash from <branch>".
 func FindAttnStash(repoDir, branch string) (bool, string, error) {
 	// List stashes with their messages
 	cmd := exec.Command("git", "stash", "list")
@@ -40,7 +40,7 @@ func FindAttnStash(repoDir, branch string) (bool, string, error) {
 		return false, "", fmt.Errorf("git stash list failed: %w", err)
 	}
 
-	pattern := fmt.Sprintf("attn: auto-stash before switching to %s", branch)
+	pattern := fmt.Sprintf("attn: auto-stash from %s", branch)
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	for _, line := range lines {
 		if strings.Contains(line, pattern) {

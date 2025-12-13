@@ -47,14 +47,14 @@ func TestFindAttnStash(t *testing.T) {
 	runGit(t, dir, "add", "file.txt")
 	runGit(t, dir, "commit", "-m", "initial")
 
-	// Create stash with attn message
+	// Create stash with attn message (stashing changes FROM main branch)
 	writeFile(t, dir, "file.txt", "modified")
-	err := Stash(dir, "attn: auto-stash before switching to main")
+	err := Stash(dir, "attn: auto-stash from main")
 	if err != nil {
 		t.Fatalf("Stash failed: %v", err)
 	}
 
-	// Find attn stash for "main" branch
+	// Find attn stash for "main" branch (when returning to main)
 	found, ref, err := FindAttnStash(dir, "main")
 	if err != nil {
 		t.Fatalf("FindAttnStash failed: %v", err)
