@@ -32,6 +32,56 @@ type BranchesResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type CheckAttnStashMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+type CheckAttnStashResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Found corresponds to the JSON schema field "found".
+	Found bool `json:"found"`
+
+	// StashRef corresponds to the JSON schema field "stash_ref".
+	StashRef *string `json:"stash_ref,omitempty"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type CheckDirtyMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+type CheckDirtyResultMessage struct {
+	// Dirty corresponds to the JSON schema field "dirty".
+	Dirty bool `json:"dirty"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type ClearSessionsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -48,18 +98,23 @@ type CollapseRepoMessage struct {
 	Repo string `json:"repo"`
 }
 
-type CreateWorktreeFromBranchMessage struct {
-	// Branch corresponds to the JSON schema field "branch".
-	Branch string `json:"branch"`
-
+type CommitWIPMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
-	// MainRepo corresponds to the JSON schema field "main_repo".
-	MainRepo string `json:"main_repo"`
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
 
-	// Path corresponds to the JSON schema field "path".
-	Path *string `json:"path,omitempty"`
+type CommitWIPResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type CreateBranchMessage struct {
@@ -85,6 +140,20 @@ type CreateBranchResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+}
+
+type CreateWorktreeFromBranchMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo string `json:"main_repo"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path *string `json:"path,omitempty"`
 }
 
 type CreateWorktreeMessage struct {
@@ -173,6 +242,47 @@ type FetchPRDetailsMessage struct {
 	Repo string `json:"repo"`
 }
 
+type FetchRemotesMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+type FetchRemotesResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type GetDefaultBranchMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+type GetDefaultBranchResultMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type GetRecentLocationsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -222,6 +332,28 @@ type ListBranchesMessage struct {
 
 	// MainRepo corresponds to the JSON schema field "main_repo".
 	MainRepo string `json:"main_repo"`
+}
+
+type ListRemoteBranchesMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+type ListRemoteBranchesResultMessage struct {
+	// Branches corresponds to the JSON schema field "branches".
+	Branches []Branch `json:"branches"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type ListWorktreesMessage struct {
@@ -552,6 +684,50 @@ type SetSettingMessage struct {
 
 	// Value corresponds to the JSON schema field "value".
 	Value string `json:"value"`
+}
+
+type StashMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Message corresponds to the JSON schema field "message".
+	Message string `json:"message"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+type StashPopMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+type StashPopResultMessage struct {
+	// Conflict corresponds to the JSON schema field "conflict".
+	Conflict *bool `json:"conflict,omitempty"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type StashResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type StateMessage struct {

@@ -1,12 +1,20 @@
 // To parse this data:
 //
-//   import { Convert, ApprovePRMessage, Branch, BranchesResultMessage, ClearSessionsMessage, CollapseRepoMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, GetRecentLocationsMessage, GetSettingsMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoState, Response, Session, SessionState, SetSettingMessage, StateMessage, StopMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, ApprovePRMessage, Branch, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetRecentLocationsMessage, GetSettingsMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoState, Response, Session, SessionState, SetSettingMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const branch = Convert.toBranch(json);
 //   const branchesResultMessage = Convert.toBranchesResultMessage(json);
+//   const checkAttnStashMessage = Convert.toCheckAttnStashMessage(json);
+//   const checkAttnStashResultMessage = Convert.toCheckAttnStashResultMessage(json);
+//   const checkDirtyMessage = Convert.toCheckDirtyMessage(json);
+//   const checkDirtyResultMessage = Convert.toCheckDirtyResultMessage(json);
 //   const clearSessionsMessage = Convert.toClearSessionsMessage(json);
 //   const collapseRepoMessage = Convert.toCollapseRepoMessage(json);
+//   const commitWIPMessage = Convert.toCommitWIPMessage(json);
+//   const commitWIPResultMessage = Convert.toCommitWIPResultMessage(json);
+//   const createBranchMessage = Convert.toCreateBranchMessage(json);
+//   const createBranchResultMessage = Convert.toCreateBranchResultMessage(json);
 //   const createWorktreeFromBranchMessage = Convert.toCreateWorktreeFromBranchMessage(json);
 //   const createWorktreeMessage = Convert.toCreateWorktreeMessage(json);
 //   const createWorktreeResultMessage = Convert.toCreateWorktreeResultMessage(json);
@@ -15,6 +23,10 @@
 //   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
 //   const fetchPRDetailsMessage = Convert.toFetchPRDetailsMessage(json);
+//   const fetchRemotesMessage = Convert.toFetchRemotesMessage(json);
+//   const fetchRemotesResultMessage = Convert.toFetchRemotesResultMessage(json);
+//   const getDefaultBranchMessage = Convert.toGetDefaultBranchMessage(json);
+//   const getDefaultBranchResultMessage = Convert.toGetDefaultBranchResultMessage(json);
 //   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
 //   const getSettingsMessage = Convert.toGetSettingsMessage(json);
 //   const heartbeatMessage = Convert.toHeartbeatMessage(json);
@@ -22,6 +34,8 @@
 //   const injectTestPRMessage = Convert.toInjectTestPRMessage(json);
 //   const injectTestSessionMessage = Convert.toInjectTestSessionMessage(json);
 //   const listBranchesMessage = Convert.toListBranchesMessage(json);
+//   const listRemoteBranchesMessage = Convert.toListRemoteBranchesMessage(json);
+//   const listRemoteBranchesResultMessage = Convert.toListRemoteBranchesResultMessage(json);
 //   const listWorktreesMessage = Convert.toListWorktreesMessage(json);
 //   const mergePRMessage = Convert.toMergePRMessage(json);
 //   const muteMessage = Convert.toMuteMessage(json);
@@ -45,6 +59,10 @@
 //   const session = Convert.toSession(json);
 //   const sessionState = Convert.toSessionState(json);
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
+//   const stashMessage = Convert.toStashMessage(json);
+//   const stashPopMessage = Convert.toStashPopMessage(json);
+//   const stashPopResultMessage = Convert.toStashPopResultMessage(json);
+//   const stashResultMessage = Convert.toStashResultMessage(json);
 //   const stateMessage = Convert.toStateMessage(json);
 //   const stopMessage = Convert.toStopMessage(json);
 //   const switchBranchMessage = Convert.toSwitchBranchMessage(json);
@@ -91,6 +109,52 @@ export enum BranchesResultMessageEvent {
     BranchesResult = "branches_result",
 }
 
+export interface CheckAttnStashMessage {
+    branch: string;
+    cmd:    CheckAttnStashMessageCmd;
+    repo:   string;
+    [property: string]: any;
+}
+
+export enum CheckAttnStashMessageCmd {
+    CheckAttnStash = "check_attn_stash",
+}
+
+export interface CheckAttnStashResultMessage {
+    error?:     string;
+    event:      CheckAttnStashResultMessageEvent;
+    found:      boolean;
+    stash_ref?: string;
+    success:    boolean;
+    [property: string]: any;
+}
+
+export enum CheckAttnStashResultMessageEvent {
+    CheckAttnStashResult = "check_attn_stash_result",
+}
+
+export interface CheckDirtyMessage {
+    cmd:  CheckDirtyMessageCmd;
+    repo: string;
+    [property: string]: any;
+}
+
+export enum CheckDirtyMessageCmd {
+    CheckDirty = "check_dirty",
+}
+
+export interface CheckDirtyResultMessage {
+    dirty:   boolean;
+    error?:  string;
+    event:   CheckDirtyResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum CheckDirtyResultMessageEvent {
+    CheckDirtyResult = "check_dirty_result",
+}
+
 export interface ClearSessionsMessage {
     cmd: ClearSessionsMessageCmd;
     [property: string]: any;
@@ -109,6 +173,50 @@ export interface CollapseRepoMessage {
 
 export enum CollapseRepoMessageCmd {
     CollapseRepo = "collapse_repo",
+}
+
+export interface CommitWIPMessage {
+    cmd:  CommitWIPMessageCmd;
+    repo: string;
+    [property: string]: any;
+}
+
+export enum CommitWIPMessageCmd {
+    CommitWip = "commit_wip",
+}
+
+export interface CommitWIPResultMessage {
+    error?:  string;
+    event:   CommitWIPResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum CommitWIPResultMessageEvent {
+    CommitWipResult = "commit_wip_result",
+}
+
+export interface CreateBranchMessage {
+    branch:    string;
+    cmd:       CreateBranchMessageCmd;
+    main_repo: string;
+    [property: string]: any;
+}
+
+export enum CreateBranchMessageCmd {
+    CreateBranch = "create_branch",
+}
+
+export interface CreateBranchResultMessage {
+    branch:  string;
+    error?:  string;
+    event:   CreateBranchResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum CreateBranchResultMessageEvent {
+    CreateBranchResult = "create_branch_result",
 }
 
 export interface CreateWorktreeFromBranchMessage {
@@ -201,6 +309,49 @@ export interface FetchPRDetailsMessage {
 
 export enum FetchPRDetailsMessageCmd {
     FetchPRDetails = "fetch_pr_details",
+}
+
+export interface FetchRemotesMessage {
+    cmd:  FetchRemotesMessageCmd;
+    repo: string;
+    [property: string]: any;
+}
+
+export enum FetchRemotesMessageCmd {
+    FetchRemotes = "fetch_remotes",
+}
+
+export interface FetchRemotesResultMessage {
+    error?:  string;
+    event:   FetchRemotesResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum FetchRemotesResultMessageEvent {
+    FetchRemotesResult = "fetch_remotes_result",
+}
+
+export interface GetDefaultBranchMessage {
+    cmd:  GetDefaultBranchMessageCmd;
+    repo: string;
+    [property: string]: any;
+}
+
+export enum GetDefaultBranchMessageCmd {
+    GetDefaultBranch = "get_default_branch",
+}
+
+export interface GetDefaultBranchResultMessage {
+    branch:  string;
+    error?:  string;
+    event:   GetDefaultBranchResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum GetDefaultBranchResultMessageEvent {
+    GetDefaultBranchResult = "get_default_branch_result",
 }
 
 export interface GetRecentLocationsMessage {
@@ -321,6 +472,28 @@ export interface ListBranchesMessage {
 
 export enum ListBranchesMessageCmd {
     ListBranches = "list_branches",
+}
+
+export interface ListRemoteBranchesMessage {
+    cmd:  ListRemoteBranchesMessageCmd;
+    repo: string;
+    [property: string]: any;
+}
+
+export enum ListRemoteBranchesMessageCmd {
+    ListRemoteBranches = "list_remote_branches",
+}
+
+export interface ListRemoteBranchesResultMessage {
+    branches: BranchElement[];
+    error?:   string;
+    event:    ListRemoteBranchesResultMessageEvent;
+    success:  boolean;
+    [property: string]: any;
+}
+
+export enum ListRemoteBranchesResultMessageEvent {
+    ListRemoteBranchesResult = "list_remote_branches_result",
 }
 
 export interface ListWorktreesMessage {
@@ -578,6 +751,50 @@ export enum SetSettingMessageCmd {
     SetSetting = "set_setting",
 }
 
+export interface StashMessage {
+    cmd:     StashMessageCmd;
+    message: string;
+    repo:    string;
+    [property: string]: any;
+}
+
+export enum StashMessageCmd {
+    Stash = "stash",
+}
+
+export interface StashPopMessage {
+    cmd:  StashPopMessageCmd;
+    repo: string;
+    [property: string]: any;
+}
+
+export enum StashPopMessageCmd {
+    StashPop = "stash_pop",
+}
+
+export interface StashPopResultMessage {
+    conflict?: boolean;
+    error?:    string;
+    event:     StashPopResultMessageEvent;
+    success:   boolean;
+    [property: string]: any;
+}
+
+export enum StashPopResultMessageEvent {
+    StashPopResult = "stash_pop_result",
+}
+
+export interface StashResultMessage {
+    error?:  string;
+    event:   StashResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum StashResultMessageEvent {
+    StashResult = "stash_result",
+}
+
 export interface StateMessage {
     cmd:   StateMessageCmd;
     id:    string;
@@ -718,6 +935,38 @@ export class Convert {
         return JSON.stringify(uncast(value, r("BranchesResultMessage")), null, 2);
     }
 
+    public static toCheckAttnStashMessage(json: string): CheckAttnStashMessage {
+        return cast(JSON.parse(json), r("CheckAttnStashMessage"));
+    }
+
+    public static checkAttnStashMessageToJson(value: CheckAttnStashMessage): string {
+        return JSON.stringify(uncast(value, r("CheckAttnStashMessage")), null, 2);
+    }
+
+    public static toCheckAttnStashResultMessage(json: string): CheckAttnStashResultMessage {
+        return cast(JSON.parse(json), r("CheckAttnStashResultMessage"));
+    }
+
+    public static checkAttnStashResultMessageToJson(value: CheckAttnStashResultMessage): string {
+        return JSON.stringify(uncast(value, r("CheckAttnStashResultMessage")), null, 2);
+    }
+
+    public static toCheckDirtyMessage(json: string): CheckDirtyMessage {
+        return cast(JSON.parse(json), r("CheckDirtyMessage"));
+    }
+
+    public static checkDirtyMessageToJson(value: CheckDirtyMessage): string {
+        return JSON.stringify(uncast(value, r("CheckDirtyMessage")), null, 2);
+    }
+
+    public static toCheckDirtyResultMessage(json: string): CheckDirtyResultMessage {
+        return cast(JSON.parse(json), r("CheckDirtyResultMessage"));
+    }
+
+    public static checkDirtyResultMessageToJson(value: CheckDirtyResultMessage): string {
+        return JSON.stringify(uncast(value, r("CheckDirtyResultMessage")), null, 2);
+    }
+
     public static toClearSessionsMessage(json: string): ClearSessionsMessage {
         return cast(JSON.parse(json), r("ClearSessionsMessage"));
     }
@@ -732,6 +981,38 @@ export class Convert {
 
     public static collapseRepoMessageToJson(value: CollapseRepoMessage): string {
         return JSON.stringify(uncast(value, r("CollapseRepoMessage")), null, 2);
+    }
+
+    public static toCommitWIPMessage(json: string): CommitWIPMessage {
+        return cast(JSON.parse(json), r("CommitWIPMessage"));
+    }
+
+    public static commitWIPMessageToJson(value: CommitWIPMessage): string {
+        return JSON.stringify(uncast(value, r("CommitWIPMessage")), null, 2);
+    }
+
+    public static toCommitWIPResultMessage(json: string): CommitWIPResultMessage {
+        return cast(JSON.parse(json), r("CommitWIPResultMessage"));
+    }
+
+    public static commitWIPResultMessageToJson(value: CommitWIPResultMessage): string {
+        return JSON.stringify(uncast(value, r("CommitWIPResultMessage")), null, 2);
+    }
+
+    public static toCreateBranchMessage(json: string): CreateBranchMessage {
+        return cast(JSON.parse(json), r("CreateBranchMessage"));
+    }
+
+    public static createBranchMessageToJson(value: CreateBranchMessage): string {
+        return JSON.stringify(uncast(value, r("CreateBranchMessage")), null, 2);
+    }
+
+    public static toCreateBranchResultMessage(json: string): CreateBranchResultMessage {
+        return cast(JSON.parse(json), r("CreateBranchResultMessage"));
+    }
+
+    public static createBranchResultMessageToJson(value: CreateBranchResultMessage): string {
+        return JSON.stringify(uncast(value, r("CreateBranchResultMessage")), null, 2);
     }
 
     public static toCreateWorktreeFromBranchMessage(json: string): CreateWorktreeFromBranchMessage {
@@ -798,6 +1079,38 @@ export class Convert {
         return JSON.stringify(uncast(value, r("FetchPRDetailsMessage")), null, 2);
     }
 
+    public static toFetchRemotesMessage(json: string): FetchRemotesMessage {
+        return cast(JSON.parse(json), r("FetchRemotesMessage"));
+    }
+
+    public static fetchRemotesMessageToJson(value: FetchRemotesMessage): string {
+        return JSON.stringify(uncast(value, r("FetchRemotesMessage")), null, 2);
+    }
+
+    public static toFetchRemotesResultMessage(json: string): FetchRemotesResultMessage {
+        return cast(JSON.parse(json), r("FetchRemotesResultMessage"));
+    }
+
+    public static fetchRemotesResultMessageToJson(value: FetchRemotesResultMessage): string {
+        return JSON.stringify(uncast(value, r("FetchRemotesResultMessage")), null, 2);
+    }
+
+    public static toGetDefaultBranchMessage(json: string): GetDefaultBranchMessage {
+        return cast(JSON.parse(json), r("GetDefaultBranchMessage"));
+    }
+
+    public static getDefaultBranchMessageToJson(value: GetDefaultBranchMessage): string {
+        return JSON.stringify(uncast(value, r("GetDefaultBranchMessage")), null, 2);
+    }
+
+    public static toGetDefaultBranchResultMessage(json: string): GetDefaultBranchResultMessage {
+        return cast(JSON.parse(json), r("GetDefaultBranchResultMessage"));
+    }
+
+    public static getDefaultBranchResultMessageToJson(value: GetDefaultBranchResultMessage): string {
+        return JSON.stringify(uncast(value, r("GetDefaultBranchResultMessage")), null, 2);
+    }
+
     public static toGetRecentLocationsMessage(json: string): GetRecentLocationsMessage {
         return cast(JSON.parse(json), r("GetRecentLocationsMessage"));
     }
@@ -852,6 +1165,22 @@ export class Convert {
 
     public static listBranchesMessageToJson(value: ListBranchesMessage): string {
         return JSON.stringify(uncast(value, r("ListBranchesMessage")), null, 2);
+    }
+
+    public static toListRemoteBranchesMessage(json: string): ListRemoteBranchesMessage {
+        return cast(JSON.parse(json), r("ListRemoteBranchesMessage"));
+    }
+
+    public static listRemoteBranchesMessageToJson(value: ListRemoteBranchesMessage): string {
+        return JSON.stringify(uncast(value, r("ListRemoteBranchesMessage")), null, 2);
+    }
+
+    public static toListRemoteBranchesResultMessage(json: string): ListRemoteBranchesResultMessage {
+        return cast(JSON.parse(json), r("ListRemoteBranchesResultMessage"));
+    }
+
+    public static listRemoteBranchesResultMessageToJson(value: ListRemoteBranchesResultMessage): string {
+        return JSON.stringify(uncast(value, r("ListRemoteBranchesResultMessage")), null, 2);
     }
 
     public static toListWorktreesMessage(json: string): ListWorktreesMessage {
@@ -1036,6 +1365,38 @@ export class Convert {
 
     public static setSettingMessageToJson(value: SetSettingMessage): string {
         return JSON.stringify(uncast(value, r("SetSettingMessage")), null, 2);
+    }
+
+    public static toStashMessage(json: string): StashMessage {
+        return cast(JSON.parse(json), r("StashMessage"));
+    }
+
+    public static stashMessageToJson(value: StashMessage): string {
+        return JSON.stringify(uncast(value, r("StashMessage")), null, 2);
+    }
+
+    public static toStashPopMessage(json: string): StashPopMessage {
+        return cast(JSON.parse(json), r("StashPopMessage"));
+    }
+
+    public static stashPopMessageToJson(value: StashPopMessage): string {
+        return JSON.stringify(uncast(value, r("StashPopMessage")), null, 2);
+    }
+
+    public static toStashPopResultMessage(json: string): StashPopResultMessage {
+        return cast(JSON.parse(json), r("StashPopResultMessage"));
+    }
+
+    public static stashPopResultMessageToJson(value: StashPopResultMessage): string {
+        return JSON.stringify(uncast(value, r("StashPopResultMessage")), null, 2);
+    }
+
+    public static toStashResultMessage(json: string): StashResultMessage {
+        return cast(JSON.parse(json), r("StashResultMessage"));
+    }
+
+    public static stashResultMessageToJson(value: StashResultMessage): string {
+        return JSON.stringify(uncast(value, r("StashResultMessage")), null, 2);
     }
 
     public static toStateMessage(json: string): StateMessage {
@@ -1281,6 +1642,28 @@ const typeMap: any = {
     "BranchElement": o([
         { json: "name", js: "name", typ: "" },
     ], "any"),
+    "CheckAttnStashMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("CheckAttnStashMessageCmd") },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "CheckAttnStashResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("CheckAttnStashResultMessageEvent") },
+        { json: "found", js: "found", typ: true },
+        { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "CheckDirtyMessage": o([
+        { json: "cmd", js: "cmd", typ: r("CheckDirtyMessageCmd") },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "CheckDirtyResultMessage": o([
+        { json: "dirty", js: "dirty", typ: true },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("CheckDirtyResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "ClearSessionsMessage": o([
         { json: "cmd", js: "cmd", typ: r("ClearSessionsMessageCmd") },
     ], "any"),
@@ -1288,6 +1671,26 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("CollapseRepoMessageCmd") },
         { json: "collapsed", js: "collapsed", typ: true },
         { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "CommitWIPMessage": o([
+        { json: "cmd", js: "cmd", typ: r("CommitWIPMessageCmd") },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "CommitWIPResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("CommitWIPResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "CreateBranchMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("CreateBranchMessageCmd") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+    ], "any"),
+    "CreateBranchResultMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("CreateBranchResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
     ], "any"),
     "CreateWorktreeFromBranchMessage": o([
         { json: "branch", js: "branch", typ: "" },
@@ -1332,6 +1735,25 @@ const typeMap: any = {
     "FetchPRDetailsMessage": o([
         { json: "cmd", js: "cmd", typ: r("FetchPRDetailsMessageCmd") },
         { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "FetchRemotesMessage": o([
+        { json: "cmd", js: "cmd", typ: r("FetchRemotesMessageCmd") },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "FetchRemotesResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("FetchRemotesResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "GetDefaultBranchMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetDefaultBranchMessageCmd") },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "GetDefaultBranchResultMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("GetDefaultBranchResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
     ], "any"),
     "GetRecentLocationsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetRecentLocationsMessageCmd") },
@@ -1395,6 +1817,16 @@ const typeMap: any = {
     "ListBranchesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListBranchesMessageCmd") },
         { json: "main_repo", js: "main_repo", typ: "" },
+    ], "any"),
+    "ListRemoteBranchesMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ListRemoteBranchesMessageCmd") },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "ListRemoteBranchesResultMessage": o([
+        { json: "branches", js: "branches", typ: a(r("BranchElement")) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("ListRemoteBranchesResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
     ], "any"),
     "ListWorktreesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListWorktreesMessageCmd") },
@@ -1541,6 +1973,26 @@ const typeMap: any = {
         { json: "key", js: "key", typ: "" },
         { json: "value", js: "value", typ: "" },
     ], "any"),
+    "StashMessage": o([
+        { json: "cmd", js: "cmd", typ: r("StashMessageCmd") },
+        { json: "message", js: "message", typ: "" },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "StashPopMessage": o([
+        { json: "cmd", js: "cmd", typ: r("StashPopMessageCmd") },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "StashPopResultMessage": o([
+        { json: "conflict", js: "conflict", typ: u(undefined, true) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("StashPopResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "StashResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("StashResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "StateMessage": o([
         { json: "cmd", js: "cmd", typ: r("StateMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -1612,11 +2064,35 @@ const typeMap: any = {
     "BranchesResultMessageEvent": [
         "branches_result",
     ],
+    "CheckAttnStashMessageCmd": [
+        "check_attn_stash",
+    ],
+    "CheckAttnStashResultMessageEvent": [
+        "check_attn_stash_result",
+    ],
+    "CheckDirtyMessageCmd": [
+        "check_dirty",
+    ],
+    "CheckDirtyResultMessageEvent": [
+        "check_dirty_result",
+    ],
     "ClearSessionsMessageCmd": [
         "clear_sessions",
     ],
     "CollapseRepoMessageCmd": [
         "collapse_repo",
+    ],
+    "CommitWIPMessageCmd": [
+        "commit_wip",
+    ],
+    "CommitWIPResultMessageEvent": [
+        "commit_wip_result",
+    ],
+    "CreateBranchMessageCmd": [
+        "create_branch",
+    ],
+    "CreateBranchResultMessageEvent": [
+        "create_branch_result",
     ],
     "CreateWorktreeFromBranchMessageCmd": [
         "create_worktree_from_branch",
@@ -1641,6 +2117,18 @@ const typeMap: any = {
     ],
     "FetchPRDetailsMessageCmd": [
         "fetch_pr_details",
+    ],
+    "FetchRemotesMessageCmd": [
+        "fetch_remotes",
+    ],
+    "FetchRemotesResultMessageEvent": [
+        "fetch_remotes_result",
+    ],
+    "GetDefaultBranchMessageCmd": [
+        "get_default_branch",
+    ],
+    "GetDefaultBranchResultMessageEvent": [
+        "get_default_branch_result",
     ],
     "GetRecentLocationsMessageCmd": [
         "get_recent_locations",
@@ -1673,6 +2161,12 @@ const typeMap: any = {
     ],
     "ListBranchesMessageCmd": [
         "list_branches",
+    ],
+    "ListRemoteBranchesMessageCmd": [
+        "list_remote_branches",
+    ],
+    "ListRemoteBranchesResultMessageEvent": [
+        "list_remote_branches_result",
     ],
     "ListWorktreesMessageCmd": [
         "list_worktrees",
@@ -1721,6 +2215,18 @@ const typeMap: any = {
     ],
     "SetSettingMessageCmd": [
         "set_setting",
+    ],
+    "StashMessageCmd": [
+        "stash",
+    ],
+    "StashPopMessageCmd": [
+        "stash_pop",
+    ],
+    "StashPopResultMessageEvent": [
+        "stash_pop_result",
+    ],
+    "StashResultMessageEvent": [
+        "stash_result",
     ],
     "StateMessageCmd": [
         "state",

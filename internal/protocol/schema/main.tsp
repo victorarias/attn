@@ -282,6 +282,48 @@ model CreateBranchMessage {
   branch: string;
 }
 
+model CheckDirtyMessage {
+  cmd: "check_dirty";
+  repo: string;
+}
+
+model StashMessage {
+  cmd: "stash";
+  repo: string;
+  message: string;
+}
+
+model StashPopMessage {
+  cmd: "stash_pop";
+  repo: string;
+}
+
+model CheckAttnStashMessage {
+  cmd: "check_attn_stash";
+  repo: string;
+  branch: string;
+}
+
+model CommitWIPMessage {
+  cmd: "commit_wip";
+  repo: string;
+}
+
+model GetDefaultBranchMessage {
+  cmd: "get_default_branch";
+  repo: string;
+}
+
+model FetchRemotesMessage {
+  cmd: "fetch_remotes";
+  repo: string;
+}
+
+model ListRemoteBranchesMessage {
+  cmd: "list_remote_branches";
+  repo: string;
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -359,6 +401,60 @@ model SwitchBranchResultMessage {
 model CreateBranchResultMessage {
   event: "create_branch_result";
   branch: string;
+  success: boolean;
+  error?: string;
+}
+
+model CheckDirtyResultMessage {
+  event: "check_dirty_result";
+  dirty: boolean;
+  success: boolean;
+  error?: string;
+}
+
+model StashResultMessage {
+  event: "stash_result";
+  success: boolean;
+  error?: string;
+}
+
+model StashPopResultMessage {
+  event: "stash_pop_result";
+  success: boolean;
+  conflict?: boolean;
+  error?: string;
+}
+
+model CheckAttnStashResultMessage {
+  event: "check_attn_stash_result";
+  found: boolean;
+  stash_ref?: string;
+  success: boolean;
+  error?: string;
+}
+
+model CommitWIPResultMessage {
+  event: "commit_wip_result";
+  success: boolean;
+  error?: string;
+}
+
+model GetDefaultBranchResultMessage {
+  event: "get_default_branch_result";
+  branch: string;
+  success: boolean;
+  error?: string;
+}
+
+model FetchRemotesResultMessage {
+  event: "fetch_remotes_result";
+  success: boolean;
+  error?: string;
+}
+
+model ListRemoteBranchesResultMessage {
+  event: "list_remote_branches_result";
+  branches: Branch[];
   success: boolean;
   error?: string;
 }
