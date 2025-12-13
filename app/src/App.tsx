@@ -435,7 +435,7 @@ function App() {
         }
       }
     },
-    enabled: !locationPickerOpen,
+    enabled: !locationPickerOpen && !branchPickerOpen,
   });
 
   return (
