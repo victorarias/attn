@@ -152,8 +152,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const session = sessions.find((s) => s.id === id);
 
     if (session) {
+      // Kill main session PTY
       invoke('pty_kill', { id }).catch(console.error);
       session.terminal?.dispose();
+
+      // Kill all utility terminal PTYs
+      for (const utilTerminal of session.terminalPanel.terminals) {
+        invoke('pty_kill', { id: utilTerminal.ptyId }).catch(console.error);
+      }
     }
 
     const newSessions = sessions.filter((s) => s.id !== id);
