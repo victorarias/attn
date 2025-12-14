@@ -26,6 +26,8 @@
   /* VS Code: user-select none for terminal */
   user-select: none;
   -webkit-user-select: none;
+  /* Fill any gap with terminal background color */
+  background: #1e1e1e;
 }
 
 /* VS Code: Hide outline when focus jumps (terminal.css line 208-211) */
@@ -51,6 +53,9 @@
 .terminal-container .xterm-screen {
   z-index: 31;
   cursor: text;
+  /* Fill full width - remainder gap gets terminal background */
+  width: 100% !important;
+  background: #1e1e1e;
 }
 
 /* VS Code: decoration overview ruler z-index (terminal.css line 112-116) */
