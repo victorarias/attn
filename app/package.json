@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:all": "tauri dev",
+    "dev": "tauri dev",
+    "dev:vite": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -38,7 +38,6 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
-    "concurrently": "^9.2.1",
     "happy-dom": "^20.0.11",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
