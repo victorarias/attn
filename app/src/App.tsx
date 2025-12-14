@@ -6,14 +6,15 @@ import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
-import { DrawerTrigger } from './components/DrawerTrigger';
 import { LocationPicker } from './components/LocationPicker';
 import { BranchPicker } from './components/BranchPicker';
 import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
+import { ChangesPanel } from './components/ChangesPanel';
+import { DiffOverlay } from './components/DiffOverlay';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { useSessionStore } from './store/sessions';
-import { useDaemonSocket, DaemonWorktree } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, GitStatusUpdate } from './hooks/useDaemonSocket';
 import { normalizeSessionState } from './types/sessionState';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
@@ -57,6 +58,17 @@ function App() {
     return stored === 'true';
   });
 
+  // Git status state
+  const [gitStatus, setGitStatus] = useState<GitStatusUpdate | null>(null);
+
+  // Diff overlay state
+  const [diffOverlay, setDiffOverlay] = useState<{
+    isOpen: boolean;
+    path: string;
+    staged: boolean;
+    index: number;
+  }>({ isOpen: false, path: '', staged: false, index: 0 });
+
   // Ensure daemon is running before connecting
   useEffect(() => {
     async function ensureDaemon() {
@@ -75,12 +87,13 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, sendGetRecentLocations, sendListBranches, sendDeleteBranch, sendSwitchBranch, sendCreateBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, sendGetRecentLocations, sendListBranches, sendDeleteBranch, sendSwitchBranch, sendCreateBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
     onSettingsUpdate: setSettings,
     onWorktreesUpdate: setWorktrees,
+    onGitStatusUpdate: setGitStatus,
   });
 
   // Clear stale daemon sessions on app start
@@ -155,6 +168,23 @@ function App() {
       setView('session');
     }
   }, [activeSessionId]);
+
+  // Subscribe to git status for active session
+  useEffect(() => {
+    const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
+    if (activeLocalSession?.cwd && view === 'session') {
+      const daemonSession = daemonSessions.find((ds) => ds.directory === activeLocalSession.cwd);
+      if (daemonSession) {
+        sendSubscribeGitStatus(daemonSession.directory);
+        return () => {
+          sendUnsubscribeGitStatus();
+          setGitStatus(null);
+        };
+      }
+    } else {
+      setGitStatus(null);
+    }
+  }, [activeSessionId, sessions, daemonSessions, view, sendSubscribeGitStatus, sendUnsubscribeGitStatus]);
 
   // Function to go to dashboard
   const goToDashboard = useCallback(() => {
@@ -429,6 +459,48 @@ function App() {
     }
   }, [activeSessionId, handleCloseSession]);
 
+  // Diff overlay handlers
+  const handleFileSelect = useCallback((path: string, staged: boolean) => {
+    const allFiles = [
+      ...(gitStatus?.staged || []).map(f => ({ ...f, staged: true })),
+      ...(gitStatus?.unstaged || []).map(f => ({ ...f, staged: false })),
+      ...(gitStatus?.untracked || []).map(f => ({ ...f, staged: false })),
+    ];
+    const index = allFiles.findIndex(f => f.path === path && f.staged === staged);
+    setDiffOverlay({ isOpen: true, path, staged, index: Math.max(0, index) });
+  }, [gitStatus]);
+
+  const handleDiffClose = useCallback(() => {
+    setDiffOverlay({ isOpen: false, path: '', staged: false, index: 0 });
+  }, []);
+
+  const handleDiffNav = useCallback((direction: 'prev' | 'next') => {
+    const allFiles = [
+      ...(gitStatus?.staged || []).map(f => ({ ...f, staged: true })),
+      ...(gitStatus?.unstaged || []).map(f => ({ ...f, staged: false })),
+      ...(gitStatus?.untracked || []).map(f => ({ ...f, staged: false })),
+    ];
+    const newIndex = direction === 'prev'
+      ? Math.max(0, diffOverlay.index - 1)
+      : Math.min(allFiles.length - 1, diffOverlay.index + 1);
+    const file = allFiles[newIndex];
+    if (file) {
+      setDiffOverlay({ isOpen: true, path: file.path, staged: file.staged, index: newIndex });
+    }
+  }, [gitStatus, diffOverlay.index]);
+
+  const fetchDiff = useCallback(async () => {
+    const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
+    if (!activeLocalSession?.cwd) throw new Error('No active session');
+    const daemonSession = daemonSessions.find((ds) => ds.directory === activeLocalSession.cwd);
+    if (!daemonSession) throw new Error('No daemon session found');
+    return sendGetFileDiff(daemonSession.directory, diffOverlay.path, diffOverlay.staged);
+  }, [sessions, activeSessionId, daemonSessions, diffOverlay.path, diffOverlay.staged, sendGetFileDiff]);
+
+  const totalDiffFiles = (gitStatus?.staged?.length || 0) +
+    (gitStatus?.unstaged?.length || 0) +
+    (gitStatus?.untracked?.length || 0);
+
   // Use keyboard shortcuts hook
   useKeyboardShortcuts({
     onNewSession: handleNewSession,
@@ -514,7 +586,13 @@ function App() {
             </div>
           )}
         </div>
-        <DrawerTrigger count={attentionCount} onClick={toggleDrawer} />
+        <ChangesPanel
+          gitStatus={gitStatus}
+          attentionCount={attentionCount}
+          selectedFile={diffOverlay.isOpen ? diffOverlay.path : null}
+          onFileSelect={handleFileSelect}
+          onAttentionClick={toggleDrawer}
+        />
         <AttentionDrawer
           isOpen={drawerOpen}
           onClose={closeDrawer}
@@ -568,6 +646,16 @@ function App() {
         onKeep={handleWorktreeKeep}
         onDelete={handleWorktreeDelete}
         onAlwaysKeep={handleWorktreeAlwaysKeep}
+      />
+      <DiffOverlay
+        isOpen={diffOverlay.isOpen}
+        filePath={diffOverlay.path}
+        fileIndex={diffOverlay.index}
+        totalFiles={totalDiffFiles}
+        onClose={handleDiffClose}
+        onPrev={() => handleDiffNav('prev')}
+        onNext={() => handleDiffNav('next')}
+        fetchDiff={fetchDiff}
       />
     </div>
     </DaemonProvider>
