@@ -2,15 +2,32 @@
 .pr-actions {
   display: flex;
   gap: 4px;
-  margin-left: auto;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   opacity: 0;
+  pointer-events: none;
   transition: opacity 150ms ease-out;
+  background: linear-gradient(90deg, transparent 0%, #1a1a1d 20%, #1a1a1d 100%);
+  padding: 4px 4px 4px 24px;
+  border-radius: 4px;
 }
 
 .pr-row:hover .pr-actions,
-.pr-row:focus-within .pr-actions,
-.pr-actions.compact {
+.pr-row:focus-within .pr-actions {
   opacity: 1;
+  pointer-events: auto;
+}
+
+/* Compact mode (in AttentionDrawer) - always visible, no overlay */
+.pr-actions.compact {
+  position: static;
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
+  background: none;
+  padding: 0;
 }
 
 .pr-action-btn {

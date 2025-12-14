@@ -393,6 +393,7 @@
   gap: 8px;
   padding: 8px 10px;
   border-radius: 6px;
+  position: relative;
 }
 
 .pr-link {
