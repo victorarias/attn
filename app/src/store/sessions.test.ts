@@ -1,7 +1,6 @@
 // app/src/store/sessions.test.ts
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { useSessionStore } from './sessions';
-import { act } from '@testing-library/react';
 
 // Mock Tauri APIs
 vi.mock('@tauri-apps/api/core', () => ({
@@ -149,7 +148,7 @@ describe('sessions store - terminal panel', () => {
 
     it('selects next tab when removing active tab', async () => {
       const sessionId = await useSessionStore.getState().createSession('test', '/tmp');
-      const t1 = useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-1');
+      useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-1'); // t1 - setup only
       const t2 = useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-2');
       const t3 = useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-3');
 
@@ -200,7 +199,7 @@ describe('sessions store - terminal panel', () => {
     it('keeps panel open when terminals remain', async () => {
       const sessionId = await useSessionStore.getState().createSession('test', '/tmp');
       const t1 = useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-1');
-      const t2 = useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-2');
+      useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-2'); // t2 - setup only
 
       useSessionStore.getState().openTerminalPanel(sessionId);
       useSessionStore.getState().removeUtilityTerminal(sessionId, t1);
@@ -212,7 +211,7 @@ describe('sessions store - terminal panel', () => {
     it('does not change active tab when removing non-active tab', async () => {
       const sessionId = await useSessionStore.getState().createSession('test', '/tmp');
       const t1 = useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-1');
-      const t2 = useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-2');
+      useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-2'); // t2 - setup only
       const t3 = useSessionStore.getState().addUtilityTerminal(sessionId, 'pty-3');
 
       // t3 is active, remove t1

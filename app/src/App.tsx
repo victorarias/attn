@@ -353,13 +353,22 @@ function App() {
       }
 
       const repoName = getRepoName(pr.repo);
-      const localRepoPath = `${projectsDir}/${repoName}`;
+      // Normalize path: remove trailing slash from projectsDir if present
+      const normalizedProjectsDir = projectsDir.replace(/\/+$/, '');
+      const localRepoPath = `${normalizedProjectsDir}/${repoName}`;
 
       console.log(`[App] Creating worktree for ${pr.repo}#${pr.number} branch ${pr.head_branch} in ${localRepoPath}`);
 
       try {
-        // Create worktree via daemon
-        const result = await sendCreateWorktree(localRepoPath, pr.head_branch);
+        // Fetch remote first to ensure the PR branch is available locally
+        console.log(`[App] Fetching remotes for ${localRepoPath}`);
+        await sendFetchRemotes(localRepoPath);
+
+        // Create worktree from the remote branch (PR branches already exist on remote)
+        // Using origin/<branch> to track the remote branch
+        const remoteBranch = `origin/${pr.head_branch}`;
+        console.log(`[App] Creating worktree from remote branch ${remoteBranch}`);
+        const result = await sendCreateWorktreeFromBranch(localRepoPath, remoteBranch);
 
         if (result.success && result.path) {
           console.log(`[App] Worktree created at ${result.path}`);
@@ -394,7 +403,7 @@ function App() {
         }
       }
     },
-    [settings, sendCreateWorktree, createSession]
+    [settings, sendFetchRemotes, sendCreateWorktreeFromBranch, createSession]
   );
 
   // Worktree cleanup prompt handlers

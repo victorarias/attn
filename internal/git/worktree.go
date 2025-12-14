@@ -63,12 +63,31 @@ func CreateWorktree(repoDir, branch, path string) error {
 
 // CreateWorktreeFromBranch creates a worktree from an existing branch
 func CreateWorktreeFromBranch(repoDir, branch, path string) error {
-	cmd := exec.Command("git", "worktree", "add", path, branch)
-	cmd.Dir = repoDir
+	cmd := exec.Command("git", "worktree", "add", ExpandPath(path), branch)
+	cmd.Dir = ExpandPath(repoDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree add failed: %s", out)
 	}
 	return nil
+}
+
+// CreateWorktreeFromRemoteBranch creates a worktree with a local branch tracking a remote branch.
+// remoteBranch should be in format "origin/branch-name".
+// Returns the local branch name that was created.
+func CreateWorktreeFromRemoteBranch(repoDir, remoteBranch, path string) (string, error) {
+	// Extract local branch name from remote (e.g., "origin/fix-bug" -> "fix-bug")
+	localBranch := remoteBranch
+	if idx := strings.Index(remoteBranch, "/"); idx != -1 {
+		localBranch = remoteBranch[idx+1:]
+	}
+
+	// git worktree add <path> -b <local-branch> <remote-branch>
+	cmd := exec.Command("git", "worktree", "add", ExpandPath(path), "-b", localBranch, remoteBranch)
+	cmd.Dir = ExpandPath(repoDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git worktree add failed: %s", out)
+	}
+	return localBranch, nil
 }
 
 // DeleteWorktree removes a worktree

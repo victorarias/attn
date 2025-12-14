@@ -114,10 +114,10 @@ describe('shortcut registry', () => {
 
       for (const [id, def] of Object.entries(SHORTCUTS)) {
         const parts: string[] = [];
-        if (def.meta) parts.push('meta');
-        if (def.ctrl) parts.push('ctrl');
-        if (def.alt) parts.push('alt');
-        if (def.shift) parts.push('shift');
+        if ('meta' in def && def.meta) parts.push('meta');
+        if ('ctrl' in def && def.ctrl) parts.push('ctrl');
+        if ('alt' in def && def.alt) parts.push('alt');
+        if ('shift' in def && def.shift) parts.push('shift');
         parts.push(def.key.toLowerCase());
         const key = parts.join('+');
 

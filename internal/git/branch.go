@@ -3,9 +3,22 @@ package git
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
+
+// ExpandPath expands ~ to the user's home directory
+func ExpandPath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
+}
 
 // ListBranches returns local branches not checked out in any worktree.
 // Uses: git branch --format='%(refname:short)'
@@ -100,7 +113,7 @@ func GetCurrentBranch(repoDir string) (string, error) {
 // FetchRemotes fetches all remotes with prune.
 func FetchRemotes(repoDir string) error {
 	cmd := exec.Command("git", "fetch", "--all", "--prune")
-	cmd.Dir = repoDir
+	cmd.Dir = ExpandPath(repoDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch failed: %s", out)
 	}

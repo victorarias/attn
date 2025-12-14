@@ -334,13 +334,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 }));
 
-// Test helper types for E2E
-interface TestTerminalPanel {
-  isOpen: boolean;
-  terminals: Array<{ id: string; title: string }>;
-  activeTabId: string | null;
-}
-
 declare global {
   interface Window {
     __TEST_OPEN_TERMINAL_PANEL?: (sessionId: string) => void;

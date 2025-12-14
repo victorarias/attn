@@ -2,6 +2,7 @@
 package daemon
 
 import (
+	"strings"
 	"time"
 
 	"github.com/victorarias/claude-manager/internal/git"
@@ -40,19 +41,40 @@ func (d *Daemon) doCreateBranch(mainRepo, branch string) error {
 
 // doCreateWorktreeFromBranch creates a worktree from an existing branch
 func (d *Daemon) doCreateWorktreeFromBranch(msg *protocol.CreateWorktreeFromBranchMessage) (string, error) {
-	path := protocol.Deref(msg.Path)
-	if path == "" {
-		path = git.GenerateWorktreePath(msg.MainRepo, msg.Branch)
+	mainRepo := git.ExpandPath(msg.MainRepo)
+	branch := msg.Branch
+
+	// For remote branches (origin/xxx), extract local name for path and tracking
+	localBranch := branch
+	isRemote := strings.HasPrefix(branch, "origin/")
+	if isRemote {
+		localBranch = strings.TrimPrefix(branch, "origin/")
 	}
 
-	if err := git.CreateWorktreeFromBranch(msg.MainRepo, msg.Branch, path); err != nil {
-		return "", err
+	path := protocol.Deref(msg.Path)
+	if path == "" {
+		// Use local branch name for cleaner worktree path
+		path = git.GenerateWorktreePath(msg.MainRepo, localBranch)
+	}
+	path = git.ExpandPath(path)
+
+	if isRemote {
+		// Create worktree with local branch tracking remote
+		createdBranch, err := git.CreateWorktreeFromRemoteBranch(mainRepo, branch, path)
+		if err != nil {
+			return "", err
+		}
+		localBranch = createdBranch
+	} else {
+		if err := git.CreateWorktreeFromBranch(mainRepo, branch, path); err != nil {
+			return "", err
+		}
 	}
 
 	wt := &store.Worktree{
 		Path:      path,
-		Branch:    msg.Branch,
-		MainRepo:  msg.MainRepo,
+		Branch:    localBranch, // Store local branch name, not origin/xxx
+		MainRepo:  mainRepo,
 		CreatedAt: time.Now(),
 	}
 	d.store.AddWorktree(wt)
