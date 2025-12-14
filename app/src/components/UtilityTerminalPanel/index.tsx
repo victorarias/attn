@@ -190,12 +190,17 @@ export function UtilityTerminalPanel({
   useShortcut('terminal.prevTab', handlePrevTab, enabled && panel.isOpen);
   useShortcut('terminal.nextTab', handleNextTab, enabled && panel.isOpen);
 
-  if (!panel.isOpen) {
+  // Don't render anything if there are no terminals
+  if (panel.terminals.length === 0) {
     return null;
   }
 
+  // Keep terminals mounted but hidden when collapsed to preserve buffer content
   return (
-    <div className="utility-terminal-panel" style={{ height: panel.height }}>
+    <div
+      className={`utility-terminal-panel ${!panel.isOpen ? 'collapsed' : ''}`}
+      style={{ height: panel.isOpen ? panel.height : 0 }}
+    >
       <ResizeHandle height={panel.height} onHeightChange={onSetHeight} />
       <TabBar
         terminals={panel.terminals}

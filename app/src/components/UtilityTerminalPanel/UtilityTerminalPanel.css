@@ -4,6 +4,13 @@
   flex-direction: column;
   background: #1e1e1e;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.utility-terminal-panel.collapsed {
+  /* Keep in DOM but invisible to preserve xterm buffer */
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .utility-terminal-content {
