@@ -726,6 +726,12 @@ func (d *Daemon) doDetailRefresh() {
 		return
 	}
 
+	// Check if already rate limited before starting
+	if limited, resetAt := d.ghClient.IsRateLimited("core"); limited {
+		d.logf("Detail refresh: skipping, rate limited until %v", resetAt)
+		return
+	}
+
 	// First decay heat states
 	d.store.DecayHeatStates()
 
@@ -741,6 +747,14 @@ func (d *Daemon) doDetailRefresh() {
 	for _, pr := range prs {
 		details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
 		if err != nil {
+			// If rate limited, stop the loop and broadcast notification
+			if errors.Is(err, github.ErrRateLimited) {
+				d.logf("Detail refresh: rate limited, stopping refresh loop")
+				if _, resetAt := d.ghClient.IsRateLimited("core"); !resetAt.IsZero() {
+					d.broadcastRateLimited("core", resetAt)
+				}
+				break
+			}
 			d.logf("Failed to fetch details for %s: %v", pr.ID, err)
 			continue
 		}
@@ -768,6 +782,13 @@ func (d *Daemon) fetchAllPRDetails() {
 		return
 	}
 
+	// Check if already rate limited before starting
+	if limited, resetAt := d.ghClient.IsRateLimited("core"); limited {
+		d.logf("App launch: skipping detail fetch, rate limited until %v", resetAt)
+		d.broadcastRateLimited("core", resetAt)
+		return
+	}
+
 	// Get all visible PRs (not muted)
 	allPRs := d.store.ListPRs("")
 	if len(allPRs) == 0 {
@@ -789,6 +810,14 @@ func (d *Daemon) fetchAllPRDetails() {
 
 		details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
 		if err != nil {
+			// If rate limited, stop the loop and broadcast notification
+			if errors.Is(err, github.ErrRateLimited) {
+				d.logf("App launch: rate limited, stopping detail fetch loop")
+				if _, resetAt := d.ghClient.IsRateLimited("core"); !resetAt.IsZero() {
+					d.broadcastRateLimited("core", resetAt)
+				}
+				break
+			}
 			d.logf("Failed to fetch details for %s: %v", pr.ID, err)
 			continue
 		}
@@ -876,6 +905,12 @@ func (d *Daemon) fetchPRDetailsImmediate(prID string) {
 		return
 	}
 
+	// Check if already rate limited before making request
+	if limited, resetAt := d.ghClient.IsRateLimited("core"); limited {
+		d.logf("Immediate fetch skipped for %s: rate limited until %v", prID, resetAt)
+		return
+	}
+
 	pr := d.store.GetPR(prID)
 	if pr == nil {
 		return
@@ -895,6 +930,14 @@ func (d *Daemon) fetchPRDetailsImmediate(prID string) {
 
 	details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
 	if err != nil {
+		// If rate limited, broadcast notification
+		if errors.Is(err, github.ErrRateLimited) {
+			d.logf("Immediate fetch for %s: rate limited", prID)
+			if _, resetAt := d.ghClient.IsRateLimited("core"); !resetAt.IsZero() {
+				d.broadcastRateLimited("core", resetAt)
+			}
+			return
+		}
 		d.logf("Immediate fetch failed for %s: %v", prID, err)
 		return
 	}
