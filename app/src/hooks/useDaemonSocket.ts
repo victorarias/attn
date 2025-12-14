@@ -189,6 +189,7 @@ export function useDaemonSocket({
   onReposUpdate,
   onWorktreesUpdate,
   onSettingsUpdate,
+  onGitStatusUpdate,
   wsUrl = DEFAULT_WS_URL,
 }: UseDaemonSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -545,6 +546,35 @@ export function useDaemonSocket({
             }
             break;
           }
+
+          case 'git_status_update':
+            if (data.directory) {
+              onGitStatusUpdate?.({
+                directory: data.directory,
+                staged: data.staged || [],
+                unstaged: data.unstaged || [],
+                untracked: data.untracked || [],
+                error: data.error,
+              });
+            }
+            break;
+
+          case 'file_diff_result': {
+            const pending = pendingActionsRef.current.get('get_file_diff');
+            if (pending) {
+              pendingActionsRef.current.delete('get_file_diff');
+              if (data.success) {
+                pending.resolve({
+                  success: true,
+                  original: data.original || '',
+                  modified: data.modified || '',
+                });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to get diff'));
+              }
+            }
+            break;
+          }
         }
       } catch (err) {
         console.error('[Daemon] Parse error:', err);
@@ -566,7 +596,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onWorktreesUpdate, onSettingsUpdate]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate]);
 
   useEffect(() => {
     connect();
@@ -1106,6 +1136,50 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Subscribe to git status updates for a directory
+  const sendSubscribeGitStatus = useCallback((directory: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    ws.send(JSON.stringify({ cmd: 'subscribe_git_status', directory }));
+  }, []);
+
+  // Unsubscribe from git status updates
+  const sendUnsubscribeGitStatus = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    ws.send(JSON.stringify({ cmd: 'unsubscribe_git_status' }));
+  }, []);
+
+  // Get file diff
+  const sendGetFileDiff = useCallback((directory: string, path: string, staged?: boolean): Promise<FileDiffResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'get_file_diff';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({
+        cmd: 'get_file_diff',
+        directory,
+        path,
+        ...(staged !== undefined && { staged }),
+      }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get file diff timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -1137,5 +1211,8 @@ export function useDaemonSocket({
     sendGetDefaultBranch,
     sendFetchRemotes,
     sendListRemoteBranches,
+    sendSubscribeGitStatus,
+    sendUnsubscribeGitStatus,
+    sendGetFileDiff,
   };
 }
