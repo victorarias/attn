@@ -52,25 +52,28 @@ export function DiffOverlay({
       });
   }, [isOpen, filePath, fetchDiff]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts - use capture phase to intercept before terminal
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation();
         onClose();
       } else if (e.key === 'ArrowLeft' || e.key === 'k') {
         e.preventDefault();
+        e.stopPropagation();
         onPrev();
       } else if (e.key === 'ArrowRight' || e.key === 'j') {
         e.preventDefault();
+        e.stopPropagation();
         onNext();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, onClose, onPrev, onNext]);
 
   // Detect language from file extension
