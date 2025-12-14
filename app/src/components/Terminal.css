@@ -42,6 +42,8 @@
   z-index: 30;
   /* VS Code: box-sizing for accurate dimensions */
   box-sizing: border-box;
+  /* Fix black rectangle: viewport background shows in gap between xterm-screen and container */
+  background: #1e1e1e !important;
 }
 
 /* VS Code: CRITICAL - viewport needs right offset for scrollbar (terminal.css line 163-167) */
