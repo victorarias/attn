@@ -31,11 +31,11 @@ export const SHORTCUTS = {
 
   // Terminal panel
   'terminal.open': { key: '`', meta: true },
-  'terminal.collapse': { key: '`', shift: true },
+  'terminal.collapse': { key: '~', shift: true },  // Shift+` produces ~ on US keyboards
   'terminal.new': { key: 't', meta: true },
   'terminal.close': { key: 'w', meta: true, shift: true },
-  'terminal.prevTab': { key: '[', meta: true, shift: true },
-  'terminal.nextTab': { key: ']', meta: true, shift: true },
+  'terminal.prevTab': { key: '{', meta: true, shift: true },  // Shift+[ produces {
+  'terminal.nextTab': { key: '}', meta: true, shift: true },  // Shift+] produces }
 } as const;
 
 export type ShortcutId = keyof typeof SHORTCUTS;
