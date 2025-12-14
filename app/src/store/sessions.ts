@@ -4,6 +4,32 @@ import { listen } from '@tauri-apps/api/event';
 import { Terminal } from '@xterm/xterm';
 import type { UISessionState } from '../types/sessionState';
 
+export interface UtilityTerminal {
+  id: string;
+  ptyId: string;
+  title: string;
+}
+
+export interface TerminalPanelState {
+  isOpen: boolean;
+  height: number;
+  activeTabId: string | null;
+  terminals: UtilityTerminal[];
+  nextTerminalNumber: number;
+}
+
+const DEFAULT_PANEL_HEIGHT = 200;
+
+function createDefaultPanelState(): TerminalPanelState {
+  return {
+    isOpen: false,
+    height: DEFAULT_PANEL_HEIGHT,
+    activeTabId: null,
+    terminals: [],
+    nextTerminalNumber: 1,
+  };
+}
+
 export interface Session {
   id: string;
   label: string;
@@ -12,6 +38,7 @@ export interface Session {
   cwd: string;
   branch?: string;
   isWorktree?: boolean;
+  terminalPanel: TerminalPanelState;
 }
 
 interface SessionStore {
@@ -26,6 +53,15 @@ interface SessionStore {
   setActiveSession: (id: string | null) => void;
   connectTerminal: (id: string, terminal: Terminal) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
+
+  // Terminal panel actions
+  openTerminalPanel: (sessionId: string) => void;
+  collapseTerminalPanel: (sessionId: string) => void;
+  setTerminalPanelHeight: (sessionId: string, height: number) => void;
+  addUtilityTerminal: (sessionId: string, ptyId: string) => string;
+  removeUtilityTerminal: (sessionId: string, terminalId: string) => void;
+  setActiveUtilityTerminal: (sessionId: string, terminalId: string) => void;
+  renameUtilityTerminal: (sessionId: string, terminalId: string, title: string) => void;
 }
 
 let sessionCounter = 0;
@@ -100,6 +136,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       state: 'working',
       terminal: null,
       cwd,
+      terminalPanel: createDefaultPanelState(),
     };
 
     set((state) => ({
@@ -184,13 +221,118 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   resizeSession: (id: string, cols: number, rows: number) => {
     invoke('pty_resize', { id, cols, rows }).catch(console.error);
   },
+
+  openTerminalPanel: (sessionId: string) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === sessionId ? { ...s, terminalPanel: { ...s.terminalPanel, isOpen: true } } : s
+      ),
+    }));
+  },
+
+  collapseTerminalPanel: (sessionId: string) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === sessionId ? { ...s, terminalPanel: { ...s.terminalPanel, isOpen: false } } : s
+      ),
+    }));
+  },
+
+  setTerminalPanelHeight: (sessionId: string, height: number) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === sessionId ? { ...s, terminalPanel: { ...s.terminalPanel, height } } : s
+      ),
+    }));
+  },
+
+  addUtilityTerminal: (sessionId: string, ptyId: string) => {
+    const terminalId = `util-${Date.now()}`;
+    set((state) => ({
+      sessions: state.sessions.map((s) => {
+        if (s.id !== sessionId) return s;
+        const title = `Shell ${s.terminalPanel.nextTerminalNumber}`;
+        const newTerminal: UtilityTerminal = { id: terminalId, ptyId, title };
+        return {
+          ...s,
+          terminalPanel: {
+            ...s.terminalPanel,
+            terminals: [...s.terminalPanel.terminals, newTerminal],
+            activeTabId: terminalId,
+            nextTerminalNumber: s.terminalPanel.nextTerminalNumber + 1,
+          },
+        };
+      }),
+    }));
+    return terminalId;
+  },
+
+  removeUtilityTerminal: (sessionId: string, terminalId: string) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) => {
+        if (s.id !== sessionId) return s;
+        const terminals = s.terminalPanel.terminals.filter((t) => t.id !== terminalId);
+        let activeTabId = s.terminalPanel.activeTabId;
+
+        // If we removed the active tab, select another
+        if (activeTabId === terminalId) {
+          const removedIndex = s.terminalPanel.terminals.findIndex((t) => t.id === terminalId);
+          if (terminals.length > 0) {
+            // Select next tab, or previous if we removed the last
+            activeTabId = terminals[Math.min(removedIndex, terminals.length - 1)].id;
+          } else {
+            activeTabId = null;
+          }
+        }
+
+        return {
+          ...s,
+          terminalPanel: {
+            ...s.terminalPanel,
+            terminals,
+            activeTabId,
+            // If no more terminals, close the panel
+            isOpen: terminals.length > 0 ? s.terminalPanel.isOpen : false,
+          },
+        };
+      }),
+    }));
+  },
+
+  setActiveUtilityTerminal: (sessionId: string, terminalId: string) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === sessionId
+          ? { ...s, terminalPanel: { ...s.terminalPanel, activeTabId: terminalId } }
+          : s
+      ),
+    }));
+  },
+
+  renameUtilityTerminal: (sessionId: string, terminalId: string, title: string) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === sessionId
+          ? {
+              ...s,
+              terminalPanel: {
+                ...s.terminalPanel,
+                terminals: s.terminalPanel.terminals.map((t) =>
+                  t.id === terminalId ? { ...t, title: title || t.title } : t
+                ),
+              },
+            }
+          : s
+      ),
+    }));
+  },
 }));
 
 // Expose test helpers for E2E testing (only in development)
 if (import.meta.env.DEV) {
   window.__TEST_INJECT_SESSION = (session: TestSession) => {
     useSessionStore.setState((state) => ({
-      sessions: [...state.sessions, { ...session, terminal: null }],
+      sessions: [...state.sessions, { ...session, terminal: null, terminalPanel: createDefaultPanelState() }],
     }));
   };
 
