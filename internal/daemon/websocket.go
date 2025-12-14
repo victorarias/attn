@@ -26,7 +26,8 @@ const (
 type wsClient struct {
 	conn      *websocket.Conn
 	send      chan []byte
-	slowCount int // tracks consecutive failed sends
+	recv      chan []byte // incoming messages for ordered processing
+	slowCount int         // tracks consecutive failed sends
 
 	// Git status subscription state
 	gitStatusDir    string
@@ -166,6 +167,7 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 	client := &wsClient{
 		conn: conn,
 		send: make(chan []byte, 256),
+		recv: make(chan []byte, 256), // buffer for incoming messages
 	}
 
 	d.wsHub.register <- client
@@ -180,6 +182,7 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Handle client lifecycle
 	go d.wsWritePump(client)
+	go d.wsMsgPump(client) // NEW: message processing goroutine
 	d.wsReadPump(client)
 
 	// Signal ping loop to stop when read pump exits
@@ -228,6 +231,15 @@ func (d *Daemon) wsWritePump(client *wsClient) {
 	}
 }
 
+// wsMsgPump processes incoming messages in FIFO order
+// This runs in a dedicated goroutine to avoid blocking the read loop
+func (d *Daemon) wsMsgPump(client *wsClient) {
+	for data := range client.recv {
+		d.handleClientMessage(client, data)
+	}
+	d.logf("WebSocket message pump exited")
+}
+
 // wsPingLoop sends periodic pings to keep the connection alive and detect dead clients
 func (d *Daemon) wsPingLoop(client *wsClient, done <-chan struct{}) {
 	ticker := time.NewTicker(30 * time.Second)
@@ -252,6 +264,7 @@ func (d *Daemon) wsPingLoop(client *wsClient, done <-chan struct{}) {
 
 func (d *Daemon) wsReadPump(client *wsClient) {
 	defer func() {
+		close(client.recv) // signal wsMsgPump to exit
 		d.wsHub.unregister <- client
 		client.conn.Close(websocket.StatusNormalClosure, "")
 		d.logf("WebSocket client disconnected (%d remaining)", d.wsHub.ClientCount())
@@ -267,8 +280,13 @@ func (d *Daemon) wsReadPump(client *wsClient) {
 			return
 		}
 		d.logf("WebSocket raw data received: %s", string(data))
-		// Handle client messages
-		go d.handleClientMessage(client, data)
+
+		// Enqueue for ordered processing (non-blocking with buffer)
+		select {
+		case client.recv <- data:
+		default:
+			d.logf("WebSocket client recv buffer full, dropping message")
+		}
 	}
 }
 
