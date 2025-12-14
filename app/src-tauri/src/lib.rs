@@ -94,6 +94,8 @@ async fn list_directory(path: String, prefix: Option<String>) -> Result<Vec<Stri
     Ok(directories)
 }
 
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -112,6 +114,10 @@ pub fn run() {
             is_daemon_running,
             start_daemon,
         ])
+        .on_page_load(|webview, _payload| {
+            // Show window as soon as page content is loaded (loading screen visible)
+            let _ = webview.window().show();
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

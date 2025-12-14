@@ -87,12 +87,9 @@ function App() {
   useEffect(() => {
     const loadingScreen = document.getElementById('loading-screen');
     if (loadingScreen) {
-      // Small delay to ensure smooth transition
-      setTimeout(() => {
-        loadingScreen.classList.add('hidden');
-        // Remove from DOM after transition completes
-        setTimeout(() => loadingScreen.remove(), 300);
-      }, 100);
+      loadingScreen.classList.add('hidden');
+      // Remove from DOM after transition completes
+      setTimeout(() => loadingScreen.remove(), 300);
     }
   }, []);
 
