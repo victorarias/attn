@@ -91,9 +91,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (get().connected) return;
 
     try {
-      await invoke('pty_connect');
-
-      // Listen for PTY events
+      // Listen for PTY events (no connect call needed - PTY is native now)
       await listen<any>('pty-event', (event) => {
         const msg = event.payload;
         const { sessions } = get();
