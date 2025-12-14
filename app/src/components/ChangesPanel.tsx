@@ -56,6 +56,14 @@ export function ChangesPanel({
         </div>
       </div>
 
+      {totalStats.files > 0 && (
+        <div className="changes-summary">
+          <span>{totalStats.files} files</span>
+          {totalStats.additions > 0 && <span className="stat-add">+{totalStats.additions}</span>}
+          {totalStats.deletions > 0 && <span className="stat-del">-{totalStats.deletions}</span>}
+        </div>
+      )}
+
       <div className="changes-body">
         {gitStatus?.error ? (
           <div className="changes-error">{gitStatus.error}</div>
@@ -140,14 +148,6 @@ export function ChangesPanel({
           </>
         )}
       </div>
-
-      {totalStats.files > 0 && (
-        <div className="changes-footer">
-          <span>{totalStats.files} files</span>
-          {totalStats.additions > 0 && <span className="stat-add">+{totalStats.additions}</span>}
-          {totalStats.deletions > 0 && <span className="stat-del">-{totalStats.deletions}</span>}
-        </div>
-      )}
     </div>
   );
 }

@@ -133,7 +133,7 @@ export function DiffOverlay({
                 language={getLanguage(filePath)}
                 theme="vs-dark"
                 options={{
-                  readOnly: true,
+                  readOnly: false,
                   renderSideBySide: true,
                   minimap: { enabled: false },
                   scrollBeyondLastLine: false,

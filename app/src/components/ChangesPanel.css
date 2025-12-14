@@ -121,12 +121,12 @@
 .stat-add { color: #22c55e; }
 .stat-del { color: #ef4444; }
 
-.changes-footer {
+.changes-summary {
   padding: 8px 12px;
-  border-top: 1px solid #2a2a2d;
+  border-bottom: 1px solid #2a2a2d;
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
-  color: #555;
+  color: #888;
   display: flex;
   gap: 8px;
 }
