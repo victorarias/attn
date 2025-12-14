@@ -4,8 +4,9 @@
   align-items: center;
   justify-content: space-between;
   height: 32px;
-  background: #252526;
-  border-bottom: 1px solid #3c3c3c;
+  background: #1a1a1c;
+  border-top: 1px solid rgba(255, 107, 53, 0.3);
+  border-bottom: 1px solid #2a2a2d;
   padding: 0 8px;
   user-select: none;
 }
@@ -32,7 +33,7 @@
 }
 
 .terminal-tab:hover {
-  background: #2a2d2e;
+  background: #252528;
   color: #cccccc;
 }
 
@@ -99,7 +100,7 @@
 }
 
 .terminal-tab-new:hover {
-  background: #2a2d2e;
+  background: #252528;
   color: #ffffff;
 }
 
@@ -118,6 +119,6 @@
 }
 
 .terminal-collapse:hover {
-  background: #2a2d2e;
+  background: #252528;
   color: #ffffff;
 }
