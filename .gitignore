@@ -13,3 +13,6 @@ attn
 # Test artifacts
 coverage.out
 .playwright-mcp/
+
+# Documentation (local only)
+docs/
