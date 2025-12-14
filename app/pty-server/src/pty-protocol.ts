@@ -24,6 +24,7 @@ export interface PtySpawnCommand {
   cwd?: string;
   cols?: number;
   rows?: number;
+  shell?: boolean; // If true, spawn a plain shell instead of attn
 }
 
 export interface PtyWriteCommand {

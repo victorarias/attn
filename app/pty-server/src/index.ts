@@ -64,10 +64,14 @@ function handleMessage(socket: net.Socket, socketId: symbol, msg: PtyCommand): v
         return;
       }
 
-      // Spawn attn (Attention Manager) wrapper which registers with daemon and sets up hooks
-      // Use fish login shell to ensure PATH includes ~/.local/bin
-      // Set TERM=xterm-256color for proper xterm.js compatibility
-      const ptyProcess = pty.spawn('/opt/homebrew/bin/fish', ['-l', '-c', 'set -x TERM xterm-256color; attn -y'], {
+      // Determine what to spawn
+      // If shell=true, spawn a plain shell; otherwise spawn attn (Claude Code wrapper)
+      const shell = process.env.SHELL || '/bin/zsh';
+      const [spawnCommand, spawnArgs] = msg.shell
+        ? [shell, ['-l']] // Plain login shell for utility terminals
+        : ['/opt/homebrew/bin/fish', ['-l', '-c', 'set -x TERM xterm-256color; attn -y']]; // Claude Code
+
+      const ptyProcess = pty.spawn(spawnCommand, spawnArgs, {
         name: 'xterm-256color',
         cols: msg.cols || 80,
         rows: msg.rows || 24,

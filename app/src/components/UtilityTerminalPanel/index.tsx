@@ -84,6 +84,7 @@ export function UtilityTerminalPanel({
         cwd,
         cols: 80,
         rows: 24,
+        shell: true, // Utility terminals spawn a plain shell, not attn/Claude
       });
 
       const terminalId = onAddTerminal(ptyId);
@@ -135,6 +136,13 @@ export function UtilityTerminalPanel({
     }
   }, [panel.isOpen, panel.terminals.length, panel.activeTabId, onOpen, handleNewTab]);
 
+  const handleNewTabOrOpen = useCallback(async () => {
+    if (!panel.isOpen) {
+      onOpen();
+    }
+    await handleNewTab();
+  }, [panel.isOpen, onOpen, handleNewTab]);
+
   const handleTerminalReady = useCallback(
     (terminalId: string, ptyId: string) => (xterm: XTerm) => {
       xtermRefs.current.set(terminalId, xterm);
@@ -177,7 +185,7 @@ export function UtilityTerminalPanel({
   // Register shortcuts
   useShortcut('terminal.open', handleOpenOrFocus, enabled);
   useShortcut('terminal.collapse', onCollapse, enabled && panel.isOpen);
-  useShortcut('terminal.new', handleNewTab, enabled && panel.isOpen);
+  useShortcut('terminal.new', handleNewTabOrOpen, enabled);
   useShortcut('terminal.close', handleCloseCurrentTab, enabled && panel.isOpen);
   useShortcut('terminal.prevTab', handlePrevTab, enabled && panel.isOpen);
   useShortcut('terminal.nextTab', handleNextTab, enabled && panel.isOpen);

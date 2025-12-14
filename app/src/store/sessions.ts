@@ -334,6 +334,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 }));
 
+// Test helper types for E2E
+interface TestTerminalPanel {
+  isOpen: boolean;
+  terminals: Array<{ id: string; title: string }>;
+  activeTabId: string | null;
+}
+
+declare global {
+  interface Window {
+    __TEST_OPEN_TERMINAL_PANEL?: (sessionId: string) => void;
+    __TEST_ADD_UTILITY_TERMINAL?: (sessionId: string, terminalId: string, title: string) => void;
+    __TEST_COLLAPSE_TERMINAL_PANEL?: (sessionId: string) => void;
+    __TEST_SET_ACTIVE_TERMINAL?: (sessionId: string, terminalId: string) => void;
+    __TEST_REMOVE_TERMINAL?: (sessionId: string, terminalId: string) => void;
+    __TEST_RENAME_TERMINAL?: (sessionId: string, terminalId: string, title: string) => void;
+  }
+}
+
 // Expose test helpers for E2E testing (only in development)
 if (import.meta.env.DEV) {
   window.__TEST_INJECT_SESSION = (session: TestSession) => {
@@ -348,5 +366,43 @@ if (import.meta.env.DEV) {
         session.id === id ? { ...session, state } : session
       ),
     }));
+  };
+
+  window.__TEST_OPEN_TERMINAL_PANEL = (sessionId: string) => {
+    useSessionStore.getState().openTerminalPanel(sessionId);
+  };
+
+  window.__TEST_COLLAPSE_TERMINAL_PANEL = (sessionId: string) => {
+    useSessionStore.getState().collapseTerminalPanel(sessionId);
+  };
+
+  window.__TEST_ADD_UTILITY_TERMINAL = (sessionId: string, terminalId: string, title: string) => {
+    useSessionStore.setState((state) => ({
+      sessions: state.sessions.map((s) => {
+        if (s.id !== sessionId) return s;
+        const newTerminal = { id: terminalId, ptyId: `mock-pty-${terminalId}`, title };
+        return {
+          ...s,
+          terminalPanel: {
+            ...s.terminalPanel,
+            terminals: [...s.terminalPanel.terminals, newTerminal],
+            activeTabId: terminalId,
+            isOpen: true,
+          },
+        };
+      }),
+    }));
+  };
+
+  window.__TEST_SET_ACTIVE_TERMINAL = (sessionId: string, terminalId: string) => {
+    useSessionStore.getState().setActiveUtilityTerminal(sessionId, terminalId);
+  };
+
+  window.__TEST_REMOVE_TERMINAL = (sessionId: string, terminalId: string) => {
+    useSessionStore.getState().removeUtilityTerminal(sessionId, terminalId);
+  };
+
+  window.__TEST_RENAME_TERMINAL = (sessionId: string, terminalId: string, title: string) => {
+    useSessionStore.getState().renameUtilityTerminal(sessionId, terminalId, title);
   };
 }

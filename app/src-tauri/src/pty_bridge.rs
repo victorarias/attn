@@ -83,6 +83,7 @@ pub async fn pty_spawn(
     cwd: String,
     cols: u32,
     rows: u32,
+    shell: Option<bool>,
 ) -> Result<(), String> {
     let mut guard = state.stream.lock().map_err(|_| "Mutex poisoned".to_string())?;
     let stream = guard.as_mut().ok_or("Not connected")?;
@@ -93,6 +94,7 @@ pub async fn pty_spawn(
         "cwd": cwd,
         "cols": cols,
         "rows": rows,
+        "shell": shell.unwrap_or(false),
     });
 
     write_frame(stream, &msg).map_err(|e| e.to_string())?;
