@@ -1,0 +1,26 @@
+/* app/src/components/UtilityTerminalPanel/UtilityTerminalPanel.css */
+.utility-terminal-panel {
+  display: flex;
+  flex-direction: column;
+  background: #1e1e1e;
+  flex-shrink: 0;
+}
+
+.utility-terminal-content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.utility-terminal-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: none;
+}
+
+.utility-terminal-wrapper.active {
+  display: block;
+}
