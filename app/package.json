@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:all": "concurrently -n pty,tauri -c blue,green \"npm run pty:dev\" \"npm run tauri dev\"",
-    "pty:dev": "cd pty-server && npm run dev",
+    "dev:all": "tauri dev",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
