@@ -73,19 +73,6 @@
         50% { background-position: 100% center; }
       }
 
-      /* Typing cursor effect */
-      .loading-brand::after {
-        content: '_';
-        position: absolute;
-        right: -24px;
-        -webkit-text-fill-color: #ff6b35;
-        animation: cursor-blink 0.8s steps(1) infinite;
-      }
-
-      @keyframes cursor-blink {
-        0%, 50% { opacity: 1; }
-        51%, 100% { opacity: 0; }
-      }
 
       /* Subtitle */
       .loading-subtitle {
@@ -95,8 +82,6 @@
         text-transform: uppercase;
         color: #444;
         margin-top: 16px;
-        opacity: 0;
-        animation: fade-in 0.5s ease 0.3s forwards;
       }
 
       @keyframes fade-in {
