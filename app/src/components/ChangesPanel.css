@@ -1,0 +1,145 @@
+/* app/src/components/ChangesPanel.css */
+.changes-panel {
+  width: 200px;
+  height: 100%;
+  background: #111113;
+  border-left: 1px solid #2a2a2d;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.changes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid #2a2a2d;
+}
+
+.changes-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #555;
+}
+
+.changes-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.attention-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 107, 53, 0.15);
+  border: 1px solid rgba(255, 107, 53, 0.3);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 11px;
+  color: #ff6b35;
+}
+
+.attention-badge:hover {
+  background: rgba(255, 107, 53, 0.25);
+}
+
+.changes-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.changes-section {
+  margin-bottom: 8px;
+}
+
+.section-header {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #555;
+  padding: 4px 12px;
+}
+
+.change-file {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.change-file:hover {
+  background: #1a1a1d;
+}
+
+.change-file.selected {
+  background: #1a1a1d;
+  border-left: 2px solid #ff6b35;
+  padding-left: 10px;
+}
+
+.file-status {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.file-status.modified { color: #f59e0b; }
+.file-status.added { color: #22c55e; }
+.file-status.deleted { color: #ef4444; }
+.file-status.untracked { color: #888; }
+.file-status.renamed { color: #3b82f6; }
+
+.file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e8e8e8;
+}
+
+.file-stats {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.stat-add { color: #22c55e; }
+.stat-del { color: #ef4444; }
+
+.changes-footer {
+  padding: 8px 12px;
+  border-top: 1px solid #2a2a2d;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #555;
+  display: flex;
+  gap: 8px;
+}
+
+.changes-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: #555;
+  font-size: 12px;
+}
+
+.changes-error {
+  padding: 12px;
+  color: #ef4444;
+  font-size: 11px;
+}
