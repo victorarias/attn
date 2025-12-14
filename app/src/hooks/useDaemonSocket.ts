@@ -46,7 +46,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '9';
+const PROTOCOL_VERSION = '10';
 
 interface PRActionResult {
   success: boolean;
@@ -113,12 +113,36 @@ interface RemoteBranchesResult {
   error?: string;
 }
 
+interface GitFileChange {
+  path: string;
+  status: string;
+  additions?: number;
+  deletions?: number;
+  old_path?: string;
+}
+
+export interface GitStatusUpdate {
+  directory: string;
+  staged: GitFileChange[];
+  unstaged: GitFileChange[];
+  untracked: GitFileChange[];
+  error?: string;
+}
+
+export interface FileDiffResult {
+  success: boolean;
+  original: string;
+  modified: string;
+  error?: string;
+}
+
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
   onSettingsUpdate?: (settings: DaemonSettings) => void;
+  onGitStatusUpdate?: (status: GitStatusUpdate) => void;
   wsUrl?: string;
 }
 
