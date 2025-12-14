@@ -65,18 +65,19 @@ function handleMessage(socket: net.Socket, socketId: symbol, msg: PtyCommand): v
       }
 
       // Determine what to spawn
-      // If shell=true, spawn a plain shell; otherwise spawn attn (Claude Code wrapper)
+      // If shell=true, spawn a plain shell; otherwise spawn attn (Claude Code wrapper with hooks)
+      // ATTN_INSIDE_APP tells attn to run claude directly instead of opening the app
       const shell = process.env.SHELL || '/bin/zsh';
-      const [spawnCommand, spawnArgs] = msg.shell
-        ? [shell, ['-l']] // Plain login shell for utility terminals
-        : ['/opt/homebrew/bin/fish', ['-l', '-c', 'set -x TERM xterm-256color; attn -y']]; // Claude Code
+      const [spawnCommand, spawnArgs, spawnEnv] = msg.shell
+        ? [shell, ['-l'], {}] // Plain login shell for utility terminals
+        : ['attn', ['-y'], { ATTN_INSIDE_APP: '1' }]; // Claude Code with hooks
 
       const ptyProcess = pty.spawn(spawnCommand, spawnArgs, {
         name: 'xterm-256color',
         cols: msg.cols || 80,
         rows: msg.rows || 24,
         cwd: msg.cwd || os.homedir(),
-        env: { ...process.env, TERM: 'xterm-256color' } as { [key: string]: string },
+        env: { ...process.env, TERM: 'xterm-256color', ...spawnEnv } as { [key: string]: string },
       });
 
       const dataDisposable = ptyProcess.onData((data) => {

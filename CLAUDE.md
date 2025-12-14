@@ -7,12 +7,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 make build          # Build binary to ./attn
 make install        # Build and install to ~/.local/bin/attn (kills daemon)
-make test           # Run all tests
-go test ./...       # Run all tests (alternative)
+make test           # Run Go tests
+make test-frontend  # Run frontend tests (vitest)
+make test-all       # Run Go + frontend tests
 go test ./internal/store -run TestList  # Run single test
 ```
 
 **Rule:** Always use `make install` after any code change. The daemon is auto-killed and restarted by the app.
+
+## CLI Usage
+
+```bash
+attn                # Open app and create session (label = directory name)
+attn -s <label>     # Open app and create session with explicit label
+attn daemon         # Run daemon in foreground
+attn status         # Output for tmux status bar
+attn list           # List all sessions (JSON)
+```
 
 ## Debugging
 
@@ -75,6 +86,13 @@ Types are defined once in TypeSpec and generated for Go and TypeScript. **Never 
 **Generated files:**
 - `internal/protocol/generated.go` (Go structs)
 - `app/src/types/generated.ts` (TypeScript interfaces)
+
+**Prerequisites (first time only):**
+```bash
+cd internal/protocol/schema && pnpm install
+go install github.com/atombender/go-jsonschema/cmd/go-jsonschema@latest
+npm install -g quicktype
+```
 
 **Workflow for adding a new command/event:**
 
@@ -205,8 +223,6 @@ When modifying `app/src/components/Terminal.tsx`:
 2. **Pre-calculate initial dimensions** - Measure font before creating XTerm to avoid 80x24 default
 3. **Resize xterm first, then PTY** - Call `term.resize()` then notify PTY (sends SIGWINCH)
 4. **Use VS Code's resize debouncing** - Y-axis immediate, X-axis 100ms debounced (text reflow is expensive)
-
-See `docs/plans/2025-12-09-node-pty-sidecar-design.md` for architecture details.
 
 ### E2E Testing
 

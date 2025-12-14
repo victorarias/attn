@@ -148,29 +148,52 @@ function App() {
     }
   }, [sendRefreshPRs]);
 
+  // Track processed deep links to avoid duplicates (persists across re-renders)
+  const processedDeepLinks = useRef(new Set<string>());
+
   // Handle deep-link spawn requests (attn://spawn?cwd=/path&label=name)
+  // Note: We access sessions via store to avoid dependency changes triggering re-registration
   useEffect(() => {
-    const unlisten = onOpenUrl((urls) => {
-      for (const urlStr of urls) {
-        try {
-          const url = new URL(urlStr);
-          if (url.host === 'spawn') {
-            const cwd = url.searchParams.get('cwd');
-            const label = url.searchParams.get('label') || cwd?.split('/').pop() || 'session';
-            if (cwd) {
+    const handleDeepLinkUrl = (urlStr: string) => {
+      // Deduplicate: only process each unique URL once
+      if (processedDeepLinks.current.has(urlStr)) {
+        return;
+      }
+      processedDeepLinks.current.add(urlStr);
+
+      try {
+        const url = new URL(urlStr);
+        if (url.host === 'spawn') {
+          const cwd = url.searchParams.get('cwd');
+          const label = url.searchParams.get('label') || cwd?.split('/').pop() || 'session';
+          if (cwd) {
+            // Check if session for this cwd already exists (read current state)
+            const currentSessions = useSessionStore.getState().sessions;
+            const existingSession = currentSessions.find((s) => s.cwd === cwd);
+            if (existingSession) {
+              // Just activate the existing session
+              setActiveSession(existingSession.id);
+            } else {
               createSession(label, cwd);
             }
           }
-        } catch (e) {
-          console.error('Failed to parse deep-link URL:', e);
         }
+      } catch (e) {
+        console.error('Failed to parse deep-link URL:', e);
+      }
+    };
+
+    // Listen for deep links - onOpenUrl calls getCurrent on registration for cold starts
+    const unlisten = onOpenUrl((urls) => {
+      for (const urlStr of urls) {
+        handleDeepLinkUrl(urlStr);
       }
     });
 
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [createSession]);
+  }, [createSession, setActiveSession]); // Stable deps from Zustand
 
   // Enrich local sessions with daemon state (working/waiting from hooks)
   const enrichedLocalSessions = sessions.map((s) => {
