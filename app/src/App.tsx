@@ -12,6 +12,7 @@ import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffOverlay } from './components/DiffOverlay';
+import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket, DaemonWorktree, GitStatusUpdate } from './hooks/useDaemonSocket';
@@ -32,6 +33,13 @@ function App() {
     setActiveSession,
     connectTerminal,
     resizeSession,
+    openTerminalPanel,
+    collapseTerminalPanel,
+    setTerminalPanelHeight,
+    addUtilityTerminal,
+    removeUtilityTerminal,
+    setActiveUtilityTerminal,
+    renameUtilityTerminal,
   } = useSessionStore();
 
   const {
@@ -507,6 +515,36 @@ function App() {
     (gitStatus?.unstaged?.length || 0) +
     (gitStatus?.untracked?.length || 0);
 
+  // Terminal panel handlers for active session
+  const handleOpenTerminalPanel = useCallback(() => {
+    if (activeSessionId) openTerminalPanel(activeSessionId);
+  }, [activeSessionId, openTerminalPanel]);
+
+  const handleCollapseTerminalPanel = useCallback(() => {
+    if (activeSessionId) collapseTerminalPanel(activeSessionId);
+  }, [activeSessionId, collapseTerminalPanel]);
+
+  const handleSetTerminalPanelHeight = useCallback((height: number) => {
+    if (activeSessionId) setTerminalPanelHeight(activeSessionId, height);
+  }, [activeSessionId, setTerminalPanelHeight]);
+
+  const handleAddUtilityTerminal = useCallback((ptyId: string) => {
+    if (activeSessionId) return addUtilityTerminal(activeSessionId, ptyId);
+    return '';
+  }, [activeSessionId, addUtilityTerminal]);
+
+  const handleRemoveUtilityTerminal = useCallback((terminalId: string) => {
+    if (activeSessionId) removeUtilityTerminal(activeSessionId, terminalId);
+  }, [activeSessionId, removeUtilityTerminal]);
+
+  const handleSetActiveUtilityTerminal = useCallback((terminalId: string) => {
+    if (activeSessionId) setActiveUtilityTerminal(activeSessionId, terminalId);
+  }, [activeSessionId, setActiveUtilityTerminal]);
+
+  const handleRenameUtilityTerminal = useCallback((terminalId: string, title: string) => {
+    if (activeSessionId) renameUtilityTerminal(activeSessionId, terminalId, title);
+  }, [activeSessionId, renameUtilityTerminal]);
+
   // Use keyboard shortcuts hook
   useKeyboardShortcuts({
     onNewSession: handleNewSession,
@@ -576,25 +614,46 @@ function App() {
           onToggleCollapse={toggleSidebarCollapse}
         />
         <div className="terminal-pane">
-          {sessions.map((session) => (
-            <div
-              key={session.id}
-              className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
-            >
-              <Terminal
-                ref={setTerminalRef(session.id)}
+          <div className="terminal-main-area">
+            {sessions.map((session) => (
+              <div
+                key={session.id}
+                className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
+              >
+                <Terminal
+                  ref={setTerminalRef(session.id)}
+                  fontSize={terminalFontSize}
+                  onReady={handleTerminalReady(session.id)}
+                  onResize={handleResize(session.id)}
+                />
+              </div>
+            ))}
+            {sessions.length === 0 && (
+              <div className="no-sessions">
+                <p>No active sessions</p>
+                <p>Click "+" in the sidebar to start a new session</p>
+              </div>
+            )}
+          </div>
+          {activeSessionId && (() => {
+            const activeSession = sessions.find(s => s.id === activeSessionId);
+            if (!activeSession) return null;
+            return (
+              <UtilityTerminalPanel
+                cwd={activeSession.cwd}
+                panel={activeSession.terminalPanel}
                 fontSize={terminalFontSize}
-                onReady={handleTerminalReady(session.id)}
-                onResize={handleResize(session.id)}
+                onOpen={handleOpenTerminalPanel}
+                onCollapse={handleCollapseTerminalPanel}
+                onSetHeight={handleSetTerminalPanelHeight}
+                onAddTerminal={handleAddUtilityTerminal}
+                onRemoveTerminal={handleRemoveUtilityTerminal}
+                onSetActiveTerminal={handleSetActiveUtilityTerminal}
+                onRenameTerminal={handleRenameUtilityTerminal}
+                enabled={!locationPickerOpen && !branchPickerOpen}
               />
-            </div>
-          ))}
-          {sessions.length === 0 && (
-            <div className="no-sessions">
-              <p>No active sessions</p>
-              <p>Click "+" in the sidebar to start a new session</p>
-            </div>
-          )}
+            );
+          })()}
         </div>
         <ChangesPanel
           gitStatus={gitStatus}

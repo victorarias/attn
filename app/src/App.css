@@ -56,6 +56,14 @@ html, body, #root {
   overflow: hidden;
   position: relative;
   background: #1e1e1e;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-main-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
 }
 
 .terminal-wrapper {
