@@ -1,0 +1,11 @@
+/* app/src/components/UtilityTerminalPanel/ResizeHandle.css */
+.terminal-resize-handle {
+  height: 4px;
+  background: #252526;
+  cursor: ns-resize;
+  flex-shrink: 0;
+}
+
+.terminal-resize-handle:hover {
+  background: #007acc;
+}
