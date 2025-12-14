@@ -20,6 +20,7 @@ function installGlobalListener() {
         const shortcutHandlers = handlers.get(id as ShortcutId);
         if (shortcutHandlers && shortcutHandlers.size > 0) {
           e.preventDefault();
+          e.stopPropagation(); // Prevent event from reaching xterm
           // Call all registered handlers for this shortcut
           for (const handler of shortcutHandlers) {
             handler();
