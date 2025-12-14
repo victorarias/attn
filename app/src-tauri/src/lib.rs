@@ -1,6 +1,6 @@
-mod pty_bridge;
+mod pty_manager;
 
-use pty_bridge::PtyState;
+use pty_manager::PtyState;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -104,11 +104,10 @@ pub fn run() {
         .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![
             greet,
-            pty_bridge::pty_connect,
-            pty_bridge::pty_spawn,
-            pty_bridge::pty_write,
-            pty_bridge::pty_resize,
-            pty_bridge::pty_kill,
+            pty_manager::pty_spawn,
+            pty_manager::pty_write,
+            pty_manager::pty_resize,
+            pty_manager::pty_kill,
             list_directory,
             is_daemon_running,
             start_daemon,
