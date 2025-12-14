@@ -14,6 +14,9 @@ interface KeyboardShortcutsConfig {
   onToggleSidebar?: () => void;
   onRefreshPRs?: () => void;
   onOpenBranchPicker?: () => void;
+  onIncreaseFontSize?: () => void;
+  onDecreaseFontSize?: () => void;
+  onResetFontSize?: () => void;
   enabled: boolean;
 }
 
@@ -30,13 +33,38 @@ export function useKeyboardShortcuts({
   onToggleSidebar,
   onRefreshPRs,
   onOpenBranchPicker,
+  onIncreaseFontSize,
+  onDecreaseFontSize,
+  onResetFontSize,
   enabled,
 }: KeyboardShortcutsConfig) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (!enabled) return;
-
+      // Font size shortcuts work even when disabled (e.g., in modals)
       const isMeta = e.metaKey || e.ctrlKey;
+
+      // ⌘+ or ⌘= - Increase font size
+      if (isMeta && (e.key === '+' || e.key === '=') && onIncreaseFontSize) {
+        e.preventDefault();
+        onIncreaseFontSize();
+        return;
+      }
+
+      // ⌘- - Decrease font size
+      if (isMeta && e.key === '-' && onDecreaseFontSize) {
+        e.preventDefault();
+        onDecreaseFontSize();
+        return;
+      }
+
+      // ⌘0 - Reset font size
+      if (isMeta && e.key === '0' && onResetFontSize) {
+        e.preventDefault();
+        onResetFontSize();
+        return;
+      }
+
+      if (!enabled) return;
 
       // ⌘⇧N - New worktree session (check shift first)
       if (isMeta && e.shiftKey && e.key.toLowerCase() === 'n' && onNewWorktreeSession) {
@@ -137,6 +165,9 @@ export function useKeyboardShortcuts({
       onToggleSidebar,
       onRefreshPRs,
       onOpenBranchPicker,
+      onIncreaseFontSize,
+      onDecreaseFontSize,
+      onResetFontSize,
     ]
   );
 

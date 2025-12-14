@@ -7,7 +7,7 @@ import './Terminal.css';
 
 // Terminal font configuration (matches xterm options)
 const FONT_FAMILY = 'Menlo, Monaco, "Courier New", monospace';
-const FONT_SIZE = 14;
+const DEFAULT_FONT_SIZE = 14;
 
 // VS Code limits canvas width to prevent performance issues with very wide terminals
 // Source: Constants.MaxCanvasWidth in terminalInstance.ts (line 103)
@@ -48,6 +48,7 @@ export interface TerminalHandle {
 }
 
 interface TerminalProps {
+  fontSize?: number;
   onReady?: (terminal: XTerm) => void;
   onResize?: (cols: number, rows: number) => void;
 }
@@ -59,6 +60,7 @@ interface TerminalProps {
 function getScaledDimensions(
   container: HTMLElement,
   term: XTerm,
+  fontSize: number,
   letterSpacing = 0,
   lineHeight = 1
 ): { cols: number; rows: number } | null {
@@ -95,7 +97,7 @@ function getScaledDimensions(
     charWidth = cellDims.width - Math.round(letterSpacing) / dpr;
     charHeight = cellDims.height / lineHeight;
   } else {
-    const measured = measureFont(FONT_FAMILY, FONT_SIZE);
+    const measured = measureFont(FONT_FAMILY, fontSize);
     charWidth = measured.charWidth;
     charHeight = measured.charHeight;
   }
@@ -116,18 +118,20 @@ function getScaledDimensions(
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
-  function Terminal({ onReady, onResize }, ref) {
+  function Terminal({ fontSize = DEFAULT_FONT_SIZE, onReady, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
     const webglAddonRef = useRef<WebglAddon | null>(null);
 
-    // Store callbacks in refs to avoid re-running effect when they change
+    // Store callbacks and values in refs to avoid re-running effect when they change
     const onReadyRef = useRef(onReady);
     const onResizeRef = useRef(onResize);
+    const fontSizeRef = useRef(fontSize);
 
     useEffect(() => {
       onReadyRef.current = onReady;
       onResizeRef.current = onResize;
+      fontSizeRef.current = fontSize;
     });
 
     // Helper to resize terminal and notify PTY
@@ -145,7 +149,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const container = containerRef.current;
         if (!term || !container) return;
 
-        const dims = getScaledDimensions(container, term);
+        const dims = getScaledDimensions(container, term, fontSizeRef.current);
         if (dims) {
           resizeTerminal(term, dims.cols, dims.rows);
         }
@@ -164,7 +168,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const containerStyle = getComputedStyle(containerRef.current);
       const containerWidth = parseFloat(containerStyle.width);
       const containerHeight = parseFloat(containerStyle.height);
-      const measured = measureFont(FONT_FAMILY, FONT_SIZE);
+      const initialFontSize = fontSizeRef.current;
+      const measured = measureFont(FONT_FAMILY, initialFontSize);
       const dpr = window.devicePixelRatio;
 
       // Calculate initial cols/rows using same logic as getScaledDimensions
@@ -192,7 +197,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         rows: initialRows,
         allowProposedApi: true,
         cursorBlink: true,
-        fontSize: FONT_SIZE,
+        fontSize: initialFontSize,
         fontFamily: FONT_FAMILY,
         scrollback: 10000,
         // VS Code options
@@ -234,7 +239,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           const container = containerRef.current;
           if (container && term) {
             requestAnimationFrame(() => {
-              const dims = getScaledDimensions(container, term);
+              const dims = getScaledDimensions(container, term, fontSizeRef.current);
               if (dims) {
                 resizeTerminal(term, dims.cols, dims.rows);
               }
@@ -291,7 +296,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const container = containerRef.current;
         if (!container) return;
 
-        const dims = getScaledDimensions(container, term);
+        const dims = getScaledDimensions(container, term, fontSizeRef.current);
         if (!dims) return;
 
         const { cols, rows } = dims;
@@ -346,7 +351,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         if (!readyFired) {
           // Wait one frame for renderer to initialize cell dimensions
           requestAnimationFrame(() => {
-            const dims = getScaledDimensions(containerRef.current!, term);
+            const dims = getScaledDimensions(containerRef.current!, term, fontSizeRef.current);
             if (dims && dims.cols > 0 && dims.rows > 0) {
               readyFired = true;
               lastCols = dims.cols;
@@ -385,7 +390,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             clearTimeout(xResizeTimeout);
             const container = containerRef.current;
             if (container) {
-              const dims = getScaledDimensions(container, term);
+              const dims = getScaledDimensions(container, term, fontSizeRef.current);
               if (dims) {
                 lastCols = dims.cols;
                 lastRows = dims.rows;
@@ -407,7 +412,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           currentDpr = newDpr;
           const container = containerRef.current;
           if (container) {
-            const dims = getScaledDimensions(container, term);
+            const dims = getScaledDimensions(container, term, fontSizeRef.current);
             if (dims) {
               resizeTerminal(term, dims.cols, dims.rows);
             }
@@ -428,6 +433,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         term.dispose();
       };
     }, []);
+
+    // Handle fontSize changes after terminal is created
+    useEffect(() => {
+      const term = xtermRef.current;
+      const container = containerRef.current;
+      if (!term || !container) return;
+
+      // Update xterm font size
+      term.options.fontSize = fontSize;
+
+      // Recalculate dimensions with new font size
+      const dims = getScaledDimensions(container, term, fontSize);
+      if (dims) {
+        term.resize(dims.cols, dims.rows);
+        onResizeRef.current?.(dims.cols, dims.rows);
+      }
+    }, [fontSize]);
 
     return <div ref={containerRef} className="terminal-container" />;
   }

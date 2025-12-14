@@ -19,7 +19,7 @@
 
 .changes-title {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -41,7 +41,7 @@
   border-radius: 4px;
   padding: 2px 6px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: #ff6b35;
 }
 
@@ -61,7 +61,7 @@
 
 .section-header {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -75,7 +75,7 @@
   padding: 4px 12px;
   gap: 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .change-file:hover {
@@ -90,7 +90,7 @@
 
 .file-status {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   width: 12px;
   flex-shrink: 0;
@@ -112,7 +112,7 @@
 
 .file-stats {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   display: flex;
   gap: 4px;
   flex-shrink: 0;
@@ -125,7 +125,7 @@
   padding: 8px 12px;
   border-bottom: 1px solid #2a2a2d;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   color: #888;
   display: flex;
   gap: 8px;
@@ -135,11 +135,11 @@
   padding: 20px 12px;
   text-align: center;
   color: #555;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .changes-error {
   padding: 12px;
   color: #ef4444;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
 }

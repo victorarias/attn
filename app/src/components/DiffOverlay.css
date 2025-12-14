@@ -31,7 +31,7 @@
 
 .diff-filename {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: #e8e8e8;
   flex: 1;
@@ -44,7 +44,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: #888;
 }
 
@@ -55,7 +55,7 @@
   color: #888;
   padding: 4px 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .diff-nav button:hover:not(:disabled) {
@@ -72,7 +72,7 @@
   background: none;
   border: none;
   color: #555;
-  font-size: 18px;
+  font-size: var(--font-size-lg);
   cursor: pointer;
   padding: 4px 8px;
   line-height: 1;
@@ -93,7 +93,7 @@
   justify-content: center;
   height: 100%;
   color: #555;
-  font-size: 14px;
+  font-size: var(--font-size);
 }
 
 .diff-error {
@@ -102,7 +102,7 @@
   justify-content: center;
   height: 100%;
   color: #ef4444;
-  font-size: 14px;
+  font-size: var(--font-size);
   padding: 20px;
   text-align: center;
 }

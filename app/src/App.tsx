@@ -19,6 +19,7 @@ import { normalizeSessionState } from './types/sessionState';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useUIScale } from './hooks/useUIScale';
 import { getRepoName } from './utils/repo';
 import './App.css';
 
@@ -40,6 +41,11 @@ function App() {
     setPRs,
     setRepoStates,
   } = useDaemonStore();
+
+  // UI scale for font sizing (Cmd+/Cmd-)
+  const { scale, increaseScale, decreaseScale, resetScale } = useUIScale();
+  const terminalFontSize = Math.round(14 * scale);
+  const diffFontSize = Math.round(12 * scale);
 
   // Track PR refresh state for progress indicator
   const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
@@ -524,6 +530,9 @@ function App() {
         }
       }
     },
+    onIncreaseFontSize: increaseScale,
+    onDecreaseFontSize: decreaseScale,
+    onResetFontSize: resetScale,
     enabled: !locationPickerOpen && !branchPickerOpen,
   });
 
@@ -574,6 +583,7 @@ function App() {
             >
               <Terminal
                 ref={setTerminalRef(session.id)}
+                fontSize={terminalFontSize}
                 onReady={handleTerminalReady(session.id)}
                 onResize={handleResize(session.id)}
               />
@@ -652,6 +662,7 @@ function App() {
         filePath={diffOverlay.path}
         fileIndex={diffOverlay.index}
         totalFiles={totalDiffFiles}
+        fontSize={diffFontSize}
         onClose={handleDiffClose}
         onPrev={() => handleDiffNav('prev')}
         onNext={() => handleDiffNav('next')}

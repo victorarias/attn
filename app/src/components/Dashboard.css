@@ -22,14 +22,14 @@
 
 .dashboard-header h1 {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 24px;
+  font-size: var(--font-size-xl);
   font-weight: 700;
   color: #e8e8e8;
   margin: 0;
 }
 
 .dashboard-subtitle {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: #555;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -66,7 +66,7 @@
   border: 1px solid rgba(255, 107, 53, 0.3);
   border-radius: 6px;
   color: #ff6b35;
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 
 .rate-limit-banner svg {
@@ -101,7 +101,7 @@
 
 .card-header h2 {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -114,7 +114,7 @@
   border: 1px solid #2a2a2d;
   border-radius: 4px;
   color: #888;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   padding: 4px 10px;
   cursor: pointer;
 }
@@ -127,7 +127,7 @@
 .card-count {
   background: #ff6b35;
   color: #000;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 10px;
@@ -209,7 +209,7 @@
 
 .card-empty {
   color: #555;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   text-align: center;
   padding: 20px;
 }
@@ -219,7 +219,7 @@
 }
 
 .group-label {
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   color: #555;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -233,7 +233,7 @@
   gap: 10px;
   padding: 10px 12px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: #e8e8e8;
 }
 
@@ -280,7 +280,7 @@
 }
 
 .shortcut {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: #555;
 }
 
@@ -290,7 +290,7 @@
   border-radius: 3px;
   padding: 2px 6px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   margin-right: 6px;
 }
 
@@ -309,7 +309,7 @@
   gap: 8px;
   padding: 8px 10px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: #e8e8e8;
 }
 
@@ -349,7 +349,7 @@
 }
 
 .repo-counts .count {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -383,7 +383,7 @@
   align-items: center;
   gap: 8px;
   flex: 1;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: #888;
   text-decoration: none;
   overflow: hidden;
@@ -398,13 +398,13 @@
 }
 
 .pr-role {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .pr-number {
   color: #555;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
 }
 
 .pr-title {
@@ -415,7 +415,7 @@
 }
 
 .pr-reason {
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   color: #555;
   background: #1a1a1d;
   padding: 2px 6px;
@@ -429,7 +429,7 @@
   border: 1px solid #3a3a3d;
   border-radius: 4px;
   color: #888;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   padding: 4px 8px;
   cursor: pointer;
   transition: all 150ms;

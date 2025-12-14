@@ -32,7 +32,7 @@
 
 .drawer-title {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   letter-spacing: 0.15em;
   text-transform: uppercase;
@@ -43,7 +43,7 @@
   background: #ff6b35;
   color: #000;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   padding: 3px 8px;
   border-radius: 10px;
@@ -56,7 +56,7 @@
   background: none;
   border: none;
   color: #444;
-  font-size: 18px;
+  font-size: var(--font-size-lg);
   cursor: pointer;
   padding: 4px 8px;
   line-height: 1;
@@ -86,7 +86,7 @@
   align-items: center;
   gap: 10px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -97,7 +97,7 @@
 .section-count {
   background: rgba(255, 107, 53, 0.15);
   color: #ff6b35;
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 4px;
@@ -110,7 +110,7 @@
   gap: 12px;
   padding: 12px 14px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: #e8e8e8;
   text-decoration: none;
   margin-bottom: 4px;
@@ -208,7 +208,7 @@
   align-items: center;
   gap: 8px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: #666;
 }
 
@@ -227,7 +227,7 @@
 
 /* PR title - full display, wraps to 2 lines max */
 .pr-title-full {
-  font-size: 13px;
+  font-size: var(--font-size-md);
   line-height: 1.4;
   color: #d4d4d4;
   display: -webkit-box;
@@ -254,7 +254,7 @@
 
 .pr-reason {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   letter-spacing: 0.05em;
   color: #666;
   background: rgba(255, 255, 255, 0.04);
@@ -272,7 +272,7 @@
 /* Legacy support for items without new structure */
 .item-reason {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   color: #666;
   background: rgba(255, 255, 255, 0.04);
   padding: 3px 8px;
@@ -283,7 +283,7 @@
 /* Empty state */
 .drawer-empty {
   color: #444;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   text-align: center;
   padding: 60px 24px;
   line-height: 1.5;
@@ -299,7 +299,7 @@
 }
 
 .drawer-footer .shortcut {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: #444;
 }
 
@@ -309,7 +309,7 @@
   border-radius: 4px;
   padding: 3px 6px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   margin-right: 6px;
   color: #666;
 }

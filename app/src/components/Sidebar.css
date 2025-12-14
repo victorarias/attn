@@ -22,7 +22,7 @@
   border: 1px solid #2a2a2d;
   border-radius: 4px;
   color: #888;
-  font-size: 14px;
+  font-size: var(--font-size);
   width: 28px;
   height: 28px;
   cursor: pointer;
@@ -38,13 +38,13 @@
 
 .home-shortcut {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   color: #555;
 }
 
 .sidebar-title {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -86,7 +86,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: #888;
   font-family: 'JetBrains Mono', monospace;
 }
@@ -98,7 +98,7 @@
   padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: #e8e8e8;
 }
 
@@ -150,7 +150,7 @@
 
 .session-branch {
   color: #666;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -158,14 +158,14 @@
 
 .worktree-indicator {
   color: #888;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   margin-left: auto;
   margin-right: 4px;
 }
 
 .session-shortcut {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   color: #555;
 }
 
@@ -194,7 +194,7 @@
 }
 
 .shortcut-hint {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: #555;
 }
 

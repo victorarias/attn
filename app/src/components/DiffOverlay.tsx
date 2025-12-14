@@ -12,6 +12,7 @@ interface DiffOverlayProps {
   filePath: string;
   fileIndex: number;
   totalFiles: number;
+  fontSize?: number;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
@@ -23,6 +24,7 @@ export function DiffOverlay({
   filePath,
   fileIndex,
   totalFiles,
+  fontSize = 12,
   onClose,
   onPrev,
   onNext,
@@ -140,7 +142,7 @@ export function DiffOverlay({
                   renderSideBySide: true,
                   minimap: { enabled: false },
                   scrollBeyondLastLine: false,
-                  fontSize: 12,
+                  fontSize,
                   fontFamily: "'JetBrains Mono', monospace",
                   lineNumbers: 'on',
                   renderLineHighlight: 'none',
