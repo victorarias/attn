@@ -73,8 +73,8 @@ export function useKeyboardShortcuts({
         return;
       }
 
-      // ⌘D or Escape - Go to dashboard
-      if ((isMeta && e.key === 'd') || e.key === 'Escape') {
+      // ⌘D - Go to dashboard
+      if (isMeta && e.key === 'd') {
         e.preventDefault();
         onGoToDashboard();
         return;
