@@ -2,7 +2,7 @@
 .dashboard {
   height: 100%;
   width: 100%;
-  background: #0a0a0b;
+  background: #0d0d0f;
   display: flex;
   flex-direction: column;
   padding: 40px;
@@ -24,8 +24,18 @@
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xl);
   font-weight: 700;
-  color: #e8e8e8;
+  background: linear-gradient(135deg, #ff6b35 0%, #ff9966 50%, #ff6b35 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   margin: 0;
+  animation: gradient-shift 8s ease infinite;
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% center; }
+  50% { background-position: 100% center; }
 }
 
 .dashboard-subtitle {
@@ -89,6 +99,12 @@
   flex-direction: column;
   min-height: 0; /* Allow card to shrink for scrolling */
   overflow: hidden;
+  transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+
+.dashboard-card:hover {
+  border-color: #3a3a3d;
+  box-shadow: 0 0 0 1px rgba(255, 107, 53, 0.08), 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .card-header {
@@ -285,13 +301,14 @@
 }
 
 .shortcut kbd {
-  background: #1a1a1d;
+  background: linear-gradient(180deg, #1e1e20 0%, #161618 100%);
   border: 1px solid #2a2a2d;
-  border-radius: 3px;
-  padding: 2px 6px;
+  border-radius: 4px;
+  padding: 3px 8px;
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-sm);
   margin-right: 6px;
+  box-shadow: 0 1px 0 #2a2a2d, 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 /* PR list styles */

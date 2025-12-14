@@ -7,6 +7,10 @@
   --font-size: calc(14px * var(--ui-scale));
   --font-size-lg: calc(18px * var(--ui-scale));
   --font-size-xl: calc(24px * var(--ui-scale));
+
+  /* Brand colors */
+  --accent: #ff6b35;
+  --accent-glow: rgba(255, 107, 53, 0.15);
 }
 
 * {
@@ -27,8 +31,31 @@ html, body, #root {
   height: 100%;
   width: 100%;
   display: flex;
-  background: #0a0a0b;
+  background: #0d0d0f;
   position: relative;
+}
+
+/* Custom scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a2d;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3d;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .view-container {
@@ -85,9 +112,22 @@ html, body, #root {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #808080;
+  color: #606060;
   font-size: var(--font-size);
-  gap: 8px;
+  gap: 12px;
+}
+
+.no-sessions::before {
+  content: '>';
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 32px;
+  color: #333;
+  animation: cursor-blink 1s steps(1) infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
 }
 
 /* Connection error banner - shown for version mismatch etc. */

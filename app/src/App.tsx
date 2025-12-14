@@ -83,6 +83,19 @@ function App() {
     index: number;
   }>({ isOpen: false, path: '', staged: false, index: 0 });
 
+  // Hide loading screen on mount
+  useEffect(() => {
+    const loadingScreen = document.getElementById('loading-screen');
+    if (loadingScreen) {
+      // Small delay to ensure smooth transition
+      setTimeout(() => {
+        loadingScreen.classList.add('hidden');
+        // Remove from DOM after transition completes
+        setTimeout(() => loadingScreen.remove(), 300);
+      }, 100);
+    }
+  }, []);
+
   // Ensure daemon is running before connecting
   useEffect(() => {
     async function ensureDaemon() {

@@ -4,10 +4,171 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>attn</title>
+    <style>
+      /* Loading screen - shown before React mounts */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html, body {
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+        background: #0d0d0f;
+      }
+
+      #loading-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: #0d0d0f;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        opacity: 1;
+        transition: opacity 0.3s ease-out;
+      }
+
+      #loading-screen.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      /* Subtle scan lines overlay */
+      #loading-screen::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent 2px,
+          rgba(0, 0, 0, 0.03) 2px,
+          rgba(0, 0, 0, 0.03) 4px
+        );
+        pointer-events: none;
+      }
+
+      /* Brand wordmark */
+      .loading-brand {
+        font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+        font-size: 48px;
+        font-weight: 700;
+        letter-spacing: -2px;
+        background: linear-gradient(135deg, #ff6b35 0%, #ff9966 50%, #ff6b35 100%);
+        background-size: 200% auto;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        position: relative;
+        animation: gradient-pulse 3s ease infinite;
+      }
+
+      @keyframes gradient-pulse {
+        0%, 100% { background-position: 0% center; }
+        50% { background-position: 100% center; }
+      }
+
+      /* Typing cursor effect */
+      .loading-brand::after {
+        content: '_';
+        position: absolute;
+        right: -24px;
+        -webkit-text-fill-color: #ff6b35;
+        animation: cursor-blink 0.8s steps(1) infinite;
+      }
+
+      @keyframes cursor-blink {
+        0%, 50% { opacity: 1; }
+        51%, 100% { opacity: 0; }
+      }
+
+      /* Subtitle */
+      .loading-subtitle {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 11px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #444;
+        margin-top: 16px;
+        opacity: 0;
+        animation: fade-in 0.5s ease 0.3s forwards;
+      }
+
+      @keyframes fade-in {
+        to { opacity: 1; }
+      }
+
+      /* Loading indicator - three dots */
+      .loading-dots {
+        display: flex;
+        gap: 6px;
+        margin-top: 40px;
+      }
+
+      .loading-dots span {
+        width: 6px;
+        height: 6px;
+        background: #333;
+        border-radius: 50%;
+        animation: dot-pulse 1.4s ease-in-out infinite;
+      }
+
+      .loading-dots span:nth-child(1) { animation-delay: 0s; }
+      .loading-dots span:nth-child(2) { animation-delay: 0.16s; }
+      .loading-dots span:nth-child(3) { animation-delay: 0.32s; }
+
+      @keyframes dot-pulse {
+        0%, 80%, 100% {
+          transform: scale(0.8);
+          background: #333;
+        }
+        40% {
+          transform: scale(1.2);
+          background: #ff6b35;
+        }
+      }
+
+      /* Ambient glow */
+      .loading-glow {
+        position: absolute;
+        width: 300px;
+        height: 300px;
+        background: radial-gradient(circle, rgba(255, 107, 53, 0.08) 0%, transparent 70%);
+        border-radius: 50%;
+        filter: blur(40px);
+        animation: glow-breathe 4s ease-in-out infinite;
+      }
+
+      @keyframes glow-breathe {
+        0%, 100% { opacity: 0.5; transform: scale(1); }
+        50% { opacity: 0.8; transform: scale(1.1); }
+      }
+
+      #root {
+        height: 100%;
+        width: 100%;
+      }
+    </style>
   </head>
 
   <body>
+    <!-- Loading screen - hidden when React mounts -->
+    <div id="loading-screen">
+      <div class="loading-glow"></div>
+      <div class="loading-brand">attn</div>
+      <div class="loading-subtitle">attention hub</div>
+      <div class="loading-dots">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
