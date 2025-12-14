@@ -85,3 +85,13 @@
 .terminal-container .xterm .xterm-scrollable-element > .invisible.fade {
   transition: opacity 800ms linear;
 }
+
+/* Hide scrollbar track background to prevent rectangle artifact */
+.terminal-container .xterm .xterm-scrollable-element > .scrollbar > .slider {
+  background: rgba(121, 121, 121, 0.4);
+  border-radius: 4px;
+}
+
+.terminal-container .xterm .xterm-scrollable-element > .scrollbar.vertical {
+  background: transparent;
+}
