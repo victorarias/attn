@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
-import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
+import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke } from '@tauri-apps/api/core';
 import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
@@ -151,39 +151,52 @@ function App() {
   // Track processed deep links to avoid duplicates (persists across re-renders)
   const processedDeepLinks = useRef(new Set<string>());
 
-  // Handle deep-link spawn requests (attn://spawn?cwd=/path&label=name)
-  // Note: We access sessions via store to avoid dependency changes triggering re-registration
-  useEffect(() => {
-    const handleDeepLinkUrl = (urlStr: string) => {
-      // Deduplicate: only process each unique URL once
-      if (processedDeepLinks.current.has(urlStr)) {
-        return;
-      }
-      processedDeepLinks.current.add(urlStr);
+  // Handle a deep-link URL (used by both cold start and runtime handlers)
+  const handleDeepLinkUrl = useCallback((urlStr: string) => {
+    // Deduplicate: only process each unique URL once
+    if (processedDeepLinks.current.has(urlStr)) {
+      return;
+    }
+    processedDeepLinks.current.add(urlStr);
 
-      try {
-        const url = new URL(urlStr);
-        if (url.host === 'spawn') {
-          const cwd = url.searchParams.get('cwd');
-          const label = url.searchParams.get('label') || cwd?.split('/').pop() || 'session';
-          if (cwd) {
-            // Check if session for this cwd already exists (read current state)
-            const currentSessions = useSessionStore.getState().sessions;
-            const existingSession = currentSessions.find((s) => s.cwd === cwd);
-            if (existingSession) {
-              // Just activate the existing session
-              setActiveSession(existingSession.id);
-            } else {
-              createSession(label, cwd);
-            }
+    try {
+      const url = new URL(urlStr);
+      if (url.host === 'spawn') {
+        const cwd = url.searchParams.get('cwd');
+        const label = url.searchParams.get('label') || cwd?.split('/').pop() || 'session';
+        if (cwd) {
+          // Check if session for this cwd already exists (read current state)
+          const currentSessions = useSessionStore.getState().sessions;
+          const existingSession = currentSessions.find((s) => s.cwd === cwd);
+          if (existingSession) {
+            // Just activate the existing session
+            setActiveSession(existingSession.id);
+          } else {
+            createSession(label, cwd);
           }
         }
-      } catch (e) {
-        console.error('Failed to parse deep-link URL:', e);
       }
-    };
+    } catch (e) {
+      console.error('Failed to parse deep-link URL:', e);
+    }
+  }, [createSession, setActiveSession]);
 
-    // Listen for deep links - onOpenUrl calls getCurrent on registration for cold starts
+  // Handle cold-start deep links (app opened via URL when not running)
+  useEffect(() => {
+    getCurrent().then((urls) => {
+      if (urls && urls.length > 0) {
+        console.log('[DeepLink] Cold start URLs:', urls);
+        for (const urlStr of urls) {
+          handleDeepLinkUrl(urlStr);
+        }
+      }
+    }).catch((err) => {
+      console.error('[DeepLink] getCurrent failed:', err);
+    });
+  }, [handleDeepLinkUrl]);
+
+  // Handle deep links while app is running
+  useEffect(() => {
     const unlisten = onOpenUrl((urls) => {
       for (const urlStr of urls) {
         handleDeepLinkUrl(urlStr);
@@ -193,7 +206,7 @@ function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [createSession, setActiveSession]); // Stable deps from Zustand
+  }, [handleDeepLinkUrl]);
 
   // Enrich local sessions with daemon state (working/waiting from hooks)
   const enrichedLocalSessions = sessions.map((s) => {
