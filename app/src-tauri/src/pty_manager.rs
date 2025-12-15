@@ -12,6 +12,55 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter, State};
 
+/// Find the last safe UTF-8 boundary in a byte slice.
+/// Returns the index up to which the slice contains only complete UTF-8 sequences.
+/// The remainder (from returned index to end) should be carried over to the next read.
+fn find_utf8_boundary(bytes: &[u8]) -> usize {
+    if bytes.is_empty() {
+        return 0;
+    }
+
+    let len = bytes.len();
+
+    // Walk backwards from the end looking for a potential incomplete sequence.
+    // UTF-8 sequences are at most 4 bytes, so we only need to check the last 4 bytes.
+    for i in (len.saturating_sub(4)..len).rev() {
+        let b = bytes[i];
+
+        // Skip continuation bytes (10xxxxxx)
+        if (b & 0b1100_0000) == 0b1000_0000 {
+            continue;
+        }
+
+        // Found a start byte - determine expected sequence length
+        let expected_len = if b < 0x80 {
+            1 // ASCII
+        } else if (b & 0b1110_0000) == 0b1100_0000 {
+            2 // 110xxxxx = 2-byte sequence
+        } else if (b & 0b1111_0000) == 0b1110_0000 {
+            3 // 1110xxxx = 3-byte sequence
+        } else if (b & 0b1111_1000) == 0b1111_0000 {
+            4 // 11110xxx = 4-byte sequence
+        } else {
+            1 // Invalid byte, treat as single byte
+        };
+
+        let actual_len = len - i;
+
+        if actual_len >= expected_len {
+            // Sequence is complete, safe to send everything
+            return len;
+        } else {
+            // Sequence is incomplete, cut before this start byte
+            return i;
+        }
+    }
+
+    // All bytes in last 4 positions are continuation bytes (shouldn't happen normally)
+    // or we have a very short buffer - be conservative, send what we have
+    len
+}
+
 /// Holds a PTY session's resources
 struct PtySession {
     #[allow(dead_code)]
@@ -49,24 +98,27 @@ pub async fn pty_spawn(
 
     // Determine command to spawn
     let is_shell = shell.unwrap_or(false);
+    let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+
     let mut cmd = if is_shell {
         // Plain shell for utility terminals
-        let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         let mut cmd = CommandBuilder::new(&shell_path);
         cmd.arg("-l");
         cmd
     } else {
         // Claude Code with hooks via attn wrapper
-        // Use absolute path since bundled apps have minimal PATH
+        // Spawn through shell like the old node-pty code did
+        // This ensures proper terminal environment setup
         let attn_path = dirs::home_dir()
             .map(|h| h.join(".local/bin/attn"))
             .filter(|p| p.exists())
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| "attn".to_string());
 
-        let mut cmd = CommandBuilder::new(&attn_path);
-        cmd.arg("-y");
-        cmd.env("ATTN_INSIDE_APP", "1");
+        let mut cmd = CommandBuilder::new(&shell_path);
+        cmd.arg("-l");
+        cmd.arg("-c");
+        cmd.arg(format!("ATTN_INSIDE_APP=1 exec {attn_path} -y"));
         cmd
     };
 
@@ -109,22 +161,53 @@ pub async fn pty_spawn(
     let sessions_ref = Arc::clone(&state.sessions);
     thread::spawn(move || {
         let mut reader = reader;
-        let mut buf = [0u8; 4096];
+        // Large buffer to naturally coalesce PTY output at OS level
+        let mut buf = [0u8; 16384];
+        // Buffer for incomplete UTF-8 sequences carried over between reads
+        let mut utf8_carryover: Vec<u8> = Vec::with_capacity(4);
 
         loop {
             match reader.read(&mut buf) {
-                Ok(0) => break, // EOF
+                Ok(0) => {
+                    // EOF - flush any remaining carryover
+                    if !utf8_carryover.is_empty() {
+                        let data = BASE64.encode(&utf8_carryover);
+                        let _ = app.emit(
+                            "pty-event",
+                            json!({
+                                "event": "data",
+                                "id": session_id,
+                                "data": data,
+                            }),
+                        );
+                    }
+                    break;
+                }
                 Ok(n) => {
-                    // Send base64-encoded data to frontend
-                    let data = BASE64.encode(&buf[..n]);
-                    let _ = app.emit(
-                        "pty-event",
-                        json!({
-                            "event": "data",
-                            "id": session_id,
-                            "data": data,
-                        }),
-                    );
+                    // Combine carryover with new data
+                    let mut combined = std::mem::take(&mut utf8_carryover);
+                    combined.extend_from_slice(&buf[..n]);
+
+                    // Find safe UTF-8 boundary
+                    let boundary = find_utf8_boundary(&combined);
+
+                    // Only emit if we have complete sequences to send
+                    if boundary > 0 {
+                        let data = BASE64.encode(&combined[..boundary]);
+                        let _ = app.emit(
+                            "pty-event",
+                            json!({
+                                "event": "data",
+                                "id": session_id,
+                                "data": data,
+                            }),
+                        );
+                    }
+
+                    // Carry over incomplete sequence for next read
+                    if boundary < combined.len() {
+                        utf8_carryover = combined[boundary..].to_vec();
+                    }
                 }
                 Err(_) => break,
             }
