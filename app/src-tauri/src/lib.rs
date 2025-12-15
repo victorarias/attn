@@ -94,8 +94,6 @@ async fn list_directory(path: String, prefix: Option<String>) -> Result<Vec<Stri
     Ok(directories)
 }
 
-use tauri::Manager;
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
