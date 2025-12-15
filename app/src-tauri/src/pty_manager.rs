@@ -8,9 +8,34 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter, State};
+
+/// Get the user's actual login shell from the system (macOS).
+/// Falls back to None if it can't be determined.
+fn get_user_login_shell() -> Option<String> {
+    // Get username from environment
+    let username = std::env::var("USER").ok()?;
+
+    // On macOS, use dscl to get the login shell
+    let output = Command::new("dscl")
+        .args([".", "-read", &format!("/Users/{}", username), "UserShell"])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // Output format: "UserShell: /path/to/shell"
+        stdout
+            .lines()
+            .find(|line| line.starts_with("UserShell:"))
+            .map(|line| line.trim_start_matches("UserShell:").trim().to_string())
+    } else {
+        None
+    }
+}
 
 /// Find the last safe UTF-8 boundary in a byte slice.
 /// Returns the index up to which the slice contains only complete UTF-8 sequences.
@@ -98,26 +123,28 @@ pub async fn pty_spawn(
 
     // Determine command to spawn
     let is_shell = shell.unwrap_or(false);
-    let shell_path = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+
+    // Get user's actual login shell (not $SHELL which may differ)
+    let login_shell = get_user_login_shell()
+        .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()));
 
     let mut cmd = if is_shell {
         // Plain shell for utility terminals
-        let mut cmd = CommandBuilder::new(&shell_path);
+        let mut cmd = CommandBuilder::new(&login_shell);
         cmd.arg("-l");
         cmd
     } else {
         // Claude Code with hooks via attn wrapper
-        // Spawn through shell like the old node-pty code did
-        // This ensures proper terminal environment setup
         let attn_path = dirs::home_dir()
             .map(|h| h.join(".local/bin/attn"))
             .filter(|p| p.exists())
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| "attn".to_string());
 
-        let mut cmd = CommandBuilder::new(&shell_path);
+        let mut cmd = CommandBuilder::new(&login_shell);
         cmd.arg("-l");
         cmd.arg("-c");
+        // Use shell-agnostic env var syntax
         cmd.arg(format!("ATTN_INSIDE_APP=1 exec {attn_path} -y"));
         cmd
     };
