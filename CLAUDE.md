@@ -40,7 +40,7 @@ Attention Manager (`attn`) tracks multiple Claude Code sessions and surfaces whi
 
 ### Core Flow
 
-1. **Wrapper** (`cmd/attn/main.go`): CLI entry point that wraps `claude` command. Parses attn-specific flags (`-s`, `-y`, `-d`), passes unknown flags through to claude. Registers session with daemon, writes temporary hooks config, executes claude with `--settings` pointing to hooks.
+1. **Wrapper** (`cmd/attn/main.go`): CLI entry point that wraps `claude` command. Parses attn-specific flags (`-s`), passes unknown flags through to claude. Registers session with daemon, writes temporary hooks config, executes claude with `--settings` pointing to hooks.
 
 2. **Hooks** (`internal/hooks`): Generates Claude Code hooks JSON that reports state changes back to daemon via unix socket using `nc`. Three hooks: Stop (waiting), UserPromptSubmit (working), PostToolUse/TodoWrite (update todos).
 

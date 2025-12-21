@@ -145,7 +145,7 @@ pub async fn pty_spawn(
         cmd.arg("-l");
         cmd.arg("-c");
         // Use shell-agnostic env var syntax
-        cmd.arg(format!("ATTN_INSIDE_APP=1 exec {attn_path} -y"));
+        cmd.arg(format!("ATTN_INSIDE_APP=1 exec {attn_path}"));
         cmd
     };
 
