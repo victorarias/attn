@@ -177,6 +177,9 @@ type CreateWorktreeMessage struct {
 
 	// Path corresponds to the JSON schema field "path".
 	Path *string `json:"path,omitempty"`
+
+	// StartingFrom corresponds to the JSON schema field "starting_from".
+	StartingFrom *string `json:"starting_from,omitempty"`
 }
 
 type CreateWorktreeResultMessage struct {

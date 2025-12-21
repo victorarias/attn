@@ -217,6 +217,7 @@ model CreateWorktreeMessage {
   main_repo: string;
   branch: string;
   path?: string;
+  starting_from?: string;  // Branch to create worktree from (default: current HEAD)
 }
 
 model DeleteWorktreeMessage {

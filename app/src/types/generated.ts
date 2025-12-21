@@ -247,10 +247,11 @@ export enum CreateWorktreeFromBranchMessageCmd {
 }
 
 export interface CreateWorktreeMessage {
-    branch:    string;
-    cmd:       CreateWorktreeMessageCmd;
-    main_repo: string;
-    path?:     string;
+    branch:         string;
+    cmd:            CreateWorktreeMessageCmd;
+    main_repo:      string;
+    path?:          string;
+    starting_from?: string;
     [property: string]: any;
 }
 
@@ -1924,6 +1925,7 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("CreateWorktreeMessageCmd") },
         { json: "main_repo", js: "main_repo", typ: "" },
         { json: "path", js: "path", typ: u(undefined, "") },
+        { json: "starting_from", js: "starting_from", typ: u(undefined, "") },
     ], "any"),
     "CreateWorktreeResultMessage": o([
         { json: "error", js: "error", typ: u(undefined, "") },

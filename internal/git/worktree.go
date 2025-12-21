@@ -61,6 +61,20 @@ func CreateWorktree(repoDir, branch, path string) error {
 	return nil
 }
 
+// CreateWorktreeFromPoint creates a worktree with a new branch starting from a specific ref.
+func CreateWorktreeFromPoint(repoDir, branch, path, startingFrom string) error {
+	args := []string{"worktree", "add", "-b", branch, path}
+	if startingFrom != "" {
+		args = append(args, startingFrom)
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree add failed: %s", out)
+	}
+	return nil
+}
+
 // CreateWorktreeFromBranch creates a worktree from an existing branch
 func CreateWorktreeFromBranch(repoDir, branch, path string) error {
 	cmd := exec.Command("git", "worktree", "add", ExpandPath(path), branch)

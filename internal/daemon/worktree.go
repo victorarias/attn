@@ -68,7 +68,14 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 		path = git.GenerateWorktreePath(msg.MainRepo, msg.Branch)
 	}
 
-	if err := git.CreateWorktree(msg.MainRepo, msg.Branch, path); err != nil {
+	startingFrom := protocol.Deref(msg.StartingFrom)
+	var err error
+	if startingFrom != "" {
+		err = git.CreateWorktreeFromPoint(msg.MainRepo, msg.Branch, path, startingFrom)
+	} else {
+		err = git.CreateWorktree(msg.MainRepo, msg.Branch, path)
+	}
+	if err != nil {
 		return "", err
 	}
 
