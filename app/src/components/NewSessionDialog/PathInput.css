@@ -1,0 +1,37 @@
+.path-input-container {
+  position: relative;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+}
+
+.path-input {
+  width: 100%;
+  background: var(--bg-deep, #0d1117);
+  border: 1px solid var(--text-muted, #484f58);
+  padding: 12px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text-primary, #e6edf3);
+  caret-color: var(--git-green, #3fb950);
+  outline: none;
+  transition: border-color 80ms ease-out, box-shadow 80ms ease-out;
+}
+
+.path-input:focus {
+  border-color: var(--git-blue, #58a6ff);
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+}
+
+.path-input::placeholder {
+  color: var(--text-muted, #484f58);
+}
+
+.path-ghost {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: var(--text-muted, #484f58);
+  pointer-events: none;
+  white-space: pre;
+}
