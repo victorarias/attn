@@ -113,6 +113,23 @@ interface RemoteBranchesResult {
   error?: string;
 }
 
+interface RepoInfo {
+  repo: string;
+  current_branch: string;
+  current_commit_hash: string;
+  current_commit_time: string;
+  default_branch: string;
+  worktrees: DaemonWorktree[];
+  branches: Branch[];
+  fetched_at?: string;
+}
+
+interface RepoInfoResult {
+  success: boolean;
+  info?: RepoInfo;
+  error?: string;
+}
+
 interface GitFileChange {
   path: string;
   status: string;
@@ -571,6 +588,22 @@ export function useDaemonSocket({
                 });
               } else {
                 pending.reject(new Error(data.error || 'Failed to get diff'));
+              }
+            }
+            break;
+          }
+
+          case 'get_repo_info_result': {
+            // Extract repo from info to build key
+            const repoPath = (data as any).info?.repo || '';
+            const key = `repo_info_${repoPath}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (pending) {
+              pendingActionsRef.current.delete(key);
+              if ((data as any).success) {
+                pending.resolve({ success: true, info: (data as any).info });
+              } else {
+                pending.resolve({ success: false, error: (data as any).error });
               }
             }
             break;
@@ -1180,6 +1213,29 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Get repo info
+  const getRepoInfo = useCallback((repo: string): Promise<RepoInfoResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = `repo_info_${repo}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'get_repo_info', repo }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('get_repo_info timeout'));
+        }
+      }, 30000);
+    });
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -1214,5 +1270,6 @@ export function useDaemonSocket({
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendGetFileDiff,
+    getRepoInfo,
   };
 }
