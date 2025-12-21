@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,18 +26,25 @@ import (
 	"github.com/victorarias/claude-manager/internal/transcript"
 )
 
+type repoCache struct {
+	fetchedAt time.Time
+	branches  []protocol.Branch
+}
+
 // Daemon manages Claude sessions
 type Daemon struct {
-	socketPath string
-	pidPath    string
-	store      *store.Store
-	listener   net.Listener
-	httpServer *http.Server
-	wsHub      *wsHub
-	done       chan struct{}
-	logger     *logging.Logger
-	ghClient   github.GitHubClient
-	classifier Classifier // Optional, uses package-level classifier.Classify if nil
+	socketPath   string
+	pidPath      string
+	store        *store.Store
+	listener     net.Listener
+	httpServer   *http.Server
+	wsHub        *wsHub
+	done         chan struct{}
+	logger       *logging.Logger
+	ghClient     github.GitHubClient
+	classifier   Classifier // Optional, uses package-level classifier.Classify if nil
+	repoCaches   map[string]*repoCache
+	repoCacheMu  sync.RWMutex
 }
 
 // New creates a new daemon
@@ -81,6 +89,7 @@ func New(socketPath string) *Daemon {
 		done:       make(chan struct{}),
 		logger:     logger,
 		ghClient:   ghClient,
+		repoCaches: make(map[string]*repoCache),
 	}
 }
 
@@ -95,6 +104,7 @@ func NewForTesting(socketPath string) *Daemon {
 		done:       make(chan struct{}),
 		logger:     nil, // No logging in tests
 		ghClient:   nil,
+		repoCaches: make(map[string]*repoCache),
 	}
 }
 
@@ -109,6 +119,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		done:       make(chan struct{}),
 		logger:     nil,
 		ghClient:   ghClient,
+		repoCaches: make(map[string]*repoCache),
 	}
 }
 

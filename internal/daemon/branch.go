@@ -10,6 +10,38 @@ import (
 	"github.com/victorarias/claude-manager/internal/store"
 )
 
+const fetchCacheTTL = 30 * time.Minute
+
+func (d *Daemon) getCachedBranches(repo string) ([]protocol.Branch, time.Time, bool) {
+	d.repoCacheMu.RLock()
+	defer d.repoCacheMu.RUnlock()
+
+	cache, ok := d.repoCaches[repo]
+	if !ok {
+		return nil, time.Time{}, false
+	}
+	if time.Since(cache.fetchedAt) > fetchCacheTTL {
+		return nil, time.Time{}, false
+	}
+	return cache.branches, cache.fetchedAt, true
+}
+
+func (d *Daemon) setCachedBranches(repo string, branches []protocol.Branch) {
+	d.repoCacheMu.Lock()
+	defer d.repoCacheMu.Unlock()
+
+	d.repoCaches[repo] = &repoCache{
+		fetchedAt: time.Now(),
+		branches:  branches,
+	}
+}
+
+func (d *Daemon) invalidateBranchCache(repo string) {
+	d.repoCacheMu.Lock()
+	defer d.repoCacheMu.Unlock()
+	delete(d.repoCaches, repo)
+}
+
 // doListBranches fetches local branches not checked out in any worktree
 func (d *Daemon) doListBranches(mainRepo string) ([]protocol.Branch, error) {
 	branches, err := git.ListBranches(mainRepo)
@@ -126,6 +158,7 @@ func (d *Daemon) handleDeleteBranchWS(client *wsClient, msg *protocol.DeleteBran
 			result.Error = protocol.Ptr(err.Error())
 			d.logf("Delete branch failed for %s: %v", msg.Branch, err)
 		} else {
+			d.invalidateBranchCache(msg.MainRepo)
 			d.logf("Delete branch succeeded: %s", msg.Branch)
 		}
 		d.sendToClient(client, result)
@@ -180,6 +213,7 @@ func (d *Daemon) handleCreateBranchWS(client *wsClient, msg *protocol.CreateBran
 			result.Error = protocol.Ptr(err.Error())
 			d.logf("Create branch failed for %s: %v", msg.Branch, err)
 		} else {
+			d.invalidateBranchCache(msg.MainRepo)
 			d.logf("Create branch succeeded: %s", msg.Branch)
 		}
 		d.sendToClient(client, result)
@@ -213,20 +247,35 @@ func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfo
 		// Get worktrees
 		worktrees := d.doListWorktrees(repo)
 
-		// Get available branches with commit info
-		branchesWithCommits, err := git.ListBranchesWithCommits(repo)
-		if err != nil {
-			d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
-				Event:   protocol.EventGetRepoInfoResult,
-				Success: false,
-				Error:   protocol.Ptr(err.Error()),
-			})
-			return
-		}
+		// Check cache first
+		var branches []protocol.Branch
+		var fetchedAt *string
+		cachedBranches, cachedTime, cacheHit := d.getCachedBranches(repo)
 
-		branches := make([]protocol.Branch, len(branchesWithCommits))
-		for i, b := range branchesWithCommits {
-			branches[i] = b.ToProtocol()
+		if cacheHit {
+			// Use cached branches
+			branches = cachedBranches
+			timeStr := cachedTime.Format(time.RFC3339)
+			fetchedAt = &timeStr
+		} else {
+			// Cache miss - fetch branches with commit info
+			branchesWithCommits, err := git.ListBranchesWithCommits(repo)
+			if err != nil {
+				d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
+					Event:   protocol.EventGetRepoInfoResult,
+					Success: false,
+					Error:   protocol.Ptr(err.Error()),
+				})
+				return
+			}
+
+			branches = make([]protocol.Branch, len(branchesWithCommits))
+			for i, b := range branchesWithCommits {
+				branches[i] = b.ToProtocol()
+			}
+
+			// Cache the result
+			d.setCachedBranches(repo, branches)
 		}
 
 		d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
@@ -239,6 +288,7 @@ func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfo
 				DefaultBranch:     defaultBranch,
 				Worktrees:         worktrees,
 				Branches:          branches,
+				FetchedAt:         fetchedAt,
 			},
 			Success: true,
 		})
