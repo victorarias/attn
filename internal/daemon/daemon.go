@@ -133,8 +133,9 @@ func (d *Daemon) Start() error {
 	d.wsHub.logf = d.logf
 	go d.wsHub.run()
 
-	// Start HTTP server for WebSocket
-	go d.startHTTPServer()
+	// Create HTTP server for WebSocket (must be created synchronously to avoid race with Stop())
+	d.initHTTPServer()
+	go d.runHTTPServer()
 
 	// Note: No background persistence needed - SQLite persists immediately
 
@@ -185,7 +186,9 @@ func (d *Daemon) Stop() {
 	}
 }
 
-func (d *Daemon) startHTTPServer() {
+// initHTTPServer creates the HTTP server synchronously to avoid race with Stop().
+// Must be called before runHTTPServer().
+func (d *Daemon) initHTTPServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", d.handleWS)
 	mux.HandleFunc("/health", d.handleHealth)
@@ -199,8 +202,11 @@ func (d *Daemon) startHTTPServer() {
 		Addr:    "127.0.0.1:" + port,
 		Handler: mux,
 	}
+}
 
-	d.logf("WebSocket server starting on ws://127.0.0.1:%s/ws", port)
+// runHTTPServer starts listening. Must be called after initHTTPServer().
+func (d *Daemon) runHTTPServer() {
+	d.logf("WebSocket server starting on ws://%s/ws", d.httpServer.Addr)
 	if err := d.httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		d.logf("HTTP server error: %v", err)
 	}
