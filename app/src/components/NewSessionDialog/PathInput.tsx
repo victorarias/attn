@@ -42,7 +42,14 @@ export function PathInput({
       onChange(ghostText);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      onSelect(value || ghostText);
+      // If ghostText is a valid completion of what user typed, use it
+      // Otherwise use what they typed (or ghostText if empty)
+      const pathToSelect = (ghostText && ghostText.startsWith(value))
+        ? ghostText
+        : (value || ghostText);
+      if (pathToSelect) {
+        onSelect(pathToSelect);
+      }
     }
   }, [ghostText, value, onChange, onSelect]);
 

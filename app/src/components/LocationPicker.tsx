@@ -125,8 +125,15 @@ export function LocationPicker({
       )
     : state.recentLocations;
 
-  // Calculate ghost text from first filesystem suggestion
-  const ghostText = fsSuggestions.length > 0 ? fsSuggestions[0].path : '';
+  // Calculate ghost text from selected item (recent or filesystem suggestion)
+  const getSelectedPath = () => {
+    if (state.selectedIndex < filteredRecent.length) {
+      return filteredRecent[state.selectedIndex]?.path || '';
+    }
+    const fsIndex = state.selectedIndex - filteredRecent.length;
+    return fsSuggestions[fsIndex]?.path || '';
+  };
+  const ghostText = getSelectedPath();
 
   // Reset selection when suggestions change
   useEffect(() => {
@@ -134,7 +141,13 @@ export function LocationPicker({
   }, [state.inputValue]);
 
   const handleSelect = useCallback(
-    async (path: string) => {
+    async (rawPath: string) => {
+      // Expand ~ to home path and remove trailing slash
+      const path = (rawPath.startsWith('~')
+        ? rawPath.replace('~', state.homePath)
+        : rawPath
+      ).replace(/\/$/, '');
+
       console.log('[LocationPicker] handleSelect:', path);
 
       // Check if path is a git repo by checking for .git
@@ -170,20 +183,17 @@ export function LocationPicker({
       onSelect(path);
       onClose();
     },
-    [onSelect, onClose, onGetRepoInfo]
+    [onSelect, onClose, onGetRepoInfo, state.homePath]
   );
 
   const handlePathInputChange = useCallback((value: string) => {
     setState(prev => ({ ...prev, inputValue: value }));
   }, []);
 
+  // PathInput already sends the raw path - handleSelect does the expansion
   const handlePathInputSelect = useCallback((path: string) => {
-    // Expand ~ to home path
-    const expandedPath = path.startsWith('~')
-      ? path.replace('~', state.homePath)
-      : path;
-    handleSelect(expandedPath.replace(/\/$/, '')); // Remove trailing slash
-  }, [handleSelect, state.homePath]);
+    handleSelect(path);
+  }, [handleSelect]);
 
   // RepoOptions callbacks
   const handleSelectMainRepo = useCallback(() => {
