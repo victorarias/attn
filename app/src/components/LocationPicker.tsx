@@ -24,8 +24,10 @@ interface LocationPickerProps {
   onSelect: (path: string) => void;
   onGetRecentLocations?: () => Promise<{ locations: RecentLocation[] }>;
   onGetRepoInfo?: (mainRepo: string) => Promise<{ success: boolean; info?: RepoInfo; error?: string }>;
-  onCreateWorktree?: (mainRepo: string, branch: string, path?: string) => Promise<{ success: boolean; path?: string }>;
+  onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string) => Promise<{ success: boolean; path?: string }>;
 }
+
+const MAX_RECENT_LOCATIONS = 10;
 
 type Mode = 'path-input' | 'repo-options';
 
@@ -105,17 +107,6 @@ export function LocationPicker({
           loc.path.toLowerCase().includes(state.inputValue.toLowerCase())
       )
     : state.recentLocations;
-
-  // Combine suggestions: recent first, then filesystem
-  // (not used for navigation, just for reference)
-  // const allSuggestions = [
-  //   ...filteredRecent.slice(0, 10).map(loc => ({
-  //     type: 'recent' as const,
-  //     name: loc.label,
-  //     path: loc.path
-  //   })),
-  //   ...fsSuggestions.map(s => ({ type: 'dir' as const, ...s })),
-  // ];
 
   // Calculate ghost text from first filesystem suggestion
   const ghostText = fsSuggestions.length > 0 ? fsSuggestions[0].path : '';
@@ -197,13 +188,11 @@ export function LocationPicker({
     }
   }, [state.selectedRepo, onSelect, onClose]);
 
-  const handleCreateWorktree = useCallback(async (branchName: string, _startingFrom: string) => {
+  const handleCreateWorktree = useCallback(async (branchName: string, startingFrom: string) => {
     if (!state.selectedRepo || !onCreateWorktree) return;
 
-    // Note: The daemon's create_worktree command handles branch creation
-    // and starting point internally. We just pass the branch name.
     try {
-      const result = await onCreateWorktree(state.selectedRepo, branchName);
+      const result = await onCreateWorktree(state.selectedRepo, branchName, undefined, startingFrom);
       if (result.success && result.path) {
         onSelect(result.path);
         onClose();
@@ -302,7 +291,7 @@ export function LocationPicker({
               {filteredRecent.length > 0 && (
                 <div className="picker-section">
                   <div className="picker-section-title">RECENT</div>
-                  {filteredRecent.slice(0, 10).map((loc, index) => (
+                  {filteredRecent.slice(0, MAX_RECENT_LOCATIONS).map((loc, index) => (
                     <div
                       key={loc.path}
                       className={`picker-item ${index === state.selectedIndex ? 'selected' : ''}`}

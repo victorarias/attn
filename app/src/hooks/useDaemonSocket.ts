@@ -775,7 +775,7 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'list_worktrees', main_repo: mainRepo }));
   }, []);
 
-  const sendCreateWorktree = useCallback((mainRepo: string, branch: string, path?: string): Promise<WorktreeActionResult> => {
+  const sendCreateWorktree = useCallback((mainRepo: string, branch: string, path?: string, startingFrom?: string): Promise<WorktreeActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -799,6 +799,7 @@ export function useDaemonSocket({
         main_repo: mainRepo,
         branch,
         ...(path && { path }),
+        ...(startingFrom && { starting_from: startingFrom }),
       }));
     });
   }, []);
