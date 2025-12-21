@@ -36,8 +36,16 @@ func GetTmuxTarget() string {
 }
 
 // WriteHooksConfig writes a temporary hooks configuration file
+// Creates a subdirectory to isolate from other temp files (avoids fs.watch issues)
 func WriteHooksConfig(tmpDir, sessionID, socketPath string) (string, error) {
-	configPath := filepath.Join(tmpDir, "claude-hooks-"+sessionID+".json")
+	// Create a subdirectory for this session's hooks
+	// This prevents Claude from trying to watch socket files in the parent temp dir
+	hooksDir := filepath.Join(tmpDir, "attn-hooks-"+sessionID)
+	if err := os.MkdirAll(hooksDir, 0700); err != nil {
+		return "", err
+	}
+
+	configPath := filepath.Join(hooksDir, "settings.json")
 
 	content := hooks.Generate(sessionID, socketPath)
 
@@ -48,7 +56,9 @@ func WriteHooksConfig(tmpDir, sessionID, socketPath string) (string, error) {
 	return configPath, nil
 }
 
-// CleanupHooksConfig removes the temporary hooks configuration
+// CleanupHooksConfig removes the temporary hooks configuration and its directory
 func CleanupHooksConfig(configPath string) {
 	os.Remove(configPath)
+	// Also remove the parent directory (attn-hooks-<sessionID>)
+	os.Remove(filepath.Dir(configPath))
 }
