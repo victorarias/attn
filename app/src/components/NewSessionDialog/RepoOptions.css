@@ -1,11 +1,47 @@
+/* RepoOptions.css - Industrial Terminal Aesthetic */
+
 .repo-options {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
+  background: #0a0a0c;
+  color: #e8e8ec;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 13px;
+}
+
+.repo-options-header {
+  padding: 16px;
+  border-bottom: 1px solid #1a1a1e;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.repo-options-back {
+  background: none;
+  border: 1px solid #2a2a30;
+  border-radius: 4px;
+  color: #8a8a95;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.repo-options-back:hover {
+  background: #111115;
+  border-color: #3a3a40;
+  color: #f0f0f0;
+}
+
+.repo-options-title {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #00ff88;
+  text-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
 }
 
 .repo-options-content {
@@ -17,13 +53,14 @@
 /* Section headers */
 .repo-section-header {
   text-transform: uppercase;
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: 0.5px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: #5a5a65;
   margin-top: 16px;
   margin-bottom: 8px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 6px;
+  border-bottom: 1px solid #1a1a1e;
 }
 
 .repo-section-header:first-child {
@@ -33,160 +70,250 @@
 /* Option items */
 .repo-option-item {
   display: grid;
-  grid-template-columns: 20px 1fr auto auto;
-  gap: 8px;
+  grid-template-columns: 24px 1fr auto auto;
+  gap: 10px;
   align-items: center;
-  padding: 8px 12px;
+  padding: 10px 12px;
   margin: 2px 0;
-  border-left: 2px solid transparent;
+  border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.1s ease;
+  transition: all 0.1s ease-out;
 }
 
 .repo-option-item:hover {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: #1f1f25;
 }
 
 .repo-option-item.selected {
-  border-left-color: var(--accent-blue);
-  background: rgba(59, 130, 246, 0.1);
+  background: rgba(0, 255, 136, 0.08);
+  border-color: rgba(0, 255, 136, 0.2);
 }
 
 /* Icons */
 .repo-option-icon {
   font-size: 14px;
   text-align: center;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: #111115;
+  border: 1px solid #1f1f25;
 }
 
 .icon-green {
-  color: var(--status-active);
+  color: #00ff88;
 }
 
 .icon-purple {
-  color: var(--accent-purple);
+  color: #a855f7;
 }
 
 .icon-blue {
-  color: var(--accent-blue);
+  color: #00aaff;
 }
 
 .icon-muted {
-  color: var(--text-muted);
+  color: #6a6a75;
+}
+
+.repo-option-item.selected .repo-option-icon {
+  background: #00ff88;
+  border-color: #00ff88;
+  color: #000;
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.4);
 }
 
 /* Name and details */
 .repo-option-name {
   font-weight: 500;
-  color: var(--text-primary);
+  color: #e8e8ec;
+}
+
+.repo-option-item.selected .repo-option-name {
+  color: #ffffff;
 }
 
 .repo-option-detail {
   font-size: 11px;
-  color: var(--text-muted);
+  color: #6a6a75;
+}
+
+.repo-option-item.selected .repo-option-detail {
+  color: #8a8a95;
 }
 
 .repo-option-shortcut {
-  font-size: 11px;
-  color: var(--text-muted);
-  background: var(--bg-secondary);
-  padding: 2px 6px;
+  font-size: 10px;
+  color: #8a8a95;
+  background: #111115;
+  border: 1px solid #2a2a30;
+  padding: 3px 6px;
   border-radius: 3px;
-  min-width: 20px;
+  min-width: 22px;
   text-align: center;
+}
+
+.repo-option-item.selected .repo-option-shortcut {
+  background: #00ff88;
+  border-color: #00ff88;
+  color: #000;
 }
 
 /* New worktree form */
 .new-worktree-form {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-subtle);
+  background: #0d0d10;
+  border: 1px solid #1f1f25;
   border-radius: 6px;
-  padding: 12px;
-  margin: 4px 0 8px 0;
+  padding: 14px;
+  margin: 6px 0 10px 0;
 }
 
 .new-worktree-input-row {
   display: grid;
-  grid-template-columns: 20px 1fr;
-  gap: 8px;
+  grid-template-columns: 24px 1fr;
+  gap: 10px;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .new-worktree-input {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-default);
+  background: #040405;
+  border: 1px solid #2a2a30;
   border-radius: 4px;
-  padding: 6px 8px;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
+  padding: 8px 10px;
+  color: #f0f0f0;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 13px;
   outline: none;
+  caret-color: #00ff88;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .new-worktree-input:focus {
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+  border-color: #00ff88;
+  box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.1);
+}
+
+.new-worktree-input::placeholder {
+  color: #4a4a55;
 }
 
 .new-worktree-radio-row {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 
 .new-worktree-radio-row label {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition: all 0.1s ease-out;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: #8a8a95;
 }
 
 .new-worktree-radio-row label:hover {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: #1f1f25;
 }
 
 .new-worktree-radio-row label.selected {
-  color: var(--text-primary);
-  background: rgba(59, 130, 246, 0.1);
+  color: #e8e8ec;
+  background: rgba(0, 255, 136, 0.06);
+  border-color: rgba(0, 255, 136, 0.15);
 }
 
 .new-worktree-radio-row input[type="radio"] {
   margin: 0;
   cursor: pointer;
+  accent-color: #00ff88;
 }
 
 .new-worktree-hint {
   font-size: 11px;
-  color: var(--text-muted);
+  color: #5a5a65;
   text-align: center;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+  border-top: 1px solid #1a1a1e;
+}
+
+.new-worktree-hint kbd {
+  background: #111115;
+  border: 1px solid #2a2a30;
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 10px;
+  color: #8a8a95;
 }
 
 /* Footer */
 .repo-options-footer {
   display: flex;
-  gap: 16px;
-  padding: 12px 16px;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border-subtle);
+  gap: 20px;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-top: 1px solid #1a1a1e;
   font-size: 11px;
-  color: var(--text-muted);
+  color: #5a5a65;
 }
 
 .repo-options-footer span {
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.repo-options-footer kbd {
+  background: #111115;
+  border: 1px solid #2a2a30;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 10px;
+  color: #8a8a95;
+  min-width: 20px;
+  text-align: center;
 }
 
 .repo-options-footer .fetch-time {
   margin-left: auto;
+  color: #4a4a55;
+}
+
+/* Refresh button */
+.repo-refresh-btn {
+  background: none;
+  border: 1px solid #2a2a30;
+  border-radius: 3px;
+  color: #6a6a75;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.repo-refresh-btn:hover {
+  background: #111115;
+  border-color: #3a3a40;
+  color: #00ff88;
+}
+
+.repo-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Scrollbar styling */
@@ -195,14 +322,14 @@
 }
 
 .repo-options-content::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+  background: transparent;
 }
 
 .repo-options-content::-webkit-scrollbar-thumb {
-  background: var(--border-default);
+  background: #2a2a30;
   border-radius: 4px;
 }
 
 .repo-options-content::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: #3a3a40;
 }

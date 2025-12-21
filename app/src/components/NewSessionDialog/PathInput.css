@@ -1,28 +1,31 @@
+/* PathInput.css - Industrial Terminal Aesthetic */
+
 .path-input-container {
   position: relative;
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
 }
 
 .path-input {
   width: 100%;
-  background: var(--bg-deep, #0d1117);
-  border: 1px solid var(--text-muted, #484f58);
-  padding: 12px;
+  background: #040405;
+  border: 1px solid #2a2a30;
+  border-radius: 4px;
+  padding: 12px 14px;
   font-family: inherit;
   font-size: 14px;
-  color: var(--text-primary, #e6edf3);
-  caret-color: var(--git-green, #3fb950);
+  color: #f0f0f0;
+  caret-color: #00ff88;
   outline: none;
-  transition: border-color 80ms ease-out, box-shadow 80ms ease-out;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .path-input:focus {
-  border-color: var(--git-blue, #58a6ff);
-  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+  border-color: #00ff88;
+  box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.1);
 }
 
 .path-input::placeholder {
-  color: var(--text-muted, #484f58);
+  color: #4a4a55;
 }
 
 /* Hidden span for measuring typed text width */
@@ -36,12 +39,14 @@
   pointer-events: none;
 }
 
+/* Ghost text autocomplete suggestion */
 .path-ghost {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
   font-size: 14px;
-  color: var(--text-muted, #484f58);
+  color: #3a3a45;
   pointer-events: none;
   white-space: pre;
+  opacity: 0.7;
 }

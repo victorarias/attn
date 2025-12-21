@@ -280,23 +280,13 @@ export function LocationPicker({
           ...prev,
           selectedIndex: Math.max(prev.selectedIndex - 1, 0),
         }));
-      } else if (e.key === 'Enter' && totalItems > 0) {
-        e.preventDefault();
-        // Select the highlighted item
-        if (state.selectedIndex < filteredRecent.length) {
-          handleSelect(filteredRecent[state.selectedIndex].path);
-        } else {
-          const fsIndex = state.selectedIndex - filteredRecent.length;
-          if (fsIndex < fsSuggestions.length) {
-            handleSelect(fsSuggestions[fsIndex].path);
-          }
-        }
       }
+      // Note: Enter is handled by PathInput component directly
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isOpen, state.mode, state.selectedIndex, handleBack, onClose, filteredRecent, fsSuggestions, handleSelect]);
+  }, [isOpen, state.mode, state.selectedIndex, handleBack, onClose, filteredRecent, fsSuggestions]);
 
   // Transform RepoInfo from snake_case to camelCase for RepoOptions
   const transformedRepoInfo = state.repoInfo ? {
