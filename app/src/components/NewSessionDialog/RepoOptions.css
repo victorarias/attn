@@ -40,8 +40,8 @@
   font-weight: 500;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  color: #00ff88;
-  text-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+  color: #ff6b35;
+  text-shadow: 0 0 20px rgba(255, 107, 53, 0.3);
 }
 
 .repo-options-content {
@@ -87,8 +87,8 @@
 }
 
 .repo-option-item.selected {
-  background: rgba(0, 255, 136, 0.08);
-  border-color: rgba(0, 255, 136, 0.2);
+  background: rgba(255, 107, 53, 0.08);
+  border-color: rgba(255, 107, 53, 0.2);
 }
 
 /* Icons */
@@ -106,7 +106,7 @@
 }
 
 .icon-green {
-  color: #00ff88;
+  color: #ff6b35;
 }
 
 .icon-purple {
@@ -122,10 +122,10 @@
 }
 
 .repo-option-item.selected .repo-option-icon {
-  background: #00ff88;
-  border-color: #00ff88;
+  background: #ff6b35;
+  border-color: #ff6b35;
   color: #000;
-  box-shadow: 0 0 12px rgba(0, 255, 136, 0.4);
+  box-shadow: 0 0 12px rgba(255, 107, 53, 0.4);
 }
 
 /* Name and details */
@@ -159,8 +159,8 @@
 }
 
 .repo-option-item.selected .repo-option-shortcut {
-  background: #00ff88;
-  border-color: #00ff88;
+  background: #ff6b35;
+  border-color: #ff6b35;
   color: #000;
 }
 
@@ -190,13 +190,13 @@
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 13px;
   outline: none;
-  caret-color: #00ff88;
+  caret-color: #ff6b35;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .new-worktree-input:focus {
-  border-color: #00ff88;
-  box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.1);
+  border-color: #ff6b35;
+  box-shadow: 0 0 0 2px rgba(255, 107, 53, 0.1);
 }
 
 .new-worktree-input::placeholder {
@@ -230,14 +230,14 @@
 
 .new-worktree-radio-row label.selected {
   color: #e8e8ec;
-  background: rgba(0, 255, 136, 0.06);
-  border-color: rgba(0, 255, 136, 0.15);
+  background: rgba(255, 107, 53, 0.06);
+  border-color: rgba(255, 107, 53, 0.15);
 }
 
 .new-worktree-radio-row input[type="radio"] {
   margin: 0;
   cursor: pointer;
-  accent-color: #00ff88;
+  accent-color: #ff6b35;
 }
 
 .new-worktree-hint {
@@ -308,7 +308,7 @@
 .repo-refresh-btn:hover {
   background: #111115;
   border-color: #3a3a40;
-  color: #00ff88;
+  color: #ff6b35;
 }
 
 .repo-refresh-btn:disabled {

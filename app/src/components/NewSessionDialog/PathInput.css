@@ -14,14 +14,14 @@
   font-family: inherit;
   font-size: 14px;
   color: #f0f0f0;
-  caret-color: #00ff88;
+  caret-color: #ff6b35;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .path-input:focus {
-  border-color: #00ff88;
-  box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.1);
+  border-color: #ff6b35;
+  box-shadow: 0 0 0 2px rgba(255, 107, 53, 0.1);
 }
 
 .path-input::placeholder {
