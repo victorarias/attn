@@ -71,7 +71,7 @@ export function PathInput({
       {visibleGhost && (
         <span
           className="path-ghost"
-          style={{ left: 13 + ghostOffset }}
+          style={{ left: 14 + ghostOffset }}
         >
           {visibleGhost}
         </span>

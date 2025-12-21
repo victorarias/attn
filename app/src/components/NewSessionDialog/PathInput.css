@@ -35,7 +35,7 @@
   white-space: pre;
   font-family: inherit;
   font-size: 14px;
-  padding: 12px;
+  /* No padding - we only want to measure text width */
   pointer-events: none;
 }
 
