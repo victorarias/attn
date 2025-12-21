@@ -16,6 +16,13 @@ import (
 	"github.com/victorarias/claude-manager/internal/wrapper"
 )
 
+// hookInput represents the JSON input from Claude Code hooks
+type hookInput struct {
+	SessionID      string          `json:"session_id"`
+	TranscriptPath string          `json:"transcript_path"`
+	ToolInput      json.RawMessage `json:"tool_input"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		runWrapper()
@@ -194,7 +201,26 @@ func startDaemonBackground() error {
 }
 
 func runHookStop() {
-	// Placeholder - implemented in Task 4
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-stop <session_id>\n")
+		os.Exit(1)
+	}
+	sessionID := os.Args[2]
+
+	// Parse hook input from stdin to extract transcript path
+	var input hookInput
+	transcriptPath := ""
+	if err := json.NewDecoder(os.Stdin).Decode(&input); err == nil {
+		transcriptPath = input.TranscriptPath
+	}
+	// Note: We gracefully handle stdin parse errors by sending stop without transcript
+
+	// Send stop event to daemon for classification
+	c := client.New("")
+	if err := c.SendStop(sessionID, transcriptPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error sending stop: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func runHookTodo() {
