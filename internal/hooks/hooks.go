@@ -55,7 +55,7 @@ func Generate(sessionID, socketPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`~/.local/bin/attn _hook-asking "%s"`, sessionID),
+							Command: fmt.Sprintf(`echo '{"cmd":"state","id":"%s","state":"waiting_input"}' | nc -U %s`, sessionID, socketPath),
 						},
 					},
 				},
@@ -76,7 +76,7 @@ func Generate(sessionID, socketPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`~/.local/bin/attn _hook-answered "%s"`, sessionID),
+							Command: fmt.Sprintf(`echo '{"cmd":"state","id":"%s","state":"working"}' | nc -U %s`, sessionID, socketPath),
 						},
 					},
 				},
