@@ -2,13 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/signal"
+	"syscall"
 
 	"github.com/victorarias/claude-manager/internal/client"
 	"github.com/victorarias/claude-manager/internal/config"
 	"github.com/victorarias/claude-manager/internal/daemon"
 	"github.com/victorarias/claude-manager/internal/status"
+	"github.com/victorarias/claude-manager/internal/wrapper"
 )
 
 func main() {
@@ -75,8 +80,117 @@ func runList() {
 }
 
 func runWrapper() {
-	// Placeholder - implemented in Task 3
-	fmt.Println("wrapper not implemented")
+	// Parse flags
+	fs := flag.NewFlagSet("attn", flag.ContinueOnError)
+	labelFlag := fs.String("s", "", "session label")
+
+	// Find where our flags end and claude flags begin
+	var attnArgs []string
+	var claudeArgs []string
+
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-s" && i+1 < len(args) {
+			attnArgs = append(attnArgs, arg, args[i+1])
+			i++ // skip next arg
+		} else if arg == "--" {
+			claudeArgs = append(claudeArgs, args[i+1:]...)
+			break
+		} else {
+			claudeArgs = append(claudeArgs, arg)
+		}
+	}
+
+	fs.Parse(attnArgs)
+
+	// Get label
+	label := *labelFlag
+	if label == "" {
+		label = wrapper.DefaultLabel()
+	}
+
+	// Get working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error getting cwd: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Ensure daemon is running
+	c := client.New("")
+	if !c.IsRunning() {
+		if err := startDaemonBackground(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not start daemon: %v\n", err)
+		}
+	}
+
+	// Generate session ID and register
+	sessionID := wrapper.GenerateSessionID()
+	if err := c.Register(sessionID, label, cwd); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
+	}
+
+	// Write hooks config
+	socketPath := config.SocketPath()
+	hooksPath, err := wrapper.WriteHooksConfig(os.TempDir(), sessionID, socketPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error writing hooks config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Setup cleanup
+	cleanup := func() {
+		wrapper.CleanupHooksConfig(hooksPath)
+		c.Unregister(sessionID)
+	}
+
+	// Handle signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		cleanup()
+		os.Exit(0)
+	}()
+
+	// Build claude command
+	claudeCmd := []string{"--settings", hooksPath}
+	claudeCmd = append(claudeCmd, claudeArgs...)
+
+	cmd := exec.Command("claude", claudeCmd...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err = cmd.Run()
+	cleanup()
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		os.Exit(1)
+	}
+}
+
+func startDaemonBackground() error {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command(executable, "daemon")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+
+	// Detach from parent process
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid: true,
+	}
+
+	return cmd.Start()
 }
 
 func runHookStop() {
