@@ -72,4 +72,4 @@ pnpm run dev:all    # Start app in development mode
 - **CLI** (`cmd/attn`): Wrapper that registers sessions and installs hooks
 - **Daemon** (`internal/daemon`): Background process tracking all sessions via unix socket
 - **Hooks** (`internal/hooks`): Claude Code hooks that report state changes
-- **App** (`app/`): Tauri + React desktop dashboard with native Rust PTY (no Node.js)
+- **App** (`app/`): Tauri + React desktop dashboard with native Rust PTY
