@@ -562,6 +562,11 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		diffMsg := msg.(*protocol.GetFileDiffMessage)
 		d.logf("Getting file diff for %s in %s", diffMsg.Path, diffMsg.Directory)
 		go d.handleGetFileDiff(client, diffMsg)
+
+	case protocol.CmdGetRepoInfo:
+		repoMsg := msg.(*protocol.GetRepoInfoMessage)
+		d.logf("Getting repo info for %s", repoMsg.Repo)
+		d.handleGetRepoInfoWS(client, repoMsg)
 	}
 }
 

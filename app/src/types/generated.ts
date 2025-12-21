@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, ApprovePRMessage, Branch, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoState, Response, Session, SessionState, SetSettingMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, ApprovePRMessage, Branch, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, Response, Session, SessionState, SetSettingMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const branch = Convert.toBranch(json);
@@ -30,6 +30,8 @@
 //   const getDefaultBranchResultMessage = Convert.toGetDefaultBranchResultMessage(json);
 //   const getFileDiffMessage = Convert.toGetFileDiffMessage(json);
 //   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
+//   const getRepoInfoMessage = Convert.toGetRepoInfoMessage(json);
+//   const getRepoInfoResultMessage = Convert.toGetRepoInfoResultMessage(json);
 //   const getSettingsMessage = Convert.toGetSettingsMessage(json);
 //   const gitFileChange = Convert.toGitFileChange(json);
 //   const gitStatusUpdateMessage = Convert.toGitStatusUpdateMessage(json);
@@ -58,6 +60,7 @@
 //   const refreshPRsMessage = Convert.toRefreshPRsMessage(json);
 //   const refreshPRsResultMessage = Convert.toRefreshPRsResultMessage(json);
 //   const registerMessage = Convert.toRegisterMessage(json);
+//   const repoInfo = Convert.toRepoInfo(json);
 //   const repoState = Convert.toRepoState(json);
 //   const response = Convert.toResponse(json);
 //   const session = Convert.toSession(json);
@@ -401,6 +404,48 @@ export interface GetRecentLocationsMessage {
 
 export enum GetRecentLocationsMessageCmd {
     GetRecentLocations = "get_recent_locations",
+}
+
+export interface GetRepoInfoMessage {
+    cmd:  GetRepoInfoMessageCmd;
+    repo: string;
+    [property: string]: any;
+}
+
+export enum GetRepoInfoMessageCmd {
+    GetRepoInfo = "get_repo_info",
+}
+
+export interface GetRepoInfoResultMessage {
+    error?:  string;
+    event:   GetRepoInfoResultMessageEvent;
+    info?:   Info;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum GetRepoInfoResultMessageEvent {
+    GetRepoInfoResult = "get_repo_info_result",
+}
+
+export interface Info {
+    branches:            BranchElement[];
+    current_branch:      string;
+    current_commit_hash: string;
+    current_commit_time: string;
+    default_branch:      string;
+    fetched_at?:         string;
+    repo:                string;
+    worktrees:           WorktreeElement[];
+    [property: string]: any;
+}
+
+export interface WorktreeElement {
+    branch:      string;
+    created_at?: string;
+    main_repo:   string;
+    path:        string;
+    [property: string]: any;
 }
 
 export interface GetSettingsMessage {
@@ -772,6 +817,18 @@ export enum RegisterMessageCmd {
     Register = "register",
 }
 
+export interface RepoInfo {
+    branches:            BranchElement[];
+    current_branch:      string;
+    current_commit_hash: string;
+    current_commit_time: string;
+    default_branch:      string;
+    fetched_at?:         string;
+    repo:                string;
+    worktrees:           WorktreeElement[];
+    [property: string]: any;
+}
+
 export interface RepoState {
     collapsed: boolean;
     muted:     boolean;
@@ -971,14 +1028,6 @@ export interface WebSocketEvent {
     stash_ref?:           string;
     success?:             boolean;
     worktrees?:           WorktreeElement[];
-    [property: string]: any;
-}
-
-export interface WorktreeElement {
-    branch:      string;
-    created_at?: string;
-    main_repo:   string;
-    path:        string;
     [property: string]: any;
 }
 
@@ -1229,6 +1278,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("GetRecentLocationsMessage")), null, 2);
     }
 
+    public static toGetRepoInfoMessage(json: string): GetRepoInfoMessage {
+        return cast(JSON.parse(json), r("GetRepoInfoMessage"));
+    }
+
+    public static getRepoInfoMessageToJson(value: GetRepoInfoMessage): string {
+        return JSON.stringify(uncast(value, r("GetRepoInfoMessage")), null, 2);
+    }
+
+    public static toGetRepoInfoResultMessage(json: string): GetRepoInfoResultMessage {
+        return cast(JSON.parse(json), r("GetRepoInfoResultMessage"));
+    }
+
+    public static getRepoInfoResultMessageToJson(value: GetRepoInfoResultMessage): string {
+        return JSON.stringify(uncast(value, r("GetRepoInfoResultMessage")), null, 2);
+    }
+
     public static toGetSettingsMessage(json: string): GetSettingsMessage {
         return cast(JSON.parse(json), r("GetSettingsMessage"));
     }
@@ -1451,6 +1516,14 @@ export class Convert {
 
     public static registerMessageToJson(value: RegisterMessage): string {
         return JSON.stringify(uncast(value, r("RegisterMessage")), null, 2);
+    }
+
+    public static toRepoInfo(json: string): RepoInfo {
+        return cast(JSON.parse(json), r("RepoInfo"));
+    }
+
+    public static repoInfoToJson(value: RepoInfo): string {
+        return JSON.stringify(uncast(value, r("RepoInfo")), null, 2);
     }
 
     public static toRepoState(json: string): RepoState {
@@ -1922,6 +1995,32 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("GetRecentLocationsMessageCmd") },
         { json: "limit", js: "limit", typ: u(undefined, 0) },
     ], "any"),
+    "GetRepoInfoMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetRepoInfoMessageCmd") },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "GetRepoInfoResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("GetRepoInfoResultMessageEvent") },
+        { json: "info", js: "info", typ: u(undefined, r("Info")) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "Info": o([
+        { json: "branches", js: "branches", typ: a(r("BranchElement")) },
+        { json: "current_branch", js: "current_branch", typ: "" },
+        { json: "current_commit_hash", js: "current_commit_hash", typ: "" },
+        { json: "current_commit_time", js: "current_commit_time", typ: "" },
+        { json: "default_branch", js: "default_branch", typ: "" },
+        { json: "fetched_at", js: "fetched_at", typ: u(undefined, "") },
+        { json: "repo", js: "repo", typ: "" },
+        { json: "worktrees", js: "worktrees", typ: a(r("WorktreeElement")) },
+    ], "any"),
+    "WorktreeElement": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "created_at", js: "created_at", typ: u(undefined, "") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
     "GetSettingsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetSettingsMessageCmd") },
     ], "any"),
@@ -2122,6 +2221,16 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "label", js: "label", typ: u(undefined, "") },
     ], "any"),
+    "RepoInfo": o([
+        { json: "branches", js: "branches", typ: a(r("BranchElement")) },
+        { json: "current_branch", js: "current_branch", typ: "" },
+        { json: "current_commit_hash", js: "current_commit_hash", typ: "" },
+        { json: "current_commit_time", js: "current_commit_time", typ: "" },
+        { json: "default_branch", js: "default_branch", typ: "" },
+        { json: "fetched_at", js: "fetched_at", typ: u(undefined, "") },
+        { json: "repo", js: "repo", typ: "" },
+        { json: "worktrees", js: "worktrees", typ: a(r("WorktreeElement")) },
+    ], "any"),
     "RepoState": o([
         { json: "collapsed", js: "collapsed", typ: true },
         { json: "muted", js: "muted", typ: true },
@@ -2236,12 +2345,6 @@ const typeMap: any = {
         { json: "success", js: "success", typ: u(undefined, true) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
     ], "any"),
-    "WorktreeElement": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "created_at", js: "created_at", typ: u(undefined, "") },
-        { json: "main_repo", js: "main_repo", typ: "" },
-        { json: "path", js: "path", typ: "" },
-    ], "any"),
     "Worktree": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "created_at", js: "created_at", typ: u(undefined, "") },
@@ -2334,6 +2437,12 @@ const typeMap: any = {
     ],
     "GetRecentLocationsMessageCmd": [
         "get_recent_locations",
+    ],
+    "GetRepoInfoMessageCmd": [
+        "get_repo_info",
+    ],
+    "GetRepoInfoResultMessageEvent": [
+        "get_repo_info_result",
     ],
     "GetSettingsMessageCmd": [
         "get_settings",

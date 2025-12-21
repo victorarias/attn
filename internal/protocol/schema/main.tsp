@@ -351,6 +351,11 @@ model GetFileDiffMessage {
   staged?: boolean;  // If true, show staged diff instead of working tree
 }
 
+model GetRepoInfoMessage {
+  cmd: "get_repo_info";
+  repo: string;
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -501,6 +506,24 @@ model FileDiffResultMessage {
   path: string;
   original: string;
   modified: string;
+  success: boolean;
+  error?: string;
+}
+
+model RepoInfo {
+  repo: string;
+  current_branch: string;
+  current_commit_hash: string;
+  current_commit_time: string;
+  default_branch: string;
+  worktrees: Worktree[];
+  branches: Branch[];          // Available branches with commit info
+  fetched_at?: string;         // ISO timestamp, when branches were last fetched
+}
+
+model GetRepoInfoResultMessage {
+  event: "get_repo_info_result";
+  info?: RepoInfo;
   success: boolean;
   error?: string;
 }

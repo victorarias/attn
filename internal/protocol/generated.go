@@ -337,6 +337,28 @@ type GetRecentLocationsMessage struct {
 	Limit *int `json:"limit,omitempty"`
 }
 
+type GetRepoInfoMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+type GetRepoInfoResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Info corresponds to the JSON schema field "info".
+	Info *RepoInfo `json:"info,omitempty"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type GetSettingsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -684,6 +706,32 @@ type RegisterMessage struct {
 
 	// Label corresponds to the JSON schema field "label".
 	Label *string `json:"label,omitempty"`
+}
+
+type RepoInfo struct {
+	// Branches corresponds to the JSON schema field "branches".
+	Branches []Branch `json:"branches"`
+
+	// CurrentBranch corresponds to the JSON schema field "current_branch".
+	CurrentBranch string `json:"current_branch"`
+
+	// CurrentCommitHash corresponds to the JSON schema field "current_commit_hash".
+	CurrentCommitHash string `json:"current_commit_hash"`
+
+	// CurrentCommitTime corresponds to the JSON schema field "current_commit_time".
+	CurrentCommitTime string `json:"current_commit_time"`
+
+	// DefaultBranch corresponds to the JSON schema field "default_branch".
+	DefaultBranch string `json:"default_branch"`
+
+	// FetchedAt corresponds to the JSON schema field "fetched_at".
+	FetchedAt *string `json:"fetched_at,omitempty"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+
+	// Worktrees corresponds to the JSON schema field "worktrees".
+	Worktrees []Worktree `json:"worktrees"`
 }
 
 type RepoState struct {

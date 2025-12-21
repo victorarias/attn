@@ -185,3 +185,62 @@ func (d *Daemon) handleCreateBranchWS(client *wsClient, msg *protocol.CreateBran
 		d.sendToClient(client, result)
 	}()
 }
+
+func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfoMessage) {
+	go func() {
+		repo := git.ExpandPath(msg.Repo)
+
+		// Get current branch and commit
+		currentBranch, err := git.GetCurrentBranch(repo)
+		if err != nil {
+			d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
+				Event:   protocol.EventGetRepoInfoResult,
+				Success: false,
+				Error:   protocol.Ptr(err.Error()),
+			})
+			return
+		}
+
+		// Get current commit hash and time
+		commitHash, commitTime := git.GetHeadCommitInfo(repo)
+
+		// Get default branch
+		defaultBranch, _ := git.GetDefaultBranch(repo)
+		if defaultBranch == "" {
+			defaultBranch = "main"
+		}
+
+		// Get worktrees
+		worktrees := d.doListWorktrees(repo)
+
+		// Get available branches with commit info
+		branchesWithCommits, err := git.ListBranchesWithCommits(repo)
+		if err != nil {
+			d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
+				Event:   protocol.EventGetRepoInfoResult,
+				Success: false,
+				Error:   protocol.Ptr(err.Error()),
+			})
+			return
+		}
+
+		branches := make([]protocol.Branch, len(branchesWithCommits))
+		for i, b := range branchesWithCommits {
+			branches[i] = b.ToProtocol()
+		}
+
+		d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
+			Event: protocol.EventGetRepoInfoResult,
+			Info: &protocol.RepoInfo{
+				Repo:              repo,
+				CurrentBranch:     currentBranch,
+				CurrentCommitHash: commitHash,
+				CurrentCommitTime: commitTime,
+				DefaultBranch:     defaultBranch,
+				Worktrees:         worktrees,
+				Branches:          branches,
+			},
+			Success: true,
+		})
+	}()
+}

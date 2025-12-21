@@ -258,3 +258,18 @@ func CheckoutBranch(repoDir, branch string) error {
 	}
 	return nil
 }
+
+// GetHeadCommitInfo returns the short hash and ISO timestamp of HEAD
+func GetHeadCommitInfo(repoDir string) (hash string, time string) {
+	cmd := exec.Command("git", "log", "-1", "--format=%h|%cI")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", ""
+	}
+	parts := strings.Split(strings.TrimSpace(string(out)), "|")
+	if len(parts) >= 2 {
+		return parts[0], parts[1]
+	}
+	return "", ""
+}
