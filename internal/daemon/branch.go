@@ -196,6 +196,8 @@ func (d *Daemon) handleCreateWorktreeFromBranchWS(client *wsClient, msg *protoco
 			d.logf("Create worktree from branch failed for %s: %v", msg.Branch, err)
 		} else {
 			d.logf("Create worktree from branch succeeded: %s at %s", msg.Branch, path)
+			// Invalidate branch cache since a branch is now checked out in worktree
+			d.invalidateBranchCache(msg.MainRepo)
 		}
 		d.sendToClient(client, result)
 	}()
