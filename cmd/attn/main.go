@@ -23,6 +23,14 @@ type hookInput struct {
 	ToolInput      json.RawMessage `json:"tool_input"`
 }
 
+// todoWriteInput represents the tool_input for TodoWrite
+type todoWriteInput struct {
+	Todos []struct {
+		Content string `json:"content"`
+		Status  string `json:"status"`
+	} `json:"todos"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		runWrapper()
@@ -224,5 +232,42 @@ func runHookStop() {
 }
 
 func runHookTodo() {
-	// Placeholder - implemented in Task 5
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-todo <session_id>\n")
+		os.Exit(1)
+	}
+	sessionID := os.Args[2]
+
+	// Parse hook input from stdin
+	var input hookInput
+	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
+		return // Silently fail if no input
+	}
+
+	// Parse tool_input to extract todos
+	var todoInput todoWriteInput
+	if err := json.Unmarshal(input.ToolInput, &todoInput); err != nil {
+		return // Silently fail if parse error
+	}
+
+	// Format todos with status markers
+	var todos []string
+	for _, t := range todoInput.Todos {
+		var marker string
+		switch t.Status {
+		case "completed":
+			marker = "[✓]"
+		case "in_progress":
+			marker = "[→]"
+		default:
+			marker = "[ ]"
+		}
+		todos = append(todos, fmt.Sprintf("%s %s", marker, t.Content))
+	}
+
+	c := client.New("")
+	if err := c.UpdateTodos(sessionID, todos); err != nil {
+		fmt.Fprintf(os.Stderr, "error updating todos: %v\n", err)
+		os.Exit(1)
+	}
 }
