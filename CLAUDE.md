@@ -182,23 +182,19 @@ When the frontend triggers an async operation via WebSocket that expects a respo
 
 ```bash
 cd app
-pnpm run dev:all    # Starts both pty-server and tauri dev
+pnpm run dev:all    # Starts tauri dev with hot reload
 ```
-
-This runs two processes concurrently:
-- **pty-server**: Node.js sidecar using node-pty over Unix socket (`~/.attn-pty.sock`)
-- **tauri dev**: Vite + Tauri development server
 
 ### PTY Architecture
 
-The app uses a Node.js sidecar (`pty-server/`) instead of tauri-pty because:
-- Event-driven streaming vs polling-based IPC
-- No fixed buffer size limitations (tauri-pty had 1024-byte limit)
-- Full terminal width support (no rendering issues at wide widths)
+The app uses native Rust PTY handling via `portable-pty` (`src-tauri/src/pty_manager.rs`):
+- Direct PTY management in Rust, no separate process
+- Event-driven streaming to frontend via Tauri events
+- Handles UTF-8 boundary splits for proper terminal rendering
 
 Communication flow:
 ```
-Frontend (React) → Tauri Commands → Rust pty_bridge → Unix Socket → pty-server (node-pty)
+Frontend (React) → Tauri Commands → Rust pty_manager → portable-pty
 ```
 
 ### Frontend Architecture
