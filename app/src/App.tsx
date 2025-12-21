@@ -729,6 +729,7 @@ function App() {
         onGetRecentLocations={sendGetRecentLocations}
         onGetRepoInfo={getRepoInfo}
         onCreateWorktree={sendCreateWorktree}
+        projectsDirectory={settings.projects_directory}
       />
       <BranchPicker
         isOpen={branchPickerOpen}

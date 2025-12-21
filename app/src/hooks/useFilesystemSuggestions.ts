@@ -79,9 +79,13 @@ export function useFilesystemSuggestions(inputPath: string): UseFilesystemSugges
         prefix: prefix || null,
       });
 
+      // Contract paths back to use ~ for home directory
+      const contractPath = (p: string) =>
+        p === homePath ? '~' : p.startsWith(homePath + '/') ? '~' + p.slice(homePath.length) : p;
+
       setSuggestions(dirs.map(name => ({
         name,
-        path: dirToQuery + name,
+        path: contractPath(dirToQuery + name) + '/',  // Keep ~ and add trailing slash
       })));
     } catch (e) {
       console.error('[fs-suggestions] error:', e);

@@ -25,9 +25,19 @@
   color: var(--text-muted, #484f58);
 }
 
+/* Hidden span for measuring typed text width */
+.path-input-measure {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 12px;
+  pointer-events: none;
+}
+
 .path-ghost {
   position: absolute;
-  left: 13px;
   top: 50%;
   transform: translateY(-50%);
   font-size: 14px;

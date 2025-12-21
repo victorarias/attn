@@ -25,6 +25,7 @@ interface LocationPickerProps {
   onGetRecentLocations?: () => Promise<{ locations: RecentLocation[] }>;
   onGetRepoInfo?: (mainRepo: string) => Promise<{ success: boolean; info?: RepoInfo; error?: string }>;
   onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string) => Promise<{ success: boolean; path?: string }>;
+  projectsDirectory?: string;
 }
 
 const MAX_RECENT_LOCATIONS = 10;
@@ -49,6 +50,7 @@ export function LocationPicker({
   onGetRecentLocations,
   onGetRepoInfo,
   onCreateWorktree,
+  projectsDirectory,
 }: LocationPickerProps) {
   const [state, setState] = useState<State>({
     mode: 'path-input',
@@ -87,17 +89,32 @@ export function LocationPicker({
   // Reset state when picker opens
   useEffect(() => {
     if (isOpen) {
+      // Contract projectsDirectory to use ~ for home path
+      let initialValue = '';
+      if (projectsDirectory) {
+        if (projectsDirectory.startsWith(state.homePath + '/')) {
+          initialValue = '~' + projectsDirectory.slice(state.homePath.length);
+        } else if (projectsDirectory === state.homePath) {
+          initialValue = '~';
+        } else {
+          initialValue = projectsDirectory;
+        }
+        // Ensure trailing slash for directory browsing
+        if (!initialValue.endsWith('/')) {
+          initialValue += '/';
+        }
+      }
       setState(prev => ({
         ...prev,
         mode: 'path-input',
-        inputValue: '',
+        inputValue: initialValue,
         selectedIndex: 0,
         selectedRepo: null,
         repoInfo: null,
         refreshing: false,
       }));
     }
-  }, [isOpen]);
+  }, [isOpen, projectsDirectory, state.homePath]);
 
   // Filter recent locations based on input
   const filteredRecent = state.inputValue
@@ -231,7 +248,7 @@ export function LocationPicker({
     }));
   }, []);
 
-  // Global Escape key handler
+  // Global keyboard handler for navigation
   useEffect(() => {
     if (!isOpen) return;
 
@@ -243,12 +260,43 @@ export function LocationPicker({
         } else {
           onClose();
         }
+        return;
+      }
+
+      // Arrow keys and Enter only in path-input mode
+      if (state.mode !== 'path-input') return;
+
+      const totalItems = filteredRecent.length + fsSuggestions.length;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setState(prev => ({
+          ...prev,
+          selectedIndex: Math.min(prev.selectedIndex + 1, totalItems - 1),
+        }));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setState(prev => ({
+          ...prev,
+          selectedIndex: Math.max(prev.selectedIndex - 1, 0),
+        }));
+      } else if (e.key === 'Enter' && totalItems > 0) {
+        e.preventDefault();
+        // Select the highlighted item
+        if (state.selectedIndex < filteredRecent.length) {
+          handleSelect(filteredRecent[state.selectedIndex].path);
+        } else {
+          const fsIndex = state.selectedIndex - filteredRecent.length;
+          if (fsIndex < fsSuggestions.length) {
+            handleSelect(fsSuggestions[fsIndex].path);
+          }
+        }
       }
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isOpen, state.mode, handleBack, onClose]);
+  }, [isOpen, state.mode, state.selectedIndex, handleBack, onClose, filteredRecent, fsSuggestions, handleSelect]);
 
   // Transform RepoInfo from snake_case to camelCase for RepoOptions
   const transformedRepoInfo = state.repoInfo ? {
