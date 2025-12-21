@@ -14,6 +14,15 @@ type ApprovePRMessage struct {
 }
 
 type Branch struct {
+	// CommitHash corresponds to the JSON schema field "commit_hash".
+	CommitHash *string `json:"commit_hash,omitempty"`
+
+	// CommitTime corresponds to the JSON schema field "commit_time".
+	CommitTime *string `json:"commit_time,omitempty"`
+
+	// IsCurrent corresponds to the JSON schema field "is_current".
+	IsCurrent *bool `json:"is_current,omitempty"`
+
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
 }

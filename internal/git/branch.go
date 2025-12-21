@@ -7,7 +7,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/victorarias/claude-manager/internal/protocol"
 )
+
+// BranchWithCommit contains branch name and latest commit info
+type BranchWithCommit struct {
+	Name       string
+	CommitHash string // Short SHA
+	CommitTime string // ISO timestamp
+	IsCurrent  bool
+}
+
+// ToProtocol converts BranchWithCommit to the protocol Branch type.
+func (b BranchWithCommit) ToProtocol() protocol.Branch {
+	return protocol.Branch{
+		Name:       b.Name,
+		CommitHash: &b.CommitHash,
+		CommitTime: &b.CommitTime,
+		IsCurrent:  &b.IsCurrent,
+	}
+}
 
 // ExpandPath expands ~ to the user's home directory
 func ExpandPath(path string) string {
@@ -58,6 +78,60 @@ func ListBranches(repoDir string) ([]string, error) {
 	}
 
 	return available, nil
+}
+
+// ListBranchesWithCommits returns branches with their latest commit info.
+func ListBranchesWithCommits(repoDir string) ([]BranchWithCommit, error) {
+	// Get current branch for marking
+	currentBranch, _ := GetCurrentBranch(repoDir)
+
+	// Get all local branches with commit info
+	// Format: refname:short | committerdate:iso-strict | objectname:short
+	cmd := exec.Command("git", "branch", "--format=%(refname:short)|%(committerdate:iso-strict)|%(objectname:short)")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git branch failed: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return nil, nil
+	}
+
+	// Get branches that are checked out in worktrees
+	worktrees, err := ListWorktrees(repoDir)
+	if err != nil {
+		return nil, fmt.Errorf("listing worktrees: %w", err)
+	}
+
+	checkedOut := make(map[string]bool)
+	for _, wt := range worktrees {
+		if wt.Branch != "" {
+			checkedOut[wt.Branch] = true
+		}
+	}
+
+	var result []BranchWithCommit
+	for _, line := range lines {
+		parts := strings.Split(line, "|")
+		if len(parts) < 3 {
+			continue
+		}
+		name := parts[0]
+		// Skip branches checked out in worktrees
+		if checkedOut[name] {
+			continue
+		}
+		result = append(result, BranchWithCommit{
+			Name:       name,
+			CommitTime: parts[1],
+			CommitHash: parts[2],
+			IsCurrent:  name == currentBranch,
+		})
+	}
+
+	return result, nil
 }
 
 // DeleteBranch deletes a local branch.

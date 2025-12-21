@@ -101,6 +101,9 @@ model RecentLocation {
 
 model Branch {
   name: string;
+  commit_hash?: string;    // Short SHA (7 chars)
+  commit_time?: string;    // ISO timestamp
+  is_current?: boolean;    // True if this is the checked-out branch
 }
 
 model GitFileChange {

@@ -94,7 +94,10 @@ export enum ApprovePRMessageCmd {
 }
 
 export interface Branch {
-    name: string;
+    commit_hash?: string;
+    commit_time?: string;
+    is_current?:  boolean;
+    name:         string;
     [property: string]: any;
 }
 
@@ -107,7 +110,10 @@ export interface BranchesResultMessage {
 }
 
 export interface BranchElement {
-    name: string;
+    commit_hash?: string;
+    commit_time?: string;
+    is_current?:  boolean;
+    name:         string;
     [property: string]: any;
 }
 
@@ -1767,6 +1773,9 @@ const typeMap: any = {
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
     "Branch": o([
+        { json: "commit_hash", js: "commit_hash", typ: u(undefined, "") },
+        { json: "commit_time", js: "commit_time", typ: u(undefined, "") },
+        { json: "is_current", js: "is_current", typ: u(undefined, true) },
         { json: "name", js: "name", typ: "" },
     ], "any"),
     "BranchesResultMessage": o([
@@ -1776,6 +1785,9 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "BranchElement": o([
+        { json: "commit_hash", js: "commit_hash", typ: u(undefined, "") },
+        { json: "commit_time", js: "commit_time", typ: u(undefined, "") },
+        { json: "is_current", js: "is_current", typ: u(undefined, true) },
         { json: "name", js: "name", typ: "" },
     ], "any"),
     "CheckAttnStashMessage": o([
