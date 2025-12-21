@@ -62,8 +62,8 @@ function App() {
   // Settings state
   const [settings, setSettings] = useState<Record<string, string>>({});
 
-  // Worktrees state for LocationPicker
-  const [worktrees, setWorktrees] = useState<DaemonWorktree[]>([]);
+  // Worktrees state (used by WorktreeCleanupPrompt)
+  const [, setWorktrees] = useState<DaemonWorktree[]>([]);
 
   // Worktree cleanup prompt state
   const [closedWorktree, setClosedWorktree] = useState<{ path: string; branch?: string } | null>(null);
@@ -111,7 +111,7 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendListWorktrees, sendDeleteWorktree, sendGetRecentLocations, sendListBranches, sendDeleteBranch, sendSwitchBranch, sendCreateBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, getRepoInfo, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -289,7 +289,6 @@ function App() {
 
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
-  const [worktreeFlowMode, setWorktreeFlowMode] = useState(false);
 
   // Branch picker state management
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
@@ -297,12 +296,10 @@ function App() {
   // No auto-creation - user clicks "+" to start a session
 
   const handleNewSession = useCallback(() => {
-    setWorktreeFlowMode(false);
     setLocationPickerOpen(true);
   }, []);
 
   const handleNewWorktreeSession = useCallback(() => {
-    setWorktreeFlowMode(true);
     setLocationPickerOpen(true);
   }, []);
 
@@ -323,7 +320,6 @@ function App() {
 
   const closeLocationPicker = useCallback(() => {
     setLocationPickerOpen(false);
-    setWorktreeFlowMode(false);
   }, []);
 
   const handleCloseSession = useCallback(
@@ -730,18 +726,9 @@ function App() {
         isOpen={locationPickerOpen}
         onClose={closeLocationPicker}
         onSelect={handleLocationSelect}
-        worktrees={worktrees}
-        onListWorktrees={sendListWorktrees}
-        onCreateWorktree={sendCreateWorktree}
-        onDeleteWorktree={sendDeleteWorktree}
-        worktreeFlowMode={worktreeFlowMode}
-        projectsDirectory={settings.projects_directory}
         onGetRecentLocations={sendGetRecentLocations}
-        onListBranches={sendListBranches}
-        onDeleteBranch={sendDeleteBranch}
-        onSwitchBranch={sendSwitchBranch}
-        onCreateBranch={sendCreateBranch}
-        onCreateWorktreeFromBranch={sendCreateWorktreeFromBranch}
+        onGetRepoInfo={getRepoInfo}
+        onCreateWorktree={sendCreateWorktree}
       />
       <BranchPicker
         isOpen={branchPickerOpen}

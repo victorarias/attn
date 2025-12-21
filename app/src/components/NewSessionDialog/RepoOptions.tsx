@@ -173,7 +173,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   };
 
   let currentIndex = 0;
-  const items: JSX.Element[] = [];
+  const items: React.ReactElement[] = [];
 
   // Main repository section
   items.push(
