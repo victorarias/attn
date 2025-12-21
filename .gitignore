@@ -1,6 +1,6 @@
-# Binaries
-cm
-attn
+# Binaries (anchored to root)
+/cm
+/attn
 
 # IDE
 .idea/

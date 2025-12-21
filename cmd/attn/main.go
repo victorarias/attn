@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/victorarias/claude-manager/internal/client"
@@ -95,6 +97,52 @@ func runList() {
 }
 
 func runWrapper() {
+	// If running inside the app, run claude directly
+	if os.Getenv("ATTN_INSIDE_APP") == "1" {
+		runClaudeDirectly()
+		return
+	}
+
+	// Otherwise, open the app via deep link
+	openAppWithDeepLink()
+}
+
+// openAppWithDeepLink opens the Tauri app with a deep link to spawn a session
+func openAppWithDeepLink() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error getting cwd: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Parse -s flag for label
+	label := ""
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-s" && i+1 < len(args) {
+			label = args[i+1]
+			break
+		}
+	}
+	if label == "" {
+		label = filepath.Base(cwd)
+	}
+
+	// Build deep link URL
+	deepLink := fmt.Sprintf("attn://spawn?cwd=%s&label=%s",
+		url.QueryEscape(cwd),
+		url.QueryEscape(label))
+
+	// Open via system handler
+	cmd := exec.Command("open", deepLink)
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error opening app: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runClaudeDirectly runs claude with hooks (used when inside the app)
+func runClaudeDirectly() {
 	// Parse flags
 	fs := flag.NewFlagSet("attn", flag.ContinueOnError)
 	labelFlag := fs.String("s", "", "session label")
