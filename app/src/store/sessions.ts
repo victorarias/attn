@@ -203,8 +203,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       });
 
       // Terminal input -> PTY
-      terminal.onData((data: string) => {
+      const sendToPty = (data: string) => {
         invoke('pty_write', { id, data }).catch(console.error);
+      };
+      terminal.onData(sendToPty);
+
+      // Shift+Enter sends newline for line breaks in Claude Code
+      // Source: https://github.com/anthropics/claude-code/issues/1282
+      terminal.attachCustomKeyEventHandler((ev) => {
+        if (ev.key === 'Enter' && ev.shiftKey && !ev.ctrlKey && !ev.altKey) {
+          if (ev.type === 'keydown') {
+            sendToPty('\n');
+          }
+          // Block both keydown and keyup to prevent any leakage
+          return false;
+        }
+        return true;
       });
 
       // Update session with terminal ref
