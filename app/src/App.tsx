@@ -562,6 +562,17 @@ function App() {
     return sendGetFileDiff(daemonSession.directory, diffOverlay.path, diffOverlay.staged);
   }, [sessions, activeSessionId, daemonSessions, diffOverlay.path, diffOverlay.staged, sendGetFileDiff]);
 
+  // Send code reference to the active Claude terminal
+  const handleSendToClaude = useCallback((reference: string) => {
+    if (!activeSessionId) return;
+    invoke('pty_write', { id: activeSessionId, data: reference }).catch(console.error);
+    // Focus the terminal so user can start typing
+    setTimeout(() => {
+      const handle = terminalRefs.current.get(activeSessionId);
+      handle?.focus();
+    }, 50);
+  }, [activeSessionId]);
+
   const totalDiffFiles = (gitStatus?.staged?.length || 0) +
     (gitStatus?.unstaged?.length || 0) +
     (gitStatus?.untracked?.length || 0);
@@ -769,6 +780,7 @@ function App() {
         onPrev={() => handleDiffNav('prev')}
         onNext={() => handleDiffNav('next')}
         fetchDiff={fetchDiff}
+        onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
       />
     </div>
     </DaemonProvider>

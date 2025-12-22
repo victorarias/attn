@@ -106,3 +106,27 @@
   padding: 20px;
   text-align: center;
 }
+
+/* Send to Claude widget */
+.send-to-claude-widget {
+  background: #2a2a2d;
+  border: 1px solid #3a3a3d;
+  border-radius: 4px;
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
+}
+
+.send-to-claude-widget:hover {
+  background: #3a3a3d;
+  border-color: #4a4a4d;
+}
+
+.send-to-claude-widget svg {
+  width: 16px;
+  height: 16px;
+  color: #d4a27f;
+}
