@@ -4,8 +4,10 @@ import './PathInput.css';
 interface PathInputProps {
   value: string;
   onChange: (value: string) => void;
+  onTabComplete: (value: string) => void;
   onSelect: (path: string) => void;
   ghostText: string;
+  hasSelectedSinceTab: boolean;
   placeholder?: string;
   autoFocus?: boolean;
 }
@@ -13,8 +15,10 @@ interface PathInputProps {
 export function PathInput({
   value,
   onChange,
+  onTabComplete,
   onSelect,
   ghostText,
+  hasSelectedSinceTab,
   placeholder = 'Type path (e.g., ~/projects)...',
   autoFocus = true,
 }: PathInputProps) {
@@ -38,20 +42,21 @@ export function PathInput({
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Tab' && ghostText) {
       e.preventDefault();
-      // Complete to ghost text
-      onChange(ghostText);
+      // Complete to ghost text - use onTabComplete to signal this was Tab (not typing)
+      onTabComplete(ghostText);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      // If ghostText is a valid completion of what user typed, use it
-      // Otherwise use what they typed (or ghostText if empty)
-      const pathToSelect = (ghostText && ghostText.startsWith(value))
-        ? ghostText
-        : (value || ghostText);
+      // Decision logic:
+      // - If user has intentionally selected (typed or arrowed), accept ghost text as completion
+      // - If user just Tabbed (hasSelectedSinceTab=false), confirm the current value
+      const pathToSelect = (ghostText && ghostText.startsWith(value) && hasSelectedSinceTab)
+        ? ghostText  // User intentionally selected, accept ghost as completion
+        : value;     // User just Tabbed, confirm current path
       if (pathToSelect) {
         onSelect(pathToSelect);
       }
     }
-  }, [ghostText, value, onChange, onSelect]);
+  }, [ghostText, value, onTabComplete, onSelect, hasSelectedSinceTab]);
 
   // Calculate ghost text to show (portion not yet typed)
   const visibleGhost = ghostText.startsWith(value)

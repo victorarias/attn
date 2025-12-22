@@ -41,6 +41,9 @@ interface State {
   recentLocations: RecentLocation[];
   homePath: string;
   refreshing: boolean;
+  // Tracks if user has intentionally selected since last Tab
+  // (typing or arrow navigation = intentional, Tab auto-selects first child = not intentional)
+  hasSelectedSinceTab: boolean;
 }
 
 export function LocationPicker({
@@ -61,6 +64,7 @@ export function LocationPicker({
     recentLocations: [],
     homePath: '/Users',
     refreshing: false,
+    hasSelectedSinceTab: true, // Start true - any initial value is "intentional"
   });
 
   const { suggestions: fsSuggestions, currentDir } = useFilesystemSuggestions(state.inputValue);
@@ -112,6 +116,7 @@ export function LocationPicker({
         selectedRepo: null,
         repoInfo: null,
         refreshing: false,
+        hasSelectedSinceTab: true, // Initial value counts as intentional
       }));
     }
   }, [isOpen, projectsDirectory, state.homePath]);
@@ -187,7 +192,13 @@ export function LocationPicker({
   );
 
   const handlePathInputChange = useCallback((value: string) => {
-    setState(prev => ({ ...prev, inputValue: value }));
+    setState(prev => ({ ...prev, inputValue: value, hasSelectedSinceTab: true }));
+  }, []);
+
+  // Tab completion handler - sets hasSelectedSinceTab to false since
+  // the auto-selection of first child is not an intentional selection
+  const handleTabComplete = useCallback((value: string) => {
+    setState(prev => ({ ...prev, inputValue: value, hasSelectedSinceTab: false }));
   }, []);
 
   // PathInput already sends the raw path - handleSelect does the expansion
@@ -283,12 +294,14 @@ export function LocationPicker({
         setState(prev => ({
           ...prev,
           selectedIndex: Math.min(prev.selectedIndex + 1, totalItems - 1),
+          hasSelectedSinceTab: true, // Arrow navigation is intentional selection
         }));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setState(prev => ({
           ...prev,
           selectedIndex: Math.max(prev.selectedIndex - 1, 0),
+          hasSelectedSinceTab: true, // Arrow navigation is intentional selection
         }));
       }
       // Note: Enter is handled by PathInput component directly
@@ -322,8 +335,10 @@ export function LocationPicker({
               <PathInput
                 value={state.inputValue}
                 onChange={handlePathInputChange}
+                onTabComplete={handleTabComplete}
                 onSelect={handlePathInputSelect}
                 ghostText={ghostText}
+                hasSelectedSinceTab={state.hasSelectedSinceTab}
                 placeholder="Type path (e.g., ~/projects) or search..."
               />
               {currentDir && (
