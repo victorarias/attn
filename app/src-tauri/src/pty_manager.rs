@@ -37,18 +37,86 @@ fn get_user_login_shell() -> Option<String> {
     }
 }
 
-/// Find the last safe UTF-8 boundary in a byte slice.
-/// Returns the index up to which the slice contains only complete UTF-8 sequences.
+/// Find the last safe boundary for both UTF-8 and ANSI escape sequences.
+/// Returns the index up to which the slice contains only complete sequences.
 /// The remainder (from returned index to end) should be carried over to the next read.
-fn find_utf8_boundary(bytes: &[u8]) -> usize {
+fn find_safe_boundary(bytes: &[u8]) -> usize {
     if bytes.is_empty() {
         return 0;
     }
 
     let len = bytes.len();
 
-    // Walk backwards from the end looking for a potential incomplete sequence.
-    // UTF-8 sequences are at most 4 bytes, so we only need to check the last 4 bytes.
+    // First, check for incomplete ANSI escape sequences.
+    // Look for ESC (0x1B) in the last portion of the buffer.
+    // ANSI sequences can be long (e.g., \x1B[38;2;255;128;64m), so check last 32 bytes.
+    let search_start = len.saturating_sub(32);
+    for i in (search_start..len).rev() {
+        if bytes[i] == 0x1B {
+            // Found ESC - check if sequence is complete
+            if i + 1 >= len {
+                // Just ESC at the end, incomplete
+                return i;
+            }
+
+            match bytes[i + 1] {
+                // CSI sequence: \x1B[ followed by params, terminated by 0x40-0x7E
+                b'[' => {
+                    // Look for terminating byte (letter or @[\]^_`{|}~)
+                    for j in (i + 2)..len {
+                        let b = bytes[j];
+                        if (0x40..=0x7E).contains(&b) {
+                            // Sequence is complete, continue searching for more ESC
+                            break;
+                        }
+                        if j == len - 1 {
+                            // Reached end without terminator, incomplete
+                            return i;
+                        }
+                    }
+                    if i + 2 >= len {
+                        // Just \x1B[ at end, incomplete
+                        return i;
+                    }
+                }
+                // OSC sequence: \x1B] followed by text, terminated by BEL (0x07) or ST (\x1B\\)
+                b']' => {
+                    let mut found_terminator = false;
+                    for j in (i + 2)..len {
+                        if bytes[j] == 0x07 {
+                            found_terminator = true;
+                            break;
+                        }
+                        if bytes[j] == 0x1B && j + 1 < len && bytes[j + 1] == b'\\' {
+                            found_terminator = true;
+                            break;
+                        }
+                    }
+                    if !found_terminator {
+                        return i;
+                    }
+                }
+                // DCS, PM, APC sequences: similar to OSC
+                b'P' | b'^' | b'_' => {
+                    let mut found_terminator = false;
+                    for j in (i + 2)..len {
+                        if bytes[j] == 0x1B && j + 1 < len && bytes[j + 1] == b'\\' {
+                            found_terminator = true;
+                            break;
+                        }
+                    }
+                    if !found_terminator {
+                        return i;
+                    }
+                }
+                // Simple two-byte escape (e.g., \x1B7, \x1B8, \x1Bc)
+                // These are complete if we have the second byte
+                _ => {}
+            }
+        }
+    }
+
+    // Now check for incomplete UTF-8 sequences in the last 4 bytes
     for i in (len.saturating_sub(4)..len).rev() {
         let b = bytes[i];
 
@@ -81,8 +149,6 @@ fn find_utf8_boundary(bytes: &[u8]) -> usize {
         }
     }
 
-    // All bytes in last 4 positions are continuation bytes (shouldn't happen normally)
-    // or we have a very short buffer - be conservative, send what we have
     len
 }
 
@@ -215,8 +281,8 @@ pub async fn pty_spawn(
                     let mut combined = std::mem::take(&mut utf8_carryover);
                     combined.extend_from_slice(&buf[..n]);
 
-                    // Find safe UTF-8 boundary
-                    let boundary = find_utf8_boundary(&combined);
+                    // Find safe boundary (UTF-8 + ANSI escape sequences)
+                    let boundary = find_safe_boundary(&combined);
 
                     // Only emit if we have complete sequences to send
                     if boundary > 0 {
