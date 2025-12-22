@@ -2,6 +2,7 @@ import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 
@@ -220,8 +221,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         },
       });
 
-      // Load WebLinksAddon before open
-      term.loadAddon(new WebLinksAddon());
+      // Load WebLinksAddon before open - Cmd/Ctrl+click to open URLs
+      term.loadAddon(new WebLinksAddon(async (event, uri) => {
+        if (event.metaKey || event.ctrlKey) {
+          await openUrl(uri);
+        }
+      }));
 
       // VS Code: open() FIRST, then load WebGL
       // Source: xtermTerminal.ts attachToElement() - WebGL is loaded AFTER raw.open()
