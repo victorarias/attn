@@ -69,6 +69,25 @@
   padding: 4px 12px;
 }
 
+.tree-dir {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  font-size: var(--font-size-sm);
+  background: rgba(42, 42, 45, 0.3);
+  margin-bottom: 2px;
+}
+
+.dir-name {
+  color: #888;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+}
+
+.tree-file {
+  /* Inherits from .change-file */
+}
+
 .change-file {
   display: flex;
   align-items: center;

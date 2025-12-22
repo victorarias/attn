@@ -8,7 +8,7 @@ func TestParseGitStatusPorcelain(t *testing.T) {
 	// Porcelain v1 format: XY PATH or XY ORIG -> PATH for renames
 	input := " M src/App.tsx\x00A  src/new.ts\x00?? untracked.txt\x00"
 
-	staged, unstaged, untracked := parseGitStatusPorcelain(input)
+	staged, unstaged, untracked := parseGitStatusPorcelain(input, "")
 
 	if len(unstaged) != 1 || unstaged[0].Path != "src/App.tsx" {
 		t.Errorf("Expected 1 unstaged file, got %v", unstaged)

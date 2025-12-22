@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -16,9 +18,65 @@ type diffStats struct {
 	Deletions int
 }
 
+// walkUntrackedDir walks an untracked directory and returns all files,
+// filtering out gitignored files using git check-ignore
+func walkUntrackedDir(repoDir, dirPath string) []protocol.GitFileChange {
+	var files []protocol.GitFileChange
+	fullPath := filepath.Join(repoDir, dirPath)
+
+	// Collect all regular files in the directory
+	var filePaths []string
+	filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip files we can't access
+		}
+		if !d.IsDir() {
+			// Convert to relative path from repo root
+			relPath, err := filepath.Rel(repoDir, path)
+			if err == nil {
+				filePaths = append(filePaths, relPath)
+			}
+		}
+		return nil
+	})
+
+	if len(filePaths) == 0 {
+		return files
+	}
+
+	// Use git check-ignore to filter out ignored files
+	// Pass all paths at once for efficiency
+	cmd := exec.Command("git", append([]string{"check-ignore", "--stdin"}, []string{}...)...)
+	cmd.Dir = repoDir
+	cmd.Stdin = strings.NewReader(strings.Join(filePaths, "\n"))
+	ignoredOutput, _ := cmd.Output()
+
+	// Build a set of ignored paths
+	ignoredSet := make(map[string]bool)
+	if len(ignoredOutput) > 0 {
+		for _, path := range strings.Split(strings.TrimSpace(string(ignoredOutput)), "\n") {
+			if path != "" {
+				ignoredSet[path] = true
+			}
+		}
+	}
+
+	// Create GitFileChange for non-ignored files
+	for _, path := range filePaths {
+		if !ignoredSet[path] {
+			files = append(files, protocol.GitFileChange{
+				Path:   path,
+				Status: "untracked",
+			})
+		}
+	}
+
+	return files
+}
+
 // parseGitStatusPorcelain parses `git status --porcelain -z` output
 // Format: XY PATH\0 where X=index status, Y=worktree status
-func parseGitStatusPorcelain(output string) (staged, unstaged, untracked []protocol.GitFileChange) {
+func parseGitStatusPorcelain(output string, repoDir string) (staged, unstaged, untracked []protocol.GitFileChange) {
 	entries := strings.Split(output, "\x00")
 
 	for _, entry := range entries {
@@ -36,10 +94,16 @@ func parseGitStatusPorcelain(output string) (staged, unstaged, untracked []proto
 
 		// Untracked files
 		if indexStatus == '?' && worktreeStatus == '?' {
-			untracked = append(untracked, protocol.GitFileChange{
-				Path:   path,
-				Status: "untracked",
-			})
+			// If path ends with /, it's a directory - expand it
+			if strings.HasSuffix(path, "/") {
+				files := walkUntrackedDir(repoDir, path)
+				untracked = append(untracked, files...)
+			} else {
+				untracked = append(untracked, protocol.GitFileChange{
+					Path:   path,
+					Status: "untracked",
+				})
+			}
 			continue
 		}
 
@@ -122,7 +186,7 @@ func getGitStatus(dir string) (*protocol.GitStatusUpdateMessage, error) {
 		}, nil
 	}
 
-	staged, unstaged, untracked := parseGitStatusPorcelain(string(statusOutput))
+	staged, unstaged, untracked := parseGitStatusPorcelain(string(statusOutput), dir)
 
 	// Get numstat for unstaged changes
 	if len(unstaged) > 0 {
