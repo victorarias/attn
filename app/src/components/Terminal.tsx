@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 
 // Terminal font configuration (matches xterm options)
-const FONT_FAMILY = 'Menlo, Monaco, "Courier New", monospace';
+const FONT_FAMILY = 'Iosevka, Menlo, Monaco, "Courier New", monospace';
 const DEFAULT_FONT_SIZE = 14;
 
 // VS Code limits canvas width to prevent performance issues with very wide terminals

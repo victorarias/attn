@@ -5,15 +5,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 
 ```bash
+# Daemon only (fast, ~2s)
 make build          # Build binary to ./attn
-make install        # Build and install to ~/.local/bin/attn (kills daemon)
+make install        # Build and install daemon to ~/.local/bin/attn (restarts daemon)
+
+# Full app
+make build-app      # Build Go daemon + Tauri app
+make install-app    # Build and install .app to /Applications
+make install-all    # Install both daemon and app
+
+# Distribution
+make dist           # Create DMG at app/src-tauri/target/release/bundle/dmg/
+
+# Testing
 make test           # Run Go tests
 make test-frontend  # Run frontend tests (vitest)
 make test-all       # Run Go + frontend tests
 go test ./internal/store -run TestList  # Run single test
 ```
 
-**Rule:** Always use `make install` after any code change. The daemon is auto-killed and restarted by the app.
+**Dev workflow:** Use `make install` for daemon changes (fast iteration). Use `make install-app` when you need to test the full packaged app.
+
+**Distribution:** The .app bundle includes the daemon binary. When no local daemon exists at `~/.local/bin/attn`, the app uses its bundled copy.
 
 ## CLI Usage
 
@@ -44,7 +57,7 @@ Attention Manager (`attn`) tracks multiple Claude Code sessions and surfaces whi
 
 2. **Hooks** (`internal/hooks`): Generates Claude Code hooks JSON that reports state changes back to daemon via unix socket using `nc`. Three hooks: Stop (waiting), UserPromptSubmit (working), PostToolUse/TodoWrite (update todos).
 
-3. **Daemon** (`internal/daemon`): Background process listening on `~/.attn.sock`. Handles register/unregister/state/todos/query/heartbeat commands. Auto-started by app if not running.
+3. **Daemon** (`internal/daemon`): Background process listening on `~/.attn.sock`. Handles register/unregister/state/todos/query/heartbeat commands. Auto-started by app if not running. The app includes a circuit breaker for daemon restarts (3 reconnect attempts → 2 restart attempts → circuit opens, auto-resets after 30s).
 
 4. **Store** (`internal/store`): Thread-safe in-memory session storage with mutex protection.
 

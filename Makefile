@@ -1,4 +1,4 @@
-.PHONY: build install test test-all test-frontend clean generate-types check-types
+.PHONY: build install test test-all test-frontend clean generate-types check-types build-app install-app install-all dist
 
 BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
@@ -49,3 +49,23 @@ generate-types:
 # CI check: verify generated files are up-to-date
 check-types: generate-types
 	git diff --exit-code internal/protocol/generated.go app/src/types/generated.ts
+
+# Build Tauri app with bundled daemon
+build-app: build
+	@mkdir -p app/src-tauri/binaries
+	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
+	cd app && pnpm tauri build
+
+# Install Tauri app to /Applications
+install-app: build-app
+	@rm -rf /Applications/attn.app
+	cp -r app/src-tauri/target/release/bundle/macos/attn.app /Applications/
+	@echo "Installed attn.app to /Applications"
+
+# Install daemon and app
+install-all: install install-app
+
+# Create distributable DMG
+dist: build-app
+	cd app && pnpm tauri build --bundles dmg
+	@echo "DMG created at app/src-tauri/target/release/bundle/dmg/"

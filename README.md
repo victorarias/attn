@@ -1,36 +1,56 @@
 # attn
 
-Track multiple Claude Code sessions and surface which ones need your attention.
+A desktop app for managing multiple [Claude Code](https://claude.ai/code) sessions. Know which ones need your attention.
 
-## Problem
+![Demo](docs/demo.gif)
+<!-- TODO: Record demo gif showing: opening app, multiple sessions with different states, PR notifications -->
 
-Running multiple Claude sessions means constantly checking which ones are waiting for input.
+## The Problem
 
-## Solution
+You're running 5 Claude Code sessions across different projects. One finished and is waiting for approval. Another hit an error. A third is asking a clarifying question. But you're focused on the fourth one and have no idea the others need you.
 
-- **Desktop app**: Dashboard showing all sessions with real-time state updates
-- **tmux integration**: Status bar shows waiting sessions
-- **GitHub PR monitoring**: Tracks PRs needing review, with CI failures, or merge conflicts
+## The Solution
+
+**attn** tracks all your Claude Code sessions in one place:
+
+- **Real-time status** - See which sessions are working, waiting, or idle
+- **Desktop notifications** - Get alerted when sessions need input
+- **Built-in terminal** - Manage sessions without leaving the app
+- **GitHub PR integration** - Track PRs needing review, with CI failures, or merge conflicts
+- **tmux status bar** - Quick glance at session states from your terminal
 
 ## Installation
 
+### Download
+
+Download the latest `.dmg` from [Releases](https://github.com/victorarias/attn/releases).
+
+### Build from source
+
+Requires: Go 1.21+, Rust, Node.js, pnpm
+
 ```bash
-make install
+git clone https://github.com/victorarias/attn.git
+cd attn
+make install-all   # Installs daemon + desktop app
 ```
 
-This builds the CLI and installs it to `~/.local/bin/attn`.
-
 ## Usage
+
+### Desktop App
+
+Launch **attn** from Applications. The app shows all active Claude Code sessions with their current state.
+
+### CLI
 
 ```bash
 attn                # Start Claude with directory name as session label
 attn -s myproject   # Start Claude with explicit session label
 attn status         # Output for tmux status bar
 attn list           # List all sessions (JSON)
-attn daemon         # Run daemon in foreground (for debugging)
 ```
 
-## tmux Setup
+### tmux Integration
 
 Add to `.tmux.conf`:
 
@@ -39,37 +59,60 @@ set -g status-interval 5
 set -g status-right '#(attn status)'
 ```
 
-## How It Works
-
-1. `attn` wraps `claude` and installs hooks that report state changes to a daemon
-2. The daemon tracks session states: **working**, **waiting_input**, or **idle**
-3. A Tauri desktop app connects via WebSocket for real-time updates
-4. `attn status` queries the daemon for a tmux-friendly summary
-
 ## Session States
 
-| State | Meaning |
-|-------|---------|
-| working | Claude is actively generating |
-| waiting_input | Claude asked a question or needs permission |
-| idle | Claude finished its task |
+| State | Indicator | Meaning |
+|-------|-----------|---------|
+| Working | Green | Claude is actively generating |
+| Waiting | Orange | Claude needs your input |
+| Idle | Gray | Claude finished its task |
+
+## Requirements
+
+- **macOS** (Apple Silicon or Intel)
+- **Claude Code** CLI installed
+
+## How It Works
+
+1. `attn` wraps the `claude` command and installs hooks that report state changes
+2. A background daemon tracks all session states via unix socket
+3. The desktop app connects via WebSocket for real-time updates
+4. GitHub integration polls for PRs using the `gh` CLI
 
 ## Development
 
 ```bash
-make build          # Build CLI to ./attn
-make test           # Run Go tests
-make install        # Build and install to ~/.local/bin
+# Daemon only (fast iteration, ~2s)
+make install        # Build and install daemon
 
-# Desktop app
-cd app
-pnpm install
-pnpm run dev:all    # Start app in development mode
+# Desktop app (with hot reload)
+cd app && pnpm install && pnpm run dev:all
+
+# Full build
+make build-app      # Build daemon + Tauri app
+make install-app    # Install to /Applications
+make dist           # Create distributable DMG
+
+# Testing
+make test-all       # Run Go + frontend tests
 ```
 
-## Architecture
+## Status
 
-- **CLI** (`cmd/attn`): Wrapper that registers sessions and installs hooks
-- **Daemon** (`internal/daemon`): Background process tracking all sessions via unix socket
-- **Hooks** (`internal/hooks`): Claude Code hooks that report state changes
-- **App** (`app/`): Tauri + React desktop dashboard with native Rust PTY
+**Beta** - I use attn daily for my own work, but offer no guarantees. Expect rough edges.
+
+## Built With
+
+- [Claude Code](https://claude.ai/code) - The AI coding assistant this tool wraps
+- [Tauri](https://tauri.app) - Desktop app framework
+- [React](https://react.dev) - UI framework
+- [Go](https://go.dev) - Daemon and CLI
+- [SQLite](https://sqlite.org) - Local storage
+
+## License
+
+[GPL-3.0](LICENSE)
+
+## Contributing
+
+Contributions welcome! Please open an issue first to discuss what you'd like to change.

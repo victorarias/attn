@@ -14,5 +14,5 @@
 coverage.out
 .playwright-mcp/
 
-# Documentation (local only)
-docs/
+# Build artifacts
+app/src-tauri/binaries/

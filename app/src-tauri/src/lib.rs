@@ -20,18 +20,35 @@ fn is_daemon_running() -> bool {
 }
 
 /// Start the daemon process
+/// Checks local dev path first (~/.local/bin/attn), then falls back to bundled binary
 #[tauri::command]
-fn start_daemon() -> Result<(), String> {
+fn start_daemon(_app: tauri::AppHandle) -> Result<(), String> {
     use std::process::Command;
     use std::thread;
     use std::time::Duration;
 
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let bin_path = home.join(".local/bin/attn");
 
-    if !bin_path.exists() {
-        return Err(format!("attn binary not found at {:?}. Run 'make install' first.", bin_path));
-    }
+    // 1. Check local dev path first (~/.local/bin/attn)
+    let local_path = home.join(".local/bin/attn");
+
+    // 2. Check bundled path (same directory as the app executable)
+    let bundled_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("attn")));
+
+    // Use local if exists (dev mode), otherwise bundled
+    let bin_path = if local_path.exists() {
+        local_path
+    } else if let Some(ref bp) = bundled_path {
+        if bp.exists() {
+            bp.clone()
+        } else {
+            return Err("No daemon binary found. Run 'make install' or reinstall the app.".into());
+        }
+    } else {
+        return Err("No daemon binary found.".into());
+    };
 
     Command::new(&bin_path)
         .arg("daemon")

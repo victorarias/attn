@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import type {
   Session as GeneratedSession,
   PR as GeneratedPR,
@@ -221,6 +222,16 @@ export function useDaemonSocket({
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
 
+  // Circuit breaker state for daemon restart
+  const reconnectAttemptsRef = useRef(0);
+  const restartAttemptsRef = useRef(0);
+  const circuitOpenRef = useRef(false);
+  const circuitResetTimeoutRef = useRef<number | null>(null);
+
+  const MAX_RECONNECTS_BEFORE_RESTART = 3;
+  const MAX_RESTART_ATTEMPTS = 2;
+  const CIRCUIT_RESET_MS = 30000;
+
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
@@ -230,6 +241,14 @@ export function useDaemonSocket({
       console.log('[Daemon] WebSocket connected');
       setConnectionError(null);
       reconnectDelayRef.current = 1000; // Reset to 1s on successful connect
+      // Reset circuit breaker state on successful connect
+      reconnectAttemptsRef.current = 0;
+      restartAttemptsRef.current = 0;
+      circuitOpenRef.current = false;
+      if (circuitResetTimeoutRef.current) {
+        clearTimeout(circuitResetTimeoutRef.current);
+        circuitResetTimeoutRef.current = null;
+      }
     };
 
     ws.onmessage = (event) => {
@@ -615,12 +634,75 @@ export function useDaemonSocket({
     };
 
     ws.onclose = () => {
-      const delay = reconnectDelayRef.current;
-      console.log(`[Daemon] WebSocket disconnected, reconnecting in ${delay}ms...`);
       wsRef.current = null;
-      reconnectTimeoutRef.current = window.setTimeout(connect, delay);
-      // Exponential backoff: 1s -> 1.5s -> 2.25s -> ... -> max 5s
-      reconnectDelayRef.current = Math.min(delay * 1.5, 5000);
+
+      // Circuit breaker: if open, don't retry
+      if (circuitOpenRef.current) {
+        console.error('[Daemon] Circuit open, not retrying');
+        return;
+      }
+
+      reconnectAttemptsRef.current++;
+      const delay = reconnectDelayRef.current;
+
+      if (reconnectAttemptsRef.current > MAX_RECONNECTS_BEFORE_RESTART) {
+        // Reconnects exhausted, try restarting daemon
+        if (restartAttemptsRef.current < MAX_RESTART_ATTEMPTS) {
+          restartAttemptsRef.current++;
+          console.log(`[Daemon] Attempting daemon restart (${restartAttemptsRef.current}/${MAX_RESTART_ATTEMPTS})`);
+
+          invoke('start_daemon')
+            .then(() => {
+              console.log('[Daemon] Daemon restarted successfully');
+              reconnectAttemptsRef.current = 0; // Reset reconnect counter
+              reconnectDelayRef.current = 1000; // Reset delay
+              reconnectTimeoutRef.current = window.setTimeout(connect, 1000);
+            })
+            .catch((err) => {
+              console.error('[Daemon] Failed to restart daemon:', err);
+              if (restartAttemptsRef.current >= MAX_RESTART_ATTEMPTS) {
+                circuitOpenRef.current = true;
+                setConnectionError('Daemon unreachable. Click to retry.');
+                console.error('[Daemon] Circuit breaker open - daemon unreachable');
+                // Auto-reset circuit after timeout
+                circuitResetTimeoutRef.current = window.setTimeout(() => {
+                  console.log('[Daemon] Circuit breaker auto-reset');
+                  circuitOpenRef.current = false;
+                  restartAttemptsRef.current = 0;
+                  reconnectAttemptsRef.current = 0;
+                  reconnectDelayRef.current = 1000;
+                  connect();
+                }, CIRCUIT_RESET_MS);
+              } else {
+                // Try restart again after delay
+                reconnectTimeoutRef.current = window.setTimeout(() => {
+                  wsRef.current = null; // Trigger onclose logic again
+                  connect();
+                }, delay);
+              }
+            });
+        } else {
+          // All restart attempts exhausted, open circuit
+          circuitOpenRef.current = true;
+          setConnectionError('Daemon unreachable. Click to retry.');
+          console.error('[Daemon] Circuit breaker open - all restart attempts exhausted');
+          // Auto-reset circuit after timeout
+          circuitResetTimeoutRef.current = window.setTimeout(() => {
+            console.log('[Daemon] Circuit breaker auto-reset');
+            circuitOpenRef.current = false;
+            restartAttemptsRef.current = 0;
+            reconnectAttemptsRef.current = 0;
+            reconnectDelayRef.current = 1000;
+            connect();
+          }, CIRCUIT_RESET_MS);
+        }
+      } else {
+        // Normal reconnect with backoff
+        console.log(`[Daemon] WebSocket disconnected, reconnecting in ${delay}ms... (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECTS_BEFORE_RESTART})`);
+        reconnectTimeoutRef.current = window.setTimeout(connect, delay);
+        // Exponential backoff: 1s -> 1.5s -> 2.25s -> ... -> max 5s
+        reconnectDelayRef.current = Math.min(delay * 1.5, 5000);
+      }
     };
 
     ws.onerror = (err) => {
@@ -638,8 +720,26 @@ export function useDaemonSocket({
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
+      if (circuitResetTimeoutRef.current) {
+        clearTimeout(circuitResetTimeoutRef.current);
+      }
       wsRef.current?.close();
     };
+  }, [connect]);
+
+  // Manual retry function for UI
+  const retryConnection = useCallback(() => {
+    console.log('[Daemon] Manual retry requested');
+    if (circuitResetTimeoutRef.current) {
+      clearTimeout(circuitResetTimeoutRef.current);
+      circuitResetTimeoutRef.current = null;
+    }
+    circuitOpenRef.current = false;
+    restartAttemptsRef.current = 0;
+    reconnectAttemptsRef.current = 0;
+    reconnectDelayRef.current = 1000;
+    setConnectionError(null);
+    connect();
   }, [connect]);
 
   const sendPRAction = useCallback((
@@ -1243,6 +1343,7 @@ export function useDaemonSocket({
     hasReceivedInitialState,
     settings: settingsRef.current,
     rateLimit,
+    retryConnection,
     sendPRAction,
     sendMutePR,
     sendMuteRepo,
