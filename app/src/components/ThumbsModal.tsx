@@ -83,12 +83,8 @@ export function ThumbsModal({ isOpen, terminalText, onClose, onCopy }: ThumbsMod
         } else if (pattern.pattern_type === 'ip_port') {
           await openUrl(`http://${pattern.value}`);
         } else {
-          // Path - use openUrl which should handle file:// URIs
-          // For local paths, prepend file:// protocol
-          const fileUrl = pattern.value.startsWith('/')
-            ? `file://${pattern.value}`
-            : pattern.value;
-          await openUrl(fileUrl);
+          // Path - reveal in Finder (macOS)
+          await invoke('reveal_in_finder', { path: pattern.value });
         }
       }
       onClose();

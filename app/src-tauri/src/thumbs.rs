@@ -1,6 +1,7 @@
 use regex::Regex;
 use serde::Serialize;
 use std::collections::HashSet;
+use std::process::Command;
 use std::sync::LazyLock;
 
 #[derive(Serialize, Clone)]
@@ -157,6 +158,18 @@ pub fn extract_patterns(text: String) -> Vec<PatternMatch> {
     }
 
     matches
+}
+
+/// Reveal a file or directory in Finder (macOS)
+#[tauri::command]
+pub fn reveal_in_finder(path: String) -> Result<(), String> {
+    // Use `open -R` to reveal in Finder
+    Command::new("open")
+        .arg("-R")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Failed to reveal in Finder: {}", e))?;
+    Ok(())
 }
 
 #[cfg(test)]

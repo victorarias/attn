@@ -130,6 +130,7 @@ pub fn run() {
             is_daemon_running,
             start_daemon,
             thumbs::extract_patterns,
+            thumbs::reveal_in_finder,
         ])
         .on_page_load(|webview, _payload| {
             // Show window as soon as page content is loaded (loading screen visible)
