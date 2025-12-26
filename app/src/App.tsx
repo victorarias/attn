@@ -13,6 +13,8 @@ import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffOverlay } from './components/DiffOverlay';
 import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
+import { ThumbsModal } from './components/ThumbsModal';
+import { CopyToast, useCopyToast } from './components/CopyToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket, DaemonWorktree, GitStatusUpdate } from './hooks/useDaemonSocket';
@@ -293,6 +295,11 @@ function App() {
   // Branch picker state management
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
 
+  // Thumbs (Quick Find) state
+  const [thumbsOpen, setThumbsOpen] = useState(false);
+  const [thumbsText, setThumbsText] = useState('');
+  const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
+
   // No auto-creation - user clicks "+" to start a session
 
   const handleNewSession = useCallback(() => {
@@ -321,6 +328,37 @@ function App() {
   const closeLocationPicker = useCallback(() => {
     setLocationPickerOpen(false);
   }, []);
+
+  // Quick Find (thumbs) handlers
+  const handleOpenQuickFind = useCallback(() => {
+    if (!activeSessionId) return;
+    const handle = terminalRefs.current.get(activeSessionId);
+    const terminal = handle?.terminal;
+    if (!terminal) return;
+
+    // Extract last 1000 lines from terminal buffer
+    const buffer = terminal.buffer.active;
+    if (!buffer) return;
+    const lines = 1000;
+    const startLine = Math.max(0, buffer.length - lines);
+    const textLines: string[] = [];
+
+    for (let i = startLine; i < buffer.length; i++) {
+      const line = buffer.getLine(i);
+      if (line) textLines.push(line.translateToString(true));
+    }
+
+    setThumbsText(textLines.join('\n'));
+    setThumbsOpen(true);
+  }, [activeSessionId]);
+
+  const handleThumbsClose = useCallback(() => {
+    setThumbsOpen(false);
+  }, []);
+
+  const handleThumbsCopy = useCallback((_value: string) => {
+    showCopyToast('Copied to clipboard');
+  }, [showCopyToast]);
 
   const handleCloseSession = useCallback(
     (id: string) => {
@@ -630,10 +668,11 @@ function App() {
         }
       }
     },
+    onQuickFind: view === 'session' ? handleOpenQuickFind : undefined,
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
-    enabled: !locationPickerOpen && !branchPickerOpen,
+    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen,
   });
 
   return (
@@ -782,6 +821,13 @@ function App() {
         fetchDiff={fetchDiff}
         onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
       />
+      <ThumbsModal
+        isOpen={thumbsOpen}
+        terminalText={thumbsText}
+        onClose={handleThumbsClose}
+        onCopy={handleThumbsCopy}
+      />
+      <CopyToast message={copyMessage} onDone={clearCopyToast} />
     </div>
     </DaemonProvider>
   );

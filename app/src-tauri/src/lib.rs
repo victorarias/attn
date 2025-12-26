@@ -1,4 +1,5 @@
 mod pty_manager;
+mod thumbs;
 
 use pty_manager::PtyState;
 
@@ -128,6 +129,7 @@ pub fn run() {
             list_directory,
             is_daemon_running,
             start_daemon,
+            thumbs::extract_patterns,
         ])
         .on_page_load(|webview, _payload| {
             // Show window as soon as page content is loaded (loading screen visible)

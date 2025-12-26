@@ -15,6 +15,7 @@ interface KeyboardShortcutsConfig {
   onToggleSidebar?: () => void;
   onRefreshPRs?: () => void;
   onOpenBranchPicker?: () => void;
+  onQuickFind?: () => void;
   onIncreaseFontSize?: () => void;
   onDecreaseFontSize?: () => void;
   onResetFontSize?: () => void;
@@ -34,6 +35,7 @@ export function useKeyboardShortcuts({
   onToggleSidebar,
   onRefreshPRs,
   onOpenBranchPicker,
+  onQuickFind,
   onIncreaseFontSize,
   onDecreaseFontSize,
   onResetFontSize,
@@ -50,6 +52,9 @@ export function useKeyboardShortcuts({
   useShortcut('session.toggleSidebar', onToggleSidebar ?? (() => {}), enabled && !!onToggleSidebar);
   useShortcut('session.openBranchPicker', onOpenBranchPicker ?? (() => {}), enabled && !!onOpenBranchPicker);
   useShortcut('session.refreshPRs', onRefreshPRs ?? (() => {}), enabled && !!onRefreshPRs);
+
+  // Quick Find (thumbs)
+  useShortcut('terminal.quickFind', onQuickFind ?? (() => {}), enabled && !!onQuickFind);
 
   // Drawer
   useShortcut('drawer.toggle', onToggleDrawer, enabled);

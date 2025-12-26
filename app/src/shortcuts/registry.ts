@@ -29,6 +29,9 @@ export const SHORTCUTS = {
   'ui.decreaseFontSize': { key: '-', meta: true },
   'ui.resetFontSize': { key: '0', meta: true },
 
+  // Quick Find (thumbs)
+  'terminal.quickFind': { key: 'f', meta: true },
+
   // Terminal panel
   'terminal.open': { key: '`', meta: true },
   'terminal.collapse': { key: '~', shift: true },  // Shift+` produces ~ on US keyboards

@@ -54,6 +54,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
  "portable-pty",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

@@ -28,4 +28,5 @@ tauri-plugin-deep-link = "2"
 dirs = "5"
 portable-pty = "0.8"
 base64 = "0.22"
+regex = "1"
 
