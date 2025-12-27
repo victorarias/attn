@@ -50,11 +50,11 @@ generate-types:
 check-types: generate-types
 	git diff --exit-code internal/protocol/generated.go app/src/types/generated.ts
 
-# Build Tauri app with bundled daemon
+# Build Tauri app with bundled daemon (app bundle only, no DMG dialog)
 build-app: build
 	@mkdir -p app/src-tauri/binaries
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
-	cd app && pnpm tauri build
+	cd app && pnpm tauri build --bundles app
 
 # Install Tauri app to /Applications
 install-app: build-app

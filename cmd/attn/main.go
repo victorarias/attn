@@ -208,15 +208,6 @@ func runClaudeDirectly() {
 		c.Unregister(sessionID)
 	}
 
-	// Handle signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		cleanup()
-		os.Exit(0)
-	}()
-
 	// Build claude command
 	claudeCmd := []string{"--settings", hooksPath}
 	claudeCmd = append(claudeCmd, claudeArgs...)
@@ -227,7 +218,29 @@ func runClaudeDirectly() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	err = cmd.Run()
+	// Start claude (non-blocking so we can set up signal forwarding)
+	if err = cmd.Start(); err != nil {
+		cleanup()
+		fmt.Fprintf(os.Stderr, "error starting claude: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Handle signals - forward to claude subprocess
+	// Must be after cmd.Start() so cmd.Process is available
+	// Don't os.Exit here - let cmd.Wait() complete so claude can run its hooks
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-sigChan
+		// Always send SIGTERM to claude for graceful shutdown (triggers cleanup hooks)
+		// SIGHUP from PTY just kills the process without cleanup
+		if cmd.Process != nil {
+			cmd.Process.Signal(syscall.SIGTERM)
+		}
+	}()
+
+	// Wait for claude to exit
+	err = cmd.Wait()
 	cleanup()
 
 	if err != nil {
