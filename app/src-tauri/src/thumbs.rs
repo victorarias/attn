@@ -152,6 +152,9 @@ pub fn extract_patterns(text: String) -> Vec<PatternMatch> {
         });
     }
 
+    // Reverse so most recent matches appear first (user more likely to want recent paths)
+    matches.reverse();
+
     // Assign hints in order
     for (i, m) in matches.iter_mut().enumerate() {
         m.hint = generate_hint(i);
