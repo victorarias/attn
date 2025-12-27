@@ -122,6 +122,14 @@ export function ThumbsModal({ isOpen, terminalText, onClose, onCopy }: ThumbsMod
         return;
       }
 
+      // Enter to confirm filter and return to hint mode (keeps filter text)
+      if (e.key === 'Enter' && isFiltering) {
+        e.preventDefault();
+        setIsFiltering(false);
+        // Keep filter text - user can now type hints on filtered results
+        return;
+      }
+
       // Don't process hints when filtering and focused on input
       if (isFiltering && document.activeElement === filterInputRef.current) {
         return;
@@ -253,7 +261,7 @@ export function ThumbsModal({ isOpen, terminalText, onClose, onCopy }: ThumbsMod
           <span className="footer-sep">·</span>
           <span>⇧+hint to open</span>
           <span className="footer-sep">·</span>
-          <span>/ search</span>
+          <span>{isFiltering ? '↩ confirm' : '/ filter'}</span>
         </div>
         </div>
       </FocusTrap>
