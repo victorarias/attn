@@ -4,7 +4,7 @@
 //! No Unix socket, no separate process.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -157,7 +157,7 @@ struct PtySession {
     #[allow(dead_code)]
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    // Reader runs in dedicated thread, no handle needed
+    child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
 }
 
 /// Global PTY state managed by Tauri
@@ -241,6 +241,7 @@ pub async fn pty_spawn(
     let session = PtySession {
         master: Arc::new(Mutex::new(pair.master)),
         writer: Arc::new(Mutex::new(writer)),
+        child: Arc::new(Mutex::new(child)),
     };
 
     state
@@ -368,7 +369,14 @@ pub async fn pty_resize(
 pub async fn pty_kill(state: State<'_, PtyState>, id: String) -> Result<(), String> {
     let mut sessions = state.sessions.lock().map_err(|_| "Lock poisoned")?;
 
-    // Removing the session drops the master PTY, which sends SIGHUP to child
+    // Kill the child process before removing session
+    if let Some(session) = sessions.get(&id) {
+        if let Ok(mut child) = session.child.lock() {
+            // kill() sends SIGHUP to the child process
+            let _ = child.kill();
+        }
+    }
+
     sessions.remove(&id);
 
     Ok(())
