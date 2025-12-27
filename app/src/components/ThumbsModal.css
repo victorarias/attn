@@ -20,7 +20,7 @@
 
 /* Modal container */
 .thumbs-modal {
-  width: 580px;
+  width: 720px;
   max-width: calc(100vw - 48px);
   max-height: 70vh;
   background: #0c0c0e;

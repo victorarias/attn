@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -56,9 +58,51 @@ func SetLogger(fn LogFunc) {
 	DefaultLogger = fn
 }
 
-// Classify calls Claude CLI to classify the text
+// FindClaudePath searches for the claude binary in common locations.
+// Returns the absolute path or an error if not found.
+func FindClaudePath() (string, error) {
+	// Try PATH first (works when running from shell)
+	if path, err := exec.LookPath("claude"); err == nil {
+		return path, nil
+	}
+
+	// Common installation locations
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot get home dir: %w", err)
+	}
+
+	candidates := []string{
+		filepath.Join(home, ".local", "bin", "claude"),
+		filepath.Join(home, ".claude", "local", "claude"),
+		"/usr/local/bin/claude",
+		"/opt/homebrew/bin/claude",
+	}
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("claude binary not found in PATH or common locations")
+}
+
+// Classify calls Claude CLI to classify the text.
+// Deprecated: Use ClassifyWithPath instead for daemon context.
 // Returns "waiting_input" or "idle"
 func Classify(text string, timeout time.Duration) (string, error) {
+	claudePath, err := FindClaudePath()
+	if err != nil {
+		DefaultLogger("classifier: %v", err)
+		return "waiting_input", err
+	}
+	return ClassifyWithPath(claudePath, text, timeout)
+}
+
+// ClassifyWithPath calls Claude CLI at the given path to classify the text.
+// Returns "waiting_input" or "idle"
+func ClassifyWithPath(claudePath, text string, timeout time.Duration) (string, error) {
 	if text == "" {
 		DefaultLogger("classifier: empty text, returning idle")
 		return "idle", nil
@@ -77,7 +121,7 @@ func Classify(text string, timeout time.Duration) (string, error) {
 	defer cancel()
 
 	DefaultLogger("classifier: calling claude CLI with %d second timeout (using haiku)", int(timeout.Seconds()))
-	cmd := exec.CommandContext(ctx, "claude", "-p", prompt, "--print", "--model", "haiku", "--no-session-persistence")
+	cmd := exec.CommandContext(ctx, claudePath, "-p", prompt, "--print", "--model", "haiku", "--no-session-persistence")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdin = nil // Explicitly close stdin to prevent hanging
 	cmd.Stdout = &stdout

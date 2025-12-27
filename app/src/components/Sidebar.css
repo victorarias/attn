@@ -290,3 +290,13 @@
   border-radius: 50%;
   background: #f59e0b;
 }
+
+.mini-badge.pending {
+  background: #eab308;
+  animation: flash-pending 1s ease-in-out infinite;
+}
+
+@keyframes flash-pending {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}

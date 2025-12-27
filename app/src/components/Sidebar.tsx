@@ -4,7 +4,7 @@ import { StateIndicator } from './StateIndicator';
 interface LocalSession {
   id: string;
   label: string;
-  state: 'working' | 'waiting_input' | 'idle';
+  state: 'working' | 'waiting_input' | 'idle' | 'pending_approval';
   branch?: string;
   isWorktree?: boolean;
   cwd?: string;
@@ -73,7 +73,9 @@ export function Sidebar({
               title={`${session.label} (⌘${index + 1})`}
             >
               ▸
-              {session.state === 'waiting_input' && <span className="mini-badge" />}
+              {(session.state === 'waiting_input' || session.state === 'pending_approval') && (
+                <span className={`mini-badge ${session.state === 'pending_approval' ? 'pending' : ''}`} />
+              )}
             </button>
           ))}
           <button className="icon-btn" onClick={onNewSession} title="New Session (⌘N)">

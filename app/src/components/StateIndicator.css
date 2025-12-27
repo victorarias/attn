@@ -36,6 +36,16 @@
   background-color: #6b7280; /* gray */
 }
 
+.state-indicator--session.state-indicator--pending-approval {
+  background-color: #eab308; /* yellow-500 */
+  animation: flash-pending 1s ease-in-out infinite;
+}
+
+@keyframes flash-pending {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 /* PR states - PRs that need attention are always "waiting" */
 .state-indicator--pr {
   background-color: #3b82f6; /* blue */

@@ -1,7 +1,7 @@
 // app/src/components/StateIndicator.tsx
 import './StateIndicator.css';
 
-type StateIndicatorState = 'working' | 'waiting_input' | 'idle';
+type StateIndicatorState = 'working' | 'waiting_input' | 'idle' | 'pending_approval';
 type StateIndicatorSize = 'sm' | 'md' | 'lg';
 type StateIndicatorKind = 'session' | 'pr';
 

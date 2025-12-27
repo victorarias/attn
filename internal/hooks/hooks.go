@@ -60,6 +60,18 @@ func Generate(sessionID, socketPath string) string {
 					},
 				},
 			},
+			"PermissionRequest": {
+				{
+					// PermissionRequest fires when Claude needs user approval for a tool
+					Matcher: "*",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf(`echo '{"cmd":"state","id":"%s","state":"pending_approval"}' | nc -U %s`, sessionID, socketPath),
+						},
+					},
+				},
+			},
 			"PostToolUse": {
 				{
 					Matcher: "TodoWrite",
@@ -73,6 +85,16 @@ func Generate(sessionID, socketPath string) string {
 				{
 					// PostToolUse fires AFTER user responds - set back to working
 					Matcher: "AskUserQuestion",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf(`echo '{"cmd":"state","id":"%s","state":"working"}' | nc -U %s`, sessionID, socketPath),
+						},
+					},
+				},
+				{
+					// Any tool completing means Claude is working again (resets pending_approval)
+					Matcher: "*",
 					Hooks: []Hook{
 						{
 							Type:    "command",
