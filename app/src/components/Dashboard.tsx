@@ -14,7 +14,7 @@ interface DashboardProps {
   sessions: Array<{
     id: string;
     label: string;
-    state: 'working' | 'waiting_input' | 'idle';
+    state: 'working' | 'waiting_input' | 'idle' | 'pending_approval';
     cwd: string;
   }>;
   prs: DaemonPR[];

@@ -12,7 +12,7 @@ interface AttentionDrawerProps {
   waitingSessions: Array<{
     id: string;
     label: string;
-    state: 'working' | 'waiting_input' | 'idle';
+    state: 'working' | 'waiting_input' | 'idle' | 'pending_approval';
   }>;
   prs: DaemonPR[];
   onSelectSession: (id: string) => void;

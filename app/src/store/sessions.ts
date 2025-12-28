@@ -365,7 +365,7 @@ if (import.meta.env.DEV) {
     }));
   };
 
-  window.__TEST_UPDATE_SESSION_STATE = (id: string, state: 'working' | 'waiting_input' | 'idle') => {
+  window.__TEST_UPDATE_SESSION_STATE = (id: string, state: 'working' | 'waiting_input' | 'idle' | 'pending_approval') => {
     useSessionStore.setState((s) => ({
       sessions: s.sessions.map((session) =>
         session.id === id ? { ...session, state } : session

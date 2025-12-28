@@ -14,6 +14,10 @@ describe('normalizeSessionState', () => {
     expect(normalizeSessionState('idle')).toBe('idle');
   });
 
+  it('returns pending_approval for pending_approval', () => {
+    expect(normalizeSessionState('pending_approval')).toBe('pending_approval');
+  });
+
   it('returns idle for unknown states', () => {
     expect(normalizeSessionState('unknown')).toBe('idle');
     expect(normalizeSessionState('')).toBe('idle');

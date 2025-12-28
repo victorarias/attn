@@ -5,7 +5,7 @@ import { SessionState } from './generated';
 
 // Type aliases for backward compatibility
 export type DaemonSessionState = SessionState;
-export type UISessionState = 'working' | 'waiting_input' | 'idle';
+export type UISessionState = 'working' | 'waiting_input' | 'idle' | 'pending_approval';
 
 // Normalize daemon state to UI state
 // Daemon always sends 'waiting_input' for sessions (from SessionState enum)
@@ -16,6 +16,9 @@ export function normalizeSessionState(state: string): UISessionState {
   }
   if (state === 'working') {
     return 'working';
+  }
+  if (state === 'pending_approval') {
+    return 'pending_approval';
   }
   return 'idle';
 }
