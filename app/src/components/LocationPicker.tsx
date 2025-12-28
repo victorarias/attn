@@ -122,11 +122,15 @@ export function LocationPicker({
   }, [isOpen, projectsDirectory, state.homePath]);
 
   // Filter recent locations based on input
-  const filteredRecent = state.inputValue
+  // Expand ~ to home path so filtering works with stored full paths
+  const expandedInput = state.inputValue.startsWith('~')
+    ? state.inputValue.replace('~', state.homePath)
+    : state.inputValue;
+  const filteredRecent = expandedInput
     ? state.recentLocations.filter(
         (loc) =>
-          loc.label.toLowerCase().includes(state.inputValue.toLowerCase()) ||
-          loc.path.toLowerCase().includes(state.inputValue.toLowerCase())
+          loc.label.toLowerCase().includes(expandedInput.toLowerCase()) ||
+          loc.path.toLowerCase().includes(expandedInput.toLowerCase())
       )
     : state.recentLocations;
 
