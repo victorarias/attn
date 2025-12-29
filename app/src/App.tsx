@@ -14,6 +14,7 @@ import { ChangesPanel } from './components/ChangesPanel';
 import { DiffOverlay } from './components/DiffOverlay';
 import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
 import { ThumbsModal } from './components/ThumbsModal';
+import { ForkDialog } from './components/ForkDialog';
 import { CopyToast, useCopyToast } from './components/CopyToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { useSessionStore } from './store/sessions';
@@ -42,6 +43,7 @@ function App() {
     removeUtilityTerminal,
     setActiveUtilityTerminal,
     renameUtilityTerminal,
+    setForkParams,
   } = useSessionStore();
 
   const {
@@ -300,6 +302,15 @@ function App() {
   const [thumbsText, setThumbsText] = useState('');
   const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
 
+  // Fork dialog state
+  const [forkDialogOpen, setForkDialogOpen] = useState(false);
+  const [forkTargetSession, setForkTargetSession] = useState<{
+    id: string;
+    label: string;
+    cwd: string;
+    daemonSessionId: string;
+  } | null>(null);
+
   // No auto-creation - user clicks "+" to start a session
 
   const handleNewSession = useCallback(() => {
@@ -359,6 +370,70 @@ function App() {
   const handleThumbsCopy = useCallback((_value: string) => {
     showCopyToast('Copied to clipboard');
   }, [showCopyToast]);
+
+  // Fork session handlers
+  const handleOpenForkDialog = useCallback(() => {
+    if (!activeSessionId) return;
+    const localSession = sessions.find((s) => s.id === activeSessionId);
+    if (!localSession) return;
+    const daemonSession = daemonSessions.find((ds) => ds.directory === localSession.cwd);
+    if (!daemonSession) return;
+
+    setForkTargetSession({
+      id: localSession.id,
+      label: localSession.label,
+      cwd: localSession.cwd,
+      daemonSessionId: daemonSession.id,
+    });
+    setForkDialogOpen(true);
+  }, [activeSessionId, sessions, daemonSessions]);
+
+  const handleForkConfirm = useCallback(async (name: string, createWorktree: boolean) => {
+    if (!forkTargetSession) return;
+
+    try {
+      let targetCwd = forkTargetSession.cwd;
+
+      // Create worktree if requested
+      if (createWorktree) {
+        const branchName = `fork/${name}`;
+        const result = await sendCreateWorktree(
+          forkTargetSession.cwd,
+          branchName
+        );
+        if (!result.success) {
+          console.error('[App] Failed to create worktree:', result.error);
+          setForkDialogOpen(false);
+          return;
+        }
+        targetCwd = result.path!;
+      }
+
+      // Create the forked session
+      const sessionId = await createSession(name, targetCwd);
+
+      // Store fork params to use when connecting terminal
+      setForkParams(sessionId, forkTargetSession.daemonSessionId);
+
+      setForkDialogOpen(false);
+      setForkTargetSession(null);
+
+      // Fit terminal after view becomes visible
+      setTimeout(() => {
+        const handle = terminalRefs.current.get(sessionId);
+        handle?.fit();
+        handle?.focus();
+      }, 100);
+    } catch (err) {
+      console.error('[App] Fork failed:', err);
+      setForkDialogOpen(false);
+    }
+  }, [forkTargetSession, sendCreateWorktree, createSession, setForkParams]);
+
+  const handleForkClose = useCallback(() => {
+    setForkDialogOpen(false);
+    setForkTargetSession(null);
+  }, []);
 
   const handleCloseSession = useCallback(
     (id: string) => {
@@ -669,10 +744,11 @@ function App() {
       }
     },
     onQuickFind: view === 'session' ? handleOpenQuickFind : undefined,
+    onForkSession: view === 'session' ? handleOpenForkDialog : undefined,
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
-    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen,
+    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen && !forkDialogOpen,
   });
 
   return (
@@ -828,6 +904,13 @@ function App() {
         onCopy={handleThumbsCopy}
       />
       <CopyToast message={copyMessage} onDone={clearCopyToast} />
+      <ForkDialog
+        isOpen={forkDialogOpen}
+        sessionLabel={forkTargetSession?.label || ''}
+        sessionId={forkTargetSession?.daemonSessionId || ''}
+        onClose={handleForkClose}
+        onFork={handleForkConfirm}
+      />
     </div>
     </DaemonProvider>
   );
