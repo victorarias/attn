@@ -20,6 +20,7 @@ export const SHORTCUTS = {
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
   'session.openBranchPicker': { key: 'b', meta: true },
   'session.refreshPRs': { key: 'r', meta: true },
+  'session.fork': { key: 'f', meta: true, shift: true },
 
   // Drawer
   'drawer.toggle': { key: 'k', meta: true },
