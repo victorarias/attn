@@ -64,13 +64,13 @@ export function LocationPicker({
   const [state, setState] = useState<State>({
     mode: 'path-input',
     inputValue: '',
-    selectedIndex: 0,
+    selectedIndex: -1, // Start with nothing selected
     selectedRepo: null,
     repoInfo: null,
     recentLocations: [],
     homePath: '/Users',
     refreshing: false,
-    hasSelectedSinceTab: true, // Start true - any initial value is "intentional"
+    hasSelectedSinceTab: false, // Start false - user hasn't navigated yet
   });
 
   const { suggestions: fsSuggestions, currentDir } = useFilesystemSuggestions(state.inputValue);
@@ -118,11 +118,11 @@ export function LocationPicker({
         ...prev,
         mode: 'path-input',
         inputValue: initialValue,
-        selectedIndex: 0,
+        selectedIndex: -1, // Nothing selected initially
         selectedRepo: null,
         repoInfo: null,
         refreshing: false,
-        hasSelectedSinceTab: true, // Initial value counts as intentional
+        hasSelectedSinceTab: false, // User hasn't navigated yet
       }));
     }
   }, [isOpen, projectsDirectory, state.homePath]);
@@ -141,7 +141,12 @@ export function LocationPicker({
     : state.recentLocations;
 
   // Calculate ghost text from selected item (recent or filesystem suggestion)
+  // When nothing selected (-1), use first available suggestion for Tab autocomplete
   const getSelectedPath = () => {
+    if (state.selectedIndex === -1) {
+      // Nothing selected - use first suggestion for autocomplete
+      return fsSuggestions[0]?.path || filteredRecent[0]?.path || '';
+    }
     if (state.selectedIndex < filteredRecent.length) {
       return filteredRecent[state.selectedIndex]?.path || '';
     }
@@ -150,9 +155,9 @@ export function LocationPicker({
   };
   const ghostText = getSelectedPath();
 
-  // Reset selection when suggestions change
+  // Reset selection when input changes (user is typing, not navigating)
   useEffect(() => {
-    setState(prev => ({ ...prev, selectedIndex: 0 }));
+    setState(prev => ({ ...prev, selectedIndex: -1 }));
   }, [state.inputValue]);
 
   const handleSelect = useCallback(
