@@ -260,4 +260,4 @@ Use `bd ready` to see unblocked work.
 3. **If refactoring**, list preserved behaviors and verify each one survives
 4. **Never remove user-requested functionality** without explicit approval
 
-Ask yourself: "Am I fixing the problem or avoiding it?"
+Ask yourself: "Am I fixing the problem or avoiding it?". You have autonomy to make beads to fix the problem or act on it immediately.
