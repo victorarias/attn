@@ -48,7 +48,7 @@ interface SessionStore {
 
   // Actions
   connect: () => Promise<void>;
-  createSession: (label: string, cwd: string) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string) => Promise<string>;
   closeSession: (id: string) => void;
   setActiveSession: (id: string | null) => void;
   connectTerminal: (id: string, terminal: Terminal) => Promise<void>;
@@ -127,9 +127,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  createSession: async (label: string, cwd: string) => {
-    // Use crypto.randomUUID() for unique session ID that matches daemon
-    const id = crypto.randomUUID();
+  createSession: async (label: string, cwd: string, providedId?: string) => {
+    // Use provided ID or generate new one
+    const id = providedId || crypto.randomUUID();
     const session: Session = {
       id,
       label,

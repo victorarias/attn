@@ -416,11 +416,15 @@ function App() {
         worktreePath = result.path!;
       }
 
-      // Create the forked session
-      const sessionId = await createSession(name, targetCwd);
+      // Pre-generate session ID so we can set fork params BEFORE creating session
+      // (createSession triggers re-render which mounts Terminal and calls connectTerminal)
+      const sessionId = crypto.randomUUID();
 
-      // Store fork params to use when connecting terminal
+      // Store fork params BEFORE creating session to avoid race condition
       setForkParams(sessionId, forkTargetSession.daemonSessionId);
+
+      // Create the forked session with the pre-generated ID
+      await createSession(name, targetCwd, sessionId);
 
       setForkDialogOpen(false);
       setForkTargetSession(null);
