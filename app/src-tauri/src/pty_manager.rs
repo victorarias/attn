@@ -175,6 +175,8 @@ pub async fn pty_spawn(
     cols: u16,
     rows: u16,
     shell: Option<bool>,
+    resume_session_id: Option<String>,
+    fork_session: Option<bool>,
 ) -> Result<u32, String> {
     let pty_system = native_pty_system();
 
@@ -207,11 +209,17 @@ pub async fn pty_spawn(
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| "attn".to_string());
 
+        // Build fork flags if provided
+        let fork_flags = match (&resume_session_id, fork_session.unwrap_or(false)) {
+            (Some(resume_id), true) => format!(" --resume '{}' --fork-session", resume_id),
+            (Some(resume_id), false) => format!(" --resume '{}'", resume_id),
+            _ => String::new(),
+        };
+
         let mut cmd = CommandBuilder::new(&login_shell);
         cmd.arg("-l");
         cmd.arg("-c");
-        // Use shell-agnostic env var syntax
-        cmd.arg(format!("ATTN_INSIDE_APP=1 exec {attn_path}"));
+        cmd.arg(format!("ATTN_INSIDE_APP=1 exec {attn_path}{fork_flags}"));
         cmd
     };
 
