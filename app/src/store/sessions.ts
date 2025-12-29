@@ -53,6 +53,7 @@ interface SessionStore {
   setActiveSession: (id: string | null) => void;
   connectTerminal: (id: string, terminal: Terminal) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
+  setForkParams: (sessionId: string, resumeSessionId: string) => void;
 
   // Terminal panel actions
   openTerminalPanel: (sessionId: string) => void;
@@ -66,6 +67,7 @@ interface SessionStore {
 
 let sessionCounter = 0;
 const pendingConnections = new Set<string>();
+const pendingForkParams = new Map<string, { resumeSessionId: string; forkSession: boolean }>();
 
 // Test helper for E2E - allows injecting sessions without PTY
 interface TestSession {
@@ -195,11 +197,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const rows = terminal.rows > 0 ? terminal.rows : 24;
 
     try {
+      // Check for pending fork params
+      const forkParams = pendingForkParams.get(id);
+      pendingForkParams.delete(id);
+
       await invoke('pty_spawn', {
         id,
         cwd: session.cwd,
         cols,
         rows,
+        resume_session_id: forkParams?.resumeSessionId,
+        fork_session: forkParams?.forkSession,
       });
 
       // Terminal input -> PTY
@@ -238,6 +246,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   resizeSession: (id: string, cols: number, rows: number) => {
     invoke('pty_resize', { id, cols, rows }).catch(console.error);
+  },
+
+  setForkParams: (sessionId: string, resumeSessionId: string) => {
+    pendingForkParams.set(sessionId, { resumeSessionId, forkSession: true });
   },
 
   openTerminalPanel: (sessionId: string) => {
