@@ -1,19 +1,16 @@
 package wrapper
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 
+	"github.com/google/uuid"
 	"github.com/victorarias/claude-manager/internal/hooks"
 )
 
-// GenerateSessionID generates a unique session ID
+// GenerateSessionID generates a UUID for use as session ID
 func GenerateSessionID() string {
-	bytes := make([]byte, 8)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
+	return uuid.New().String()
 }
 
 // DefaultLabel returns the current directory name as default label
