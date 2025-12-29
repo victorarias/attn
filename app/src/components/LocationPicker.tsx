@@ -25,6 +25,8 @@ interface LocationPickerProps {
   onGetRecentLocations?: () => Promise<{ locations: RecentLocation[] }>;
   onGetRepoInfo?: (mainRepo: string) => Promise<{ success: boolean; info?: RepoInfo; error?: string }>;
   onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string) => Promise<{ success: boolean; path?: string }>;
+  onDeleteWorktree?: (path: string) => Promise<{ success: boolean; error?: string }>;
+  onDeleteBranch?: (mainRepo: string, branch: string, force?: boolean) => Promise<{ success: boolean; error?: string }>;
   projectsDirectory?: string;
 }
 
@@ -53,6 +55,8 @@ export function LocationPicker({
   onGetRecentLocations,
   onGetRepoInfo,
   onCreateWorktree,
+  onDeleteWorktree,
+  onDeleteBranch,
   projectsDirectory,
 }: LocationPickerProps) {
   const [state, setState] = useState<State>({
@@ -424,6 +428,28 @@ export function LocationPicker({
             onSelectWorktree={handleSelectWorktree}
             onSelectBranch={handleSelectBranch}
             onCreateWorktree={handleCreateWorktree}
+            onDeleteWorktree={onDeleteWorktree ? async (path) => {
+              await onDeleteWorktree(path);
+              // Refresh repo info after delete
+              if (state.selectedRepo && onGetRepoInfo) {
+                const result = await onGetRepoInfo(state.selectedRepo);
+                if (result.success && result.info) {
+                  setState(prev => ({ ...prev, repoInfo: result.info || null }));
+                }
+              }
+            } : undefined}
+            onDeleteBranch={onDeleteBranch ? async (branch) => {
+              if (state.selectedRepo) {
+                await onDeleteBranch(state.selectedRepo, branch, false);
+                // Refresh repo info after delete
+                if (onGetRepoInfo) {
+                  const result = await onGetRepoInfo(state.selectedRepo);
+                  if (result.success && result.info) {
+                    setState(prev => ({ ...prev, repoInfo: result.info || null }));
+                  }
+                }
+              }
+            } : undefined}
             onRefresh={handleRefresh}
             onBack={handleBack}
             refreshing={state.refreshing}

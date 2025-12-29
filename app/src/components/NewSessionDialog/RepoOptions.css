@@ -91,6 +91,18 @@
   border-color: rgba(255, 107, 53, 0.2);
 }
 
+/* Delete confirmation */
+.repo-option-item.delete-confirm {
+  background: rgba(220, 38, 38, 0.15);
+  border-color: rgba(220, 38, 38, 0.4);
+}
+
+.delete-prompt {
+  color: #dc2626;
+  font-weight: 500;
+  grid-column: 1 / -1;
+}
+
 /* Icons */
 .repo-option-icon {
   font-size: 14px;

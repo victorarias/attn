@@ -19,6 +19,8 @@ interface RepoOptionsProps {
   onSelectWorktree: (path: string) => void;
   onSelectBranch: (branch: string) => void;
   onCreateWorktree: (branchName: string, startingFrom: string) => Promise<void>;
+  onDeleteWorktree?: (path: string) => Promise<void>;
+  onDeleteBranch?: (branch: string) => Promise<void>;
   onRefresh: () => void;
   onBack: () => void;
   refreshing?: boolean;
@@ -44,6 +46,8 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   onSelectWorktree,
   onSelectBranch,
   onCreateWorktree,
+  onDeleteWorktree,
+  onDeleteBranch,
   onRefresh,
   onBack,
   refreshing = false,
@@ -52,6 +56,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [newWorktreeName, setNewWorktreeName] = useState('');
   const [startingBranch, setStartingBranch] = useState<'current' | 'default'>('current');
+  const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
 
   // Calculate total items for navigation
   const mainRepoCount = 1;
@@ -60,9 +65,74 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const branchCount = repoInfo.branches.length;
   const totalItems = mainRepoCount + worktreeCount + newWorktreeCount + branchCount;
 
+  // Check if the currently selected item can be deleted
+  const canDeleteSelectedItem = () => {
+    // Index 0 = main repo (can't delete)
+    if (selectedIndex === 0) return false;
+
+    // Worktrees (indices 1 to worktreeCount)
+    if (selectedIndex > 0 && selectedIndex <= worktreeCount) return true;
+
+    // "New worktree..." option (can't delete)
+    if (selectedIndex === worktreeCount + 1) return false;
+
+    // Branches - check if it's the default branch
+    const branchStartIndex = worktreeCount + 2;
+    if (selectedIndex >= branchStartIndex) {
+      const branchIndex = selectedIndex - branchStartIndex;
+      const branch = repoInfo.branches[branchIndex];
+      // Can't delete default branch
+      return branch && branch.name !== repoInfo.defaultBranch;
+    }
+
+    return false;
+  };
+
+  // Execute the pending delete operation
+  const executeDelete = async () => {
+    if (pendingDeleteIndex === null) return;
+
+    try {
+      // Worktree deletion
+      if (pendingDeleteIndex > 0 && pendingDeleteIndex <= worktreeCount) {
+        const worktree = repoInfo.worktrees[pendingDeleteIndex - 1];
+        if (onDeleteWorktree) {
+          await onDeleteWorktree(worktree.path);
+        }
+      }
+      // Branch deletion
+      else {
+        const branchIndex = pendingDeleteIndex - worktreeCount - 2;
+        const branch = repoInfo.branches[branchIndex];
+        if (onDeleteBranch && branch) {
+          await onDeleteBranch(branch.name);
+        }
+      }
+    } catch (err) {
+      console.error('Delete failed:', err);
+    }
+
+    setPendingDeleteIndex(null);
+  };
+
   // Handle keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Handle delete confirmation
+      if (pendingDeleteIndex !== null) {
+        if (e.key === 'y' || e.key === 'Y') {
+          executeDelete();
+          e.preventDefault();
+        } else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') {
+          setPendingDeleteIndex(null);
+          e.preventDefault();
+        } else {
+          // Any other key cancels and is processed normally
+          setPendingDeleteIndex(null);
+        }
+        return;
+      }
+
       if (showNewWorktree) {
         if (e.key === 'Escape') {
           setShowNewWorktree(false);
@@ -94,6 +164,13 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
           handleSelect(selectedIndex);
           e.preventDefault();
           break;
+        case 'd':
+        case 'D':
+          if (canDeleteSelectedItem()) {
+            setPendingDeleteIndex(selectedIndex);
+          }
+          e.preventDefault();
+          break;
         case 'r':
         case 'R':
           onRefresh();
@@ -118,7 +195,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIndex, totalItems, showNewWorktree, newWorktreeName, startingBranch]);
+  }, [selectedIndex, totalItems, showNewWorktree, newWorktreeName, startingBranch, pendingDeleteIndex]);
 
   const handleSelect = (index: number) => {
     let currentIndex = 0;
@@ -162,6 +239,17 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     shortcut?: number
   ) => {
     const isSelected = selectedIndex === itemIndex;
+    const isDeleting = pendingDeleteIndex === itemIndex;
+
+    // Show delete confirmation inline
+    if (isDeleting) {
+      return (
+        <div className="repo-option-item selected delete-confirm">
+          <span className="delete-prompt">Delete {name}? (y/n)</span>
+        </div>
+      );
+    }
+
     return (
       <div className={`repo-option-item ${isSelected ? 'selected' : ''}`}>
         <span className={`repo-option-icon ${iconColor}`}>{icon}</span>
@@ -307,6 +395,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
       <div className="repo-options-footer">
         <span>↑↓ Navigate</span>
         <span>Enter Select</span>
+        {canDeleteSelectedItem() && <span>D Delete</span>}
         <span>R Refresh{refreshing && ' ...'}</span>
         <span>Esc Back</span>
         {repoInfo.fetchedAt && (
