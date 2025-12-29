@@ -202,12 +202,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       pendingForkParams.delete(id);
 
       await invoke('pty_spawn', {
-        id,
-        cwd: session.cwd,
-        cols,
-        rows,
-        resume_session_id: forkParams?.resumeSessionId,
-        fork_session: forkParams?.forkSession,
+        args: {
+          id,
+          cwd: session.cwd,
+          cols,
+          rows,
+          shell: false,
+          resume_session_id: forkParams?.resumeSessionId ?? null,
+          fork_session: forkParams?.forkSession ?? null,
+        },
       });
 
       // Terminal input -> PTY

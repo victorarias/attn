@@ -6,6 +6,7 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -13,6 +14,21 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter, State};
+
+/// Arguments for pty_spawn command
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PtySpawnArgs {
+    pub id: String,
+    pub cwd: String,
+    pub cols: u16,
+    pub rows: u16,
+    #[serde(default)]
+    pub shell: Option<bool>,
+    #[serde(default)]
+    pub resume_session_id: Option<String>,
+    #[serde(default)]
+    pub fork_session: Option<bool>,
+}
 
 /// Validate that a string is a valid UUID format.
 /// Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (lowercase hex)
@@ -180,14 +196,9 @@ pub struct PtyState {
 pub async fn pty_spawn(
     state: State<'_, PtyState>,
     app: AppHandle,
-    id: String,
-    cwd: String,
-    cols: u16,
-    rows: u16,
-    shell: Option<bool>,
-    resume_session_id: Option<String>,
-    fork_session: Option<bool>,
+    args: PtySpawnArgs,
 ) -> Result<u32, String> {
+    let PtySpawnArgs { id, cwd, cols, rows, shell, resume_session_id, fork_session } = args;
     let pty_system = native_pty_system();
 
     let pair = pty_system
