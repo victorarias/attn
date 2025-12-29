@@ -13,43 +13,74 @@ import (
 
 // Core worktree operations - shared between Unix socket and WebSocket handlers
 
-// doListWorktrees fetches worktrees from store and git, merges them, returns protocol type
+// doListWorktrees fetches worktrees from store and git, merges them, returns protocol type.
+// It also prunes stale worktrees that no longer exist in git.
 func (d *Daemon) doListWorktrees(mainRepo string) []protocol.Worktree {
 	// Get from registry first
-	worktrees := d.store.ListWorktreesByRepo(mainRepo)
+	storedWorktrees := d.store.ListWorktreesByRepo(mainRepo)
 
-	// Also scan git for any we don't have
+	// Get current git worktrees
 	gitWorktrees, err := git.ListWorktrees(mainRepo)
-	if err == nil {
-		for _, gwt := range gitWorktrees {
-			// Skip main repo
-			if gwt.Path == mainRepo {
-				continue
+	if err != nil {
+		// If we can't read git, just return stored worktrees
+		protoWorktrees := make([]protocol.Worktree, len(storedWorktrees))
+		for i, wt := range storedWorktrees {
+			protoWorktrees[i] = protocol.Worktree{
+				Path:      wt.Path,
+				Branch:    wt.Branch,
+				MainRepo:  wt.MainRepo,
+				CreatedAt: protocol.Ptr(wt.CreatedAt.Format(time.RFC3339)),
 			}
-			// Add if not in registry
-			found := false
-			for _, wt := range worktrees {
-				if wt.Path == gwt.Path {
-					found = true
-					break
-				}
+		}
+		return protoWorktrees
+	}
+
+	// Build set of valid git worktree paths
+	gitWorktreePaths := make(map[string]bool)
+	for _, gwt := range gitWorktrees {
+		gitWorktreePaths[gwt.Path] = true
+	}
+
+	// Prune stale worktrees from store and build valid list
+	var validWorktrees []*store.Worktree
+	for _, wt := range storedWorktrees {
+		if gitWorktreePaths[wt.Path] {
+			validWorktrees = append(validWorktrees, wt)
+		} else {
+			// Worktree no longer exists in git - remove from store
+			d.store.RemoveWorktree(wt.Path)
+		}
+	}
+
+	// Add any git worktrees not in registry
+	for _, gwt := range gitWorktrees {
+		// Skip main repo
+		if gwt.Path == mainRepo {
+			continue
+		}
+		// Add if not in registry
+		found := false
+		for _, wt := range validWorktrees {
+			if wt.Path == gwt.Path {
+				found = true
+				break
 			}
-			if !found {
-				newWt := &store.Worktree{
-					Path:      gwt.Path,
-					Branch:    gwt.Branch,
-					MainRepo:  mainRepo,
-					CreatedAt: time.Now(),
-				}
-				d.store.AddWorktree(newWt)
-				worktrees = append(worktrees, newWt)
+		}
+		if !found {
+			newWt := &store.Worktree{
+				Path:      gwt.Path,
+				Branch:    gwt.Branch,
+				MainRepo:  mainRepo,
+				CreatedAt: time.Now(),
 			}
+			d.store.AddWorktree(newWt)
+			validWorktrees = append(validWorktrees, newWt)
 		}
 	}
 
 	// Convert to protocol type
-	protoWorktrees := make([]protocol.Worktree, len(worktrees))
-	for i, wt := range worktrees {
+	protoWorktrees := make([]protocol.Worktree, len(validWorktrees))
+	for i, wt := range validWorktrees {
 		protoWorktrees[i] = protocol.Worktree{
 			Path:      wt.Path,
 			Branch:    wt.Branch,
