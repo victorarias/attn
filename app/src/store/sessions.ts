@@ -65,7 +65,6 @@ interface SessionStore {
   renameUtilityTerminal: (sessionId: string, terminalId: string, title: string) => void;
 }
 
-let sessionCounter = 0;
 const pendingConnections = new Set<string>();
 const pendingForkParams = new Map<string, { resumeSessionId: string; forkSession: boolean }>();
 
@@ -129,7 +128,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   createSession: async (label: string, cwd: string) => {
-    const id = `session-${++sessionCounter}`;
+    // Use crypto.randomUUID() for unique session ID that matches daemon
+    const id = crypto.randomUUID();
     const session: Session = {
       id,
       label,

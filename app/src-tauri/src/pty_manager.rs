@@ -236,7 +236,8 @@ pub async fn pty_spawn(
         let mut cmd = CommandBuilder::new(&login_shell);
         cmd.arg("-l");
         cmd.arg("-c");
-        cmd.arg(format!("ATTN_INSIDE_APP=1 exec {attn_path}{fork_flags}"));
+        // Pass session ID via env var so attn uses the same ID as frontend
+        cmd.arg(format!("ATTN_INSIDE_APP=1 ATTN_SESSION_ID='{id}' exec {attn_path}{fork_flags}"));
         cmd
     };
 

@@ -195,8 +195,11 @@ func runClaudeDirectly() {
 		}
 	}
 
-	// Generate session ID and register
-	sessionID := wrapper.GenerateSessionID()
+	// Use session ID from environment if provided (from frontend), otherwise generate
+	sessionID := os.Getenv("ATTN_SESSION_ID")
+	if sessionID == "" {
+		sessionID = wrapper.GenerateSessionID()
+	}
 	if err := c.Register(sessionID, label, cwd); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
 	}

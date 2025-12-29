@@ -210,8 +210,9 @@ function App() {
   }, [handleDeepLinkUrl]);
 
   // Enrich local sessions with daemon state (working/waiting from hooks)
+  // Match by session ID (UUID) - not directory - to handle multiple sessions per directory
   const enrichedLocalSessions = sessions.map((s) => {
-    const daemonSession = daemonSessions.find((ds) => ds.directory === s.cwd);
+    const daemonSession = daemonSessions.find((ds) => ds.id === s.id);
     const rawState = daemonSession?.state ?? s.state;
     return {
       ...s,
@@ -237,7 +238,7 @@ function App() {
   useEffect(() => {
     const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
     if (activeLocalSession?.cwd && view === 'session') {
-      const daemonSession = daemonSessions.find((ds) => ds.directory === activeLocalSession.cwd);
+      const daemonSession = daemonSessions.find((ds) => ds.id === activeLocalSession.id);
       if (daemonSession) {
         sendSubscribeGitStatus(daemonSession.directory);
         return () => {
@@ -377,7 +378,7 @@ function App() {
     if (!activeSessionId) return;
     const localSession = sessions.find((s) => s.id === activeSessionId);
     if (!localSession) return;
-    const daemonSession = daemonSessions.find((ds) => ds.directory === localSession.cwd);
+    const daemonSession = daemonSessions.find((ds) => ds.id === localSession.id);
     if (!daemonSession) return;
 
     setForkTargetSession({
@@ -463,12 +464,10 @@ function App() {
         }
       }
 
-      // Unregister from daemon by finding the daemon session with matching directory
-      if (session?.cwd) {
-        const daemonSession = daemonSessions.find(ds => ds.directory === session.cwd);
-        if (daemonSession) {
-          sendUnregisterSession(daemonSession.id);
-        }
+      // Unregister from daemon by matching session ID
+      const daemonSession = daemonSessions.find(ds => ds.id === session?.id);
+      if (daemonSession) {
+        sendUnregisterSession(daemonSession.id);
       }
 
       terminalRefs.current.delete(id);
@@ -684,7 +683,7 @@ function App() {
   const fetchDiff = useCallback(async () => {
     const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
     if (!activeLocalSession?.cwd) throw new Error('No active session');
-    const daemonSession = daemonSessions.find((ds) => ds.directory === activeLocalSession.cwd);
+    const daemonSession = daemonSessions.find((ds) => ds.id === activeLocalSession.id);
     if (!daemonSession) throw new Error('No daemon session found');
     return sendGetFileDiff(daemonSession.directory, diffOverlay.path, diffOverlay.staged);
   }, [sessions, activeSessionId, daemonSessions, diffOverlay.path, diffOverlay.staged, sendGetFileDiff]);
@@ -751,7 +750,7 @@ function App() {
       // Only open if we have an active session with git
       const localSession = sessions.find(s => s.id === activeSessionId);
       if (localSession) {
-        const daemonSession = daemonSessions.find(ds => ds.directory === localSession.cwd);
+        const daemonSession = daemonSessions.find(ds => ds.id === localSession.id);
         if (daemonSession && (daemonSession.branch || daemonSession.main_repo)) {
           setBranchPickerOpen(true);
         }
@@ -877,7 +876,7 @@ function App() {
         session={(() => {
           const localSession = sessions.find(s => s.id === activeSessionId);
           if (!localSession) return null;
-          return daemonSessions.find(ds => ds.directory === localSession.cwd) || null;
+          return daemonSessions.find(ds => ds.id === localSession.id) || null;
         })()}
         onListBranches={sendListBranches}
         onListRemoteBranches={sendListRemoteBranches}
