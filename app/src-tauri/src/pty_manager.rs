@@ -5,6 +5,7 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use regex::Regex;
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -12,6 +13,15 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter, State};
+
+/// Validate that a string is a valid UUID format.
+/// Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (lowercase hex)
+fn is_valid_uuid(s: &str) -> bool {
+    let uuid_regex = Regex::new(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    ).unwrap();
+    uuid_regex.is_match(s)
+}
 
 /// Get the user's actual login shell from the system (macOS).
 /// Falls back to None if it can't be determined.
@@ -208,6 +218,13 @@ pub async fn pty_spawn(
             .filter(|p| p.exists())
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| "attn".to_string());
+
+        // Validate resume_session_id if provided (defense-in-depth against shell injection)
+        if let Some(ref resume_id) = resume_session_id {
+            if !is_valid_uuid(resume_id) {
+                return Err(format!("Invalid resume session ID format: {}", resume_id));
+            }
+        }
 
         // Build fork flags if provided
         let fork_flags = match (&resume_session_id, fork_session.unwrap_or(false)) {
