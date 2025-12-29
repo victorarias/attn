@@ -1,5 +1,5 @@
 // app/src/components/ChangesPanel.tsx
-import { useMemo } from 'react';
+import { useMemo, memo, useCallback } from 'react';
 import type { GitStatusUpdate } from '../hooks/useDaemonSocket';
 import './ChangesPanel.css';
 
@@ -101,7 +101,7 @@ function buildTree(files: GitFileChange[]): TreeNode[] {
   return result;
 }
 
-export function ChangesPanel({
+export const ChangesPanel = memo(function ChangesPanel({
   gitStatus,
   attentionCount,
   selectedFile,
@@ -118,7 +118,21 @@ export function ChangesPanel({
     return { files: allFiles.length, additions, deletions };
   }, [gitStatus]);
 
-  const getStatusIcon = (status: string) => {
+  // Memoize tree building to avoid rebuilding on every render
+  const stagedTree = useMemo(() =>
+    gitStatus?.staged ? buildTree(gitStatus.staged) : [],
+    [gitStatus?.staged]
+  );
+  const unstagedTree = useMemo(() =>
+    gitStatus?.unstaged ? buildTree(gitStatus.unstaged) : [],
+    [gitStatus?.unstaged]
+  );
+  const untrackedTree = useMemo(() =>
+    gitStatus?.untracked ? buildTree(gitStatus.untracked) : [],
+    [gitStatus?.untracked]
+  );
+
+  const getStatusIcon = useCallback((status: string) => {
     switch (status) {
       case 'modified': return 'M';
       case 'added': return 'A';
@@ -127,7 +141,7 @@ export function ChangesPanel({
       case 'untracked': return '?';
       default: return 'M';
     }
-  };
+  }, []);
 
   const renderTree = (nodes: TreeNode[], depth: number, staged: boolean) => {
     return nodes.map((node, index) => {
@@ -202,24 +216,24 @@ export function ChangesPanel({
           <div className="changes-empty">No changes</div>
         ) : (
           <>
-            {gitStatus?.staged && gitStatus.staged.length > 0 && (
+            {stagedTree.length > 0 && (
               <div className="changes-section">
-                <div className="section-header">Staged ({gitStatus.staged.length})</div>
-                {renderTree(buildTree(gitStatus.staged), 0, true)}
+                <div className="section-header">Staged ({gitStatus?.staged?.length || 0})</div>
+                {renderTree(stagedTree, 0, true)}
               </div>
             )}
 
-            {gitStatus?.unstaged && gitStatus.unstaged.length > 0 && (
+            {unstagedTree.length > 0 && (
               <div className="changes-section">
-                <div className="section-header">Changes ({gitStatus.unstaged.length})</div>
-                {renderTree(buildTree(gitStatus.unstaged), 0, false)}
+                <div className="section-header">Changes ({gitStatus?.unstaged?.length || 0})</div>
+                {renderTree(unstagedTree, 0, false)}
               </div>
             )}
 
-            {gitStatus?.untracked && gitStatus.untracked.length > 0 && (
+            {untrackedTree.length > 0 && (
               <div className="changes-section">
-                <div className="section-header">Untracked ({gitStatus.untracked.length})</div>
-                {renderTree(buildTree(gitStatus.untracked), 0, false)}
+                <div className="section-header">Untracked ({gitStatus?.untracked?.length || 0})</div>
+                {renderTree(untrackedTree, 0, false)}
               </div>
             )}
           </>
@@ -227,4 +241,4 @@ export function ChangesPanel({
       </div>
     </div>
   );
-}
+});

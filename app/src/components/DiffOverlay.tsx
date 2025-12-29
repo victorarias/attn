@@ -49,6 +49,12 @@ export function DiffOverlay({
   const monacoRef = useRef<Monaco | null>(null);
   const widgetRef = useRef<editor.IContentWidget | null>(null);
 
+  // Keep fetchDiff in a ref to avoid re-triggering the effect when it changes
+  // (it changes when sessions/daemonSessions update, but we only want to refetch
+  // when the overlay opens or the file changes)
+  const fetchDiffRef = useRef(fetchDiff);
+  fetchDiffRef.current = fetchDiff;
+
   // Load diff content when file changes
   useEffect(() => {
     if (!isOpen) return;
@@ -56,7 +62,7 @@ export function DiffOverlay({
     setLoading(true);
     setError(null);
 
-    fetchDiff()
+    fetchDiffRef.current()
       .then(({ original, modified }) => {
         setOriginal(original);
         setModified(modified);
@@ -66,7 +72,7 @@ export function DiffOverlay({
         setError(err.message || 'Failed to load diff');
         setLoading(false);
       });
-  }, [isOpen, filePath, fetchDiff]);
+  }, [isOpen, filePath]);
 
   // Keyboard shortcuts - use capture phase to intercept before terminal
   useEffect(() => {
