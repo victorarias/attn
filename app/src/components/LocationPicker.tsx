@@ -140,6 +140,16 @@ export function LocationPicker({
       )
     : state.recentLocations;
 
+  // Contract full path to use ~ for home directory
+  const contractPath = (path: string) => {
+    if (path.startsWith(state.homePath + '/')) {
+      return '~' + path.slice(state.homePath.length);
+    } else if (path === state.homePath) {
+      return '~';
+    }
+    return path;
+  };
+
   // Calculate ghost text from selected item (recent or filesystem suggestion)
   // When nothing selected (-1), use first available suggestion for Tab autocomplete
   const getSelectedPath = () => {
@@ -153,7 +163,8 @@ export function LocationPicker({
     const fsIndex = state.selectedIndex - filteredRecent.length;
     return fsSuggestions[fsIndex]?.path || '';
   };
-  const ghostText = getSelectedPath();
+  // Contract ghostText to use ~ so it matches input value format
+  const ghostText = contractPath(getSelectedPath());
 
   // Reset selection when input changes (user is typing, not navigating)
   useEffect(() => {
