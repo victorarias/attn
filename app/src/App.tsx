@@ -310,6 +310,7 @@ function App() {
     cwd: string;
     daemonSessionId: string;
   } | null>(null);
+  const [forkError, setForkError] = useState<string | null>(null);
 
   // No auto-creation - user clicks "+" to start a session
 
@@ -385,11 +386,15 @@ function App() {
       cwd: localSession.cwd,
       daemonSessionId: daemonSession.id,
     });
+    setForkError(null);
     setForkDialogOpen(true);
   }, [activeSessionId, sessions, daemonSessions]);
 
   const handleForkConfirm = useCallback(async (name: string, createWorktree: boolean) => {
     if (!forkTargetSession) return;
+
+    setForkError(null);
+    let worktreePath: string | null = null;
 
     try {
       let targetCwd = forkTargetSession.cwd;
@@ -402,11 +407,12 @@ function App() {
           branchName
         );
         if (!result.success) {
-          console.error('[App] Failed to create worktree:', result.error);
-          setForkDialogOpen(false);
+          // Show error in dialog, don't close - user can retry or uncheck worktree
+          setForkError(`Failed to create worktree: ${result.error || 'Unknown error'}`);
           return;
         }
         targetCwd = result.path!;
+        worktreePath = result.path!;
       }
 
       // Create the forked session
@@ -417,6 +423,7 @@ function App() {
 
       setForkDialogOpen(false);
       setForkTargetSession(null);
+      setForkError(null);
 
       // Fit terminal after view becomes visible
       setTimeout(() => {
@@ -426,13 +433,20 @@ function App() {
       }, 100);
     } catch (err) {
       console.error('[App] Fork failed:', err);
-      setForkDialogOpen(false);
+      // Clean up worktree if it was created but downstream steps failed
+      if (worktreePath) {
+        sendDeleteWorktree(worktreePath).catch((e) =>
+          console.error('[App] Failed to cleanup worktree:', e)
+        );
+      }
+      setForkError(err instanceof Error ? err.message : 'Fork failed');
     }
-  }, [forkTargetSession, sendCreateWorktree, createSession, setForkParams]);
+  }, [forkTargetSession, sendCreateWorktree, sendDeleteWorktree, createSession, setForkParams]);
 
   const handleForkClose = useCallback(() => {
     setForkDialogOpen(false);
     setForkTargetSession(null);
+    setForkError(null);
   }, []);
 
   const handleCloseSession = useCallback(
@@ -907,7 +921,8 @@ function App() {
       <ForkDialog
         isOpen={forkDialogOpen}
         sessionLabel={forkTargetSession?.label || ''}
-        sessionId={forkTargetSession?.daemonSessionId || ''}
+        existingLabels={sessions.map(s => s.label)}
+        error={forkError}
         onClose={handleForkClose}
         onFork={handleForkConfirm}
       />

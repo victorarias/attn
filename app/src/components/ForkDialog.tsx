@@ -4,7 +4,8 @@ import './ForkDialog.css';
 interface ForkDialogProps {
   isOpen: boolean;
   sessionLabel: string;
-  sessionId: string;
+  existingLabels: string[];
+  error: string | null;
   onClose: () => void;
   onFork: (name: string, createWorktree: boolean) => void;
 }
@@ -12,7 +13,8 @@ interface ForkDialogProps {
 export function ForkDialog({
   isOpen,
   sessionLabel,
-  sessionId: _sessionId,
+  existingLabels,
+  error,
   onClose,
   onFork,
 }: ForkDialogProps) {
@@ -21,10 +23,15 @@ export function ForkDialog({
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Generate default name when dialog opens
+  // Generate default name with auto-increment when dialog opens
   useEffect(() => {
     if (isOpen) {
-      setName(`${sessionLabel}-fork-1`);
+      // Find next available fork number
+      let counter = 1;
+      while (existingLabels.includes(`${sessionLabel}-fork-${counter}`)) {
+        counter++;
+      }
+      setName(`${sessionLabel}-fork-${counter}`);
       setCreateWorktree(true);
       setIsLoading(false);
       // Focus and select input after render
@@ -33,7 +40,14 @@ export function ForkDialog({
         inputRef.current?.select();
       }, 0);
     }
-  }, [isOpen, sessionLabel]);
+  }, [isOpen, sessionLabel, existingLabels]);
+
+  // Reset loading state when error changes (allows retry)
+  useEffect(() => {
+    if (error) {
+      setIsLoading(false);
+    }
+  }, [error]);
 
   const handleSubmit = useCallback(() => {
     if (!name.trim() || isLoading) return;
@@ -64,6 +78,11 @@ export function ForkDialog({
           <h3>Fork Session</h3>
         </div>
         <div className="fork-dialog-body">
+          {error && (
+            <div className="fork-error">
+              {error}
+            </div>
+          )}
           <div className="fork-field">
             <label htmlFor="fork-name">Name</label>
             <input
