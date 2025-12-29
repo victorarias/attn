@@ -209,7 +209,7 @@ func runClaudeDirectly() {
 	}
 
 	// Build claude command
-	claudeCmd := []string{"--settings", hooksPath}
+	claudeCmd := []string{"--session-id", sessionID, "--settings", hooksPath}
 	claudeCmd = append(claudeCmd, claudeArgs...)
 
 	cmd := exec.Command("claude", claudeCmd...)
