@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/victorarias/claude-manager/internal/client"
@@ -141,6 +143,95 @@ func openAppWithDeepLink() {
 	}
 }
 
+// getClaudeProjectDir returns the Claude project directory for a given working directory.
+// Claude uses ~/.claude/projects/<escaped-path>/ format.
+func getClaudeProjectDir(cwd string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	// Claude escapes paths by replacing / and . with -
+	escapedPath := strings.ReplaceAll(cwd, "/", "-")
+	escapedPath = strings.ReplaceAll(escapedPath, ".", "-")
+	return filepath.Join(homeDir, ".claude", "projects", escapedPath)
+}
+
+// findTranscript searches all Claude project directories for a transcript with the given session ID.
+// Returns the full path to the transcript file, or empty string if not found.
+func findTranscript(sessionID string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	projectsDir := filepath.Join(homeDir, ".claude", "projects")
+	transcriptName := sessionID + ".jsonl"
+
+	var found string
+	filepath.WalkDir(projectsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+		// Only look one level deep (project directories)
+		if d.IsDir() && path != projectsDir {
+			transcriptPath := filepath.Join(path, transcriptName)
+			if _, err := os.Stat(transcriptPath); err == nil {
+				found = transcriptPath
+				return filepath.SkipAll // Stop searching
+			}
+			return filepath.SkipDir // Don't recurse into subdirectories
+		}
+		return nil
+	})
+	return found
+}
+
+// copyTranscriptForFork copies the parent transcript to the fork's project directory.
+// This is needed because Claude's --resume only looks in the current project directory.
+func copyTranscriptForFork(parentSessionID, forkCwd string) error {
+	// Find the parent transcript
+	srcPath := findTranscript(parentSessionID)
+	if srcPath == "" {
+		return fmt.Errorf("parent transcript not found for session %s", parentSessionID)
+	}
+
+	// Get the destination directory
+	destDir := getClaudeProjectDir(forkCwd)
+	if destDir == "" {
+		return fmt.Errorf("could not determine Claude project directory")
+	}
+
+	// Create the destination directory if it doesn't exist
+	if err := os.MkdirAll(destDir, 0700); err != nil {
+		return fmt.Errorf("failed to create project directory: %w", err)
+	}
+
+	// Copy the transcript
+	destPath := filepath.Join(destDir, parentSessionID+".jsonl")
+
+	// Don't copy if it's already there (same project directory)
+	if srcPath == destPath {
+		return nil
+	}
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to open source transcript: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to create destination transcript: %w", err)
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return fmt.Errorf("failed to copy transcript: %w", err)
+	}
+
+	return nil
+}
+
 // runClaudeDirectly runs claude with hooks (used when inside the app)
 func runClaudeDirectly() {
 	// Parse flags
@@ -223,6 +314,12 @@ func runClaudeDirectly() {
 
 	// Add fork flags if resuming
 	if *resumeFlag != "" {
+		// Copy parent transcript to fork directory so --resume can find it
+		// (Claude only looks in the current project directory)
+		if err := copyTranscriptForFork(*resumeFlag, cwd); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not copy transcript for fork: %v\n", err)
+			// Continue anyway - Claude will start fresh if transcript not found
+		}
 		claudeCmd = append(claudeCmd, "--resume", *resumeFlag)
 		if *forkFlag {
 			claudeCmd = append(claudeCmd, "--fork-session")
