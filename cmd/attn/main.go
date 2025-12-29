@@ -146,6 +146,8 @@ func runClaudeDirectly() {
 	// Parse flags
 	fs := flag.NewFlagSet("attn", flag.ContinueOnError)
 	labelFlag := fs.String("s", "", "session label")
+	resumeFlag := fs.String("resume", "", "session ID to resume from")
+	forkFlag := fs.Bool("fork-session", false, "fork the resumed session")
 
 	// Find where our flags end and claude flags begin
 	var attnArgs []string
@@ -156,7 +158,12 @@ func runClaudeDirectly() {
 		arg := args[i]
 		if arg == "-s" && i+1 < len(args) {
 			attnArgs = append(attnArgs, arg, args[i+1])
-			i++ // skip next arg
+			i++
+		} else if arg == "--resume" && i+1 < len(args) && args[i+1] != "--" {
+			attnArgs = append(attnArgs, arg, args[i+1])
+			i++
+		} else if arg == "--fork-session" {
+			attnArgs = append(attnArgs, arg)
 		} else if arg == "--" {
 			claudeArgs = append(claudeArgs, args[i+1:]...)
 			break
@@ -210,6 +217,15 @@ func runClaudeDirectly() {
 
 	// Build claude command
 	claudeCmd := []string{"--session-id", sessionID, "--settings", hooksPath}
+
+	// Add fork flags if resuming
+	if *resumeFlag != "" {
+		claudeCmd = append(claudeCmd, "--resume", *resumeFlag)
+		if *forkFlag {
+			claudeCmd = append(claudeCmd, "--fork-session")
+		}
+	}
+
 	claudeCmd = append(claudeCmd, claudeArgs...)
 
 	cmd := exec.Command("claude", claudeCmd...)
