@@ -1,0 +1,31 @@
+/* app/src/components/ErrorToast.css */
+.error-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  background: #1a1a1d;
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #e8e8e8;
+  box-shadow: 0 8px 24px rgba(220, 38, 38, 0.2);
+  z-index: 400;
+  opacity: 0;
+  transition: opacity 150ms ease-out, transform 150ms ease-out;
+  pointer-events: none;
+}
+
+.error-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.error-toast svg {
+  color: #dc2626;
+  flex-shrink: 0;
+}

@@ -27,6 +27,7 @@ interface LocationPickerProps {
   onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string) => Promise<{ success: boolean; path?: string }>;
   onDeleteWorktree?: (path: string) => Promise<{ success: boolean; error?: string }>;
   onDeleteBranch?: (mainRepo: string, branch: string, force?: boolean) => Promise<{ success: boolean; error?: string }>;
+  onError?: (message: string) => void;
   projectsDirectory?: string;
 }
 
@@ -57,6 +58,7 @@ export function LocationPicker({
   onCreateWorktree,
   onDeleteWorktree,
   onDeleteBranch,
+  onError,
   projectsDirectory,
 }: LocationPickerProps) {
   const [state, setState] = useState<State>({
@@ -450,6 +452,7 @@ export function LocationPicker({
                 }
               }
             } : undefined}
+            onError={onError}
             onRefresh={handleRefresh}
             onBack={handleBack}
             refreshing={state.refreshing}

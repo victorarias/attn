@@ -16,6 +16,7 @@ import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
 import { ThumbsModal } from './components/ThumbsModal';
 import { ForkDialog } from './components/ForkDialog';
 import { CopyToast, useCopyToast } from './components/CopyToast';
+import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket, DaemonWorktree, GitStatusUpdate } from './hooks/useDaemonSocket';
@@ -302,6 +303,7 @@ function App() {
   const [thumbsOpen, setThumbsOpen] = useState(false);
   const [thumbsText, setThumbsText] = useState('');
   const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
+  const { message: errorMessage, showError, clearError } = useErrorToast();
 
   // Fork dialog state
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
@@ -874,6 +876,7 @@ function App() {
         onCreateWorktree={sendCreateWorktree}
         onDeleteWorktree={sendDeleteWorktree}
         onDeleteBranch={sendDeleteBranch}
+        onError={showError}
         projectsDirectory={settings.projects_directory}
       />
       <BranchPicker
@@ -923,6 +926,7 @@ function App() {
         onCopy={handleThumbsCopy}
       />
       <CopyToast message={copyMessage} onDone={clearCopyToast} />
+      <ErrorToast message={errorMessage} onDone={clearError} />
       <ForkDialog
         isOpen={forkDialogOpen}
         sessionLabel={forkTargetSession?.label || ''}

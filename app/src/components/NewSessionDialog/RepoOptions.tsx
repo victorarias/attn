@@ -21,6 +21,7 @@ interface RepoOptionsProps {
   onCreateWorktree: (branchName: string, startingFrom: string) => Promise<void>;
   onDeleteWorktree?: (path: string) => Promise<void>;
   onDeleteBranch?: (branch: string) => Promise<void>;
+  onError?: (message: string) => void;
   onRefresh: () => void;
   onBack: () => void;
   refreshing?: boolean;
@@ -48,6 +49,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   onCreateWorktree,
   onDeleteWorktree,
   onDeleteBranch,
+  onError,
   onRefresh,
   onBack,
   refreshing = false,
@@ -57,6 +59,11 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const [newWorktreeName, setNewWorktreeName] = useState('');
   const [startingBranch, setStartingBranch] = useState<'current' | 'default'>('current');
   const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
+
+  // Clear pending delete when repoInfo changes externally (e.g., after refresh)
+  useEffect(() => {
+    setPendingDeleteIndex(null);
+  }, [repoInfo]);
 
   // Calculate total items for navigation
   const mainRepoCount = 1;
@@ -92,6 +99,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const executeDelete = async () => {
     if (pendingDeleteIndex === null) return;
 
+    const deletedIndex = pendingDeleteIndex;
     try {
       // Worktree deletion
       if (pendingDeleteIndex > 0 && pendingDeleteIndex <= worktreeCount) {
@@ -108,8 +116,15 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
           await onDeleteBranch(branch.name);
         }
       }
+      // After successful delete, adjust selectedIndex if needed
+      // If we deleted an item at or before current selection, move selection up
+      if (selectedIndex >= deletedIndex && selectedIndex > 0) {
+        setSelectedIndex(prev => Math.max(0, prev - 1));
+      }
     } catch (err) {
       console.error('Delete failed:', err);
+      const message = err instanceof Error ? err.message : 'Delete failed';
+      onError?.(message);
     }
 
     setPendingDeleteIndex(null);
