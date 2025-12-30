@@ -26,8 +26,6 @@ go test ./internal/store -run TestList  # Run single test
 
 **Dev workflow:** Use `make install` for daemon changes (fast iteration). Use `make install-app` when you need to test the full packaged app.
 
-**Distribution:** The .app bundle includes the daemon binary. When no local daemon exists at `~/.local/bin/attn`, the app uses its bundled copy.
-
 ## CLI Usage
 
 ```bash
@@ -53,21 +51,35 @@ Attention Manager (`attn`) tracks multiple Claude Code sessions and surfaces whi
 
 ### Core Flow
 
-1. **Wrapper** (`cmd/attn/main.go`): CLI entry point that wraps `claude` command. Parses attn-specific flags (`-s`), passes unknown flags through to claude. Registers session with daemon, writes temporary hooks config, executes claude with `--settings` pointing to hooks.
+1. **Wrapper** (`cmd/attn/main.go`): CLI entry point that wraps `claude` command. Parses attn-specific flags (`-s`, `--resume`, `--fork`), passes unknown flags through to claude. Registers session with daemon, writes temporary hooks config, executes claude with `--settings` pointing to hooks. Handles signal forwarding (SIGTERM allows claude cleanup hooks to run).
 
-2. **Hooks** (`internal/hooks`): Generates Claude Code hooks JSON that reports state changes back to daemon via unix socket using `nc`. Three hooks: Stop (waiting), UserPromptSubmit (working), PostToolUse/TodoWrite (update todos).
+2. **Hooks** (`internal/hooks`): Generates Claude Code hooks JSON that reports state changes back to daemon via unix socket using `nc`. Key hooks:
+   - `UserPromptSubmit` → state: working
+   - `AskUserQuestion` (PreToolUse) → state: waiting_input
+   - `PermissionRequest` → state: pending_approval
+   - `PostToolUse` (any) → state: working (resets from approval)
+   - `Stop` → triggers classifier
+   - `TodoWrite` → updates todo list
 
-3. **Daemon** (`internal/daemon`): Background process listening on `~/.attn.sock`. Handles register/unregister/state/todos/query/heartbeat commands. Auto-started by app if not running. The app includes a circuit breaker for daemon restarts (3 reconnect attempts → 2 restart attempts → circuit opens, auto-resets after 30s).
+3. **Daemon** (`internal/daemon`): Background process listening on `~/.attn/attn.sock` (unix socket) and `ws://localhost:9849` (WebSocket). Handles session lifecycle, git operations, GitHub PR polling, and real-time updates to the app.
 
-4. **Store** (`internal/store`): Thread-safe in-memory session storage with mutex protection.
+4. **Store** (`internal/store`): SQLite-backed storage with thread-safe in-memory caching. Uses RWMutex for concurrent reads. Always `defer mu.Unlock()` immediately after lock, before any I/O.
 
-5. **Client** (`internal/client`): Sends JSON messages to daemon over unix socket.
+5. **Classifier** (`internal/classifier`): Uses `claude -p` with Haiku to classify Claude's final message as WAITING (needs input) or DONE (idle). Called via Stop hook when Claude stops generating.
 
-6. **Protocol** (`internal/protocol`): Message types and parsing. Three states: "working" (actively generating), "waiting_input" (needs user attention), and "idle" (completed task).
+6. **Transcript Parser** (`internal/transcript`): Parses Claude Code JSONL transcripts to extract the last assistant message. Handles both string content (old format) and `[]contentBlock` (Claude Code format).
 
-7. **Classifier** (`internal/classifier`): Uses `claude -p` to classify Claude's final message and determine if it's waiting for input or idle. Called via Stop hook when Claude stops generating.
+### Git Operations
 
-8. **Transcript Parser** (`internal/transcript`): Parses Claude Code JSONL transcripts to extract the last assistant message for classification.
+The daemon provides comprehensive git functionality via protocol commands:
+
+- **Branch Management:** `list_branches`, `delete_branch`, `switch_branch`, `create_branch`, `list_remote_branches`, `fetch_remotes`, `get_default_branch`
+- **Worktree Management:** `create_worktree`, `create_worktree_from_branch`, `list_worktrees`
+- **Stash Operations:** `stash`, `stash_pop`, `check_attn_stash`, `commit_wip`, `check_dirty`
+- **Git Status:** `subscribe_git_status`, `unsubscribe_git_status` (real-time polling every 5s per client)
+- **File Operations:** `get_file_diff`, `get_repo_info`
+
+Implementation in `internal/git/` (branch.go, stash.go, worktree.go) and `internal/daemon/` handlers.
 
 ### GitHub PR Monitoring
 
@@ -75,119 +87,92 @@ The daemon polls GitHub every 90 seconds for PRs that need attention (using `gh`
 - PRs where you're a requested reviewer
 - Your PRs with review comments, CI failures, or merge conflicts
 
-The store (`internal/store`) tracks both sessions and PRs with mute states. PR actions (approve, merge) are handled via WebSocket commands to the daemon.
+PR actions (approve, merge, mute) are handled via WebSocket commands with Promise-based responses.
 
-### Protocol Versioning
+## Critical Patterns
+
+### 1. Protocol Versioning (REQUIRED)
 
 **Rule:** When changing the protocol (adding/modifying commands, events, or message structures), increment `ProtocolVersion` in `internal/protocol/constants.go`.
 
-The app checks protocol version on WebSocket connect and shows an error banner if mismatched. This prevents silent failures when the daemon is running old code.
+The app checks protocol version on WebSocket connect and **immediately closes the connection** if mismatched, showing an error banner.
 
 **After protocol changes:**
 1. Increment `ProtocolVersion` in `internal/protocol/constants.go`
 2. Run `make install` (kills daemon automatically)
 3. The app will auto-start a new daemon with updated code
 
-**Why:** The daemon runs as a background process and survives `make install`. Without version checking, old daemon + new app = mysterious failures with no logs.
+**Why:** The daemon runs as a background process and survives `make install`. Without version checking, old daemon + new app = silent failures with no logs.
 
-### Adding New Protocol Types (TypeSpec Workflow)
+### 2. Generated Files (NEVER HAND-EDIT)
 
-Types are defined once in TypeSpec and generated for Go and TypeScript. **Never hand-edit generated files.**
+Types are defined once in TypeSpec and generated for Go and TypeScript.
 
 **Source of truth:** `internal/protocol/schema/main.tsp`
 
-**Generated files:**
-- `internal/protocol/generated.go` (Go structs)
-- `app/src/types/generated.ts` (TypeScript interfaces)
-
-**Prerequisites (first time only):**
-```bash
-cd internal/protocol/schema && pnpm install
-go install github.com/atombender/go-jsonschema/cmd/go-jsonschema@latest
-npm install -g quicktype
-```
+**Generated files (DO NOT EDIT):**
+- `internal/protocol/generated.go`
+- `app/src/types/generated.ts`
 
 **Workflow for adding a new command/event:**
 
-1. **Define types in TypeSpec** (`internal/protocol/schema/main.tsp`):
-   ```tsp
-   // Command message (client → daemon)
-   model GetRecentLocationsMessage {
-     cmd: "get_recent_locations";
-     limit?: int32;
-   }
-
-   // Result event (daemon → client)
-   model RecentLocationsResultMessage {
-     event: "recent_locations_result";
-     locations: RecentLocation[];
-     success: boolean;
-     error?: string;
-   }
-   ```
-
-2. **Generate types:**
-   ```bash
-   make generate-types
-   ```
-
-3. **Add command constant** (`internal/protocol/constants.go`):
-   ```go
-   const CmdGetRecentLocations = "get_recent_locations"
-   const EventRecentLocationsResult = "recent_locations_result"
-   ```
-
-4. **Add parse case** in `ParseMessage()` (`internal/protocol/constants.go`):
-   ```go
-   case CmdGetRecentLocations:
-       var msg GetRecentLocationsMessage
-       if err := json.Unmarshal(data, &msg); err != nil {
-           return "", nil, err
-       }
-       return peek.Cmd, &msg, nil
-   ```
-
-5. **Increment protocol version** if breaking change (`internal/protocol/constants.go`)
-
-6. **Run `make install`** to rebuild and restart daemon
+1. Define types in TypeSpec (`internal/protocol/schema/main.tsp`)
+2. Run `make generate-types`
+3. Add command constant in `internal/protocol/constants.go`
+4. Add parse case in `ParseMessage()` in `internal/protocol/constants.go`
+5. Increment protocol version if breaking change
+6. Run `make install`
 
 **CI check:** `make check-types` verifies generated files match the schema.
 
-### Communication
+### 3. Async WebSocket Pattern (REQUIRED for operations that can fail)
 
-All IPC uses JSON over unix socket at `~/.attn.sock`. Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates. WebSocket at `ws://localhost:21152` for real-time updates to the Tauri app.
-
-### Async WebSocket Pattern (REQUIRED for any async operation)
-
-When the frontend triggers an async operation via WebSocket that expects a response:
-
-**DO NOT** fire-and-forget with optimistic UI or silent timeouts.
+**DO NOT** fire-and-forget with optimistic UI for operations that can fail.
 
 **DO** implement the request/result event pattern:
 
 1. **Daemon side** (`internal/daemon/websocket.go`):
-   - Handle the command (e.g., `refresh_prs`)
-   - Send a `*_result` event when complete (e.g., `refresh_prs_result`)
+   - Handle the command
+   - Send a `*_result` event when complete
    - Include `success: bool` and `error?: string` in the result
 
-2. **Protocol** (`internal/protocol/types.go`):
-   - Define the result event constant (e.g., `EventRefreshPRsResult`)
-   - Define the result message struct with success/error fields
+2. **Protocol** (`internal/protocol/constants.go`):
+   - Define result event constant
+   - Define result message struct with success/error fields
 
 3. **Frontend hook** (`app/src/hooks/useDaemonSocket.ts`):
    - Return a `Promise` from the send function
    - Store pending request in `pendingActionsRef` Map with unique key
    - Listen for result event, resolve/reject the Promise
-   - Set timeout (e.g., 30s) that rejects with error
-
-4. **Frontend UI**:
-   - Show loading state while Promise is pending
-   - Show error toast/message if Promise rejects
-   - Clear loading state on resolve or reject
+   - Set timeout (30s typical)
 
 **Example**: See `sendPRAction` in `useDaemonSocket.ts` for the canonical implementation.
 
-**Why**: Silent failures frustrate users. Every async operation must have clear success/failure feedback.
+**Fire-and-forget OK for**: Simple toggles that rarely fail (`sendMutePR`, `sendMuteRepo`)
+
+### 4. Classifier Timestamp Protection
+
+The classifier runs asynchronously and can take 30+ seconds. To prevent stale results from overwriting newer state:
+
+- Capture timestamp BEFORE classification starts
+- Use `UpdateStateWithTimestamp()` instead of `UpdateState()`
+- Only updates if classification timestamp is newer than current `StateUpdatedAt`
+
+See `internal/daemon/daemon.go` around line 460.
+
+### 5. Type Conversion Helpers
+
+Store uses pointers `[]*Session`, but API returns value slices `[]Session`. Use helpers in `internal/protocol/helpers.go`:
+
+- `Ptr[T](v T) *T` - convert value to pointer
+- `Deref[T](p *T) T` - convert pointer to value (returns zero if nil)
+- `SessionsToValues()`, `PRsToValues()` - batch conversions
+
+## Communication
+
+All IPC uses JSON over unix socket at `~/.attn/attn.sock`. Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates. WebSocket at `ws://localhost:9849` for real-time updates to the Tauri app.
+
+**WebSocket buffer limit:** Each client has 256-message buffer. If frontend sends commands faster than daemon processes them, messages can be dropped. Slow clients get disconnected after 3 failed sends.
 
 ## Tauri App Development
 
@@ -195,34 +180,27 @@ When the frontend triggers an async operation via WebSocket that expects a respo
 
 ```bash
 cd app
-pnpm run dev:all    # Starts tauri dev with hot reload
-```
-
-### PTY Architecture
-
-The app uses native Rust PTY handling via `portable-pty` (`src-tauri/src/pty_manager.rs`):
-- Direct PTY management in Rust, no separate process
-- Event-driven streaming to frontend via Tauri events
-- Handles UTF-8 boundary splits for proper terminal rendering
-
-Communication flow:
-```
-Frontend (React) → Tauri Commands → Rust pty_manager → portable-pty
+pnpm run dev    # Starts tauri dev with hot reload
 ```
 
 ### Frontend Architecture
 
-Key app components:
-- **App.tsx**: Main layout with sidebar and dashboard
-- **Sidebar.tsx**: Session/PR list with state indicators (green=working, orange=waiting_input, gray=idle)
-- **Dashboard.tsx**: Central area with terminal tabs
+Key components:
+- **App.tsx**: Main layout, state orchestration
+- **Sidebar.tsx**: Session/PR list with state indicators
+- **Dashboard.tsx**: Terminal tabs and main content area
 - **Terminal.tsx**: xterm.js integration with PTY bridge
+- **LocationPicker.tsx**: Path selection with filesystem suggestions
+- **NewSessionDialog/**: Session creation (PathInput, RepoOptions subcomponents)
+- **ChangesPanel.tsx**: Git changes display
+- **DiffOverlay.tsx**: Monaco-based diff viewing
+- **BranchPicker.tsx**: Branch selection UI
 - **AttentionDrawer.tsx**: Quick view of items needing attention
 
 State management:
 - **store/daemonSessions.ts**: Zustand store for session/PR state from daemon
 - **store/sessions.ts**: Local terminal session management
-- **hooks/useDaemonSocket.ts**: WebSocket connection to daemon
+- **hooks/useDaemonSocket.ts**: WebSocket connection with circuit breaker (3 reconnects → 2 daemon restarts → circuit opens 30s)
 
 ### Terminal Component (xterm.js)
 
@@ -233,6 +211,13 @@ When modifying `app/src/components/Terminal.tsx`:
 3. **Resize xterm first, then PTY** - Call `term.resize()` then notify PTY (sends SIGWINCH)
 4. **Use VS Code's resize debouncing** - Y-axis immediate, X-axis 100ms debounced (text reflow is expensive)
 
+### PTY Architecture
+
+Native Rust PTY handling via `portable-pty` (`src-tauri/src/pty_manager.rs`):
+- Direct PTY management in Rust, no separate process
+- Event-driven streaming to frontend via Tauri events
+- Handles UTF-8 boundary splits for proper terminal rendering
+
 ### E2E Testing
 
 ```bash
@@ -241,6 +226,16 @@ pnpm run e2e               # Run all E2E tests
 pnpm run e2e:headed        # Run with browser visible
 pnpm run e2e -- --ui       # Run with Playwright UI
 ```
+
+## Known Gotchas
+
+1. **Worktree action key collision**: `sendCreateWorktree()` and `sendCreateWorktreeFromBranch()` use the same pending action key. Don't call both simultaneously.
+
+2. **Timeout vs completion race**: Async operations timeout after 30s. If daemon responds after timeout, the operation completed but UI shows error.
+
+3. **Git status subscription**: Only 1 subscription per client. New subscription replaces old one.
+
+4. **Circuit breaker auto-reset**: Opens after failed reconnects, auto-resets after 30s even without user action.
 
 ## Task Tracking
 
