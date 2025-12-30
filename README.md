@@ -14,6 +14,10 @@ You're running 5 Claude Code sessions across different projects. One finished an
 
 - **Real-time status** - See which sessions are working, waiting, or idle
 - **Built-in terminal** - Manage Claude Code sessions without leaving the app, or open plain terminal sessions to run arbitrary commands
+- **Git worktrees** - Create and manage worktrees for parallel work (`Cmd+N`)
+- **Git diffs** - View changes with Monaco editor, send diff snippets as context to Claude
+- **Session forking** - Fork a Claude session to explore different approaches (`Cmd+Shift+F`)
+- **Quick Find** - Keyboard-friendly extraction of URLs, paths, and hashes from terminal (`Cmd+F`)
 - **GitHub PR integration** - Track PRs needing review, with CI failures, or merge conflicts
 - **tmux status bar** - Quick glance at session states from your terminal
 
