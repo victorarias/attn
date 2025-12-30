@@ -57,6 +57,7 @@ func TestListBranchesWithCommits(t *testing.T) {
 	runGit(t, mainDir, "init")
 	runGit(t, mainDir, "config", "user.email", "test@test.com")
 	runGit(t, mainDir, "config", "user.name", "Test")
+	runGit(t, mainDir, "checkout", "-b", "main") // Ensure branch is named 'main'
 
 	// Create initial commit on main
 	writeFile(t, mainDir, "file1.txt", "initial")

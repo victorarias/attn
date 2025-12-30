@@ -92,6 +92,12 @@ func FindClaudePath() (string, error) {
 // Deprecated: Use ClassifyWithPath instead for daemon context.
 // Returns "waiting_input" or "idle"
 func Classify(text string, timeout time.Duration) (string, error) {
+	// Early return for empty text - no need to find claude binary
+	if text == "" {
+		DefaultLogger("classifier: empty text, returning idle")
+		return "idle", nil
+	}
+
 	claudePath, err := FindClaudePath()
 	if err != nil {
 		DefaultLogger("classifier: %v", err)
