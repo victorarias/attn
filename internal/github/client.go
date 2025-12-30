@@ -491,8 +491,9 @@ func (c *Client) FetchPRDetails(repo string, number int) (*PRDetails, error) {
 	return details, nil
 }
 
-
-func computeReviewStatus(reviews []struct{ State string `json:"state"` }) string {
+func computeReviewStatus(reviews []struct {
+	State string `json:"state"`
+}) string {
 	if len(reviews) == 0 {
 		return "none"
 	}

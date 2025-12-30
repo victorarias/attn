@@ -18,7 +18,7 @@ type contentBlock struct {
 type transcriptEntry struct {
 	Type    string `json:"type"`
 	Message struct {
-		Role    string         `json:"role"`
+		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"` // Can be string or array
 	} `json:"message"`
 }

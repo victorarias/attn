@@ -33,19 +33,19 @@ type repoCache struct {
 
 // Daemon manages Claude sessions
 type Daemon struct {
-	socketPath   string
-	pidPath      string
-	store        *store.Store
-	listener     net.Listener
-	httpServer   *http.Server
-	wsHub        *wsHub
-	done         chan struct{}
-	logger       *logging.Logger
-	ghClient     github.GitHubClient
-	classifier   Classifier // Optional, uses package-level classifier.Classify if nil
-	claudePath   string     // Resolved path to claude binary (found at startup)
-	repoCaches   map[string]*repoCache
-	repoCacheMu  sync.RWMutex
+	socketPath  string
+	pidPath     string
+	store       *store.Store
+	listener    net.Listener
+	httpServer  *http.Server
+	wsHub       *wsHub
+	done        chan struct{}
+	logger      *logging.Logger
+	ghClient    github.GitHubClient
+	classifier  Classifier // Optional, uses package-level classifier.Classify if nil
+	claudePath  string     // Resolved path to claude binary (found at startup)
+	repoCaches  map[string]*repoCache
+	repoCacheMu sync.RWMutex
 }
 
 // New creates a new daemon
@@ -1030,11 +1030,11 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 	prs := d.store.ListPRs("")
 
 	health := map[string]interface{}{
-		"status":          "ok",
-		"protocol":        protocol.ProtocolVersion,
-		"sessions":        len(sessions),
-		"prs":             len(prs),
-		"ws_clients":      d.wsHub.ClientCount(),
+		"status":           "ok",
+		"protocol":         protocol.ProtocolVersion,
+		"sessions":         len(sessions),
+		"prs":              len(prs),
+		"ws_clients":       d.wsHub.ClientCount(),
 		"github_available": d.ghClient != nil && d.ghClient.IsAvailable(),
 	}
 
