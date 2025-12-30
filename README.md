@@ -80,7 +80,7 @@ set -g status-right '#(attn status)'
 make install        # Build and install daemon
 
 # Desktop app (with hot reload)
-cd app && pnpm install && pnpm run dev:all
+cd app && pnpm install && pnpm run dev
 
 # Full build
 make build-app      # Build daemon + Tauri app
