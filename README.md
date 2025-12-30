@@ -3,7 +3,6 @@
 A desktop app for managing multiple [Claude Code](https://claude.ai/code) sessions. Know which ones need your attention.
 
 ![Demo](docs/demo.gif)
-<!-- TODO: Record demo gif showing: opening app, multiple sessions with different states, PR notifications -->
 
 ## The Problem
 
