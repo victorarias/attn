@@ -13,16 +13,19 @@ You're running 5 Claude Code sessions across different projects. One finished an
 **attn** tracks all your Claude Code sessions in one place:
 
 - **Real-time status** - See which sessions are working, waiting, or idle
-- **Desktop notifications** - Get alerted when sessions need input
-- **Built-in terminal** - Manage sessions without leaving the app
+- **Built-in terminal** - Manage Claude Code sessions without leaving the app, or open plain terminal sessions to run arbitrary commands
 - **GitHub PR integration** - Track PRs needing review, with CI failures, or merge conflicts
 - **tmux status bar** - Quick glance at session states from your terminal
+
+The tracking of Claude Code sessions is done using hooks and asking Haiku to assess whether Claude Code is waiting for input (for when it stops without a request for approval).
 
 ## Installation
 
 > **Alpha**: No pre-built releases yet. You'll need to build from source.
 
-Requires: Go 1.21+, Rust, Node.js, pnpm
+Requires: Go 1.21+, Rust, Node.js, pnpm, authenticated gh CLI, Claude Code.
+
+Only tested on macOS (Apple Silicon).
 
 ```bash
 git clone https://github.com/victorarias/attn.git
@@ -59,13 +62,9 @@ set -g status-right '#(attn status)'
 | State | Indicator | Meaning |
 |-------|-----------|---------|
 | Working | Green | Claude is actively generating |
-| Waiting | Orange | Claude needs your input |
+| Waiting | Yellow | Claude needs your input |
 | Idle | Gray | Claude finished its task |
-
-## Requirements
-
-- **macOS** (Apple Silicon or Intel)
-- **Claude Code** CLI installed
+| Waiting for approval | Flashing yellow | Claude is waiting for approval |
 
 ## How It Works
 
@@ -87,6 +86,7 @@ cd app && pnpm install && pnpm run dev:all
 make build-app      # Build daemon + Tauri app
 make install-app    # Install to /Applications
 make dist           # Create distributable DMG
+make install-all    # Install daemon + app
 
 # Testing
 make test-all       # Run Go + frontend tests
@@ -94,7 +94,7 @@ make test-all       # Run Go + frontend tests
 
 ## Status
 
-**Alpha** - I use attn daily for my own work, but expect rough edges. No pre-built releases yet.
+**Alpha** - I use attn daily for my own work, but expect rough edges.
 
 ## Built With
 
