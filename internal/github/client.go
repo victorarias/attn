@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 // ErrRateLimited is returned when GitHub rate limit is exceeded

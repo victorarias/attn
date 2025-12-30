@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/victorarias/claude-manager/internal/git"
-	"github.com/victorarias/claude-manager/internal/protocol"
-	"github.com/victorarias/claude-manager/internal/store"
+	"github.com/victorarias/attn/internal/git"
+	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 const fetchCacheTTL = 30 * time.Minute

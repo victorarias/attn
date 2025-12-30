@@ -3,7 +3,7 @@ package attention
 import (
 	"sort"
 
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 // Aggregator combines multiple attention sources into a unified view.

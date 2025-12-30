@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 type diffStats struct {

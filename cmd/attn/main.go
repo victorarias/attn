@@ -13,11 +13,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/victorarias/claude-manager/internal/client"
-	"github.com/victorarias/claude-manager/internal/config"
-	"github.com/victorarias/claude-manager/internal/daemon"
-	"github.com/victorarias/claude-manager/internal/status"
-	"github.com/victorarias/claude-manager/internal/wrapper"
+	"github.com/victorarias/attn/internal/client"
+	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/daemon"
+	"github.com/victorarias/attn/internal/status"
+	"github.com/victorarias/attn/internal/wrapper"
 )
 
 // hookInput represents the JSON input from Claude Code hooks

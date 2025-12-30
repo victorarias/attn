@@ -3,7 +3,7 @@ package github
 import (
 	"time"
 
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 // GitHubClient defines the interface for all GitHub operations

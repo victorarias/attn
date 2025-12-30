@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/victorarias/claude-manager/internal/attention"
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/attention"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 const maxLabels = 3

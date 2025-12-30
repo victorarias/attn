@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/victorarias/claude-manager/internal/config"
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 // DefaultSocketPath returns the default socket path

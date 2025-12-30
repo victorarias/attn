@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/victorarias/claude-manager/internal/config"
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 // Store manages session state in SQLite

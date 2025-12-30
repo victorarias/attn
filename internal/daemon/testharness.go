@@ -4,9 +4,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/victorarias/claude-manager/internal/github"
-	"github.com/victorarias/claude-manager/internal/protocol"
-	"github.com/victorarias/claude-manager/internal/store"
+	"github.com/victorarias/attn/internal/github"
+	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // Classifier is an interface for classifying session state

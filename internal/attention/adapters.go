@@ -3,7 +3,7 @@ package attention
 import (
 	"time"
 
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 // SessionAdapter wraps a protocol.Session to implement Source.

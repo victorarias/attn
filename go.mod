@@ -1,4 +1,4 @@
-module github.com/victorarias/claude-manager
+module github.com/victorarias/attn
 
 go 1.25.3
 

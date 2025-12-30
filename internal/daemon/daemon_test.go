@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victorarias/claude-manager/internal/client"
-	"github.com/victorarias/claude-manager/internal/github"
-	"github.com/victorarias/claude-manager/internal/github/mockserver"
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/client"
+	"github.com/victorarias/attn/internal/github"
+	"github.com/victorarias/attn/internal/github/mockserver"
+	"github.com/victorarias/attn/internal/protocol"
 	"nhooyr.io/websocket"
 )
 

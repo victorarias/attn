@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/victorarias/claude-manager/internal/github"
+	"github.com/victorarias/attn/internal/github"
 )
 
 func TestMockServer_SearchAndApprove(t *testing.T) {

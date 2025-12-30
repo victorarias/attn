@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/victorarias/claude-manager/internal/config"
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 func TestClient_Register(t *testing.T) {

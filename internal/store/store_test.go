@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 func TestStore_AddAndGet(t *testing.T) {

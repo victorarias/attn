@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/victorarias/claude-manager/internal/config"
+	"github.com/victorarias/attn/internal/config"
 )
 
 type Logger struct {

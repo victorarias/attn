@@ -3,8 +3,8 @@ package daemon
 import (
 	"strings"
 
-	"github.com/victorarias/claude-manager/internal/git"
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/git"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 func (d *Daemon) handleCheckDirtyWS(client *wsClient, msg *protocol.CheckDirtyMessage) {

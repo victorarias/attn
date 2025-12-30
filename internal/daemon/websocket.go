@@ -14,7 +14,7 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/victorarias/claude-manager/internal/protocol"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 // Valid setting keys

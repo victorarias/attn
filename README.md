@@ -20,11 +20,7 @@ You're running 5 Claude Code sessions across different projects. One finished an
 
 ## Installation
 
-### Download
-
-Download the latest `.dmg` from [Releases](https://github.com/victorarias/attn/releases).
-
-### Build from source
+> **Alpha**: No pre-built releases yet. You'll need to build from source.
 
 Requires: Go 1.21+, Rust, Node.js, pnpm
 
@@ -98,7 +94,7 @@ make test-all       # Run Go + frontend tests
 
 ## Status
 
-**Beta** - I use attn daily for my own work, but offer no guarantees. Expect rough edges.
+**Alpha** - I use attn daily for my own work, but expect rough edges. No pre-built releases yet.
 
 ## Built With
 

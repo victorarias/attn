@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/google/uuid"
-	"github.com/victorarias/claude-manager/internal/hooks"
+	"github.com/victorarias/attn/internal/hooks"
 )
 
 // GenerateSessionID generates a UUID for use as session ID
