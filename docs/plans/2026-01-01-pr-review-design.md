@@ -60,17 +60,19 @@ CREATE TABLE reviewer_sessions (
 
 **Implementation:** Go agent using `victorarias/claude-agent-sdk-go`
 
-**Tool allowlist (read-only + comment):**
-- `read_file(path)` - read file contents
+**Built-in tools (from claude-agent-sdk-go):**
+- `Read` - read any file in the repo
+- `Grep` - ripgrep search across codebase
+- `Glob` - list files by pattern
+
+**Excluded built-in tools:**
+- `Write`, `Edit`, `bash`, `WebSearch`
+
+**Custom tools (MCP server hosted by attn daemon):**
 - `get_diff(path?)` - get diff for file or full branch
-- `get_file_list()` - list changed files
+- `get_changed_files()` - list files in the branch diff
 - `add_comment(filepath, line_start, line_end, content)` - add review comment
 - `list_comments()` - see existing comments with resolved status
-
-**Explicitly excluded:**
-- bash / shell
-- write_file / edit
-- Any MCP servers
 
 **Contextual intelligence:**
 On subsequent review triggers, the agent receives:
@@ -88,9 +90,9 @@ On subsequent review triggers, the agent receives:
 **Layout (modal, full-screen):**
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ feature-branch → main              [Ask Claude] [Create PR] │
+│ feature-branch → origin/main                   [Ask Claude] │
 ├─────────────────┬────────────────────────────────────────────┤
-│ Files           │ Diff viewer (Monaco)                       │
+│ Files           │ Diff viewer (CodeMirror 6)                 │
 │ ────────────────│                                            │
 │ ✓ src/foo.ts    │  @@ -10,3 +10,5 @@                        │
 │   src/bar.ts    │  - old line                                │
@@ -110,12 +112,12 @@ On subsequent review triggers, the agent receives:
 
 **File list:**
 - Groups: "Needs review" / "Auto-skip"
-- Auto-skip patterns: `pnpm-lock.yaml`, `go.sum`, `*.generated.*`, etc. (configurable)
+- Auto-skip: hardcoded defaults + `.gitattributes` `linguist-generated` detection
 - Icons: ✓ = viewed, ⊘ = auto-skipped
 - Shows +/- line counts
 
 **Diff viewer:**
-- Monaco-based (existing, consider CodeMirror 6 migration later)
+- CodeMirror 6 based (new implementation, more control over UX)
 - Default: diff hunks only
 - Expand on demand: `e` for context around hunk, `E` for full file
 - Click line number or select text → comment popover
@@ -156,33 +158,66 @@ On subsequent review triggers, the agent receives:
 
 ## Implementation Phases
 
-### Phase 1: Core Review UI
-- Evolve DiffOverlay to multi-file review panel
-- File list with navigation
-- Keyboard shortcuts
-- Auto-skip patterns
+### Phase 1.0: Basic Review Panel
+- New modal with file list + CodeMirror 6 diff viewer
+- Keyboard navigation (j/k/n/p/]/Esc)
+- Auto-skip detection (hardcoded defaults + gitattributes)
+- Diff hunks with expand on demand (e/E)
+- Entry point: button next to CHANGES
+- Auto-select first file (no empty state)
+
+**Verify:** Can navigate files, view diffs, skip lockfiles
+
+### Phase 1.1: Viewed Tracking (Persisted)
+- Track which files have been viewed per review
+- Checkmark in file list (✓)
+- `]` skips viewed files
+- Persist in SQLite (reviews table or separate)
+
+**Verify:** Close and reopen review, viewed state preserved
 
 ### Phase 2: Comments
-- Comment storage (SQLite)
-- Add/view/resolve comments in UI
-- "Send to Session" integration
+- SQLite: `review_comments` table
+- Add, view, resolve/unresolve comments
+- Comment markers in gutter (💬)
+- "Send to Claude Code" on comments
+
+**Verify:** Comments survive restart, can send to main session
 
 ### Phase 3: Reviewer Agent
 - Integrate claude-agent-sdk-go
-- Implement read-only tool set
-- Streaming response in review panel
+- Built-in tools: `Read`, `Grep`, `Glob` (read-only)
+- Custom MCP tools: `get_diff`, `get_changed_files`, `add_comment`, `list_comments`
+- Streaming response in collapsible bottom panel
+- Findings auto-create comments
+- Click finding → jump to file/line
+
+**Verify:** Claude can explore codebase, review, and leave comments
 
 ### Phase 4: Contextual Intelligence
-- Store reviewer transcripts
-- Inject previous context on subsequent reviews
-- Track what changed between reviews
+- Store reviewer transcripts (`reviewer_sessions` table)
+- Inject previous review context on re-trigger
+- Show diff of changes since last review
 
-## Open Questions
+**Verify:** Second review knows about first review's findings
 
-1. **CodeMirror migration** - Monaco works but is heavy. Migrate before or after this feature?
-2. **Auto-skip configuration** - Where to configure patterns? Settings file? UI?
-3. **Branch selector** - How to pick which branch to review? Dropdown in panel header?
-4. **PR creation from review** - "Create PR" button exists in mockup. What info to pre-fill?
+## Resolved Questions
+
+1. **CodeMirror** - Use CodeMirror 6 for the review panel (not Monaco). More control over UX, and this is a new component anyway.
+
+2. **Auto-skip patterns** - Hardcoded defaults + gitattributes detection:
+   - Defaults: `pnpm-lock.yaml`, `go.sum`, `package-lock.json`, `yarn.lock`, `Cargo.lock`
+   - Check `.gitattributes` for `linguist-generated` or `diff=generated` markers
+   - No config UI for now
+
+3. **Branch selection** - Implicit, no selector:
+   - Always reviews current session's branch vs `origin/main` (or default branch)
+   - Branch is snapshotted when review starts
+   - If branch changes mid-session, we don't handle it (edge case, defer)
+
+4. **PR creation** - No dedicated button. Instead:
+   - "Create PR" action sends `commit and create pr` to main Claude Code session
+   - Keeps PR creation in Claude Code where it has full context
 
 ## Non-Goals (for now)
 
