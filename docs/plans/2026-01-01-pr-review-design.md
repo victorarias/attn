@@ -99,7 +99,7 @@ On subsequent review triggers, the agent receives:
 │                 │  💬 comment popover                        │
 │ AUTO-SKIP       │  ┌────────────────────────────────────┐    │
 │ ⊘ pnpm-lock     │  │ check null here                    │    │
-│                 │  │ [Resolve] [Cancel] [Save] [Send CC]│    │
+│                 │  │ [Cancel] [Save] [Resolve] [Send CC]│    │
 │                 │  └────────────────────────────────────┘    │
 ├─────────────────┴────────────────────────────────────────────┤
 │ ▾ Claude Review (3 unresolved)                               │
@@ -147,7 +147,9 @@ On subsequent review triggers, the agent receives:
 **Comments:**
 - 💬 gutter markers on lines with comments
 - Click to expand popover
-- Actions: **Resolve** (button), Save, Cancel, Send to Claude Code
+- New comment actions: Cancel, Save, Send to Claude Code
+- Saved comment actions: Cancel, Save, **Resolve**, Send to Claude Code
+- Resolve button only appears after comment is saved (on right side)
 - Resolved comments are tracked but visually dimmed
 
 ## Integration Points

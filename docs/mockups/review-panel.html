@@ -960,16 +960,17 @@
               <span class="diff-line-sign">+</span>
               <span class="diff-line-content">  <span class="token-keyword">const</span> decoded = jwt.<span class="token-function">verify</span>(token);</span>
 
-              <!-- Comment popover -->
+              <!-- Comment popover (saved state - shows Resolve) -->
               <div class="comment-popover">
                 <textarea class="comment-textarea" placeholder="Add a comment...">jwt.verify can throw JwtError - wrap in try/catch</textarea>
                 <div class="comment-actions">
                   <div class="comment-actions-left">
-                    <button class="btn btn-ghost btn-xs btn-resolve">Resolve</button>
+                    <!-- Empty on saved comments -->
                   </div>
                   <div class="comment-actions-right">
                     <button class="btn btn-ghost btn-xs">Cancel</button>
                     <button class="btn btn-ghost btn-xs">Save</button>
+                    <button class="btn btn-resolve btn-xs">Resolve</button>
                     <button class="btn btn-primary btn-xs">Send to Claude Code</button>
                   </div>
                 </div>
