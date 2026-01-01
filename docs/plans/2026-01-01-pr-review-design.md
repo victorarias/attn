@@ -36,6 +36,7 @@ CREATE TABLE review_comments (
     line_start INTEGER NOT NULL,
     line_end INTEGER NOT NULL,
     content TEXT NOT NULL,
+    author TEXT NOT NULL,        -- "user" or "agent"
     resolved INTEGER DEFAULT 0,  -- boolean: 0 = unresolved, 1 = resolved
     created_at TEXT NOT NULL
 );
@@ -147,6 +148,7 @@ On subsequent review triggers, the agent receives:
 **Comments:**
 - 💬 gutter markers on lines with comments
 - Click to expand popover
+- Saved comments show author badge: "Claude" (amber) or "You" (blue) + timestamp
 - New comment actions: Cancel, Save, Send to Claude Code
 - Saved comment actions: Cancel, Save, **Resolve**, Send to Claude Code
 - Resolve button only appears after comment is saved (on right side)
