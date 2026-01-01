@@ -90,37 +90,47 @@ On subsequent review triggers, the agent receives:
 **Layout (modal, full-screen):**
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ feature-branch → origin/main                   [Ask Claude] │
+│ review: feature-branch → origin/main          2/8 files [×] │
 ├─────────────────┬────────────────────────────────────────────┤
-│ Files           │ Diff viewer (CodeMirror 6)                 │
-│ ────────────────│                                            │
-│ ✓ src/foo.ts    │  @@ -10,3 +10,5 @@                        │
-│   src/bar.ts    │  - old line                                │
-│ ⊘ pnpm-lock.yaml│  + new line                                │
-│                 │  + another new line                        │
-│                 │                                            │
+│ NEEDS REVIEW    │  @@ -10,3 +10,5 @@           [▲ 10][▼ 10] │
+│ ✓ src/foo.ts    │  - old line                                │
+│ 💬 bar.tsx   2  │  + new line                                │
+│   src/baz.ts    │                                            │
 │                 │  💬 comment popover                        │
-│                 │  ┌────────────────────┐                    │
-│                 │  │ check null here    │                    │
-│                 │  │ [Send to Session]  │                    │
-│                 │  └────────────────────┘                    │
+│ AUTO-SKIP       │  ┌────────────────────────────────────┐    │
+│ ⊘ pnpm-lock     │  │ check null here                    │    │
+│                 │  │ [Resolve] [Cancel] [Save] [Send CC]│    │
+│                 │  └────────────────────────────────────┘    │
 ├─────────────────┴────────────────────────────────────────────┤
-│ Claude Review (streaming)                                    │
-│ "Reviewing 5 files... Found potential null pointer at..."   │
+│ ▾ Claude Review (3 unresolved)                               │
+│ ─────────────────────────────────────────────────────────────│
+│ ## Authentication Implementation Review                      │
+│                                                              │
+│ This PR introduces a complete auth flow...                   │
+│ The token validation in `src/login.tsx:19` uses...           │
 └──────────────────────────────────────────────────────────────┘
 ```
 
 **File list:**
 - Groups: "Needs review" / "Auto-skip"
 - Auto-skip: hardcoded defaults + `.gitattributes` `linguist-generated` detection
-- Icons: ✓ = viewed, ⊘ = auto-skipped
+- Icons: ✓ = viewed, 💬 = has comments, ⊘ = auto-skipped
+- Unresolved comment badge (blue number) next to filename
 - Shows +/- line counts
+- Path abbreviation for deep paths (`.../api/routes.go`)
 
 **Diff viewer:**
 - CodeMirror 6 based (new implementation, more control over UX)
 - Default: diff hunks only
-- Expand on demand: `e` for context around hunk, `E` for full file
+- Hunk controls: `▲ 10` / `▼ 10` buttons to expand N lines up/down incrementally
+- `e` / `E` for quick expand around cursor / full file
 - Click line number or select text → comment popover
+
+**Claude review panel (collapsible bottom):**
+- Shows markdown-formatted review brief (not structured list)
+- File references are clickable (jump to file:line)
+- Badge shows unresolved comment count
+- Expands to ~400px when visible
 
 **Keyboard navigation:**
 | Key | Action |
@@ -135,10 +145,10 @@ On subsequent review triggers, the agent receives:
 | `Esc` | Close panel |
 
 **Comments:**
-- Yellow gutter markers on lines with comments
-- Hover or click to expand
-- "Send to Session" button → opens main session with context
-- Resolve/unresolve toggle (manual task tracking)
+- 💬 gutter markers on lines with comments
+- Click to expand popover
+- Actions: **Resolve** (button), Save, Cancel, Send to Claude Code
+- Resolved comments are tracked but visually dimmed
 
 ## Integration Points
 
