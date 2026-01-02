@@ -12,6 +12,8 @@ import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, b
 import { history } from '@codemirror/commands';
 import { highlightSelectionMatches } from '@codemirror/search';
 import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../hooks/useDaemonSocket';
+import type { ReviewComment } from '../types/generated';
+import { CommentPopover } from './CommentPopover';
 import './ReviewPanel.css';
 
 // Auto-skip patterns for lockfiles and generated files
@@ -45,6 +47,12 @@ interface ReviewPanelProps {
   getReviewState: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: ReviewState; error?: string }>;
   markFileViewed: (reviewId: string, filepath: string, viewed: boolean) => Promise<{ success: boolean; error?: string }>;
   onSendToClaude?: (reference: string) => void;
+  // Comment operations
+  addComment?: (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => Promise<{ success: boolean; comment?: ReviewComment }>;
+  updateComment?: (commentId: string, content: string) => Promise<{ success: boolean }>;
+  resolveComment?: (commentId: string, resolved: boolean) => Promise<{ success: boolean }>;
+  deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
+  getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: ReviewComment[] }>;
 }
 
 // Simple hash function for detecting content changes
@@ -67,7 +75,12 @@ export function ReviewPanel({
   fetchDiff,
   getReviewState,
   markFileViewed,
-  onSendToClaude: _onSendToClaude, // Will be used in Phase 2 for comments
+  onSendToClaude,
+  addComment,
+  updateComment,
+  resolveComment,
+  deleteComment,
+  getComments,
 }: ReviewPanelProps) {
   // Track selected file by path for stability across gitStatus updates
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
@@ -80,6 +93,33 @@ export function ReviewPanel({
   const [fontSize, setFontSize] = useState(13); // Default font size
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
+
+  // Comment state
+  const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
+  const [activePopover, setActivePopover] = useState<{
+    type: 'new' | 'existing';
+    lineStart?: number;
+    lineEnd?: number;
+    comment?: ReviewComment;
+    position: { top: number; left: number };
+  } | null>(null);
+
+  // Derive comments for current file (used for CodeMirror gutter markers - TODO: Phase 2)
+  const comments = useMemo(() => {
+    if (!selectedFilePath) return [];
+    return allReviewComments.filter(c => c.filepath === selectedFilePath);
+  }, [allReviewComments, selectedFilePath]);
+  // Silence unused warning - will be used for gutter markers
+  void comments;
+
+  // Compute comment counts per file
+  const fileCommentCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const comment of allReviewComments) {
+      counts[comment.filepath] = (counts[comment.filepath] || 0) + 1;
+    }
+    return counts;
+  }, [allReviewComments]);
 
   // Track diff hashes for "changed since viewed" detection
   const viewedDiffHashesRef = useRef<Map<string, string>>(new Map());
@@ -153,6 +193,23 @@ export function ReviewPanel({
       setSelectedFilePath(needsReviewFiles[0].path);
     }
   }, [isOpen, needsReviewFiles, selectedFilePath]);
+
+  // Load all comments for the review
+  useEffect(() => {
+    if (!reviewId || !getComments) {
+      setAllReviewComments([]);
+      return;
+    }
+
+    // Load all comments for the review (no filepath filter)
+    getComments(reviewId)
+      .then((result) => {
+        if (result.success && result.comments) {
+          setAllReviewComments(result.comments);
+        }
+      })
+      .catch(console.error);
+  }, [reviewId, getComments]);
 
   // Clear "changed" status when navigating away from a file
   useEffect(() => {
@@ -589,6 +646,9 @@ export function ReviewPanel({
                         )}
                       </span>
                     )}
+                    {fileCommentCounts[file.path] > 0 && (
+                      <span className="file-comment-count">{fileCommentCounts[file.path]}</span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -663,6 +723,66 @@ export function ReviewPanel({
           <span className="shortcut"><kbd>Esc</kbd> close</span>
         </div>
       </div>
+
+      {/* Comment Popover */}
+      {activePopover && (
+        <CommentPopover
+          isNew={activePopover.type === 'new'}
+          lineStart={activePopover.lineStart}
+          lineEnd={activePopover.lineEnd}
+          comment={activePopover.comment}
+          position={activePopover.position}
+          onSave={async (content) => {
+            if (activePopover.type === 'new') {
+              // Add new comment
+              if (!reviewId || !selectedFilePath || !addComment) return;
+              if (activePopover.lineStart === undefined || activePopover.lineEnd === undefined) return;
+              const result = await addComment(
+                reviewId,
+                selectedFilePath,
+                activePopover.lineStart,
+                activePopover.lineEnd,
+                content
+              );
+              if (result.success && result.comment) {
+                setAllReviewComments(prev => [...prev, result.comment!]);
+              }
+            } else {
+              // Update existing comment
+              if (!activePopover.comment || !updateComment) return;
+              const result = await updateComment(activePopover.comment.id, content);
+              if (result.success) {
+                setAllReviewComments(prev =>
+                  prev.map(c => c.id === activePopover.comment!.id ? { ...c, content } : c)
+                );
+              }
+            }
+          }}
+          onCancel={() => setActivePopover(null)}
+          onResolve={activePopover.comment && resolveComment ? async (resolved) => {
+            if (!activePopover.comment) return;
+            const result = await resolveComment(activePopover.comment.id, resolved);
+            if (result.success) {
+              setAllReviewComments(prev =>
+                prev.map(c => c.id === activePopover.comment!.id ? { ...c, resolved } : c)
+              );
+            }
+          } : undefined}
+          onDelete={activePopover.comment && deleteComment ? async () => {
+            if (!activePopover.comment) return;
+            const result = await deleteComment(activePopover.comment.id);
+            if (result.success) {
+              setAllReviewComments(prev => prev.filter(c => c.id !== activePopover.comment!.id));
+              setActivePopover(null);
+            }
+          } : undefined}
+          onSendToClaude={onSendToClaude && activePopover.comment ? () => {
+            if (!activePopover.comment || !selectedFilePath) return;
+            const reference = `${selectedFilePath}:${activePopover.comment.line_start}-${activePopover.comment.line_end}\n${activePopover.comment.content}`;
+            onSendToClaude(reference);
+          } : undefined}
+        />
+      )}
     </>
   );
 }
