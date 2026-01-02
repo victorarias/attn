@@ -15,12 +15,21 @@ import { ReviewPanel } from './ReviewPanel';
 vi.mock('@codemirror/view', () => {
   class MockEditorView {
     destroy = vi.fn();
+    dispatch = vi.fn();
     static theme = vi.fn(() => []);
     static editable = { of: vi.fn(() => []) };
   }
 
+  class MockGutterMarker {
+    toDOM() {
+      return document.createElement('span');
+    }
+  }
+
   return {
     EditorView: MockEditorView,
+    GutterMarker: MockGutterMarker,
+    gutter: vi.fn(() => []),
     lineNumbers: vi.fn(() => []),
     highlightActiveLineGutter: vi.fn(() => []),
     highlightSpecialChars: vi.fn(() => []),
@@ -29,12 +38,32 @@ vi.mock('@codemirror/view', () => {
   };
 });
 
-vi.mock('@codemirror/state', () => ({
-  EditorState: {
-    create: vi.fn(() => ({})),
-    allowMultipleSelections: { of: vi.fn(() => []) },
-  },
-}));
+vi.mock('@codemirror/state', () => {
+  // Create a mock effect type that can be used with is() and of()
+  const mockEffectType = {
+    is: vi.fn(() => false),
+    of: vi.fn((value: unknown) => ({ type: mockEffectType, value })),
+  };
+
+  return {
+    EditorState: {
+      create: vi.fn(() => ({
+        field: vi.fn(() => new Map()),
+        doc: { lineAt: vi.fn(() => ({ number: 1 })), line: vi.fn(() => ({ from: 0 })), lines: 1 },
+      })),
+      allowMultipleSelections: { of: vi.fn(() => []) },
+    },
+    RangeSet: {
+      of: vi.fn(() => ({})),
+    },
+    StateField: {
+      define: vi.fn(() => ({})),
+    },
+    StateEffect: {
+      define: vi.fn(() => mockEffectType),
+    },
+  };
+});
 
 vi.mock('@codemirror/merge', () => ({
   unifiedMergeView: vi.fn(() => []),

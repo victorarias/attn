@@ -327,3 +327,55 @@
   text-align: center;
   flex-shrink: 0;
 }
+
+/* Comment gutter in CodeMirror diff view */
+.comment-gutter {
+  width: 24px;
+  cursor: pointer;
+}
+
+.comment-gutter .cm-gutterElement {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: transparent;
+  transition: color 0.15s ease;
+}
+
+/* Show + on hover for lines without comments */
+.comment-gutter .cm-gutterElement:hover {
+  color: #2563eb;
+}
+
+.comment-gutter .cm-gutterElement:hover::before {
+  content: '+';
+  font-size: 14px;
+  font-weight: bold;
+}
+
+/* Lines with existing comments show the marker instead */
+.comment-gutter .cm-gutterElement:has(.comment-marker) {
+  color: inherit;
+}
+
+.comment-gutter .cm-gutterElement:has(.comment-marker):hover::before {
+  content: none;
+}
+
+.comment-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.comment-marker.has-comment {
+  color: #2563eb;
+}
+
+.comment-marker.has-comment:hover {
+  color: #3b82f6;
+}

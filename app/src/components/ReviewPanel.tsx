@@ -1,7 +1,7 @@
 // app/src/components/ReviewPanel.tsx
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { EditorView } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
+import { EditorView, gutter, GutterMarker } from '@codemirror/view';
+import { EditorState, RangeSet, StateField, StateEffect } from '@codemirror/state';
 import { unifiedMergeView } from '@codemirror/merge';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { javascript } from '@codemirror/lang-javascript';
@@ -27,6 +27,39 @@ const AUTO_SKIP_PATTERNS = [
   'Gemfile.lock',
   'poetry.lock',
 ];
+
+// Comment gutter marker for lines with existing comments
+class CommentMarker extends GutterMarker {
+  constructor(public commentCount: number) {
+    super();
+  }
+
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'comment-marker has-comment';
+    span.textContent = '\u{1F4AC}'; // 💬 emoji
+    span.title = `${this.commentCount} comment${this.commentCount > 1 ? 's' : ''}`;
+    return span;
+  }
+}
+
+// State effect to update comment markers
+const setCommentLines = StateEffect.define<Map<number, number>>();
+
+// State field that tracks which lines have comments
+const commentLinesField = StateField.define<Map<number, number>>({
+  create() {
+    return new Map();
+  },
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(setCommentLines)) {
+        return effect.value;
+      }
+    }
+    return value;
+  },
+});
 
 interface ReviewFile {
   path: string;
@@ -104,13 +137,11 @@ export function ReviewPanel({
     position: { top: number; left: number };
   } | null>(null);
 
-  // Derive comments for current file (used for CodeMirror gutter markers - TODO: Phase 2)
+  // Derive comments for current file (used for CodeMirror gutter markers)
   const comments = useMemo(() => {
     if (!selectedFilePath) return [];
     return allReviewComments.filter(c => c.filepath === selectedFilePath);
   }, [allReviewComments, selectedFilePath]);
-  // Silence unused warning - will be used for gutter markers
-  void comments;
 
   // Compute comment counts per file
   const fileCommentCounts = useMemo(() => {
@@ -445,7 +476,67 @@ export function ReviewPanel({
       highlightSelectionMatches(),
     ];
 
+    // Build map of line numbers to comment counts for this file
+    const commentLineMap = new Map<number, number>();
+    for (const comment of comments) {
+      // Comments may span multiple lines, but we show marker on line_start
+      const lineNum = comment.line_start;
+      commentLineMap.set(lineNum, (commentLineMap.get(lineNum) || 0) + 1);
+    }
+
+    // Comment gutter extension with click handling
+    const commentGutter = gutter({
+      class: 'comment-gutter',
+      markers: (view) => {
+        const commentLines = view.state.field(commentLinesField);
+        const markers: { from: number; to: number; value: GutterMarker }[] = [];
+
+        commentLines.forEach((count, lineNum) => {
+          // lineNum is 1-indexed from comments, need to convert to doc position
+          const line = view.state.doc.line(Math.min(lineNum, view.state.doc.lines));
+          markers.push({ from: line.from, to: line.from, value: new CommentMarker(count) });
+        });
+
+        return RangeSet.of(markers, true);
+      },
+      domEventHandlers: {
+        click: (view, line, event) => {
+          const lineNum = view.state.doc.lineAt(line.from).number;
+          const commentLines = view.state.field(commentLinesField);
+          const hasComment = commentLines.has(lineNum);
+
+          // Get position for popover relative to viewport
+          const rect = (event.target as HTMLElement).getBoundingClientRect();
+
+          if (hasComment) {
+            // Find the comment(s) at this line
+            const lineComments = comments.filter(c => c.line_start === lineNum);
+            if (lineComments.length > 0) {
+              // Open existing comment popover
+              setActivePopover({
+                type: 'existing',
+                comment: lineComments[0],
+                position: { top: rect.top, left: rect.right + 8 },
+              });
+            }
+          } else {
+            // Open new comment popover
+            setActivePopover({
+              type: 'new',
+              lineStart: lineNum,
+              lineEnd: lineNum,
+              position: { top: rect.top, left: rect.right + 8 },
+            });
+          }
+
+          return true;
+        },
+      },
+    });
+
     const extensions = [
+      commentLinesField,
+      commentGutter,
       minimalSetup,
       langExtension,
       oneDark,
@@ -473,13 +564,18 @@ export function ReviewPanel({
       parent: editorContainerRef.current,
     });
 
+    // Initialize comment markers
+    view.dispatch({
+      effects: setCommentLines.of(commentLineMap),
+    });
+
     editorViewRef.current = view;
 
     return () => {
       view.destroy();
       editorViewRef.current = null;
     };
-  }, [diffContent, selectedFile?.path, expandedContext, fontSize]);
+  }, [diffContent, selectedFile?.path, expandedContext, fontSize, comments]);
 
   // Keyboard navigation
   useEffect(() => {
