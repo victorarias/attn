@@ -227,6 +227,43 @@ pnpm run e2e:headed        # Run with browser visible
 pnpm run e2e -- --ui       # Run with Playwright UI
 ```
 
+### Frontend Integration Tests
+
+**Purpose:** Catch bugs before manual testing - infinite loops, race conditions, incorrect state management.
+
+**Architecture:** Components use `useDaemon()` hook. In tests, a `MockDaemonProvider` replaces the real WebSocket with a controllable mock that tracks all calls.
+
+**When to run tests:**
+- After ANY change to components that use `useDaemon()`
+- After changes to `useDaemonSocket.ts`
+- Before declaring work complete on frontend changes
+
+```bash
+make test-frontend      # Run all frontend tests
+pnpm test -- --watch    # Watch mode during development
+pnpm test ReviewPanel   # Run specific component tests
+```
+
+**What tests catch:**
+- **Infinite loops**: Assert exact call counts after render settles
+- **Race conditions**: Simulate out-of-order responses, verify correct content displayed
+- **Extra daemon calls**: Mock tracks all calls; assert expected count
+- **State bugs**: Verify UI updates correctly after interactions
+
+**Test pattern:**
+```typescript
+it('fetches diff exactly once on open', async () => {
+  render(<ReviewPanel {...props} />, { wrapper: MockDaemonProvider });
+  await waitFor(() => screen.getByText('file.tsx'));
+
+  expect(mockDaemon.getCalls('get_file_diff')).toHaveLength(1);
+  await sleep(100); // Ensure no loop
+  expect(mockDaemon.getCalls('get_file_diff')).toHaveLength(1);
+});
+```
+
+**Full design:** See `docs/plans/2026-01-02-frontend-testing-strategy.md`
+
 ## Known Gotchas
 
 1. **Worktree action key collision**: `sendCreateWorktree()` and `sendCreateWorktreeFromBranch()` use the same pending action key. Don't call both simultaneously.
