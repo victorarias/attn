@@ -614,9 +614,11 @@ export function useDaemonSocket({
             break;
 
           case 'file_diff_result': {
-            const pending = pendingActionsRef.current.get('get_file_diff');
+            // Use path-based key to match the request
+            const key = `get_file_diff_${data.path}`;
+            const pending = pendingActionsRef.current.get(key);
             if (pending) {
-              pendingActionsRef.current.delete('get_file_diff');
+              pendingActionsRef.current.delete(key);
               if (data.success) {
                 pending.resolve({
                   success: true,
@@ -1339,7 +1341,8 @@ export function useDaemonSocket({
         return;
       }
 
-      const key = 'get_file_diff';
+      // Use unique key per file to avoid race conditions when multiple files are fetched
+      const key = `get_file_diff_${path}`;
       pendingActionsRef.current.set(key, { resolve, reject });
 
       ws.send(JSON.stringify({

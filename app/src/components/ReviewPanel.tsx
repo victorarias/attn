@@ -84,6 +84,7 @@ export function ReviewPanel({
   // Track diff hashes for "changed since viewed" detection
   const viewedDiffHashesRef = useRef<Map<string, string>>(new Map());
   const [changedSinceViewed, setChangedSinceViewed] = useState<Set<string>>(new Set());
+  const previousSelectedPathRef = useRef<string | null>(null);
 
   // Build file list from git status
   const { needsReviewFiles, autoSkipFiles } = useMemo(() => {
@@ -153,6 +154,21 @@ export function ReviewPanel({
     }
   }, [isOpen, needsReviewFiles, selectedFilePath]);
 
+  // Clear "changed" status when navigating away from a file
+  useEffect(() => {
+    const prevPath = previousSelectedPathRef.current;
+    if (prevPath && prevPath !== selectedFilePath) {
+      // User navigated away from previous file - clear its "changed" status
+      setChangedSinceViewed(prev => {
+        if (!prev.has(prevPath)) return prev;
+        const next = new Set(prev);
+        next.delete(prevPath);
+        return next;
+      });
+    }
+    previousSelectedPathRef.current = selectedFilePath;
+  }, [selectedFilePath]);
+
   // Reset state when closing
   useEffect(() => {
     if (!isOpen) {
@@ -213,15 +229,11 @@ export function ReviewPanel({
         // Update stored hash
         viewedDiffHashesRef.current.set(fetchPath, newHash);
 
-        // Clear "changed" status since we're now viewing the updated content
-        setChangedSinceViewed(prev => {
-          const next = new Set(prev);
-          next.delete(fetchPath);
-          return next;
+        // Mark file as viewed (local state) - only create new Set if actually adding
+        setViewedFiles(prev => {
+          if (prev.has(fetchPath)) return prev; // same reference = no state change
+          return new Set(prev).add(fetchPath);
         });
-
-        // Mark file as viewed (local state)
-        setViewedFiles(prev => new Set(prev).add(fetchPath));
 
         // Persist to backend if we have a review ID (only on first view)
         if (isFirstView && reviewId) {
@@ -235,7 +247,8 @@ export function ReviewPanel({
         setError(err.message || 'Failed to load diff');
         setLoading(false);
       });
-  }, [diffFetchKey, selectedFile, selectedFilePath, fetchDiff, reviewId, markFileViewed, viewedFiles]);
+  // Note: viewedFiles intentionally excluded - we read it but don't want re-runs when it changes
+  }, [diffFetchKey, selectedFile, selectedFilePath, fetchDiff, reviewId, markFileViewed]);
 
   // Check for changes in viewed files when gitStatus updates (for files not currently selected)
   useEffect(() => {
@@ -605,7 +618,12 @@ export function ReviewPanel({
 
           <div className="review-diff-area">
             <div className="diff-toolbar">
-              <span className="diff-filename">{selectedFile?.path || 'Select a file'}</span>
+              <span className="diff-filename">
+                {selectedFile?.path || 'Select a file'}
+                {selectedFilePath && changedSinceViewed.has(selectedFilePath) && (
+                  <span className="changed-badge">changed</span>
+                )}
+              </span>
               <div className="diff-actions">
                 <button
                   className={`expand-btn ${expandedContext === 0 ? 'active' : ''}`}
