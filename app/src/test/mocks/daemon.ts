@@ -142,7 +142,6 @@ export function createGitStatus(files: string[], options?: {
 
   return {
     directory: '/test/repo',
-    branch: 'main',
     staged: staged ? fileObjects : [],
     unstaged: staged ? [] : fileObjects,
     untracked: [],
@@ -154,7 +153,6 @@ export function createFileDiffResult(original: string, modified: string): FileDi
     success: true,
     original,
     modified,
-    path: '',
   };
 }
 
@@ -166,8 +164,6 @@ export function createReviewState(viewedFiles: string[] = []): { success: boolea
       repo_path: '/test/repo',
       branch: 'main',
       viewed_files: viewedFiles,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     },
   };
 }

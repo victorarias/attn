@@ -4,7 +4,6 @@ import {
   createMockDaemon,
   createGitStatus,
   createFileDiffResult,
-  createReviewState,
   setupDefaultResponses,
   sleep,
   MockDaemon,
@@ -103,7 +102,7 @@ vi.mock('@codemirror/search', () => ({
 
 describe('ReviewPanel', () => {
   let mockDaemon: MockDaemon;
-  let onClose: ReturnType<typeof vi.fn>;
+  let onClose: () => void;
 
   beforeEach(() => {
     mockDaemon = createMockDaemon();
@@ -153,8 +152,6 @@ describe('ReviewPanel', () => {
       await waitFor(() => {
         expect(mockDaemon.getCalls('fetchDiff').length).toBeGreaterThanOrEqual(1);
       });
-
-      const callsAfterInitial = mockDaemon.getCalls('fetchDiff').length;
 
       // Wait to ensure no infinite loop - if there was a loop, calls would grow exponentially
       await sleep(200);
@@ -210,8 +207,6 @@ describe('ReviewPanel', () => {
       await waitFor(() => {
         expect(mockDaemon.getCalls('fetchDiff').length).toBeGreaterThanOrEqual(1);
       });
-
-      const initialCallCount = mockDaemon.getCalls('fetchDiff').length;
 
       // Click second file
       const secondFile = getFileInList('src/utils.ts');

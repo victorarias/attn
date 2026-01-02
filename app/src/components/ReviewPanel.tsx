@@ -28,18 +28,26 @@ const AUTO_SKIP_PATTERNS = [
   'poetry.lock',
 ];
 
-// Comment gutter marker for lines with existing comments
+// Comment gutter marker - renders clickable button for each line
 class CommentMarker extends GutterMarker {
   constructor(public commentCount: number) {
     super();
   }
 
   toDOM() {
-    const span = document.createElement('span');
-    span.className = 'comment-marker has-comment';
-    span.textContent = '\u{1F4AC}'; // 💬 emoji
-    span.title = `${this.commentCount} comment${this.commentCount > 1 ? 's' : ''}`;
-    return span;
+    const btn = document.createElement('button');
+    btn.className = this.commentCount > 0 ? 'comment-gutter-btn has-comment' : 'comment-gutter-btn';
+    btn.type = 'button';
+
+    if (this.commentCount > 0) {
+      btn.innerHTML = `<span class="comment-icon">💬</span>`;
+      btn.title = `${this.commentCount} comment${this.commentCount > 1 ? 's' : ''} - click to view`;
+    } else {
+      btn.innerHTML = `<span class="comment-icon-add">+</span>`;
+      btn.title = 'Add comment';
+    }
+
+    return btn;
   }
 }
 
@@ -491,11 +499,12 @@ export function ReviewPanel({
         const commentLines = view.state.field(commentLinesField);
         const markers: { from: number; to: number; value: GutterMarker }[] = [];
 
-        commentLines.forEach((count, lineNum) => {
-          // lineNum is 1-indexed from comments, need to convert to doc position
-          const line = view.state.doc.line(Math.min(lineNum, view.state.doc.lines));
-          markers.push({ from: line.from, to: line.from, value: new CommentMarker(count) });
-        });
+        // Render a marker on EVERY line so the + button is always visible
+        for (let i = 1; i <= view.state.doc.lines; i++) {
+          const line = view.state.doc.line(i);
+          const commentCount = commentLines.get(i) || 0;
+          markers.push({ from: line.from, to: line.from, value: new CommentMarker(commentCount) });
+        }
 
         return RangeSet.of(markers, true);
       },

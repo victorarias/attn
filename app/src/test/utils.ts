@@ -1,10 +1,7 @@
 // Test utilities for rendering components with mock daemon
 
-import { render, type RenderOptions } from '@testing-library/react';
-import type { ReactElement } from 'react';
 import {
   MockDaemon,
-  createMockDaemon,
   createFileDiffResult,
   createReviewState,
 } from './mocks/daemon';
