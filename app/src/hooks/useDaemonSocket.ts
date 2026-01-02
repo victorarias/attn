@@ -48,7 +48,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '13';
+const PROTOCOL_VERSION = '14';
 
 interface PRActionResult {
   success: boolean;
