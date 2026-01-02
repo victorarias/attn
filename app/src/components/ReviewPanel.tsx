@@ -220,11 +220,8 @@ export function ReviewPanel({
           return next;
         });
 
-        // Mark file as viewed (local state) - only create new Set if actually adding
-        setViewedFiles(prev => {
-          if (prev.has(fetchPath)) return prev; // same reference = no state change
-          return new Set(prev).add(fetchPath);
-        });
+        // Mark file as viewed (local state)
+        setViewedFiles(prev => new Set(prev).add(fetchPath));
 
         // Persist to backend if we have a review ID (only on first view)
         if (isFirstView && reviewId) {
@@ -238,8 +235,7 @@ export function ReviewPanel({
         setError(err.message || 'Failed to load diff');
         setLoading(false);
       });
-  // Note: viewedFiles intentionally excluded - we read it but don't want re-runs when it changes
-  }, [diffFetchKey, selectedFile, selectedFilePath, fetchDiff, reviewId, markFileViewed]);
+  }, [diffFetchKey, selectedFile, selectedFilePath, fetchDiff, reviewId, markFileViewed, viewedFiles]);
 
   // Check for changes in viewed files when gitStatus updates (for files not currently selected)
   useEffect(() => {
