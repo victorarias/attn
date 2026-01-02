@@ -120,7 +120,7 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, getRepoInfo, getReviewState, markFileViewed, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, getRepoInfo, getReviewState, markFileViewed, sendAddComment, sendUpdateComment, sendResolveComment, sendDeleteComment, sendGetComments, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -959,6 +959,11 @@ function App() {
         getReviewState={getReviewState}
         markFileViewed={markFileViewed}
         onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
+        addComment={sendAddComment}
+        updateComment={sendUpdateComment}
+        resolveComment={sendResolveComment}
+        deleteComment={sendDeleteComment}
+        getComments={sendGetComments}
       />
       <ThumbsModal
         isOpen={thumbsOpen}
