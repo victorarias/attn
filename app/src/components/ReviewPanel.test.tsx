@@ -10,7 +10,7 @@ import {
   sleep,
   MockDaemon,
 } from '../test/utils';
-import { ReviewPanel } from './ReviewPanel';
+import { ReviewPanel, canAddCommentToDeletedChunk } from './ReviewPanel';
 
 // Mock CodeMirror since it requires DOM measurements
 vi.mock('@codemirror/view', () => {
@@ -622,6 +622,90 @@ describe('Deleted-Line Comment Fixtures', () => {
       const isDeletedLine = (c: { line_end: number }) => c.line_end < 0;
       expect(isDeletedLine(commentAfterLine0)).toBe(true);
       expect(isDeletedLine(commentAfterLine1000)).toBe(true);
+    });
+  });
+
+  /**
+   * Regression test for: clicking deleted chunks should work even with existing saved comments.
+   *
+   * Bug: The click handler checked for `.inline-comment` to prevent duplicate forms,
+   * but this also blocked new comments when saved comments existed.
+   * Fix: Check for `.inline-comment.new` (unsaved forms only).
+   *
+   * These tests use the actual `canAddCommentToDeletedChunk` function from the component,
+   * so if someone changes the implementation, these tests will fail.
+   */
+  describe('canAddCommentToDeletedChunk', () => {
+    it('allows adding comment when chunk already has a saved comment', () => {
+      const deletedChunk = document.createElement('div');
+      deletedChunk.className = 'cm-deletedChunk';
+
+      // Add a deleted line
+      const deletedLine = document.createElement('div');
+      deletedLine.className = 'cm-deletedLine';
+      deletedChunk.appendChild(deletedLine);
+
+      // Add an existing SAVED comment (not .new - this is key)
+      const savedComment = document.createElement('div');
+      savedComment.className = 'inline-comment'; // NO .new class
+      deletedChunk.appendChild(savedComment);
+
+      // The actual function used by the component should return true
+      // (allowing new comment even with saved comment present)
+      expect(canAddCommentToDeletedChunk(deletedChunk)).toBe(true);
+    });
+
+    it('blocks adding comment when chunk already has an unsaved form', () => {
+      const deletedChunk = document.createElement('div');
+      deletedChunk.className = 'cm-deletedChunk';
+
+      const deletedLine = document.createElement('div');
+      deletedLine.className = 'cm-deletedLine';
+      deletedChunk.appendChild(deletedLine);
+
+      // Add an UNSAVED form (has .new class)
+      const unsavedForm = document.createElement('div');
+      unsavedForm.className = 'inline-comment new'; // HAS .new class
+      deletedChunk.appendChild(unsavedForm);
+
+      // Should return false - block duplicate unsaved forms
+      expect(canAddCommentToDeletedChunk(deletedChunk)).toBe(false);
+    });
+
+    it('allows adding comment to empty chunk', () => {
+      const deletedChunk = document.createElement('div');
+      deletedChunk.className = 'cm-deletedChunk';
+
+      const deletedLine = document.createElement('div');
+      deletedLine.className = 'cm-deletedLine';
+      deletedChunk.appendChild(deletedLine);
+
+      // No comments at all - should allow
+      expect(canAddCommentToDeletedChunk(deletedChunk)).toBe(true);
+    });
+
+    it('allows multiple saved comments in same chunk', () => {
+      const deletedChunk = document.createElement('div');
+      deletedChunk.className = 'cm-deletedChunk';
+
+      // Multiple deleted lines
+      for (let i = 0; i < 3; i++) {
+        const line = document.createElement('div');
+        line.className = 'cm-deletedLine';
+        deletedChunk.appendChild(line);
+      }
+
+      // Two saved comments already exist
+      const comment1 = document.createElement('div');
+      comment1.className = 'inline-comment';
+      deletedChunk.appendChild(comment1);
+
+      const comment2 = document.createElement('div');
+      comment2.className = 'inline-comment';
+      deletedChunk.appendChild(comment2);
+
+      // Should still allow - saved comments don't block new ones
+      expect(canAddCommentToDeletedChunk(deletedChunk)).toBe(true);
     });
   });
 

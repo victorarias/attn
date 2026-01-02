@@ -27,6 +27,20 @@ const AUTO_SKIP_PATTERNS = [
   'poetry.lock',
 ];
 
+/**
+ * Check if a deleted chunk can accept a new comment form.
+ * Returns true if no unsaved form exists (saved comments are OK).
+ *
+ * IMPORTANT: This checks for `.inline-comment.new` (unsaved forms only),
+ * NOT `.inline-comment` (which would block new comments when saved comments exist).
+ *
+ * @exported for testing - regression test verifies this logic
+ */
+export function canAddCommentToDeletedChunk(chunk: Element): boolean {
+  // Only block if there's an unsaved form, not saved comments
+  return !chunk.querySelector('.inline-comment.new');
+}
+
 // Comment gutter marker - renders clickable button for each line
 class CommentMarker extends GutterMarker {
   constructor(public commentCount: number, public lineNum: number) {
@@ -59,7 +73,8 @@ class InlineCommentWidget extends WidgetType {
     public onSave: (content: string) => void,
     public onCancel: () => void,
     public onStartEdit: () => void,
-    public onResolve: (resolved: boolean) => void
+    public onResolve: (resolved: boolean) => void,
+    public onDelete: () => void
   ) {
     super();
   }
@@ -140,6 +155,15 @@ class InlineCommentWidget extends WidgetType {
         };
         actions.appendChild(resolveBtn);
       }
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'inline-comment-btn delete';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.onDelete();
+      };
+      actions.appendChild(deleteBtn);
 
       header.appendChild(actions);
       wrapper.appendChild(header);
@@ -306,12 +330,11 @@ export function ReviewPanel({
   addComment,
   updateComment,
   resolveComment,
-  deleteComment: _deleteComment,
+  deleteComment,
   getComments,
 }: ReviewPanelProps) {
-  // These props are reserved for future use
+  // This prop is reserved for future use
   void _onSendToClaude;
-  void _deleteComment;
   // Track selected file by path for stability across gitStatus updates
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
@@ -814,6 +837,16 @@ export function ReviewPanel({
                   );
                 }
               }
+            },
+            async () => {
+              if (deleteComment) {
+                const result = await deleteComment(comment.id);
+                if (result.success) {
+                  setAllReviewComments(prev =>
+                    prev.filter(c => c.id !== comment.id)
+                  );
+                }
+              }
             }
           ),
         });
@@ -940,16 +973,8 @@ export function ReviewPanel({
         const commentEl = document.createElement('div');
         commentEl.className = `inline-comment ${comment.resolved ? 'resolved' : ''}`;
         commentEl.dataset.commentId = comment.id;
-        commentEl.innerHTML = `
-          <div class="inline-comment-header">
-            <span class="inline-comment-author ${comment.author}">${comment.author === 'agent' ? 'Claude' : 'You'}</span>
-            <div class="inline-comment-actions">
-              <button type="button" class="inline-comment-btn edit-btn">Edit</button>
-              <button type="button" class="inline-comment-btn ${comment.resolved ? '' : 'resolve'} resolve-btn">${comment.resolved ? 'Unresolve' : 'Resolve'}</button>
-            </div>
-          </div>
-          <div class="inline-comment-content">${comment.content.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-        `;
+        const escapedContent = comment.content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        commentEl.innerHTML = `<div class="inline-comment-header"><span class="inline-comment-author ${comment.author}">${comment.author === 'agent' ? 'Claude' : 'You'}</span><div class="inline-comment-actions"><button type="button" class="inline-comment-btn edit-btn">Edit</button><button type="button" class="inline-comment-btn ${comment.resolved ? '' : 'resolve'} resolve-btn">${comment.resolved ? 'Unresolve' : 'Resolve'}</button><button type="button" class="inline-comment-btn delete delete-btn">Delete</button></div></div><div class="inline-comment-content">${escapedContent}</div>`;
 
         // Wire up edit button
         commentEl.querySelector('.edit-btn')?.addEventListener('click', () => {
@@ -979,6 +1004,20 @@ export function ReviewPanel({
           }
         });
 
+        // Wire up delete button
+        commentEl.querySelector('.delete-btn')?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (deleteComment) {
+            const deleteResult = await deleteComment(comment.id);
+            if (deleteResult.success) {
+              setAllReviewComments(prev =>
+                prev.filter(c => c.id !== comment.id)
+              );
+              commentEl.remove();
+            }
+          }
+        });
+
         // Insert after the specific deleted line (index encoded in line_end)
         // line_end = -(index + 1), so index = Math.abs(line_end) - 1
         const deletedLines = chunk.querySelectorAll('.cm-deletedLine');
@@ -1001,8 +1040,11 @@ export function ReviewPanel({
       // Only handle if click is within our editor container
       if (!editorContainerRef.current?.contains(target)) return;
 
-      // Check if there's already a form in this chunk
-      if (deletedChunk.querySelector('.inline-comment')) {
+      // Ignore clicks inside existing comments (buttons, content, etc.)
+      if (target.closest('.inline-comment')) return;
+
+      // Check if we can add a new comment (no unsaved form exists)
+      if (!canAddCommentToDeletedChunk(deletedChunk)) {
         return;
       }
 

@@ -463,6 +463,16 @@
   color: #fff;
 }
 
+.inline-comment-btn.delete {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.inline-comment-btn.delete:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
 .inline-comment-content {
   color: #e5e7eb;
   font-size: 13px;
@@ -530,9 +540,14 @@
   border-color: #2563eb;
 }
 
-/* Inline comments inside deleted chunks */
+/* Inline comments inside deleted chunks - more compact */
 .cm-deletedChunk .inline-comment {
-  margin: 4px 0;
+  margin: 2px 0;
+  padding: 6px 10px;
+}
+
+.cm-deletedChunk .inline-comment-header {
+  margin-bottom: 4px;
 }
 
 /*
