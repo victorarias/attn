@@ -15,6 +15,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // Valid setting keys
@@ -577,6 +578,31 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		viewedMsg := msg.(*protocol.MarkFileViewedMessage)
 		d.logf("Marking file %s viewed=%v in review %s", viewedMsg.Filepath, viewedMsg.Viewed, viewedMsg.ReviewID)
 		d.handleMarkFileViewed(client, viewedMsg)
+
+	case protocol.CmdAddComment:
+		commentMsg := msg.(*protocol.AddCommentMessage)
+		d.logf("Adding comment to review %s file %s", commentMsg.ReviewID, commentMsg.Filepath)
+		d.handleAddComment(client, commentMsg)
+
+	case protocol.CmdUpdateComment:
+		commentMsg := msg.(*protocol.UpdateCommentMessage)
+		d.logf("Updating comment %s", commentMsg.CommentID)
+		d.handleUpdateComment(client, commentMsg)
+
+	case protocol.CmdResolveComment:
+		commentMsg := msg.(*protocol.ResolveCommentMessage)
+		d.logf("Resolving comment %s resolved=%v", commentMsg.CommentID, commentMsg.Resolved)
+		d.handleResolveComment(client, commentMsg)
+
+	case protocol.CmdDeleteComment:
+		commentMsg := msg.(*protocol.DeleteCommentMessage)
+		d.logf("Deleting comment %s", commentMsg.CommentID)
+		d.handleDeleteComment(client, commentMsg)
+
+	case protocol.CmdGetComments:
+		commentMsg := msg.(*protocol.GetCommentsMessage)
+		d.logf("Getting comments for review %s", commentMsg.ReviewID)
+		d.handleGetComments(client, commentMsg)
 	}
 }
 
@@ -835,5 +861,123 @@ func (d *Daemon) handleMarkFileViewed(client *wsClient, msg *protocol.MarkFileVi
 	}
 
 	result.Success = true
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleAddComment(client *wsClient, msg *protocol.AddCommentMessage) {
+	result := protocol.AddCommentResultMessage{
+		Event:   protocol.EventAddCommentResult,
+		Success: false,
+	}
+
+	comment, err := d.store.AddComment(msg.ReviewID, msg.Filepath, int(msg.LineStart), int(msg.LineEnd), msg.Content, "user")
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	result.Success = true
+	result.Comment = &protocol.ReviewComment{
+		ID:        comment.ID,
+		ReviewID:  comment.ReviewID,
+		Filepath:  comment.Filepath,
+		LineStart: int(comment.LineStart),
+		LineEnd:   int(comment.LineEnd),
+		Content:   comment.Content,
+		Author:    comment.Author,
+		Resolved:  comment.Resolved,
+		CreatedAt: comment.CreatedAt.Format(time.RFC3339),
+	}
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleUpdateComment(client *wsClient, msg *protocol.UpdateCommentMessage) {
+	result := protocol.UpdateCommentResultMessage{
+		Event:   protocol.EventUpdateCommentResult,
+		Success: false,
+	}
+
+	err := d.store.UpdateComment(msg.CommentID, msg.Content)
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	result.Success = true
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleResolveComment(client *wsClient, msg *protocol.ResolveCommentMessage) {
+	result := protocol.ResolveCommentResultMessage{
+		Event:   protocol.EventResolveCommentResult,
+		Success: false,
+	}
+
+	err := d.store.ResolveComment(msg.CommentID, msg.Resolved)
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	result.Success = true
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleDeleteComment(client *wsClient, msg *protocol.DeleteCommentMessage) {
+	result := protocol.DeleteCommentResultMessage{
+		Event:   protocol.EventDeleteCommentResult,
+		Success: false,
+	}
+
+	err := d.store.DeleteComment(msg.CommentID)
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	result.Success = true
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleGetComments(client *wsClient, msg *protocol.GetCommentsMessage) {
+	result := protocol.GetCommentsResultMessage{
+		Event:   protocol.EventGetCommentsResult,
+		Success: false,
+	}
+
+	var comments []*store.ReviewComment
+	var err error
+
+	if msg.Filepath != nil && *msg.Filepath != "" {
+		comments, err = d.store.GetCommentsForFile(msg.ReviewID, *msg.Filepath)
+	} else {
+		comments, err = d.store.GetComments(msg.ReviewID)
+	}
+
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	result.Success = true
+	result.Comments = make([]protocol.ReviewComment, len(comments))
+	for i, c := range comments {
+		result.Comments[i] = protocol.ReviewComment{
+			ID:        c.ID,
+			ReviewID:  c.ReviewID,
+			Filepath:  c.Filepath,
+			LineStart: int(c.LineStart),
+			LineEnd:   int(c.LineEnd),
+			Content:   c.Content,
+			Author:    c.Author,
+			Resolved:  c.Resolved,
+			CreatedAt: c.CreatedAt.Format(time.RFC3339),
+		}
+	}
 	d.sendToClient(client, result)
 }
