@@ -2,6 +2,7 @@
 // Tracks all calls and allows controlling responses
 
 import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../../hooks/useDaemonSocket';
+import type { ReviewComment } from '../../types/generated';
 
 interface Call {
   method: string;
@@ -117,6 +118,41 @@ export class MockDaemon {
       return this.getResponse('markFileViewed', [reviewId, filepath, viewed]);
     };
   }
+
+  createAddComment(): (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => Promise<{ success: boolean; comment?: ReviewComment }> {
+    return async (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => {
+      this.recordCall('addComment', [reviewId, filepath, lineStart, lineEnd, content]);
+      return this.getResponse('addComment', [reviewId, filepath, lineStart, lineEnd, content]);
+    };
+  }
+
+  createUpdateComment(): (commentId: string, content: string) => Promise<{ success: boolean }> {
+    return async (commentId: string, content: string) => {
+      this.recordCall('updateComment', [commentId, content]);
+      return this.getResponse('updateComment', [commentId, content]);
+    };
+  }
+
+  createResolveComment(): (commentId: string, resolved: boolean) => Promise<{ success: boolean }> {
+    return async (commentId: string, resolved: boolean) => {
+      this.recordCall('resolveComment', [commentId, resolved]);
+      return this.getResponse('resolveComment', [commentId, resolved]);
+    };
+  }
+
+  createDeleteComment(): (commentId: string) => Promise<{ success: boolean }> {
+    return async (commentId: string) => {
+      this.recordCall('deleteComment', [commentId]);
+      return this.getResponse('deleteComment', [commentId]);
+    };
+  }
+
+  createGetComments(): (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: ReviewComment[] }> {
+    return async (reviewId: string, filepath?: string) => {
+      this.recordCall('getComments', [reviewId, filepath]);
+      return this.getResponse('getComments', [reviewId, filepath]);
+    };
+  }
 }
 
 // Factory function
@@ -166,6 +202,48 @@ export function createReviewState(viewedFiles: string[] = []): { success: boolea
       viewed_files: viewedFiles,
     },
   };
+}
+
+/**
+ * Create a ReviewComment fixture.
+ *
+ * For deleted-line comments, use a negative line_end:
+ * - line_end = -1: comment after deleted line index 0 (first)
+ * - line_end = -2: comment after deleted line index 1 (second)
+ * - etc.
+ */
+export function createReviewComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
+  return {
+    id: `comment-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    review_id: 'test-review-id',
+    filepath: 'src/App.tsx',
+    line_start: 10,
+    line_end: 10,
+    content: 'Test comment',
+    author: 'user',
+    resolved: false,
+    created_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+/**
+ * Create a deleted-line comment.
+ *
+ * @param anchorLine - The line number before the deleted chunk
+ * @param deletedLineIndex - The index of the deleted line within the chunk (0-based)
+ * @param overrides - Additional overrides
+ */
+export function createDeletedLineComment(
+  anchorLine: number,
+  deletedLineIndex: number,
+  overrides: Partial<ReviewComment> = {}
+): ReviewComment {
+  return createReviewComment({
+    line_start: anchorLine,
+    line_end: -(deletedLineIndex + 1),  // Encode: -1 for index 0, -2 for index 1, etc.
+    ...overrides,
+  });
 }
 
 // Helper to wait for a condition

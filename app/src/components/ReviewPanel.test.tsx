@@ -4,6 +4,8 @@ import {
   createMockDaemon,
   createGitStatus,
   createFileDiffResult,
+  createReviewComment,
+  createDeletedLineComment,
   setupDefaultResponses,
   sleep,
   MockDaemon,
@@ -15,8 +17,12 @@ vi.mock('@codemirror/view', () => {
   class MockEditorView {
     destroy = vi.fn();
     dispatch = vi.fn();
+    scrollDOM = { scrollTop: 0 };
     static theme = vi.fn(() => []);
     static editable = { of: vi.fn(() => []) };
+    static lineWrapping = [];
+    static domEventHandlers = vi.fn(() => []);
+    static decorations = { of: vi.fn(() => []) };
   }
 
   class MockGutterMarker {
@@ -25,9 +31,26 @@ vi.mock('@codemirror/view', () => {
     }
   }
 
+  class MockWidgetType {
+    toDOM() {
+      return document.createElement('div');
+    }
+    eq() {
+      return false;
+    }
+    ignoreEvent() {
+      return false;
+    }
+  }
+
   return {
     EditorView: MockEditorView,
     GutterMarker: MockGutterMarker,
+    WidgetType: MockWidgetType,
+    Decoration: {
+      widget: vi.fn(() => ({ range: vi.fn(() => ({})) })),
+      set: vi.fn(() => ({})),
+    },
     gutter: vi.fn(() => []),
     lineNumbers: vi.fn(() => []),
     highlightActiveLineGutter: vi.fn(() => []),
@@ -375,6 +398,406 @@ describe('ReviewPanel', () => {
       await waitFor(() => {
         expect(screen.getByText('Network error')).toBeInTheDocument();
       });
+    });
+  });
+});
+
+/**
+ * Tests for deleted-line comment encoding and fixtures.
+ * These are unit tests for the data model used to distinguish regular vs deleted-line comments.
+ *
+ * The deleted-line comment convention:
+ * - Regular comments: line_end >= 0 (the actual line number)
+ * - Deleted-line comments: line_end < 0 (encoded as -(index + 1))
+ *   - line_end = -1: comment after deleted line index 0 (first deleted line)
+ *   - line_end = -2: comment after deleted line index 1 (second deleted line)
+ *   - etc.
+ */
+describe('Deleted-Line Comment Fixtures', () => {
+  describe('createReviewComment', () => {
+    it('creates a regular comment with positive line_end by default', () => {
+      const comment = createReviewComment();
+
+      expect(comment.id).toBeTruthy();
+      expect(comment.review_id).toBe('test-review-id');
+      expect(comment.filepath).toBe('src/App.tsx');
+      expect(comment.line_start).toBe(10);
+      expect(comment.line_end).toBe(10);
+      expect(comment.content).toBe('Test comment');
+      expect(comment.author).toBe('user');
+      expect(comment.resolved).toBe(false);
+      expect(comment.created_at).toBeTruthy();
+    });
+
+    it('accepts overrides for all fields', () => {
+      const comment = createReviewComment({
+        id: 'custom-id',
+        filepath: 'src/utils.ts',
+        line_start: 5,
+        line_end: 8,
+        content: 'Custom comment',
+        author: 'agent',
+        resolved: true,
+      });
+
+      expect(comment.id).toBe('custom-id');
+      expect(comment.filepath).toBe('src/utils.ts');
+      expect(comment.line_start).toBe(5);
+      expect(comment.line_end).toBe(8);
+      expect(comment.content).toBe('Custom comment');
+      expect(comment.author).toBe('agent');
+      expect(comment.resolved).toBe(true);
+    });
+
+    it('can create deleted-line comments with negative line_end', () => {
+      // line_end = -1 means: after deleted line at index 0
+      const comment = createReviewComment({ line_end: -1 });
+
+      expect(comment.line_end).toBe(-1);
+      expect(comment.line_end).toBeLessThan(0);
+    });
+
+    it('generates unique IDs for each comment', () => {
+      const comment1 = createReviewComment();
+      const comment2 = createReviewComment();
+
+      expect(comment1.id).not.toBe(comment2.id);
+    });
+  });
+
+  describe('createDeletedLineComment', () => {
+    it('encodes deleted line index 0 as line_end = -1', () => {
+      const comment = createDeletedLineComment(15, 0);
+
+      expect(comment.line_start).toBe(15);  // Anchor line (line before deleted chunk)
+      expect(comment.line_end).toBe(-1);    // Encoded: -(0 + 1) = -1
+    });
+
+    it('encodes deleted line index 1 as line_end = -2', () => {
+      const comment = createDeletedLineComment(15, 1);
+
+      expect(comment.line_start).toBe(15);
+      expect(comment.line_end).toBe(-2);    // Encoded: -(1 + 1) = -2
+    });
+
+    it('encodes deleted line index 5 as line_end = -6', () => {
+      const comment = createDeletedLineComment(20, 5);
+
+      expect(comment.line_start).toBe(20);
+      expect(comment.line_end).toBe(-6);    // Encoded: -(5 + 1) = -6
+    });
+
+    it('accepts additional overrides', () => {
+      const comment = createDeletedLineComment(10, 2, {
+        content: 'Comment on third deleted line',
+        author: 'agent',
+        resolved: true,
+      });
+
+      expect(comment.line_start).toBe(10);
+      expect(comment.line_end).toBe(-3);    // Encoded index 2
+      expect(comment.content).toBe('Comment on third deleted line');
+      expect(comment.author).toBe('agent');
+      expect(comment.resolved).toBe(true);
+    });
+
+    it('creates comments that are recognized as deleted-line comments', () => {
+      const deletedLineComment = createDeletedLineComment(10, 0);
+      const regularComment = createReviewComment();
+
+      // The detection logic: line_end < 0
+      expect(deletedLineComment.line_end < 0).toBe(true);
+      expect(regularComment.line_end < 0).toBe(false);
+    });
+  });
+
+  describe('deleted line index encoding/decoding', () => {
+    /**
+     * The encoding convention:
+     * - encode: line_end = -(deletedLineIndex + 1)
+     * - decode: deletedLineIndex = Math.abs(line_end) - 1
+     */
+    it('encodes index 0 to -1 and decodes back', () => {
+      const index = 0;
+      const encoded = -(index + 1);
+      const decoded = Math.abs(encoded) - 1;
+
+      expect(encoded).toBe(-1);
+      expect(decoded).toBe(index);
+    });
+
+    it('encodes index 1 to -2 and decodes back', () => {
+      const index = 1;
+      const encoded = -(index + 1);
+      const decoded = Math.abs(encoded) - 1;
+
+      expect(encoded).toBe(-2);
+      expect(decoded).toBe(index);
+    });
+
+    it('encodes index 10 to -11 and decodes back', () => {
+      const index = 10;
+      const encoded = -(index + 1);
+      const decoded = Math.abs(encoded) - 1;
+
+      expect(encoded).toBe(-11);
+      expect(decoded).toBe(index);
+    });
+
+    it('all negative values decode to valid non-negative indices', () => {
+      // Test that any negative line_end value decodes to a valid index
+      for (let lineEnd = -1; lineEnd >= -100; lineEnd--) {
+        const index = Math.abs(lineEnd) - 1;
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(Number.isInteger(index)).toBe(true);
+      }
+    });
+  });
+
+  describe('comment categorization', () => {
+    it('correctly identifies regular comments', () => {
+      const comments = [
+        createReviewComment({ line_end: 0 }),   // Edge case: line 0
+        createReviewComment({ line_end: 1 }),
+        createReviewComment({ line_end: 10 }),
+        createReviewComment({ line_end: 100 }),
+      ];
+
+      const isDeletedLine = (c: { line_end: number }) => c.line_end < 0;
+      const regularComments = comments.filter(c => !isDeletedLine(c));
+      const deletedLineComments = comments.filter(c => isDeletedLine(c));
+
+      expect(regularComments).toHaveLength(4);
+      expect(deletedLineComments).toHaveLength(0);
+    });
+
+    it('correctly identifies deleted-line comments', () => {
+      const comments = [
+        createDeletedLineComment(5, 0),   // line_end = -1
+        createDeletedLineComment(10, 1),  // line_end = -2
+        createDeletedLineComment(15, 5),  // line_end = -6
+      ];
+
+      const isDeletedLine = (c: { line_end: number }) => c.line_end < 0;
+      const regularComments = comments.filter(c => !isDeletedLine(c));
+      const deletedLineComments = comments.filter(c => isDeletedLine(c));
+
+      expect(regularComments).toHaveLength(0);
+      expect(deletedLineComments).toHaveLength(3);
+    });
+
+    it('correctly categorizes a mixed set of comments', () => {
+      const comments = [
+        createReviewComment({ line_end: 5 }),       // Regular
+        createDeletedLineComment(8, 0),             // Deleted-line (index 0)
+        createReviewComment({ line_end: 12 }),      // Regular
+        createDeletedLineComment(15, 2),            // Deleted-line (index 2)
+        createReviewComment({ line_end: 20 }),      // Regular
+      ];
+
+      const isDeletedLine = (c: { line_end: number }) => c.line_end < 0;
+      const regularComments = comments.filter(c => !isDeletedLine(c));
+      const deletedLineComments = comments.filter(c => isDeletedLine(c));
+
+      expect(regularComments).toHaveLength(3);
+      expect(deletedLineComments).toHaveLength(2);
+
+      // Verify the deleted-line comments have the expected encoded values
+      expect(deletedLineComments[0].line_end).toBe(-1);  // index 0
+      expect(deletedLineComments[1].line_end).toBe(-3);  // index 2
+    });
+
+    it('handles edge cases for anchor lines', () => {
+      // Deleted chunk after line 0 (beginning of file)
+      const commentAfterLine0 = createDeletedLineComment(0, 0);
+      expect(commentAfterLine0.line_start).toBe(0);
+      expect(commentAfterLine0.line_end).toBe(-1);
+
+      // Deleted chunk after line 1000
+      const commentAfterLine1000 = createDeletedLineComment(1000, 5);
+      expect(commentAfterLine1000.line_start).toBe(1000);
+      expect(commentAfterLine1000.line_end).toBe(-6);
+
+      // Both should be recognized as deleted-line comments
+      const isDeletedLine = (c: { line_end: number }) => c.line_end < 0;
+      expect(isDeletedLine(commentAfterLine0)).toBe(true);
+      expect(isDeletedLine(commentAfterLine1000)).toBe(true);
+    });
+  });
+
+  describe('daemon mock comment operations', () => {
+    let mockDaemon: MockDaemon;
+
+    beforeEach(() => {
+      mockDaemon = createMockDaemon();
+    });
+
+    it('can add a regular comment', async () => {
+      const savedComment = createReviewComment({
+        id: 'saved-1',
+        filepath: 'src/test.tsx',
+        line_start: 5,
+        line_end: 5,
+        content: 'Regular comment',
+      });
+
+      mockDaemon.setResponse('addComment', () => ({
+        success: true,
+        comment: savedComment,
+      }));
+
+      const addComment = mockDaemon.createAddComment();
+      const result = await addComment(
+        'review-123',
+        'src/test.tsx',
+        5,  // line_start
+        5,  // line_end (regular)
+        'Regular comment'
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.comment?.line_end).toBe(5);
+      expect(result.comment?.line_end).toBeGreaterThanOrEqual(0);
+
+      // Verify the call was recorded
+      const calls = mockDaemon.getCalls('addComment');
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args).toEqual([
+        'review-123',
+        'src/test.tsx',
+        5,
+        5,
+        'Regular comment',
+      ]);
+    });
+
+    it('can add a deleted-line comment with encoded line_end', async () => {
+      const deletedLineIndex = 2;  // Third deleted line
+      const encodedLineEnd = -(deletedLineIndex + 1);  // = -3
+
+      const savedComment = createDeletedLineComment(10, deletedLineIndex, {
+        id: 'saved-deleted-1',
+        content: 'Comment on deleted line',
+      });
+
+      mockDaemon.setResponse('addComment', () => ({
+        success: true,
+        comment: savedComment,
+      }));
+
+      const addComment = mockDaemon.createAddComment();
+      const result = await addComment(
+        'review-123',
+        'src/App.tsx',
+        10,             // line_start (anchor)
+        encodedLineEnd, // line_end = -3 (encoded index 2)
+        'Comment on deleted line'
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.comment?.line_end).toBe(-3);
+      expect(result.comment?.line_end).toBeLessThan(0);
+
+      // Verify the call used the encoded value
+      const calls = mockDaemon.getCalls('addComment');
+      expect(calls[0].args[3]).toBe(-3);
+    });
+
+    it('can resolve/unresolve comments', async () => {
+      mockDaemon.setResponse('resolveComment', () => ({ success: true }));
+
+      const resolveComment = mockDaemon.createResolveComment();
+
+      // Resolve
+      let result = await resolveComment('comment-1', true);
+      expect(result.success).toBe(true);
+
+      // Unresolve
+      result = await resolveComment('comment-1', false);
+      expect(result.success).toBe(true);
+
+      const calls = mockDaemon.getCalls('resolveComment');
+      expect(calls).toHaveLength(2);
+      expect(calls[0].args).toEqual(['comment-1', true]);
+      expect(calls[1].args).toEqual(['comment-1', false]);
+    });
+
+    it('can fetch comments and separate regular from deleted-line', async () => {
+      const mixedComments = [
+        createReviewComment({ id: 'regular-1', line_end: 5 }),
+        createDeletedLineComment(10, 0, { id: 'deleted-1' }),  // line_end = -1
+        createReviewComment({ id: 'regular-2', line_end: 15 }),
+        createDeletedLineComment(20, 3, { id: 'deleted-2' }),  // line_end = -4
+      ];
+
+      mockDaemon.setResponse('getComments', () => ({
+        success: true,
+        comments: mixedComments,
+      }));
+
+      const getComments = mockDaemon.createGetComments();
+      const result = await getComments('review-123');
+
+      expect(result.success).toBe(true);
+      expect(result.comments).toHaveLength(4);
+
+      // Split and verify
+      const isDeletedLine = (c: { line_end: number }) => c.line_end < 0;
+      const regularComments = result.comments!.filter(c => !isDeletedLine(c));
+      const deletedLineComments = result.comments!.filter(c => isDeletedLine(c));
+
+      expect(regularComments).toHaveLength(2);
+      expect(deletedLineComments).toHaveLength(2);
+
+      // Verify encoding is preserved
+      expect(deletedLineComments[0].line_end).toBe(-1);  // index 0
+      expect(deletedLineComments[1].line_end).toBe(-4);  // index 3
+    });
+
+    it('preserves deleted-line comment data through save/load cycle', async () => {
+      // Simulate saving a deleted-line comment
+      const originalIndex = 5;
+      const savedComment = createDeletedLineComment(25, originalIndex, {
+        id: 'persisted-comment',
+        content: 'Important note on deleted code',
+      });
+
+      mockDaemon.setResponse('addComment', () => ({
+        success: true,
+        comment: savedComment,
+      }));
+
+      mockDaemon.setResponse('getComments', () => ({
+        success: true,
+        comments: [savedComment],
+      }));
+
+      // Save
+      const addComment = mockDaemon.createAddComment();
+      await addComment(
+        'review-123',
+        'src/App.tsx',
+        25,
+        -(originalIndex + 1),
+        'Important note on deleted code'
+      );
+
+      // Load (simulate switching files and coming back)
+      const getComments = mockDaemon.createGetComments();
+      const loadResult = await getComments('review-123');
+
+      expect(loadResult.success).toBe(true);
+      expect(loadResult.comments).toHaveLength(1);
+
+      const loadedComment = loadResult.comments![0];
+
+      // Verify the encoded data is preserved
+      expect(loadedComment.line_start).toBe(25);
+      expect(loadedComment.line_end).toBe(-(originalIndex + 1));  // = -6
+
+      // Verify we can decode back to the original index
+      const decodedIndex = Math.abs(loadedComment.line_end) - 1;
+      expect(decodedIndex).toBe(originalIndex);
     });
   });
 });

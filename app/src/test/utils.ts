@@ -46,6 +46,8 @@ export {
   createGitStatus,
   createFileDiffResult,
   createReviewState,
+  createReviewComment,
+  createDeletedLineComment,
   waitForCalls,
   assertNoMoreCalls,
 } from './mocks/daemon';
