@@ -1,6 +1,6 @@
 .comment-popover {
-  position: absolute;
-  z-index: 1000;
+  position: fixed;
+  z-index: 1100;
   min-width: 320px;
   max-width: 480px;
   background: #2d2d2d;
