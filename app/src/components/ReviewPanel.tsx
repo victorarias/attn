@@ -47,6 +47,17 @@ interface ReviewPanelProps {
   onSendToClaude?: (reference: string) => void;
 }
 
+// Simple hash function for detecting content changes
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString(36);
+}
+
 export function ReviewPanel({
   isOpen,
   gitStatus,
@@ -58,7 +69,8 @@ export function ReviewPanel({
   markFileViewed,
   onSendToClaude: _onSendToClaude, // Will be used in Phase 2 for comments
 }: ReviewPanelProps) {
-  const [selectedFile, setSelectedFile] = useState<ReviewFile | null>(null);
+  // Track selected file by path for stability across gitStatus updates
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -68,6 +80,10 @@ export function ReviewPanel({
   const [fontSize, setFontSize] = useState(13); // Default font size
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
+
+  // Track diff hashes for "changed since viewed" detection
+  const viewedDiffHashesRef = useRef<Map<string, string>>(new Map());
+  const [changedSinceViewed, setChangedSinceViewed] = useState<Set<string>>(new Set());
 
   // Build file list from git status
   const { needsReviewFiles, autoSkipFiles } = useMemo(() => {
@@ -108,6 +124,12 @@ export function ReviewPanel({
 
   const allFiles = useMemo(() => [...needsReviewFiles, ...autoSkipFiles], [needsReviewFiles, autoSkipFiles]);
 
+  // Derive selectedFile from path (stable across gitStatus updates)
+  const selectedFile = useMemo(() => {
+    if (!selectedFilePath) return null;
+    return allFiles.find(f => f.path === selectedFilePath) || null;
+  }, [selectedFilePath, allFiles]);
+
   // Load persisted review state when opening
   useEffect(() => {
     if (isOpen && repoPath && branch) {
@@ -126,49 +148,123 @@ export function ReviewPanel({
 
   // Auto-select first file when opening
   useEffect(() => {
-    if (isOpen && needsReviewFiles.length > 0 && !selectedFile) {
-      setSelectedFile(needsReviewFiles[0]);
+    if (isOpen && needsReviewFiles.length > 0 && !selectedFilePath) {
+      setSelectedFilePath(needsReviewFiles[0].path);
     }
-  }, [isOpen, needsReviewFiles, selectedFile]);
+  }, [isOpen, needsReviewFiles, selectedFilePath]);
 
   // Reset state when closing
   useEffect(() => {
     if (!isOpen) {
-      setSelectedFile(null);
+      setSelectedFilePath(null);
       setDiffContent(null);
       setError(null);
       setExpandedContext(0);
+      // Clear change detection state
+      viewedDiffHashesRef.current.clear();
+      setChangedSinceViewed(new Set());
     }
   }, [isOpen]);
 
-  // Fetch diff when selected file changes
+  // Create a stable key that changes when we need to refetch the diff
+  // This includes the file path and a representation of the git status for that file
+  const diffFetchKey = useMemo(() => {
+    if (!selectedFile) return null;
+    // Include additions/deletions as a proxy for content changes
+    return `${selectedFile.path}:${selectedFile.staged}:${selectedFile.additions ?? 0}:${selectedFile.deletions ?? 0}`;
+  }, [selectedFile]);
+
+  // Fetch diff when selected file changes OR when git status indicates the file changed
   useEffect(() => {
-    if (!selectedFile) {
+    if (!selectedFile || !diffFetchKey) {
       setDiffContent(null);
       return;
     }
 
-    setLoading(true);
+    // Store current path to check if we're still viewing the same file when fetch completes
+    const fetchPath = selectedFile.path;
+    const fetchStaged = selectedFile.staged;
+    const isFirstView = !viewedFiles.has(fetchPath);
+
+    // Only show loading on first view to avoid flickering during updates
+    if (isFirstView) {
+      setLoading(true);
+    }
     setError(null);
 
-    fetchDiff(selectedFile.path, selectedFile.staged)
+    fetchDiff(fetchPath, fetchStaged)
       .then((result) => {
-        setDiffContent({ original: result.original, modified: result.modified });
+        // Only update if we're still viewing the same file
+        if (selectedFilePath !== fetchPath) return;
+
+        const newContent = { original: result.original, modified: result.modified };
+        const newHash = simpleHash(result.original + result.modified);
+        const prevHash = viewedDiffHashesRef.current.get(fetchPath);
+
+        setDiffContent(newContent);
         setLoading(false);
+
+        // Check if file changed since last viewed
+        if (prevHash && prevHash !== newHash) {
+          // File was viewed before but content changed - mark as changed
+          setChangedSinceViewed(prev => new Set(prev).add(fetchPath));
+        }
+
+        // Update stored hash
+        viewedDiffHashesRef.current.set(fetchPath, newHash);
+
+        // Clear "changed" status since we're now viewing the updated content
+        setChangedSinceViewed(prev => {
+          const next = new Set(prev);
+          next.delete(fetchPath);
+          return next;
+        });
+
         // Mark file as viewed (local state)
-        setViewedFiles(prev => new Set(prev).add(selectedFile.path));
-        // Persist to backend if we have a review ID
-        if (reviewId) {
-          markFileViewed(reviewId, selectedFile.path, true).catch((err) => {
+        setViewedFiles(prev => new Set(prev).add(fetchPath));
+
+        // Persist to backend if we have a review ID (only on first view)
+        if (isFirstView && reviewId) {
+          markFileViewed(reviewId, fetchPath, true).catch((err) => {
             console.error('Failed to persist viewed state:', err);
           });
         }
       })
       .catch((err) => {
+        if (selectedFilePath !== fetchPath) return;
         setError(err.message || 'Failed to load diff');
         setLoading(false);
       });
-  }, [selectedFile, fetchDiff, reviewId, markFileViewed]);
+  }, [diffFetchKey, selectedFile, selectedFilePath, fetchDiff, reviewId, markFileViewed, viewedFiles]);
+
+  // Check for changes in viewed files when gitStatus updates (for files not currently selected)
+  useEffect(() => {
+    if (!gitStatus) return;
+
+    // For each viewed file that's still in the changes, check if it changed
+    viewedFiles.forEach(async (viewedPath) => {
+      // Skip currently selected file (handled by the main effect)
+      if (viewedPath === selectedFilePath) return;
+
+      // Find the file in current git status
+      const fileInChanges = allFiles.find(f => f.path === viewedPath);
+      if (!fileInChanges) return; // File no longer in changes
+
+      // Fetch and check hash
+      try {
+        const result = await fetchDiff(viewedPath, fileInChanges.staged);
+        const newHash = simpleHash(result.original + result.modified);
+        const prevHash = viewedDiffHashesRef.current.get(viewedPath);
+
+        if (prevHash && prevHash !== newHash) {
+          setChangedSinceViewed(prev => new Set(prev).add(viewedPath));
+          viewedDiffHashesRef.current.set(viewedPath, newHash);
+        }
+      } catch {
+        // Ignore errors for background checks
+      }
+    });
+  }, [gitStatus, viewedFiles, selectedFilePath, allFiles, fetchDiff]);
 
   // Create/update CodeMirror editor
   useEffect(() => {
@@ -389,26 +485,34 @@ export function ReviewPanel({
   }, [isOpen, onClose, allFiles, selectedFile]);
 
   const navigateFiles = useCallback((direction: 'prev' | 'next') => {
-    if (!selectedFile || allFiles.length === 0) return;
-    const currentIndex = allFiles.findIndex(f => f.path === selectedFile.path);
+    if (!selectedFilePath || allFiles.length === 0) return;
+    const currentIndex = allFiles.findIndex(f => f.path === selectedFilePath);
     const newIndex = direction === 'next'
       ? Math.min(currentIndex + 1, allFiles.length - 1)
       : Math.max(currentIndex - 1, 0);
-    setSelectedFile(allFiles[newIndex]);
-  }, [allFiles, selectedFile]);
+    setSelectedFilePath(allFiles[newIndex].path);
+  }, [allFiles, selectedFilePath]);
 
   const navigateToNextUnreviewed = useCallback(() => {
+    // First look for files that changed since viewed
+    const changedFile = needsReviewFiles.find(f => changedSinceViewed.has(f.path));
+    if (changedFile) {
+      setSelectedFilePath(changedFile.path);
+      return;
+    }
+    // Then look for unviewed files
     const unreviewed = needsReviewFiles.find(f => !viewedFiles.has(f.path));
     if (unreviewed) {
-      setSelectedFile(unreviewed);
+      setSelectedFilePath(unreviewed.path);
     }
-  }, [needsReviewFiles, viewedFiles]);
+  }, [needsReviewFiles, viewedFiles, changedSinceViewed]);
 
   const getFileIcon = useCallback((file: ReviewFile) => {
     if (file.isAutoSkip) return '⊘';
+    if (changedSinceViewed.has(file.path)) return '↻'; // Changed since viewed
     if (viewedFiles.has(file.path)) return '✓';
     return '';
-  }, [viewedFiles]);
+  }, [viewedFiles, changedSinceViewed]);
 
   const getStatusLabel = useCallback((status: string) => {
     switch (status) {
@@ -456,8 +560,8 @@ export function ReviewPanel({
                 {needsReviewFiles.map(file => (
                   <div
                     key={file.path}
-                    className={`file-item ${selectedFile?.path === file.path ? 'selected' : ''} ${viewedFiles.has(file.path) ? 'viewed' : ''}`}
-                    onClick={() => setSelectedFile(file)}
+                    className={`file-item ${selectedFilePath === file.path ? 'selected' : ''} ${viewedFiles.has(file.path) ? 'viewed' : ''} ${changedSinceViewed.has(file.path) ? 'changed' : ''}`}
+                    onClick={() => setSelectedFilePath(file.path)}
                   >
                     <span className="file-icon">{getFileIcon(file)}</span>
                     <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>
@@ -483,8 +587,8 @@ export function ReviewPanel({
                 {autoSkipFiles.map(file => (
                   <div
                     key={file.path}
-                    className={`file-item auto-skip ${selectedFile?.path === file.path ? 'selected' : ''}`}
-                    onClick={() => setSelectedFile(file)}
+                    className={`file-item auto-skip ${selectedFilePath === file.path ? 'selected' : ''}`}
+                    onClick={() => setSelectedFilePath(file.path)}
                   >
                     <span className="file-icon">{getFileIcon(file)}</span>
                     <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>

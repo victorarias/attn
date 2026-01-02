@@ -115,6 +115,14 @@
   color: #858585;
 }
 
+.file-item.changed {
+  color: #e2c08d;
+}
+
+.file-item.changed .file-icon {
+  color: #e2c08d;
+}
+
 .file-item.auto-skip {
   color: #6a6a6a;
 }
