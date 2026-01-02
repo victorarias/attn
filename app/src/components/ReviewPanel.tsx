@@ -1,6 +1,6 @@
 // app/src/components/ReviewPanel.tsx
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { EditorView, gutter, GutterMarker } from '@codemirror/view';
+import { EditorView, gutter, GutterMarker, Decoration, WidgetType } from '@codemirror/view';
 import { EditorState, RangeSet, StateField, StateEffect } from '@codemirror/state';
 import { unifiedMergeView } from '@codemirror/merge';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -13,7 +13,6 @@ import { history } from '@codemirror/commands';
 import { highlightSelectionMatches } from '@codemirror/search';
 import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../hooks/useDaemonSocket';
 import type { ReviewComment } from '../types/generated';
-import { CommentPopover } from './CommentPopover';
 import './ReviewPanel.css';
 
 // Auto-skip patterns for lockfiles and generated files
@@ -49,6 +48,192 @@ class CommentMarker extends GutterMarker {
     }
 
     return btn;
+  }
+}
+
+// Inline comment widget - displays saved comments below the line
+class InlineCommentWidget extends WidgetType {
+  constructor(
+    public comment: ReviewComment,
+    public isEditing: boolean,
+    public onSave: (content: string) => void,
+    public onCancel: () => void,
+    public onStartEdit: () => void,
+    public onResolve: (resolved: boolean) => void
+  ) {
+    super();
+  }
+
+  toDOM() {
+    const wrapper = document.createElement('div');
+    wrapper.className = `inline-comment ${this.comment.resolved ? 'resolved' : ''}`;
+
+    if (this.isEditing) {
+      // Edit mode - show form
+      const form = document.createElement('div');
+      form.className = 'inline-comment-form';
+
+      const textarea = document.createElement('textarea');
+      textarea.className = 'inline-comment-textarea';
+      textarea.value = this.comment.content;
+      textarea.rows = 3;
+      textarea.placeholder = 'Edit comment...';
+      form.appendChild(textarea);
+
+      const buttons = document.createElement('div');
+      buttons.className = 'inline-comment-buttons';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'inline-comment-btn';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.type = 'button';
+      cancelBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.onCancel();
+      };
+      buttons.appendChild(cancelBtn);
+
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'inline-comment-btn save';
+      saveBtn.textContent = 'Save';
+      saveBtn.type = 'button';
+      saveBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.onSave(textarea.value);
+      };
+      buttons.appendChild(saveBtn);
+
+      form.appendChild(buttons);
+      wrapper.appendChild(form);
+
+      // Focus textarea after render
+      setTimeout(() => textarea.focus(), 0);
+    } else {
+      // Display mode
+      const header = document.createElement('div');
+      header.className = 'inline-comment-header';
+
+      const author = document.createElement('span');
+      author.className = `inline-comment-author ${this.comment.author}`;
+      author.textContent = this.comment.author === 'agent' ? 'Claude' : 'You';
+      header.appendChild(author);
+
+      const actions = document.createElement('div');
+      actions.className = 'inline-comment-actions';
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'inline-comment-btn';
+      editBtn.textContent = 'Edit';
+      editBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.onStartEdit();
+      };
+      actions.appendChild(editBtn);
+
+      if (!this.comment.resolved) {
+        const resolveBtn = document.createElement('button');
+        resolveBtn.className = 'inline-comment-btn resolve';
+        resolveBtn.textContent = 'Resolve';
+        resolveBtn.onclick = (e) => {
+          e.stopPropagation();
+          this.onResolve(true);
+        };
+        actions.appendChild(resolveBtn);
+      }
+
+      header.appendChild(actions);
+      wrapper.appendChild(header);
+
+      const content = document.createElement('div');
+      content.className = 'inline-comment-content';
+      content.textContent = this.comment.content;
+      wrapper.appendChild(content);
+    }
+
+    return wrapper;
+  }
+
+  eq(other: InlineCommentWidget) {
+    return other.comment.id === this.comment.id &&
+           other.comment.content === this.comment.content &&
+           other.comment.resolved === this.comment.resolved &&
+           other.isEditing === this.isEditing;
+  }
+
+  ignoreEvent() {
+    return false;
+  }
+}
+
+// Widget for adding a new comment
+class NewCommentWidget extends WidgetType {
+  constructor(
+    public lineNum: number,
+    public onSave: (content: string) => void,
+    public onCancel: () => void
+  ) {
+    super();
+  }
+
+  toDOM() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'inline-comment new';
+
+    const form = document.createElement('div');
+    form.className = 'inline-comment-form';
+
+    const label = document.createElement('div');
+    label.className = 'inline-comment-label';
+    label.textContent = `Line ${this.lineNum}`;
+    form.appendChild(label);
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'inline-comment-textarea';
+    textarea.rows = 3;
+    textarea.placeholder = 'Add a comment...';
+    form.appendChild(textarea);
+
+    const buttons = document.createElement('div');
+    buttons.className = 'inline-comment-buttons';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'inline-comment-btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.type = 'button';
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      this.onCancel();
+    };
+    buttons.appendChild(cancelBtn);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'inline-comment-btn save';
+    saveBtn.textContent = 'Save';
+    saveBtn.type = 'button';
+    saveBtn.onclick = (e) => {
+      e.stopPropagation();
+      const content = textarea.value.trim();
+      if (content) {
+        this.onSave(content);
+      }
+    };
+    buttons.appendChild(saveBtn);
+
+    form.appendChild(buttons);
+    wrapper.appendChild(form);
+
+    // Focus textarea after render
+    setTimeout(() => textarea.focus(), 0);
+
+    return wrapper;
+  }
+
+  eq(other: NewCommentWidget) {
+    return other.lineNum === this.lineNum;
+  }
+
+  ignoreEvent() {
+    return false;
   }
 }
 
@@ -117,13 +302,16 @@ export function ReviewPanel({
   fetchDiff,
   getReviewState,
   markFileViewed,
-  onSendToClaude,
+  onSendToClaude: _onSendToClaude,
   addComment,
   updateComment,
   resolveComment,
-  deleteComment,
+  deleteComment: _deleteComment,
   getComments,
 }: ReviewPanelProps) {
+  // These props are reserved for future use
+  void _onSendToClaude;
+  void _deleteComment;
   // Track selected file by path for stability across gitStatus updates
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
@@ -135,22 +323,28 @@ export function ReviewPanel({
   const [fontSize, setFontSize] = useState(13); // Default font size
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
+  const scrollPositionRef = useRef<number>(0);
 
   // Comment state
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
-  const [activePopover, setActivePopover] = useState<{
-    type: 'new' | 'existing';
-    lineStart?: number;
-    lineEnd?: number;
-    comment?: ReviewComment;
-    position: { top: number; left: number };
-  } | null>(null);
+  const [newCommentLine, setNewCommentLine] = useState<number | null>(null);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+
+  // Helper: check if comment is on a deleted line (marked by line_end < 0)
+  // line_end encodes the deleted line index: -1 = after line 0, -2 = after line 1, etc.
+  const isDeletedLineComment = (comment: ReviewComment) => comment.line_end < 0;
 
   // Derive comments for current file (used for CodeMirror gutter markers)
   const comments = useMemo(() => {
     if (!selectedFilePath) return [];
     return allReviewComments.filter(c => c.filepath === selectedFilePath);
   }, [allReviewComments, selectedFilePath]);
+
+  // Split comments into regular and deleted-line comments
+  const regularComments = useMemo(() =>
+    comments.filter(c => !isDeletedLineComment(c)), [comments]);
+  const deletedLineComments = useMemo(() =>
+    comments.filter(c => isDeletedLineComment(c)), [comments]);
 
   // Compute comment counts per file
   const fileCommentCounts = useMemo(() => {
@@ -380,8 +574,9 @@ export function ReviewPanel({
   useEffect(() => {
     if (!editorContainerRef.current || !diffContent) return;
 
-    // Clean up existing editor
+    // Clean up existing editor - save scroll position first
     if (editorViewRef.current) {
+      scrollPositionRef.current = editorViewRef.current.scrollDOM.scrollTop;
       editorViewRef.current.destroy();
       editorViewRef.current = null;
     }
@@ -407,6 +602,7 @@ export function ReviewPanel({
     }
 
     // Custom diff styling that works with oneDark
+    // Note: Line wrapping styles are in ReviewPanel.css (flex:1 + min-width:0 on cm-content)
     const diffTheme = EditorView.theme({
       '&': {
         height: '100%',
@@ -513,79 +709,166 @@ export function ReviewPanel({
 
     // Click handler for gutter buttons and diff lines
     const clickHandler = EditorView.domEventHandlers({
-      click: (event, view) => {
+      mousedown: (event, view) => {
         const target = event.target as HTMLElement;
 
-        // Check if clicking a gutter button
+        // Don't handle clicks on inline comment elements
+        if (target.closest('.inline-comment')) {
+          return false;
+        }
+
+        // Check if clicking a gutter button - only open new comment (existing are inline)
         const gutterBtn = target.closest('.comment-gutter-btn');
         if (gutterBtn instanceof HTMLElement) {
           const lineNum = parseInt(gutterBtn.dataset.lineNum || '0', 10);
           if (lineNum > 0) {
-            const rect = gutterBtn.getBoundingClientRect();
             const hasComment = commentLineMap.has(lineNum);
-
-            if (hasComment) {
-              const lineComments = comments.filter(c => c.line_start === lineNum);
-              if (lineComments.length > 0) {
-                setActivePopover({
-                  type: 'existing',
-                  comment: lineComments[0],
-                  position: { top: rect.top, left: rect.right + 8 },
-                });
-              }
-            } else {
-              setActivePopover({
-                type: 'new',
-                lineStart: lineNum,
-                lineEnd: lineNum,
-                position: { top: rect.top, left: rect.right + 8 },
-              });
+            if (!hasComment) {
+              setNewCommentLine(lineNum);
+              return true;
             }
-            return true;
           }
         }
 
-        // Check if clicking a diff line (not gutter, not already on button)
-        const line = target.closest('.cm-line');
-        if (line instanceof HTMLElement) {
-          // Get position in editor
-          const pos = view.posAtDOM(line);
-          const lineNum = view.state.doc.lineAt(pos).number;
-          const rect = line.getBoundingClientRect();
+        // Try to get line number from click position
+        const editorRect = view.dom.getBoundingClientRect();
+        const y = event.clientY - editorRect.top + view.scrollDOM.scrollTop;
+
+        // Use lineBlockAtHeight to find which line block we're in
+        try {
+          const block = view.lineBlockAtHeight(y);
+          const lineNum = view.state.doc.lineAt(block.from).number;
           const hasComment = commentLineMap.has(lineNum);
 
-          if (hasComment) {
-            const lineComments = comments.filter(c => c.line_start === lineNum);
-            if (lineComments.length > 0) {
-              setActivePopover({
-                type: 'existing',
-                comment: lineComments[0],
-                position: { top: rect.top, left: rect.right + 8 },
-              });
-            }
-          } else {
-            setActivePopover({
-              type: 'new',
-              lineStart: lineNum,
-              lineEnd: lineNum,
-              position: { top: rect.top, left: rect.right + 8 },
-            });
+          if (!hasComment) {
+            setNewCommentLine(lineNum);
+            return true;
           }
-          return true;
+        } catch {
+          // Fallback: try to get from DOM element
+          const line = target.closest('.cm-line');
+          if (line instanceof HTMLElement) {
+            try {
+              const pos = view.posAtDOM(line);
+              const lineNum = view.state.doc.lineAt(pos).number;
+              const hasComment = commentLineMap.has(lineNum);
+
+              if (!hasComment) {
+                setNewCommentLine(lineNum);
+                return true;
+              }
+            } catch {
+              // Ignore
+            }
+          }
         }
 
         return false;
       },
     });
 
+    // Helper to calculate position at end of line
+    const getLineEndPos = (lineNum: number, content: string) => {
+      const lines = content.split('\n');
+      if (lineNum < 1 || lineNum > lines.length) return -1;
+      let pos = 0;
+      for (let i = 0; i < lineNum; i++) {
+        pos += (lines[i]?.length || 0) + 1;
+      }
+      return Math.max(0, pos - 1);
+    };
+
+    // Create inline comment decorations
+    const inlineWidgets: { pos: number; widget: WidgetType }[] = [];
+
+    // Add existing comment widgets (only regular comments, not deleted-line comments)
+    for (const comment of regularComments) {
+      const lineNum = comment.line_start;
+      const pos = getLineEndPos(lineNum, diffContent.modified);
+      if (pos >= 0) {
+        const isEditing = editingCommentId === comment.id;
+        inlineWidgets.push({
+          pos,
+          widget: new InlineCommentWidget(
+            comment,
+            isEditing,
+            async (content) => {
+              if (updateComment) {
+                const result = await updateComment(comment.id, content);
+                if (result.success) {
+                  setAllReviewComments(prev =>
+                    prev.map(c => c.id === comment.id ? { ...c, content } : c)
+                  );
+                  setEditingCommentId(null);
+                }
+              }
+            },
+            () => setEditingCommentId(null),
+            () => setEditingCommentId(comment.id),
+            async (resolved) => {
+              if (resolveComment) {
+                const result = await resolveComment(comment.id, resolved);
+                if (result.success) {
+                  setAllReviewComments(prev =>
+                    prev.map(c => c.id === comment.id ? { ...c, resolved } : c)
+                  );
+                }
+              }
+            }
+          ),
+        });
+      }
+    }
+
+    // Add new comment widget if active
+    if (newCommentLine !== null) {
+      const pos = getLineEndPos(newCommentLine, diffContent.modified);
+      if (pos >= 0) {
+        inlineWidgets.push({
+          pos,
+          widget: new NewCommentWidget(
+            newCommentLine,
+            async (content) => {
+              if (reviewId && selectedFilePath && addComment) {
+                const result = await addComment(
+                  reviewId,
+                  selectedFilePath,
+                  newCommentLine,
+                  newCommentLine,
+                  content
+                );
+                if (result.success && result.comment) {
+                  setAllReviewComments(prev => [...prev, result.comment!]);
+                  setNewCommentLine(null);
+                }
+              }
+            },
+            () => setNewCommentLine(null)
+          ),
+        });
+      }
+    }
+
+    // Sort by position and create decoration set
+    inlineWidgets.sort((a, b) => a.pos - b.pos);
+    const inlineDecorations = Decoration.set(
+      inlineWidgets.map(({ pos, widget }) =>
+        Decoration.widget({ widget, block: true, side: 1 }).range(pos)
+      )
+    );
+
+    const inlineCommentsExtension = EditorView.decorations.of(inlineDecorations);
+
     const extensions = [
       commentLinesField,
       commentGutter,
       clickHandler,
+      inlineCommentsExtension,
       minimalSetup,
       langExtension,
       oneDark,
       diffTheme,
+      EditorView.lineWrapping,
       EditorView.editable.of(false),
       unifiedMergeView({
         original: diffContent.original,
@@ -616,17 +899,217 @@ export function ReviewPanel({
 
     editorViewRef.current = view;
 
+    // Restore scroll position
+    if (scrollPositionRef.current > 0) {
+      view.scrollDOM.scrollTop = scrollPositionRef.current;
+    }
+
+    // Inject saved deleted-line comments into deleted chunks
+    setTimeout(() => {
+      if (!editorContainerRef.current) return;
+
+      // Build a map of anchor line -> deleted chunk element
+      const deletedChunks = editorContainerRef.current.querySelectorAll('.cm-deletedChunk');
+      const anchorLineToChunk = new Map<number, Element>();
+
+      deletedChunks.forEach((chunk) => {
+        let prevLine = chunk.previousElementSibling;
+        while (prevLine && !prevLine.classList.contains('cm-line')) {
+          prevLine = prevLine.previousElementSibling;
+        }
+        if (prevLine && view) {
+          try {
+            const pos = view.posAtDOM(prevLine);
+            const lineNum = view.state.doc.lineAt(pos).number;
+            anchorLineToChunk.set(lineNum, chunk);
+          } catch {
+            // Ignore
+          }
+        }
+      });
+
+      // Inject saved comments for deleted lines
+      deletedLineComments.forEach((comment) => {
+        const chunk = anchorLineToChunk.get(comment.line_start);
+        if (!chunk) return;
+
+        // Check if already injected
+        if (chunk.querySelector(`[data-comment-id="${comment.id}"]`)) return;
+
+        // Create comment element
+        const commentEl = document.createElement('div');
+        commentEl.className = `inline-comment ${comment.resolved ? 'resolved' : ''}`;
+        commentEl.dataset.commentId = comment.id;
+        commentEl.innerHTML = `
+          <div class="inline-comment-header">
+            <span class="inline-comment-author ${comment.author}">${comment.author === 'agent' ? 'Claude' : 'You'}</span>
+            <div class="inline-comment-actions">
+              <button type="button" class="inline-comment-btn edit-btn">Edit</button>
+              <button type="button" class="inline-comment-btn ${comment.resolved ? '' : 'resolve'} resolve-btn">${comment.resolved ? 'Unresolve' : 'Resolve'}</button>
+            </div>
+          </div>
+          <div class="inline-comment-content">${comment.content.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        `;
+
+        // Wire up edit button
+        commentEl.querySelector('.edit-btn')?.addEventListener('click', () => {
+          setEditingCommentId(comment.id);
+        });
+
+        // Wire up resolve button
+        const resolveBtn = commentEl.querySelector('.resolve-btn');
+        resolveBtn?.addEventListener('click', async () => {
+          if (resolveComment) {
+            const newResolved = !comment.resolved;
+            const resolveResult = await resolveComment(comment.id, newResolved);
+            if (resolveResult.success) {
+              setAllReviewComments(prev =>
+                prev.map(c => c.id === comment.id ? { ...c, resolved: newResolved } : c)
+              );
+              if (newResolved) {
+                commentEl.classList.add('resolved');
+                resolveBtn.textContent = 'Unresolve';
+                resolveBtn.classList.remove('resolve');
+              } else {
+                commentEl.classList.remove('resolved');
+                resolveBtn.textContent = 'Resolve';
+                resolveBtn.classList.add('resolve');
+              }
+            }
+          }
+        });
+
+        // Insert after the specific deleted line (index encoded in line_end)
+        // line_end = -(index + 1), so index = Math.abs(line_end) - 1
+        const deletedLines = chunk.querySelectorAll('.cm-deletedLine');
+        const deletedLineIndex = Math.abs(comment.line_end) - 1;
+        const targetLine = deletedLines[deletedLineIndex] || deletedLines[deletedLines.length - 1];
+        if (targetLine) {
+          targetLine.after(commentEl);
+        } else {
+          chunk.appendChild(commentEl);
+        }
+      });
+    }, 0);
+
+    // Add document-level click handler for deleted chunks (they don't receive normal editor events)
+    const handleDeletedChunkClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const deletedChunk = target.closest('.cm-deletedChunk');
+      if (!deletedChunk) return;
+
+      // Only handle if click is within our editor container
+      if (!editorContainerRef.current?.contains(target)) return;
+
+      // Check if there's already a form in this chunk
+      if (deletedChunk.querySelector('.inline-comment')) {
+        return;
+      }
+
+      // Find the previous .cm-line sibling to anchor the comment
+      let prevLine = deletedChunk.previousElementSibling;
+      while (prevLine && !prevLine.classList.contains('cm-line')) {
+        prevLine = prevLine.previousElementSibling;
+      }
+
+      // Get the anchor line number for storing the comment
+      let anchorLineNum = 0;
+      if (prevLine && view) {
+        try {
+          const pos = view.posAtDOM(prevLine);
+          anchorLineNum = view.state.doc.lineAt(pos).number;
+        } catch {
+          // Ignore
+        }
+      }
+
+      // Create and insert the comment form directly into the deleted chunk
+      const form = document.createElement('div');
+      form.className = 'inline-comment new';
+      form.innerHTML = `
+        <div class="inline-comment-form">
+          <div class="inline-comment-label">Deleted content (after line ${anchorLineNum})</div>
+          <textarea class="inline-comment-textarea" rows="3" placeholder="Add a comment..."></textarea>
+          <div class="inline-comment-buttons">
+            <button type="button" class="inline-comment-btn cancel-btn">Cancel</button>
+            <button type="button" class="inline-comment-btn save save-btn">Save</button>
+          </div>
+        </div>
+      `;
+
+      // Find the deleted line that was clicked and its index within the chunk
+      const clickedLine = target.closest('.cm-deletedLine');
+      const allDeletedLines = deletedChunk.querySelectorAll('.cm-deletedLine');
+      let clickedLineIndex = 0;
+      if (clickedLine) {
+        const foundIndex = Array.from(allDeletedLines).indexOf(clickedLine);
+        clickedLineIndex = foundIndex >= 0 ? foundIndex : 0;
+        clickedLine.after(form);
+      } else {
+        // Fallback: insert at beginning of chunk
+        deletedChunk.insertBefore(form, deletedChunk.firstChild);
+      }
+
+      // Focus the textarea
+      const textarea = form.querySelector('textarea');
+      if (textarea) {
+        setTimeout(() => textarea.focus(), 0);
+      }
+
+      // Handle cancel
+      const cancelBtn = form.querySelector('.cancel-btn');
+      cancelBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        form.remove();
+      });
+
+      // Handle save
+      const saveBtn = form.querySelector('.save-btn');
+      saveBtn?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const content = textarea?.value.trim();
+        if (content && reviewId && selectedFilePath && addComment) {
+          // Use line_end = -(index + 1) to mark deleted-line comment and store position
+          // -1 = after deleted line 0, -2 = after deleted line 1, etc.
+          const result = await addComment(
+            reviewId,
+            selectedFilePath,
+            anchorLineNum,
+            -(clickedLineIndex + 1),  // Encode deleted line index
+            content
+          );
+          if (result.success && result.comment) {
+            // Add to state - the injection logic will handle positioning
+            setAllReviewComments(prev => [...prev, result.comment!]);
+            form.remove();
+          }
+        }
+      });
+
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    document.addEventListener('mousedown', handleDeletedChunkClick, true);
+
     return () => {
+      document.removeEventListener('mousedown', handleDeletedChunkClick, true);
       view.destroy();
       editorViewRef.current = null;
     };
-  }, [diffContent, selectedFile?.path, expandedContext, fontSize, comments]);
+  }, [diffContent, selectedFile?.path, expandedContext, fontSize, regularComments, deletedLineComments, newCommentLine, editingCommentId, reviewId, selectedFilePath, addComment, updateComment, resolveComment]);
 
   // Keyboard navigation
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't capture keystrokes when typing in inputs
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
       // Handle Cmd/Ctrl + / - for font size
       if (e.metaKey || e.ctrlKey) {
         if (e.key === '=' || e.key === '+') {
@@ -865,65 +1348,6 @@ export function ReviewPanel({
         </div>
       </div>
 
-      {/* Comment Popover */}
-      {activePopover && (
-        <CommentPopover
-          isNew={activePopover.type === 'new'}
-          lineStart={activePopover.lineStart}
-          lineEnd={activePopover.lineEnd}
-          comment={activePopover.comment}
-          position={activePopover.position}
-          onSave={async (content) => {
-            if (activePopover.type === 'new') {
-              // Add new comment
-              if (!reviewId || !selectedFilePath || !addComment) return;
-              if (activePopover.lineStart === undefined || activePopover.lineEnd === undefined) return;
-              const result = await addComment(
-                reviewId,
-                selectedFilePath,
-                activePopover.lineStart,
-                activePopover.lineEnd,
-                content
-              );
-              if (result.success && result.comment) {
-                setAllReviewComments(prev => [...prev, result.comment!]);
-              }
-            } else {
-              // Update existing comment
-              if (!activePopover.comment || !updateComment) return;
-              const result = await updateComment(activePopover.comment.id, content);
-              if (result.success) {
-                setAllReviewComments(prev =>
-                  prev.map(c => c.id === activePopover.comment!.id ? { ...c, content } : c)
-                );
-              }
-            }
-          }}
-          onCancel={() => setActivePopover(null)}
-          onResolve={activePopover.comment && resolveComment ? async (resolved) => {
-            if (!activePopover.comment) return;
-            const result = await resolveComment(activePopover.comment.id, resolved);
-            if (result.success) {
-              setAllReviewComments(prev =>
-                prev.map(c => c.id === activePopover.comment!.id ? { ...c, resolved } : c)
-              );
-            }
-          } : undefined}
-          onDelete={activePopover.comment && deleteComment ? async () => {
-            if (!activePopover.comment) return;
-            const result = await deleteComment(activePopover.comment.id);
-            if (result.success) {
-              setAllReviewComments(prev => prev.filter(c => c.id !== activePopover.comment!.id));
-              setActivePopover(null);
-            }
-          } : undefined}
-          onSendToClaude={onSendToClaude && activePopover.comment ? () => {
-            if (!activePopover.comment || !selectedFilePath) return;
-            const reference = `${selectedFilePath}:${activePopover.comment.line_start}-${activePopover.comment.line_end}\n${activePopover.comment.content}`;
-            onSendToClaude(reference);
-          } : undefined}
-        />
-      )}
     </>
   );
 }

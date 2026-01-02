@@ -394,3 +394,161 @@
   font-size: 12px;
   line-height: 1;
 }
+
+/* Inline comments displayed within the diff */
+.inline-comment {
+  background: #2d3748;
+  border-left: 3px solid #3b82f6;
+  margin: 4px 0 4px 40px;
+  padding: 8px 12px;
+  border-radius: 0 4px 4px 0;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.inline-comment.resolved {
+  border-left-color: #22c55e;
+  background: #1e3a2f;
+}
+
+.inline-comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.inline-comment-author {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #fff;
+}
+
+.inline-comment-author.user {
+  background: #2563eb;
+}
+
+.inline-comment-author.agent {
+  background: #d97706;
+}
+
+.inline-comment-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.inline-comment-btn {
+  background: transparent;
+  border: 1px solid #4b5563;
+  color: #9ca3af;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.inline-comment-btn:hover {
+  background: #374151;
+  color: #e5e7eb;
+}
+
+.inline-comment-btn.resolve {
+  border-color: #22c55e;
+  color: #22c55e;
+}
+
+.inline-comment-btn.resolve:hover {
+  background: #22c55e;
+  color: #fff;
+}
+
+.inline-comment-content {
+  color: #e5e7eb;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* Inline comment form */
+.inline-comment.new {
+  border-left-color: #6366f1;
+  background: #312e81;
+}
+
+.inline-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inline-comment-label {
+  font-size: 11px;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.inline-comment-textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 4px;
+  color: #e5e7eb;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.inline-comment-textarea:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.inline-comment-textarea::placeholder {
+  color: #6b7280;
+}
+
+.inline-comment-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.inline-comment-btn.save {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+
+.inline-comment-btn.save:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+/* Inline comments inside deleted chunks */
+.cm-deletedChunk .inline-comment {
+  margin: 4px 0;
+}
+
+/*
+ * Force line wrapping in diff view
+ * Key fix: cm-scroller is display:flex with cm-gutters + cm-content as children.
+ * cm-content needs flex:1 + min-width:0 to fill remaining space and allow shrinking.
+ */
+.codemirror-container .cm-content {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+}
+
+.codemirror-container .cm-line,
+.codemirror-container .cm-deletedLine {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+}
