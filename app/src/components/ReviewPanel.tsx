@@ -65,6 +65,121 @@ class CommentMarker extends GutterMarker {
   }
 }
 
+// Shared handlers interface for comment elements
+interface CommentHandlers {
+  onEdit: () => void;
+  onSave: (content: string) => void;
+  onCancel: () => void;
+  onResolve: (resolved: boolean) => void;
+  onDelete: () => void;
+}
+
+/**
+ * Creates a comment element with all event handlers wired up.
+ * Used by both InlineCommentWidget (for regular lines) and DOM injection (for deleted lines).
+ */
+function createCommentElement(
+  comment: ReviewComment,
+  isEditing: boolean,
+  handlers: CommentHandlers
+): HTMLDivElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = `inline-comment ${comment.resolved ? 'resolved' : ''}`;
+
+  if (isEditing) {
+    // Edit mode - show form
+    const form = document.createElement('div');
+    form.className = 'inline-comment-form';
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'inline-comment-textarea';
+    textarea.value = comment.content;
+    textarea.rows = 3;
+    textarea.placeholder = 'Edit comment...';
+    form.appendChild(textarea);
+
+    const buttons = document.createElement('div');
+    buttons.className = 'inline-comment-buttons';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'inline-comment-btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.type = 'button';
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      handlers.onCancel();
+    };
+    buttons.appendChild(cancelBtn);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'inline-comment-btn save';
+    saveBtn.textContent = 'Save';
+    saveBtn.type = 'button';
+    saveBtn.onclick = (e) => {
+      e.stopPropagation();
+      handlers.onSave(textarea.value);
+    };
+    buttons.appendChild(saveBtn);
+
+    form.appendChild(buttons);
+    wrapper.appendChild(form);
+
+    // Focus textarea after render
+    setTimeout(() => textarea.focus(), 0);
+  } else {
+    // Display mode
+    const header = document.createElement('div');
+    header.className = 'inline-comment-header';
+
+    const author = document.createElement('span');
+    author.className = `inline-comment-author ${comment.author}`;
+    author.textContent = comment.author === 'agent' ? 'Claude' : 'You';
+    header.appendChild(author);
+
+    const actions = document.createElement('div');
+    actions.className = 'inline-comment-actions';
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'inline-comment-btn';
+    editBtn.textContent = 'Edit';
+    editBtn.onclick = (e) => {
+      e.stopPropagation();
+      handlers.onEdit();
+    };
+    actions.appendChild(editBtn);
+
+    if (!comment.resolved) {
+      const resolveBtn = document.createElement('button');
+      resolveBtn.className = 'inline-comment-btn resolve';
+      resolveBtn.textContent = 'Resolve';
+      resolveBtn.onclick = (e) => {
+        e.stopPropagation();
+        handlers.onResolve(true);
+      };
+      actions.appendChild(resolveBtn);
+    }
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'inline-comment-btn delete';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.onclick = (e) => {
+      e.stopPropagation();
+      handlers.onDelete();
+    };
+    actions.appendChild(deleteBtn);
+
+    header.appendChild(actions);
+    wrapper.appendChild(header);
+
+    const content = document.createElement('div');
+    content.className = 'inline-comment-content';
+    content.textContent = comment.content;
+    wrapper.appendChild(content);
+  }
+
+  return wrapper;
+}
+
 // Inline comment widget - displays saved comments below the line
 class InlineCommentWidget extends WidgetType {
   constructor(
@@ -80,101 +195,13 @@ class InlineCommentWidget extends WidgetType {
   }
 
   toDOM() {
-    const wrapper = document.createElement('div');
-    wrapper.className = `inline-comment ${this.comment.resolved ? 'resolved' : ''}`;
-
-    if (this.isEditing) {
-      // Edit mode - show form
-      const form = document.createElement('div');
-      form.className = 'inline-comment-form';
-
-      const textarea = document.createElement('textarea');
-      textarea.className = 'inline-comment-textarea';
-      textarea.value = this.comment.content;
-      textarea.rows = 3;
-      textarea.placeholder = 'Edit comment...';
-      form.appendChild(textarea);
-
-      const buttons = document.createElement('div');
-      buttons.className = 'inline-comment-buttons';
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'inline-comment-btn';
-      cancelBtn.textContent = 'Cancel';
-      cancelBtn.type = 'button';
-      cancelBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.onCancel();
-      };
-      buttons.appendChild(cancelBtn);
-
-      const saveBtn = document.createElement('button');
-      saveBtn.className = 'inline-comment-btn save';
-      saveBtn.textContent = 'Save';
-      saveBtn.type = 'button';
-      saveBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.onSave(textarea.value);
-      };
-      buttons.appendChild(saveBtn);
-
-      form.appendChild(buttons);
-      wrapper.appendChild(form);
-
-      // Focus textarea after render
-      setTimeout(() => textarea.focus(), 0);
-    } else {
-      // Display mode
-      const header = document.createElement('div');
-      header.className = 'inline-comment-header';
-
-      const author = document.createElement('span');
-      author.className = `inline-comment-author ${this.comment.author}`;
-      author.textContent = this.comment.author === 'agent' ? 'Claude' : 'You';
-      header.appendChild(author);
-
-      const actions = document.createElement('div');
-      actions.className = 'inline-comment-actions';
-
-      const editBtn = document.createElement('button');
-      editBtn.className = 'inline-comment-btn';
-      editBtn.textContent = 'Edit';
-      editBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.onStartEdit();
-      };
-      actions.appendChild(editBtn);
-
-      if (!this.comment.resolved) {
-        const resolveBtn = document.createElement('button');
-        resolveBtn.className = 'inline-comment-btn resolve';
-        resolveBtn.textContent = 'Resolve';
-        resolveBtn.onclick = (e) => {
-          e.stopPropagation();
-          this.onResolve(true);
-        };
-        actions.appendChild(resolveBtn);
-      }
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'inline-comment-btn delete';
-      deleteBtn.textContent = 'Delete';
-      deleteBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.onDelete();
-      };
-      actions.appendChild(deleteBtn);
-
-      header.appendChild(actions);
-      wrapper.appendChild(header);
-
-      const content = document.createElement('div');
-      content.className = 'inline-comment-content';
-      content.textContent = this.comment.content;
-      wrapper.appendChild(content);
-    }
-
-    return wrapper;
+    return createCommentElement(this.comment, this.isEditing, {
+      onEdit: this.onStartEdit,
+      onSave: this.onSave,
+      onCancel: this.onCancel,
+      onResolve: this.onResolve,
+      onDelete: this.onDelete,
+    });
   }
 
   eq(other: InlineCommentWidget) {
@@ -961,7 +988,7 @@ export function ReviewPanel({
         }
       });
 
-      // Inject saved comments for deleted lines
+      // Inject saved comments for deleted lines (using shared createCommentElement)
       deletedLineComments.forEach((comment) => {
         const chunk = anchorLineToChunk.get(comment.line_start);
         if (!chunk) return;
@@ -969,54 +996,45 @@ export function ReviewPanel({
         // Check if already injected
         if (chunk.querySelector(`[data-comment-id="${comment.id}"]`)) return;
 
-        // Create comment element
-        const commentEl = document.createElement('div');
-        commentEl.className = `inline-comment ${comment.resolved ? 'resolved' : ''}`;
-        commentEl.dataset.commentId = comment.id;
-        const escapedContent = comment.content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        commentEl.innerHTML = `<div class="inline-comment-header"><span class="inline-comment-author ${comment.author}">${comment.author === 'agent' ? 'Claude' : 'You'}</span><div class="inline-comment-actions"><button type="button" class="inline-comment-btn edit-btn">Edit</button><button type="button" class="inline-comment-btn ${comment.resolved ? '' : 'resolve'} resolve-btn">${comment.resolved ? 'Unresolve' : 'Resolve'}</button><button type="button" class="inline-comment-btn delete delete-btn">Delete</button></div></div><div class="inline-comment-content">${escapedContent}</div>`;
-
-        // Wire up edit button
-        commentEl.querySelector('.edit-btn')?.addEventListener('click', () => {
-          setEditingCommentId(comment.id);
-        });
-
-        // Wire up resolve button
-        const resolveBtn = commentEl.querySelector('.resolve-btn');
-        resolveBtn?.addEventListener('click', async () => {
-          if (resolveComment) {
-            const newResolved = !comment.resolved;
-            const resolveResult = await resolveComment(comment.id, newResolved);
-            if (resolveResult.success) {
-              setAllReviewComments(prev =>
-                prev.map(c => c.id === comment.id ? { ...c, resolved: newResolved } : c)
-              );
-              if (newResolved) {
-                commentEl.classList.add('resolved');
-                resolveBtn.textContent = 'Unresolve';
-                resolveBtn.classList.remove('resolve');
-              } else {
-                commentEl.classList.remove('resolved');
-                resolveBtn.textContent = 'Resolve';
-                resolveBtn.classList.add('resolve');
+        // Create comment element using shared function
+        const commentEl = createCommentElement(comment, false, {
+          onEdit: () => setEditingCommentId(comment.id),
+          onSave: async (content) => {
+            if (updateComment) {
+              const result = await updateComment(comment.id, content);
+              if (result.success) {
+                setAllReviewComments(prev =>
+                  prev.map(c => c.id === comment.id ? { ...c, content } : c)
+                );
+                setEditingCommentId(null);
               }
             }
-          }
+          },
+          onCancel: () => setEditingCommentId(null),
+          onResolve: async (resolved) => {
+            if (resolveComment) {
+              const result = await resolveComment(comment.id, resolved);
+              if (result.success) {
+                setAllReviewComments(prev =>
+                  prev.map(c => c.id === comment.id ? { ...c, resolved } : c)
+                );
+              }
+            }
+          },
+          onDelete: async () => {
+            if (deleteComment) {
+              const result = await deleteComment(comment.id);
+              if (result.success) {
+                setAllReviewComments(prev =>
+                  prev.filter(c => c.id !== comment.id)
+                );
+              }
+            }
+          },
         });
 
-        // Wire up delete button
-        commentEl.querySelector('.delete-btn')?.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          if (deleteComment) {
-            const deleteResult = await deleteComment(comment.id);
-            if (deleteResult.success) {
-              setAllReviewComments(prev =>
-                prev.filter(c => c.id !== comment.id)
-              );
-              commentEl.remove();
-            }
-          }
-        });
+        // Add data attribute for duplicate detection
+        commentEl.dataset.commentId = comment.id;
 
         // Insert after the specific deleted line (index encoded in line_end)
         // line_end = -(index + 1), so index = Math.abs(line_end) - 1
