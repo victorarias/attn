@@ -3,13 +3,14 @@ package protocol
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "13"
+const ProtocolVersion = "14"
 
 // Commands
 const (
@@ -59,6 +60,11 @@ const (
 	CmdGetRepoInfo              = "get_repo_info"
 	CmdGetReviewState           = "get_review_state"
 	CmdMarkFileViewed           = "mark_file_viewed"
+	CmdAddComment               = "add_comment"
+	CmdUpdateComment            = "update_comment"
+	CmdResolveComment           = "resolve_comment"
+	CmdDeleteComment            = "delete_comment"
+	CmdGetComments              = "get_comments"
 )
 
 // WebSocket Events (daemon -> client)
@@ -99,6 +105,11 @@ const (
 	EventGetRepoInfoResult        = "get_repo_info_result"
 	EventGetReviewStateResult     = "get_review_state_result"
 	EventMarkFileViewedResult     = "mark_file_viewed_result"
+	EventAddCommentResult         = "add_comment_result"
+	EventUpdateCommentResult      = "update_comment_result"
+	EventResolveCommentResult     = "resolve_comment_result"
+	EventDeleteCommentResult      = "delete_comment_result"
+	EventGetCommentsResult        = "get_comments_result"
 )
 
 // Session states (values for SessionState enum)
@@ -485,6 +496,41 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg MarkFileViewedMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAddComment:
+		var msg AddCommentMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal add_comment: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdUpdateComment:
+		var msg UpdateCommentMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal update_comment: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdResolveComment:
+		var msg ResolveCommentMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal resolve_comment: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDeleteComment:
+		var msg DeleteCommentMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal delete_comment: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdGetComments:
+		var msg GetCommentsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal get_comments: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
