@@ -2,6 +2,40 @@
 
 package protocol
 
+type AddCommentMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Filepath corresponds to the JSON schema field "filepath".
+	Filepath string `json:"filepath"`
+
+	// LineEnd corresponds to the JSON schema field "line_end".
+	LineEnd int `json:"line_end"`
+
+	// LineStart corresponds to the JSON schema field "line_start".
+	LineStart int `json:"line_start"`
+
+	// ReviewID corresponds to the JSON schema field "review_id".
+	ReviewID string `json:"review_id"`
+}
+
+type AddCommentResultMessage struct {
+	// Comment corresponds to the JSON schema field "comment".
+	Comment *ReviewComment `json:"comment,omitempty"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type ApprovePRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -224,6 +258,25 @@ type DeleteBranchResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type DeleteCommentMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// CommentID corresponds to the JSON schema field "comment_id".
+	CommentID string `json:"comment_id"`
+}
+
+type DeleteCommentResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type DeleteWorktreeMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -291,6 +344,31 @@ type FileDiffResultMessage struct {
 
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type GetCommentsMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Filepath corresponds to the JSON schema field "filepath".
+	Filepath *string `json:"filepath,omitempty"`
+
+	// ReviewID corresponds to the JSON schema field "review_id".
+	ReviewID string `json:"review_id"`
+}
+
+type GetCommentsResultMessage struct {
+	// Comments corresponds to the JSON schema field "comments".
+	Comments []ReviewComment `json:"comments,omitempty"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
@@ -807,6 +885,28 @@ type RepoState struct {
 	Repo string `json:"repo"`
 }
 
+type ResolveCommentMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// CommentID corresponds to the JSON schema field "comment_id".
+	CommentID string `json:"comment_id"`
+
+	// Resolved corresponds to the JSON schema field "resolved".
+	Resolved bool `json:"resolved"`
+}
+
+type ResolveCommentResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type Response struct {
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
@@ -822,6 +922,35 @@ type Response struct {
 
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty"`
+}
+
+type ReviewComment struct {
+	// Author corresponds to the JSON schema field "author".
+	Author string `json:"author"`
+
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// Filepath corresponds to the JSON schema field "filepath".
+	Filepath string `json:"filepath"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// LineEnd corresponds to the JSON schema field "line_end".
+	LineEnd int `json:"line_end"`
+
+	// LineStart corresponds to the JSON schema field "line_start".
+	LineStart int `json:"line_start"`
+
+	// Resolved corresponds to the JSON schema field "resolved".
+	Resolved bool `json:"resolved"`
+
+	// ReviewID corresponds to the JSON schema field "review_id".
+	ReviewID string `json:"review_id"`
 }
 
 type ReviewState struct {
@@ -1014,6 +1143,28 @@ type UnregisterMessage struct {
 type UnsubscribeGitStatusMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
+}
+
+type UpdateCommentMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// CommentID corresponds to the JSON schema field "comment_id".
+	CommentID string `json:"comment_id"`
+
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+}
+
+type UpdateCommentResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type WebSocketEvent struct {

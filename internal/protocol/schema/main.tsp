@@ -370,6 +370,38 @@ model MarkFileViewedMessage {
   viewed: boolean;  // true to mark viewed, false to unmark
 }
 
+model AddCommentMessage {
+  cmd: "add_comment";
+  review_id: string;
+  filepath: string;
+  line_start: int32;
+  line_end: int32;
+  content: string;
+}
+
+model UpdateCommentMessage {
+  cmd: "update_comment";
+  comment_id: string;
+  content: string;
+}
+
+model ResolveCommentMessage {
+  cmd: "resolve_comment";
+  comment_id: string;
+  resolved: boolean;
+}
+
+model DeleteCommentMessage {
+  cmd: "delete_comment";
+  comment_id: string;
+}
+
+model GetCommentsMessage {
+  cmd: "get_comments";
+  review_id: string;
+  filepath?: string;  // Optional: filter by file
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -549,6 +581,18 @@ model ReviewState {
   viewed_files: string[];  // List of filepath strings
 }
 
+model ReviewComment {
+  id: string;
+  review_id: string;
+  filepath: string;
+  line_start: int32;
+  line_end: int32;
+  content: string;
+  author: string;  // "user" or "agent"
+  resolved: boolean;
+  created_at: string;  // ISO timestamp
+}
+
 model GetReviewStateResultMessage {
   event: "get_review_state_result";
   state?: ReviewState;
@@ -562,6 +606,38 @@ model MarkFileViewedResultMessage {
   filepath: string;
   viewed: boolean;
   success: boolean;
+  error?: string;
+}
+
+model AddCommentResultMessage {
+  event: "add_comment_result";
+  success: boolean;
+  comment?: ReviewComment;
+  error?: string;
+}
+
+model UpdateCommentResultMessage {
+  event: "update_comment_result";
+  success: boolean;
+  error?: string;
+}
+
+model ResolveCommentResultMessage {
+  event: "resolve_comment_result";
+  success: boolean;
+  error?: string;
+}
+
+model DeleteCommentResultMessage {
+  event: "delete_comment_result";
+  success: boolean;
+  error?: string;
+}
+
+model GetCommentsResultMessage {
+  event: "get_comments_result";
+  success: boolean;
+  comments?: ReviewComment[];
   error?: string;
 }
 

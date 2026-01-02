@@ -1,7 +1,9 @@
 // To parse this data:
 //
-//   import { Convert, ApprovePRMessage, Branch, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, Response, ReviewState, Session, SessionState, SetSettingMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, Branch, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewState, Session, SessionState, SetSettingMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
 //
+//   const addCommentMessage = Convert.toAddCommentMessage(json);
+//   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const branch = Convert.toBranch(json);
 //   const branchesResultMessage = Convert.toBranchesResultMessage(json);
@@ -20,12 +22,16 @@
 //   const createWorktreeResultMessage = Convert.toCreateWorktreeResultMessage(json);
 //   const deleteBranchMessage = Convert.toDeleteBranchMessage(json);
 //   const deleteBranchResultMessage = Convert.toDeleteBranchResultMessage(json);
+//   const deleteCommentMessage = Convert.toDeleteCommentMessage(json);
+//   const deleteCommentResultMessage = Convert.toDeleteCommentResultMessage(json);
 //   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
 //   const fetchPRDetailsMessage = Convert.toFetchPRDetailsMessage(json);
 //   const fetchRemotesMessage = Convert.toFetchRemotesMessage(json);
 //   const fetchRemotesResultMessage = Convert.toFetchRemotesResultMessage(json);
 //   const fileDiffResultMessage = Convert.toFileDiffResultMessage(json);
+//   const getCommentsMessage = Convert.toGetCommentsMessage(json);
+//   const getCommentsResultMessage = Convert.toGetCommentsResultMessage(json);
 //   const getDefaultBranchMessage = Convert.toGetDefaultBranchMessage(json);
 //   const getDefaultBranchResultMessage = Convert.toGetDefaultBranchResultMessage(json);
 //   const getFileDiffMessage = Convert.toGetFileDiffMessage(json);
@@ -66,7 +72,10 @@
 //   const registerMessage = Convert.toRegisterMessage(json);
 //   const repoInfo = Convert.toRepoInfo(json);
 //   const repoState = Convert.toRepoState(json);
+//   const resolveCommentMessage = Convert.toResolveCommentMessage(json);
+//   const resolveCommentResultMessage = Convert.toResolveCommentResultMessage(json);
 //   const response = Convert.toResponse(json);
+//   const reviewComment = Convert.toReviewComment(json);
 //   const reviewState = Convert.toReviewState(json);
 //   const session = Convert.toSession(json);
 //   const sessionState = Convert.toSessionState(json);
@@ -83,12 +92,53 @@
 //   const todosMessage = Convert.toTodosMessage(json);
 //   const unregisterMessage = Convert.toUnregisterMessage(json);
 //   const unsubscribeGitStatusMessage = Convert.toUnsubscribeGitStatusMessage(json);
+//   const updateCommentMessage = Convert.toUpdateCommentMessage(json);
+//   const updateCommentResultMessage = Convert.toUpdateCommentResultMessage(json);
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
 //   const worktree = Convert.toWorktree(json);
 //   const worktreeCreatedEvent = Convert.toWorktreeCreatedEvent(json);
 //
 // These functions will throw an error if the JSON doesn't
 // match the expected interface, even if the JSON is valid.
+
+export interface AddCommentMessage {
+    cmd:        AddCommentMessageCmd;
+    content:    string;
+    filepath:   string;
+    line_end:   number;
+    line_start: number;
+    review_id:  string;
+    [property: string]: any;
+}
+
+export enum AddCommentMessageCmd {
+    AddComment = "add_comment",
+}
+
+export interface AddCommentResultMessage {
+    comment?: Comment;
+    error?:   string;
+    event:    AddCommentResultMessageEvent;
+    success:  boolean;
+    [property: string]: any;
+}
+
+export interface Comment {
+    author:     string;
+    content:    string;
+    created_at: string;
+    filepath:   string;
+    id:         string;
+    line_end:   number;
+    line_start: number;
+    resolved:   boolean;
+    review_id:  string;
+    [property: string]: any;
+}
+
+export enum AddCommentResultMessageEvent {
+    AddCommentResult = "add_comment_result",
+}
 
 export interface ApprovePRMessage {
     cmd:    ApprovePRMessageCmd;
@@ -300,6 +350,27 @@ export enum DeleteBranchResultMessageEvent {
     DeleteBranchResult = "delete_branch_result",
 }
 
+export interface DeleteCommentMessage {
+    cmd:        DeleteCommentMessageCmd;
+    comment_id: string;
+    [property: string]: any;
+}
+
+export enum DeleteCommentMessageCmd {
+    DeleteComment = "delete_comment",
+}
+
+export interface DeleteCommentResultMessage {
+    error?:  string;
+    event:   DeleteCommentResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum DeleteCommentResultMessageEvent {
+    DeleteCommentResult = "delete_comment_result",
+}
+
 export interface DeleteWorktreeMessage {
     cmd:  DeleteWorktreeMessageCmd;
     path: string;
@@ -366,6 +437,29 @@ export interface FileDiffResultMessage {
 
 export enum FileDiffResultMessageEvent {
     FileDiffResult = "file_diff_result",
+}
+
+export interface GetCommentsMessage {
+    cmd:       GetCommentsMessageCmd;
+    filepath?: string;
+    review_id: string;
+    [property: string]: any;
+}
+
+export enum GetCommentsMessageCmd {
+    GetComments = "get_comments",
+}
+
+export interface GetCommentsResultMessage {
+    comments?: Comment[];
+    error?:    string;
+    event:     GetCommentsResultMessageEvent;
+    success:   boolean;
+    [property: string]: any;
+}
+
+export enum GetCommentsResultMessageEvent {
+    GetCommentsResult = "get_comments_result",
 }
 
 export interface GetDefaultBranchMessage {
@@ -899,6 +993,28 @@ export interface RepoState {
     [property: string]: any;
 }
 
+export interface ResolveCommentMessage {
+    cmd:        ResolveCommentMessageCmd;
+    comment_id: string;
+    resolved:   boolean;
+    [property: string]: any;
+}
+
+export enum ResolveCommentMessageCmd {
+    ResolveComment = "resolve_comment",
+}
+
+export interface ResolveCommentResultMessage {
+    error?:  string;
+    event:   ResolveCommentResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum ResolveCommentResultMessageEvent {
+    ResolveCommentResult = "resolve_comment_result",
+}
+
 export interface Response {
     error?:    string;
     ok:        boolean;
@@ -912,6 +1028,19 @@ export interface RepoElement {
     collapsed: boolean;
     muted:     boolean;
     repo:      string;
+    [property: string]: any;
+}
+
+export interface ReviewComment {
+    author:     string;
+    content:    string;
+    created_at: string;
+    filepath:   string;
+    id:         string;
+    line_end:   number;
+    line_start: number;
+    resolved:   boolean;
+    review_id:  string;
     [property: string]: any;
 }
 
@@ -1079,6 +1208,28 @@ export enum UnsubscribeGitStatusMessageCmd {
     UnsubscribeGitStatus = "unsubscribe_git_status",
 }
 
+export interface UpdateCommentMessage {
+    cmd:        UpdateCommentMessageCmd;
+    comment_id: string;
+    content:    string;
+    [property: string]: any;
+}
+
+export enum UpdateCommentMessageCmd {
+    UpdateComment = "update_comment",
+}
+
+export interface UpdateCommentResultMessage {
+    error?:  string;
+    event:   UpdateCommentResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum UpdateCommentResultMessageEvent {
+    UpdateCommentResult = "update_comment_result",
+}
+
 export interface WebSocketEvent {
     branch?:              string;
     branches?:            BranchElement[];
@@ -1125,6 +1276,22 @@ export enum WorktreeCreatedEventEvent {
 // Converts JSON strings to/from your types
 // and asserts the results of JSON.parse at runtime
 export class Convert {
+    public static toAddCommentMessage(json: string): AddCommentMessage {
+        return cast(JSON.parse(json), r("AddCommentMessage"));
+    }
+
+    public static addCommentMessageToJson(value: AddCommentMessage): string {
+        return JSON.stringify(uncast(value, r("AddCommentMessage")), null, 2);
+    }
+
+    public static toAddCommentResultMessage(json: string): AddCommentResultMessage {
+        return cast(JSON.parse(json), r("AddCommentResultMessage"));
+    }
+
+    public static addCommentResultMessageToJson(value: AddCommentResultMessage): string {
+        return JSON.stringify(uncast(value, r("AddCommentResultMessage")), null, 2);
+    }
+
     public static toApprovePRMessage(json: string): ApprovePRMessage {
         return cast(JSON.parse(json), r("ApprovePRMessage"));
     }
@@ -1269,6 +1436,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("DeleteBranchResultMessage")), null, 2);
     }
 
+    public static toDeleteCommentMessage(json: string): DeleteCommentMessage {
+        return cast(JSON.parse(json), r("DeleteCommentMessage"));
+    }
+
+    public static deleteCommentMessageToJson(value: DeleteCommentMessage): string {
+        return JSON.stringify(uncast(value, r("DeleteCommentMessage")), null, 2);
+    }
+
+    public static toDeleteCommentResultMessage(json: string): DeleteCommentResultMessage {
+        return cast(JSON.parse(json), r("DeleteCommentResultMessage"));
+    }
+
+    public static deleteCommentResultMessageToJson(value: DeleteCommentResultMessage): string {
+        return JSON.stringify(uncast(value, r("DeleteCommentResultMessage")), null, 2);
+    }
+
     public static toDeleteWorktreeMessage(json: string): DeleteWorktreeMessage {
         return cast(JSON.parse(json), r("DeleteWorktreeMessage"));
     }
@@ -1315,6 +1498,22 @@ export class Convert {
 
     public static fileDiffResultMessageToJson(value: FileDiffResultMessage): string {
         return JSON.stringify(uncast(value, r("FileDiffResultMessage")), null, 2);
+    }
+
+    public static toGetCommentsMessage(json: string): GetCommentsMessage {
+        return cast(JSON.parse(json), r("GetCommentsMessage"));
+    }
+
+    public static getCommentsMessageToJson(value: GetCommentsMessage): string {
+        return JSON.stringify(uncast(value, r("GetCommentsMessage")), null, 2);
+    }
+
+    public static toGetCommentsResultMessage(json: string): GetCommentsResultMessage {
+        return cast(JSON.parse(json), r("GetCommentsResultMessage"));
+    }
+
+    public static getCommentsResultMessageToJson(value: GetCommentsResultMessage): string {
+        return JSON.stringify(uncast(value, r("GetCommentsResultMessage")), null, 2);
     }
 
     public static toGetDefaultBranchMessage(json: string): GetDefaultBranchMessage {
@@ -1637,12 +1836,36 @@ export class Convert {
         return JSON.stringify(uncast(value, r("RepoState")), null, 2);
     }
 
+    public static toResolveCommentMessage(json: string): ResolveCommentMessage {
+        return cast(JSON.parse(json), r("ResolveCommentMessage"));
+    }
+
+    public static resolveCommentMessageToJson(value: ResolveCommentMessage): string {
+        return JSON.stringify(uncast(value, r("ResolveCommentMessage")), null, 2);
+    }
+
+    public static toResolveCommentResultMessage(json: string): ResolveCommentResultMessage {
+        return cast(JSON.parse(json), r("ResolveCommentResultMessage"));
+    }
+
+    public static resolveCommentResultMessageToJson(value: ResolveCommentResultMessage): string {
+        return JSON.stringify(uncast(value, r("ResolveCommentResultMessage")), null, 2);
+    }
+
     public static toResponse(json: string): Response {
         return cast(JSON.parse(json), r("Response"));
     }
 
     public static responseToJson(value: Response): string {
         return JSON.stringify(uncast(value, r("Response")), null, 2);
+    }
+
+    public static toReviewComment(json: string): ReviewComment {
+        return cast(JSON.parse(json), r("ReviewComment"));
+    }
+
+    public static reviewCommentToJson(value: ReviewComment): string {
+        return JSON.stringify(uncast(value, r("ReviewComment")), null, 2);
     }
 
     public static toReviewState(json: string): ReviewState {
@@ -1771,6 +1994,22 @@ export class Convert {
 
     public static unsubscribeGitStatusMessageToJson(value: UnsubscribeGitStatusMessage): string {
         return JSON.stringify(uncast(value, r("UnsubscribeGitStatusMessage")), null, 2);
+    }
+
+    public static toUpdateCommentMessage(json: string): UpdateCommentMessage {
+        return cast(JSON.parse(json), r("UpdateCommentMessage"));
+    }
+
+    public static updateCommentMessageToJson(value: UpdateCommentMessage): string {
+        return JSON.stringify(uncast(value, r("UpdateCommentMessage")), null, 2);
+    }
+
+    public static toUpdateCommentResultMessage(json: string): UpdateCommentResultMessage {
+        return cast(JSON.parse(json), r("UpdateCommentResultMessage"));
+    }
+
+    public static updateCommentResultMessageToJson(value: UpdateCommentResultMessage): string {
+        return JSON.stringify(uncast(value, r("UpdateCommentResultMessage")), null, 2);
     }
 
     public static toWebSocketEvent(json: string): WebSocketEvent {
@@ -1951,6 +2190,31 @@ function r(name: string) {
 }
 
 const typeMap: any = {
+    "AddCommentMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AddCommentMessageCmd") },
+        { json: "content", js: "content", typ: "" },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+        { json: "review_id", js: "review_id", typ: "" },
+    ], "any"),
+    "AddCommentResultMessage": o([
+        { json: "comment", js: "comment", typ: u(undefined, r("Comment")) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("AddCommentResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "Comment": o([
+        { json: "author", js: "author", typ: "" },
+        { json: "content", js: "content", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+        { json: "resolved", js: "resolved", typ: true },
+        { json: "review_id", js: "review_id", typ: "" },
+    ], "any"),
     "ApprovePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
         { json: "number", js: "number", typ: 0 },
@@ -2055,6 +2319,15 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("DeleteBranchResultMessageEvent") },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "DeleteCommentMessage": o([
+        { json: "cmd", js: "cmd", typ: r("DeleteCommentMessageCmd") },
+        { json: "comment_id", js: "comment_id", typ: "" },
+    ], "any"),
+    "DeleteCommentResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("DeleteCommentResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "DeleteWorktreeMessage": o([
         { json: "cmd", js: "cmd", typ: r("DeleteWorktreeMessageCmd") },
         { json: "path", js: "path", typ: "" },
@@ -2085,6 +2358,17 @@ const typeMap: any = {
         { json: "modified", js: "modified", typ: "" },
         { json: "original", js: "original", typ: "" },
         { json: "path", js: "path", typ: "" },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "GetCommentsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetCommentsMessageCmd") },
+        { json: "filepath", js: "filepath", typ: u(undefined, "") },
+        { json: "review_id", js: "review_id", typ: "" },
+    ], "any"),
+    "GetCommentsResultMessage": o([
+        { json: "comments", js: "comments", typ: u(undefined, a(r("Comment"))) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("GetCommentsResultMessageEvent") },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "GetDefaultBranchMessage": o([
@@ -2379,6 +2663,16 @@ const typeMap: any = {
         { json: "muted", js: "muted", typ: true },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
+    "ResolveCommentMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ResolveCommentMessageCmd") },
+        { json: "comment_id", js: "comment_id", typ: "" },
+        { json: "resolved", js: "resolved", typ: true },
+    ], "any"),
+    "ResolveCommentResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("ResolveCommentResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "Response": o([
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "ok", js: "ok", typ: true },
@@ -2390,6 +2684,17 @@ const typeMap: any = {
         { json: "collapsed", js: "collapsed", typ: true },
         { json: "muted", js: "muted", typ: true },
         { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "ReviewComment": o([
+        { json: "author", js: "author", typ: "" },
+        { json: "content", js: "content", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+        { json: "resolved", js: "resolved", typ: true },
+        { json: "review_id", js: "review_id", typ: "" },
     ], "any"),
     "ReviewState": o([
         { json: "branch", js: "branch", typ: "" },
@@ -2473,6 +2778,16 @@ const typeMap: any = {
     "UnsubscribeGitStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("UnsubscribeGitStatusMessageCmd") },
     ], "any"),
+    "UpdateCommentMessage": o([
+        { json: "cmd", js: "cmd", typ: r("UpdateCommentMessageCmd") },
+        { json: "comment_id", js: "comment_id", typ: "" },
+        { json: "content", js: "content", typ: "" },
+    ], "any"),
+    "UpdateCommentResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("UpdateCommentResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "WebSocketEvent": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "branches", js: "branches", typ: u(undefined, a(r("BranchElement"))) },
@@ -2506,6 +2821,12 @@ const typeMap: any = {
         { json: "main_repo", js: "main_repo", typ: "" },
         { json: "path", js: "path", typ: "" },
     ], "any"),
+    "AddCommentMessageCmd": [
+        "add_comment",
+    ],
+    "AddCommentResultMessageEvent": [
+        "add_comment_result",
+    ],
     "ApprovePRMessageCmd": [
         "approve_pr",
     ],
@@ -2557,6 +2878,12 @@ const typeMap: any = {
     "DeleteBranchResultMessageEvent": [
         "delete_branch_result",
     ],
+    "DeleteCommentMessageCmd": [
+        "delete_comment",
+    ],
+    "DeleteCommentResultMessageEvent": [
+        "delete_comment_result",
+    ],
     "DeleteWorktreeMessageCmd": [
         "delete_worktree",
     ],
@@ -2574,6 +2901,12 @@ const typeMap: any = {
     ],
     "FileDiffResultMessageEvent": [
         "file_diff_result",
+    ],
+    "GetCommentsMessageCmd": [
+        "get_comments",
+    ],
+    "GetCommentsResultMessageEvent": [
+        "get_comments_result",
     ],
     "GetDefaultBranchMessageCmd": [
         "get_default_branch",
@@ -2688,6 +3021,12 @@ const typeMap: any = {
     "RegisterMessageCmd": [
         "register",
     ],
+    "ResolveCommentMessageCmd": [
+        "resolve_comment",
+    ],
+    "ResolveCommentResultMessageEvent": [
+        "resolve_comment_result",
+    ],
     "SetSettingMessageCmd": [
         "set_setting",
     ],
@@ -2726,6 +3065,12 @@ const typeMap: any = {
     ],
     "UnsubscribeGitStatusMessageCmd": [
         "unsubscribe_git_status",
+    ],
+    "UpdateCommentMessageCmd": [
+        "update_comment",
+    ],
+    "UpdateCommentResultMessageEvent": [
+        "update_comment_result",
     ],
     "WorktreeCreatedEventEvent": [
         "worktree_created",
