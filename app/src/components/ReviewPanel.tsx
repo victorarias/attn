@@ -30,7 +30,7 @@ const AUTO_SKIP_PATTERNS = [
 
 // Comment gutter marker - renders clickable button for each line
 class CommentMarker extends GutterMarker {
-  constructor(public commentCount: number) {
+  constructor(public commentCount: number, public lineNum: number) {
     super();
   }
 
@@ -38,6 +38,7 @@ class CommentMarker extends GutterMarker {
     const btn = document.createElement('button');
     btn.className = this.commentCount > 0 ? 'comment-gutter-btn has-comment' : 'comment-gutter-btn';
     btn.type = 'button';
+    btn.dataset.lineNum = String(this.lineNum);
 
     if (this.commentCount > 0) {
       btn.innerHTML = `<span class="comment-icon">💬</span>`;
@@ -503,25 +504,59 @@ export function ReviewPanel({
         for (let i = 1; i <= view.state.doc.lines; i++) {
           const line = view.state.doc.line(i);
           const commentCount = commentLines.get(i) || 0;
-          markers.push({ from: line.from, to: line.from, value: new CommentMarker(commentCount) });
+          markers.push({ from: line.from, to: line.from, value: new CommentMarker(commentCount, i) });
         }
 
         return RangeSet.of(markers, true);
       },
-      domEventHandlers: {
-        click: (view, line, event) => {
-          const lineNum = view.state.doc.lineAt(line.from).number;
-          const commentLines = view.state.field(commentLinesField);
-          const hasComment = commentLines.has(lineNum);
+    });
 
-          // Get position for popover relative to viewport
-          const rect = (event.target as HTMLElement).getBoundingClientRect();
+    // Click handler for gutter buttons and diff lines
+    const clickHandler = EditorView.domEventHandlers({
+      click: (event, view) => {
+        const target = event.target as HTMLElement;
+
+        // Check if clicking a gutter button
+        const gutterBtn = target.closest('.comment-gutter-btn');
+        if (gutterBtn instanceof HTMLElement) {
+          const lineNum = parseInt(gutterBtn.dataset.lineNum || '0', 10);
+          if (lineNum > 0) {
+            const rect = gutterBtn.getBoundingClientRect();
+            const hasComment = commentLineMap.has(lineNum);
+
+            if (hasComment) {
+              const lineComments = comments.filter(c => c.line_start === lineNum);
+              if (lineComments.length > 0) {
+                setActivePopover({
+                  type: 'existing',
+                  comment: lineComments[0],
+                  position: { top: rect.top, left: rect.right + 8 },
+                });
+              }
+            } else {
+              setActivePopover({
+                type: 'new',
+                lineStart: lineNum,
+                lineEnd: lineNum,
+                position: { top: rect.top, left: rect.right + 8 },
+              });
+            }
+            return true;
+          }
+        }
+
+        // Check if clicking a diff line (not gutter, not already on button)
+        const line = target.closest('.cm-line');
+        if (line instanceof HTMLElement) {
+          // Get position in editor
+          const pos = view.posAtDOM(line);
+          const lineNum = view.state.doc.lineAt(pos).number;
+          const rect = line.getBoundingClientRect();
+          const hasComment = commentLineMap.has(lineNum);
 
           if (hasComment) {
-            // Find the comment(s) at this line
             const lineComments = comments.filter(c => c.line_start === lineNum);
             if (lineComments.length > 0) {
-              // Open existing comment popover
               setActivePopover({
                 type: 'existing',
                 comment: lineComments[0],
@@ -529,7 +564,6 @@ export function ReviewPanel({
               });
             }
           } else {
-            // Open new comment popover
             setActivePopover({
               type: 'new',
               lineStart: lineNum,
@@ -537,15 +571,17 @@ export function ReviewPanel({
               position: { top: rect.top, left: rect.right + 8 },
             });
           }
-
           return true;
-        },
+        }
+
+        return false;
       },
     });
 
     const extensions = [
       commentLinesField,
       commentGutter,
+      clickHandler,
       minimalSetup,
       langExtension,
       oneDark,
