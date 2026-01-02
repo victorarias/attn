@@ -131,3 +131,133 @@ func TestViewedFiles(t *testing.T) {
 		t.Errorf("expected 0 viewed files after clear, got %d", len(files))
 	}
 }
+
+func setupTestStore(t *testing.T) *Store {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	return store
+}
+
+func TestReviewComments(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	// Create a review first
+	review, err := store.GetOrCreateReview("/test/repo", "main")
+	if err != nil {
+		t.Fatalf("failed to create review: %v", err)
+	}
+
+	// Test AddComment
+	comment, err := store.AddComment(review.ID, "src/foo.go", 10, 15, "Check null here", "user")
+	if err != nil {
+		t.Fatalf("failed to add comment: %v", err)
+	}
+	if comment.ID == "" {
+		t.Error("comment ID should not be empty")
+	}
+	if comment.ReviewID != review.ID {
+		t.Errorf("expected review ID %s, got %s", review.ID, comment.ReviewID)
+	}
+	if comment.Filepath != "src/foo.go" {
+		t.Errorf("expected filepath 'src/foo.go', got '%s'", comment.Filepath)
+	}
+	if comment.LineStart != 10 {
+		t.Errorf("expected line_start 10, got %d", comment.LineStart)
+	}
+	if comment.LineEnd != 15 {
+		t.Errorf("expected line_end 15, got %d", comment.LineEnd)
+	}
+	if comment.Content != "Check null here" {
+		t.Errorf("expected content 'Check null here', got '%s'", comment.Content)
+	}
+	if comment.Author != "user" {
+		t.Errorf("expected author 'user', got '%s'", comment.Author)
+	}
+	if comment.Resolved {
+		t.Error("comment should not be resolved by default")
+	}
+
+	// Test GetComments
+	comments, err := store.GetComments(review.ID)
+	if err != nil {
+		t.Fatalf("failed to get comments: %v", err)
+	}
+	if len(comments) != 1 {
+		t.Errorf("expected 1 comment, got %d", len(comments))
+	}
+
+	// Test GetCommentsForFile
+	fileComments, err := store.GetCommentsForFile(review.ID, "src/foo.go")
+	if err != nil {
+		t.Fatalf("failed to get comments for file: %v", err)
+	}
+	if len(fileComments) != 1 {
+		t.Errorf("expected 1 comment for file, got %d", len(fileComments))
+	}
+
+	// Test GetCommentsForFile with non-existent file
+	emptyComments, err := store.GetCommentsForFile(review.ID, "nonexistent.go")
+	if err != nil {
+		t.Fatalf("failed to get comments for non-existent file: %v", err)
+	}
+	if len(emptyComments) != 0 {
+		t.Errorf("expected 0 comments for non-existent file, got %d", len(emptyComments))
+	}
+
+	// Test UpdateComment
+	err = store.UpdateComment(comment.ID, "Updated content")
+	if err != nil {
+		t.Fatalf("failed to update comment: %v", err)
+	}
+	updated, err := store.GetCommentByID(comment.ID)
+	if err != nil {
+		t.Fatalf("failed to get updated comment: %v", err)
+	}
+	if updated.Content != "Updated content" {
+		t.Errorf("expected content 'Updated content', got '%s'", updated.Content)
+	}
+
+	// Test ResolveComment
+	err = store.ResolveComment(comment.ID, true)
+	if err != nil {
+		t.Fatalf("failed to resolve comment: %v", err)
+	}
+	resolved, err := store.GetCommentByID(comment.ID)
+	if err != nil {
+		t.Fatalf("failed to get resolved comment: %v", err)
+	}
+	if !resolved.Resolved {
+		t.Error("comment should be resolved")
+	}
+
+	// Test unresolving
+	err = store.ResolveComment(comment.ID, false)
+	if err != nil {
+		t.Fatalf("failed to unresolve comment: %v", err)
+	}
+	unresolved, err := store.GetCommentByID(comment.ID)
+	if err != nil {
+		t.Fatalf("failed to get unresolved comment: %v", err)
+	}
+	if unresolved.Resolved {
+		t.Error("comment should be unresolved")
+	}
+
+	// Test DeleteComment
+	err = store.DeleteComment(comment.ID)
+	if err != nil {
+		t.Fatalf("failed to delete comment: %v", err)
+	}
+	comments, err = store.GetComments(review.ID)
+	if err != nil {
+		t.Fatalf("failed to get comments after delete: %v", err)
+	}
+	if len(comments) != 0 {
+		t.Errorf("expected 0 comments after delete, got %d", len(comments))
+	}
+}

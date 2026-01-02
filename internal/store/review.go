@@ -152,3 +152,151 @@ func (s *Store) ClearViewedFiles(reviewID string) error {
 	_, err := s.db.Exec(`DELETE FROM review_viewed_files WHERE review_id = ?`, reviewID)
 	return err
 }
+
+// ReviewComment represents a comment on a code review
+type ReviewComment struct {
+	ID        string
+	ReviewID  string
+	Filepath  string
+	LineStart int
+	LineEnd   int
+	Content   string
+	Author    string // "user" or "agent"
+	Resolved  bool
+	CreatedAt time.Time
+}
+
+// AddComment adds a new comment to a review
+func (s *Store) AddComment(reviewID, filepath string, lineStart, lineEnd int, content, author string) (*ReviewComment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	comment := &ReviewComment{
+		ID:        uuid.New().String(),
+		ReviewID:  reviewID,
+		Filepath:  filepath,
+		LineStart: lineStart,
+		LineEnd:   lineEnd,
+		Content:   content,
+		Author:    author,
+		Resolved:  false,
+		CreatedAt: now,
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO review_comments (id, review_id, filepath, line_start, line_end, content, author, resolved, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, comment.ID, comment.ReviewID, comment.Filepath, comment.LineStart, comment.LineEnd,
+		comment.Content, comment.Author, 0, now.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+
+	return comment, nil
+}
+
+// GetComments returns all comments for a review
+func (s *Store) GetComments(reviewID string) ([]*ReviewComment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, created_at
+		FROM review_comments WHERE review_id = ? ORDER BY filepath, line_start
+	`, reviewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanComments(rows)
+}
+
+// GetCommentsForFile returns comments for a specific file
+func (s *Store) GetCommentsForFile(reviewID, filepath string) ([]*ReviewComment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, created_at
+		FROM review_comments WHERE review_id = ? AND filepath = ? ORDER BY line_start
+	`, reviewID, filepath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanComments(rows)
+}
+
+// GetCommentByID returns a single comment by ID
+func (s *Store) GetCommentByID(id string) (*ReviewComment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var comment ReviewComment
+	var resolved int
+	var createdAt string
+
+	err := s.db.QueryRow(`
+		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, created_at
+		FROM review_comments WHERE id = ?
+	`, id).Scan(&comment.ID, &comment.ReviewID, &comment.Filepath, &comment.LineStart,
+		&comment.LineEnd, &comment.Content, &comment.Author, &resolved, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+
+	comment.Resolved = resolved == 1
+	comment.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	return &comment, nil
+}
+
+// UpdateComment updates the content of a comment
+func (s *Store) UpdateComment(id, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`UPDATE review_comments SET content = ? WHERE id = ?`, content, id)
+	return err
+}
+
+// ResolveComment sets the resolved status of a comment
+func (s *Store) ResolveComment(id string, resolved bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	resolvedInt := 0
+	if resolved {
+		resolvedInt = 1
+	}
+	_, err := s.db.Exec(`UPDATE review_comments SET resolved = ? WHERE id = ?`, resolvedInt, id)
+	return err
+}
+
+// DeleteComment deletes a comment
+func (s *Store) DeleteComment(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM review_comments WHERE id = ?`, id)
+	return err
+}
+
+func scanComments(rows *sql.Rows) ([]*ReviewComment, error) {
+	var comments []*ReviewComment
+	for rows.Next() {
+		var comment ReviewComment
+		var resolved int
+		var createdAt string
+		if err := rows.Scan(&comment.ID, &comment.ReviewID, &comment.Filepath, &comment.LineStart,
+			&comment.LineEnd, &comment.Content, &comment.Author, &resolved, &createdAt); err != nil {
+			return nil, err
+		}
+		comment.Resolved = resolved == 1
+		comment.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		comments = append(comments, &comment)
+	}
+	return comments, rows.Err()
+}
