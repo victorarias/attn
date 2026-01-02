@@ -47,7 +47,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '12';
+const PROTOCOL_VERSION = '13';
 
 interface PRActionResult {
   success: boolean;
@@ -128,6 +128,24 @@ interface RepoInfo {
 interface RepoInfoResult {
   success: boolean;
   info?: RepoInfo;
+  error?: string;
+}
+
+export interface ReviewState {
+  review_id: string;
+  repo_path: string;
+  branch: string;
+  viewed_files: string[];
+}
+
+interface ReviewStateResult {
+  success: boolean;
+  state?: ReviewState;
+  error?: string;
+}
+
+interface MarkFileViewedResult {
+  success: boolean;
   error?: string;
 }
 
@@ -623,6 +641,32 @@ export function useDaemonSocket({
                 pending.resolve({ success: true, info: (data as any).info });
               } else {
                 pending.resolve({ success: false, error: (data as any).error });
+              }
+            }
+            break;
+          }
+
+          case 'get_review_state_result': {
+            const pending = pendingActionsRef.current.get('get_review_state');
+            if (pending) {
+              pendingActionsRef.current.delete('get_review_state');
+              if ((data as any).success) {
+                pending.resolve({ success: true, state: (data as any).state });
+              } else {
+                pending.reject(new Error((data as any).error || 'Failed to get review state'));
+              }
+            }
+            break;
+          }
+
+          case 'mark_file_viewed_result': {
+            const pending = pendingActionsRef.current.get('mark_file_viewed');
+            if (pending) {
+              pendingActionsRef.current.delete('mark_file_viewed');
+              if ((data as any).success) {
+                pending.resolve({ success: true });
+              } else {
+                pending.reject(new Error((data as any).error || 'Failed to mark file viewed'));
               }
             }
             break;
@@ -1337,6 +1381,52 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Get review state for a repo/branch
+  const getReviewState = useCallback((repoPath: string, branch: string): Promise<ReviewStateResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'get_review_state';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'get_review_state', repo_path: repoPath, branch }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get review state timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  // Mark a file as viewed/unviewed in a review
+  const markFileViewed = useCallback((reviewId: string, filepath: string, viewed: boolean): Promise<MarkFileViewedResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'mark_file_viewed';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'mark_file_viewed', review_id: reviewId, filepath, viewed }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Mark file viewed timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -1373,5 +1463,7 @@ export function useDaemonSocket({
     sendUnsubscribeGitStatus,
     sendGetFileDiff,
     getRepoInfo,
+    getReviewState,
+    markFileViewed,
   };
 }

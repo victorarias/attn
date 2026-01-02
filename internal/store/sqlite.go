@@ -103,6 +103,22 @@ var migrations = []migration{
 		last_seen TEXT NOT NULL,
 		use_count INTEGER NOT NULL DEFAULT 1
 	)`},
+	{12, "create reviews table", `CREATE TABLE IF NOT EXISTS reviews (
+		id TEXT PRIMARY KEY,
+		branch TEXT NOT NULL,
+		pr_number INTEGER,
+		repo_path TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		UNIQUE(repo_path, branch)
+	)`},
+	{13, "create review_viewed_files table", `CREATE TABLE IF NOT EXISTS review_viewed_files (
+		review_id TEXT NOT NULL,
+		filepath TEXT NOT NULL,
+		viewed_at TEXT NOT NULL,
+		PRIMARY KEY (review_id, filepath),
+		FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
+	)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, ApprovePRMessage, Branch, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, Response, Session, SessionState, SetSettingMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, ApprovePRMessage, Branch, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, Response, ReviewState, Session, SessionState, SetSettingMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const branch = Convert.toBranch(json);
@@ -32,6 +32,8 @@
 //   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
 //   const getRepoInfoMessage = Convert.toGetRepoInfoMessage(json);
 //   const getRepoInfoResultMessage = Convert.toGetRepoInfoResultMessage(json);
+//   const getReviewStateMessage = Convert.toGetReviewStateMessage(json);
+//   const getReviewStateResultMessage = Convert.toGetReviewStateResultMessage(json);
 //   const getSettingsMessage = Convert.toGetSettingsMessage(json);
 //   const gitFileChange = Convert.toGitFileChange(json);
 //   const gitStatusUpdateMessage = Convert.toGitStatusUpdateMessage(json);
@@ -43,6 +45,8 @@
 //   const listRemoteBranchesMessage = Convert.toListRemoteBranchesMessage(json);
 //   const listRemoteBranchesResultMessage = Convert.toListRemoteBranchesResultMessage(json);
 //   const listWorktreesMessage = Convert.toListWorktreesMessage(json);
+//   const markFileViewedMessage = Convert.toMarkFileViewedMessage(json);
+//   const markFileViewedResultMessage = Convert.toMarkFileViewedResultMessage(json);
 //   const mergePRMessage = Convert.toMergePRMessage(json);
 //   const muteMessage = Convert.toMuteMessage(json);
 //   const mutePRMessage = Convert.toMutePRMessage(json);
@@ -63,6 +67,7 @@
 //   const repoInfo = Convert.toRepoInfo(json);
 //   const repoState = Convert.toRepoState(json);
 //   const response = Convert.toResponse(json);
+//   const reviewState = Convert.toReviewState(json);
 //   const session = Convert.toSession(json);
 //   const sessionState = Convert.toSessionState(json);
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
@@ -449,6 +454,37 @@ export interface WorktreeElement {
     [property: string]: any;
 }
 
+export interface GetReviewStateMessage {
+    branch:    string;
+    cmd:       GetReviewStateMessageCmd;
+    repo_path: string;
+    [property: string]: any;
+}
+
+export enum GetReviewStateMessageCmd {
+    GetReviewState = "get_review_state",
+}
+
+export interface GetReviewStateResultMessage {
+    error?:  string;
+    event:   GetReviewStateResultMessageEvent;
+    state?:  State;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum GetReviewStateResultMessageEvent {
+    GetReviewStateResult = "get_review_state_result",
+}
+
+export interface State {
+    branch:       string;
+    repo_path:    string;
+    review_id:    string;
+    viewed_files: string[];
+    [property: string]: any;
+}
+
 export interface GetSettingsMessage {
     cmd: GetSettingsMessageCmd;
     [property: string]: any;
@@ -621,6 +657,32 @@ export interface ListWorktreesMessage {
 
 export enum ListWorktreesMessageCmd {
     ListWorktrees = "list_worktrees",
+}
+
+export interface MarkFileViewedMessage {
+    cmd:       MarkFileViewedMessageCmd;
+    filepath:  string;
+    review_id: string;
+    viewed:    boolean;
+    [property: string]: any;
+}
+
+export enum MarkFileViewedMessageCmd {
+    MarkFileViewed = "mark_file_viewed",
+}
+
+export interface MarkFileViewedResultMessage {
+    error?:    string;
+    event:     MarkFileViewedResultMessageEvent;
+    filepath:  string;
+    review_id: string;
+    success:   boolean;
+    viewed:    boolean;
+    [property: string]: any;
+}
+
+export enum MarkFileViewedResultMessageEvent {
+    MarkFileViewedResult = "mark_file_viewed_result",
 }
 
 export interface MergePRMessage {
@@ -850,6 +912,14 @@ export interface RepoElement {
     collapsed: boolean;
     muted:     boolean;
     repo:      string;
+    [property: string]: any;
+}
+
+export interface ReviewState {
+    branch:       string;
+    repo_path:    string;
+    review_id:    string;
+    viewed_files: string[];
     [property: string]: any;
 }
 
@@ -1295,6 +1365,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("GetRepoInfoResultMessage")), null, 2);
     }
 
+    public static toGetReviewStateMessage(json: string): GetReviewStateMessage {
+        return cast(JSON.parse(json), r("GetReviewStateMessage"));
+    }
+
+    public static getReviewStateMessageToJson(value: GetReviewStateMessage): string {
+        return JSON.stringify(uncast(value, r("GetReviewStateMessage")), null, 2);
+    }
+
+    public static toGetReviewStateResultMessage(json: string): GetReviewStateResultMessage {
+        return cast(JSON.parse(json), r("GetReviewStateResultMessage"));
+    }
+
+    public static getReviewStateResultMessageToJson(value: GetReviewStateResultMessage): string {
+        return JSON.stringify(uncast(value, r("GetReviewStateResultMessage")), null, 2);
+    }
+
     public static toGetSettingsMessage(json: string): GetSettingsMessage {
         return cast(JSON.parse(json), r("GetSettingsMessage"));
     }
@@ -1381,6 +1467,22 @@ export class Convert {
 
     public static listWorktreesMessageToJson(value: ListWorktreesMessage): string {
         return JSON.stringify(uncast(value, r("ListWorktreesMessage")), null, 2);
+    }
+
+    public static toMarkFileViewedMessage(json: string): MarkFileViewedMessage {
+        return cast(JSON.parse(json), r("MarkFileViewedMessage"));
+    }
+
+    public static markFileViewedMessageToJson(value: MarkFileViewedMessage): string {
+        return JSON.stringify(uncast(value, r("MarkFileViewedMessage")), null, 2);
+    }
+
+    public static toMarkFileViewedResultMessage(json: string): MarkFileViewedResultMessage {
+        return cast(JSON.parse(json), r("MarkFileViewedResultMessage"));
+    }
+
+    public static markFileViewedResultMessageToJson(value: MarkFileViewedResultMessage): string {
+        return JSON.stringify(uncast(value, r("MarkFileViewedResultMessage")), null, 2);
     }
 
     public static toMergePRMessage(json: string): MergePRMessage {
@@ -1541,6 +1643,14 @@ export class Convert {
 
     public static responseToJson(value: Response): string {
         return JSON.stringify(uncast(value, r("Response")), null, 2);
+    }
+
+    public static toReviewState(json: string): ReviewState {
+        return cast(JSON.parse(json), r("ReviewState"));
+    }
+
+    public static reviewStateToJson(value: ReviewState): string {
+        return JSON.stringify(uncast(value, r("ReviewState")), null, 2);
     }
 
     public static toSession(json: string): Session {
@@ -2023,6 +2133,23 @@ const typeMap: any = {
         { json: "main_repo", js: "main_repo", typ: "" },
         { json: "path", js: "path", typ: "" },
     ], "any"),
+    "GetReviewStateMessage": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("GetReviewStateMessageCmd") },
+        { json: "repo_path", js: "repo_path", typ: "" },
+    ], "any"),
+    "GetReviewStateResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("GetReviewStateResultMessageEvent") },
+        { json: "state", js: "state", typ: u(undefined, r("State")) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "State": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "repo_path", js: "repo_path", typ: "" },
+        { json: "review_id", js: "review_id", typ: "" },
+        { json: "viewed_files", js: "viewed_files", typ: a("") },
+    ], "any"),
     "GetSettingsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetSettingsMessageCmd") },
     ], "any"),
@@ -2117,6 +2244,20 @@ const typeMap: any = {
     "ListWorktreesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListWorktreesMessageCmd") },
         { json: "main_repo", js: "main_repo", typ: "" },
+    ], "any"),
+    "MarkFileViewedMessage": o([
+        { json: "cmd", js: "cmd", typ: r("MarkFileViewedMessageCmd") },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "review_id", js: "review_id", typ: "" },
+        { json: "viewed", js: "viewed", typ: true },
+    ], "any"),
+    "MarkFileViewedResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("MarkFileViewedResultMessageEvent") },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "review_id", js: "review_id", typ: "" },
+        { json: "success", js: "success", typ: true },
+        { json: "viewed", js: "viewed", typ: true },
     ], "any"),
     "MergePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("MergePRMessageCmd") },
@@ -2249,6 +2390,12 @@ const typeMap: any = {
         { json: "collapsed", js: "collapsed", typ: true },
         { json: "muted", js: "muted", typ: true },
         { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "ReviewState": o([
+        { json: "branch", js: "branch", typ: "" },
+        { json: "repo_path", js: "repo_path", typ: "" },
+        { json: "review_id", js: "review_id", typ: "" },
+        { json: "viewed_files", js: "viewed_files", typ: a("") },
     ], "any"),
     "Session": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
@@ -2446,6 +2593,12 @@ const typeMap: any = {
     "GetRepoInfoResultMessageEvent": [
         "get_repo_info_result",
     ],
+    "GetReviewStateMessageCmd": [
+        "get_review_state",
+    ],
+    "GetReviewStateResultMessageEvent": [
+        "get_review_state_result",
+    ],
     "GetSettingsMessageCmd": [
         "get_settings",
     ],
@@ -2486,6 +2639,12 @@ const typeMap: any = {
     ],
     "ListWorktreesMessageCmd": [
         "list_worktrees",
+    ],
+    "MarkFileViewedMessageCmd": [
+        "mark_file_viewed",
+    ],
+    "MarkFileViewedResultMessageEvent": [
+        "mark_file_viewed_result",
     ],
     "MergePRMessageCmd": [
         "merge_pr",

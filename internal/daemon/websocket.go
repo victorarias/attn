@@ -567,6 +567,16 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		repoMsg := msg.(*protocol.GetRepoInfoMessage)
 		d.logf("Getting repo info for %s", repoMsg.Repo)
 		d.handleGetRepoInfoWS(client, repoMsg)
+
+	case protocol.CmdGetReviewState:
+		reviewMsg := msg.(*protocol.GetReviewStateMessage)
+		d.logf("Getting review state for %s branch %s", reviewMsg.RepoPath, reviewMsg.Branch)
+		d.handleGetReviewState(client, reviewMsg)
+
+	case protocol.CmdMarkFileViewed:
+		viewedMsg := msg.(*protocol.MarkFileViewedMessage)
+		d.logf("Marking file %s viewed=%v in review %s", viewedMsg.Filepath, viewedMsg.Viewed, viewedMsg.ReviewID)
+		d.handleMarkFileViewed(client, viewedMsg)
 	}
 }
 
@@ -769,5 +779,61 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 	result.Modified = modified
 	result.Success = true
 
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleGetReviewState(client *wsClient, msg *protocol.GetReviewStateMessage) {
+	result := protocol.GetReviewStateResultMessage{
+		Event:   protocol.EventGetReviewStateResult,
+		Success: false,
+	}
+
+	review, err := d.store.GetOrCreateReview(msg.RepoPath, msg.Branch)
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	viewedFiles, err := d.store.GetViewedFiles(review.ID)
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	result.State = &protocol.ReviewState{
+		ReviewID:    review.ID,
+		RepoPath:    review.RepoPath,
+		Branch:      review.Branch,
+		ViewedFiles: viewedFiles,
+	}
+	result.Success = true
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleMarkFileViewed(client *wsClient, msg *protocol.MarkFileViewedMessage) {
+	result := protocol.MarkFileViewedResultMessage{
+		Event:    protocol.EventMarkFileViewedResult,
+		ReviewID: msg.ReviewID,
+		Filepath: msg.Filepath,
+		Viewed:   msg.Viewed,
+		Success:  false,
+	}
+
+	var err error
+	if msg.Viewed {
+		err = d.store.MarkFileViewed(msg.ReviewID, msg.Filepath)
+	} else {
+		err = d.store.UnmarkFileViewed(msg.ReviewID, msg.Filepath)
+	}
+
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	result.Success = true
 	d.sendToClient(client, result)
 }

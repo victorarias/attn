@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke } from '@tauri-apps/api/core';
@@ -120,7 +120,7 @@ function App() {
   }, []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, getRepoInfo, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, getRepoInfo, getReviewState, markFileViewed, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -707,6 +707,13 @@ function App() {
     return sendGetFileDiff(daemonSession.directory, path, staged);
   }, [sessions, activeSessionId, daemonSessions, sendGetFileDiff]);
 
+  // Get active daemon session info for ReviewPanel
+  const activeDaemonSession = useMemo(() => {
+    const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
+    if (!activeLocalSession?.cwd) return null;
+    return daemonSessions.find((ds) => ds.id === activeLocalSession.id) || null;
+  }, [sessions, activeSessionId, daemonSessions]);
+
   // Review panel handlers
   const handleOpenReviewPanel = useCallback(() => {
     setReviewPanelOpen(true);
@@ -945,8 +952,12 @@ function App() {
       <ReviewPanel
         isOpen={reviewPanelOpen}
         gitStatus={gitStatus}
+        repoPath={activeDaemonSession?.directory || ''}
+        branch={activeDaemonSession?.branch || ''}
         onClose={handleCloseReviewPanel}
         fetchDiff={fetchDiffForReview}
+        getReviewState={getReviewState}
+        markFileViewed={markFileViewed}
         onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
       />
       <ThumbsModal

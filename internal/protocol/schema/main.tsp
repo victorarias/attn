@@ -357,6 +357,19 @@ model GetRepoInfoMessage {
   repo: string;
 }
 
+model GetReviewStateMessage {
+  cmd: "get_review_state";
+  repo_path: string;
+  branch: string;
+}
+
+model MarkFileViewedMessage {
+  cmd: "mark_file_viewed";
+  review_id: string;
+  filepath: string;
+  viewed: boolean;  // true to mark viewed, false to unmark
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -525,6 +538,29 @@ model RepoInfo {
 model GetRepoInfoResultMessage {
   event: "get_repo_info_result";
   info?: RepoInfo;
+  success: boolean;
+  error?: string;
+}
+
+model ReviewState {
+  review_id: string;
+  repo_path: string;
+  branch: string;
+  viewed_files: string[];  // List of filepath strings
+}
+
+model GetReviewStateResultMessage {
+  event: "get_review_state_result";
+  state?: ReviewState;
+  success: boolean;
+  error?: string;
+}
+
+model MarkFileViewedResultMessage {
+  event: "mark_file_viewed_result";
+  review_id: string;
+  filepath: string;
+  viewed: boolean;
   success: boolean;
   error?: string;
 }

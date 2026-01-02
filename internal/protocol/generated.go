@@ -362,6 +362,31 @@ type GetRepoInfoResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type GetReviewStateMessage struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RepoPath corresponds to the JSON schema field "repo_path".
+	RepoPath string `json:"repo_path"`
+}
+
+type GetReviewStateResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// State corresponds to the JSON schema field "state".
+	State *ReviewState `json:"state,omitempty"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type GetSettingsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -470,6 +495,40 @@ type ListWorktreesMessage struct {
 
 	// MainRepo corresponds to the JSON schema field "main_repo".
 	MainRepo string `json:"main_repo"`
+}
+
+type MarkFileViewedMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Filepath corresponds to the JSON schema field "filepath".
+	Filepath string `json:"filepath"`
+
+	// ReviewID corresponds to the JSON schema field "review_id".
+	ReviewID string `json:"review_id"`
+
+	// Viewed corresponds to the JSON schema field "viewed".
+	Viewed bool `json:"viewed"`
+}
+
+type MarkFileViewedResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Filepath corresponds to the JSON schema field "filepath".
+	Filepath string `json:"filepath"`
+
+	// ReviewID corresponds to the JSON schema field "review_id".
+	ReviewID string `json:"review_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Viewed corresponds to the JSON schema field "viewed".
+	Viewed bool `json:"viewed"`
 }
 
 type MergePRMessage struct {
@@ -763,6 +822,20 @@ type Response struct {
 
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty"`
+}
+
+type ReviewState struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// RepoPath corresponds to the JSON schema field "repo_path".
+	RepoPath string `json:"repo_path"`
+
+	// ReviewID corresponds to the JSON schema field "review_id".
+	ReviewID string `json:"review_id"`
+
+	// ViewedFiles corresponds to the JSON schema field "viewed_files".
+	ViewedFiles []string `json:"viewed_files"`
 }
 
 type Session struct {

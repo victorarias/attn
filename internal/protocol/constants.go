@@ -9,7 +9,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "12"
+const ProtocolVersion = "13"
 
 // Commands
 const (
@@ -57,6 +57,8 @@ const (
 	CmdUnsubscribeGitStatus     = "unsubscribe_git_status"
 	CmdGetFileDiff              = "get_file_diff"
 	CmdGetRepoInfo              = "get_repo_info"
+	CmdGetReviewState           = "get_review_state"
+	CmdMarkFileViewed           = "mark_file_viewed"
 )
 
 // WebSocket Events (daemon -> client)
@@ -95,6 +97,8 @@ const (
 	EventGitStatusUpdate          = "git_status_update"
 	EventFileDiffResult           = "file_diff_result"
 	EventGetRepoInfoResult        = "get_repo_info_result"
+	EventGetReviewStateResult     = "get_review_state_result"
+	EventMarkFileViewedResult     = "mark_file_viewed_result"
 )
 
 // Session states (values for SessionState enum)
@@ -465,6 +469,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdGetRepoInfo:
 		var msg GetRepoInfoMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdGetReviewState:
+		var msg GetReviewStateMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdMarkFileViewed:
+		var msg MarkFileViewedMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

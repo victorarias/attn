@@ -11,7 +11,7 @@ import { lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSele
 import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
 import { history } from '@codemirror/commands';
 import { highlightSelectionMatches } from '@codemirror/search';
-import type { GitStatusUpdate, FileDiffResult } from '../hooks/useDaemonSocket';
+import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../hooks/useDaemonSocket';
 import './ReviewPanel.css';
 
 // Auto-skip patterns for lockfiles and generated files
@@ -38,20 +38,29 @@ interface ReviewFile {
 interface ReviewPanelProps {
   isOpen: boolean;
   gitStatus: GitStatusUpdate | null;
+  repoPath: string;
+  branch: string;
   onClose: () => void;
   fetchDiff: (path: string, staged: boolean) => Promise<FileDiffResult>;
+  getReviewState: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: ReviewState; error?: string }>;
+  markFileViewed: (reviewId: string, filepath: string, viewed: boolean) => Promise<{ success: boolean; error?: string }>;
   onSendToClaude?: (reference: string) => void;
 }
 
 export function ReviewPanel({
   isOpen,
   gitStatus,
+  repoPath,
+  branch,
   onClose,
   fetchDiff,
+  getReviewState,
+  markFileViewed,
   onSendToClaude: _onSendToClaude, // Will be used in Phase 2 for comments
 }: ReviewPanelProps) {
   const [selectedFile, setSelectedFile] = useState<ReviewFile | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
+  const [reviewId, setReviewId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState<{ original: string; modified: string } | null>(null);
@@ -99,6 +108,22 @@ export function ReviewPanel({
 
   const allFiles = useMemo(() => [...needsReviewFiles, ...autoSkipFiles], [needsReviewFiles, autoSkipFiles]);
 
+  // Load persisted review state when opening
+  useEffect(() => {
+    if (isOpen && repoPath && branch) {
+      getReviewState(repoPath, branch)
+        .then((result) => {
+          if (result.success && result.state) {
+            setReviewId(result.state.review_id);
+            setViewedFiles(new Set(result.state.viewed_files || []));
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to load review state:', err);
+        });
+    }
+  }, [isOpen, repoPath, branch, getReviewState]);
+
   // Auto-select first file when opening
   useEffect(() => {
     if (isOpen && needsReviewFiles.length > 0 && !selectedFile) {
@@ -130,14 +155,20 @@ export function ReviewPanel({
       .then((result) => {
         setDiffContent({ original: result.original, modified: result.modified });
         setLoading(false);
-        // Mark file as viewed
+        // Mark file as viewed (local state)
         setViewedFiles(prev => new Set(prev).add(selectedFile.path));
+        // Persist to backend if we have a review ID
+        if (reviewId) {
+          markFileViewed(reviewId, selectedFile.path, true).catch((err) => {
+            console.error('Failed to persist viewed state:', err);
+          });
+        }
       })
       .catch((err) => {
         setError(err.message || 'Failed to load diff');
         setLoading(false);
       });
-  }, [selectedFile, fetchDiff]);
+  }, [selectedFile, fetchDiff, reviewId, markFileViewed]);
 
   // Create/update CodeMirror editor
   useEffect(() => {
