@@ -1,0 +1,292 @@
+/* app/src/components/ReviewPanel.css */
+
+.review-panel-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+}
+
+.review-panel {
+  position: fixed;
+  top: 24px;
+  left: 24px;
+  right: 24px;
+  bottom: 24px;
+  background: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  z-index: 1001;
+  overflow: hidden;
+}
+
+.review-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: #252526;
+  border-bottom: 1px solid #3c3c3c;
+  gap: 12px;
+}
+
+.review-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #e0e0e0;
+}
+
+.review-file-count {
+  font-size: 12px;
+  color: #858585;
+  margin-left: auto;
+}
+
+.review-close {
+  background: none;
+  border: none;
+  color: #858585;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.review-close:hover {
+  color: #e0e0e0;
+}
+
+.review-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.review-file-list {
+  width: 280px;
+  min-width: 200px;
+  max-width: 400px;
+  background: #252526;
+  border-right: 1px solid #3c3c3c;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.file-group {
+  padding: 8px 0;
+}
+
+.file-group-header {
+  font-size: 10px;
+  font-weight: 600;
+  color: #858585;
+  padding: 4px 12px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.file-group.auto-skip {
+  opacity: 0.6;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #cccccc;
+}
+
+.file-item:hover {
+  background: #2a2d2e;
+}
+
+.file-item.selected {
+  background: #094771;
+}
+
+.file-item.viewed {
+  color: #858585;
+}
+
+.file-item.auto-skip {
+  color: #6a6a6a;
+}
+
+.file-icon {
+  width: 14px;
+  font-size: 12px;
+  color: #4ec9b0;
+}
+
+.file-item.auto-skip .file-icon {
+  color: #6a6a6a;
+}
+
+.file-status {
+  font-size: 11px;
+  font-weight: 600;
+  width: 14px;
+  text-align: center;
+}
+
+.file-status.modified {
+  color: #e2c08d;
+}
+
+.file-status.added, .file-status.untracked {
+  color: #89d185;
+}
+
+.file-status.deleted {
+  color: #f14c4c;
+}
+
+.file-status.renamed {
+  color: #4fc1ff;
+}
+
+.file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-stats {
+  font-size: 11px;
+  display: flex;
+  gap: 4px;
+}
+
+.file-stats .stat-add {
+  color: #89d185;
+}
+
+.file-stats .stat-del {
+  color: #f14c4c;
+}
+
+.file-list-empty {
+  padding: 24px;
+  text-align: center;
+  color: #6a6a6a;
+  font-size: 13px;
+}
+
+.review-diff-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #282c34;
+}
+
+.diff-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  background: #21252b;
+  border-bottom: 1px solid #3e4451;
+  gap: 12px;
+}
+
+.diff-filename {
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #abb2bf;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.expand-btn {
+  background: #3e4451;
+  border: 1px solid #4b5263;
+  color: #abb2bf;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.expand-btn:hover {
+  background: #4b5263;
+  border-color: #5c6370;
+}
+
+.expand-btn.active {
+  background: #98c379;
+  border-color: #98c379;
+  color: #282c34;
+  font-weight: 500;
+}
+
+.diff-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background: #282c34;
+}
+
+.diff-loading,
+.diff-error,
+.diff-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #5c6370;
+  font-size: 14px;
+  background: #282c34;
+}
+
+.diff-error {
+  color: #e06c75;
+}
+
+.codemirror-container {
+  height: 100%;
+  overflow: hidden;
+}
+
+.codemirror-container .cm-editor {
+  height: 100%;
+}
+
+.review-footer {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  background: #252526;
+  border-top: 1px solid #3c3c3c;
+  gap: 16px;
+}
+
+.review-footer .shortcut {
+  font-size: 11px;
+  color: #858585;
+}
+
+.review-footer .shortcut kbd {
+  background: #3c3c3c;
+  border: 1px solid #4c4c4c;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: inherit;
+  font-size: 10px;
+  color: #cccccc;
+}

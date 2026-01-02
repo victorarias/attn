@@ -32,6 +32,21 @@
   gap: 8px;
 }
 
+.review-btn {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  color: #3b82f6;
+  font-weight: 500;
+}
+
+.review-btn:hover {
+  background: rgba(59, 130, 246, 0.25);
+}
+
 .attention-badge {
   display: flex;
   align-items: center;

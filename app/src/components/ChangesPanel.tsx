@@ -9,6 +9,7 @@ interface ChangesPanelProps {
   selectedFile: string | null;
   onFileSelect: (path: string, staged: boolean) => void;
   onAttentionClick: () => void;
+  onReviewClick?: () => void;
 }
 
 type GitFileChange = {
@@ -107,6 +108,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   selectedFile,
   onFileSelect,
   onAttentionClick,
+  onReviewClick,
 }: ChangesPanelProps) {
   const totalStats = useMemo(() => {
     if (!gitStatus) return { files: 0, additions: 0, deletions: 0 };
@@ -193,6 +195,11 @@ export const ChangesPanel = memo(function ChangesPanel({
       <div className="changes-header">
         <span className="changes-title">Changes</span>
         <div className="changes-header-actions">
+          {totalStats.files > 0 && onReviewClick && (
+            <button className="review-btn" onClick={onReviewClick} title="Review changes (r)">
+              Review
+            </button>
+          )}
           {attentionCount > 0 && (
             <button className="attention-badge" onClick={onAttentionClick}>
               ⚠ {attentionCount}

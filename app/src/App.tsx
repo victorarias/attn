@@ -12,6 +12,7 @@ import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffOverlay } from './components/DiffOverlay';
+import { ReviewPanel } from './components/ReviewPanel';
 import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
 import { ThumbsModal } from './components/ThumbsModal';
 import { ForkDialog } from './components/ForkDialog';
@@ -87,6 +88,9 @@ function App() {
     staged: boolean;
     index: number;
   }>({ isOpen: false, path: '', staged: false, index: 0 });
+
+  // Review panel state
+  const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
 
   // Hide loading screen on mount
   useEffect(() => {
@@ -694,6 +698,24 @@ function App() {
     return sendGetFileDiff(daemonSession.directory, diffOverlay.path, diffOverlay.staged);
   }, [sessions, activeSessionId, daemonSessions, diffOverlay.path, diffOverlay.staged, sendGetFileDiff]);
 
+  // Fetch diff for ReviewPanel (takes path and staged as parameters)
+  const fetchDiffForReview = useCallback(async (path: string, staged: boolean) => {
+    const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
+    if (!activeLocalSession?.cwd) throw new Error('No active session');
+    const daemonSession = daemonSessions.find((ds) => ds.id === activeLocalSession.id);
+    if (!daemonSession) throw new Error('No daemon session found');
+    return sendGetFileDiff(daemonSession.directory, path, staged);
+  }, [sessions, activeSessionId, daemonSessions, sendGetFileDiff]);
+
+  // Review panel handlers
+  const handleOpenReviewPanel = useCallback(() => {
+    setReviewPanelOpen(true);
+  }, []);
+
+  const handleCloseReviewPanel = useCallback(() => {
+    setReviewPanelOpen(false);
+  }, []);
+
   // Send code reference to the active Claude terminal
   const handleSendToClaude = useCallback((reference: string) => {
     if (!activeSessionId) return;
@@ -857,6 +879,7 @@ function App() {
           selectedFile={diffOverlay.isOpen ? diffOverlay.path : null}
           onFileSelect={handleFileSelect}
           onAttentionClick={toggleDrawer}
+          onReviewClick={handleOpenReviewPanel}
         />
         <AttentionDrawer
           isOpen={drawerOpen}
@@ -917,6 +940,13 @@ function App() {
         onPrev={() => handleDiffNav('prev')}
         onNext={() => handleDiffNav('next')}
         fetchDiff={fetchDiff}
+        onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
+      />
+      <ReviewPanel
+        isOpen={reviewPanelOpen}
+        gitStatus={gitStatus}
+        onClose={handleCloseReviewPanel}
+        fetchDiff={fetchDiffForReview}
         onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
       />
       <ThumbsModal

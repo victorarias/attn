@@ -237,6 +237,39 @@ pnpm run e2e -- --ui       # Run with Playwright UI
 
 4. **Circuit breaker auto-reset**: Opens after failed reconnects, auto-resets after 30s even without user action.
 
+## Changelog
+
+Maintain `CHANGELOG.md` at the project root. Uses timestamps (not versions) since this is a personal project.
+
+**When to update:**
+- After completing a feature or significant change
+- When making commits (include in same commit)
+- After fixing notable bugs
+- When removing or deprecating functionality
+
+**Format:**
+```markdown
+## [YYYY-MM-DD]
+
+### Added
+- **Feature Name**: Brief description of what it does
+
+### Changed
+- Description of behavior changes
+
+### Fixed
+- Description of bug fixes
+
+### Removed
+- Description of removed functionality
+```
+
+**Guidelines:**
+- Write for users, not developers (focus on what changed, not how)
+- Group related changes under a single bullet with sub-points if needed
+- Use present tense ("Add" not "Added")
+- Link to relevant docs/plans if helpful
+
 ## Task Tracking
 
 Use `bd` (beads) for tracking work items, not inline markdown TODOs or TodoWrite.
