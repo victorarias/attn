@@ -264,6 +264,88 @@ it('fetches diff exactly once on open', async () => {
 
 **Full design:** See `docs/plans/2026-01-02-frontend-testing-strategy.md`
 
+### Component Test Harness (Playwright)
+
+**When to use:** For components that need real browser APIs that jsdom can't simulate:
+- CodeMirror (requires DOM measurements, layout, ResizeObserver)
+- Complex DOM interactions (drag/drop, scroll-based behaviors)
+- Components with native browser features
+
+**When NOT to use:** Prefer vitest + happy-dom for simpler components. The harness adds overhead - use it only when necessary.
+
+**How it works:**
+1. Harness page at `/test-harness/?component=ComponentName`
+2. Component rendered in isolation with mocked props
+3. `window.__HARNESS__` API for test control
+4. Real browser environment via Playwright
+
+**Creating a new harness:**
+
+```bash
+# 1. Create harness file
+app/test-harness/harnesses/MyComponentHarness.tsx
+
+# 2. Register in harnesses/index.ts
+export const harnesses = {
+  ReviewPanel: ReviewPanelHarness,
+  MyComponent: MyComponentHarness,  // Add here
+};
+
+# 3. Write Playwright test
+app/e2e/component-harness.spec.ts  # Or new file
+```
+
+**Harness pattern:**
+```typescript
+export function MyComponentHarness({ onReady, setTriggerRerender }: HarnessProps) {
+  // Mock all props/callbacks
+  const mockCallback = useCallback(async (...args) => {
+    window.__HARNESS__.recordCall('callbackName', args);
+    return { success: true };
+  }, []);
+
+  useEffect(() => { onReady(); }, [onReady]);
+
+  return <MyComponent prop={mockCallback} />;
+}
+```
+
+**Test pattern:**
+```typescript
+test('describes exact behavior being tested', async ({ page }) => {
+  await page.goto('/test-harness/?component=MyComponent');
+  await page.waitForSelector('.expected-element');
+
+  // Use real interactions
+  await page.locator('.input').focus();
+  await page.keyboard.type('content', { delay: 10 });
+
+  // Trigger state changes naturally (not artificial rerenders)
+  await page.locator('.another-element').click();
+
+  // Assert behavior
+  await expect(page.locator('.input')).toHaveValue('content');
+
+  // Verify mock calls
+  const calls = await page.evaluate(() => window.__HARNESS__.getCalls('callbackName'));
+  expect(calls[0][0]).toBe('expected-arg');
+});
+```
+
+**Key learnings:**
+- Use `page.keyboard.type()` not `.fill()` for realistic input
+- Use `.click()` not `dispatchEvent()` when possible
+- Trigger re-renders naturally (open another form, change state) not artificially
+- Document the exact bug scenario in regression tests with JSDoc
+- Wait for specific elements, not arbitrary timeouts
+
+**Running harness tests:**
+```bash
+cd app
+pnpm run e2e -- e2e/component-harness.spec.ts
+pnpm run e2e:headed -- e2e/component-harness.spec.ts  # Debug visually
+```
+
 ## Known Gotchas
 
 1. **Worktree action key collision**: `sendCreateWorktree()` and `sendCreateWorktreeFromBranch()` use the same pending action key. Don't call both simultaneously.
@@ -306,15 +388,6 @@ Maintain `CHANGELOG.md` at the project root. Uses timestamps (not versions) sinc
 - Group related changes under a single bullet with sub-points if needed
 - Use present tense ("Add" not "Added")
 - Link to relevant docs/plans if helpful
-
-## Task Tracking
-
-Use `bd` (beads) for tracking work items, not inline markdown TODOs or TodoWrite.
-
-- **Epics:** Use for any change requiring 3+ tasks
-- **Plan references:** Link tasks to their plan section in `--description` (e.g., `docs/plans/foo.md#section`)
-- **Dependencies:** Use `bd dep add` when order matters
-- **Discovery:** Add tasks as work progresses - don't plan everything upfront
 
 Use `bd ready` to see unblocked work.
 
