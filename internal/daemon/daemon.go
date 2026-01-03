@@ -35,6 +35,7 @@ type repoCache struct {
 type Daemon struct {
 	socketPath  string
 	pidPath     string
+	pidFile     *os.File // Held open with flock for exclusive access
 	store       *store.Store
 	listener    net.Listener
 	httpServer  *http.Server
@@ -245,57 +246,111 @@ func (d *Daemon) logf(format string, args ...interface{}) {
 	}
 }
 
-// acquirePIDLock ensures only one daemon instance runs at a time.
+// acquirePIDLock ensures only one daemon instance runs at a time using flock.
 // If another daemon is running, it sends SIGTERM and waits for it to exit.
 func (d *Daemon) acquirePIDLock() error {
-	// Check if PID file exists
-	data, err := os.ReadFile(d.pidPath)
-	if err == nil {
-		// PID file exists, check if process is running
-		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-		if err == nil && pid > 0 {
-			// Check if process exists by sending signal 0
-			process, err := os.FindProcess(pid)
-			if err == nil {
-				err = process.Signal(syscall.Signal(0))
-				if err == nil {
-					// Process is running, try to kill it gracefully
-					d.logf("Found existing daemon (PID %d), sending SIGTERM", pid)
-					process.Signal(syscall.SIGTERM)
+	// Open or create the PID file
+	f, err := os.OpenFile(d.pidPath, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return fmt.Errorf("open PID file: %w", err)
+	}
 
-					// Wait up to 2 seconds for graceful shutdown
-					deadline := time.Now().Add(2 * time.Second)
-					for time.Now().Before(deadline) {
-						time.Sleep(100 * time.Millisecond)
-						if err := process.Signal(syscall.Signal(0)); err != nil {
-							// Process exited
-							d.logf("Previous daemon exited gracefully")
-							break
+	// Try non-blocking exclusive lock first
+	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if err != nil {
+		// Another process holds the lock - read PID and try to kill it
+		data, readErr := os.ReadFile(d.pidPath)
+		if readErr == nil {
+			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
+			if parseErr == nil && pid > 0 {
+				process, findErr := os.FindProcess(pid)
+				if findErr == nil {
+					if signalErr := process.Signal(syscall.Signal(0)); signalErr == nil {
+						// Process is running, kill it
+						d.logf("Found existing daemon (PID %d), sending SIGTERM", pid)
+						process.Signal(syscall.SIGTERM)
+
+						// Wait up to 3 seconds for graceful shutdown
+						deadline := time.Now().Add(3 * time.Second)
+						for time.Now().Before(deadline) {
+							time.Sleep(100 * time.Millisecond)
+							if err := process.Signal(syscall.Signal(0)); err != nil {
+								d.logf("Previous daemon exited gracefully")
+								break
+							}
 						}
-					}
 
-					// Check if still running, force kill
-					if err := process.Signal(syscall.Signal(0)); err == nil {
-						d.logf("Previous daemon didn't exit, sending SIGKILL")
-						process.Signal(syscall.SIGKILL)
-						time.Sleep(100 * time.Millisecond)
+						// Force kill if still running
+						if err := process.Signal(syscall.Signal(0)); err == nil {
+							d.logf("Previous daemon didn't exit, sending SIGKILL")
+							process.Signal(syscall.SIGKILL)
+							time.Sleep(200 * time.Millisecond)
+						}
 					}
 				}
 			}
 		}
+
+		// Now try blocking lock (should succeed after killing old daemon)
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+		if err != nil {
+			f.Close()
+			return fmt.Errorf("acquire flock after killing old daemon: %w", err)
+		}
 	}
 
-	// Write our PID
+	// We have the lock - write our PID
+	f.Truncate(0)
+	f.Seek(0, 0)
 	pid := os.Getpid()
-	if err := os.WriteFile(d.pidPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
-		return fmt.Errorf("write PID file: %w", err)
+	if _, err := f.WriteString(strconv.Itoa(pid)); err != nil {
+		f.Close()
+		return fmt.Errorf("write PID: %w", err)
 	}
+	f.Sync()
+
+	// Keep file open to hold the lock
+	d.pidFile = f
 	d.logf("Acquired PID lock (PID %d, file %s)", pid, d.pidPath)
+
+	// Wait for WebSocket port to be available (old daemon may still be releasing it)
+	if err := d.waitForPort(); err != nil {
+		d.logf("Warning: port availability check failed: %v", err)
+	}
+
 	return nil
 }
 
-// releasePIDLock removes the PID file
+// waitForPort waits for the WebSocket port to become available
+func (d *Daemon) waitForPort() error {
+	port := os.Getenv("ATTN_WS_PORT")
+	if port == "" {
+		port = "9849"
+	}
+	addr := "127.0.0.1:" + port
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if err != nil {
+			// Port is not in use - good!
+			return nil
+		}
+		conn.Close()
+		// Port still in use, wait and retry
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return fmt.Errorf("port %s still in use after 5s", port)
+}
+
+// releasePIDLock unlocks and removes the PID file
 func (d *Daemon) releasePIDLock() {
+	if d.pidFile != nil {
+		syscall.Flock(int(d.pidFile.Fd()), syscall.LOCK_UN)
+		d.pidFile.Close()
+		d.pidFile = nil
+	}
 	if err := os.Remove(d.pidPath); err != nil && !os.IsNotExist(err) {
 		d.logf("Failed to remove PID file: %v", err)
 	}
