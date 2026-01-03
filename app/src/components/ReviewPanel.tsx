@@ -322,6 +322,27 @@ const commentLinesField = StateField.define<Map<number, number>>({
   },
 });
 
+// State effect to update inline comment decorations
+const setInlineDecorations = StateEffect.define<RangeSet<Decoration>>();
+
+// State field for inline comment widgets - allows dynamic updates without editor recreation
+const inlineDecorationsField = StateField.define<RangeSet<Decoration>>({
+  create() {
+    return RangeSet.empty;
+  },
+  update(decorations, tr) {
+    // Check for explicit decoration updates first
+    for (const effect of tr.effects) {
+      if (effect.is(setInlineDecorations)) {
+        return effect.value;
+      }
+    }
+    // Map existing decorations through document changes
+    return decorations.map(tr.changes);
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 interface ReviewFile {
   path: string;
   status: string;
@@ -390,6 +411,13 @@ export function ReviewPanel({
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const scrollPositionRef = useRef<number>(0);
+  // Track core editor deps to detect when only comment state changed (avoids recreation)
+  const lastEditorCoreRef = useRef<{
+    diffContent: { original: string; modified: string } | null;
+    filePath: string | undefined;
+    fontSize: number;
+    expandedContext: number;
+  } | null>(null);
 
   // Comment state
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
@@ -645,6 +673,160 @@ export function ReviewPanel({
   // Create/update CodeMirror editor
   useEffect(() => {
     if (!editorContainerRef.current || !diffContent) return;
+
+    // Check if only comment state changed (core editor deps unchanged)
+    const currentCore = {
+      diffContent,
+      filePath: selectedFile?.path,
+      fontSize,
+      expandedContext,
+    };
+    const lastCore = lastEditorCoreRef.current;
+    const coreUnchanged = lastCore &&
+      lastCore.diffContent === currentCore.diffContent &&
+      lastCore.filePath === currentCore.filePath &&
+      lastCore.fontSize === currentCore.fontSize &&
+      lastCore.expandedContext === currentCore.expandedContext;
+
+    // If editor exists and only comment state changed, dispatch updates instead of recreating
+    if (coreUnchanged && editorViewRef.current) {
+      const view = editorViewRef.current;
+
+      // Build comment line map for gutter
+      const commentLineMap = new Map<number, number>();
+      for (const comment of regularComments) {
+        const count = commentLineMap.get(comment.line_start) || 0;
+        commentLineMap.set(comment.line_start, count + 1);
+      }
+
+      // Helper to calculate position at end of line
+      const getLineEndPos = (lineNum: number, content: string) => {
+        const lines = content.split('\n');
+        if (lineNum < 1 || lineNum > lines.length) return -1;
+        let pos = 0;
+        for (let i = 0; i < lineNum; i++) {
+          pos += (lines[i]?.length || 0) + 1;
+        }
+        return Math.max(0, pos - 1);
+      };
+
+      // Build inline comment widgets
+      const inlineWidgets: { pos: number; widget: WidgetType }[] = [];
+
+      for (const comment of regularComments) {
+        const lineNum = comment.line_start;
+        const pos = getLineEndPos(lineNum, diffContent.modified);
+        if (pos >= 0) {
+          const isEditing = editingCommentId === comment.id;
+          inlineWidgets.push({
+            pos,
+            widget: new InlineCommentWidget(
+              comment,
+              isEditing,
+              async (content) => {
+                if (updateComment) {
+                  const result = await updateComment(comment.id, content);
+                  if (result.success) {
+                    setAllReviewComments(prev =>
+                      prev.map(c => c.id === comment.id ? { ...c, content } : c)
+                    );
+                    setEditingCommentId(null);
+                  }
+                }
+              },
+              () => setEditingCommentId(null),
+              () => setEditingCommentId(comment.id),
+              async (resolved) => {
+                if (resolveComment) {
+                  const result = await resolveComment(comment.id, resolved);
+                  if (result.success) {
+                    setAllReviewComments(prev =>
+                      prev.map(c => c.id === comment.id ? { ...c, resolved } : c)
+                    );
+                  }
+                }
+              },
+              async () => {
+                if (deleteComment) {
+                  const result = await deleteComment(comment.id);
+                  if (result.success) {
+                    setAllReviewComments(prev =>
+                      prev.filter(c => c.id !== comment.id)
+                    );
+                  }
+                }
+              }
+            ),
+          });
+        }
+      }
+
+      for (const lineNum of newCommentLines) {
+        const pos = getLineEndPos(lineNum, diffContent.modified);
+        if (pos >= 0) {
+          const draftContent = regularLineDraftsRef.current.get(lineNum) || '';
+          inlineWidgets.push({
+            pos,
+            widget: new NewCommentWidget(
+              lineNum,
+              draftContent,
+              async (content) => {
+                if (reviewId && selectedFilePath && addComment) {
+                  const result = await addComment(
+                    reviewId,
+                    selectedFilePath,
+                    lineNum,
+                    lineNum,
+                    content
+                  );
+                  if (result.success && result.comment) {
+                    setAllReviewComments(prev => [...prev, result.comment!]);
+                    regularLineDraftsRef.current.delete(lineNum);
+                    setNewCommentLines(prev => {
+                      const next = new Set(prev);
+                      next.delete(lineNum);
+                      return next;
+                    });
+                  }
+                }
+              },
+              () => {
+                regularLineDraftsRef.current.delete(lineNum);
+                setNewCommentLines(prev => {
+                  const next = new Set(prev);
+                  next.delete(lineNum);
+                  return next;
+                });
+              },
+              (content) => {
+                regularLineDraftsRef.current.set(lineNum, content);
+              }
+            ),
+          });
+        }
+      }
+
+      // Sort and create decoration set
+      inlineWidgets.sort((a, b) => a.pos - b.pos);
+      const inlineDecorations = Decoration.set(
+        inlineWidgets.map(({ pos, widget }) =>
+          Decoration.widget({ widget, block: true, side: 1 }).range(pos)
+        )
+      );
+
+      // Dispatch updates to existing view - NO RECREATION!
+      view.dispatch({
+        effects: [
+          setCommentLines.of(commentLineMap),
+          setInlineDecorations.of(inlineDecorations),
+        ],
+      });
+
+      return; // Early return - skip editor recreation
+    }
+
+    // Update core ref for next comparison
+    lastEditorCoreRef.current = currentCore;
 
     // Clean up existing editor - save scroll position first
     if (editorViewRef.current) {
@@ -964,13 +1146,11 @@ export function ReviewPanel({
       )
     );
 
-    const inlineCommentsExtension = EditorView.decorations.of(inlineDecorations);
-
     const extensions = [
       commentLinesField,
+      inlineDecorationsField,  // StateField for dynamic decoration updates
       commentGutter,
       clickHandler,
-      inlineCommentsExtension,
       minimalSetup,
       langExtension,
       oneDark,
@@ -999,9 +1179,12 @@ export function ReviewPanel({
       parent: editorContainerRef.current,
     });
 
-    // Initialize comment markers
+    // Initialize comment markers and inline decorations
     view.dispatch({
-      effects: setCommentLines.of(commentLineMap),
+      effects: [
+        setCommentLines.of(commentLineMap),
+        setInlineDecorations.of(inlineDecorations),
+      ],
     });
 
     editorViewRef.current = view;
