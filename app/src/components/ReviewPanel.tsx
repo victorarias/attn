@@ -74,6 +74,23 @@ function createCommentElement(
     textarea.value = comment.content;
     textarea.rows = 3;
     textarea.placeholder = 'Edit comment...';
+
+    // Keyboard shortcuts: Escape to cancel, Cmd/Ctrl+Enter to save
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        handlers.onCancel();
+      } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const content = textarea.value.trim();
+        if (content) {
+          handlers.onSave(content);
+        }
+      }
+    });
+
     form.appendChild(textarea);
 
     const buttons = document.createElement('div');
@@ -95,7 +112,10 @@ function createCommentElement(
     saveBtn.type = 'button';
     saveBtn.onclick = (e) => {
       e.stopPropagation();
-      handlers.onSave(textarea.value);
+      const content = textarea.value.trim();
+      if (content) {
+        handlers.onSave(content);
+      }
     };
     buttons.appendChild(saveBtn);
 
@@ -225,18 +245,35 @@ class NewCommentWidget extends WidgetType {
     textarea.rows = 3;
     textarea.placeholder = 'Add a comment...';
     textarea.value = this.initialContent;
-    form.appendChild(textarea);
 
     // Save draft on input (no re-render)
     textarea.addEventListener('input', () => {
       this.onInput(textarea.value);
     });
 
+    // Keyboard shortcuts: Escape to cancel, Cmd/Ctrl+Enter to save
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.onCancel();
+      } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const content = textarea.value.trim();
+        if (content) {
+          this.onSave(content);
+        }
+      }
+    });
+
+    form.appendChild(textarea);
+
     const buttons = document.createElement('div');
     buttons.className = 'inline-comment-buttons';
 
     const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'inline-comment-btn';
+    cancelBtn.className = 'inline-comment-btn cancel-btn';
     cancelBtn.textContent = 'Cancel';
     cancelBtn.type = 'button';
     cancelBtn.onclick = (e) => {
@@ -1218,6 +1255,42 @@ export function ReviewPanel({
           // Save draft on input to ref (no re-render)
           textarea.addEventListener('input', () => {
             deletedLineDraftsRef.current.set(key, textarea.value);
+          });
+
+          // Keyboard shortcuts: Escape to cancel, Cmd/Ctrl+Enter to save
+          textarea.addEventListener('keydown', async (e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              e.stopPropagation();
+              deletedLineDraftsRef.current.delete(key);
+              setNewDeletedLineComments(prev => {
+                const next = new Set(prev);
+                next.delete(key);
+                return next;
+              });
+            } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              e.stopPropagation();
+              const content = textarea.value.trim();
+              if (content && reviewId && selectedFilePath && addComment) {
+                const result = await addComment(
+                  reviewId,
+                  selectedFilePath,
+                  anchorLineNum,
+                  -(deletedLineIndex + 1),
+                  content
+                );
+                if (result.success && result.comment) {
+                  setAllReviewComments(prev => [...prev, result.comment!]);
+                  deletedLineDraftsRef.current.delete(key);
+                  setNewDeletedLineComments(prev => {
+                    const next = new Set(prev);
+                    next.delete(key);
+                    return next;
+                  });
+                }
+              }
+            }
           });
         }
 
