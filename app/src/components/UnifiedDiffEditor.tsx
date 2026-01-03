@@ -785,8 +785,11 @@ export function UnifiedDiffEditor({
     });
   }, []);
 
-  // Build unified document
-  const { content, lines } = buildUnifiedDocument(original, modified);
+  // Build unified document - memoize to prevent editor recreation on unrelated state changes
+  const { content, lines } = useMemo(
+    () => buildUnifiedDocument(original, modified),
+    [original, modified]
+  );
   linesRef.current = lines;
 
   // Get language extension based on language prop
