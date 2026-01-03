@@ -18,6 +18,8 @@ import (
 )
 
 func TestDaemon_RegisterAndQuery(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19900")
+
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
@@ -50,6 +52,8 @@ func TestDaemon_RegisterAndQuery(t *testing.T) {
 }
 
 func TestDaemon_StateUpdate(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19901")
+
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
@@ -81,6 +85,8 @@ func TestDaemon_StateUpdate(t *testing.T) {
 }
 
 func TestDaemon_Unregister(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19902")
+
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
@@ -102,6 +108,8 @@ func TestDaemon_Unregister(t *testing.T) {
 }
 
 func TestDaemon_MultipleSessions(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19903")
+
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
@@ -135,6 +143,8 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 }
 
 func TestDaemon_SocketCleanup(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19904")
+
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
@@ -351,6 +361,8 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 }
 
 func TestDaemon_InjectTestPR(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19905")
+
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
@@ -1005,6 +1017,8 @@ func TestDaemon_InjectTestSession_BroadcastsToWebSocket(t *testing.T) {
 }
 
 func TestDaemon_StopCommand_PendingTodos_SetsWaitingInput(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19906")
+
 	// Use /tmp directly to avoid long socket paths
 	sockPath := filepath.Join("/tmp", "attn-test-stop-pending.sock")
 	os.Remove(sockPath) // Clean up any existing socket
@@ -1080,6 +1094,8 @@ func TestDaemon_StopCommand_PendingTodos_SetsWaitingInput(t *testing.T) {
 }
 
 func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19907")
+
 	// This test verifies that when all todos are completed, the daemon
 	// does NOT short-circuit to waiting_input based on todos alone.
 	// Instead, it proceeds to classification.

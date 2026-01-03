@@ -12,6 +12,7 @@ import (
 )
 
 func TestHarness_FakeClassifier(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19908")
 	sockPath := filepath.Join("/tmp", "attn-harness-classifier.sock")
 
 	harness := NewTestHarnessBuilder(sockPath).
@@ -67,6 +68,7 @@ func TestHarness_FakeClassifier(t *testing.T) {
 }
 
 func TestHarness_BroadcastRecorder(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19909")
 	sockPath := filepath.Join("/tmp", "attn-harness-recorder.sock")
 
 	harness := NewTestHarnessBuilder(sockPath).Build()
@@ -119,6 +121,7 @@ func TestHarness_BroadcastRecorder(t *testing.T) {
 }
 
 func TestHarness_WaitForEvent(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19910")
 	sockPath := filepath.Join("/tmp", "attn-harness-wait.sock")
 
 	harness := NewTestHarnessBuilder(sockPath).Build()
@@ -177,6 +180,7 @@ func TestHarness_ClassifierWithCustomResponses(t *testing.T) {
 }
 
 func TestHarness_ConcurrentOperations(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19911")
 	sockPath := filepath.Join("/tmp", "attn-harness-concurrent.sock")
 
 	harness := NewTestHarnessBuilder(sockPath).Build()
