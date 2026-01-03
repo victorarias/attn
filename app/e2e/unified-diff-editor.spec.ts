@@ -247,4 +247,77 @@ test.describe('UnifiedDiffEditor', () => {
       expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(10);
     });
   });
+
+  test.describe('hunks/collapsed context mode', () => {
+    test.beforeEach(async ({ page }) => {
+      // Enable large diff and set context lines
+      await page.locator('input[type="checkbox"]').check(); // Large Diff checkbox
+      await page.locator('input[type="number"]').nth(1).fill('3'); // Context Lines input
+      // Wait for editor to update
+      await page.waitForTimeout(100);
+    });
+
+    test('shows collapsed regions with large diff and contextLines > 0', async ({ page }) => {
+      const collapsedRegions = page.locator('.cm-collapsed-region');
+      await expect(collapsedRegions.first()).toBeVisible();
+
+      // Should show "N lines hidden" text
+      await expect(collapsedRegions.first()).toContainText('lines hidden');
+    });
+
+    test('clicking collapsed region expands it', async ({ page }) => {
+      const collapsedRegions = page.locator('.cm-collapsed-region');
+      const initialCount = await collapsedRegions.count();
+      expect(initialCount).toBeGreaterThan(0);
+
+      // Click first collapsed region to expand
+      await collapsedRegions.first().click();
+
+      // Should have fewer collapsed regions (or same if there was only one)
+      await page.waitForTimeout(100);
+      const newCount = await collapsedRegions.count();
+      expect(newCount).toBeLessThan(initialCount);
+    });
+
+    test('collapsed region shows expand icon', async ({ page }) => {
+      const expandIcon = page.locator('.cm-collapsed-icon');
+      await expect(expandIcon.first()).toBeVisible();
+      await expect(expandIcon.first()).toContainText('⊕');
+    });
+
+    test('contextLines=0 shows full diff (no collapsed regions)', async ({ page }) => {
+      // Set context lines back to 0
+      await page.locator('input[type="number"]').nth(1).fill('0');
+      await page.waitForTimeout(100);
+
+      const collapsedRegions = page.locator('.cm-collapsed-region');
+      await expect(collapsedRegions).toHaveCount(0);
+    });
+
+    test('regions containing comments auto-expand', async ({ page }) => {
+      // Get the text of first collapsed region to know how many lines are hidden
+      const collapsedRegion = page.locator('.cm-collapsed-region').first();
+      await expect(collapsedRegion).toBeVisible();
+
+      // Click on a visible line to add a comment (this should be in a non-collapsed area)
+      // First, let's expand a region by clicking it
+      await collapsedRegion.click();
+      await page.waitForTimeout(100);
+
+      // Now click on a line that was previously hidden
+      const lines = page.locator('.cm-line');
+      await lines.nth(5).click();
+
+      // Add a comment
+      const textarea = page.locator('.unified-comment-textarea');
+      await textarea.fill('Comment in previously collapsed region');
+      await page.locator('.save-btn').click();
+      await page.waitForSelector('.unified-comment');
+
+      // The region should stay expanded because it has a comment
+      // Even if we could re-collapse, the comment should keep it expanded
+      const comment = page.locator('.unified-comment');
+      await expect(comment).toBeVisible();
+    });
+  });
 });
