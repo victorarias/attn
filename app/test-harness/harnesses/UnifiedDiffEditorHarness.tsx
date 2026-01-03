@@ -186,14 +186,15 @@ export function UnifiedDiffEditorHarness({ onReady }: HarnessProps) {
   const modified = useLargeDiff ? LARGE_MODIFIED : SMALL_MODIFIED;
 
   // Mock addComment
-  const addComment = useCallback(async (docLine: number, content: string) => {
-    window.__HARNESS__.recordCall('addComment', [docLine, content]);
+  const addComment = useCallback(async (docLine: number, content: string, anchor: import('../../src/components/UnifiedDiffEditor').CommentAnchor) => {
+    window.__HARNESS__.recordCall('addComment', [docLine, content, anchor]);
     const newComment: InlineComment = {
       id: `comment-${Date.now()}`,
       docLine,
       content,
       resolved: false,
       author: 'user',
+      anchor,
     };
     setComments((prev) => [...prev, newComment]);
   }, []);

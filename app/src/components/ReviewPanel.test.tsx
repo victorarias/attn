@@ -10,117 +10,18 @@ import {
   sleep,
   MockDaemon,
 } from '../test/utils';
-import { ReviewPanel, canAddCommentToDeletedLine } from './ReviewPanel';
+import { ReviewPanel } from './ReviewPanel';
 
-// Mock CodeMirror since it requires DOM measurements
-vi.mock('@codemirror/view', () => {
-  class MockEditorView {
-    destroy = vi.fn();
-    dispatch = vi.fn();
-    scrollDOM = { scrollTop: 0 };
-    static theme = vi.fn(() => []);
-    static editable = { of: vi.fn(() => []) };
-    static lineWrapping = [];
-    static domEventHandlers = vi.fn(() => []);
-    static decorations = { of: vi.fn(() => []) };
-  }
-
-  class MockGutterMarker {
-    toDOM() {
-      return document.createElement('span');
-    }
-  }
-
-  class MockWidgetType {
-    toDOM() {
-      return document.createElement('div');
-    }
-    eq() {
-      return false;
-    }
-    ignoreEvent() {
-      return false;
-    }
-  }
-
-  return {
-    EditorView: MockEditorView,
-    GutterMarker: MockGutterMarker,
-    WidgetType: MockWidgetType,
-    Decoration: {
-      widget: vi.fn(() => ({ range: vi.fn(() => ({})) })),
-      set: vi.fn(() => ({})),
-    },
-    gutter: vi.fn(() => []),
-    lineNumbers: vi.fn(() => []),
-    highlightActiveLineGutter: vi.fn(() => []),
-    highlightSpecialChars: vi.fn(() => []),
-    drawSelection: vi.fn(() => []),
-    rectangularSelection: vi.fn(() => []),
-  };
-});
-
-vi.mock('@codemirror/state', () => {
-  // Create a mock effect type that can be used with is() and of()
-  const mockEffectType = {
-    is: vi.fn(() => false),
-    of: vi.fn((value: unknown) => ({ type: mockEffectType, value })),
-  };
-
-  return {
-    EditorState: {
-      create: vi.fn(() => ({
-        field: vi.fn(() => new Map()),
-        doc: { lineAt: vi.fn(() => ({ number: 1 })), line: vi.fn(() => ({ from: 0 })), lines: 1 },
-      })),
-      allowMultipleSelections: { of: vi.fn(() => []) },
-    },
-    RangeSet: {
-      of: vi.fn(() => ({})),
-    },
-    StateField: {
-      define: vi.fn(() => ({})),
-    },
-    StateEffect: {
-      define: vi.fn(() => mockEffectType),
-    },
-  };
-});
-
-vi.mock('@codemirror/merge', () => ({
-  unifiedMergeView: vi.fn(() => []),
-}));
-
-vi.mock('@codemirror/theme-one-dark', () => ({
-  oneDark: [],
-}));
-
-vi.mock('@codemirror/lang-javascript', () => ({
-  javascript: vi.fn(() => []),
-}));
-
-vi.mock('@codemirror/lang-markdown', () => ({
-  markdown: vi.fn(() => []),
-}));
-
-vi.mock('@codemirror/lang-python', () => ({
-  python: vi.fn(() => []),
-}));
-
-vi.mock('@codemirror/language', () => ({
-  foldGutter: vi.fn(() => []),
-  indentOnInput: vi.fn(() => []),
-  syntaxHighlighting: vi.fn(() => []),
-  defaultHighlightStyle: {},
-  bracketMatching: vi.fn(() => []),
-}));
-
-vi.mock('@codemirror/commands', () => ({
-  history: vi.fn(() => []),
-}));
-
-vi.mock('@codemirror/search', () => ({
-  highlightSelectionMatches: vi.fn(() => []),
+// Mock UnifiedDiffEditor since it uses CodeMirror which requires DOM measurements
+vi.mock('./UnifiedDiffEditor', () => ({
+  default: vi.fn(({ original, modified }) => (
+    <div data-testid="unified-diff-editor">
+      <div className="original">{original?.substring(0, 50)}</div>
+      <div className="modified">{modified?.substring(0, 50)}</div>
+    </div>
+  )),
+  buildUnifiedDocument: vi.fn(() => []),
+  resolveAnchor: vi.fn(() => ({ docLine: 1, isOutdated: false, isOrphaned: false })),
 }));
 
 describe('ReviewPanel', () => {
@@ -625,114 +526,9 @@ describe('Deleted-Line Comment Fixtures', () => {
     });
   });
 
-  /**
-   * Regression test for: clicking deleted chunks should work even with existing saved comments.
-   *
-   * Bug: The click handler checked for `.inline-comment` to prevent duplicate forms,
-   * but this also blocked new comments when saved comments existed.
-   * Fix: Check for `.inline-comment.new` (unsaved forms only).
-   *
-   * These tests use the actual `canAddCommentToDeletedLine` function from the component,
-   * so if someone changes the implementation, these tests will fail.
-   */
-  describe('canAddCommentToDeletedLine', () => {
-    it('allows adding comment when line has a saved comment after it', () => {
-      const deletedChunk = document.createElement('div');
-      deletedChunk.className = 'cm-deletedChunk';
-
-      // Add a deleted line
-      const deletedLine = document.createElement('div');
-      deletedLine.className = 'cm-deletedLine';
-      deletedChunk.appendChild(deletedLine);
-
-      // Add an existing SAVED comment after the line (not .new - this is key)
-      const savedComment = document.createElement('div');
-      savedComment.className = 'inline-comment'; // NO .new class
-      deletedChunk.appendChild(savedComment);
-
-      // The actual function used by the component should return true
-      // (allowing new comment even with saved comment after it)
-      expect(canAddCommentToDeletedLine(deletedLine)).toBe(true);
-    });
-
-    it('blocks adding comment when line already has an unsaved form after it', () => {
-      const deletedChunk = document.createElement('div');
-      deletedChunk.className = 'cm-deletedChunk';
-
-      const deletedLine = document.createElement('div');
-      deletedLine.className = 'cm-deletedLine';
-      deletedChunk.appendChild(deletedLine);
-
-      // Add an UNSAVED form directly after the line (has .new class)
-      const unsavedForm = document.createElement('div');
-      unsavedForm.className = 'inline-comment new'; // HAS .new class
-      deletedChunk.appendChild(unsavedForm);
-
-      // Should return false - block duplicate unsaved forms on same line
-      expect(canAddCommentToDeletedLine(deletedLine)).toBe(false);
-    });
-
-    it('allows adding comment when line has nothing after it', () => {
-      const deletedChunk = document.createElement('div');
-      deletedChunk.className = 'cm-deletedChunk';
-
-      const deletedLine = document.createElement('div');
-      deletedLine.className = 'cm-deletedLine';
-      deletedChunk.appendChild(deletedLine);
-
-      // No comments at all - should allow
-      expect(canAddCommentToDeletedLine(deletedLine)).toBe(true);
-    });
-
-    it('allows adding comment to different line even when another has unsaved form', () => {
-      const deletedChunk = document.createElement('div');
-      deletedChunk.className = 'cm-deletedChunk';
-
-      // Line 1
-      const line1 = document.createElement('div');
-      line1.className = 'cm-deletedLine';
-      deletedChunk.appendChild(line1);
-
-      // Unsaved form after line 1
-      const unsavedForm = document.createElement('div');
-      unsavedForm.className = 'inline-comment new';
-      deletedChunk.appendChild(unsavedForm);
-
-      // Line 2
-      const line2 = document.createElement('div');
-      line2.className = 'cm-deletedLine';
-      deletedChunk.appendChild(line2);
-
-      // Line 1 should be blocked (has unsaved form after it)
-      expect(canAddCommentToDeletedLine(line1)).toBe(false);
-      // Line 2 should be allowed (nothing after it)
-      expect(canAddCommentToDeletedLine(line2)).toBe(true);
-    });
-
-    it('allows null clickedLine (fallback case)', () => {
-      expect(canAddCommentToDeletedLine(null)).toBe(true);
-    });
-  });
-
-  describe('comment form state preservation', () => {
-    it('deleted line draft key format is correct', () => {
-      // The key format is "anchorLine:deletedLineIndex"
-      // This is used to identify forms and preserve drafts across re-renders
-      const key = '10:2';
-      const [anchor, index] = key.split(':');
-
-      expect(parseInt(anchor, 10)).toBe(10);
-      expect(parseInt(index, 10)).toBe(2);
-
-      // Drafts are stored in a ref (Map) to avoid re-renders on every keystroke
-      const draftsRef = new Map<string, string>();
-      draftsRef.set(key, '');
-      draftsRef.set(key, 'My comment text');
-
-      // Content persists in the ref
-      expect(draftsRef.get(key)).toBe('My comment text');
-    });
-  });
+  // Note: canAddCommentToDeletedLine tests and comment form state preservation tests
+  // were removed as part of UnifiedDiffEditor integration - that logic is now in
+  // UnifiedDiffEditor which has its own comprehensive tests in unified-diff-editor.spec.ts
 
   describe('daemon mock comment operations', () => {
     let mockDaemon: MockDaemon;

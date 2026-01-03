@@ -79,7 +79,7 @@ export interface UnifiedDiffEditorProps {
   fontSize?: number;
   language?: string;
   contextLines?: number; // Lines of context around changes (default 3, 0 for full diff)
-  onAddComment: (docLine: number, content: string) => Promise<void>;
+  onAddComment: (docLine: number, content: string, anchor: CommentAnchor) => Promise<void>;
   onEditComment: (id: string, content: string) => Promise<void>;
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
@@ -838,7 +838,12 @@ export function UnifiedDiffEditor({
   // Handlers for comment forms
   const handleSaveComment = useCallback(
     async (docLine: number, commentContent: string) => {
-      await onAddComment(docLine, commentContent);
+      const anchor = createAnchor(docLine, linesRef.current);
+      if (!anchor) {
+        console.error('Failed to create anchor for line', docLine);
+        return;
+      }
+      await onAddComment(docLine, commentContent, anchor);
       setNewCommentLines((prev) => {
         const next = new Set(prev);
         next.delete(docLine);

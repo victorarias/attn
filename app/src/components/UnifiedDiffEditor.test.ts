@@ -6,7 +6,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildUnifiedDocument,
-  DiffLine,
   hashContent,
   createAnchor,
   resolveAnchor,
@@ -353,7 +352,7 @@ describe('calculateHunks', () => {
     const modified = '1\n2\n3\nCHANGED\n5\n6\n7';
     const { lines } = buildUnifiedDocument(original, modified);
 
-    const { hunks, collapsedRegions } = calculateHunks(lines, 2);
+    const { hunks } = calculateHunks(lines, 2);
 
     expect(hunks.length).toBeGreaterThanOrEqual(1);
     // The hunk should contain the change and 2 lines of context on each side

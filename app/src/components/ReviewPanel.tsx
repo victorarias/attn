@@ -1,18 +1,15 @@
 // app/src/components/ReviewPanel.tsx
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { EditorView, Decoration, WidgetType } from '@codemirror/view';
-import { EditorState, RangeSet, StateField, StateEffect } from '@codemirror/state';
-import { unifiedMergeView } from '@codemirror/merge';
-import { oneDark } from '@codemirror/theme-one-dark';
-import { javascript } from '@codemirror/lang-javascript';
-import { markdown } from '@codemirror/lang-markdown';
-import { python } from '@codemirror/lang-python';
-import { lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, rectangularSelection } from '@codemirror/view';
-import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
-import { history } from '@codemirror/commands';
-import { highlightSelectionMatches } from '@codemirror/search';
 import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../hooks/useDaemonSocket';
 import type { ReviewComment } from '../types/generated';
+import UnifiedDiffEditor, {
+  buildUnifiedDocument,
+  resolveAnchor,
+  hashContent,
+  type DiffLine,
+  type CommentAnchor,
+  type InlineComment as EditorComment,
+} from './UnifiedDiffEditor';
 import './ReviewPanel.css';
 
 // Auto-skip patterns for lockfiles and generated files
@@ -27,316 +24,70 @@ const AUTO_SKIP_PATTERNS = [
   'poetry.lock',
 ];
 
-/**
- * Check if a deleted chunk can accept a new comment form.
- * Returns true if no unsaved form exists (saved comments are OK).
- *
- * IMPORTANT: This checks for `.inline-comment.new` (unsaved forms only),
- * NOT `.inline-comment` (which would block new comments when saved comments exist).
- *
- * @exported for testing - regression test verifies this logic
- */
-export function canAddCommentToDeletedLine(clickedLine: Element | null): boolean {
-  if (!clickedLine) return true; // Allow if no specific line (fallback case)
-  // Check if the next sibling is an unsaved form
-  const nextSibling = clickedLine.nextElementSibling;
-  return !(nextSibling?.classList.contains('inline-comment') && nextSibling?.classList.contains('new'));
-}
-
-// Shared handlers interface for comment elements
-interface CommentHandlers {
-  onEdit: () => void;
-  onSave: (content: string) => void;
-  onCancel: () => void;
-  onResolve: (resolved: boolean) => void;
-  onDelete: () => void;
-}
+// ============================================================================
+// Comment Conversion Utilities (for UnifiedDiffEditor integration)
+// ============================================================================
 
 /**
- * Creates a comment element with all event handlers wired up.
- * Used by both InlineCommentWidget (for regular lines) and DOM injection (for deleted lines).
+ * Convert a ReviewComment (API format) to EditorComment format.
+ * Uses resolveAnchor to find the docLine and detect outdated/orphaned state.
  */
-function createCommentElement(
+function toEditorComment(
   comment: ReviewComment,
-  isEditing: boolean,
-  handlers: CommentHandlers
-): HTMLDivElement {
-  const wrapper = document.createElement('div');
-  wrapper.className = `inline-comment ${comment.resolved ? 'resolved' : ''}`;
+  lines: DiffLine[]
+): EditorComment | null {
+  // Build anchor from the stored line_start.
+  // Currently we assume 'modified' side - anchorContent is empty since we don't
+  // store it in the API, so staleness detection is limited.
+  const anchor: CommentAnchor = {
+    side: 'modified',
+    line: comment.line_start,
+    anchorContent: '',
+  };
 
-  if (isEditing) {
-    // Edit mode - show form
-    const form = document.createElement('div');
-    form.className = 'inline-comment-form';
+  // Try to resolve the anchor
+  const result = resolveAnchor(anchor, lines);
 
-    const textarea = document.createElement('textarea');
-    textarea.className = 'inline-comment-textarea';
-    textarea.value = comment.content;
-    textarea.rows = 3;
-    textarea.placeholder = 'Edit comment...';
-
-    // Keyboard shortcuts: Escape to cancel, Cmd/Ctrl+Enter to save
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        handlers.onCancel();
-      } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        e.stopPropagation();
-        const content = textarea.value.trim();
-        if (content) {
-          handlers.onSave(content);
-        }
-      }
-    });
-
-    form.appendChild(textarea);
-
-    const buttons = document.createElement('div');
-    buttons.className = 'inline-comment-buttons';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'inline-comment-btn';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.type = 'button';
-    cancelBtn.onclick = (e) => {
-      e.stopPropagation();
-      handlers.onCancel();
+  if ('isOrphaned' in result) {
+    // Line no longer exists - still show comment but mark as orphaned
+    // Place it at line 1 as fallback
+    return {
+      id: comment.id,
+      docLine: 1,
+      content: comment.content,
+      resolved: comment.resolved,
+      author: comment.author as 'user' | 'agent',
+      anchor,
+      isOrphaned: true,
     };
-    buttons.appendChild(cancelBtn);
-
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'inline-comment-btn save';
-    saveBtn.textContent = 'Save';
-    saveBtn.type = 'button';
-    saveBtn.onclick = (e) => {
-      e.stopPropagation();
-      const content = textarea.value.trim();
-      if (content) {
-        handlers.onSave(content);
-      }
-    };
-    buttons.appendChild(saveBtn);
-
-    form.appendChild(buttons);
-    wrapper.appendChild(form);
-
-    // Focus textarea after render
-    setTimeout(() => textarea.focus(), 0);
-  } else {
-    // Display mode
-    const header = document.createElement('div');
-    header.className = 'inline-comment-header';
-
-    const author = document.createElement('span');
-    author.className = `inline-comment-author ${comment.author}`;
-    author.textContent = comment.author === 'agent' ? 'Claude' : 'You';
-    header.appendChild(author);
-
-    const actions = document.createElement('div');
-    actions.className = 'inline-comment-actions';
-
-    const editBtn = document.createElement('button');
-    editBtn.className = 'inline-comment-btn';
-    editBtn.textContent = 'Edit';
-    editBtn.onclick = (e) => {
-      e.stopPropagation();
-      handlers.onEdit();
-    };
-    actions.appendChild(editBtn);
-
-    if (!comment.resolved) {
-      const resolveBtn = document.createElement('button');
-      resolveBtn.className = 'inline-comment-btn resolve';
-      resolveBtn.textContent = 'Resolve';
-      resolveBtn.onclick = (e) => {
-        e.stopPropagation();
-        handlers.onResolve(true);
-      };
-      actions.appendChild(resolveBtn);
-    }
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'inline-comment-btn delete';
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.onclick = (e) => {
-      e.stopPropagation();
-      handlers.onDelete();
-    };
-    actions.appendChild(deleteBtn);
-
-    header.appendChild(actions);
-    wrapper.appendChild(header);
-
-    const content = document.createElement('div');
-    content.className = 'inline-comment-content';
-    content.textContent = comment.content;
-    wrapper.appendChild(content);
   }
 
-  return wrapper;
+  return {
+    id: comment.id,
+    docLine: result.docLine,
+    content: comment.content,
+    resolved: comment.resolved,
+    author: comment.author as 'user' | 'agent',
+    anchor,
+    isOutdated: result.isOutdated,
+  };
 }
 
-// Inline comment widget - displays saved comments below the line
-class InlineCommentWidget extends WidgetType {
-  constructor(
-    public comment: ReviewComment,
-    public isEditing: boolean,
-    public onSave: (content: string) => void,
-    public onCancel: () => void,
-    public onStartEdit: () => void,
-    public onResolve: (resolved: boolean) => void,
-    public onDelete: () => void
-  ) {
-    super();
-  }
-
-  toDOM() {
-    return createCommentElement(this.comment, this.isEditing, {
-      onEdit: this.onStartEdit,
-      onSave: this.onSave,
-      onCancel: this.onCancel,
-      onResolve: this.onResolve,
-      onDelete: this.onDelete,
-    });
-  }
-
-  eq(other: InlineCommentWidget) {
-    return other.comment.id === this.comment.id &&
-           other.comment.content === this.comment.content &&
-           other.comment.resolved === this.comment.resolved &&
-           other.isEditing === this.isEditing;
-  }
-
-  ignoreEvent(event: Event) {
-    // Return true for mouse events so clicks reach the buttons/textarea
-    // instead of being captured by CodeMirror's focus handling
-    return event.type === 'mousedown' || event.type === 'click';
-  }
+/**
+ * Extract API-compatible fields from a CommentAnchor.
+ * Used when saving a new comment to the backend.
+ */
+function fromEditorAnchor(anchor: CommentAnchor): {
+  line_start: number;
+  line_end: number;
+} {
+  // The anchor contains the line number on either original or modified side
+  // For the API, we use this as line_start/line_end
+  return {
+    line_start: anchor.line,
+    line_end: anchor.line,
+  };
 }
-
-// Widget for adding a new comment
-class NewCommentWidget extends WidgetType {
-  constructor(
-    public lineNum: number,
-    public initialContent: string,
-    public onSave: (content: string) => void,
-    public onCancel: () => void,
-    public onInput: (content: string) => void
-  ) {
-    super();
-  }
-
-  toDOM() {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'inline-comment new';
-
-    const form = document.createElement('div');
-    form.className = 'inline-comment-form';
-
-    const label = document.createElement('div');
-    label.className = 'inline-comment-label';
-    label.textContent = `Line ${this.lineNum}`;
-    form.appendChild(label);
-
-    const textarea = document.createElement('textarea');
-    textarea.className = 'inline-comment-textarea';
-    textarea.rows = 3;
-    textarea.placeholder = 'Add a comment...';
-    textarea.value = this.initialContent;
-
-    // Save draft on input (no re-render)
-    textarea.addEventListener('input', () => {
-      this.onInput(textarea.value);
-    });
-
-    // Keyboard shortcuts: Escape to cancel, Cmd/Ctrl+Enter to save
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        this.onCancel();
-      } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        e.stopPropagation();
-        const content = textarea.value.trim();
-        if (content) {
-          this.onSave(content);
-        }
-      }
-    });
-
-    form.appendChild(textarea);
-
-    const buttons = document.createElement('div');
-    buttons.className = 'inline-comment-buttons';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'inline-comment-btn cancel-btn';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.type = 'button';
-    cancelBtn.onclick = (e) => {
-      e.stopPropagation();
-      this.onCancel();
-    };
-    buttons.appendChild(cancelBtn);
-
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'inline-comment-btn save';
-    saveBtn.textContent = 'Save';
-    saveBtn.type = 'button';
-    saveBtn.onclick = (e) => {
-      e.stopPropagation();
-      const content = textarea.value.trim();
-      if (content) {
-        this.onSave(content);
-      }
-    };
-    buttons.appendChild(saveBtn);
-
-    form.appendChild(buttons);
-    wrapper.appendChild(form);
-
-    // Focus textarea after render (only if no initial content - otherwise cursor goes to end)
-    if (!this.initialContent) {
-      setTimeout(() => textarea.focus(), 0);
-    }
-
-    return wrapper;
-  }
-
-  eq(other: NewCommentWidget) {
-    return other.lineNum === this.lineNum;
-  }
-
-  ignoreEvent(event: Event) {
-    // Return true for mouse events so clicks reach the textarea/buttons
-    // instead of being captured by CodeMirror's focus handling
-    return event.type === 'mousedown' || event.type === 'click';
-  }
-}
-
-// State effect to update inline comment decorations
-const setInlineDecorations = StateEffect.define<RangeSet<Decoration>>();
-
-// State field for inline comment widgets - allows dynamic updates without editor recreation
-const inlineDecorationsField = StateField.define<RangeSet<Decoration>>({
-  create() {
-    return RangeSet.empty;
-  },
-  update(decorations, tr) {
-    // Check for explicit decoration updates first
-    for (const effect of tr.effects) {
-      if (effect.is(setInlineDecorations)) {
-        return effect.value;
-      }
-    }
-    // Map existing decorations through document changes
-    return decorations.map(tr.changes);
-  },
-  provide: (field) => EditorView.decorations.from(field),
-});
 
 interface ReviewFile {
   path: string;
@@ -365,17 +116,6 @@ interface ReviewPanelProps {
   getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: ReviewComment[] }>;
 }
 
-// Simple hash function for detecting content changes
-function simpleHash(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return hash.toString(36);
-}
-
 export function ReviewPanel({
   isOpen,
   gitStatus,
@@ -401,45 +141,27 @@ export function ReviewPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState<{ original: string; modified: string } | null>(null);
-  const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks only, -1 = full
+  const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks mode (uses 3 lines context), -1 = full file
   const [fontSize, setFontSize] = useState(13); // Default font size
-  const editorContainerRef = useRef<HTMLDivElement>(null);
-  const editorViewRef = useRef<EditorView | null>(null);
-  const scrollPositionRef = useRef<number>(0);
-  // Track core editor deps to detect when only comment state changed (avoids recreation)
-  const lastEditorCoreRef = useRef<{
-    diffContent: { original: string; modified: string } | null;
-    filePath: string | undefined;
-    fontSize: number;
-    expandedContext: number;
-  } | null>(null);
 
   // Comment state
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
-  const [newCommentLines, setNewCommentLines] = useState<Set<number>>(new Set());
-  // For regular line comments: key is line number
-  // We use Set for open forms (triggers re-render) and ref for draft content (no re-render on typing)
-  const regularLineDraftsRef = useRef<Map<number, string>>(new Map());
-  // For deleted lines: key is "anchorLine:deletedLineIndex"
-  const [newDeletedLineComments, setNewDeletedLineComments] = useState<Set<string>>(new Set());
-  const deletedLineDraftsRef = useRef<Map<string, string>>(new Map());
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [commentError, setCommentError] = useState<string | null>(null);
 
-  // Helper: check if comment is on a deleted line (marked by line_end < 0)
-  // line_end encodes the deleted line index: -1 = after line 0, -2 = after line 1, etc.
-  const isDeletedLineComment = (comment: ReviewComment) => comment.line_end < 0;
+  // Auto-clear comment errors after 3 seconds
+  useEffect(() => {
+    if (commentError) {
+      const timer = setTimeout(() => setCommentError(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [commentError]);
 
-  // Derive comments for current file (used for CodeMirror gutter markers)
+  // Derive comments for current file
   const comments = useMemo(() => {
     if (!selectedFilePath) return [];
     return allReviewComments.filter(c => c.filepath === selectedFilePath);
   }, [allReviewComments, selectedFilePath]);
-
-  // Split comments into regular and deleted-line comments
-  const regularComments = useMemo(() =>
-    comments.filter(c => !isDeletedLineComment(c)), [comments]);
-  const deletedLineComments = useMemo(() =>
-    comments.filter(c => isDeletedLineComment(c)), [comments]);
 
   // Compute comment counts per file
   const fileCommentCounts = useMemo(() => {
@@ -600,7 +322,7 @@ export function ReviewPanel({
         if (selectedFilePath !== fetchPath) return;
 
         const newContent = { original: result.original, modified: result.modified };
-        const newHash = simpleHash(result.original + result.modified);
+        const newHash = hashContent(result.original + result.modified);
         const prevHash = viewedDiffHashesRef.current.get(fetchPath);
 
         setDiffContent(newContent);
@@ -652,7 +374,7 @@ export function ReviewPanel({
       // Fetch and check hash
       try {
         const result = await fetchDiff(viewedPath, fileInChanges.staged);
-        const newHash = simpleHash(result.original + result.modified);
+        const newHash = hashContent(result.original + result.modified);
         const prevHash = viewedDiffHashesRef.current.get(viewedPath);
 
         if (prevHash && prevHash !== newHash) {
@@ -664,910 +386,6 @@ export function ReviewPanel({
       }
     });
   }, [gitStatus, viewedFiles, selectedFilePath, allFiles, fetchDiff]);
-
-  // Create/update CodeMirror editor
-  useEffect(() => {
-    if (!editorContainerRef.current || !diffContent) return;
-
-    // Check if only comment state changed (core editor deps unchanged)
-    const currentCore = {
-      diffContent,
-      filePath: selectedFile?.path,
-      fontSize,
-      expandedContext,
-    };
-    const lastCore = lastEditorCoreRef.current;
-    const coreUnchanged = lastCore &&
-      lastCore.diffContent === currentCore.diffContent &&
-      lastCore.filePath === currentCore.filePath &&
-      lastCore.fontSize === currentCore.fontSize &&
-      lastCore.expandedContext === currentCore.expandedContext;
-
-    // If editor exists and only comment state changed, dispatch updates instead of recreating
-    if (coreUnchanged && editorViewRef.current) {
-      const view = editorViewRef.current;
-
-      // Helper to calculate position at end of line
-      const getLineEndPos = (lineNum: number, content: string) => {
-        const lines = content.split('\n');
-        if (lineNum < 1 || lineNum > lines.length) return -1;
-        let pos = 0;
-        for (let i = 0; i < lineNum; i++) {
-          pos += (lines[i]?.length || 0) + 1;
-        }
-        return Math.max(0, pos - 1);
-      };
-
-      // Build inline comment widgets
-      const inlineWidgets: { pos: number; widget: WidgetType }[] = [];
-
-      for (const comment of regularComments) {
-        const lineNum = comment.line_start;
-        const pos = getLineEndPos(lineNum, diffContent.modified);
-        if (pos >= 0) {
-          const isEditing = editingCommentId === comment.id;
-          inlineWidgets.push({
-            pos,
-            widget: new InlineCommentWidget(
-              comment,
-              isEditing,
-              async (content) => {
-                if (updateComment) {
-                  const result = await updateComment(comment.id, content);
-                  if (result.success) {
-                    setAllReviewComments(prev =>
-                      prev.map(c => c.id === comment.id ? { ...c, content } : c)
-                    );
-                    setEditingCommentId(null);
-                  }
-                }
-              },
-              () => setEditingCommentId(null),
-              () => setEditingCommentId(comment.id),
-              async (resolved) => {
-                if (resolveComment) {
-                  const result = await resolveComment(comment.id, resolved);
-                  if (result.success) {
-                    setAllReviewComments(prev =>
-                      prev.map(c => c.id === comment.id ? { ...c, resolved } : c)
-                    );
-                  }
-                }
-              },
-              async () => {
-                if (deleteComment) {
-                  const result = await deleteComment(comment.id);
-                  if (result.success) {
-                    setAllReviewComments(prev =>
-                      prev.filter(c => c.id !== comment.id)
-                    );
-                  }
-                }
-              }
-            ),
-          });
-        }
-      }
-
-      for (const lineNum of newCommentLines) {
-        const pos = getLineEndPos(lineNum, diffContent.modified);
-        if (pos >= 0) {
-          const draftContent = regularLineDraftsRef.current.get(lineNum) || '';
-          inlineWidgets.push({
-            pos,
-            widget: new NewCommentWidget(
-              lineNum,
-              draftContent,
-              async (content) => {
-                if (reviewId && selectedFilePath && addComment) {
-                  const result = await addComment(
-                    reviewId,
-                    selectedFilePath,
-                    lineNum,
-                    lineNum,
-                    content
-                  );
-                  if (result.success && result.comment) {
-                    setAllReviewComments(prev => [...prev, result.comment!]);
-                    regularLineDraftsRef.current.delete(lineNum);
-                    setNewCommentLines(prev => {
-                      const next = new Set(prev);
-                      next.delete(lineNum);
-                      return next;
-                    });
-                  }
-                }
-              },
-              () => {
-                regularLineDraftsRef.current.delete(lineNum);
-                setNewCommentLines(prev => {
-                  const next = new Set(prev);
-                  next.delete(lineNum);
-                  return next;
-                });
-              },
-              (content) => {
-                regularLineDraftsRef.current.set(lineNum, content);
-              }
-            ),
-          });
-        }
-      }
-
-      // Sort and create decoration set
-      inlineWidgets.sort((a, b) => a.pos - b.pos);
-      const inlineDecorations = Decoration.set(
-        inlineWidgets.map(({ pos, widget }) =>
-          Decoration.widget({ widget, block: true, side: 1 }).range(pos)
-        )
-      );
-
-      // Save scroll position before dispatch - widget changes can cause jumps
-      const scrollTop = view.scrollDOM.scrollTop;
-
-      // Dispatch updates to existing view - NO RECREATION!
-      view.dispatch({
-        effects: setInlineDecorations.of(inlineDecorations),
-      });
-
-      // Restore scroll position after widget updates
-      view.scrollDOM.scrollTop = scrollTop;
-
-      // Still need to handle deleted line comment DOM injection
-      // (deleted lines aren't part of CodeMirror document, so use DOM injection)
-      setTimeout(() => {
-        if (!editorContainerRef.current) return;
-
-        // Build a map of anchor line -> deleted chunk element
-        const deletedChunks = editorContainerRef.current.querySelectorAll('.cm-deletedChunk');
-        const anchorLineToChunk = new Map<number, Element>();
-
-        deletedChunks.forEach((chunk) => {
-          let prevLine = chunk.previousElementSibling;
-          while (prevLine && !prevLine.classList.contains('cm-line')) {
-            prevLine = prevLine.previousElementSibling;
-          }
-          if (prevLine && view) {
-            try {
-              const pos = view.posAtDOM(prevLine);
-              const lineNum = view.state.doc.lineAt(pos).number;
-              anchorLineToChunk.set(lineNum, chunk);
-            } catch {
-              // Ignore
-            }
-          }
-        });
-
-        // Remove forms that are no longer in state (cancelled)
-        editorContainerRef.current.querySelectorAll('[data-new-comment-key]').forEach((form) => {
-          const key = (form as HTMLElement).dataset.newCommentKey;
-          if (key && !newDeletedLineComments.has(key)) {
-            form.remove();
-          }
-        });
-
-        // Inject new comment forms for deleted lines (from state)
-        newDeletedLineComments.forEach((key) => {
-          const [anchorStr, indexStr] = key.split(':');
-          const anchorLineNum = parseInt(anchorStr, 10);
-          const deletedLineIndex = parseInt(indexStr, 10);
-
-          const chunk = anchorLineToChunk.get(anchorLineNum);
-          if (!chunk) return;
-
-          // Check if form already injected
-          if (chunk.querySelector(`[data-new-comment-key="${key}"]`)) return;
-
-          // Get draft content from ref
-          const draftContent = deletedLineDraftsRef.current.get(key) || '';
-
-          // Create the form element
-          const form = document.createElement('div');
-          form.className = 'inline-comment new';
-          form.dataset.newCommentKey = key;
-          form.innerHTML = `<div class="inline-comment-form"><div class="inline-comment-label">Deleted content (after line ${anchorLineNum})</div><textarea class="inline-comment-textarea" rows="3" placeholder="Add a comment..."></textarea><div class="inline-comment-buttons"><button type="button" class="inline-comment-btn cancel-btn">Cancel</button><button type="button" class="inline-comment-btn save save-btn">Save</button></div></div>`;
-
-          // Insert after the specific deleted line
-          const deletedLines = chunk.querySelectorAll('.cm-deletedLine');
-          const targetLine = deletedLines[deletedLineIndex] || deletedLines[deletedLines.length - 1];
-          if (targetLine) {
-            targetLine.after(form);
-          } else {
-            chunk.appendChild(form);
-          }
-
-          // Set initial content and focus
-          const textarea = form.querySelector('textarea');
-          if (textarea) {
-            textarea.value = draftContent;
-            setTimeout(() => textarea.focus(), 0);
-
-            // Save draft on input to ref (no re-render)
-            textarea.addEventListener('input', () => {
-              deletedLineDraftsRef.current.set(key, textarea.value);
-            });
-
-            // Keyboard shortcuts: Escape to cancel, Cmd/Ctrl+Enter to save
-            textarea.addEventListener('keydown', async (e) => {
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation();
-                deletedLineDraftsRef.current.delete(key);
-                setNewDeletedLineComments(prev => {
-                  const next = new Set(prev);
-                  next.delete(key);
-                  return next;
-                });
-              } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                e.stopPropagation();
-                const content = textarea.value.trim();
-                if (content && reviewId && selectedFilePath && addComment) {
-                  const result = await addComment(
-                    reviewId,
-                    selectedFilePath,
-                    anchorLineNum,
-                    -(deletedLineIndex + 1),
-                    content
-                  );
-                  if (result.success && result.comment) {
-                    setAllReviewComments(prev => [...prev, result.comment!]);
-                    deletedLineDraftsRef.current.delete(key);
-                    setNewDeletedLineComments(prev => {
-                      const next = new Set(prev);
-                      next.delete(key);
-                      return next;
-                    });
-                  }
-                }
-              }
-            });
-          }
-
-          // Handle cancel
-          const cancelBtn = form.querySelector('.cancel-btn');
-          cancelBtn?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            deletedLineDraftsRef.current.delete(key);
-            setNewDeletedLineComments(prev => {
-              const next = new Set(prev);
-              next.delete(key);
-              return next;
-            });
-          });
-
-          // Handle save
-          const saveBtn = form.querySelector('.save-btn');
-          saveBtn?.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const content = textarea?.value.trim();
-            if (content && reviewId && selectedFilePath && addComment) {
-              const result = await addComment(
-                reviewId,
-                selectedFilePath,
-                anchorLineNum,
-                -(deletedLineIndex + 1),
-                content
-              );
-              if (result.success && result.comment) {
-                setAllReviewComments(prev => [...prev, result.comment!]);
-                deletedLineDraftsRef.current.delete(key);
-                setNewDeletedLineComments(prev => {
-                  const next = new Set(prev);
-                  next.delete(key);
-                  return next;
-                });
-              }
-            }
-          });
-        });
-      }, 0);
-
-      return; // Early return - skip editor recreation
-    }
-
-    // Update core ref for next comparison
-    lastEditorCoreRef.current = currentCore;
-
-    // Clean up existing editor - save scroll position first
-    if (editorViewRef.current) {
-      scrollPositionRef.current = editorViewRef.current.scrollDOM.scrollTop;
-      editorViewRef.current.destroy();
-      editorViewRef.current = null;
-    }
-
-    // Detect language from file extension
-    const ext = selectedFile?.path.split('.').pop()?.toLowerCase();
-    let langExtension;
-    switch (ext) {
-      case 'js':
-      case 'jsx':
-      case 'ts':
-      case 'tsx':
-        langExtension = javascript({ typescript: ext === 'ts' || ext === 'tsx', jsx: ext === 'jsx' || ext === 'tsx' });
-        break;
-      case 'md':
-        langExtension = markdown();
-        break;
-      case 'py':
-        langExtension = python();
-        break;
-      default:
-        langExtension = [];
-    }
-
-    // Custom diff styling that works with oneDark
-    // Note: Line wrapping styles are in ReviewPanel.css (flex:1 + min-width:0 on cm-content)
-    const diffTheme = EditorView.theme({
-      '&': {
-        height: '100%',
-      },
-      '.cm-scroller': {
-        fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-        fontSize: `${fontSize}px`,
-        lineHeight: '1.6',
-      },
-      '.cm-gutters': {
-        borderRight: '1px solid #3e4451',
-      },
-      '.cm-lineNumbers .cm-gutterElement': {
-        padding: '0 16px 0 8px',
-        minWidth: '48px',
-      },
-      // Deleted chunk - red background for entire line
-      '.cm-deletedChunk': {
-        backgroundColor: '#3c1f1e !important',
-      },
-      // Deleted text highlight within the line
-      '.cm-deletedChunk .cm-deletedText': {
-        backgroundColor: '#6e3630 !important',
-        textDecoration: 'none !important',
-      },
-      // Inserted chunk - green background for entire line
-      '.cm-insertedChunk': {
-        backgroundColor: '#1e3a1e !important',
-      },
-      // Inserted text highlight within the line
-      '.cm-insertedChunk .cm-insertedText': {
-        backgroundColor: '#2e5c2e !important',
-      },
-      // Changed line indicator
-      '.cm-changedLine': {
-        backgroundColor: 'rgba(187, 128, 9, 0.08)',
-      },
-      // Collapsed unchanged regions (hunks mode)
-      '.cm-collapsedLines': {
-        backgroundColor: '#2c313a',
-        color: '#636d83',
-        padding: '6px 16px',
-        margin: '2px 0',
-        borderRadius: '0',
-        fontSize: '12px',
-        cursor: 'pointer',
-        borderTop: '1px solid #3e4451',
-        borderBottom: '1px solid #3e4451',
-      },
-      '.cm-collapsedLines:hover': {
-        backgroundColor: '#3e4451',
-        color: '#abb2bf',
-      },
-      // Remove active line highlighting in diff view
-      '.cm-activeLine': {
-        backgroundColor: 'transparent !important',
-      },
-      '.cm-activeLineGutter': {
-        backgroundColor: 'transparent !important',
-      },
-    }, { dark: true });
-
-    // Minimal setup for read-only diff viewing
-    const minimalSetup = [
-      lineNumbers(),
-      highlightActiveLineGutter(),
-      highlightSpecialChars(),
-      history(),
-      foldGutter(),
-      drawSelection(),
-      EditorState.allowMultipleSelections.of(true),
-      indentOnInput(),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-      bracketMatching(),
-      rectangularSelection(),
-      highlightSelectionMatches(),
-    ];
-
-    // Click handler for diff lines - opens comment forms
-    const clickHandler = EditorView.domEventHandlers({
-      mousedown: (event, view) => {
-        const target = event.target as HTMLElement;
-
-        // Don't handle clicks on inline comment elements
-        if (target.closest('.inline-comment')) {
-          return false;
-        }
-
-        // Prefer posAtDOM when clicking directly on a .cm-line element
-        // This is more accurate than lineBlockAtHeight because injected DOM elements
-        // (like saved deleted line comments) add visual height that throws off
-        // the y-coordinate calculation in lineBlockAtHeight
-        const line = target.closest('.cm-line');
-        if (line instanceof HTMLElement) {
-          try {
-            const pos = view.posAtDOM(line);
-            const lineNum = view.state.doc.lineAt(pos).number;
-            const hasNewForm = newCommentLines.has(lineNum);
-
-            if (!hasNewForm) {
-              setNewCommentLines(prev => new Set(prev).add(lineNum));
-              return true;
-            }
-            return false;
-          } catch {
-            // Fall through to lineBlockAtHeight
-          }
-        }
-
-        // Fallback: use lineBlockAtHeight for clicks outside .cm-line elements
-        // (e.g., clicking on empty space in the editor)
-        try {
-          const editorRect = view.dom.getBoundingClientRect();
-          const y = event.clientY - editorRect.top + view.scrollDOM.scrollTop;
-          const block = view.lineBlockAtHeight(y);
-          const lineNum = view.state.doc.lineAt(block.from).number;
-          const hasNewForm = newCommentLines.has(lineNum);
-
-          if (!hasNewForm) {
-            setNewCommentLines(prev => new Set(prev).add(lineNum));
-            return true;
-          }
-        } catch {
-          // Ignore
-        }
-
-        return false;
-      },
-    });
-
-    // Helper to calculate position at end of line
-    const getLineEndPos = (lineNum: number, content: string) => {
-      const lines = content.split('\n');
-      if (lineNum < 1 || lineNum > lines.length) return -1;
-      let pos = 0;
-      for (let i = 0; i < lineNum; i++) {
-        pos += (lines[i]?.length || 0) + 1;
-      }
-      return Math.max(0, pos - 1);
-    };
-
-    // Create inline comment decorations
-    const inlineWidgets: { pos: number; widget: WidgetType }[] = [];
-
-    // Add existing comment widgets (only regular comments, not deleted-line comments)
-    for (const comment of regularComments) {
-      const lineNum = comment.line_start;
-      const pos = getLineEndPos(lineNum, diffContent.modified);
-      if (pos >= 0) {
-        const isEditing = editingCommentId === comment.id;
-        inlineWidgets.push({
-          pos,
-          widget: new InlineCommentWidget(
-            comment,
-            isEditing,
-            async (content) => {
-              if (updateComment) {
-                const result = await updateComment(comment.id, content);
-                if (result.success) {
-                  setAllReviewComments(prev =>
-                    prev.map(c => c.id === comment.id ? { ...c, content } : c)
-                  );
-                  setEditingCommentId(null);
-                }
-              }
-            },
-            () => setEditingCommentId(null),
-            () => setEditingCommentId(comment.id),
-            async (resolved) => {
-              if (resolveComment) {
-                const result = await resolveComment(comment.id, resolved);
-                if (result.success) {
-                  setAllReviewComments(prev =>
-                    prev.map(c => c.id === comment.id ? { ...c, resolved } : c)
-                  );
-                }
-              }
-            },
-            async () => {
-              if (deleteComment) {
-                const result = await deleteComment(comment.id);
-                if (result.success) {
-                  setAllReviewComments(prev =>
-                    prev.filter(c => c.id !== comment.id)
-                  );
-                }
-              }
-            }
-          ),
-        });
-      }
-    }
-
-    // Add new comment widgets for all open forms
-    for (const lineNum of newCommentLines) {
-      const pos = getLineEndPos(lineNum, diffContent.modified);
-      if (pos >= 0) {
-        const draftContent = regularLineDraftsRef.current.get(lineNum) || '';
-        inlineWidgets.push({
-          pos,
-          widget: new NewCommentWidget(
-            lineNum,
-            draftContent,
-            async (content) => {
-              if (reviewId && selectedFilePath && addComment) {
-                const result = await addComment(
-                  reviewId,
-                  selectedFilePath,
-                  lineNum,
-                  lineNum,
-                  content
-                );
-                if (result.success && result.comment) {
-                  setAllReviewComments(prev => [...prev, result.comment!]);
-                  regularLineDraftsRef.current.delete(lineNum);
-                  setNewCommentLines(prev => {
-                    const next = new Set(prev);
-                    next.delete(lineNum);
-                    return next;
-                  });
-                }
-              }
-            },
-            () => {
-              regularLineDraftsRef.current.delete(lineNum);
-              setNewCommentLines(prev => {
-                const next = new Set(prev);
-                next.delete(lineNum);
-                return next;
-              });
-            },
-            (content) => {
-              regularLineDraftsRef.current.set(lineNum, content);
-            }
-          ),
-        });
-      }
-    }
-
-    // Sort by position and create decoration set
-    inlineWidgets.sort((a, b) => a.pos - b.pos);
-    const inlineDecorations = Decoration.set(
-      inlineWidgets.map(({ pos, widget }) =>
-        Decoration.widget({ widget, block: true, side: 1 }).range(pos)
-      )
-    );
-
-    const extensions = [
-      inlineDecorationsField,  // StateField for dynamic decoration updates
-      clickHandler,
-      minimalSetup,
-      langExtension,
-      oneDark,
-      diffTheme,
-      EditorView.lineWrapping,
-      EditorView.editable.of(false),
-      unifiedMergeView({
-        original: diffContent.original,
-        highlightChanges: true,
-        syntaxHighlightDeletions: true,
-        mergeControls: false,
-        // Hunks mode: collapse unchanged regions, Full mode: show everything
-        ...(expandedContext === 0 ? {
-          collapseUnchanged: { margin: 3, minSize: 6 },
-        } : {}),
-      }),
-    ];
-
-    const state = EditorState.create({
-      doc: diffContent.modified,
-      extensions,
-    });
-
-    const view = new EditorView({
-      state,
-      parent: editorContainerRef.current,
-    });
-
-    // Initialize inline decorations
-    view.dispatch({
-      effects: setInlineDecorations.of(inlineDecorations),
-    });
-
-    editorViewRef.current = view;
-
-    // Restore scroll position
-    if (scrollPositionRef.current > 0) {
-      view.scrollDOM.scrollTop = scrollPositionRef.current;
-    }
-
-    // Inject saved deleted-line comments into deleted chunks
-    setTimeout(() => {
-      if (!editorContainerRef.current) return;
-
-      // Build a map of anchor line -> deleted chunk element
-      const deletedChunks = editorContainerRef.current.querySelectorAll('.cm-deletedChunk');
-      const anchorLineToChunk = new Map<number, Element>();
-
-      deletedChunks.forEach((chunk) => {
-        let prevLine = chunk.previousElementSibling;
-        while (prevLine && !prevLine.classList.contains('cm-line')) {
-          prevLine = prevLine.previousElementSibling;
-        }
-        if (prevLine && view) {
-          try {
-            const pos = view.posAtDOM(prevLine);
-            const lineNum = view.state.doc.lineAt(pos).number;
-            anchorLineToChunk.set(lineNum, chunk);
-          } catch {
-            // Ignore
-          }
-        }
-      });
-
-      // Inject saved comments for deleted lines (using shared createCommentElement)
-      deletedLineComments.forEach((comment) => {
-        const chunk = anchorLineToChunk.get(comment.line_start);
-        if (!chunk) return;
-
-        // Check if already injected
-        if (chunk.querySelector(`[data-comment-id="${comment.id}"]`)) return;
-
-        // Create comment element using shared function
-        const commentEl = createCommentElement(comment, false, {
-          onEdit: () => setEditingCommentId(comment.id),
-          onSave: async (content) => {
-            if (updateComment) {
-              const result = await updateComment(comment.id, content);
-              if (result.success) {
-                setAllReviewComments(prev =>
-                  prev.map(c => c.id === comment.id ? { ...c, content } : c)
-                );
-                setEditingCommentId(null);
-              }
-            }
-          },
-          onCancel: () => setEditingCommentId(null),
-          onResolve: async (resolved) => {
-            if (resolveComment) {
-              const result = await resolveComment(comment.id, resolved);
-              if (result.success) {
-                setAllReviewComments(prev =>
-                  prev.map(c => c.id === comment.id ? { ...c, resolved } : c)
-                );
-              }
-            }
-          },
-          onDelete: async () => {
-            if (deleteComment) {
-              const result = await deleteComment(comment.id);
-              if (result.success) {
-                setAllReviewComments(prev =>
-                  prev.filter(c => c.id !== comment.id)
-                );
-              }
-            }
-          },
-        });
-
-        // Add data attribute for duplicate detection
-        commentEl.dataset.commentId = comment.id;
-
-        // Insert after the specific deleted line (index encoded in line_end)
-        // line_end = -(index + 1), so index = Math.abs(line_end) - 1
-        const deletedLines = chunk.querySelectorAll('.cm-deletedLine');
-        const deletedLineIndex = Math.abs(comment.line_end) - 1;
-        const targetLine = deletedLines[deletedLineIndex] || deletedLines[deletedLines.length - 1];
-        if (targetLine) {
-          targetLine.after(commentEl);
-        } else {
-          chunk.appendChild(commentEl);
-        }
-      });
-
-      // Inject new comment forms for deleted lines (from state)
-      newDeletedLineComments.forEach((key) => {
-        const [anchorStr, indexStr] = key.split(':');
-        const anchorLineNum = parseInt(anchorStr, 10);
-        const deletedLineIndex = parseInt(indexStr, 10);
-
-        const chunk = anchorLineToChunk.get(anchorLineNum);
-        if (!chunk) return;
-
-        // Check if form already injected
-        if (chunk.querySelector(`[data-new-comment-key="${key}"]`)) return;
-
-        // Get draft content from ref
-        const draftContent = deletedLineDraftsRef.current.get(key) || '';
-
-        // Create the form element
-        const form = document.createElement('div');
-        form.className = 'inline-comment new';
-        form.dataset.newCommentKey = key;
-        form.innerHTML = `<div class="inline-comment-form"><div class="inline-comment-label">Deleted content (after line ${anchorLineNum})</div><textarea class="inline-comment-textarea" rows="3" placeholder="Add a comment..."></textarea><div class="inline-comment-buttons"><button type="button" class="inline-comment-btn cancel-btn">Cancel</button><button type="button" class="inline-comment-btn save save-btn">Save</button></div></div>`;
-
-        // Insert after the specific deleted line
-        const deletedLines = chunk.querySelectorAll('.cm-deletedLine');
-        const targetLine = deletedLines[deletedLineIndex] || deletedLines[deletedLines.length - 1];
-        if (targetLine) {
-          targetLine.after(form);
-        } else {
-          chunk.appendChild(form);
-        }
-
-        // Set initial content and focus
-        const textarea = form.querySelector('textarea');
-        if (textarea) {
-          textarea.value = draftContent;
-          setTimeout(() => textarea.focus(), 0);
-
-          // Save draft on input to ref (no re-render)
-          textarea.addEventListener('input', () => {
-            deletedLineDraftsRef.current.set(key, textarea.value);
-          });
-
-          // Keyboard shortcuts: Escape to cancel, Cmd/Ctrl+Enter to save
-          textarea.addEventListener('keydown', async (e) => {
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              e.stopPropagation();
-              deletedLineDraftsRef.current.delete(key);
-              setNewDeletedLineComments(prev => {
-                const next = new Set(prev);
-                next.delete(key);
-                return next;
-              });
-            } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              e.stopPropagation();
-              const content = textarea.value.trim();
-              if (content && reviewId && selectedFilePath && addComment) {
-                const result = await addComment(
-                  reviewId,
-                  selectedFilePath,
-                  anchorLineNum,
-                  -(deletedLineIndex + 1),
-                  content
-                );
-                if (result.success && result.comment) {
-                  setAllReviewComments(prev => [...prev, result.comment!]);
-                  deletedLineDraftsRef.current.delete(key);
-                  setNewDeletedLineComments(prev => {
-                    const next = new Set(prev);
-                    next.delete(key);
-                    return next;
-                  });
-                }
-              }
-            }
-          });
-        }
-
-        // Handle cancel
-        const cancelBtn = form.querySelector('.cancel-btn');
-        cancelBtn?.addEventListener('click', (e) => {
-          e.stopPropagation();
-          deletedLineDraftsRef.current.delete(key);
-          setNewDeletedLineComments(prev => {
-            const next = new Set(prev);
-            next.delete(key);
-            return next;
-          });
-        });
-
-        // Handle save
-        const saveBtn = form.querySelector('.save-btn');
-        saveBtn?.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const content = textarea?.value.trim();
-          if (content && reviewId && selectedFilePath && addComment) {
-            const result = await addComment(
-              reviewId,
-              selectedFilePath,
-              anchorLineNum,
-              -(deletedLineIndex + 1),  // Encode deleted line index
-              content
-            );
-            if (result.success && result.comment) {
-              setAllReviewComments(prev => [...prev, result.comment!]);
-              deletedLineDraftsRef.current.delete(key);
-              setNewDeletedLineComments(prev => {
-                const next = new Set(prev);
-                next.delete(key);
-                return next;
-              });
-            }
-          }
-        });
-      });
-    }, 0);
-
-    // Click handler for deleted chunks is now in a separate stable effect (see below)
-
-    return () => {
-      // DON'T destroy view here - it prevents the early return optimization
-      // View is destroyed in the effect when core deps change, or when panel closes
-    };
-  }, [diffContent, selectedFile?.path, expandedContext, fontSize, regularComments, deletedLineComments, newCommentLines, newDeletedLineComments, editingCommentId, reviewId, selectedFilePath, addComment, updateComment, resolveComment, deleteComment]);
-
-  // Separate stable effect for the deleted chunk click handler
-  // This uses refs to avoid stale closures
-  const newDeletedLineCommentsRef = useRef(newDeletedLineComments);
-  newDeletedLineCommentsRef.current = newDeletedLineComments;
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleDeletedChunkClick = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      const deletedChunk = target.closest('.cm-deletedChunk');
-      if (!deletedChunk) return;
-
-      // Only handle if click is within our editor container
-      if (!editorContainerRef.current?.contains(target)) return;
-
-      // Ignore clicks inside existing comments (buttons, content, etc.)
-      if (target.closest('.inline-comment')) return;
-
-      // Find the deleted line that was clicked
-      const clickedLine = target.closest('.cm-deletedLine');
-      if (!clickedLine) return;
-
-      // Find the previous .cm-line sibling to anchor the comment
-      let prevLine = deletedChunk.previousElementSibling;
-      while (prevLine && !prevLine.classList.contains('cm-line')) {
-        prevLine = prevLine.previousElementSibling;
-      }
-
-      // Get the anchor line number for storing the comment
-      let anchorLineNum = 0;
-      const view = editorViewRef.current;
-      if (prevLine && view) {
-        try {
-          const pos = view.posAtDOM(prevLine);
-          anchorLineNum = view.state.doc.lineAt(pos).number;
-        } catch {
-          // Ignore
-        }
-      }
-
-      // Find the index of the clicked line within the chunk
-      const allDeletedLines = deletedChunk.querySelectorAll('.cm-deletedLine');
-      const foundIndex = Array.from(allDeletedLines).indexOf(clickedLine);
-      const clickedLineIndex = foundIndex >= 0 ? foundIndex : 0;
-
-      // Create key and check if form already exists
-      const key = `${anchorLineNum}:${clickedLineIndex}`;
-      if (newDeletedLineCommentsRef.current.has(key)) {
-        return; // Form already open for this line
-      }
-
-      // Initialize draft content in ref and add key to state
-      deletedLineDraftsRef.current.set(key, '');
-      setNewDeletedLineComments(prev => new Set(prev).add(key));
-
-      event.preventDefault();
-      event.stopPropagation();
-    };
-
-    document.addEventListener('mousedown', handleDeletedChunkClick, true);
-    return () => document.removeEventListener('mousedown', handleDeletedChunkClick, true);
-  }, [isOpen]);
-
-  // Cleanup view when panel closes
-  useEffect(() => {
-    if (!isOpen && editorViewRef.current) {
-      editorViewRef.current.destroy();
-      editorViewRef.current = null;
-    }
-  }, [isOpen]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -1698,6 +516,125 @@ export function ReviewPanel({
     return `.../${dir}/${filename}`;
   }, []);
 
+  // ============================================================================
+  // UnifiedDiffEditor Integration
+  // ============================================================================
+
+  // Build unified document and convert comments
+  const editorComments = useMemo(() => {
+    if (!diffContent) {
+      return [] as EditorComment[];
+    }
+    const { lines } = buildUnifiedDocument(diffContent.original, diffContent.modified);
+    return comments
+      .map(c => toEditorComment(c, lines))
+      .filter((c): c is EditorComment => c !== null);
+  }, [diffContent, comments]);
+
+  // Get language from file extension
+  const editorLanguage = useMemo(() => {
+    if (!selectedFilePath) return undefined;
+    const ext = selectedFilePath.split('.').pop()?.toLowerCase();
+    const langMap: Record<string, string> = {
+      js: 'javascript',
+      jsx: 'jsx',
+      ts: 'typescript',
+      tsx: 'tsx',
+      py: 'python',
+      md: 'markdown',
+      json: 'json',
+      css: 'css',
+      html: 'html',
+      go: 'go',
+      rs: 'rust',
+      sql: 'sql',
+      java: 'java',
+      kt: 'kotlin',
+      yaml: 'yaml',
+      yml: 'yaml',
+    };
+    return ext ? langMap[ext] : undefined;
+  }, [selectedFilePath]);
+
+  // UnifiedDiffEditor callbacks
+  const handleEditorAddComment = useCallback(async (
+    _docLine: number, // Not used - we get line info from anchor
+    content: string,
+    anchor: CommentAnchor
+  ) => {
+    if (!reviewId || !selectedFilePath || !addComment) return;
+    try {
+      const { line_start, line_end } = fromEditorAnchor(anchor);
+      const result = await addComment(reviewId, selectedFilePath, line_start, line_end, content);
+      if (result.success && result.comment) {
+        setAllReviewComments(prev => [...prev, result.comment!]);
+      } else {
+        setCommentError('Failed to save comment');
+      }
+    } catch (err) {
+      setCommentError('Failed to save comment');
+      console.error('Add comment error:', err);
+    }
+  }, [reviewId, selectedFilePath, addComment]);
+
+  const handleEditorEditComment = useCallback(async (id: string, content: string) => {
+    if (!updateComment) return;
+    try {
+      const result = await updateComment(id, content);
+      if (result.success) {
+        setAllReviewComments(prev =>
+          prev.map(c => c.id === id ? { ...c, content } : c)
+        );
+        setEditingCommentId(null);
+      } else {
+        setCommentError('Failed to update comment');
+      }
+    } catch (err) {
+      setCommentError('Failed to update comment');
+      console.error('Edit comment error:', err);
+    }
+  }, [updateComment]);
+
+  const handleEditorStartEdit = useCallback((id: string) => {
+    setEditingCommentId(id);
+  }, []);
+
+  const handleEditorCancelEdit = useCallback(() => {
+    setEditingCommentId(null);
+  }, []);
+
+  const handleEditorResolveComment = useCallback(async (id: string, resolved: boolean) => {
+    if (!resolveComment) return;
+    try {
+      const result = await resolveComment(id, resolved);
+      if (result.success) {
+        setAllReviewComments(prev =>
+          prev.map(c => c.id === id ? { ...c, resolved } : c)
+        );
+      } else {
+        setCommentError('Failed to update comment');
+      }
+    } catch (err) {
+      setCommentError('Failed to update comment');
+      console.error('Resolve comment error:', err);
+    }
+  }, [resolveComment]);
+
+  const handleEditorDeleteComment = useCallback(async (id: string) => {
+    if (!deleteComment) return;
+    try {
+      const result = await deleteComment(id);
+      if (result.success) {
+        setAllReviewComments(prev => prev.filter(c => c.id !== id));
+      } else {
+        setCommentError('Failed to delete comment');
+      }
+    } catch (err) {
+      setCommentError('Failed to delete comment');
+      console.error('Delete comment error:', err);
+    }
+  }, [deleteComment]);
+
   if (!isOpen) return null;
 
   const currentFileIndex = selectedFile ? allFiles.findIndex(f => f.path === selectedFile.path) : -1;
@@ -1802,8 +739,24 @@ export function ReviewPanel({
                 <div className="diff-error">{error}</div>
               ) : !selectedFile ? (
                 <div className="diff-placeholder">Select a file to view diff</div>
+              ) : !diffContent ? (
+                <div className="diff-loading">Loading diff...</div>
               ) : (
-                <div ref={editorContainerRef} className="codemirror-container" />
+                <UnifiedDiffEditor
+                  original={diffContent.original}
+                  modified={diffContent.modified}
+                  comments={editorComments}
+                  editingCommentId={editingCommentId}
+                  fontSize={fontSize}
+                  language={editorLanguage}
+                  contextLines={expandedContext === -1 ? 0 : 3}
+                  onAddComment={handleEditorAddComment}
+                  onEditComment={handleEditorEditComment}
+                  onStartEdit={handleEditorStartEdit}
+                  onCancelEdit={handleEditorCancelEdit}
+                  onResolveComment={handleEditorResolveComment}
+                  onDeleteComment={handleEditorDeleteComment}
+                />
               )}
             </div>
           </div>
@@ -1816,6 +769,25 @@ export function ReviewPanel({
           <span className="shortcut"><kbd>⌘+</kbd>/<kbd>⌘-</kbd> zoom</span>
           <span className="shortcut"><kbd>Esc</kbd> close</span>
         </div>
+
+        {/* Comment error toast */}
+        {commentError && (
+          <div style={{
+            position: 'absolute',
+            bottom: 60,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#dc2626',
+            color: 'white',
+            padding: '8px 16px',
+            borderRadius: 6,
+            fontSize: 13,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            zIndex: 1010,
+          }}>
+            {commentError}
+          </div>
+        )}
       </div>
 
     </>
