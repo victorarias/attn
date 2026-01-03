@@ -9,11 +9,22 @@
  * - Deleted lines are real document lines with decorations
  * - Comments attach to document positions, not DOM elements
  */
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { EditorView, Decoration, DecorationSet, WidgetType, gutter, GutterMarker } from '@codemirror/view';
-import { EditorState, StateField, StateEffect, RangeSetBuilder } from '@codemirror/state';
+import { EditorState, StateField, StateEffect, RangeSetBuilder, Extension } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { highlightSpecialChars } from '@codemirror/view';
+import { javascript } from '@codemirror/lang-javascript';
+import { python } from '@codemirror/lang-python';
+import { markdown } from '@codemirror/lang-markdown';
+import { json } from '@codemirror/lang-json';
+import { css } from '@codemirror/lang-css';
+import { html } from '@codemirror/lang-html';
+import { go } from '@codemirror/lang-go';
+import { rust } from '@codemirror/lang-rust';
+import { sql } from '@codemirror/lang-sql';
+import { java } from '@codemirror/lang-java';
+import { yaml } from '@codemirror/lang-yaml';
 import { diffLines } from 'diff';
 
 // ============================================================================
@@ -27,12 +38,37 @@ export interface DiffLine {
   modifiedLine: number | null; // Line number in modified file (null for deleted)
 }
 
+export interface CommentAnchor {
+  side: 'original' | 'modified'; // Which side of the diff the comment is on
+  line: number; // Line number on that side
+  anchorContent?: string; // Content of the line when comment was created (for staleness detection)
+  anchorHash?: string; // Hash of anchor content for quick comparison
+}
+
 export interface InlineComment {
   id: string;
-  docLine: number; // 1-indexed line in unified document
+  docLine: number; // 1-indexed line in unified document (runtime only, recalculated from anchor)
   content: string;
   resolved: boolean;
   author?: 'user' | 'agent';
+  anchor?: CommentAnchor; // For persistence and staleness detection
+  isOutdated?: boolean; // Line content changed since comment was created
+  isOrphaned?: boolean; // Line no longer exists in the diff
+}
+
+export interface Hunk {
+  startDocLine: number; // 1-indexed start in unified doc
+  endDocLine: number; // 1-indexed end (inclusive)
+  originalStart: number; // Starting line in original file
+  originalCount: number; // Number of lines from original
+  modifiedStart: number; // Starting line in modified file
+  modifiedCount: number; // Number of lines in modified
+}
+
+export interface CollapsedRegion {
+  startDocLine: number; // 1-indexed start
+  endDocLine: number; // 1-indexed end (inclusive)
+  lineCount: number;
 }
 
 export interface UnifiedDiffEditorProps {
@@ -40,6 +76,9 @@ export interface UnifiedDiffEditorProps {
   modified: string;
   comments: InlineComment[];
   editingCommentId: string | null;
+  fontSize?: number;
+  language?: string;
+  contextLines?: number; // Lines of context around changes (default 3, 0 for full diff)
   onAddComment: (docLine: number, content: string) => Promise<void>;
   onEditComment: (id: string, content: string) => Promise<void>;
   onStartEdit: (id: string) => void;
@@ -98,6 +137,266 @@ export function buildUnifiedDocument(original: string, modified: string): {
   const content = lines.map((l) => l.content).join('\n');
 
   return { content, lines };
+}
+
+// ============================================================================
+// Hunk Calculation Utilities
+// ============================================================================
+
+/**
+ * Calculate hunks and collapsed regions for a diff.
+ * A hunk is a group of changes with surrounding context lines.
+ * Collapsed regions are large unchanged areas between hunks.
+ */
+export function calculateHunks(
+  lines: DiffLine[],
+  contextLines: number
+): { hunks: Hunk[]; collapsedRegions: CollapsedRegion[] } {
+  if (contextLines <= 0 || lines.length === 0) {
+    // Show full diff, no collapsing
+    return { hunks: [], collapsedRegions: [] };
+  }
+
+  // Find all changed line indices (0-indexed)
+  const changedIndices: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].type !== 'unchanged') {
+      changedIndices.push(i);
+    }
+  }
+
+  if (changedIndices.length === 0) {
+    // No changes - entire file is one collapsed region
+    if (lines.length > contextLines * 2) {
+      return {
+        hunks: [],
+        collapsedRegions: [
+          {
+            startDocLine: 1,
+            endDocLine: lines.length,
+            lineCount: lines.length,
+          },
+        ],
+      };
+    }
+    return { hunks: [], collapsedRegions: [] };
+  }
+
+  // Group changes into hunks (changes that are within 2*contextLines of each other)
+  const hunkRanges: { start: number; end: number }[] = [];
+  let currentStart = changedIndices[0];
+  let currentEnd = changedIndices[0];
+
+  for (let i = 1; i < changedIndices.length; i++) {
+    const idx = changedIndices[i];
+    // If this change is within range, extend the hunk
+    if (idx <= currentEnd + contextLines * 2 + 1) {
+      currentEnd = idx;
+    } else {
+      // Start a new hunk
+      hunkRanges.push({ start: currentStart, end: currentEnd });
+      currentStart = idx;
+      currentEnd = idx;
+    }
+  }
+  hunkRanges.push({ start: currentStart, end: currentEnd });
+
+  // Build hunks with context
+  const hunks: Hunk[] = [];
+  const collapsedRegions: CollapsedRegion[] = [];
+
+  let lastHunkEnd = 0; // Track end of last visible region
+
+  for (const range of hunkRanges) {
+    const hunkStart = Math.max(0, range.start - contextLines);
+    const hunkEnd = Math.min(lines.length - 1, range.end + contextLines);
+
+    // Check for collapsed region before this hunk
+    if (hunkStart > lastHunkEnd + 1) {
+      const collapsedStart = lastHunkEnd + 1;
+      const collapsedEnd = hunkStart - 1;
+      const lineCount = collapsedEnd - collapsedStart + 1;
+
+      if (lineCount > 0) {
+        collapsedRegions.push({
+          startDocLine: collapsedStart + 1, // Convert to 1-indexed
+          endDocLine: collapsedEnd + 1,
+          lineCount,
+        });
+      }
+    }
+
+    // Calculate original/modified line ranges for this hunk
+    let originalStart = 0;
+    let originalCount = 0;
+    let modifiedStart = 0;
+    let modifiedCount = 0;
+
+    for (let i = hunkStart; i <= hunkEnd; i++) {
+      const line = lines[i];
+      if (line.originalLine !== null) {
+        if (originalStart === 0) originalStart = line.originalLine;
+        originalCount++;
+      }
+      if (line.modifiedLine !== null) {
+        if (modifiedStart === 0) modifiedStart = line.modifiedLine;
+        modifiedCount++;
+      }
+    }
+
+    hunks.push({
+      startDocLine: hunkStart + 1, // Convert to 1-indexed
+      endDocLine: hunkEnd + 1,
+      originalStart,
+      originalCount,
+      modifiedStart,
+      modifiedCount,
+    });
+
+    lastHunkEnd = hunkEnd;
+  }
+
+  // Check for collapsed region after last hunk
+  if (lastHunkEnd < lines.length - 1) {
+    const collapsedStart = lastHunkEnd + 1;
+    const collapsedEnd = lines.length - 1;
+    const lineCount = collapsedEnd - collapsedStart + 1;
+
+    if (lineCount > 0) {
+      collapsedRegions.push({
+        startDocLine: collapsedStart + 1,
+        endDocLine: collapsedEnd + 1,
+        lineCount,
+      });
+    }
+  }
+
+  return { hunks, collapsedRegions };
+}
+
+/**
+ * Get visible line indices for hunks mode.
+ * Returns a Set of 0-indexed line numbers that should be visible.
+ */
+export function getVisibleLines(
+  lines: DiffLine[],
+  contextLines: number,
+  expandedRegions: Set<number> // Set of collapsed region start lines that are expanded
+): Set<number> {
+  if (contextLines <= 0) {
+    // Show all lines
+    const allLines = new Set<number>();
+    for (let i = 0; i < lines.length; i++) {
+      allLines.add(i);
+    }
+    return allLines;
+  }
+
+  const { collapsedRegions } = calculateHunks(lines, contextLines);
+  const visible = new Set<number>();
+
+  // Start with all lines visible
+  for (let i = 0; i < lines.length; i++) {
+    visible.add(i);
+  }
+
+  // Remove collapsed regions (unless expanded)
+  for (const region of collapsedRegions) {
+    if (!expandedRegions.has(region.startDocLine)) {
+      for (let i = region.startDocLine - 1; i <= region.endDocLine - 1; i++) {
+        visible.delete(i);
+      }
+    }
+  }
+
+  return visible;
+}
+
+// ============================================================================
+// Line Number Mapping Utilities
+// ============================================================================
+
+/**
+ * Simple hash function for anchor content (for quick staleness comparison)
+ */
+export function hashContent(content: string): string {
+  let hash = 0;
+  for (let i = 0; i < content.length; i++) {
+    const char = content.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString(16);
+}
+
+/**
+ * Create a comment anchor from a document line number.
+ * Used when saving a new comment to persist its location.
+ */
+export function createAnchor(docLine: number, lines: DiffLine[]): CommentAnchor | null {
+  const diffLine = lines[docLine - 1];
+  if (!diffLine) return null;
+
+  // Determine which side this line belongs to
+  if (diffLine.type === 'deleted') {
+    // Deleted lines only exist in original
+    return {
+      side: 'original',
+      line: diffLine.originalLine!,
+      anchorContent: diffLine.content,
+      anchorHash: hashContent(diffLine.content),
+    };
+  } else {
+    // Added or unchanged lines exist in modified
+    return {
+      side: 'modified',
+      line: diffLine.modifiedLine!,
+      anchorContent: diffLine.content,
+      anchorHash: hashContent(diffLine.content),
+    };
+  }
+}
+
+/**
+ * Find the document line for a persisted comment anchor.
+ * Also detects if the comment is outdated or orphaned.
+ */
+export function resolveAnchor(
+  anchor: CommentAnchor,
+  lines: DiffLine[]
+): { docLine: number; isOutdated: boolean } | { isOrphaned: true } {
+  for (let i = 0; i < lines.length; i++) {
+    const diffLine = lines[i];
+    const lineNum =
+      anchor.side === 'original' ? diffLine.originalLine : diffLine.modifiedLine;
+
+    if (lineNum === anchor.line) {
+      // Found the line - check if content changed
+      const currentHash = hashContent(diffLine.content);
+      const isOutdated = anchor.anchorHash !== currentHash;
+      return { docLine: i + 1, isOutdated };
+    }
+  }
+
+  // Line no longer exists in the diff
+  return { isOrphaned: true };
+}
+
+/**
+ * Get original and modified line numbers for a document line.
+ * Useful for displaying line context in comment UI.
+ */
+export function getLineNumbers(
+  docLine: number,
+  lines: DiffLine[]
+): { original: number | null; modified: number | null; type: DiffLine['type'] } | null {
+  const diffLine = lines[docLine - 1];
+  if (!diffLine) return null;
+  return {
+    original: diffLine.originalLine,
+    modified: diffLine.modifiedLine,
+    type: diffLine.type,
+  };
 }
 
 // ============================================================================
@@ -394,6 +693,8 @@ export function UnifiedDiffEditor({
   modified,
   comments,
   editingCommentId,
+  fontSize = 13,
+  language,
   onAddComment,
   onEditComment,
   onStartEdit,
@@ -411,6 +712,52 @@ export function UnifiedDiffEditor({
   // Build unified document
   const { content, lines } = buildUnifiedDocument(original, modified);
   linesRef.current = lines;
+
+  // Get language extension based on language prop
+  const languageExtension = useMemo((): Extension => {
+    switch (language) {
+      case 'javascript':
+      case 'js':
+        return javascript();
+      case 'typescript':
+      case 'ts':
+        return javascript({ typescript: true });
+      case 'jsx':
+        return javascript({ jsx: true });
+      case 'tsx':
+        return javascript({ typescript: true, jsx: true });
+      case 'python':
+      case 'py':
+        return python();
+      case 'markdown':
+      case 'md':
+        return markdown();
+      case 'json':
+        return json();
+      case 'css':
+        return css();
+      case 'html':
+        return html();
+      case 'go':
+        return go();
+      case 'rust':
+      case 'rs':
+        return rust();
+      case 'sql':
+        return sql();
+      case 'java':
+        return java();
+      case 'kotlin':
+      case 'kt':
+        // Use Java highlighting for Kotlin (similar syntax)
+        return java();
+      case 'yaml':
+      case 'yml':
+        return yaml();
+      default:
+        return [];
+    }
+  }, [language]);
 
   // Handlers for comment forms
   const handleSaveComment = useCallback(
@@ -446,7 +793,7 @@ export function UnifiedDiffEditor({
         },
         '.cm-scroller': {
           fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-          fontSize: '13px',
+          fontSize: `${fontSize}px`,
           lineHeight: '1.6',
           overflow: 'auto !important',
         },
@@ -638,6 +985,7 @@ export function UnifiedDiffEditor({
           originalLineGutter,
           modifiedLineGutter,
           highlightSpecialChars(),
+          languageExtension,
           oneDark,
           theme,
           lineDecorationsField,
@@ -663,7 +1011,7 @@ export function UnifiedDiffEditor({
       view.destroy();
       editorViewRef.current = null;
     };
-  }, [content, lines]);
+  }, [content, lines, fontSize, languageExtension]);
 
   // Update comment widgets when comments or newCommentLines change
   useEffect(() => {

@@ -88,6 +88,7 @@ export function UnifiedDiffEditorHarness({ onReady }: HarnessProps) {
         modified={MODIFIED}
         comments={comments}
         editingCommentId={editingCommentId}
+        language="javascript"
         onAddComment={addComment}
         onEditComment={editComment}
         onStartEdit={startEdit}
