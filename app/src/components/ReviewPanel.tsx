@@ -802,16 +802,10 @@ export function ReviewPanel({
         )
       );
 
-      // Save scroll position before dispatch - widget changes can cause jumps
-      const scrollTop = view.scrollDOM.scrollTop;
-
       // Dispatch updates to existing view - NO RECREATION!
       view.dispatch({
         effects: setInlineDecorations.of(inlineDecorations),
       });
-
-      // Restore scroll position after widget updates
-      view.scrollDOM.scrollTop = scrollTop;
 
       return; // Early return - skip editor recreation
     }
