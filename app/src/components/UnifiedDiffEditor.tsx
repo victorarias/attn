@@ -11,7 +11,7 @@
  */
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { EditorView, Decoration, DecorationSet, WidgetType, gutter, GutterMarker } from '@codemirror/view';
-import { EditorState, StateField, StateEffect, RangeSetBuilder, Extension } from '@codemirror/state';
+import { EditorState, StateField, StateEffect, RangeSetBuilder, Extension, Range } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { highlightSpecialChars } from '@codemirror/view';
 import { javascript } from '@codemirror/lang-javascript';
@@ -507,6 +507,26 @@ const commentWidgetsField = StateField.define<DecorationSet>({
 const deletedLineDecoration = Decoration.line({ class: 'cm-deleted-line' });
 const addedLineDecoration = Decoration.line({ class: 'cm-added-line' });
 
+// Effect to update collapsed region decorations
+const setCollapsedDecorations = StateEffect.define<DecorationSet>();
+
+// StateField for collapsed region widgets (replaces ranges of lines)
+const collapsedDecorationsField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decorations, tr) {
+    decorations = decorations.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (effect.is(setCollapsedDecorations)) {
+        return effect.value;
+      }
+    }
+    return decorations;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 function buildLineDecorations(view: EditorView, lines: DiffLine[]): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const doc = view.state.doc;
@@ -675,6 +695,49 @@ class NewCommentFormWidget extends WidgetType {
 }
 
 // ============================================================================
+// Collapsed Region Widget
+// ============================================================================
+
+interface CollapsedRegionConfig {
+  startDocLine: number;
+  endDocLine: number;
+  lineCount: number;
+  onExpand: (startDocLine: number) => void;
+}
+
+class CollapsedRegionWidget extends WidgetType {
+  constructor(readonly config: CollapsedRegionConfig) {
+    super();
+  }
+
+  toDOM() {
+    const { startDocLine, lineCount, onExpand } = this.config;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'cm-collapsed-region';
+    wrapper.innerHTML = `<span class="cm-collapsed-icon">⊕</span><span class="cm-collapsed-text">${lineCount} lines hidden</span>`;
+
+    wrapper.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onExpand(startDocLine);
+    });
+
+    return wrapper;
+  }
+
+  ignoreEvent(event: Event) {
+    return event.type.startsWith('mouse');
+  }
+
+  eq(other: CollapsedRegionWidget) {
+    return (
+      this.config.startDocLine === other.config.startDocLine &&
+      this.config.lineCount === other.config.lineCount
+    );
+  }
+}
+
+// ============================================================================
 // Utilities
 // ============================================================================
 
@@ -695,6 +758,7 @@ export function UnifiedDiffEditor({
   editingCommentId,
   fontSize = 13,
   language,
+  contextLines = 0,
   onAddComment,
   onEditComment,
   onStartEdit,
@@ -708,6 +772,18 @@ export function UnifiedDiffEditor({
 
   // Track which lines have open "new comment" forms
   const [newCommentLines, setNewCommentLines] = useState<Set<number>>(new Set());
+
+  // Track which collapsed regions have been expanded by the user
+  const [expandedRegions, setExpandedRegions] = useState<Set<number>>(new Set());
+
+  // Handler to expand a collapsed region
+  const handleExpandRegion = useCallback((startDocLine: number) => {
+    setExpandedRegions((prev) => {
+      const next = new Set(prev);
+      next.add(startDocLine);
+      return next;
+    });
+  }, []);
 
   // Build unified document
   const { content, lines } = buildUnifiedDocument(original, modified);
@@ -949,6 +1025,32 @@ export function UnifiedDiffEditor({
           background: '#2563eb',
           borderColor: '#2563eb',
         },
+        // Collapsed region indicator
+        '.cm-collapsed-region': {
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '8px',
+          padding: '4px 16px',
+          background: '#1e293b',
+          borderTop: '1px solid #334155',
+          borderBottom: '1px solid #334155',
+          color: '#94a3b8',
+          fontSize: '12px',
+          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+          cursor: 'pointer',
+          userSelect: 'none',
+        },
+        '.cm-collapsed-region:hover': {
+          background: '#334155',
+          color: '#e2e8f0',
+        },
+        '.cm-collapsed-icon': {
+          fontSize: '14px',
+        },
+        '.cm-collapsed-text': {
+          fontWeight: '500',
+        },
       },
       { dark: true }
     );
@@ -957,7 +1059,12 @@ export function UnifiedDiffEditor({
     const clickHandler = EditorView.domEventHandlers({
       click: (event, view) => {
         const target = event.target as HTMLElement;
-        if (target.closest('.unified-comment') || target.closest('.unified-comment-form')) {
+        // Don't open comment form when clicking on widgets
+        if (
+          target.closest('.unified-comment') ||
+          target.closest('.unified-comment-form') ||
+          target.closest('.cm-collapsed-region')
+        ) {
           return false;
         }
 
@@ -989,6 +1096,7 @@ export function UnifiedDiffEditor({
           oneDark,
           theme,
           lineDecorationsField,
+          collapsedDecorationsField,
           commentWidgetsField,
           clickHandler,
         ],
@@ -1062,6 +1170,74 @@ export function UnifiedDiffEditor({
 
     view.dispatch({ effects: setCommentWidgets.of(decorations) });
   }, [comments, newCommentLines, editingCommentId, handleSaveComment, handleCancelComment, onStartEdit, onEditComment, onCancelEdit, onResolveComment, onDeleteComment]);
+
+  // Update collapsed region decorations when contextLines or expandedRegions change
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view || contextLines <= 0) {
+      // No collapsing needed - clear any existing collapsed decorations
+      if (view) {
+        view.dispatch({ effects: setCollapsedDecorations.of(Decoration.none) });
+      }
+      return;
+    }
+
+    const { collapsedRegions } = calculateHunks(lines, contextLines);
+
+    // Build set of comment lines for auto-expand
+    const commentLines = new Set(comments.map((c) => c.docLine));
+    const newCommentLinesSet = newCommentLines;
+
+    // Filter out regions that are expanded or contain comments
+    const regionsToCollapse = collapsedRegions.filter((region) => {
+      // Skip if user has expanded this region
+      if (expandedRegions.has(region.startDocLine)) {
+        return false;
+      }
+
+      // Skip if region contains any comments (auto-expand)
+      for (let line = region.startDocLine; line <= region.endDocLine; line++) {
+        if (commentLines.has(line) || newCommentLinesSet.has(line)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Build replace decorations for collapsed regions
+    const decorations: Range<Decoration>[] = [];
+    const doc = view.state.doc;
+
+    for (const region of regionsToCollapse) {
+      // Get positions for the range
+      const startLine = doc.line(region.startDocLine);
+      const endLine = doc.line(region.endDocLine);
+
+      // Create a widget that replaces this range
+      const widget = new CollapsedRegionWidget({
+        startDocLine: region.startDocLine,
+        endDocLine: region.endDocLine,
+        lineCount: region.lineCount,
+        onExpand: handleExpandRegion,
+      });
+
+      // Replace from start of first line to end of last line
+      decorations.push(
+        Decoration.replace({
+          widget,
+          block: true,
+        }).range(startLine.from, endLine.to)
+      );
+    }
+
+    // Sort by position (required for RangeSet)
+    decorations.sort((a, b) => a.from - b.from);
+
+    view.dispatch({
+      effects: setCollapsedDecorations.of(Decoration.set(decorations)),
+    });
+  }, [lines, contextLines, expandedRegions, comments, newCommentLines, handleExpandRegion]);
 
   return (
     <div
