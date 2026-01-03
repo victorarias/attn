@@ -1,6 +1,6 @@
 // app/src/components/ReviewPanel.tsx
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { EditorView, gutter, GutterMarker, Decoration, WidgetType } from '@codemirror/view';
+import { EditorView, Decoration, WidgetType } from '@codemirror/view';
 import { EditorState, RangeSet, StateField, StateEffect } from '@codemirror/state';
 import { unifiedMergeView } from '@codemirror/merge';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -41,30 +41,6 @@ export function canAddCommentToDeletedLine(clickedLine: Element | null): boolean
   // Check if the next sibling is an unsaved form
   const nextSibling = clickedLine.nextElementSibling;
   return !(nextSibling?.classList.contains('inline-comment') && nextSibling?.classList.contains('new'));
-}
-
-// Comment gutter marker - renders clickable button for each line
-class CommentMarker extends GutterMarker {
-  constructor(public commentCount: number, public lineNum: number) {
-    super();
-  }
-
-  toDOM() {
-    const btn = document.createElement('button');
-    btn.className = this.commentCount > 0 ? 'comment-gutter-btn has-comment' : 'comment-gutter-btn';
-    btn.type = 'button';
-    btn.dataset.lineNum = String(this.lineNum);
-
-    if (this.commentCount > 0) {
-      btn.innerHTML = `<span class="comment-icon">💬</span>`;
-      btn.title = `${this.commentCount} comment${this.commentCount > 1 ? 's' : ''} - click to view`;
-    } else {
-      btn.innerHTML = `<span class="comment-icon-add">+</span>`;
-      btn.title = 'Add comment';
-    }
-
-    return btn;
-  }
 }
 
 // Shared handlers interface for comment elements
@@ -303,24 +279,6 @@ class NewCommentWidget extends WidgetType {
     return event.type === 'mousedown' || event.type === 'click';
   }
 }
-
-// State effect to update comment markers
-const setCommentLines = StateEffect.define<Map<number, number>>();
-
-// State field that tracks which lines have comments
-const commentLinesField = StateField.define<Map<number, number>>({
-  create() {
-    return new Map();
-  },
-  update(value, tr) {
-    for (const effect of tr.effects) {
-      if (effect.is(setCommentLines)) {
-        return effect.value;
-      }
-    }
-    return value;
-  },
-});
 
 // State effect to update inline comment decorations
 const setInlineDecorations = StateEffect.define<RangeSet<Decoration>>();
@@ -692,13 +650,6 @@ export function ReviewPanel({
     if (coreUnchanged && editorViewRef.current) {
       const view = editorViewRef.current;
 
-      // Build comment line map for gutter
-      const commentLineMap = new Map<number, number>();
-      for (const comment of regularComments) {
-        const count = commentLineMap.get(comment.line_start) || 0;
-        commentLineMap.set(comment.line_start, count + 1);
-      }
-
       // Helper to calculate position at end of line
       const getLineEndPos = (lineNum: number, content: string) => {
         const lines = content.split('\n');
@@ -816,10 +767,7 @@ export function ReviewPanel({
 
       // Dispatch updates to existing view - NO RECREATION!
       view.dispatch({
-        effects: [
-          setCommentLines.of(commentLineMap),
-          setInlineDecorations.of(inlineDecorations),
-        ],
+        effects: setInlineDecorations.of(inlineDecorations),
       });
 
       return; // Early return - skip editor recreation
@@ -935,33 +883,7 @@ export function ReviewPanel({
       highlightSelectionMatches(),
     ];
 
-    // Build map of line numbers to comment counts for this file
-    const commentLineMap = new Map<number, number>();
-    for (const comment of comments) {
-      // Comments may span multiple lines, but we show marker on line_start
-      const lineNum = comment.line_start;
-      commentLineMap.set(lineNum, (commentLineMap.get(lineNum) || 0) + 1);
-    }
-
-    // Comment gutter extension with click handling
-    const commentGutter = gutter({
-      class: 'comment-gutter',
-      markers: (view) => {
-        const commentLines = view.state.field(commentLinesField);
-        const markers: { from: number; to: number; value: GutterMarker }[] = [];
-
-        // Render a marker on EVERY line so the + button is always visible
-        for (let i = 1; i <= view.state.doc.lines; i++) {
-          const line = view.state.doc.line(i);
-          const commentCount = commentLines.get(i) || 0;
-          markers.push({ from: line.from, to: line.from, value: new CommentMarker(commentCount, i) });
-        }
-
-        return RangeSet.of(markers, true);
-      },
-    });
-
-    // Click handler for gutter buttons and diff lines
+    // Click handler for diff lines - opens comment forms
     const clickHandler = EditorView.domEventHandlers({
       mousedown: (event, view) => {
         const target = event.target as HTMLElement;
@@ -969,20 +891,6 @@ export function ReviewPanel({
         // Don't handle clicks on inline comment elements
         if (target.closest('.inline-comment')) {
           return false;
-        }
-
-        // Check if clicking a gutter button - only open new comment (existing are inline)
-        const gutterBtn = target.closest('.comment-gutter-btn');
-        if (gutterBtn instanceof HTMLElement) {
-          const lineNum = parseInt(gutterBtn.dataset.lineNum || '0', 10);
-          if (lineNum > 0) {
-            const hasComment = commentLineMap.has(lineNum);
-            const hasNewForm = newCommentLines.has(lineNum);
-            if (!hasComment && !hasNewForm) {
-              setNewCommentLines(prev => new Set(prev).add(lineNum));
-              return true;
-            }
-          }
         }
 
         // Prefer posAtDOM when clicking directly on a .cm-line element
@@ -994,10 +902,9 @@ export function ReviewPanel({
           try {
             const pos = view.posAtDOM(line);
             const lineNum = view.state.doc.lineAt(pos).number;
-            const hasComment = commentLineMap.has(lineNum);
             const hasNewForm = newCommentLines.has(lineNum);
 
-            if (!hasComment && !hasNewForm) {
+            if (!hasNewForm) {
               setNewCommentLines(prev => new Set(prev).add(lineNum));
               return true;
             }
@@ -1014,10 +921,9 @@ export function ReviewPanel({
           const y = event.clientY - editorRect.top + view.scrollDOM.scrollTop;
           const block = view.lineBlockAtHeight(y);
           const lineNum = view.state.doc.lineAt(block.from).number;
-          const hasComment = commentLineMap.has(lineNum);
           const hasNewForm = newCommentLines.has(lineNum);
 
-          if (!hasComment && !hasNewForm) {
+          if (!hasNewForm) {
             setNewCommentLines(prev => new Set(prev).add(lineNum));
             return true;
           }
@@ -1147,9 +1053,7 @@ export function ReviewPanel({
     );
 
     const extensions = [
-      commentLinesField,
       inlineDecorationsField,  // StateField for dynamic decoration updates
-      commentGutter,
       clickHandler,
       minimalSetup,
       langExtension,
@@ -1179,12 +1083,9 @@ export function ReviewPanel({
       parent: editorContainerRef.current,
     });
 
-    // Initialize comment markers and inline decorations
+    // Initialize inline decorations
     view.dispatch({
-      effects: [
-        setCommentLines.of(commentLineMap),
-        setInlineDecorations.of(inlineDecorations),
-      ],
+      effects: setInlineDecorations.of(inlineDecorations),
     });
 
     editorViewRef.current = view;
