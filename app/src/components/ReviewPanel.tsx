@@ -213,8 +213,10 @@ class InlineCommentWidget extends WidgetType {
            other.isEditing === this.isEditing;
   }
 
-  ignoreEvent() {
-    return false;
+  ignoreEvent(event: Event) {
+    // Return true for mouse events so clicks reach the buttons/textarea
+    // instead of being captured by CodeMirror's focus handling
+    return event.type === 'mousedown' || event.type === 'click';
   }
 }
 
@@ -222,8 +224,10 @@ class InlineCommentWidget extends WidgetType {
 class NewCommentWidget extends WidgetType {
   constructor(
     public lineNum: number,
+    public initialContent: string,
     public onSave: (content: string) => void,
-    public onCancel: () => void
+    public onCancel: () => void,
+    public onInput: (content: string) => void
   ) {
     super();
   }
@@ -244,7 +248,13 @@ class NewCommentWidget extends WidgetType {
     textarea.className = 'inline-comment-textarea';
     textarea.rows = 3;
     textarea.placeholder = 'Add a comment...';
+    textarea.value = this.initialContent;
     form.appendChild(textarea);
+
+    // Save draft on input (no re-render)
+    textarea.addEventListener('input', () => {
+      this.onInput(textarea.value);
+    });
 
     const buttons = document.createElement('div');
     buttons.className = 'inline-comment-buttons';
@@ -275,8 +285,10 @@ class NewCommentWidget extends WidgetType {
     form.appendChild(buttons);
     wrapper.appendChild(form);
 
-    // Focus textarea after render
-    setTimeout(() => textarea.focus(), 0);
+    // Focus textarea after render (only if no initial content - otherwise cursor goes to end)
+    if (!this.initialContent) {
+      setTimeout(() => textarea.focus(), 0);
+    }
 
     return wrapper;
   }
@@ -285,8 +297,10 @@ class NewCommentWidget extends WidgetType {
     return other.lineNum === this.lineNum;
   }
 
-  ignoreEvent() {
-    return false;
+  ignoreEvent(event: Event) {
+    // Return true for mouse events so clicks reach the textarea/buttons
+    // instead of being captured by CodeMirror's focus handling
+    return event.type === 'mousedown' || event.type === 'click';
   }
 }
 
@@ -380,8 +394,10 @@ export function ReviewPanel({
   // Comment state
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
   const [newCommentLines, setNewCommentLines] = useState<Set<number>>(new Set());
-  // For deleted lines: key is "anchorLine:deletedLineIndex"
+  // For regular line comments: key is line number
   // We use Set for open forms (triggers re-render) and ref for draft content (no re-render on typing)
+  const regularLineDraftsRef = useRef<Map<number, string>>(new Map());
+  // For deleted lines: key is "anchorLine:deletedLineIndex"
   const [newDeletedLineComments, setNewDeletedLineComments] = useState<Set<string>>(new Set());
   const deletedLineDraftsRef = useRef<Map<string, string>>(new Map());
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -787,12 +803,33 @@ export function ReviewPanel({
           }
         }
 
-        // Try to get line number from click position
-        const editorRect = view.dom.getBoundingClientRect();
-        const y = event.clientY - editorRect.top + view.scrollDOM.scrollTop;
+        // Prefer posAtDOM when clicking directly on a .cm-line element
+        // This is more accurate than lineBlockAtHeight because injected DOM elements
+        // (like saved deleted line comments) add visual height that throws off
+        // the y-coordinate calculation in lineBlockAtHeight
+        const line = target.closest('.cm-line');
+        if (line instanceof HTMLElement) {
+          try {
+            const pos = view.posAtDOM(line);
+            const lineNum = view.state.doc.lineAt(pos).number;
+            const hasComment = commentLineMap.has(lineNum);
+            const hasNewForm = newCommentLines.has(lineNum);
 
-        // Use lineBlockAtHeight to find which line block we're in
+            if (!hasComment && !hasNewForm) {
+              setNewCommentLines(prev => new Set(prev).add(lineNum));
+              return true;
+            }
+            return false;
+          } catch {
+            // Fall through to lineBlockAtHeight
+          }
+        }
+
+        // Fallback: use lineBlockAtHeight for clicks outside .cm-line elements
+        // (e.g., clicking on empty space in the editor)
         try {
+          const editorRect = view.dom.getBoundingClientRect();
+          const y = event.clientY - editorRect.top + view.scrollDOM.scrollTop;
           const block = view.lineBlockAtHeight(y);
           const lineNum = view.state.doc.lineAt(block.from).number;
           const hasComment = commentLineMap.has(lineNum);
@@ -803,23 +840,7 @@ export function ReviewPanel({
             return true;
           }
         } catch {
-          // Fallback: try to get from DOM element
-          const line = target.closest('.cm-line');
-          if (line instanceof HTMLElement) {
-            try {
-              const pos = view.posAtDOM(line);
-              const lineNum = view.state.doc.lineAt(pos).number;
-              const hasComment = commentLineMap.has(lineNum);
-              const hasNewForm = newCommentLines.has(lineNum);
-
-              if (!hasComment && !hasNewForm) {
-                setNewCommentLines(prev => new Set(prev).add(lineNum));
-                return true;
-              }
-            } catch {
-              // Ignore
-            }
-          }
+          // Ignore
         }
 
         return false;
@@ -893,10 +914,12 @@ export function ReviewPanel({
     for (const lineNum of newCommentLines) {
       const pos = getLineEndPos(lineNum, diffContent.modified);
       if (pos >= 0) {
+        const draftContent = regularLineDraftsRef.current.get(lineNum) || '';
         inlineWidgets.push({
           pos,
           widget: new NewCommentWidget(
             lineNum,
+            draftContent,
             async (content) => {
               if (reviewId && selectedFilePath && addComment) {
                 const result = await addComment(
@@ -908,6 +931,7 @@ export function ReviewPanel({
                 );
                 if (result.success && result.comment) {
                   setAllReviewComments(prev => [...prev, result.comment!]);
+                  regularLineDraftsRef.current.delete(lineNum);
                   setNewCommentLines(prev => {
                     const next = new Set(prev);
                     next.delete(lineNum);
@@ -916,11 +940,17 @@ export function ReviewPanel({
                 }
               }
             },
-            () => setNewCommentLines(prev => {
-              const next = new Set(prev);
-              next.delete(lineNum);
-              return next;
-            })
+            () => {
+              regularLineDraftsRef.current.delete(lineNum);
+              setNewCommentLines(prev => {
+                const next = new Set(prev);
+                next.delete(lineNum);
+                return next;
+              });
+            },
+            (content) => {
+              regularLineDraftsRef.current.set(lineNum, content);
+            }
           ),
         });
       }

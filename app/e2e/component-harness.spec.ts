@@ -129,7 +129,7 @@ test.describe('ReviewPanel Component', () => {
 
       // Type and save
       const content = 'Comment on regular line';
-      await textarea.focus();
+      await textarea.click();
       await page.keyboard.type(content);
       await page.locator('.inline-comment-btn.save').click();
 
@@ -138,29 +138,164 @@ test.describe('ReviewPanel Component', () => {
       expect(calls).toHaveLength(1);
       expect(calls[0][4]).toBe(content);
     });
+
+    /**
+     * Test refocus on regular line comments (widget-based, not DOM-injected)
+     *
+     * Regular line comments use CodeMirror's widget system, which may have
+     * different focus behavior than the DOM-injected deleted line comments.
+     */
+    test('supports refocus on multiple regular line comment forms', async ({ page }) => {
+      const regularLines = page.locator('.cm-line');
+
+      // Open first form on line 1
+      await regularLines.first().click();
+      let textareas = page.locator('.inline-comment-textarea');
+      await expect(textareas.first()).toBeVisible();
+
+      await textareas.first().click();
+      await page.keyboard.type('First');
+
+      // Open second form on line 2
+      await regularLines.nth(1).click();
+      await expect(textareas).toHaveCount(2);
+
+      await textareas.nth(1).click();
+      await page.keyboard.type('Second comment');
+
+      // Refocus first textarea and continue typing
+      await textareas.first().click();
+      await page.keyboard.type(' comment');
+
+      // Verify both have correct content
+      await expect(textareas.first()).toHaveValue('First comment');
+      await expect(textareas.nth(1)).toHaveValue('Second comment');
+    });
+  });
+
+  test.describe('line number accuracy after deleted line comments', () => {
+    /**
+     * BUG REPRODUCTION: Line number offset after adding deleted line comments
+     *
+     * Bug: After adding comments to deleted lines, clicking on regular lines
+     * opens comment forms at the wrong line number. The offset grows with
+     * each deleted line comment added.
+     *
+     * Suspected cause: The injected DOM elements for deleted line comments
+     * might be affecting posAtDOM() or lineBlockAtHeight() calculations.
+     */
+    test('regular line click detection remains accurate after deleted line comments', async ({ page }) => {
+      // First, add a comment on a deleted line
+      const deletedLine = page.locator('.cm-deletedLine').first();
+      await deletedLine.click();
+
+      const textarea = page.locator('.inline-comment-textarea').first();
+      await expect(textarea).toBeVisible();
+      await textarea.click();
+      await page.keyboard.type('Comment on deleted line');
+      await page.locator('.inline-comment-btn.save').first().click();
+
+      // Wait for comment to be saved and form to close
+      await expect(page.locator('.inline-comment.new')).toHaveCount(0);
+
+      // Now add another comment on a different deleted line
+      const deletedLine2 = page.locator('.cm-deletedLine').nth(1);
+      await deletedLine2.click();
+      const textarea2 = page.locator('.inline-comment-textarea').first();
+      await expect(textarea2).toBeVisible();
+      await textarea2.click();
+      await page.keyboard.type('Second deleted line comment');
+      await page.locator('.inline-comment-btn.save').first().click();
+
+      // Wait for form to close
+      await expect(page.locator('.inline-comment.new')).toHaveCount(0);
+
+      // Now click on a regular line AFTER the deleted chunk
+      // In the test diff, line 3 in modified is "console.log('line 5');"
+      const regularLines = page.locator('.cm-line');
+      const targetLine = regularLines.nth(2); // Line 3 (0-indexed: 2)
+      await targetLine.click();
+
+      // Get the line number from the opened form's label
+      const formLabel = page.locator('.inline-comment-form .inline-comment-label');
+      await expect(formLabel).toBeVisible();
+      const labelText = await formLabel.textContent();
+
+      // The label should say "Line 3" since we clicked on line 3
+      // If the bug exists, it might say "Line 5" or higher due to offset
+      console.log('Form label text:', labelText);
+
+      // Verify via addComment calls - check the line numbers
+      const calls = await page.evaluate(() => window.__HARNESS__.getCalls('addComment'));
+      console.log('All addComment calls:', JSON.stringify(calls));
+
+      // The first two calls are for deleted lines (line_end < 0)
+      // We want to check that regular line detection still works
+      // For now, just verify the form opened and shows a reasonable line number
+      expect(labelText).toMatch(/Line \d+/);
+
+      // Save this comment and check the line numbers
+      const newTextarea = page.locator('.inline-comment-textarea').first();
+      await newTextarea.click();
+      await page.keyboard.type('Regular line comment');
+      await page.locator('.inline-comment-btn.save').first().click();
+
+      // Get final addComment calls
+      const finalCalls = await page.evaluate(() => window.__HARNESS__.getCalls('addComment'));
+      console.log('Final addComment calls:', JSON.stringify(finalCalls));
+
+      // The third call should be for a regular line (line_end > 0)
+      // and line_start should equal line_end and be 3
+      expect(finalCalls).toHaveLength(3);
+      const regularLineCall = finalCalls[2];
+      expect(regularLineCall[2]).toBe(regularLineCall[3]); // line_start === line_end
+      expect(regularLineCall[2]).toBe(3); // Should be line 3
+    });
   });
 
   test.describe('multiple forms', () => {
-    test('supports multiple independent comment forms simultaneously', async ({ page }) => {
+    /**
+     * REGRESSION TEST: Multiple forms with refocus capability
+     *
+     * Bug: When multiple comment forms are open, clicking back on a previous
+     * textarea doesn't give it focus - typing has no effect. The cancel button
+     * still works, suggesting the issue is focus/input capture, not the element.
+     *
+     * Root cause: CodeMirror's mousedown handler was letting clicks on
+     * .inline-comment fall through to CodeMirror's default behavior, which
+     * focuses the editor instead of the textarea.
+     *
+     * This test verifies:
+     * 1. Multiple forms can be opened
+     * 2. Each form retains its content
+     * 3. User can refocus and continue typing in ANY open form
+     * 4. All forms save with correct content
+     */
+    test('supports multiple independent comment forms with refocus', async ({ page }) => {
       const deletedLines = page.locator('.cm-deletedLine');
 
-      // Open and type in first form
+      // Open and type in first form (use click, not focus, to match real user behavior)
       await deletedLines.first().click();
       const firstTextarea = page.locator('.inline-comment-textarea').first();
-      await firstTextarea.focus();
-      await page.keyboard.type('First comment');
+      await firstTextarea.click();
+      await page.keyboard.type('First');
 
       // Open and type in second form
       await deletedLines.nth(1).click();
       await expect(page.locator('.inline-comment-textarea')).toHaveCount(2);
 
       const secondTextarea = page.locator('.inline-comment-textarea').nth(1);
-      await secondTextarea.focus();
+      await secondTextarea.click();
       await page.keyboard.type('Second comment');
 
-      // Both should have their content
-      await expect(page.locator('.inline-comment-textarea').first()).toHaveValue('First comment');
-      await expect(page.locator('.inline-comment-textarea').nth(1)).toHaveValue('Second comment');
+      // THE KEY TEST: Refocus first textarea and continue typing
+      // This is where the bug manifests - click doesn't give focus
+      await firstTextarea.click();
+      await page.keyboard.type(' comment'); // Should append to "First"
+
+      // Verify both textareas have correct content
+      await expect(firstTextarea).toHaveValue('First comment');
+      await expect(secondTextarea).toHaveValue('Second comment');
 
       // Save both - each should have correct content
       const saveButtons = page.locator('.inline-comment-btn.save');
