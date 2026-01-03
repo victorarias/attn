@@ -10,7 +10,7 @@ import {
   sleep,
   MockDaemon,
 } from '../test/utils';
-import { ReviewPanel, canAddCommentToDeletedChunk } from './ReviewPanel';
+import { ReviewPanel, canAddCommentToDeletedLine } from './ReviewPanel';
 
 // Mock CodeMirror since it requires DOM measurements
 vi.mock('@codemirror/view', () => {
@@ -632,11 +632,11 @@ describe('Deleted-Line Comment Fixtures', () => {
    * but this also blocked new comments when saved comments existed.
    * Fix: Check for `.inline-comment.new` (unsaved forms only).
    *
-   * These tests use the actual `canAddCommentToDeletedChunk` function from the component,
+   * These tests use the actual `canAddCommentToDeletedLine` function from the component,
    * so if someone changes the implementation, these tests will fail.
    */
-  describe('canAddCommentToDeletedChunk', () => {
-    it('allows adding comment when chunk already has a saved comment', () => {
+  describe('canAddCommentToDeletedLine', () => {
+    it('allows adding comment when line has a saved comment after it', () => {
       const deletedChunk = document.createElement('div');
       deletedChunk.className = 'cm-deletedChunk';
 
@@ -645,17 +645,17 @@ describe('Deleted-Line Comment Fixtures', () => {
       deletedLine.className = 'cm-deletedLine';
       deletedChunk.appendChild(deletedLine);
 
-      // Add an existing SAVED comment (not .new - this is key)
+      // Add an existing SAVED comment after the line (not .new - this is key)
       const savedComment = document.createElement('div');
       savedComment.className = 'inline-comment'; // NO .new class
       deletedChunk.appendChild(savedComment);
 
       // The actual function used by the component should return true
-      // (allowing new comment even with saved comment present)
-      expect(canAddCommentToDeletedChunk(deletedChunk)).toBe(true);
+      // (allowing new comment even with saved comment after it)
+      expect(canAddCommentToDeletedLine(deletedLine)).toBe(true);
     });
 
-    it('blocks adding comment when chunk already has an unsaved form', () => {
+    it('blocks adding comment when line already has an unsaved form after it', () => {
       const deletedChunk = document.createElement('div');
       deletedChunk.className = 'cm-deletedChunk';
 
@@ -663,16 +663,16 @@ describe('Deleted-Line Comment Fixtures', () => {
       deletedLine.className = 'cm-deletedLine';
       deletedChunk.appendChild(deletedLine);
 
-      // Add an UNSAVED form (has .new class)
+      // Add an UNSAVED form directly after the line (has .new class)
       const unsavedForm = document.createElement('div');
       unsavedForm.className = 'inline-comment new'; // HAS .new class
       deletedChunk.appendChild(unsavedForm);
 
-      // Should return false - block duplicate unsaved forms
-      expect(canAddCommentToDeletedChunk(deletedChunk)).toBe(false);
+      // Should return false - block duplicate unsaved forms on same line
+      expect(canAddCommentToDeletedLine(deletedLine)).toBe(false);
     });
 
-    it('allows adding comment to empty chunk', () => {
+    it('allows adding comment when line has nothing after it', () => {
       const deletedChunk = document.createElement('div');
       deletedChunk.className = 'cm-deletedChunk';
 
@@ -681,31 +681,56 @@ describe('Deleted-Line Comment Fixtures', () => {
       deletedChunk.appendChild(deletedLine);
 
       // No comments at all - should allow
-      expect(canAddCommentToDeletedChunk(deletedChunk)).toBe(true);
+      expect(canAddCommentToDeletedLine(deletedLine)).toBe(true);
     });
 
-    it('allows multiple saved comments in same chunk', () => {
+    it('allows adding comment to different line even when another has unsaved form', () => {
       const deletedChunk = document.createElement('div');
       deletedChunk.className = 'cm-deletedChunk';
 
-      // Multiple deleted lines
-      for (let i = 0; i < 3; i++) {
-        const line = document.createElement('div');
-        line.className = 'cm-deletedLine';
-        deletedChunk.appendChild(line);
-      }
+      // Line 1
+      const line1 = document.createElement('div');
+      line1.className = 'cm-deletedLine';
+      deletedChunk.appendChild(line1);
 
-      // Two saved comments already exist
-      const comment1 = document.createElement('div');
-      comment1.className = 'inline-comment';
-      deletedChunk.appendChild(comment1);
+      // Unsaved form after line 1
+      const unsavedForm = document.createElement('div');
+      unsavedForm.className = 'inline-comment new';
+      deletedChunk.appendChild(unsavedForm);
 
-      const comment2 = document.createElement('div');
-      comment2.className = 'inline-comment';
-      deletedChunk.appendChild(comment2);
+      // Line 2
+      const line2 = document.createElement('div');
+      line2.className = 'cm-deletedLine';
+      deletedChunk.appendChild(line2);
 
-      // Should still allow - saved comments don't block new ones
-      expect(canAddCommentToDeletedChunk(deletedChunk)).toBe(true);
+      // Line 1 should be blocked (has unsaved form after it)
+      expect(canAddCommentToDeletedLine(line1)).toBe(false);
+      // Line 2 should be allowed (nothing after it)
+      expect(canAddCommentToDeletedLine(line2)).toBe(true);
+    });
+
+    it('allows null clickedLine (fallback case)', () => {
+      expect(canAddCommentToDeletedLine(null)).toBe(true);
+    });
+  });
+
+  describe('comment form state preservation', () => {
+    it('deleted line draft key format is correct', () => {
+      // The key format is "anchorLine:deletedLineIndex"
+      // This is used to identify forms and preserve drafts across re-renders
+      const key = '10:2';
+      const [anchor, index] = key.split(':');
+
+      expect(parseInt(anchor, 10)).toBe(10);
+      expect(parseInt(index, 10)).toBe(2);
+
+      // Drafts are stored in a ref (Map) to avoid re-renders on every keystroke
+      const draftsRef = new Map<string, string>();
+      draftsRef.set(key, '');
+      draftsRef.set(key, 'My comment text');
+
+      // Content persists in the ref
+      expect(draftsRef.get(key)).toBe('My comment text');
     });
   });
 

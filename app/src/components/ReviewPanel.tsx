@@ -36,9 +36,11 @@ const AUTO_SKIP_PATTERNS = [
  *
  * @exported for testing - regression test verifies this logic
  */
-export function canAddCommentToDeletedChunk(chunk: Element): boolean {
-  // Only block if there's an unsaved form, not saved comments
-  return !chunk.querySelector('.inline-comment.new');
+export function canAddCommentToDeletedLine(clickedLine: Element | null): boolean {
+  if (!clickedLine) return true; // Allow if no specific line (fallback case)
+  // Check if the next sibling is an unsaved form
+  const nextSibling = clickedLine.nextElementSibling;
+  return !(nextSibling?.classList.contains('inline-comment') && nextSibling?.classList.contains('new'));
 }
 
 // Comment gutter marker - renders clickable button for each line
@@ -377,7 +379,11 @@ export function ReviewPanel({
 
   // Comment state
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
-  const [newCommentLine, setNewCommentLine] = useState<number | null>(null);
+  const [newCommentLines, setNewCommentLines] = useState<Set<number>>(new Set());
+  // For deleted lines: key is "anchorLine:deletedLineIndex"
+  // We use Set for open forms (triggers re-render) and ref for draft content (no re-render on typing)
+  const [newDeletedLineComments, setNewDeletedLineComments] = useState<Set<string>>(new Set());
+  const deletedLineDraftsRef = useRef<Map<string, string>>(new Map());
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
 
   // Helper: check if comment is on a deleted line (marked by line_end < 0)
@@ -773,8 +779,9 @@ export function ReviewPanel({
           const lineNum = parseInt(gutterBtn.dataset.lineNum || '0', 10);
           if (lineNum > 0) {
             const hasComment = commentLineMap.has(lineNum);
-            if (!hasComment) {
-              setNewCommentLine(lineNum);
+            const hasNewForm = newCommentLines.has(lineNum);
+            if (!hasComment && !hasNewForm) {
+              setNewCommentLines(prev => new Set(prev).add(lineNum));
               return true;
             }
           }
@@ -789,9 +796,10 @@ export function ReviewPanel({
           const block = view.lineBlockAtHeight(y);
           const lineNum = view.state.doc.lineAt(block.from).number;
           const hasComment = commentLineMap.has(lineNum);
+          const hasNewForm = newCommentLines.has(lineNum);
 
-          if (!hasComment) {
-            setNewCommentLine(lineNum);
+          if (!hasComment && !hasNewForm) {
+            setNewCommentLines(prev => new Set(prev).add(lineNum));
             return true;
           }
         } catch {
@@ -802,9 +810,10 @@ export function ReviewPanel({
               const pos = view.posAtDOM(line);
               const lineNum = view.state.doc.lineAt(pos).number;
               const hasComment = commentLineMap.has(lineNum);
+              const hasNewForm = newCommentLines.has(lineNum);
 
-              if (!hasComment) {
-                setNewCommentLine(lineNum);
+              if (!hasComment && !hasNewForm) {
+                setNewCommentLines(prev => new Set(prev).add(lineNum));
                 return true;
               }
             } catch {
@@ -880,30 +889,38 @@ export function ReviewPanel({
       }
     }
 
-    // Add new comment widget if active
-    if (newCommentLine !== null) {
-      const pos = getLineEndPos(newCommentLine, diffContent.modified);
+    // Add new comment widgets for all open forms
+    for (const lineNum of newCommentLines) {
+      const pos = getLineEndPos(lineNum, diffContent.modified);
       if (pos >= 0) {
         inlineWidgets.push({
           pos,
           widget: new NewCommentWidget(
-            newCommentLine,
+            lineNum,
             async (content) => {
               if (reviewId && selectedFilePath && addComment) {
                 const result = await addComment(
                   reviewId,
                   selectedFilePath,
-                  newCommentLine,
-                  newCommentLine,
+                  lineNum,
+                  lineNum,
                   content
                 );
                 if (result.success && result.comment) {
                   setAllReviewComments(prev => [...prev, result.comment!]);
-                  setNewCommentLine(null);
+                  setNewCommentLines(prev => {
+                    const next = new Set(prev);
+                    next.delete(lineNum);
+                    return next;
+                  });
                 }
               }
             },
-            () => setNewCommentLine(null)
+            () => setNewCommentLines(prev => {
+              const next = new Set(prev);
+              next.delete(lineNum);
+              return next;
+            })
           ),
         });
       }
@@ -1047,6 +1064,86 @@ export function ReviewPanel({
           chunk.appendChild(commentEl);
         }
       });
+
+      // Inject new comment forms for deleted lines (from state)
+      newDeletedLineComments.forEach((key) => {
+        const [anchorStr, indexStr] = key.split(':');
+        const anchorLineNum = parseInt(anchorStr, 10);
+        const deletedLineIndex = parseInt(indexStr, 10);
+
+        const chunk = anchorLineToChunk.get(anchorLineNum);
+        if (!chunk) return;
+
+        // Check if form already injected
+        if (chunk.querySelector(`[data-new-comment-key="${key}"]`)) return;
+
+        // Get draft content from ref
+        const draftContent = deletedLineDraftsRef.current.get(key) || '';
+
+        // Create the form element
+        const form = document.createElement('div');
+        form.className = 'inline-comment new';
+        form.dataset.newCommentKey = key;
+        form.innerHTML = `<div class="inline-comment-form"><div class="inline-comment-label">Deleted content (after line ${anchorLineNum})</div><textarea class="inline-comment-textarea" rows="3" placeholder="Add a comment..."></textarea><div class="inline-comment-buttons"><button type="button" class="inline-comment-btn cancel-btn">Cancel</button><button type="button" class="inline-comment-btn save save-btn">Save</button></div></div>`;
+
+        // Insert after the specific deleted line
+        const deletedLines = chunk.querySelectorAll('.cm-deletedLine');
+        const targetLine = deletedLines[deletedLineIndex] || deletedLines[deletedLines.length - 1];
+        if (targetLine) {
+          targetLine.after(form);
+        } else {
+          chunk.appendChild(form);
+        }
+
+        // Set initial content and focus
+        const textarea = form.querySelector('textarea');
+        if (textarea) {
+          textarea.value = draftContent;
+          setTimeout(() => textarea.focus(), 0);
+
+          // Save draft on input to ref (no re-render)
+          textarea.addEventListener('input', () => {
+            deletedLineDraftsRef.current.set(key, textarea.value);
+          });
+        }
+
+        // Handle cancel
+        const cancelBtn = form.querySelector('.cancel-btn');
+        cancelBtn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deletedLineDraftsRef.current.delete(key);
+          setNewDeletedLineComments(prev => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
+        });
+
+        // Handle save
+        const saveBtn = form.querySelector('.save-btn');
+        saveBtn?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const content = textarea?.value.trim();
+          if (content && reviewId && selectedFilePath && addComment) {
+            const result = await addComment(
+              reviewId,
+              selectedFilePath,
+              anchorLineNum,
+              -(deletedLineIndex + 1),  // Encode deleted line index
+              content
+            );
+            if (result.success && result.comment) {
+              setAllReviewComments(prev => [...prev, result.comment!]);
+              deletedLineDraftsRef.current.delete(key);
+              setNewDeletedLineComments(prev => {
+                const next = new Set(prev);
+                next.delete(key);
+                return next;
+              });
+            }
+          }
+        });
+      });
     }, 0);
 
     // Add document-level click handler for deleted chunks (they don't receive normal editor events)
@@ -1061,10 +1158,9 @@ export function ReviewPanel({
       // Ignore clicks inside existing comments (buttons, content, etc.)
       if (target.closest('.inline-comment')) return;
 
-      // Check if we can add a new comment (no unsaved form exists)
-      if (!canAddCommentToDeletedChunk(deletedChunk)) {
-        return;
-      }
+      // Find the deleted line that was clicked
+      const clickedLine = target.closest('.cm-deletedLine');
+      if (!clickedLine) return;
 
       // Find the previous .cm-line sibling to anchor the comment
       let prevLine = deletedChunk.previousElementSibling;
@@ -1083,68 +1179,20 @@ export function ReviewPanel({
         }
       }
 
-      // Create and insert the comment form directly into the deleted chunk
-      const form = document.createElement('div');
-      form.className = 'inline-comment new';
-      form.innerHTML = `
-        <div class="inline-comment-form">
-          <div class="inline-comment-label">Deleted content (after line ${anchorLineNum})</div>
-          <textarea class="inline-comment-textarea" rows="3" placeholder="Add a comment..."></textarea>
-          <div class="inline-comment-buttons">
-            <button type="button" class="inline-comment-btn cancel-btn">Cancel</button>
-            <button type="button" class="inline-comment-btn save save-btn">Save</button>
-          </div>
-        </div>
-      `;
-
-      // Find the deleted line that was clicked and its index within the chunk
-      const clickedLine = target.closest('.cm-deletedLine');
+      // Find the index of the clicked line within the chunk
       const allDeletedLines = deletedChunk.querySelectorAll('.cm-deletedLine');
-      let clickedLineIndex = 0;
-      if (clickedLine) {
-        const foundIndex = Array.from(allDeletedLines).indexOf(clickedLine);
-        clickedLineIndex = foundIndex >= 0 ? foundIndex : 0;
-        clickedLine.after(form);
-      } else {
-        // Fallback: insert at beginning of chunk
-        deletedChunk.insertBefore(form, deletedChunk.firstChild);
+      const foundIndex = Array.from(allDeletedLines).indexOf(clickedLine);
+      const clickedLineIndex = foundIndex >= 0 ? foundIndex : 0;
+
+      // Create key and check if form already exists
+      const key = `${anchorLineNum}:${clickedLineIndex}`;
+      if (newDeletedLineComments.has(key)) {
+        return; // Form already open for this line
       }
 
-      // Focus the textarea
-      const textarea = form.querySelector('textarea');
-      if (textarea) {
-        setTimeout(() => textarea.focus(), 0);
-      }
-
-      // Handle cancel
-      const cancelBtn = form.querySelector('.cancel-btn');
-      cancelBtn?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        form.remove();
-      });
-
-      // Handle save
-      const saveBtn = form.querySelector('.save-btn');
-      saveBtn?.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const content = textarea?.value.trim();
-        if (content && reviewId && selectedFilePath && addComment) {
-          // Use line_end = -(index + 1) to mark deleted-line comment and store position
-          // -1 = after deleted line 0, -2 = after deleted line 1, etc.
-          const result = await addComment(
-            reviewId,
-            selectedFilePath,
-            anchorLineNum,
-            -(clickedLineIndex + 1),  // Encode deleted line index
-            content
-          );
-          if (result.success && result.comment) {
-            // Add to state - the injection logic will handle positioning
-            setAllReviewComments(prev => [...prev, result.comment!]);
-            form.remove();
-          }
-        }
-      });
+      // Initialize draft content in ref and add key to state
+      deletedLineDraftsRef.current.set(key, '');
+      setNewDeletedLineComments(prev => new Set(prev).add(key));
 
       event.preventDefault();
       event.stopPropagation();
@@ -1157,7 +1205,7 @@ export function ReviewPanel({
       view.destroy();
       editorViewRef.current = null;
     };
-  }, [diffContent, selectedFile?.path, expandedContext, fontSize, regularComments, deletedLineComments, newCommentLine, editingCommentId, reviewId, selectedFilePath, addComment, updateComment, resolveComment]);
+  }, [diffContent, selectedFile?.path, expandedContext, fontSize, regularComments, deletedLineComments, newCommentLines, newDeletedLineComments, editingCommentId, reviewId, selectedFilePath, addComment, updateComment, resolveComment, deleteComment]);
 
   // Keyboard navigation
   useEffect(() => {

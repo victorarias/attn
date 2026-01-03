@@ -399,7 +399,7 @@
 .inline-comment {
   background: #2d3748;
   border-left: 3px solid #3b82f6;
-  margin: 4px 0 4px 40px;
+  margin: 4px 0;
   padding: 8px 12px;
   border-radius: 0 4px 4px 0;
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
