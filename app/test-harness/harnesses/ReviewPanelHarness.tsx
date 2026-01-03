@@ -11,19 +11,46 @@ import type { ReviewComment } from '../../src/types/generated';
 import type { HarnessProps } from '../types';
 import '../../src/components/ReviewPanel.css';
 
-// Sample diff with deleted lines - this is what we're testing
+// Generate lines with a marker at specific positions
+function generateLines(count: number, prefix: string): string {
+  return Array.from({ length: count }, (_, i) => `  console.log('${prefix} ${i + 1}');`).join('\n');
+}
+
+// Sample diff with MULTIPLE hunks spread throughout the file
+// This creates scrollable content even in hunk-only view
 const DIFF_WITH_DELETIONS: FileDiffResult = {
   success: true,
   original: `function example() {
-  console.log('line 1');
-  console.log('deleted line A');
-  console.log('deleted line B');
-  console.log('deleted line C');
-  console.log('line 5');
+  // Section 1
+${generateLines(10, 'section1')}
+  // DELETED HUNK 1
+  console.log('deleted A1');
+  console.log('deleted A2');
+  console.log('deleted A3');
+  // Section 2
+${generateLines(15, 'section2')}
+  // DELETED HUNK 2
+  console.log('deleted B1');
+  console.log('deleted B2');
+  // Section 3
+${generateLines(15, 'section3')}
+  // DELETED HUNK 3
+  console.log('deleted C1');
+  console.log('deleted C2');
+  console.log('deleted C3');
+  console.log('deleted C4');
+  // Section 4
+${generateLines(10, 'section4')}
 }`,
   modified: `function example() {
-  console.log('line 1');
-  console.log('line 5');
+  // Section 1
+${generateLines(10, 'section1')}
+  // Section 2
+${generateLines(15, 'section2')}
+  // Section 3
+${generateLines(15, 'section3')}
+  // Section 4
+${generateLines(10, 'section4')}
 }`,
 };
 

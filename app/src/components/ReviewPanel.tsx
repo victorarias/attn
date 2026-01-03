@@ -802,10 +802,166 @@ export function ReviewPanel({
         )
       );
 
+      // Save scroll position before dispatch - widget changes can cause jumps
+      const scrollTop = view.scrollDOM.scrollTop;
+
       // Dispatch updates to existing view - NO RECREATION!
       view.dispatch({
         effects: setInlineDecorations.of(inlineDecorations),
       });
+
+      // Restore scroll position after widget updates
+      view.scrollDOM.scrollTop = scrollTop;
+
+      // Still need to handle deleted line comment DOM injection
+      // (deleted lines aren't part of CodeMirror document, so use DOM injection)
+      setTimeout(() => {
+        if (!editorContainerRef.current) return;
+
+        // Build a map of anchor line -> deleted chunk element
+        const deletedChunks = editorContainerRef.current.querySelectorAll('.cm-deletedChunk');
+        const anchorLineToChunk = new Map<number, Element>();
+
+        deletedChunks.forEach((chunk) => {
+          let prevLine = chunk.previousElementSibling;
+          while (prevLine && !prevLine.classList.contains('cm-line')) {
+            prevLine = prevLine.previousElementSibling;
+          }
+          if (prevLine && view) {
+            try {
+              const pos = view.posAtDOM(prevLine);
+              const lineNum = view.state.doc.lineAt(pos).number;
+              anchorLineToChunk.set(lineNum, chunk);
+            } catch {
+              // Ignore
+            }
+          }
+        });
+
+        // Remove forms that are no longer in state (cancelled)
+        editorContainerRef.current.querySelectorAll('[data-new-comment-key]').forEach((form) => {
+          const key = (form as HTMLElement).dataset.newCommentKey;
+          if (key && !newDeletedLineComments.has(key)) {
+            form.remove();
+          }
+        });
+
+        // Inject new comment forms for deleted lines (from state)
+        newDeletedLineComments.forEach((key) => {
+          const [anchorStr, indexStr] = key.split(':');
+          const anchorLineNum = parseInt(anchorStr, 10);
+          const deletedLineIndex = parseInt(indexStr, 10);
+
+          const chunk = anchorLineToChunk.get(anchorLineNum);
+          if (!chunk) return;
+
+          // Check if form already injected
+          if (chunk.querySelector(`[data-new-comment-key="${key}"]`)) return;
+
+          // Get draft content from ref
+          const draftContent = deletedLineDraftsRef.current.get(key) || '';
+
+          // Create the form element
+          const form = document.createElement('div');
+          form.className = 'inline-comment new';
+          form.dataset.newCommentKey = key;
+          form.innerHTML = `<div class="inline-comment-form"><div class="inline-comment-label">Deleted content (after line ${anchorLineNum})</div><textarea class="inline-comment-textarea" rows="3" placeholder="Add a comment..."></textarea><div class="inline-comment-buttons"><button type="button" class="inline-comment-btn cancel-btn">Cancel</button><button type="button" class="inline-comment-btn save save-btn">Save</button></div></div>`;
+
+          // Insert after the specific deleted line
+          const deletedLines = chunk.querySelectorAll('.cm-deletedLine');
+          const targetLine = deletedLines[deletedLineIndex] || deletedLines[deletedLines.length - 1];
+          if (targetLine) {
+            targetLine.after(form);
+          } else {
+            chunk.appendChild(form);
+          }
+
+          // Set initial content and focus
+          const textarea = form.querySelector('textarea');
+          if (textarea) {
+            textarea.value = draftContent;
+            setTimeout(() => textarea.focus(), 0);
+
+            // Save draft on input to ref (no re-render)
+            textarea.addEventListener('input', () => {
+              deletedLineDraftsRef.current.set(key, textarea.value);
+            });
+
+            // Keyboard shortcuts: Escape to cancel, Cmd/Ctrl+Enter to save
+            textarea.addEventListener('keydown', async (e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                deletedLineDraftsRef.current.delete(key);
+                setNewDeletedLineComments(prev => {
+                  const next = new Set(prev);
+                  next.delete(key);
+                  return next;
+                });
+              } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                e.stopPropagation();
+                const content = textarea.value.trim();
+                if (content && reviewId && selectedFilePath && addComment) {
+                  const result = await addComment(
+                    reviewId,
+                    selectedFilePath,
+                    anchorLineNum,
+                    -(deletedLineIndex + 1),
+                    content
+                  );
+                  if (result.success && result.comment) {
+                    setAllReviewComments(prev => [...prev, result.comment!]);
+                    deletedLineDraftsRef.current.delete(key);
+                    setNewDeletedLineComments(prev => {
+                      const next = new Set(prev);
+                      next.delete(key);
+                      return next;
+                    });
+                  }
+                }
+              }
+            });
+          }
+
+          // Handle cancel
+          const cancelBtn = form.querySelector('.cancel-btn');
+          cancelBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deletedLineDraftsRef.current.delete(key);
+            setNewDeletedLineComments(prev => {
+              const next = new Set(prev);
+              next.delete(key);
+              return next;
+            });
+          });
+
+          // Handle save
+          const saveBtn = form.querySelector('.save-btn');
+          saveBtn?.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const content = textarea?.value.trim();
+            if (content && reviewId && selectedFilePath && addComment) {
+              const result = await addComment(
+                reviewId,
+                selectedFilePath,
+                anchorLineNum,
+                -(deletedLineIndex + 1),
+                content
+              );
+              if (result.success && result.comment) {
+                setAllReviewComments(prev => [...prev, result.comment!]);
+                deletedLineDraftsRef.current.delete(key);
+                setNewDeletedLineComments(prev => {
+                  const next = new Set(prev);
+                  next.delete(key);
+                  return next;
+                });
+              }
+            }
+          });
+        });
+      }, 0);
 
       return; // Early return - skip editor recreation
     }
@@ -1333,7 +1489,22 @@ export function ReviewPanel({
       });
     }, 0);
 
-    // Add document-level click handler for deleted chunks (they don't receive normal editor events)
+    // Click handler for deleted chunks is now in a separate stable effect (see below)
+
+    return () => {
+      // DON'T destroy view here - it prevents the early return optimization
+      // View is destroyed in the effect when core deps change, or when panel closes
+    };
+  }, [diffContent, selectedFile?.path, expandedContext, fontSize, regularComments, deletedLineComments, newCommentLines, newDeletedLineComments, editingCommentId, reviewId, selectedFilePath, addComment, updateComment, resolveComment, deleteComment]);
+
+  // Separate stable effect for the deleted chunk click handler
+  // This uses refs to avoid stale closures
+  const newDeletedLineCommentsRef = useRef(newDeletedLineComments);
+  newDeletedLineCommentsRef.current = newDeletedLineComments;
+
+  useEffect(() => {
+    if (!isOpen) return;
+
     const handleDeletedChunkClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
       const deletedChunk = target.closest('.cm-deletedChunk');
@@ -1357,6 +1528,7 @@ export function ReviewPanel({
 
       // Get the anchor line number for storing the comment
       let anchorLineNum = 0;
+      const view = editorViewRef.current;
       if (prevLine && view) {
         try {
           const pos = view.posAtDOM(prevLine);
@@ -1373,7 +1545,7 @@ export function ReviewPanel({
 
       // Create key and check if form already exists
       const key = `${anchorLineNum}:${clickedLineIndex}`;
-      if (newDeletedLineComments.has(key)) {
+      if (newDeletedLineCommentsRef.current.has(key)) {
         return; // Form already open for this line
       }
 
@@ -1386,13 +1558,16 @@ export function ReviewPanel({
     };
 
     document.addEventListener('mousedown', handleDeletedChunkClick, true);
+    return () => document.removeEventListener('mousedown', handleDeletedChunkClick, true);
+  }, [isOpen]);
 
-    return () => {
-      document.removeEventListener('mousedown', handleDeletedChunkClick, true);
-      view.destroy();
+  // Cleanup view when panel closes
+  useEffect(() => {
+    if (!isOpen && editorViewRef.current) {
+      editorViewRef.current.destroy();
       editorViewRef.current = null;
-    };
-  }, [diffContent, selectedFile?.path, expandedContext, fontSize, regularComments, deletedLineComments, newCommentLines, newDeletedLineComments, editingCommentId, reviewId, selectedFilePath, addComment, updateComment, resolveComment, deleteComment]);
+    }
+  }, [isOpen]);
 
   // Keyboard navigation
   useEffect(() => {
