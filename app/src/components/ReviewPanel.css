@@ -550,6 +550,54 @@
   margin-bottom: 4px;
 }
 
+/* Override CodeMirror's generic button styling inside deleted chunks */
+/* CodeMirror merge uses .ͼN .cm-deletedChunk button which has high specificity */
+.cm-deletedChunk .inline-comment-btn {
+  background: transparent !important;
+  border: 1px solid #4b5563 !important;
+  color: #9ca3af !important;
+  font-size: 11px !important;
+  padding: 2px 8px !important;
+  border-radius: 3px !important;
+  margin: 0 !important;
+}
+
+.cm-deletedChunk .inline-comment-btn:hover {
+  background: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+.cm-deletedChunk .inline-comment-btn.resolve {
+  border-color: #22c55e !important;
+  color: #22c55e !important;
+}
+
+.cm-deletedChunk .inline-comment-btn.resolve:hover {
+  background: #22c55e !important;
+  color: #fff !important;
+}
+
+.cm-deletedChunk .inline-comment-btn.delete {
+  border-color: #ef4444 !important;
+  color: #ef4444 !important;
+}
+
+.cm-deletedChunk .inline-comment-btn.delete:hover {
+  background: #ef4444 !important;
+  color: #fff !important;
+}
+
+.cm-deletedChunk .inline-comment-btn.save {
+  background: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+  color: #fff !important;
+}
+
+.cm-deletedChunk .inline-comment-btn.save:hover {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+}
+
 /*
  * Force line wrapping in diff view
  * Key fix: cm-scroller is display:flex with cm-gutters + cm-content as children.
