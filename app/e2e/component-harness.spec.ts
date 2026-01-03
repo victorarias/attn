@@ -239,5 +239,66 @@ test.describe('ReviewPanel Component', () => {
       expect(calls).toHaveLength(1);
       expect(calls[0][4]).toBe('Comment on deleted line');
     });
+
+    /**
+     * BUG: Comments on deleted lines appear at wrong position
+     *
+     * Expected behavior:
+     * - Clicking on the 2nd deleted line should show the comment form after that specific line
+     * - The saved comment should appear immediately after the clicked line
+     *
+     * Current bug: Comments appear around the entire deleted chunk, not on the specific line clicked
+     */
+    test('deleted line comment appears after the specific line clicked', async ({ page }) => {
+      // Get the deleted lines - the harness has:
+      // index 0: '// DELETED HUNK 1'
+      // index 1: 'console.log('deleted A1');'
+      // index 2: 'console.log('deleted A2');'
+      // index 3: 'console.log('deleted A3');'
+      const deletedLines = page.locator('.cm-deleted-line');
+      const count = await deletedLines.count();
+      expect(count).toBeGreaterThanOrEqual(4);
+
+      // Click on the THIRD deleted line (index 2 = 'deleted A2')
+      const targetDeletedLine = deletedLines.nth(2);
+      const targetLineText = await targetDeletedLine.textContent();
+      expect(targetLineText).toContain('deleted A2');
+
+      await targetDeletedLine.click();
+
+      // Form should appear
+      const textarea = page.locator('.unified-comment-textarea');
+      await expect(textarea).toBeVisible({ timeout: 3000 });
+
+      // Type and save
+      await textarea.fill('Comment on A2 specifically');
+      await page.locator('.save-btn').click();
+
+      // Saved comment should appear
+      const savedComment = page.locator('.unified-comment');
+      await expect(savedComment).toBeVisible({ timeout: 3000 });
+
+      // The SAVED comment should appear AFTER 'deleted A2', not somewhere else
+      // Check DOM position of the saved comment relative to deleted lines
+      const commentPosition = await page.evaluate(() => {
+        const comment = document.querySelector('.unified-comment');
+        if (!comment) return { found: false, prevLineText: 'comment not found' };
+
+        // Walk backwards from the comment to find the nearest deleted line
+        let prev = comment.previousElementSibling;
+        while (prev && !prev.classList.contains('cm-deleted-line')) {
+          prev = prev.previousElementSibling;
+        }
+
+        return {
+          found: true,
+          prevLineText: prev?.textContent || 'no deleted line found before comment',
+        };
+      });
+
+      expect(commentPosition.found).toBe(true);
+      // BUG: This will fail if the saved comment appears after the wrong line
+      expect(commentPosition.prevLineText).toContain('deleted A2');
+    });
   });
 });

@@ -31,16 +31,17 @@ const AUTO_SKIP_PATTERNS = [
 /**
  * Convert a ReviewComment (API format) to EditorComment format.
  * Uses resolveAnchor to find the docLine and detect outdated/orphaned state.
+ *
+ * Convention: negative line_end encodes 'original' side (deleted lines).
  */
 function toEditorComment(
   comment: ReviewComment,
   lines: DiffLine[]
 ): EditorComment | null {
-  // Build anchor from the stored line_start.
-  // Currently we assume 'modified' side - anchorContent is empty since we don't
-  // store it in the API, so staleness detection is limited.
+  // Detect side from line_end convention: negative = original (deleted lines)
+  const isOriginalSide = comment.line_end < 0;
   const anchor: CommentAnchor = {
-    side: 'modified',
+    side: isOriginalSide ? 'original' : 'modified',
     line: comment.line_start,
     anchorContent: '',
   };
@@ -76,16 +77,18 @@ function toEditorComment(
 /**
  * Extract API-compatible fields from a CommentAnchor.
  * Used when saving a new comment to the backend.
+ *
+ * Convention: negative line_end encodes 'original' side (deleted lines).
+ * - side='modified': line_end = line_start (positive)
+ * - side='original': line_end = -line_start (negative)
  */
 function fromEditorAnchor(anchor: CommentAnchor): {
   line_start: number;
   line_end: number;
 } {
-  // The anchor contains the line number on either original or modified side
-  // For the API, we use this as line_start/line_end
   return {
     line_start: anchor.line,
-    line_end: anchor.line,
+    line_end: anchor.side === 'original' ? -anchor.line : anchor.line,
   };
 }
 
