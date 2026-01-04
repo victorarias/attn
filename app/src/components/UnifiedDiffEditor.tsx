@@ -50,6 +50,7 @@ export interface InlineComment {
   docLine: number; // 1-indexed line in unified document (runtime only, recalculated from anchor)
   content: string;
   resolved: boolean;
+  resolvedBy?: 'user' | 'agent'; // Who resolved the comment
   author?: 'user' | 'agent';
   anchor?: CommentAnchor; // For persistence and staleness detection
   isOutdated?: boolean; // Line content changed since comment was created
@@ -607,7 +608,10 @@ class CommentWidget extends WidgetType {
       });
     } else {
       // Display mode
-      wrapper.innerHTML = `<div class="unified-comment-header"><span class="unified-comment-author">${comment.author === 'agent' ? 'Claude' : 'You'}</span><div class="unified-comment-actions"><button class="edit-btn">Edit</button><button class="resolve-btn">${comment.resolved ? 'Unresolve' : 'Resolve'}</button><button class="delete-btn">Delete</button></div></div><div class="unified-comment-content">${escapeHtml(comment.content)}</div>`;
+      const resolvedBadge = comment.resolved
+        ? `<span class="unified-comment-resolved">Resolved by ${comment.resolvedBy === 'agent' ? 'Claude' : 'you'}</span>`
+        : '';
+      wrapper.innerHTML = `<div class="unified-comment-header"><div class="unified-comment-left"><span class="unified-comment-author">${comment.author === 'agent' ? 'Claude' : 'You'}</span>${resolvedBadge}</div><div class="unified-comment-actions"><button class="edit-btn">Edit</button><button class="resolve-btn">${comment.resolved ? 'Unresolve' : 'Resolve'}</button><button class="delete-btn">Delete</button></div></div><div class="unified-comment-content">${escapeHtml(comment.content)}</div>`;
 
       wrapper.querySelector('.edit-btn')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -928,6 +932,11 @@ export function UnifiedDiffEditor({
           justifyContent: 'space-between',
           marginBottom: '4px',
         },
+        '.unified-comment-left': {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        },
         '.unified-comment-author': {
           fontSize: '12px',
           fontWeight: '600',
@@ -935,6 +944,14 @@ export function UnifiedDiffEditor({
           borderRadius: '4px',
           color: '#fff',
           background: '#2563eb',
+        },
+        '.unified-comment-resolved': {
+          fontSize: '11px',
+          fontWeight: '500',
+          padding: '2px 8px',
+          borderRadius: '4px',
+          color: '#22c55e',
+          background: 'rgba(34, 197, 94, 0.15)',
         },
         '.unified-comment-content': {
           color: '#e5e7eb',
