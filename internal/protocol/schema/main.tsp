@@ -603,7 +603,9 @@ model ReviewComment {
   content: string;
   author: string;  // "user" or "agent"
   resolved: boolean;
-  created_at: string;  // ISO timestamp
+  resolved_by?: string;  // "user" or "agent" (empty if not resolved)
+  resolved_at?: string;  // ISO timestamp (empty if not resolved)
+  created_at: string;    // ISO timestamp
 }
 
 model GetReviewStateResultMessage {

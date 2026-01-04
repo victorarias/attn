@@ -155,15 +155,17 @@ func (s *Store) ClearViewedFiles(reviewID string) error {
 
 // ReviewComment represents a comment on a code review
 type ReviewComment struct {
-	ID        string
-	ReviewID  string
-	Filepath  string
-	LineStart int
-	LineEnd   int
-	Content   string
-	Author    string // "user" or "agent"
-	Resolved  bool
-	CreatedAt time.Time
+	ID         string
+	ReviewID   string
+	Filepath   string
+	LineStart  int
+	LineEnd    int
+	Content    string
+	Author     string // "user" or "agent"
+	Resolved   bool
+	ResolvedBy string     // "user" or "agent" (empty if not resolved)
+	ResolvedAt *time.Time // when resolved (nil if not resolved)
+	CreatedAt  time.Time
 }
 
 // AddComment adds a new comment to a review
@@ -202,7 +204,7 @@ func (s *Store) GetComments(reviewID string) ([]*ReviewComment, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, created_at
+		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, resolved_by, resolved_at, created_at
 		FROM review_comments WHERE review_id = ? ORDER BY filepath, line_start
 	`, reviewID)
 	if err != nil {
@@ -219,7 +221,7 @@ func (s *Store) GetCommentsForFile(reviewID, filepath string) ([]*ReviewComment,
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, created_at
+		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, resolved_by, resolved_at, created_at
 		FROM review_comments WHERE review_id = ? AND filepath = ? ORDER BY line_start
 	`, reviewID, filepath)
 	if err != nil {
@@ -237,18 +239,22 @@ func (s *Store) GetCommentByID(id string) (*ReviewComment, error) {
 
 	var comment ReviewComment
 	var resolved int
-	var createdAt string
+	var resolvedAt, createdAt string
 
 	err := s.db.QueryRow(`
-		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, created_at
+		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, resolved_by, resolved_at, created_at
 		FROM review_comments WHERE id = ?
 	`, id).Scan(&comment.ID, &comment.ReviewID, &comment.Filepath, &comment.LineStart,
-		&comment.LineEnd, &comment.Content, &comment.Author, &resolved, &createdAt)
+		&comment.LineEnd, &comment.Content, &comment.Author, &resolved, &comment.ResolvedBy, &resolvedAt, &createdAt)
 	if err != nil {
 		return nil, err
 	}
 
 	comment.Resolved = resolved == 1
+	if resolvedAt != "" {
+		t, _ := time.Parse(time.RFC3339, resolvedAt)
+		comment.ResolvedAt = &t
+	}
 	comment.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	return &comment, nil
 }
@@ -263,15 +269,21 @@ func (s *Store) UpdateComment(id, content string) error {
 }
 
 // ResolveComment sets the resolved status of a comment
-func (s *Store) ResolveComment(id string, resolved bool) error {
+// resolvedBy should be "user" or "agent" when resolving, or empty when unresolving
+func (s *Store) ResolveComment(id string, resolved bool, resolvedBy string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	resolvedInt := 0
+	resolvedAt := ""
 	if resolved {
 		resolvedInt = 1
+		resolvedAt = time.Now().UTC().Format(time.RFC3339)
+	} else {
+		resolvedBy = "" // Clear resolvedBy when unresolving
 	}
-	_, err := s.db.Exec(`UPDATE review_comments SET resolved = ? WHERE id = ?`, resolvedInt, id)
+	_, err := s.db.Exec(`UPDATE review_comments SET resolved = ?, resolved_by = ?, resolved_at = ? WHERE id = ?`,
+		resolvedInt, resolvedBy, resolvedAt, id)
 	return err
 }
 
@@ -289,12 +301,16 @@ func scanComments(rows *sql.Rows) ([]*ReviewComment, error) {
 	for rows.Next() {
 		var comment ReviewComment
 		var resolved int
-		var createdAt string
+		var resolvedAt, createdAt string
 		if err := rows.Scan(&comment.ID, &comment.ReviewID, &comment.Filepath, &comment.LineStart,
-			&comment.LineEnd, &comment.Content, &comment.Author, &resolved, &createdAt); err != nil {
+			&comment.LineEnd, &comment.Content, &comment.Author, &resolved, &comment.ResolvedBy, &resolvedAt, &createdAt); err != nil {
 			return nil, err
 		}
 		comment.Resolved = resolved == 1
+		if resolvedAt != "" {
+			t, _ := time.Parse(time.RFC3339, resolvedAt)
+			comment.ResolvedAt = &t
+		}
 		comment.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		comments = append(comments, &comment)
 	}

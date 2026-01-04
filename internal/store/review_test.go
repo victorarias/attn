@@ -223,7 +223,7 @@ func TestReviewComments(t *testing.T) {
 	}
 
 	// Test ResolveComment
-	err = store.ResolveComment(comment.ID, true)
+	err = store.ResolveComment(comment.ID, true, "user")
 	if err != nil {
 		t.Fatalf("failed to resolve comment: %v", err)
 	}
@@ -234,9 +234,15 @@ func TestReviewComments(t *testing.T) {
 	if !resolved.Resolved {
 		t.Error("comment should be resolved")
 	}
+	if resolved.ResolvedBy != "user" {
+		t.Errorf("expected ResolvedBy='user', got '%s'", resolved.ResolvedBy)
+	}
+	if resolved.ResolvedAt == nil {
+		t.Error("ResolvedAt should not be nil")
+	}
 
 	// Test unresolving
-	err = store.ResolveComment(comment.ID, false)
+	err = store.ResolveComment(comment.ID, false, "")
 	if err != nil {
 		t.Fatalf("failed to unresolve comment: %v", err)
 	}
@@ -246,6 +252,9 @@ func TestReviewComments(t *testing.T) {
 	}
 	if unresolved.Resolved {
 		t.Error("comment should be unresolved")
+	}
+	if unresolved.ResolvedBy != "" {
+		t.Errorf("expected ResolvedBy='', got '%s'", unresolved.ResolvedBy)
 	}
 
 	// Test DeleteComment

@@ -925,7 +925,12 @@ func (d *Daemon) handleResolveComment(client *wsClient, msg *protocol.ResolveCom
 		Success: false,
 	}
 
-	err := d.store.ResolveComment(msg.CommentID, msg.Resolved)
+	// When resolving from the UI, the user is the resolver
+	resolvedBy := ""
+	if msg.Resolved {
+		resolvedBy = "user"
+	}
+	err := d.store.ResolveComment(msg.CommentID, msg.Resolved, resolvedBy)
 	if err != nil {
 		result.Error = protocol.Ptr(err.Error())
 		d.sendToClient(client, result)

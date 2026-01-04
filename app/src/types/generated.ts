@@ -132,15 +132,17 @@ export interface AddCommentResultMessage {
 }
 
 export interface Comment {
-    author:     string;
-    content:    string;
-    created_at: string;
-    filepath:   string;
-    id:         string;
-    line_end:   number;
-    line_start: number;
-    resolved:   boolean;
-    review_id:  string;
+    author:       string;
+    content:      string;
+    created_at:   string;
+    filepath:     string;
+    id:           string;
+    line_end:     number;
+    line_start:   number;
+    resolved:     boolean;
+    resolved_at?: string;
+    resolved_by?: string;
+    review_id:    string;
     [property: string]: any;
 }
 
@@ -1071,15 +1073,17 @@ export enum ReviewChunkMessageEvent {
 }
 
 export interface ReviewComment {
-    author:     string;
-    content:    string;
-    created_at: string;
-    filepath:   string;
-    id:         string;
-    line_end:   number;
-    line_start: number;
-    resolved:   boolean;
-    review_id:  string;
+    author:       string;
+    content:      string;
+    created_at:   string;
+    filepath:     string;
+    id:           string;
+    line_end:     number;
+    line_start:   number;
+    resolved:     boolean;
+    resolved_at?: string;
+    resolved_by?: string;
+    review_id:    string;
     [property: string]: any;
 }
 
@@ -2380,6 +2384,8 @@ const typeMap: any = {
         { json: "line_end", js: "line_end", typ: 0 },
         { json: "line_start", js: "line_start", typ: 0 },
         { json: "resolved", js: "resolved", typ: true },
+        { json: "resolved_at", js: "resolved_at", typ: u(undefined, "") },
+        { json: "resolved_by", js: "resolved_by", typ: u(undefined, "") },
         { json: "review_id", js: "review_id", typ: "" },
     ], "any"),
     "ApprovePRMessage": o([
@@ -2874,6 +2880,8 @@ const typeMap: any = {
         { json: "line_end", js: "line_end", typ: 0 },
         { json: "line_start", js: "line_start", typ: 0 },
         { json: "resolved", js: "resolved", typ: true },
+        { json: "resolved_at", js: "resolved_at", typ: u(undefined, "") },
+        { json: "resolved_by", js: "resolved_by", typ: u(undefined, "") },
         { json: "review_id", js: "review_id", typ: "" },
     ], "any"),
     "ReviewCompleteMessage": o([

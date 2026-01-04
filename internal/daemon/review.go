@@ -36,6 +36,10 @@ func (d *Daemon) handleStartReview(client *wsClient, msg *protocol.StartReviewMe
 	// Run the review in a goroutine
 	go func() {
 		defer func() {
+			// Recover from panic if client disconnected during review
+			if r := recover(); r != nil {
+				d.logf("Review goroutine recovered from panic: %v", r)
+			}
 			activeReviewsMu.Lock()
 			delete(activeReviews, reviewID)
 			activeReviewsMu.Unlock()

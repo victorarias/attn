@@ -976,6 +976,12 @@ type ReviewComment struct {
 	// Resolved corresponds to the JSON schema field "resolved".
 	Resolved bool `json:"resolved"`
 
+	// ResolvedAt corresponds to the JSON schema field "resolved_at".
+	ResolvedAt *string `json:"resolved_at,omitempty"`
+
+	// ResolvedBy corresponds to the JSON schema field "resolved_by".
+	ResolvedBy *string `json:"resolved_by,omitempty"`
+
 	// ReviewID corresponds to the JSON schema field "review_id".
 	ReviewID string `json:"review_id"`
 }
