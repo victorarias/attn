@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "14"
+const ProtocolVersion = "15"
 
 // Commands
 const (
@@ -65,6 +65,8 @@ const (
 	CmdResolveComment           = "resolve_comment"
 	CmdDeleteComment            = "delete_comment"
 	CmdGetComments              = "get_comments"
+	CmdStartReview              = "start_review"
+	CmdCancelReview             = "cancel_review"
 )
 
 // WebSocket Events (daemon -> client)
@@ -110,6 +112,11 @@ const (
 	EventResolveCommentResult     = "resolve_comment_result"
 	EventDeleteCommentResult      = "delete_comment_result"
 	EventGetCommentsResult        = "get_comments_result"
+	EventReviewStarted            = "review_started"
+	EventReviewChunk              = "review_chunk"
+	EventReviewFinding            = "review_finding"
+	EventReviewComplete           = "review_complete"
+	EventReviewCancelled          = "review_cancelled"
 )
 
 // Session states (values for SessionState enum)
@@ -531,6 +538,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg GetCommentsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal get_comments: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdStartReview:
+		var msg StartReviewMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal start_review: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCancelReview:
+		var msg CancelReviewMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal cancel_review: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

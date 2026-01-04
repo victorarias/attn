@@ -92,6 +92,16 @@ function App() {
   // Review panel state
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
 
+  // Reviewer agent state (for AI review streaming)
+  const [reviewerState, setReviewerState] = useState<{
+    isRunning: boolean;
+    output: string;
+    error?: string;
+  }>({ isRunning: false, output: '' });
+
+  // Comments added by reviewer agent (passed to ReviewPanel)
+  const [pendingAgentComments, setPendingAgentComments] = useState<import('./types/generated').ReviewComment[]>([]);
+
   // Hide loading screen on mount
   useEffect(() => {
     const loadingScreen = document.getElementById('loading-screen');
@@ -119,14 +129,49 @@ function App() {
     ensureDaemon();
   }, []);
 
+  // Reviewer callbacks for streaming events
+  const reviewerCallbacks = useMemo(() => ({
+    onReviewStarted: () => {
+      setReviewerState({ isRunning: true, output: '' });
+      setPendingAgentComments([]); // Clear pending comments when new review starts
+    },
+    onReviewChunk: (_reviewId: string, content: string) => {
+      setReviewerState(prev => ({
+        ...prev,
+        output: prev.output + content,
+      }));
+    },
+    onReviewFinding: (_reviewId: string, finding: { filepath: string; line_start: number; content: string }, comment?: import('./types/generated').ReviewComment) => {
+      console.log('[App] Review finding:', finding.filepath, finding.line_start);
+      // Add the comment to pending list so ReviewPanel can pick it up
+      if (comment) {
+        setPendingAgentComments(prev => [...prev, comment]);
+      }
+    },
+    onReviewComplete: (_reviewId: string, success: boolean, error?: string) => {
+      setReviewerState(prev => ({
+        ...prev,
+        isRunning: false,
+        error: success ? undefined : error,
+      }));
+    },
+    onReviewCancelled: () => {
+      setReviewerState(prev => ({
+        ...prev,
+        isRunning: false,
+      }));
+    },
+  }), []);
+
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, getRepoInfo, getReviewState, markFileViewed, sendAddComment, sendUpdateComment, sendResolveComment, sendDeleteComment, sendGetComments, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, getRepoInfo, getReviewState, markFileViewed, sendAddComment, sendUpdateComment, sendResolveComment, sendDeleteComment, sendGetComments, sendStartReview, sendCancelReview, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
     onSettingsUpdate: setSettings,
     onWorktreesUpdate: setWorktrees,
     onGitStatusUpdate: setGitStatus,
+    reviewer: reviewerCallbacks,
   });
 
   // Clear stale daemon sessions on app start
@@ -964,6 +1009,10 @@ function App() {
         resolveComment={sendResolveComment}
         deleteComment={sendDeleteComment}
         getComments={sendGetComments}
+        sendStartReview={sendStartReview}
+        sendCancelReview={sendCancelReview}
+        reviewerState={reviewerState}
+        agentComments={pendingAgentComments}
       />
       <ThumbsModal
         isOpen={thumbsOpen}

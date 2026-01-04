@@ -402,6 +402,19 @@ model GetCommentsMessage {
   filepath?: string;  // Optional: filter by file
 }
 
+model StartReviewMessage {
+  cmd: "start_review";
+  review_id: string;
+  repo_path: string;
+  branch: string;
+  base_branch: string;
+}
+
+model CancelReviewMessage {
+  cmd: "cancel_review";
+  review_id: string;
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -639,6 +652,44 @@ model GetCommentsResultMessage {
   success: boolean;
   comments?: ReviewComment[];
   error?: string;
+}
+
+// Reviewer agent streaming events
+model ReviewFinding {
+  filepath: string;
+  line_start: int32;
+  line_end: int32;
+  content: string;
+  severity?: string;  // "error", "warning", "info"
+}
+
+model ReviewStartedMessage {
+  event: "review_started";
+  review_id: string;
+}
+
+model ReviewChunkMessage {
+  event: "review_chunk";
+  review_id: string;
+  content: string;  // Markdown chunk of the review output
+}
+
+model ReviewFindingMessage {
+  event: "review_finding";
+  review_id: string;
+  finding: ReviewFinding;
+}
+
+model ReviewCompleteMessage {
+  event: "review_complete";
+  review_id: string;
+  success: boolean;
+  error?: string;
+}
+
+model ReviewCancelledMessage {
+  event: "review_cancelled";
+  review_id: string;
 }
 
 // ============================================================================

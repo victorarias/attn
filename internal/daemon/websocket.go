@@ -603,6 +603,16 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		commentMsg := msg.(*protocol.GetCommentsMessage)
 		d.logf("Getting comments for review %s", commentMsg.ReviewID)
 		d.handleGetComments(client, commentMsg)
+
+	case protocol.CmdStartReview:
+		reviewMsg := msg.(*protocol.StartReviewMessage)
+		d.logf("Starting review for %s branch %s", reviewMsg.RepoPath, reviewMsg.Branch)
+		d.handleStartReview(client, reviewMsg)
+
+	case protocol.CmdCancelReview:
+		cancelMsg := msg.(*protocol.CancelReviewMessage)
+		d.logf("Cancelling review %s", cancelMsg.ReviewID)
+		d.handleCancelReview(client, cancelMsg)
 	}
 }
 

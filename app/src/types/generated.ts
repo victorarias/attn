@@ -1,12 +1,13 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, Branch, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewState, Session, SessionState, SetSettingMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, Branch, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const branch = Convert.toBranch(json);
 //   const branchesResultMessage = Convert.toBranchesResultMessage(json);
+//   const cancelReviewMessage = Convert.toCancelReviewMessage(json);
 //   const checkAttnStashMessage = Convert.toCheckAttnStashMessage(json);
 //   const checkAttnStashResultMessage = Convert.toCheckAttnStashResultMessage(json);
 //   const checkDirtyMessage = Convert.toCheckDirtyMessage(json);
@@ -75,11 +76,18 @@
 //   const resolveCommentMessage = Convert.toResolveCommentMessage(json);
 //   const resolveCommentResultMessage = Convert.toResolveCommentResultMessage(json);
 //   const response = Convert.toResponse(json);
+//   const reviewCancelledMessage = Convert.toReviewCancelledMessage(json);
+//   const reviewChunkMessage = Convert.toReviewChunkMessage(json);
 //   const reviewComment = Convert.toReviewComment(json);
+//   const reviewCompleteMessage = Convert.toReviewCompleteMessage(json);
+//   const reviewFinding = Convert.toReviewFinding(json);
+//   const reviewFindingMessage = Convert.toReviewFindingMessage(json);
+//   const reviewStartedMessage = Convert.toReviewStartedMessage(json);
 //   const reviewState = Convert.toReviewState(json);
 //   const session = Convert.toSession(json);
 //   const sessionState = Convert.toSessionState(json);
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
+//   const startReviewMessage = Convert.toStartReviewMessage(json);
 //   const stashMessage = Convert.toStashMessage(json);
 //   const stashPopMessage = Convert.toStashPopMessage(json);
 //   const stashPopResultMessage = Convert.toStashPopResultMessage(json);
@@ -177,6 +185,16 @@ export interface BranchElement {
 
 export enum BranchesResultMessageEvent {
     BranchesResult = "branches_result",
+}
+
+export interface CancelReviewMessage {
+    cmd:       CancelReviewMessageCmd;
+    review_id: string;
+    [property: string]: any;
+}
+
+export enum CancelReviewMessageCmd {
+    CancelReview = "cancel_review",
 }
 
 export interface CheckAttnStashMessage {
@@ -1031,6 +1049,27 @@ export interface RepoElement {
     [property: string]: any;
 }
 
+export interface ReviewCancelledMessage {
+    event:     ReviewCancelledMessageEvent;
+    review_id: string;
+    [property: string]: any;
+}
+
+export enum ReviewCancelledMessageEvent {
+    ReviewCancelled = "review_cancelled",
+}
+
+export interface ReviewChunkMessage {
+    content:   string;
+    event:     ReviewChunkMessageEvent;
+    review_id: string;
+    [property: string]: any;
+}
+
+export enum ReviewChunkMessageEvent {
+    ReviewChunk = "review_chunk",
+}
+
 export interface ReviewComment {
     author:     string;
     content:    string;
@@ -1042,6 +1081,57 @@ export interface ReviewComment {
     resolved:   boolean;
     review_id:  string;
     [property: string]: any;
+}
+
+export interface ReviewCompleteMessage {
+    error?:    string;
+    event:     ReviewCompleteMessageEvent;
+    review_id: string;
+    success:   boolean;
+    [property: string]: any;
+}
+
+export enum ReviewCompleteMessageEvent {
+    ReviewComplete = "review_complete",
+}
+
+export interface ReviewFinding {
+    content:    string;
+    filepath:   string;
+    line_end:   number;
+    line_start: number;
+    severity?:  string;
+    [property: string]: any;
+}
+
+export interface ReviewFindingMessage {
+    event:     ReviewFindingMessageEvent;
+    finding:   Finding;
+    review_id: string;
+    [property: string]: any;
+}
+
+export enum ReviewFindingMessageEvent {
+    ReviewFinding = "review_finding",
+}
+
+export interface Finding {
+    content:    string;
+    filepath:   string;
+    line_end:   number;
+    line_start: number;
+    severity?:  string;
+    [property: string]: any;
+}
+
+export interface ReviewStartedMessage {
+    event:     ReviewStartedMessageEvent;
+    review_id: string;
+    [property: string]: any;
+}
+
+export enum ReviewStartedMessageEvent {
+    ReviewStarted = "review_started",
 }
 
 export interface ReviewState {
@@ -1077,6 +1167,19 @@ export interface SetSettingMessage {
 
 export enum SetSettingMessageCmd {
     SetSetting = "set_setting",
+}
+
+export interface StartReviewMessage {
+    base_branch: string;
+    branch:      string;
+    cmd:         StartReviewMessageCmd;
+    repo_path:   string;
+    review_id:   string;
+    [property: string]: any;
+}
+
+export enum StartReviewMessageCmd {
+    StartReview = "start_review",
 }
 
 export interface StashMessage {
@@ -1314,6 +1417,14 @@ export class Convert {
 
     public static branchesResultMessageToJson(value: BranchesResultMessage): string {
         return JSON.stringify(uncast(value, r("BranchesResultMessage")), null, 2);
+    }
+
+    public static toCancelReviewMessage(json: string): CancelReviewMessage {
+        return cast(JSON.parse(json), r("CancelReviewMessage"));
+    }
+
+    public static cancelReviewMessageToJson(value: CancelReviewMessage): string {
+        return JSON.stringify(uncast(value, r("CancelReviewMessage")), null, 2);
     }
 
     public static toCheckAttnStashMessage(json: string): CheckAttnStashMessage {
@@ -1860,12 +1971,60 @@ export class Convert {
         return JSON.stringify(uncast(value, r("Response")), null, 2);
     }
 
+    public static toReviewCancelledMessage(json: string): ReviewCancelledMessage {
+        return cast(JSON.parse(json), r("ReviewCancelledMessage"));
+    }
+
+    public static reviewCancelledMessageToJson(value: ReviewCancelledMessage): string {
+        return JSON.stringify(uncast(value, r("ReviewCancelledMessage")), null, 2);
+    }
+
+    public static toReviewChunkMessage(json: string): ReviewChunkMessage {
+        return cast(JSON.parse(json), r("ReviewChunkMessage"));
+    }
+
+    public static reviewChunkMessageToJson(value: ReviewChunkMessage): string {
+        return JSON.stringify(uncast(value, r("ReviewChunkMessage")), null, 2);
+    }
+
     public static toReviewComment(json: string): ReviewComment {
         return cast(JSON.parse(json), r("ReviewComment"));
     }
 
     public static reviewCommentToJson(value: ReviewComment): string {
         return JSON.stringify(uncast(value, r("ReviewComment")), null, 2);
+    }
+
+    public static toReviewCompleteMessage(json: string): ReviewCompleteMessage {
+        return cast(JSON.parse(json), r("ReviewCompleteMessage"));
+    }
+
+    public static reviewCompleteMessageToJson(value: ReviewCompleteMessage): string {
+        return JSON.stringify(uncast(value, r("ReviewCompleteMessage")), null, 2);
+    }
+
+    public static toReviewFinding(json: string): ReviewFinding {
+        return cast(JSON.parse(json), r("ReviewFinding"));
+    }
+
+    public static reviewFindingToJson(value: ReviewFinding): string {
+        return JSON.stringify(uncast(value, r("ReviewFinding")), null, 2);
+    }
+
+    public static toReviewFindingMessage(json: string): ReviewFindingMessage {
+        return cast(JSON.parse(json), r("ReviewFindingMessage"));
+    }
+
+    public static reviewFindingMessageToJson(value: ReviewFindingMessage): string {
+        return JSON.stringify(uncast(value, r("ReviewFindingMessage")), null, 2);
+    }
+
+    public static toReviewStartedMessage(json: string): ReviewStartedMessage {
+        return cast(JSON.parse(json), r("ReviewStartedMessage"));
+    }
+
+    public static reviewStartedMessageToJson(value: ReviewStartedMessage): string {
+        return JSON.stringify(uncast(value, r("ReviewStartedMessage")), null, 2);
     }
 
     public static toReviewState(json: string): ReviewState {
@@ -1898,6 +2057,14 @@ export class Convert {
 
     public static setSettingMessageToJson(value: SetSettingMessage): string {
         return JSON.stringify(uncast(value, r("SetSettingMessage")), null, 2);
+    }
+
+    public static toStartReviewMessage(json: string): StartReviewMessage {
+        return cast(JSON.parse(json), r("StartReviewMessage"));
+    }
+
+    public static startReviewMessageToJson(value: StartReviewMessage): string {
+        return JSON.stringify(uncast(value, r("StartReviewMessage")), null, 2);
     }
 
     public static toStashMessage(json: string): StashMessage {
@@ -2237,6 +2404,10 @@ const typeMap: any = {
         { json: "commit_time", js: "commit_time", typ: u(undefined, "") },
         { json: "is_current", js: "is_current", typ: u(undefined, true) },
         { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "CancelReviewMessage": o([
+        { json: "cmd", js: "cmd", typ: r("CancelReviewMessageCmd") },
+        { json: "review_id", js: "review_id", typ: "" },
     ], "any"),
     "CheckAttnStashMessage": o([
         { json: "branch", js: "branch", typ: "" },
@@ -2685,6 +2856,15 @@ const typeMap: any = {
         { json: "muted", js: "muted", typ: true },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
+    "ReviewCancelledMessage": o([
+        { json: "event", js: "event", typ: r("ReviewCancelledMessageEvent") },
+        { json: "review_id", js: "review_id", typ: "" },
+    ], "any"),
+    "ReviewChunkMessage": o([
+        { json: "content", js: "content", typ: "" },
+        { json: "event", js: "event", typ: r("ReviewChunkMessageEvent") },
+        { json: "review_id", js: "review_id", typ: "" },
+    ], "any"),
     "ReviewComment": o([
         { json: "author", js: "author", typ: "" },
         { json: "content", js: "content", typ: "" },
@@ -2694,6 +2874,35 @@ const typeMap: any = {
         { json: "line_end", js: "line_end", typ: 0 },
         { json: "line_start", js: "line_start", typ: 0 },
         { json: "resolved", js: "resolved", typ: true },
+        { json: "review_id", js: "review_id", typ: "" },
+    ], "any"),
+    "ReviewCompleteMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("ReviewCompleteMessageEvent") },
+        { json: "review_id", js: "review_id", typ: "" },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "ReviewFinding": o([
+        { json: "content", js: "content", typ: "" },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+        { json: "severity", js: "severity", typ: u(undefined, "") },
+    ], "any"),
+    "ReviewFindingMessage": o([
+        { json: "event", js: "event", typ: r("ReviewFindingMessageEvent") },
+        { json: "finding", js: "finding", typ: r("Finding") },
+        { json: "review_id", js: "review_id", typ: "" },
+    ], "any"),
+    "Finding": o([
+        { json: "content", js: "content", typ: "" },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+        { json: "severity", js: "severity", typ: u(undefined, "") },
+    ], "any"),
+    "ReviewStartedMessage": o([
+        { json: "event", js: "event", typ: r("ReviewStartedMessageEvent") },
         { json: "review_id", js: "review_id", typ: "" },
     ], "any"),
     "ReviewState": o([
@@ -2720,6 +2929,13 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("SetSettingMessageCmd") },
         { json: "key", js: "key", typ: "" },
         { json: "value", js: "value", typ: "" },
+    ], "any"),
+    "StartReviewMessage": o([
+        { json: "base_branch", js: "base_branch", typ: "" },
+        { json: "branch", js: "branch", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("StartReviewMessageCmd") },
+        { json: "repo_path", js: "repo_path", typ: "" },
+        { json: "review_id", js: "review_id", typ: "" },
     ], "any"),
     "StashMessage": o([
         { json: "cmd", js: "cmd", typ: r("StashMessageCmd") },
@@ -2832,6 +3048,9 @@ const typeMap: any = {
     ],
     "BranchesResultMessageEvent": [
         "branches_result",
+    ],
+    "CancelReviewMessageCmd": [
+        "cancel_review",
     ],
     "CheckAttnStashMessageCmd": [
         "check_attn_stash",
@@ -3027,8 +3246,26 @@ const typeMap: any = {
     "ResolveCommentResultMessageEvent": [
         "resolve_comment_result",
     ],
+    "ReviewCancelledMessageEvent": [
+        "review_cancelled",
+    ],
+    "ReviewChunkMessageEvent": [
+        "review_chunk",
+    ],
+    "ReviewCompleteMessageEvent": [
+        "review_complete",
+    ],
+    "ReviewFindingMessageEvent": [
+        "review_finding",
+    ],
+    "ReviewStartedMessageEvent": [
+        "review_started",
+    ],
     "SetSettingMessageCmd": [
         "set_setting",
+    ],
+    "StartReviewMessageCmd": [
+        "start_review",
     ],
     "StashMessageCmd": [
         "stash",

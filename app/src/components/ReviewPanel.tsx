@@ -1,5 +1,6 @@
 // app/src/components/ReviewPanel.tsx
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../hooks/useDaemonSocket';
 import type { ReviewComment } from '../types/generated';
 import UnifiedDiffEditor, {
@@ -101,11 +102,19 @@ interface ReviewFile {
   isAutoSkip: boolean;
 }
 
+// Reviewer agent streaming state
+interface ReviewerState {
+  isRunning: boolean;
+  output: string;
+  error?: string;
+}
+
 interface ReviewPanelProps {
   isOpen: boolean;
   gitStatus: GitStatusUpdate | null;
   repoPath: string;
   branch: string;
+  baseBranch?: string;
   onClose: () => void;
   fetchDiff: (path: string, staged: boolean) => Promise<FileDiffResult>;
   getReviewState: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: ReviewState; error?: string }>;
@@ -117,6 +126,11 @@ interface ReviewPanelProps {
   resolveComment?: (commentId: string, resolved: boolean) => Promise<{ success: boolean }>;
   deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
   getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: ReviewComment[] }>;
+  // Reviewer agent operations
+  sendStartReview?: (reviewId: string, repoPath: string, branch: string, baseBranch: string) => void;
+  sendCancelReview?: (reviewId: string) => void;
+  reviewerState?: ReviewerState;
+  agentComments?: ReviewComment[];
 }
 
 export function ReviewPanel({
@@ -124,6 +138,7 @@ export function ReviewPanel({
   gitStatus,
   repoPath,
   branch,
+  baseBranch = 'main',
   onClose,
   fetchDiff,
   getReviewState,
@@ -134,6 +149,10 @@ export function ReviewPanel({
   resolveComment,
   deleteComment,
   getComments,
+  sendStartReview,
+  sendCancelReview,
+  reviewerState,
+  agentComments = [],
 }: ReviewPanelProps) {
   // This prop is reserved for future use
   void _onSendToClaude;
@@ -146,6 +165,8 @@ export function ReviewPanel({
   const [diffContent, setDiffContent] = useState<{ original: string; modified: string } | null>(null);
   const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks mode (uses 3 lines context), -1 = full file
   const [fontSize, setFontSize] = useState(13); // Default font size
+  const [reviewerPanelHeight, setReviewerPanelHeight] = useState(400); // Default reviewer panel height
+  const reviewerResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
   // Comment state
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
@@ -264,6 +285,20 @@ export function ReviewPanel({
       })
       .catch(console.error);
   }, [reviewId, getComments]);
+
+  // Merge agent comments into local state as they arrive
+  useEffect(() => {
+    if (agentComments.length === 0) return;
+
+    setAllReviewComments(prev => {
+      // Get IDs of existing comments
+      const existingIds = new Set(prev.map(c => c.id));
+      // Filter to only new comments
+      const newComments = agentComments.filter(c => !existingIds.has(c.id));
+      if (newComments.length === 0) return prev;
+      return [...prev, ...newComments];
+    });
+  }, [agentComments]);
 
   // Clear "changed" status when navigating away from a file
   useEffect(() => {
@@ -653,7 +688,24 @@ export function ReviewPanel({
           <span className="review-file-count">
             {currentFileIndex + 1}/{allFiles.length} files
           </span>
-          <button className="review-close" onClick={onClose}>×</button>
+          <div className="review-header-actions">
+            {sendStartReview && reviewId && (
+              <button
+                className={`review-agent-btn ${reviewerState?.isRunning ? 'running' : ''}`}
+                onClick={() => {
+                  if (reviewerState?.isRunning) {
+                    sendCancelReview?.(reviewId);
+                  } else {
+                    sendStartReview(reviewId, repoPath, branch, baseBranch);
+                  }
+                }}
+                title={reviewerState?.isRunning ? 'Cancel review' : 'Run AI review'}
+              >
+                {reviewerState?.isRunning ? '⏹ Cancel' : '🤖 Review'}
+              </button>
+            )}
+            <button className="review-close" onClick={onClose}>×</button>
+          </div>
         </div>
 
         <div className="review-body">
@@ -764,6 +816,48 @@ export function ReviewPanel({
             </div>
           </div>
         </div>
+
+        {/* Reviewer Agent Output Panel */}
+        {(reviewerState?.isRunning || reviewerState?.output) && (
+          <div
+            className="reviewer-output-panel"
+            style={{ height: reviewerPanelHeight }}
+          >
+            <div
+              className="reviewer-resize-handle"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                reviewerResizeRef.current = {
+                  startY: e.clientY,
+                  startHeight: reviewerPanelHeight,
+                };
+                const handleMouseMove = (moveEvent: MouseEvent) => {
+                  if (!reviewerResizeRef.current) return;
+                  const delta = reviewerResizeRef.current.startY - moveEvent.clientY;
+                  const newHeight = Math.max(100, Math.min(800, reviewerResizeRef.current.startHeight + delta));
+                  setReviewerPanelHeight(newHeight);
+                };
+                const handleMouseUp = () => {
+                  reviewerResizeRef.current = null;
+                  document.removeEventListener('mousemove', handleMouseMove);
+                  document.removeEventListener('mouseup', handleMouseUp);
+                };
+                document.addEventListener('mousemove', handleMouseMove);
+                document.addEventListener('mouseup', handleMouseUp);
+              }}
+            />
+            <div className="reviewer-output-header">
+              <span>🤖 AI Review</span>
+              {reviewerState?.isRunning && <span className="reviewer-spinner">⟳</span>}
+              {reviewerState?.error && <span className="reviewer-error">⚠ {reviewerState.error}</span>}
+            </div>
+            <div className="reviewer-output-content">
+              <ReactMarkdown>
+                {reviewerState?.output || 'Starting review...'}
+              </ReactMarkdown>
+            </div>
+          </div>
+        )}
 
         <div className="review-footer">
           <span className="shortcut"><kbd>j</kbd>/<kbd>k</kbd> navigate</span>

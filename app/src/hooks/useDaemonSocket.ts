@@ -9,6 +9,7 @@ import type {
   RecentLocation as GeneratedRecentLocation,
   BranchElement as GeneratedBranch,
   Comment as GeneratedComment,
+  ReviewFinding as GeneratedReviewFinding,
   SessionState,
   PRRole,
   HeatState,
@@ -22,6 +23,7 @@ export type DaemonWorktree = GeneratedWorktree;
 export type RepoState = GeneratedRepoState;
 export type RecentLocation = GeneratedRecentLocation;
 export type Branch = GeneratedBranch;
+export type ReviewFinding = GeneratedReviewFinding;
 export type DaemonSettings = Record<string, string>;
 
 // Re-export enums and useful types
@@ -39,6 +41,10 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   path?: string;
   // Branch action result fields
   branch?: string;
+  // Reviewer streaming event fields
+  review_id?: string;
+  content?: string;
+  finding?: ReviewFinding;
 };
 
 export interface RateLimitState {
@@ -48,7 +54,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '14';
+const PROTOCOL_VERSION = '15';
 
 interface PRActionResult {
   success: boolean;
@@ -193,6 +199,15 @@ export interface FileDiffResult {
   error?: string;
 }
 
+// Reviewer event callbacks
+export interface ReviewerCallbacks {
+  onReviewStarted?: (reviewId: string) => void;
+  onReviewChunk?: (reviewId: string, content: string) => void;
+  onReviewFinding?: (reviewId: string, finding: ReviewFinding, comment?: ReviewComment) => void;
+  onReviewComplete?: (reviewId: string, success: boolean, error?: string) => void;
+  onReviewCancelled?: (reviewId: string) => void;
+}
+
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
@@ -200,6 +215,7 @@ interface UseDaemonSocketOptions {
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
   onSettingsUpdate?: (settings: DaemonSettings) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
+  reviewer?: ReviewerCallbacks;
   wsUrl?: string;
 }
 
@@ -247,6 +263,7 @@ export function useDaemonSocket({
   onWorktreesUpdate,
   onSettingsUpdate,
   onGitStatusUpdate,
+  reviewer,
   wsUrl = DEFAULT_WS_URL,
 }: UseDaemonSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -759,6 +776,37 @@ export function useDaemonSocket({
             }
             break;
           }
+
+          // Reviewer streaming events
+          case 'review_started':
+            if (data.review_id && reviewer?.onReviewStarted) {
+              reviewer.onReviewStarted(data.review_id);
+            }
+            break;
+
+          case 'review_chunk':
+            if (data.review_id && data.content && reviewer?.onReviewChunk) {
+              reviewer.onReviewChunk(data.review_id, data.content);
+            }
+            break;
+
+          case 'review_finding':
+            if (data.review_id && data.finding && reviewer?.onReviewFinding) {
+              reviewer.onReviewFinding(data.review_id, data.finding, data.comment);
+            }
+            break;
+
+          case 'review_complete':
+            if (data.review_id && reviewer?.onReviewComplete) {
+              reviewer.onReviewComplete(data.review_id, data.success ?? false, data.error);
+            }
+            break;
+
+          case 'review_cancelled':
+            if (data.review_id && reviewer?.onReviewCancelled) {
+              reviewer.onReviewCancelled(data.review_id);
+            }
+            break;
         }
       } catch (err) {
         console.error('[Daemon] Parse error:', err);
@@ -1659,6 +1707,41 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Reviewer agent methods
+  const sendStartReview = useCallback((
+    reviewId: string,
+    repoPath: string,
+    branch: string,
+    baseBranch: string
+  ): void => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.error('[Daemon] Cannot start review: WebSocket not connected');
+      return;
+    }
+
+    ws.send(JSON.stringify({
+      cmd: 'start_review',
+      review_id: reviewId,
+      repo_path: repoPath,
+      branch: branch,
+      base_branch: baseBranch,
+    }));
+  }, []);
+
+  const sendCancelReview = useCallback((reviewId: string): void => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.error('[Daemon] Cannot cancel review: WebSocket not connected');
+      return;
+    }
+
+    ws.send(JSON.stringify({
+      cmd: 'cancel_review',
+      review_id: reviewId,
+    }));
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
@@ -1702,5 +1785,7 @@ export function useDaemonSocket({
     sendResolveComment,
     sendDeleteComment,
     sendGetComments,
+    sendStartReview,
+    sendCancelReview,
   };
 }
