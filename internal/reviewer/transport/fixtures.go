@@ -51,10 +51,12 @@ func (b *FixtureBuilder) AddInitResponse(sessionID string) *FixtureBuilder {
 // AddAssistantText adds an assistant message with text content.
 func (b *FixtureBuilder) AddAssistantText(text string) *FixtureBuilder {
 	b.transport.AddMessage(map[string]any{
-		"type":  "assistant",
-		"model": "claude-sonnet-4-5",
-		"content": []map[string]any{
-			{"type": "text", "text": text},
+		"type": "assistant",
+		"message": map[string]any{
+			"model": "claude-sonnet-4-5",
+			"content": []any{
+				map[string]any{"type": "text", "text": text},
+			},
 		},
 	})
 	return b
@@ -63,10 +65,12 @@ func (b *FixtureBuilder) AddAssistantText(text string) *FixtureBuilder {
 // AddAssistantTextWithDelay adds an assistant message with text content and delay.
 func (b *FixtureBuilder) AddAssistantTextWithDelay(text string, delay time.Duration) *FixtureBuilder {
 	b.transport.AddMessageWithDelay(map[string]any{
-		"type":  "assistant",
-		"model": "claude-sonnet-4-5",
-		"content": []map[string]any{
-			{"type": "text", "text": text},
+		"type": "assistant",
+		"message": map[string]any{
+			"model": "claude-sonnet-4-5",
+			"content": []any{
+				map[string]any{"type": "text", "text": text},
+			},
 		},
 	}, delay)
 	return b
@@ -75,10 +79,12 @@ func (b *FixtureBuilder) AddAssistantTextWithDelay(text string, delay time.Durat
 // AddAssistantThinking adds an assistant message with thinking content.
 func (b *FixtureBuilder) AddAssistantThinking(thinking string) *FixtureBuilder {
 	b.transport.AddMessage(map[string]any{
-		"type":  "assistant",
-		"model": "claude-sonnet-4-5",
-		"content": []map[string]any{
-			{"type": "thinking", "thinking": thinking, "signature": "mock"},
+		"type": "assistant",
+		"message": map[string]any{
+			"model": "claude-sonnet-4-5",
+			"content": []any{
+				map[string]any{"type": "thinking", "thinking": thinking, "signature": "mock"},
+			},
 		},
 	})
 	return b
@@ -89,14 +95,16 @@ func (b *FixtureBuilder) AddAssistantThinking(thinking string) *FixtureBuilder {
 // AddToolUse adds a tool use message.
 func (b *FixtureBuilder) AddToolUse(toolID, toolName string, input map[string]any) *FixtureBuilder {
 	b.transport.AddMessage(map[string]any{
-		"type":  "assistant",
-		"model": "claude-sonnet-4-5",
-		"content": []map[string]any{
-			{
-				"type":  "tool_use",
-				"id":    toolID,
-				"name":  toolName,
-				"input": input,
+		"type": "assistant",
+		"message": map[string]any{
+			"model": "claude-sonnet-4-5",
+			"content": []any{
+				map[string]any{
+					"type":  "tool_use",
+					"id":    toolID,
+					"name":  toolName,
+					"input": input,
+				},
 			},
 		},
 	})
@@ -106,14 +114,16 @@ func (b *FixtureBuilder) AddToolUse(toolID, toolName string, input map[string]an
 // AddToolUseWithDelay adds a tool use message with delay.
 func (b *FixtureBuilder) AddToolUseWithDelay(toolID, toolName string, input map[string]any, delay time.Duration) *FixtureBuilder {
 	b.transport.AddMessageWithDelay(map[string]any{
-		"type":  "assistant",
-		"model": "claude-sonnet-4-5",
-		"content": []map[string]any{
-			{
-				"type":  "tool_use",
-				"id":    toolID,
-				"name":  toolName,
-				"input": input,
+		"type": "assistant",
+		"message": map[string]any{
+			"model": "claude-sonnet-4-5",
+			"content": []any{
+				map[string]any{
+					"type":  "tool_use",
+					"id":    toolID,
+					"name":  toolName,
+					"input": input,
+				},
 			},
 		},
 	}, delay)
@@ -132,6 +142,20 @@ func (b *FixtureBuilder) AddResult(sessionID string) *FixtureBuilder {
 		"duration_ms": 1000,
 		"num_turns":   1,
 	})
+	return b
+}
+
+// AddResultWithDelay adds a successful result message with a delay.
+// Use this to give MCP tool handlers time to complete before the result.
+func (b *FixtureBuilder) AddResultWithDelay(sessionID string, delay time.Duration) *FixtureBuilder {
+	b.transport.AddMessageWithDelay(map[string]any{
+		"type":        "result",
+		"subtype":     "success",
+		"session_id":  sessionID,
+		"is_error":    false,
+		"duration_ms": 1000,
+		"num_turns":   1,
+	}, delay)
 	return b
 }
 
