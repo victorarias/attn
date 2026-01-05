@@ -45,6 +45,53 @@ DEBUG=debug attn -s test
 
 **Daemon logs:** `~/.attn/daemon.log`
 
+## Logging
+
+### Daemon (Go)
+
+The daemon uses a custom logger that writes to `~/.attn/daemon.log`.
+
+**In daemon package:** Use `d.logf(format, args...)`:
+```go
+func (d *Daemon) someHandler() {
+    d.logf("Processing request: %s", requestID)
+}
+```
+
+**In sub-packages (e.g., reviewer):** Pass a `LogFunc` from the daemon:
+```go
+// In reviewer package - define LogFunc type
+type LogFunc func(format string, args ...interface{})
+
+// Add WithLogger method
+func (r *Reviewer) WithLogger(logf LogFunc) *Reviewer {
+    r.logf = logf
+    return r
+}
+
+// Use r.log() internally (checks if logger is set)
+func (r *Reviewer) log(format string, args ...interface{}) {
+    if r.logf != nil {
+        r.logf(format, args...)
+    }
+}
+
+// In daemon - wire it up
+reviewer.New(d.store).WithLogger(d.logf)
+```
+
+**DO NOT** use `log.Printf()` - it goes to stderr which is `/dev/null` when daemon runs in background.
+
+### Frontend (TypeScript)
+
+Use `console.log/warn/error` with a prefix for easy filtering:
+```typescript
+console.log('[DaemonSocket] Connected');
+console.error('[ReviewPanel] Failed to load diff:', error);
+```
+
+View in browser DevTools (Tauri: right-click → Inspect).
+
 ## Architecture
 
 Attention Manager (`attn`) tracks multiple Claude Code sessions and surfaces which ones need attention via an interactive dashboard.
