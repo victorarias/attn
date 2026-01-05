@@ -746,6 +746,10 @@ function App() {
       const index = allFiles.findIndex(f => f.path === filepath && f.staged === file.staged);
       setDiffOverlay({ isOpen: true, path: filepath, staged: file.staged, index: Math.max(0, index) });
       // TODO: scroll to line when DiffOverlay supports it
+    } else {
+      // File not in gitStatus - still try to open (may be a path mismatch)
+      console.log('[App] File not found in gitStatus, opening anyway:', filepath);
+      setDiffOverlay({ isOpen: true, path: filepath, staged: false, index: 0 });
     }
   }, [gitStatus]);
 

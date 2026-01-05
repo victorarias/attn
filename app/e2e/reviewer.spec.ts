@@ -120,12 +120,13 @@ test.describe('Reviewer Agent', () => {
     await expect(table).toBeVisible({ timeout: 2000 });
     await expect(table.locator('th').first()).toContainText('File');
 
-    // 2. Jump-to-file: verify add_comment tool call is clickable
+    // 2. Jump-to-file: verify add_comment tool call is clickable and opens diff
     const addCommentToolCall = page.locator('.reviewer-tool-call.clickable');
     await expect(addCommentToolCall).toBeVisible({ timeout: 2000 });
-    // The clickable tool call should have cursor: pointer style
-    const cursor = await addCommentToolCall.evaluate(el => getComputedStyle(el).cursor);
-    expect(cursor).toBe('pointer');
+    // Click should open diff overlay
+    await addCommentToolCall.click();
+    const diffOverlay = page.locator('.diff-overlay');
+    await expect(diffOverlay).toBeVisible({ timeout: 2000 });
 
     // 3. Font size: verify Cmd+Plus increases font size
     const outputContent = page.locator('.reviewer-output-content');

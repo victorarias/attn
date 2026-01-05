@@ -903,7 +903,10 @@ export function ReviewPanel({
                     <div
                       key={index}
                       className={`reviewer-tool-call ${canNavigate ? 'clickable' : ''}`}
-                      onClick={canNavigate ? () => onOpenInDiffOverlay(filepath, lineStart) : undefined}
+                      onClick={canNavigate ? () => {
+                        console.log('[ReviewPanel] Clicked add_comment, navigating to:', filepath, lineStart);
+                        onOpenInDiffOverlay(filepath, lineStart);
+                      } : undefined}
                       title={canNavigate ? `Click to open ${filepath}` : undefined}
                     >
                       <div className="tool-call-header">
