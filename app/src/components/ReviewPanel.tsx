@@ -19,68 +19,90 @@ import './ReviewPanel.css';
 // Pattern 1: file.ext:line or file.ext:line-line (e.g., "src/app.ts:123" or "file.md:10-20")
 const FILE_WITH_LINE_REGEX = /([^\s`"'<>()[\]{}]+\.[a-zA-Z0-9]+):(\d+)(?:-(\d+))?/g;
 
-// Pattern 2: Standalone filenames with common code extensions (when text is mostly just the filename)
-// More conservative - only matches when the text looks like a path/filename
-const STANDALONE_FILE_REGEX = /^([^\s`"'<>()[\]{}]*\/)?([a-zA-Z0-9_-]+\.(md|ts|tsx|js|jsx|go|py|rs|java|css|scss|json|yaml|yml|toml|sql|sh|bash|html|xml|vue|svelte|rb|php|c|cpp|h|hpp|swift|kt|scala|ex|exs|clj|hs|ml|fs|r|jl|lua|pl|pm|vim|el|org|tex|rst|adoc))$/;
+// Pattern 2: Standalone filenames with common code extensions (inline in text)
+// Matches filenames like "server/go.mod" or "m2-client-walking.md"
+const COMMON_EXTENSIONS = 'md|ts|tsx|js|jsx|go|py|rs|java|css|scss|json|yaml|yml|toml|sql|sh|bash|html|xml|vue|svelte|rb|php|c|cpp|h|hpp|swift|kt|scala|ex|exs|mod|sum|lock';
+const STANDALONE_FILE_REGEX = new RegExp(
+  `(?:^|[\\s,;:()\\[\\]{}])` +  // Start of string or preceded by whitespace/punctuation
+  `((?:[a-zA-Z0-9_.-]+/)*` +     // Optional path segments
+  `[a-zA-Z0-9_.-]+\\.(?:${COMMON_EXTENSIONS}))` +  // Filename with extension
+  `(?=[\\s,;:()\\[\\]{}]|$)`,    // Followed by whitespace/punctuation or end
+  'g'
+);
 
 // Helper to parse text and create elements with clickable file references
 function parseFileReferences(
   text: string,
   onFileClick: (filepath: string, line?: number) => void
 ): React.ReactNode[] {
-  const trimmed = text.trim();
-
-  // First check if the entire text is a standalone filename (common in table cells)
-  const standaloneMatch = trimmed.match(STANDALONE_FILE_REGEX);
-  if (standaloneMatch && trimmed === text.trim()) {
-    return [
-      <span
-        key="standalone"
-        className="file-reference clickable"
-        onClick={(e) => {
-          e.stopPropagation();
-          onFileClick(trimmed);
-        }}
-        title={`Open ${trimmed}`}
-      >
-        {text}
-      </span>
-    ];
-  }
-
-  // Then look for file:line patterns within the text
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
 
-  // Reset regex state
+  // Collect all matches from both patterns
+  type Match = { index: number; length: number; filepath: string; line?: number; fullMatch: string };
+  const matches: Match[] = [];
+
+  // Pattern 1: file:line references
   FILE_WITH_LINE_REGEX.lastIndex = 0;
-
+  let match: RegExpExecArray | null;
   while ((match = FILE_WITH_LINE_REGEX.exec(text)) !== null) {
-    // Add text before the match
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
+    matches.push({
+      index: match.index,
+      length: match[0].length,
+      filepath: match[1],
+      line: parseInt(match[2], 10),
+      fullMatch: match[0],
+    });
+  }
 
-    const [fullMatch, filepath, lineStart] = match;
-    const line = parseInt(lineStart, 10);
+  // Pattern 2: standalone filenames (only if not already matched by pattern 1)
+  STANDALONE_FILE_REGEX.lastIndex = 0;
+  while ((match = STANDALONE_FILE_REGEX.exec(text)) !== null) {
+    const filepath = match[1];
+    const fullMatchStart = match.index + match[0].indexOf(filepath);
+
+    // Skip if this overlaps with an existing match
+    const overlaps = matches.some(m =>
+      (fullMatchStart >= m.index && fullMatchStart < m.index + m.length) ||
+      (m.index >= fullMatchStart && m.index < fullMatchStart + filepath.length)
+    );
+
+    if (!overlaps) {
+      matches.push({
+        index: fullMatchStart,
+        length: filepath.length,
+        filepath: filepath,
+        fullMatch: filepath,
+      });
+    }
+  }
+
+  // Sort matches by position
+  matches.sort((a, b) => a.index - b.index);
+
+  // Build result
+  for (const m of matches) {
+    // Add text before the match
+    if (m.index > lastIndex) {
+      parts.push(text.slice(lastIndex, m.index));
+    }
 
     // Add clickable file reference
     parts.push(
       <span
-        key={`${match.index}-${filepath}`}
+        key={`${m.index}-${m.filepath}`}
         className="file-reference clickable"
         onClick={(e) => {
           e.stopPropagation();
-          onFileClick(filepath, line);
+          onFileClick(m.filepath, m.line);
         }}
-        title={`Open ${filepath} at line ${lineStart}`}
+        title={m.line ? `Open ${m.filepath} at line ${m.line}` : `Open ${m.filepath}`}
       >
-        {fullMatch}
+        {m.fullMatch}
       </span>
     );
 
-    lastIndex = match.index + fullMatch.length;
+    lastIndex = m.index + m.length;
   }
 
   // Add remaining text
@@ -965,7 +987,8 @@ export function ReviewPanel({
             />
             <div className="reviewer-output-header">
               <span>🤖 AI Review</span>
-              {reviewerRunning && <span className="reviewer-spinner">⟳</span>}
+              {/* Only show header spinner when content is streaming (has events) */}
+              {reviewerRunning && reviewerEvents.length > 0 && <span className="reviewer-spinner">⟳</span>}
               {reviewerError && <span className="reviewer-error">⚠ {reviewerError}</span>}
             </div>
             <div ref={reviewerOutputRef} className="reviewer-output-content" style={{ fontSize }}>
