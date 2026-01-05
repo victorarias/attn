@@ -527,7 +527,7 @@
   margin: 6px 0;
   padding: 4px 8px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: inherit;
   background: rgba(255, 255, 255, 0.02);
   border-radius: 4px;
   opacity: 0.7;
@@ -561,7 +561,6 @@
 
 .tool-call-icon {
   color: #6b7280;
-  font-size: 14px;
 }
 
 .tool-call-name {
@@ -571,7 +570,7 @@
 
 .tool-call-input {
   color: #6b7280;
-  font-size: 11px;
+  font-size: 0.85em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -595,7 +594,7 @@
   margin: 0;
   padding: 0;
   background: none;
-  font-size: 11px;
+  font-size: 0.85em;
   line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
