@@ -411,8 +411,10 @@
   background: #1a1a1d;
 }
 
-.pr-row:hover .pr-link {
+.pr-row:hover .pr-link,
+.pr-row:hover .pr-link * {
   color: #e8e8e8;
+  pointer-events: none; /* Allow action buttons to receive clicks */
 }
 
 .pr-role {

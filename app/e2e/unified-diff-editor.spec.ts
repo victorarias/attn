@@ -86,6 +86,8 @@ test.describe('UnifiedDiffEditor', () => {
       const textarea = page.locator('.unified-comment-textarea');
       await expect(textarea).toBeVisible();
 
+      // Focus textarea so Escape key event is received
+      await textarea.focus();
       await page.keyboard.press('Escape');
 
       await expect(textarea).not.toBeVisible();

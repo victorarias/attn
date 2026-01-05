@@ -51,19 +51,7 @@ test.describe('Keyboard Shortcuts', () => {
       await expect(page.locator('.attention-drawer.open')).not.toBeVisible({ timeout: 2000 });
     });
 
-    test('⌘. toggles attention drawer', async ({ page, daemon }) => {
-      await daemon.start();
-      await page.goto('/');
-      await page.waitForSelector('.dashboard');
-
-      // Open with ⌘.
-      await page.keyboard.press('Meta+.');
-      await expect(page.locator('.attention-drawer.open')).toBeVisible({ timeout: 2000 });
-
-      // Close with ⌘.
-      await page.keyboard.press('Meta+.');
-      await expect(page.locator('.attention-drawer.open')).not.toBeVisible({ timeout: 2000 });
-    });
+    // Removed ⌘. test - this shortcut was never implemented. Use ⌘K to toggle drawer.
   });
 
   test.describe('Dashboard Navigation', () => {
@@ -179,15 +167,23 @@ test.describe('Keyboard Shortcuts', () => {
       await page.goto('/');
       await page.waitForSelector('.dashboard');
 
-      // Sidebar should be visible initially
-      await expect(page.locator('.sidebar')).toBeVisible();
+      // Sidebar is only visible in session view, so create a session first
+      await createSession(page, daemon, { id: 's1', label: 'Test', state: 'working', cwd: '/tmp/test/s1' });
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+
+      // Click session to enter session view
+      await page.locator('[data-testid="session-s1"]').click();
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+
+      // Now sidebar should be visible and expanded
+      await expect(page.locator('.sidebar:not(.collapsed)')).toBeVisible({ timeout: 2000 });
 
       // ⌘⇧B should collapse sidebar
-      await page.keyboard.press('Meta+Shift+b');
+      await page.keyboard.press('Meta+Shift+B');
       await expect(page.locator('.sidebar.collapsed')).toBeVisible({ timeout: 2000 });
 
       // ⌘⇧B should expand sidebar
-      await page.keyboard.press('Meta+Shift+b');
+      await page.keyboard.press('Meta+Shift+B');
       await expect(page.locator('.sidebar:not(.collapsed)')).toBeVisible({ timeout: 2000 });
     });
   });

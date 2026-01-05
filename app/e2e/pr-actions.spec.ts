@@ -21,7 +21,8 @@ test.describe('PR Actions', () => {
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Test PR' });
     await expect(prCard).toBeVisible({ timeout: 15000 });
 
-    // 4. Click the approve button
+    // 4. Hover on row first to trigger CSS hover state, then click the approve button
+    await prCard.hover();
     const approveButton = prCard.locator('[data-testid="approve-button"]');
     await approveButton.click();
 
@@ -52,7 +53,8 @@ test.describe('PR Actions', () => {
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Merge Test PR' });
     await expect(prCard).toBeVisible({ timeout: 15000 });
 
-    // 4. Click the merge button
+    // 4. Hover on row first to trigger CSS hover state, then click the merge button
+    await prCard.hover();
     const mergeButton = prCard.locator('[data-testid="merge-button"]');
     await mergeButton.click();
 
@@ -87,7 +89,8 @@ test.describe('PR Actions', () => {
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Mute Test PR' });
     await expect(prCard).toBeVisible({ timeout: 15000 });
 
-    // 4. Click the mute button
+    // 4. Hover on row first to trigger CSS hover state, then click the mute button
+    await prCard.hover();
     const muteButton = prCard.locator('[data-testid="mute-button"]');
     await muteButton.click();
 
@@ -126,7 +129,8 @@ test.describe('PR Actions', () => {
     await expect(firstPR).toBeVisible();
     await expect(secondPR).toBeVisible();
 
-    // 5. Approve the first PR
+    // 5. Hover on row first, then approve the first PR
+    await firstPR.hover();
     const approveButton = firstPR.locator('[data-testid="approve-button"]');
     await approveButton.click();
 
@@ -214,7 +218,8 @@ test.describe('PR Actions', () => {
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Undo Test PR' });
     await expect(prCard).toBeVisible({ timeout: 15000 });
 
-    // 4. Click the mute button
+    // 4. Hover on row first to trigger CSS hover state, then click the mute button
+    await prCard.hover();
     const muteButton = prCard.locator('[data-testid="mute-button"]');
     await muteButton.click();
 
