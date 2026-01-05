@@ -15,23 +15,48 @@ import UnifiedDiffEditor, {
 } from './UnifiedDiffEditor';
 import './ReviewPanel.css';
 
-// Regex to match file references like "path/file.ext:123" or "file.ext:10-20"
-// Matches: filename with extension, colon, line number, optional dash and end line
-const FILE_REFERENCE_REGEX = /([^\s`"'<>()[\]{}]+\.[a-zA-Z0-9]+):(\d+)(?:-(\d+))?/g;
+// Regex patterns for file references
+// Pattern 1: file.ext:line or file.ext:line-line (e.g., "src/app.ts:123" or "file.md:10-20")
+const FILE_WITH_LINE_REGEX = /([^\s`"'<>()[\]{}]+\.[a-zA-Z0-9]+):(\d+)(?:-(\d+))?/g;
+
+// Pattern 2: Standalone filenames with common code extensions (when text is mostly just the filename)
+// More conservative - only matches when the text looks like a path/filename
+const STANDALONE_FILE_REGEX = /^([^\s`"'<>()[\]{}]*\/)?([a-zA-Z0-9_-]+\.(md|ts|tsx|js|jsx|go|py|rs|java|css|scss|json|yaml|yml|toml|sql|sh|bash|html|xml|vue|svelte|rb|php|c|cpp|h|hpp|swift|kt|scala|ex|exs|clj|hs|ml|fs|r|jl|lua|pl|pm|vim|el|org|tex|rst|adoc))$/;
 
 // Helper to parse text and create elements with clickable file references
 function parseFileReferences(
   text: string,
-  onFileClick: (filepath: string, line: number) => void
+  onFileClick: (filepath: string, line?: number) => void
 ): React.ReactNode[] {
+  const trimmed = text.trim();
+
+  // First check if the entire text is a standalone filename (common in table cells)
+  const standaloneMatch = trimmed.match(STANDALONE_FILE_REGEX);
+  if (standaloneMatch && trimmed === text.trim()) {
+    return [
+      <span
+        key="standalone"
+        className="file-reference clickable"
+        onClick={(e) => {
+          e.stopPropagation();
+          onFileClick(trimmed);
+        }}
+        title={`Open ${trimmed}`}
+      >
+        {text}
+      </span>
+    ];
+  }
+
+  // Then look for file:line patterns within the text
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
   // Reset regex state
-  FILE_REFERENCE_REGEX.lastIndex = 0;
+  FILE_WITH_LINE_REGEX.lastIndex = 0;
 
-  while ((match = FILE_REFERENCE_REGEX.exec(text)) !== null) {
+  while ((match = FILE_WITH_LINE_REGEX.exec(text)) !== null) {
     // Add text before the match
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
@@ -961,7 +986,7 @@ export function ReviewPanel({
               {reviewerEvents.map((event, index) => {
                 if (event.type === 'chunk') {
                   // Custom components that make file references clickable
-                  const handleFileClick = (filepath: string, line: number) => {
+                  const handleFileClick = (filepath: string, line?: number) => {
                     setSelectedFilePath(filepath);
                     setScrollToLine(line);
                   };
