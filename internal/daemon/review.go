@@ -121,8 +121,24 @@ func (m *e2eMockReviewer) Run(ctx context.Context, config ReviewerConfig, onEven
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Final summary with markdown table (for table rendering testing)
-	onEvent(ReviewerEvent{Type: "chunk", Content: "## Summary\n\n| File | Issues |\n|------|--------|\n| example.go | 2 |\n\nFound 2 issues that need attention."})
+	// Final summary with markdown table (for table rendering and clickable filename testing)
+	// This table format matches real AI output: filename in one column, line numbers in another
+	onEvent(ReviewerEvent{Type: "chunk", Content: `## Summary
+
+| File | Lines | Issue |
+|------|-------|-------|
+| example.go | 10 | Missing error handling |
+| example.go | 40 | Consider refactoring |
+
+Found 2 issues that need attention.
+
+See example.go for more details. Also check test-file.md:25 for related info.
+
+**Informational Notes (no action needed)**
+
+` + "`m2-client-walking.md`" + `    83    Isometric angle info
+` + "`server/go.mod`" + `    5    Correct removal
+` + "`server/go.sum`" + `    2-3    go-cmp is a good choice`})
 
 	// Check for final cancellation
 	select {

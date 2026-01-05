@@ -150,6 +150,69 @@ test.describe('Reviewer Agent', () => {
     await page.waitForTimeout(100);
     const newFontSize = await outputContent.evaluate(el => getComputedStyle(el).fontSize);
     expect(parseInt(newFontSize)).toBe(parseInt(initialFontSize) + 1);
+
+    // 4. Clickable filenames: verify clicking filenames navigates to file
+    // Test both table cells AND paragraph text
+
+    // Get all clickable file references
+    const clickableRefs = page.locator('.reviewer-output-content .file-reference.clickable');
+    const clickableCount = await clickableRefs.count();
+    console.log('[Test] Number of clickable file references:', clickableCount);
+
+    // Log the content of each clickable reference for debugging
+    for (let i = 0; i < Math.min(clickableCount, 5); i++) {
+      const text = await clickableRefs.nth(i).textContent();
+      console.log(`[Test] Clickable ref ${i}: "${text}"`);
+    }
+
+    // We expect at least:
+    // - 2 from table (example.go rows)
+    // - 1 from paragraph "See example.go for more details"
+    // - 1 from paragraph "test-file.md:25"
+    expect(clickableCount).toBeGreaterThanOrEqual(3);
+
+    // Test clicking a table filename
+    const tableFilename = page.locator('.reviewer-output-content table .file-reference.clickable').first();
+    await expect(tableFilename).toBeVisible({ timeout: 2000 });
+    await tableFilename.click();
+    await page.waitForTimeout(200);
+    await expect(fileItem).toHaveClass(/selected/);
+
+    // Test clicking a paragraph filename (the one with :25 line reference)
+    const paragraphRefs = page.locator('.reviewer-output-content p .file-reference.clickable');
+    const paragraphCount = await paragraphRefs.count();
+    console.log('[Test] Number of paragraph file references:', paragraphCount);
+
+    if (paragraphCount > 0) {
+      // Should have "example.go" and "test-file.md:25" in paragraph
+      for (let i = 0; i < paragraphCount; i++) {
+        const text = await paragraphRefs.nth(i).textContent();
+        console.log(`[Test] Paragraph ref ${i}: "${text}"`);
+      }
+    } else {
+      // If no paragraph refs, log the paragraph HTML for debugging
+      const paragraphHtml = await page.locator('.reviewer-output-content p').last().evaluate(el => el.innerHTML);
+      console.log('[Test] Paragraph HTML (no clickable refs found):', paragraphHtml);
+      throw new Error('Expected clickable file references in paragraph text');
+    }
+
+    // 5. Test plain-text filenames (not in markdown table)
+    // This reproduces the user's actual issue - filenames like "m2-client-walking.md" in plain text
+    const allRefs = await clickableRefs.allTextContents();
+    console.log('[Test] All clickable refs:', allRefs);
+
+    // Should include filenames from plain text section
+    const hasM2File = allRefs.some(ref => ref.includes('m2-client-walking.md'));
+    const hasGoMod = allRefs.some(ref => ref.includes('go.mod'));
+    const hasGoSum = allRefs.some(ref => ref.includes('go.sum'));
+    console.log('[Test] Plain text files found:', { hasM2File, hasGoMod, hasGoSum });
+
+    if (!hasM2File || !hasGoMod || !hasGoSum) {
+      // Dump entire output for debugging
+      const outputHtml = await page.locator('.reviewer-output-content').evaluate(el => el.innerHTML);
+      console.log('[Test] Full output HTML:', outputHtml.substring(0, 2000));
+      throw new Error(`Missing plain-text file refs. Found: ${allRefs.join(', ')}`);
+    }
   });
 
   test('cancel review mid-stream', async ({ page, daemon }) => {

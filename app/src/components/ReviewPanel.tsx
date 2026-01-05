@@ -1033,6 +1033,7 @@ export function ReviewPanel({
 
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   const markdownComponents: any = {
+                    // Block elements
                     p: ({ children, ...props }: { children?: React.ReactNode }) => (
                       <p {...props}>{processChildren(children)}</p>
                     ),
@@ -1042,6 +1043,26 @@ export function ReviewPanel({
                     td: ({ children, ...props }: { children?: React.ReactNode }) => (
                       <td {...props}>{processChildren(children)}</td>
                     ),
+                    th: ({ children, ...props }: { children?: React.ReactNode }) => (
+                      <th {...props}>{processChildren(children)}</th>
+                    ),
+                    blockquote: ({ children, ...props }: { children?: React.ReactNode }) => (
+                      <blockquote {...props}>{processChildren(children)}</blockquote>
+                    ),
+                    // Inline elements
+                    strong: ({ children, ...props }: { children?: React.ReactNode }) => (
+                      <strong {...props}>{processChildren(children)}</strong>
+                    ),
+                    em: ({ children, ...props }: { children?: React.ReactNode }) => (
+                      <em {...props}>{processChildren(children)}</em>
+                    ),
+                    code: ({ children, className, ...props }: { children?: React.ReactNode; className?: string }) => {
+                      // Only process inline code (not code blocks which have className)
+                      if (!className) {
+                        return <code {...props}>{processChildren(children)}</code>;
+                      }
+                      return <code className={className} {...props}>{children}</code>;
+                    },
                   };
 
                   return (
