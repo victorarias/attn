@@ -11,7 +11,6 @@ import { BranchPicker } from './components/BranchPicker';
 import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
-import { DiffOverlay } from './components/DiffOverlay';
 import { ReviewPanel } from './components/ReviewPanel';
 import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
 import { ThumbsModal } from './components/ThumbsModal';
@@ -333,7 +332,6 @@ function AppContent({
   // UI scale for font sizing (Cmd+/Cmd-) - now uses SettingsContext
   const { scale, increaseScale, decreaseScale, resetScale } = useUIScale();
   const terminalFontSize = Math.round(14 * scale);
-  const diffFontSize = Math.round(12 * scale);
 
   // Track PR refresh state for progress indicator
   const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
@@ -346,16 +344,9 @@ function AppContent({
     return stored === 'true';
   });
 
-  // Diff overlay state
-  const [diffOverlay, setDiffOverlay] = useState<{
-    isOpen: boolean;
-    path: string;
-    staged: boolean;
-    index: number;
-  }>({ isOpen: false, path: '', staged: false, index: 0 });
-
   // Review panel state
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
+  const [initialReviewFile, setInitialReviewFile] = useState<string | null>(null);
 
   // Clear stale daemon sessions on app start
   const hasClearedSessions = useRef(false);
@@ -888,64 +879,11 @@ function AppContent({
     }
   }, [activeSessionId, handleCloseSession]);
 
-  // Diff overlay handlers
-  const handleFileSelect = useCallback((path: string, staged: boolean) => {
-    const allFiles = [
-      ...(gitStatus?.staged || []).map(f => ({ ...f, staged: true })),
-      ...(gitStatus?.unstaged || []).map(f => ({ ...f, staged: false })),
-      ...(gitStatus?.untracked || []).map(f => ({ ...f, staged: false })),
-    ];
-    const index = allFiles.findIndex(f => f.path === path && f.staged === staged);
-    setDiffOverlay({ isOpen: true, path, staged, index: Math.max(0, index) });
-  }, [gitStatus]);
-
-  // Open file in diff overlay (for ReviewPanel jump-to-file)
-  const handleOpenInDiffOverlay = useCallback((filepath: string, _line?: number) => {
-    // Find file in gitStatus to determine if staged
-    const allFiles = [
-      ...(gitStatus?.staged || []).map(f => ({ ...f, staged: true })),
-      ...(gitStatus?.unstaged || []).map(f => ({ ...f, staged: false })),
-      ...(gitStatus?.untracked || []).map(f => ({ ...f, staged: false })),
-    ];
-    // Prefer unstaged version (more common for review)
-    const file = allFiles.find(f => f.path === filepath && !f.staged) ||
-                 allFiles.find(f => f.path === filepath);
-    if (file) {
-      const index = allFiles.findIndex(f => f.path === filepath && f.staged === file.staged);
-      setDiffOverlay({ isOpen: true, path: filepath, staged: file.staged, index: Math.max(0, index) });
-      // TODO: scroll to line when DiffOverlay supports it
-    } else {
-      // File not in gitStatus - still try to open
-      setDiffOverlay({ isOpen: true, path: filepath, staged: false, index: 0 });
-    }
-  }, [gitStatus]);
-
-  const handleDiffClose = useCallback(() => {
-    setDiffOverlay({ isOpen: false, path: '', staged: false, index: 0 });
+  // Open file in review panel
+  const handleFileSelect = useCallback((path: string, _staged: boolean) => {
+    setInitialReviewFile(path);
+    setReviewPanelOpen(true);
   }, []);
-
-  const handleDiffNav = useCallback((direction: 'prev' | 'next') => {
-    const allFiles = [
-      ...(gitStatus?.staged || []).map(f => ({ ...f, staged: true })),
-      ...(gitStatus?.unstaged || []).map(f => ({ ...f, staged: false })),
-      ...(gitStatus?.untracked || []).map(f => ({ ...f, staged: false })),
-    ];
-    const newIndex = direction === 'prev'
-      ? Math.max(0, diffOverlay.index - 1)
-      : Math.min(allFiles.length - 1, diffOverlay.index + 1);
-    const file = allFiles[newIndex];
-    if (file) {
-      setDiffOverlay({ isOpen: true, path: file.path, staged: file.staged, index: newIndex });
-    }
-  }, [gitStatus, diffOverlay.index]);
-
-  const fetchDiff = useCallback(async () => {
-    const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
-    if (!activeLocalSession?.cwd) throw new Error('No active session');
-    const daemonSession = daemonSessions.find((ds) => ds.id === activeLocalSession.id);
-    if (!daemonSession) throw new Error('No daemon session found');
-    return sendGetFileDiff(daemonSession.directory, diffOverlay.path, diffOverlay.staged);
-  }, [sessions, activeSessionId, daemonSessions, diffOverlay.path, diffOverlay.staged, sendGetFileDiff]);
 
   // Fetch diff for ReviewPanel (takes path and staged as parameters)
   const fetchDiffForReview = useCallback(async (path: string, staged: boolean) => {
@@ -965,11 +903,13 @@ function AppContent({
 
   // Review panel handlers
   const handleOpenReviewPanel = useCallback(() => {
+    setInitialReviewFile(null); // No specific file, let ReviewPanel pick first
     setReviewPanelOpen(true);
   }, []);
 
   const handleCloseReviewPanel = useCallback(() => {
     setReviewPanelOpen(false);
+    setInitialReviewFile(null);
   }, []);
 
   // Send code reference to the active Claude terminal
@@ -982,10 +922,6 @@ function AppContent({
       handle?.focus();
     }, 50);
   }, [activeSessionId]);
-
-  const totalDiffFiles = (gitStatus?.staged?.length || 0) +
-    (gitStatus?.unstaged?.length || 0) +
-    (gitStatus?.untracked?.length || 0);
 
   // Terminal panel handlers for active session
   const handleOpenTerminalPanel = useCallback(() => {
@@ -1132,7 +1068,7 @@ function AppContent({
         <ChangesPanel
           gitStatus={gitStatus}
           attentionCount={attentionCount}
-          selectedFile={diffOverlay.isOpen ? diffOverlay.path : null}
+          selectedFile={null}
           onFileSelect={handleFileSelect}
           onAttentionClick={toggleDrawer}
           onReviewClick={handleOpenReviewPanel}
@@ -1186,18 +1122,6 @@ function AppContent({
         onDelete={handleWorktreeDelete}
         onAlwaysKeep={handleWorktreeAlwaysKeep}
       />
-      <DiffOverlay
-        isOpen={diffOverlay.isOpen}
-        filePath={diffOverlay.path}
-        fileIndex={diffOverlay.index}
-        totalFiles={totalDiffFiles}
-        fontSize={diffFontSize}
-        onClose={handleDiffClose}
-        onPrev={() => handleDiffNav('prev')}
-        onNext={() => handleDiffNav('next')}
-        fetchDiff={fetchDiff}
-        onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
-      />
       <ReviewPanel
         isOpen={reviewPanelOpen}
         gitStatus={gitStatus}
@@ -1220,7 +1144,7 @@ function AppContent({
         reviewerError={reviewerError}
         agentComments={pendingAgentComments}
         agentResolvedCommentIds={agentResolvedCommentIds}
-        onOpenInDiffOverlay={handleOpenInDiffOverlay}
+        initialSelectedFile={initialReviewFile || undefined}
       />
       <ThumbsModal
         isOpen={thumbsOpen}

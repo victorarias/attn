@@ -264,8 +264,8 @@ interface ReviewPanelProps {
   reviewerError?: string;
   agentComments?: ReviewComment[];
   agentResolvedCommentIds?: string[];
-  // Navigation callback - opens file in main diff overlay
-  onOpenInDiffOverlay?: (filepath: string, line?: number) => void;
+  // Initial file to select when panel opens
+  initialSelectedFile?: string;
 }
 
 export function ReviewPanel({
@@ -278,7 +278,7 @@ export function ReviewPanel({
   fetchDiff,
   getReviewState,
   markFileViewed,
-  onSendToClaude: _onSendToClaude,
+  onSendToClaude,
   addComment,
   updateComment,
   resolveComment,
@@ -291,10 +291,8 @@ export function ReviewPanel({
   reviewerError,
   agentComments = [],
   agentResolvedCommentIds = [],
-  onOpenInDiffOverlay,
+  initialSelectedFile,
 }: ReviewPanelProps) {
-  // This prop is reserved for future use
-  void _onSendToClaude;
   // Track selected file by path for stability across gitStatus updates
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
@@ -306,6 +304,7 @@ export function ReviewPanel({
   const [fontSize, setFontSize] = useState(13); // Default font size
   const [reviewerPanelHeight, setReviewerPanelHeight] = useState(400); // Default reviewer panel height
   const [scrollToLine, setScrollToLine] = useState<number | undefined>(undefined);
+  const [reviewerPanelCollapsed, setReviewerPanelCollapsed] = useState(false);
   const reviewerResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const reviewerOutputRef = useRef<HTMLDivElement>(null);
 
@@ -322,12 +321,19 @@ export function ReviewPanel({
     }
   }, [commentError]);
 
+  // Auto-expand reviewer panel when review starts
+  useEffect(() => {
+    if (reviewerRunning) {
+      setReviewerPanelCollapsed(false);
+    }
+  }, [reviewerRunning]);
+
   // Auto-scroll reviewer output to bottom as content streams
   useEffect(() => {
-    if (reviewerOutputRef.current) {
+    if (reviewerOutputRef.current && !reviewerPanelCollapsed) {
       reviewerOutputRef.current.scrollTop = reviewerOutputRef.current.scrollHeight;
     }
-  }, [reviewerEvents]);
+  }, [reviewerEvents, reviewerPanelCollapsed]);
 
   // Derive comments for current file
   const comments = useMemo(() => {
@@ -410,12 +416,16 @@ export function ReviewPanel({
     }
   }, [isOpen, repoPath, branch, getReviewState]);
 
-  // Auto-select first file when opening
+  // Auto-select file when opening - use initialSelectedFile if provided, else first file
   useEffect(() => {
-    if (isOpen && needsReviewFiles.length > 0 && !selectedFilePath) {
-      setSelectedFilePath(needsReviewFiles[0].path);
+    if (isOpen && !selectedFilePath) {
+      if (initialSelectedFile) {
+        setSelectedFilePath(initialSelectedFile);
+      } else if (needsReviewFiles.length > 0) {
+        setSelectedFilePath(needsReviewFiles[0].path);
+      }
     }
-  }, [isOpen, needsReviewFiles, selectedFilePath]);
+  }, [isOpen, needsReviewFiles, selectedFilePath, initialSelectedFile]);
 
   // Load all comments for the review
   useEffect(() => {
@@ -840,6 +850,12 @@ export function ReviewPanel({
     }
   }, [deleteComment]);
 
+  // Wrap onSendToClaude to also close the review panel
+  const handleSendToClaude = useCallback((reference: string) => {
+    onSendToClaude?.(reference);
+    onClose();
+  }, [onSendToClaude, onClose]);
+
   if (!isOpen) return null;
 
   const currentFileIndex = selectedFile ? allFiles.findIndex(f => f.path === selectedFile.path) : -1;
@@ -885,8 +901,6 @@ export function ReviewPanel({
                     key={file.path}
                     className={`file-item ${selectedFilePath === file.path ? 'selected' : ''} ${viewedFiles.has(file.path) ? 'viewed' : ''} ${changedSinceViewed.has(file.path) ? 'changed' : ''}`}
                     onClick={() => setSelectedFilePath(file.path)}
-                    onDoubleClick={() => onOpenInDiffOverlay?.(file.path)}
-                    title="Double-click to open in diff viewer"
                   >
                     <span className="file-icon">{getFileIcon(file)}</span>
                     <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>
@@ -917,8 +931,6 @@ export function ReviewPanel({
                     key={file.path}
                     className={`file-item auto-skip ${selectedFilePath === file.path ? 'selected' : ''}`}
                     onClick={() => setSelectedFilePath(file.path)}
-                    onDoubleClick={() => onOpenInDiffOverlay?.(file.path)}
-                    title="Double-click to open in diff viewer"
                   >
                     <span className="file-icon">{getFileIcon(file)}</span>
                     <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>
@@ -977,12 +989,14 @@ export function ReviewPanel({
                   language={editorLanguage}
                   contextLines={expandedContext === -1 ? 0 : 3}
                   scrollToLine={scrollToLine}
+                  filePath={selectedFilePath || undefined}
                   onAddComment={handleEditorAddComment}
                   onEditComment={handleEditorEditComment}
                   onStartEdit={handleEditorStartEdit}
                   onCancelEdit={handleEditorCancelEdit}
                   onResolveComment={handleEditorResolveComment}
                   onDeleteComment={handleEditorDeleteComment}
+                  onSendToClaude={handleSendToClaude}
                 />
               )}
             </div>
@@ -992,37 +1006,45 @@ export function ReviewPanel({
         {/* Reviewer Agent Output Panel */}
         {(reviewerRunning || reviewerEvents.length > 0) && (
           <div
-            className="reviewer-output-panel"
-            style={{ height: reviewerPanelHeight }}
+            className={`reviewer-output-panel ${reviewerPanelCollapsed ? 'collapsed' : ''}`}
+            style={{ height: reviewerPanelCollapsed ? 'auto' : reviewerPanelHeight }}
           >
+            {!reviewerPanelCollapsed && (
+              <div
+                className="reviewer-resize-handle"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  reviewerResizeRef.current = {
+                    startY: e.clientY,
+                    startHeight: reviewerPanelHeight,
+                  };
+                  const handleMouseMove = (moveEvent: MouseEvent) => {
+                    if (!reviewerResizeRef.current) return;
+                    const delta = reviewerResizeRef.current.startY - moveEvent.clientY;
+                    const newHeight = Math.max(100, Math.min(800, reviewerResizeRef.current.startHeight + delta));
+                    setReviewerPanelHeight(newHeight);
+                  };
+                  const handleMouseUp = () => {
+                    reviewerResizeRef.current = null;
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                  };
+                  document.addEventListener('mousemove', handleMouseMove);
+                  document.addEventListener('mouseup', handleMouseUp);
+                }}
+              />
+            )}
             <div
-              className="reviewer-resize-handle"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                reviewerResizeRef.current = {
-                  startY: e.clientY,
-                  startHeight: reviewerPanelHeight,
-                };
-                const handleMouseMove = (moveEvent: MouseEvent) => {
-                  if (!reviewerResizeRef.current) return;
-                  const delta = reviewerResizeRef.current.startY - moveEvent.clientY;
-                  const newHeight = Math.max(100, Math.min(800, reviewerResizeRef.current.startHeight + delta));
-                  setReviewerPanelHeight(newHeight);
-                };
-                const handleMouseUp = () => {
-                  reviewerResizeRef.current = null;
-                  document.removeEventListener('mousemove', handleMouseMove);
-                  document.removeEventListener('mouseup', handleMouseUp);
-                };
-                document.addEventListener('mousemove', handleMouseMove);
-                document.addEventListener('mouseup', handleMouseUp);
-              }}
-            />
-            <div className="reviewer-output-header">
+              className="reviewer-output-header"
+              onClick={() => setReviewerPanelCollapsed(prev => !prev)}
+              style={{ cursor: 'pointer' }}
+            >
+              <span className="reviewer-collapse-icon">{reviewerPanelCollapsed ? '▸' : '▾'}</span>
               <span>🤖 AI Review</span>
               {reviewerError && <span className="reviewer-error">⚠ {reviewerError}</span>}
               {reviewerRunning && <div className="reviewer-progress-line" />}
             </div>
+            {!reviewerPanelCollapsed && (
             <div ref={reviewerOutputRef} className="reviewer-output-content" style={{ fontSize }}>
               {reviewerEvents.length === 0 && reviewerRunning && (
                 <div className="reviewer-loading">
@@ -1137,6 +1159,7 @@ export function ReviewPanel({
                 }
               })}
             </div>
+            )}
           </div>
         )}
 

@@ -401,6 +401,20 @@
   font-weight: 600;
   color: #e0e0e0;
   position: relative;
+  user-select: none;
+}
+
+.reviewer-output-header:hover {
+  background: #2d2d2d;
+}
+
+.reviewer-collapse-icon {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.reviewer-output-panel.collapsed {
+  border-top: 1px solid #3c3c3c;
 }
 
 /* Animated progress line below header when running */
