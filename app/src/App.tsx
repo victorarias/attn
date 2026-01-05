@@ -19,8 +19,9 @@ import { ForkDialog } from './components/ForkDialog';
 import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
+import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore } from './store/sessions';
-import { useDaemonSocket, DaemonWorktree, GitStatusUpdate, ReviewerEvent, ReviewToolUse } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse } from './hooks/useDaemonSocket';
 import { normalizeSessionState } from './types/sessionState';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
@@ -30,67 +31,8 @@ import { getRepoName } from './utils/repo';
 import './App.css';
 
 function App() {
-  const {
-    sessions,
-    activeSessionId,
-    createSession,
-    closeSession,
-    setActiveSession,
-    connectTerminal,
-    resizeSession,
-    openTerminalPanel,
-    collapseTerminalPanel,
-    setTerminalPanelHeight,
-    addUtilityTerminal,
-    removeUtilityTerminal,
-    setActiveUtilityTerminal,
-    renameUtilityTerminal,
-    setForkParams,
-  } = useSessionStore();
-
-  const {
-    daemonSessions,
-    setDaemonSessions,
-    prs,
-    setPRs,
-    setRepoStates,
-  } = useDaemonStore();
-
-  // UI scale for font sizing (Cmd+/Cmd-)
-  const { scale, increaseScale, decreaseScale, resetScale } = useUIScale();
-  const terminalFontSize = Math.round(14 * scale);
-  const diffFontSize = Math.round(12 * scale);
-
-  // Track PR refresh state for progress indicator
-  const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-
-  // Settings state
+  // Settings state (must be declared before useDaemonSocket to pass as callback)
   const [settings, setSettings] = useState<Record<string, string>>({});
-
-  // Worktrees state (used by WorktreeCleanupPrompt)
-  const [, setWorktrees] = useState<DaemonWorktree[]>([]);
-
-  // Worktree cleanup prompt state
-  const [closedWorktree, setClosedWorktree] = useState<{ path: string; branch?: string } | null>(null);
-  const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(() => {
-    const stored = localStorage.getItem('alwaysKeepWorktrees');
-    return stored === 'true';
-  });
-
-  // Git status state
-  const [gitStatus, setGitStatus] = useState<GitStatusUpdate | null>(null);
-
-  // Diff overlay state
-  const [diffOverlay, setDiffOverlay] = useState<{
-    isOpen: boolean;
-    path: string;
-    staged: boolean;
-    index: number;
-  }>({ isOpen: false, path: '', staged: false, index: 0 });
-
-  // Review panel state
-  const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
 
   // Reviewer agent state (unified events for ordered rendering)
   const [reviewerEvents, setReviewerEvents] = useState<ReviewerEvent[]>([]);
@@ -102,6 +44,20 @@ function App() {
 
   // Comment IDs resolved by reviewer agent (passed to ReviewPanel)
   const [agentResolvedCommentIds, setAgentResolvedCommentIds] = useState<string[]>([]);
+
+  // Worktrees state (used by WorktreeCleanupPrompt)
+  const [, setWorktrees] = useState<DaemonWorktree[]>([]);
+
+  // Git status state
+  const [gitStatus, setGitStatus] = useState<GitStatusUpdate | null>(null);
+
+  const {
+    daemonSessions,
+    setDaemonSessions,
+    prs,
+    setPRs,
+    setRepoStates,
+  } = useDaemonStore();
 
   // Hide loading screen on mount
   useEffect(() => {
@@ -188,6 +144,218 @@ function App() {
     onGitStatusUpdate: setGitStatus,
     reviewer: reviewerCallbacks,
   });
+
+  // Memoize clearGitStatus to prevent subscription effect from re-running
+  const clearGitStatus = useCallback(() => setGitStatus(null), []);
+
+  // Wrap the app content with SettingsProvider so useUIScale can access settings
+  return (
+    <SettingsProvider settings={settings} setSetting={sendSetSetting}>
+      <AppContent
+        daemonSessions={daemonSessions}
+        prs={prs}
+        settings={settings}
+        gitStatus={gitStatus}
+        reviewerEvents={reviewerEvents}
+        reviewerRunning={reviewerRunning}
+        reviewerError={reviewerError}
+        pendingAgentComments={pendingAgentComments}
+        agentResolvedCommentIds={agentResolvedCommentIds}
+        connectionError={connectionError}
+        hasReceivedInitialState={hasReceivedInitialState}
+        rateLimit={rateLimit}
+        // Daemon socket functions
+        sendPRAction={sendPRAction}
+        sendMutePR={sendMutePR}
+        sendMuteRepo={sendMuteRepo}
+        sendPRVisited={sendPRVisited}
+        sendRefreshPRs={sendRefreshPRs}
+        sendClearSessions={sendClearSessions}
+        sendUnregisterSession={sendUnregisterSession}
+        sendSetSetting={sendSetSetting}
+        sendCreateWorktree={sendCreateWorktree}
+        sendDeleteWorktree={sendDeleteWorktree}
+        sendDeleteBranch={sendDeleteBranch}
+        sendGetRecentLocations={sendGetRecentLocations}
+        sendListBranches={sendListBranches}
+        sendSwitchBranch={sendSwitchBranch}
+        sendCreateWorktreeFromBranch={sendCreateWorktreeFromBranch}
+        sendCheckDirty={sendCheckDirty}
+        sendStash={sendStash}
+        sendStashPop={sendStashPop}
+        sendCheckAttnStash={sendCheckAttnStash}
+        sendCommitWIP={sendCommitWIP}
+        sendGetDefaultBranch={sendGetDefaultBranch}
+        sendFetchRemotes={sendFetchRemotes}
+        sendListRemoteBranches={sendListRemoteBranches}
+        sendSubscribeGitStatus={sendSubscribeGitStatus}
+        sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
+        sendGetFileDiff={sendGetFileDiff}
+        getRepoInfo={getRepoInfo}
+        getReviewState={getReviewState}
+        markFileViewed={markFileViewed}
+        sendAddComment={sendAddComment}
+        sendUpdateComment={sendUpdateComment}
+        sendResolveComment={sendResolveComment}
+        sendDeleteComment={sendDeleteComment}
+        sendGetComments={sendGetComments}
+        sendStartReview={sendStartReview}
+        sendCancelReview={sendCancelReview}
+        clearGitStatus={clearGitStatus}
+      />
+    </SettingsProvider>
+  );
+}
+
+// Props interface for AppContent - receives daemon state and functions from App
+interface AppContentProps {
+  daemonSessions: DaemonSession[];
+  prs: DaemonPR[];
+  settings: Record<string, string>;
+  gitStatus: GitStatusUpdate | null;
+  reviewerEvents: ReviewerEvent[];
+  reviewerRunning: boolean;
+  reviewerError: string | undefined;
+  pendingAgentComments: import('./types/generated').ReviewComment[];
+  agentResolvedCommentIds: string[];
+  connectionError: string | null;
+  hasReceivedInitialState: boolean;
+  rateLimit: import('./hooks/useDaemonSocket').RateLimitState | null;
+  // All the daemon socket functions
+  sendPRAction: ReturnType<typeof useDaemonSocket>['sendPRAction'];
+  sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
+  sendMuteRepo: ReturnType<typeof useDaemonSocket>['sendMuteRepo'];
+  sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
+  sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
+  sendClearSessions: ReturnType<typeof useDaemonSocket>['sendClearSessions'];
+  sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
+  sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
+  sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
+  sendDeleteWorktree: ReturnType<typeof useDaemonSocket>['sendDeleteWorktree'];
+  sendDeleteBranch: ReturnType<typeof useDaemonSocket>['sendDeleteBranch'];
+  sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
+  sendListBranches: ReturnType<typeof useDaemonSocket>['sendListBranches'];
+  sendSwitchBranch: ReturnType<typeof useDaemonSocket>['sendSwitchBranch'];
+  sendCreateWorktreeFromBranch: ReturnType<typeof useDaemonSocket>['sendCreateWorktreeFromBranch'];
+  sendCheckDirty: ReturnType<typeof useDaemonSocket>['sendCheckDirty'];
+  sendStash: ReturnType<typeof useDaemonSocket>['sendStash'];
+  sendStashPop: ReturnType<typeof useDaemonSocket>['sendStashPop'];
+  sendCheckAttnStash: ReturnType<typeof useDaemonSocket>['sendCheckAttnStash'];
+  sendCommitWIP: ReturnType<typeof useDaemonSocket>['sendCommitWIP'];
+  sendGetDefaultBranch: ReturnType<typeof useDaemonSocket>['sendGetDefaultBranch'];
+  sendFetchRemotes: ReturnType<typeof useDaemonSocket>['sendFetchRemotes'];
+  sendListRemoteBranches: ReturnType<typeof useDaemonSocket>['sendListRemoteBranches'];
+  sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
+  sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
+  sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
+  getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
+  getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
+  markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
+  sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
+  sendUpdateComment: ReturnType<typeof useDaemonSocket>['sendUpdateComment'];
+  sendResolveComment: ReturnType<typeof useDaemonSocket>['sendResolveComment'];
+  sendDeleteComment: ReturnType<typeof useDaemonSocket>['sendDeleteComment'];
+  sendGetComments: ReturnType<typeof useDaemonSocket>['sendGetComments'];
+  sendStartReview: ReturnType<typeof useDaemonSocket>['sendStartReview'];
+  sendCancelReview: ReturnType<typeof useDaemonSocket>['sendCancelReview'];
+  clearGitStatus: () => void;
+}
+
+function AppContent({
+  daemonSessions,
+  prs,
+  settings,
+  gitStatus,
+  reviewerEvents,
+  reviewerRunning,
+  reviewerError,
+  pendingAgentComments,
+  agentResolvedCommentIds,
+  connectionError,
+  hasReceivedInitialState,
+  rateLimit,
+  sendPRAction,
+  sendMutePR,
+  sendMuteRepo,
+  sendPRVisited,
+  sendRefreshPRs,
+  sendClearSessions,
+  sendUnregisterSession,
+  sendSetSetting,
+  sendCreateWorktree,
+  sendDeleteWorktree,
+  sendDeleteBranch,
+  sendGetRecentLocations,
+  sendListBranches,
+  sendSwitchBranch,
+  sendCreateWorktreeFromBranch,
+  sendCheckDirty,
+  sendStash,
+  sendStashPop,
+  sendCheckAttnStash,
+  sendCommitWIP,
+  sendGetDefaultBranch,
+  sendFetchRemotes,
+  sendListRemoteBranches,
+  sendSubscribeGitStatus,
+  sendUnsubscribeGitStatus,
+  sendGetFileDiff,
+  getRepoInfo,
+  getReviewState,
+  markFileViewed,
+  sendAddComment,
+  sendUpdateComment,
+  sendResolveComment,
+  sendDeleteComment,
+  sendGetComments,
+  sendStartReview,
+  sendCancelReview,
+  clearGitStatus,
+}: AppContentProps) {
+  const {
+    sessions,
+    activeSessionId,
+    createSession,
+    closeSession,
+    setActiveSession,
+    connectTerminal,
+    resizeSession,
+    openTerminalPanel,
+    collapseTerminalPanel,
+    setTerminalPanelHeight,
+    addUtilityTerminal,
+    removeUtilityTerminal,
+    setActiveUtilityTerminal,
+    renameUtilityTerminal,
+    setForkParams,
+  } = useSessionStore();
+
+  // UI scale for font sizing (Cmd+/Cmd-) - now uses SettingsContext
+  const { scale, increaseScale, decreaseScale, resetScale } = useUIScale();
+  const terminalFontSize = Math.round(14 * scale);
+  const diffFontSize = Math.round(12 * scale);
+
+  // Track PR refresh state for progress indicator
+  const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  // Worktree cleanup prompt state
+  const [closedWorktree, setClosedWorktree] = useState<{ path: string; branch?: string } | null>(null);
+  const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(() => {
+    const stored = localStorage.getItem('alwaysKeepWorktrees');
+    return stored === 'true';
+  });
+
+  // Diff overlay state
+  const [diffOverlay, setDiffOverlay] = useState<{
+    isOpen: boolean;
+    path: string;
+    staged: boolean;
+    index: number;
+  }>({ isOpen: false, path: '', staged: false, index: 0 });
+
+  // Review panel state
+  const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
 
   // Clear stale daemon sessions on app start
   const hasClearedSessions = useRef(false);
@@ -303,18 +471,18 @@ function App() {
   useEffect(() => {
     const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
     if (activeLocalSession?.cwd && view === 'session') {
-      const daemonSession = daemonSessions.find((ds) => ds.id === activeLocalSession.id);
+      const daemonSession = daemonSessions.find((ds: { id: string; directory: string }) => ds.id === activeLocalSession.id);
       if (daemonSession) {
         sendSubscribeGitStatus(daemonSession.directory);
         return () => {
           sendUnsubscribeGitStatus();
-          setGitStatus(null);
+          clearGitStatus();
         };
       }
     } else {
-      setGitStatus(null);
+      clearGitStatus();
     }
-  }, [activeSessionId, sessions, daemonSessions, view, sendSubscribeGitStatus, sendUnsubscribeGitStatus]);
+  }, [activeSessionId, sessions, daemonSessions, view, sendSubscribeGitStatus, sendUnsubscribeGitStatus, clearGitStatus]);
 
   // Function to go to dashboard
   const goToDashboard = useCallback(() => {

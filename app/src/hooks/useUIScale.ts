@@ -1,27 +1,38 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSettings } from '../contexts/SettingsContext';
 
-const STORAGE_KEY = 'uiScale';
+const SETTINGS_KEY = 'uiScale';
 const DEFAULT_SCALE = 1.0;
 const MIN_SCALE = 0.7;
 const MAX_SCALE = 1.5;
 const SCALE_STEP = 0.1;
 
 export function useUIScale() {
-  const [scale, setScale] = useState<number>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = parseFloat(stored);
+  const { settings, setSetting } = useSettings();
+  const initializedFromSettings = useRef(false);
+
+  const [scale, setScale] = useState<number>(DEFAULT_SCALE);
+
+  // Sync from daemon settings when they arrive
+  useEffect(() => {
+    if (settings[SETTINGS_KEY] && !initializedFromSettings.current) {
+      const parsed = parseFloat(settings[SETTINGS_KEY]);
       if (!isNaN(parsed) && parsed >= MIN_SCALE && parsed <= MAX_SCALE) {
-        return parsed;
+        setScale(parsed);
+        initializedFromSettings.current = true;
       }
     }
-    return DEFAULT_SCALE;
-  });
+  }, [settings]);
 
-  // Persist to localStorage
+  // Persist to daemon settings when scale changes (skip initial sync)
+  const lastSavedScale = useRef<number | null>(null);
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, scale.toString());
-  }, [scale]);
+    // Don't save if this is the initial value from settings
+    if (lastSavedScale.current !== null && scale !== lastSavedScale.current) {
+      setSetting(SETTINGS_KEY, scale.toString());
+    }
+    lastSavedScale.current = scale;
+  }, [scale, setSetting]);
 
   // Apply CSS variable to document root
   useEffect(() => {

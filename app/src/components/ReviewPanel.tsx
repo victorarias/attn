@@ -176,6 +176,7 @@ export function ReviewPanel({
   const [reviewerPanelHeight, setReviewerPanelHeight] = useState(400); // Default reviewer panel height
   const [scrollToLine, setScrollToLine] = useState<number | undefined>(undefined);
   const reviewerResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const reviewerOutputRef = useRef<HTMLDivElement>(null);
 
   // Comment state
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
@@ -189,6 +190,13 @@ export function ReviewPanel({
       return () => clearTimeout(timer);
     }
   }, [commentError]);
+
+  // Auto-scroll reviewer output to bottom as content streams
+  useEffect(() => {
+    if (reviewerOutputRef.current) {
+      reviewerOutputRef.current.scrollTop = reviewerOutputRef.current.scrollHeight;
+    }
+  }, [reviewerEvents]);
 
   // Derive comments for current file
   const comments = useMemo(() => {
@@ -884,7 +892,7 @@ export function ReviewPanel({
               {reviewerRunning && <span className="reviewer-spinner">⟳</span>}
               {reviewerError && <span className="reviewer-error">⚠ {reviewerError}</span>}
             </div>
-            <div className="reviewer-output-content" style={{ fontSize }}>
+            <div ref={reviewerOutputRef} className="reviewer-output-content" style={{ fontSize }}>
               {reviewerEvents.length === 0 && reviewerRunning && (
                 <span className="reviewer-starting">Starting review...</span>
               )}

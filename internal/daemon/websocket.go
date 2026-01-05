@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 // Valid setting keys
 const (
 	SettingProjectsDirectory = "projects_directory"
+	SettingUIScale           = "uiScale"
 )
 
 // wsClient represents a connected WebSocket client
@@ -661,9 +663,23 @@ func (d *Daemon) validateSetting(key, value string) error {
 	switch key {
 	case SettingProjectsDirectory:
 		return validateProjectsDirectory(value)
+	case SettingUIScale:
+		return validateUIScale(value)
 	default:
 		return fmt.Errorf("unknown setting: %s", key)
 	}
+}
+
+// validateUIScale ensures the scale value is a valid float within range
+func validateUIScale(value string) error {
+	scale, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fmt.Errorf("invalid scale value: %s", value)
+	}
+	if scale < 0.5 || scale > 2.0 {
+		return fmt.Errorf("scale must be between 0.5 and 2.0")
+	}
+	return nil
 }
 
 // validateProjectsDirectory ensures the path is valid and usable
