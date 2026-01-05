@@ -80,6 +80,7 @@ export interface UnifiedDiffEditorProps {
   fontSize?: number;
   language?: string;
   contextLines?: number; // Lines of context around changes (default 3, 0 for full diff)
+  scrollToLine?: number; // Line number to scroll to (1-indexed, in modified file)
   onAddComment: (docLine: number, content: string, anchor: CommentAnchor) => Promise<void>;
   onEditComment: (id: string, content: string) => Promise<void>;
   onStartEdit: (id: string) => void;
@@ -766,6 +767,7 @@ export function UnifiedDiffEditor({
   fontSize = 13,
   language,
   contextLines = 0,
+  scrollToLine,
   onAddComment,
   onEditComment,
   onStartEdit,
@@ -1266,6 +1268,26 @@ export function UnifiedDiffEditor({
       effects: setCollapsedDecorations.of(Decoration.set(decorations)),
     });
   }, [lines, contextLines, expandedRegions, comments, newCommentLines, handleExpandRegion]);
+
+  // Scroll to line when scrollToLine prop changes
+  useEffect(() => {
+    if (!scrollToLine || !editorViewRef.current) return;
+
+    const view = editorViewRef.current;
+    const currentLines = linesRef.current;
+
+    // Find the doc line that corresponds to this modified file line
+    const targetLine = currentLines.find(
+      (line) => line.type !== 'deleted' && line.modifiedLine === scrollToLine
+    );
+
+    if (targetLine) {
+      const docLine = view.state.doc.line(targetLine.docLine);
+      view.dispatch({
+        effects: EditorView.scrollIntoView(docLine.from, { y: 'center' }),
+      });
+    }
+  }, [scrollToLine]);
 
   return (
     <div

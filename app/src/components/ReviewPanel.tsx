@@ -174,6 +174,7 @@ export function ReviewPanel({
   const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks mode (uses 3 lines context), -1 = full file
   const [fontSize, setFontSize] = useState(13); // Default font size
   const [reviewerPanelHeight, setReviewerPanelHeight] = useState(400); // Default reviewer panel height
+  const [scrollToLine, setScrollToLine] = useState<number | undefined>(undefined);
   const reviewerResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
   // Comment state
@@ -348,6 +349,7 @@ export function ReviewPanel({
       setDiffContent(null);
       setError(null);
       setExpandedContext(0);
+      setScrollToLine(undefined);
       // Clear change detection state
       viewedDiffHashesRef.current.clear();
       setChangedSinceViewed(new Set());
@@ -835,6 +837,7 @@ export function ReviewPanel({
                   fontSize={fontSize}
                   language={editorLanguage}
                   contextLines={expandedContext === -1 ? 0 : 3}
+                  scrollToLine={scrollToLine}
                   onAddComment={handleEditorAddComment}
                   onEditComment={handleEditorEditComment}
                   onStartEdit={handleEditorStartEdit}
@@ -903,8 +906,9 @@ export function ReviewPanel({
                       key={index}
                       className={`reviewer-tool-call ${canNavigate ? 'clickable' : ''}`}
                       onClick={isAddComment && filepath ? () => {
+                        const lineStart = Number(event.input.line_start) || undefined;
                         setSelectedFilePath(filepath);
-                        // TODO: scroll to lineStart when supported
+                        setScrollToLine(lineStart);
                       } : undefined}
                       title={canNavigate ? `Click to open ${filepath}` : undefined}
                     >
