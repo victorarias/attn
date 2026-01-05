@@ -1168,38 +1168,6 @@ export function UnifiedDiffEditor({
         '.cm-collapsed-text': {
           fontWeight: '500',
         },
-        // Selection popup (matches legacy DiffOverlay styling)
-        '.cm-selection-popup': {
-          display: 'flex',
-          gap: '4px',
-          background: '#2a2a2d',
-          border: '1px solid #3a3a3d',
-          borderRadius: '4px',
-          padding: '4px',
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
-        },
-        '.cm-popup-btn': {
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '24px',
-          height: '24px',
-          padding: '0',
-          border: 'none',
-          borderRadius: '4px',
-          background: 'transparent',
-          cursor: 'pointer',
-          transition: 'background-color 0.15s ease',
-        },
-        '.cm-popup-btn:hover': {
-          background: '#3a3a3d',
-        },
-        '.cm-popup-btn.send-to-claude': {
-          color: '#d4a27f',
-        },
-        '.cm-popup-btn.add-comment': {
-          color: '#60a5fa',
-        },
       },
       { dark: true }
     );
@@ -1294,6 +1262,11 @@ export function UnifiedDiffEditor({
       editorViewRef.current = null;
     };
   }, [content, lines, fontSize, languageExtension]);
+
+  // Clear selection when file content changes (prevents stale popup)
+  useEffect(() => {
+    setSelection(null);
+  }, [content]);
 
   // Update comment widgets when comments or newCommentLines change
   useEffect(() => {
