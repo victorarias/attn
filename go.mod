@@ -7,6 +7,9 @@ require (
 	nhooyr.io/websocket v1.8.17
 )
 
-require github.com/google/uuid v1.6.0
+require (
+	github.com/google/uuid v1.6.0
+	github.com/victorarias/claude-agent-sdk-go v0.0.0-00010101000000-000000000000
+)
 
 replace github.com/victorarias/claude-agent-sdk-go => ../claude-agent-sdk-go

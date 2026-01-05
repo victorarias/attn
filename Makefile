@@ -1,4 +1,4 @@
-.PHONY: build install test test-all test-frontend clean generate-types check-types build-app install-app install-all dist
+.PHONY: build install test test-v test-quick test-watch test-all test-frontend clean generate-types check-types build-app install-app install-all dist
 
 BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
@@ -8,7 +8,19 @@ build:
 	go build -o $(BINARY_NAME) $(BUILD_DIR)
 
 test:
-	go test ./...
+	gotestsum --format testdox -- ./...
+
+# Verbose test output (shows all test names as they run)
+test-v:
+	gotestsum --format standard-verbose -- ./...
+
+# Quick test (dots only, fastest)
+test-quick:
+	gotestsum --format dots -- ./...
+
+# Watch mode - re-runs tests on file changes
+test-watch:
+	gotestsum --watch --format testdox -- ./...
 
 test-frontend:
 	cd app && pnpm run test
