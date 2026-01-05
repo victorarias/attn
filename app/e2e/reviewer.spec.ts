@@ -120,27 +120,28 @@ test.describe('Reviewer Agent', () => {
     await expect(table).toBeVisible({ timeout: 2000 });
     await expect(table.locator('th').first()).toContainText('File');
 
-    // 2. Jump-to-file: verify add_comment tool call is clickable
-    const addCommentToolCall = page.locator('.reviewer-tool-call.clickable');
-    await expect(addCommentToolCall).toBeVisible({ timeout: 2000 });
+    // 2. Jump-to-file with scroll: verify clicking different add_comment tool calls scrolls to correct lines
+    // Mock sends two add_comment calls: line 10 and line 40
+    const addCommentToolCalls = page.locator('.reviewer-tool-call.clickable');
+    await expect(addCommentToolCalls).toHaveCount(2, { timeout: 2000 });
 
     // Verify file list has example.go and it's already selected (auto-selection)
     const fileItem = page.locator('.file-item', { hasText: 'example.go' });
     await expect(fileItem).toBeVisible({ timeout: 2000 });
     await expect(fileItem).toHaveClass(/selected/);
 
-    // Verify the modified line 40 is visible in the diff (shows the change)
+    // Click first tool call (line 10) - should scroll to show "doSomething()"
+    await addCommentToolCalls.nth(0).click();
+    await page.waitForTimeout(300);
+    await expect(page.locator('.cm-content')).toContainText('doSomething', { timeout: 2000 });
+
+    // Click second tool call (line 40) - should scroll to show "MODIFIED for review"
+    await addCommentToolCalls.nth(1).click();
+    await page.waitForTimeout(300);
     await expect(page.locator('.cm-content')).toContainText('MODIFIED for review', { timeout: 2000 });
 
-    // Click the tool call - should keep file selected and line visible
-    await addCommentToolCall.click();
-    await page.waitForTimeout(200);
-
-    // File should still be selected
+    // File should still be selected after all clicks
     await expect(fileItem).toHaveClass(/selected/);
-
-    // The target line content should still be visible
-    await expect(page.locator('.cm-content')).toContainText('MODIFIED for review');
 
     // 3. Font size: verify Cmd+Plus increases font size
     const outputContent = page.locator('.reviewer-output-content');

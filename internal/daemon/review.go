@@ -96,13 +96,25 @@ func (m *e2eMockReviewer) Run(ctx context.Context, config ReviewerConfig, onEven
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Simulate add_comment tool call (for jump-to-file testing)
-	// Uses line 40 which exists in the test file and requires scrolling
+	// Simulate add_comment tool calls (for jump-to-file and scroll testing)
+	// First comment at line 10 (near top)
 	onEvent(ReviewerEvent{
 		Type: "tool_use",
 		ToolUse: &ReviewerToolUse{
 			Name:   "add_comment",
-			Input:  map[string]interface{}{"filepath": "example.go", "line_start": 40, "line_end": 40, "content": "Test comment"},
+			Input:  map[string]interface{}{"filepath": "example.go", "line_start": 10, "line_end": 10, "content": "Comment at line 10"},
+			Output: `{"success": true}`,
+		},
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Second comment at line 40 (requires scrolling down)
+	onEvent(ReviewerEvent{
+		Type: "tool_use",
+		ToolUse: &ReviewerToolUse{
+			Name:   "add_comment",
+			Input:  map[string]interface{}{"filepath": "example.go", "line_start": 40, "line_end": 40, "content": "Comment at line 40"},
 			Output: `{"success": true}`,
 		},
 	})
@@ -110,7 +122,7 @@ func (m *e2eMockReviewer) Run(ctx context.Context, config ReviewerConfig, onEven
 	time.Sleep(50 * time.Millisecond)
 
 	// Final summary with markdown table (for table rendering testing)
-	onEvent(ReviewerEvent{Type: "chunk", Content: "## Summary\n\n| File | Issues |\n|------|--------|\n| example.go | 1 |\n\nFound 1 issue that needs attention."})
+	onEvent(ReviewerEvent{Type: "chunk", Content: "## Summary\n\n| File | Issues |\n|------|--------|\n| example.go | 2 |\n\nFound 2 issues that need attention."})
 
 	// Check for final cancellation
 	select {
