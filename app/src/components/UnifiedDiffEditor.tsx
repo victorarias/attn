@@ -969,13 +969,6 @@ export function UnifiedDiffEditor({
         '.cm-content': {
           minWidth: '0',
         },
-        // Hide cursor in read-only mode
-        '.cm-cursor, .cm-cursor-primary, .cm-cursor-secondary': {
-          display: 'none !important',
-        },
-        '.cm-cursorLayer': {
-          display: 'none !important',
-        },
         '.cm-gutters': {
           backgroundColor: '#21252b',
           borderRight: '1px solid #3e4451',
@@ -1232,6 +1225,7 @@ export function UnifiedDiffEditor({
         doc: content,
         extensions: [
           EditorState.readOnly.of(true),
+          EditorView.editable.of(false),
           EditorView.lineWrapping,
           lineMetadataField,
           originalLineGutter,
