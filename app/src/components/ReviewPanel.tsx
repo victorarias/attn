@@ -893,19 +893,18 @@ export function ReviewPanel({
                     </ReactMarkdown>
                   );
                 } else {
-                  // tool_use - make add_comment calls clickable
+                  // tool_use - make add_comment calls clickable to navigate to file
                   const isAddComment = event.name === 'add_comment';
                   const filepath = isAddComment ? String(event.input.filepath || '') : '';
-                  const lineStart = isAddComment ? Number(event.input.line_start) || undefined : undefined;
-                  const canNavigate = isAddComment && filepath && onOpenInDiffOverlay;
+                  const canNavigate = isAddComment && filepath;
 
                   return (
                     <div
                       key={index}
                       className={`reviewer-tool-call ${canNavigate ? 'clickable' : ''}`}
-                      onClick={canNavigate ? () => {
-                        console.log('[ReviewPanel] Clicked add_comment, navigating to:', filepath, lineStart);
-                        onOpenInDiffOverlay(filepath, lineStart);
+                      onClick={isAddComment && filepath ? () => {
+                        setSelectedFilePath(filepath);
+                        // TODO: scroll to lineStart when supported
                       } : undefined}
                       title={canNavigate ? `Click to open ${filepath}` : undefined}
                     >
