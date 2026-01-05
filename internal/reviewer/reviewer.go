@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/victorarias/attn/internal/reviewer/mcp"
@@ -43,12 +44,13 @@ type Finding struct {
 
 // ReviewConfig contains configuration for a review.
 type ReviewConfig struct {
-	RepoPath   string
-	Branch     string
-	BaseBranch string
-	ReviewID   string
-	IsRereview bool
-	LastReviewSHA string
+	RepoPath          string
+	Branch            string
+	BaseBranch        string
+	ReviewID          string
+	IsRereview        bool
+	LastReviewSHA     string
+	PreviousTranscript string // JSON transcript from previous review session
 }
 
 // LogFunc is a function that logs a message.
@@ -162,8 +164,20 @@ func (r *Reviewer) Run(ctx context.Context, config ReviewConfig, onEvent func(Re
 		return fmt.Errorf("client not connected")
 	}
 
+	// Fetch existing comments for re-review context
+	var unresolvedComments []*store.ReviewComment
+	if config.IsRereview {
+		if comments, err := r.store.GetComments(config.ReviewID); err == nil {
+			for _, c := range comments {
+				if !c.Resolved {
+					unresolvedComments = append(unresolvedComments, c)
+				}
+			}
+		}
+	}
+
 	// Build the review prompt
-	prompt := r.buildPrompt(config)
+	prompt := r.buildPrompt(config, unresolvedComments)
 
 	// Send the query
 	r.log("[reviewer] Sending query to agent...")
@@ -453,8 +467,90 @@ func (r *Reviewer) buildMCPServer(tools *mcp.Tools, reviewID string, onEvent fun
 		Build()
 }
 
+// transcriptEvent mirrors the daemon's transcript event structure for parsing
+type transcriptEvent struct {
+	Type       string                 `json:"type"`
+	Content    string                 `json:"content,omitempty"`
+	ToolUse    *transcriptToolUse     `json:"tool_use,omitempty"`
+	Finding    *transcriptFinding     `json:"finding,omitempty"`
+	ResolvedID string                 `json:"resolved_id,omitempty"`
+}
+
+type transcriptToolUse struct {
+	Name   string                 `json:"name"`
+	Input  map[string]interface{} `json:"input,omitempty"`
+	Output string                 `json:"output,omitempty"`
+}
+
+type transcriptFinding struct {
+	Filepath  string `json:"filepath"`
+	LineStart int    `json:"line_start"`
+	LineEnd   int    `json:"line_end"`
+	Content   string `json:"content"`
+}
+
+// formatTranscriptForPrompt converts the JSON transcript to a human-readable summary
+func formatTranscriptForPrompt(transcriptJSON string) string {
+	if transcriptJSON == "" || transcriptJSON == "[]" {
+		return ""
+	}
+
+	var events []transcriptEvent
+	if err := json.Unmarshal([]byte(transcriptJSON), &events); err != nil {
+		return ""
+	}
+
+	if len(events) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n## Previous Review Summary\n\n")
+
+	// Collect text chunks (agent's commentary)
+	var textParts []string
+	for _, e := range events {
+		if e.Type == "chunk" && e.Content != "" {
+			textParts = append(textParts, e.Content)
+		}
+	}
+	if len(textParts) > 0 {
+		sb.WriteString("### Agent Commentary\n")
+		sb.WriteString(strings.Join(textParts, ""))
+		sb.WriteString("\n\n")
+	}
+
+	// Collect findings (comments made)
+	var findings []transcriptFinding
+	for _, e := range events {
+		if e.Type == "finding" && e.Finding != nil {
+			findings = append(findings, *e.Finding)
+		}
+	}
+	if len(findings) > 0 {
+		sb.WriteString("### Comments Made\n")
+		for _, f := range findings {
+			sb.WriteString(fmt.Sprintf("- %s:%d-%d: %s\n", f.Filepath, f.LineStart, f.LineEnd, f.Content))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Collect resolved comments
+	var resolved []string
+	for _, e := range events {
+		if e.Type == "resolved" && e.ResolvedID != "" {
+			resolved = append(resolved, e.ResolvedID)
+		}
+	}
+	if len(resolved) > 0 {
+		sb.WriteString(fmt.Sprintf("### Comments Resolved: %d\n\n", len(resolved)))
+	}
+
+	return sb.String()
+}
+
 // buildPrompt constructs the review prompt.
-func (r *Reviewer) buildPrompt(config ReviewConfig) string {
+func (r *Reviewer) buildPrompt(config ReviewConfig, unresolvedComments []*store.ReviewComment) string {
 	prompt := fmt.Sprintf(`You are a code reviewer. Review the changes on branch "%s" against "%s".
 
 You have access to these tools and MUST use them immediately without asking for permission:
@@ -482,7 +578,26 @@ Do NOT ask for permission - you already have it. Start reviewing immediately.
 `, config.Branch, config.BaseBranch)
 
 	if config.IsRereview {
-		prompt += fmt.Sprintf("\nThis is a follow-up review. Focus on changes since commit %s.\n", config.LastReviewSHA)
+		prompt += fmt.Sprintf("\n---\n\nThis is a FOLLOW-UP review. The previous review was at commit %s.\n", config.LastReviewSHA)
+		prompt += "Focus on:\n"
+		prompt += "1. Changes made since the previous review\n"
+		prompt += "2. Whether previous issues have been addressed (use resolve_comment if so)\n"
+		prompt += "3. Any new issues introduced\n"
+
+		// Add formatted previous transcript
+		if formatted := formatTranscriptForPrompt(config.PreviousTranscript); formatted != "" {
+			prompt += formatted
+		}
+
+		// Add unresolved comments that need attention
+		if len(unresolvedComments) > 0 {
+			prompt += "\n### Unresolved Comments (need attention)\n"
+			prompt += "These comments from previous reviews are still open. Check if they've been addressed and use resolve_comment(id) if so:\n\n"
+			for _, c := range unresolvedComments {
+				prompt += fmt.Sprintf("- **%s** (id: %s)\n  %s:%d-%d: %s\n\n",
+					c.Author, c.ID, c.Filepath, c.LineStart, c.LineEnd, c.Content)
+			}
+		}
 	}
 
 	return prompt

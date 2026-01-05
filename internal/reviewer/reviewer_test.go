@@ -408,3 +408,202 @@ func TestReviewer_PreventConcurrentRuns(t *testing.T) {
 		t.Error("Expected error when starting concurrent review")
 	}
 }
+
+func TestFormatTranscriptForPrompt(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		contains []string
+		empty    bool
+	}{
+		{
+			name:  "empty transcript",
+			input: "",
+			empty: true,
+		},
+		{
+			name:  "empty array",
+			input: "[]",
+			empty: true,
+		},
+		{
+			name:  "invalid JSON",
+			input: "not json",
+			empty: true,
+		},
+		{
+			name: "chunk events",
+			input: `[
+				{"type": "chunk", "content": "Reviewing the code...\n"},
+				{"type": "chunk", "content": "Found some issues."}
+			]`,
+			contains: []string{
+				"Previous Review Summary",
+				"Agent Commentary",
+				"Reviewing the code",
+				"Found some issues",
+			},
+		},
+		{
+			name: "finding events",
+			input: `[
+				{"type": "finding", "finding": {"filepath": "main.go", "line_start": 10, "line_end": 15, "content": "Missing error handling"}}
+			]`,
+			contains: []string{
+				"Comments Made",
+				"main.go:10-15: Missing error handling",
+			},
+		},
+		{
+			name: "resolved events",
+			input: `[
+				{"type": "resolved", "resolved_id": "comment-123"},
+				{"type": "resolved", "resolved_id": "comment-456"}
+			]`,
+			contains: []string{
+				"Comments Resolved: 2",
+			},
+		},
+		{
+			name: "mixed events",
+			input: `[
+				{"type": "chunk", "content": "Starting review..."},
+				{"type": "tool_use", "tool_use": {"name": "get_changed_files", "output": "[]"}},
+				{"type": "finding", "finding": {"filepath": "api.go", "line_start": 5, "line_end": 5, "content": "SQL injection risk"}},
+				{"type": "resolved", "resolved_id": "old-comment"},
+				{"type": "chunk", "content": "Review complete."}
+			]`,
+			contains: []string{
+				"Agent Commentary",
+				"Starting review",
+				"Review complete",
+				"Comments Made",
+				"api.go:5-5: SQL injection risk",
+				"Comments Resolved: 1",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatTranscriptForPrompt(tt.input)
+
+			if tt.empty {
+				if result != "" {
+					t.Errorf("Expected empty result, got %q", result)
+				}
+				return
+			}
+
+			for _, want := range tt.contains {
+				if !contains(result, want) {
+					t.Errorf("Result should contain %q, got:\n%s", want, result)
+				}
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildPrompt_Rereview(t *testing.T) {
+	testStore := createTestStore(t)
+	defer testStore.Close()
+
+	reviewer := New(testStore)
+
+	// Test basic prompt (no re-review)
+	config := ReviewConfig{
+		Branch:     "feature-branch",
+		BaseBranch: "main",
+		IsRereview: false,
+	}
+
+	prompt := reviewer.buildPrompt(config, nil)
+
+	if !containsSubstring(prompt, "feature-branch") {
+		t.Error("Prompt should contain branch name")
+	}
+	if !containsSubstring(prompt, "main") {
+		t.Error("Prompt should contain base branch name")
+	}
+	if containsSubstring(prompt, "FOLLOW-UP") {
+		t.Error("Non-rereview prompt should not contain FOLLOW-UP")
+	}
+
+	// Test re-review prompt with context
+	config = ReviewConfig{
+		Branch:        "feature-branch",
+		BaseBranch:    "main",
+		IsRereview:    true,
+		LastReviewSHA: "abc123",
+		PreviousTranscript: `[
+			{"type": "chunk", "content": "Found issues with error handling."},
+			{"type": "finding", "finding": {"filepath": "main.go", "line_start": 10, "line_end": 10, "content": "Add error check"}}
+		]`,
+	}
+
+	prompt = reviewer.buildPrompt(config, nil)
+
+	if !containsSubstring(prompt, "FOLLOW-UP") {
+		t.Error("Re-review prompt should contain FOLLOW-UP")
+	}
+	if !containsSubstring(prompt, "abc123") {
+		t.Error("Re-review prompt should contain last review SHA")
+	}
+	if !containsSubstring(prompt, "Previous Review Summary") {
+		t.Error("Re-review prompt should contain previous review summary")
+	}
+	if !containsSubstring(prompt, "Found issues with error handling") {
+		t.Error("Re-review prompt should contain previous agent commentary")
+	}
+	if !containsSubstring(prompt, "main.go:10-10: Add error check") {
+		t.Error("Re-review prompt should contain previous findings")
+	}
+
+	// Test re-review prompt with unresolved comments
+	unresolvedComments := []*store.ReviewComment{
+		{
+			ID:        "comment-123",
+			Filepath:  "api.go",
+			LineStart: 25,
+			LineEnd:   30,
+			Content:   "SQL injection vulnerability",
+			Author:    "agent",
+		},
+		{
+			ID:        "comment-456",
+			Filepath:  "main.go",
+			LineStart: 5,
+			LineEnd:   5,
+			Content:   "Missing nil check",
+			Author:    "user",
+		},
+	}
+
+	prompt = reviewer.buildPrompt(config, unresolvedComments)
+
+	if !containsSubstring(prompt, "Unresolved Comments") {
+		t.Error("Re-review prompt should contain unresolved comments section")
+	}
+	if !containsSubstring(prompt, "comment-123") {
+		t.Error("Re-review prompt should contain comment ID")
+	}
+	if !containsSubstring(prompt, "SQL injection vulnerability") {
+		t.Error("Re-review prompt should contain comment content")
+	}
+	if !containsSubstring(prompt, "api.go:25-30") {
+		t.Error("Re-review prompt should contain comment location")
+	}
+}

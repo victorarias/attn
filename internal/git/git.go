@@ -65,6 +65,17 @@ func getCurrentBranch(dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// GetHeadCommit returns the full SHA of the HEAD commit
+func GetHeadCommit(dir string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func getWorktreeInfo(dir string) (mainRepo string, isWorktree bool) {
 	// Get the git dir
 	cmd := exec.Command("git", "rev-parse", "--git-dir")

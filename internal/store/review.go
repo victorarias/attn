@@ -296,6 +296,112 @@ func (s *Store) DeleteComment(id string) error {
 	return err
 }
 
+// ReviewerSession represents a single execution of the reviewer agent
+type ReviewerSession struct {
+	ID          string
+	ReviewID    string
+	CommitSHA   string
+	Transcript  string // JSON array of events
+	StartedAt   time.Time
+	CompletedAt *time.Time
+}
+
+// CreateReviewSession creates a new reviewer session
+func (s *Store) CreateReviewSession(reviewID, commitSHA string) (*ReviewerSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	session := &ReviewerSession{
+		ID:        uuid.New().String(),
+		ReviewID:  reviewID,
+		CommitSHA: commitSHA,
+		StartedAt: now,
+	}
+
+	// Use RFC3339Nano for sub-second precision in ordering
+	_, err := s.db.Exec(`
+		INSERT INTO reviewer_sessions (id, review_id, commit_sha, transcript, started_at)
+		VALUES (?, ?, ?, '[]', ?)
+	`, session.ID, session.ReviewID, session.CommitSHA, now.Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+
+	return session, nil
+}
+
+// UpdateReviewSessionTranscript updates the transcript for a session
+func (s *Store) UpdateReviewSessionTranscript(sessionID, transcript string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`UPDATE reviewer_sessions SET transcript = ? WHERE id = ?`, transcript, sessionID)
+	return err
+}
+
+// CompleteReviewSession marks a session as complete
+func (s *Store) CompleteReviewSession(sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Use RFC3339Nano for sub-second precision in ordering
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.Exec(`UPDATE reviewer_sessions SET completed_at = ? WHERE id = ?`, now, sessionID)
+	return err
+}
+
+// GetLastReviewSession returns the most recent completed session for a review
+func (s *Store) GetLastReviewSession(reviewID string) (*ReviewerSession, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var session ReviewerSession
+	var startedAt string
+	var completedAt sql.NullString
+
+	err := s.db.QueryRow(`
+		SELECT id, review_id, commit_sha, transcript, started_at, completed_at
+		FROM reviewer_sessions
+		WHERE review_id = ? AND completed_at IS NOT NULL
+		ORDER BY completed_at DESC, started_at DESC
+		LIMIT 1
+	`, reviewID).Scan(&session.ID, &session.ReviewID, &session.CommitSHA, &session.Transcript, &startedAt, &completedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	session.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+	if completedAt.Valid {
+		t, _ := time.Parse(time.RFC3339Nano, completedAt.String)
+		session.CompletedAt = &t
+	}
+
+	return &session, nil
+}
+
+// PruneReviewSessions keeps only the last N completed sessions per review
+func (s *Store) PruneReviewSessions(reviewID string, keepCount int) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Delete sessions beyond the keepCount most recent completed ones
+	result, err := s.db.Exec(`
+		DELETE FROM reviewer_sessions
+		WHERE review_id = ? AND id NOT IN (
+			SELECT id FROM reviewer_sessions
+			WHERE review_id = ? AND completed_at IS NOT NULL
+			ORDER BY completed_at DESC
+			LIMIT ?
+		)
+	`, reviewID, reviewID, keepCount)
+	if err != nil {
+		return 0, err
+	}
+
+	return result.RowsAffected()
+}
+
 func scanComments(rows *sql.Rows) ([]*ReviewComment, error) {
 	var comments []*ReviewComment
 	for rows.Next() {

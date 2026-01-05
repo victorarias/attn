@@ -41,12 +41,13 @@ type Reviewer interface {
 
 // ReviewerConfig matches reviewer.ReviewConfig
 type ReviewerConfig struct {
-	RepoPath      string
-	Branch        string
-	BaseBranch    string
-	ReviewID      string
-	IsRereview    bool
-	LastReviewSHA string
+	RepoPath           string
+	Branch             string
+	BaseBranch         string
+	ReviewID           string
+	IsRereview         bool
+	LastReviewSHA      string
+	PreviousTranscript string
 }
 
 // ReviewerEvent matches reviewer.ReviewEvent

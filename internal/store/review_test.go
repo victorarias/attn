@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestGetOrCreateReview(t *testing.T) {
@@ -268,5 +269,97 @@ func TestReviewComments(t *testing.T) {
 	}
 	if len(comments) != 0 {
 		t.Errorf("expected 0 comments after delete, got %d", len(comments))
+	}
+}
+
+func TestReviewerSessions(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	// Create a review first
+	review, err := store.GetOrCreateReview("/test/repo", "feature-branch")
+	if err != nil {
+		t.Fatalf("failed to create review: %v", err)
+	}
+
+	// Test CreateReviewSession
+	session, err := store.CreateReviewSession(review.ID, "abc123def456")
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	if session.ID == "" {
+		t.Error("session ID should not be empty")
+	}
+	if session.ReviewID != review.ID {
+		t.Errorf("expected review ID %s, got %s", review.ID, session.ReviewID)
+	}
+	if session.CommitSHA != "abc123def456" {
+		t.Errorf("expected commit SHA 'abc123def456', got %s", session.CommitSHA)
+	}
+	if session.StartedAt.IsZero() {
+		t.Error("StartedAt should not be zero")
+	}
+
+	// Test GetLastReviewSession - should fail (session not completed)
+	_, err = store.GetLastReviewSession(review.ID)
+	if err == nil {
+		t.Error("expected error for incomplete session")
+	}
+
+	// Test UpdateReviewSessionTranscript
+	transcript := `[{"type": "chunk", "content": "Test review"}]`
+	err = store.UpdateReviewSessionTranscript(session.ID, transcript)
+	if err != nil {
+		t.Fatalf("failed to update transcript: %v", err)
+	}
+
+	// Test CompleteReviewSession
+	err = store.CompleteReviewSession(session.ID)
+	if err != nil {
+		t.Fatalf("failed to complete session: %v", err)
+	}
+
+	// Test GetLastReviewSession - should succeed now
+	lastSession, err := store.GetLastReviewSession(review.ID)
+	if err != nil {
+		t.Fatalf("failed to get last session: %v", err)
+	}
+	if lastSession.ID != session.ID {
+		t.Errorf("expected session ID %s, got %s", session.ID, lastSession.ID)
+	}
+	if lastSession.Transcript != transcript {
+		t.Errorf("expected transcript %s, got %s", transcript, lastSession.Transcript)
+	}
+	if lastSession.CompletedAt == nil {
+		t.Error("CompletedAt should not be nil")
+	}
+
+	// Create another session (with small delay to ensure different completion time)
+	time.Sleep(10 * time.Millisecond)
+	session2, err := store.CreateReviewSession(review.ID, "def789ghi012")
+	if err != nil {
+		t.Fatalf("failed to create second session: %v", err)
+	}
+
+	transcript2 := `[{"type": "chunk", "content": "Second review"}]`
+	err = store.UpdateReviewSessionTranscript(session2.ID, transcript2)
+	if err != nil {
+		t.Fatalf("failed to update second transcript: %v", err)
+	}
+	err = store.CompleteReviewSession(session2.ID)
+	if err != nil {
+		t.Fatalf("failed to complete second session: %v", err)
+	}
+
+	// GetLastReviewSession should return the most recent one
+	latestSession, err := store.GetLastReviewSession(review.ID)
+	if err != nil {
+		t.Fatalf("failed to get latest session: %v", err)
+	}
+	if latestSession.ID != session2.ID {
+		t.Errorf("expected latest session ID %s, got %s", session2.ID, latestSession.ID)
+	}
+	if latestSession.CommitSHA != "def789ghi012" {
+		t.Errorf("expected commit SHA 'def789ghi012', got %s", latestSession.CommitSHA)
 	}
 }

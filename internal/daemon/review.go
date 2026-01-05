@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/reviewer"
 	"github.com/victorarias/attn/internal/store"
@@ -164,12 +166,13 @@ type realReviewerAdapter struct {
 
 func (a *realReviewerAdapter) Run(ctx context.Context, config ReviewerConfig, onEvent func(ReviewerEvent)) error {
 	realConfig := reviewer.ReviewConfig{
-		RepoPath:      config.RepoPath,
-		Branch:        config.Branch,
-		BaseBranch:    config.BaseBranch,
-		ReviewID:      config.ReviewID,
-		IsRereview:    config.IsRereview,
-		LastReviewSHA: config.LastReviewSHA,
+		RepoPath:           config.RepoPath,
+		Branch:             config.Branch,
+		BaseBranch:         config.BaseBranch,
+		ReviewID:           config.ReviewID,
+		IsRereview:         config.IsRereview,
+		LastReviewSHA:      config.LastReviewSHA,
+		PreviousTranscript: config.PreviousTranscript,
 	}
 
 	return a.r.Run(ctx, realConfig, func(event reviewer.ReviewEvent) {
@@ -202,10 +205,57 @@ func (a *realReviewerAdapter) Run(ctx context.Context, config ReviewerConfig, on
 	})
 }
 
+// transcriptEvent is a simplified event for storage in the transcript
+type transcriptEvent struct {
+	Type       string                 `json:"type"`
+	Content    string                 `json:"content,omitempty"`
+	ToolUse    *transcriptToolUse     `json:"tool_use,omitempty"`
+	Finding    *transcriptFinding     `json:"finding,omitempty"`
+	ResolvedID string                 `json:"resolved_id,omitempty"`
+}
+
+type transcriptToolUse struct {
+	Name   string                 `json:"name"`
+	Input  map[string]interface{} `json:"input,omitempty"`
+	Output string                 `json:"output,omitempty"`
+}
+
+type transcriptFinding struct {
+	Filepath  string `json:"filepath"`
+	LineStart int    `json:"line_start"`
+	LineEnd   int    `json:"line_end"`
+	Content   string `json:"content"`
+}
+
 // runReview executes a code review using the real reviewer agent
 func (d *Daemon) runReview(ctx context.Context, client *wsClient, msg *protocol.StartReviewMessage) {
 	reviewID := msg.ReviewID
 	d.logf("runReview called for reviewID=%s repoPath=%s", reviewID, msg.RepoPath)
+
+	// Get current HEAD commit for session tracking
+	commitSHA, err := git.GetHeadCommit(msg.RepoPath)
+	if err != nil {
+		d.logf("Failed to get HEAD commit: %v", err)
+		commitSHA = "unknown"
+	}
+
+	// Check for previous session (re-review detection)
+	var isRereview bool
+	var lastReviewSHA string
+	var previousTranscript string
+	prevSession, err := d.store.GetLastReviewSession(reviewID)
+	if err == nil && prevSession != nil {
+		isRereview = true
+		lastReviewSHA = prevSession.CommitSHA
+		previousTranscript = prevSession.Transcript
+		d.logf("Detected re-review: last session was at commit %s (transcript: %d bytes)", lastReviewSHA, len(previousTranscript))
+	}
+
+	// Create a new session to track this review
+	session, err := d.store.CreateReviewSession(reviewID, commitSHA)
+	if err != nil {
+		d.logf("Failed to create review session: %v", err)
+	}
 
 	// Create reviewer agent
 	// Priority: 1) factory (for unit tests), 2) env var mock (for E2E), 3) real reviewer
@@ -221,16 +271,55 @@ func (d *Daemon) runReview(ctx context.Context, client *wsClient, msg *protocol.
 
 	// Configure the review
 	config := ReviewerConfig{
-		RepoPath:   msg.RepoPath,
-		Branch:     msg.Branch,
-		BaseBranch: msg.BaseBranch,
-		ReviewID:   reviewID,
+		RepoPath:           msg.RepoPath,
+		Branch:             msg.Branch,
+		BaseBranch:         msg.BaseBranch,
+		ReviewID:           reviewID,
+		IsRereview:         isRereview,
+		LastReviewSHA:      lastReviewSHA,
+		PreviousTranscript: previousTranscript,
 	}
 
+	// Transcript accumulator
+	var transcript []transcriptEvent
+
 	// Run the review with event callback
-	d.logf("Calling agent.Run for reviewID=%s", reviewID)
-	err := agent.Run(ctx, config, func(event ReviewerEvent) {
+	d.logf("Calling agent.Run for reviewID=%s (isRereview=%v)", reviewID, isRereview)
+	err = agent.Run(ctx, config, func(event ReviewerEvent) {
 		d.logf("Review event: type=%s", event.Type)
+
+		// Capture event for transcript (skip started/complete/error/cancelled - they're metadata)
+		switch event.Type {
+		case "chunk":
+			transcript = append(transcript, transcriptEvent{Type: "chunk", Content: event.Content})
+		case "tool_use":
+			// Store only tool name for debugging - skip input/output to avoid bloat
+			// (get_diff output can be megabytes)
+			if event.ToolUse != nil {
+				transcript = append(transcript, transcriptEvent{
+					Type: "tool_use",
+					ToolUse: &transcriptToolUse{
+						Name: event.ToolUse.Name,
+					},
+				})
+			}
+		case "finding":
+			if event.Finding != nil {
+				transcript = append(transcript, transcriptEvent{
+					Type: "finding",
+					Finding: &transcriptFinding{
+						Filepath:  event.Finding.Filepath,
+						LineStart: event.Finding.LineStart,
+						LineEnd:   event.Finding.LineEnd,
+						Content:   event.Finding.Content,
+					},
+				})
+			}
+		case "resolved":
+			transcript = append(transcript, transcriptEvent{Type: "resolved", ResolvedID: event.ResolvedID})
+		}
+
+		// Forward event to client
 		switch event.Type {
 		case "started":
 			d.sendToClient(client, map[string]interface{}{
@@ -342,5 +431,28 @@ func (d *Daemon) runReview(ctx context.Context, client *wsClient, msg *protocol.
 	d.logf("agent.Run completed for reviewID=%s, err=%v", reviewID, err)
 	if err != nil && err != context.Canceled {
 		d.logf("Review error: %v", err)
+	}
+
+	// Save transcript and mark session complete
+	if session != nil && len(transcript) > 0 {
+		transcriptJSON, jsonErr := json.Marshal(transcript)
+		if jsonErr != nil {
+			d.logf("Failed to marshal transcript: %v", jsonErr)
+		} else {
+			if updateErr := d.store.UpdateReviewSessionTranscript(session.ID, string(transcriptJSON)); updateErr != nil {
+				d.logf("Failed to save transcript: %v", updateErr)
+			}
+		}
+		if completeErr := d.store.CompleteReviewSession(session.ID); completeErr != nil {
+			d.logf("Failed to mark session complete: %v", completeErr)
+		}
+		d.logf("Saved transcript with %d events for session %s", len(transcript), session.ID)
+
+		// Prune old sessions (keep last 5)
+		if pruned, pruneErr := d.store.PruneReviewSessions(reviewID, 5); pruneErr != nil {
+			d.logf("Failed to prune old sessions: %v", pruneErr)
+		} else if pruned > 0 {
+			d.logf("Pruned %d old review sessions", pruned)
+		}
 	}
 }

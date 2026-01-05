@@ -135,6 +135,15 @@ var migrations = []migration{
 		ALTER TABLE review_comments ADD COLUMN resolved_by TEXT NOT NULL DEFAULT '';
 		ALTER TABLE review_comments ADD COLUMN resolved_at TEXT NOT NULL DEFAULT '';
 	`},
+	{16, "create reviewer_sessions table", `CREATE TABLE IF NOT EXISTS reviewer_sessions (
+		id TEXT PRIMARY KEY,
+		review_id TEXT NOT NULL,
+		commit_sha TEXT NOT NULL,
+		transcript TEXT NOT NULL,
+		started_at TEXT NOT NULL,
+		completed_at TEXT,
+		FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
+	)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
