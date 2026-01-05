@@ -1,5 +1,5 @@
 import { test as base, expect } from '@playwright/test';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import * as http from 'http';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -131,6 +131,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
       ATTN_WS_PORT: TEST_DAEMON_PORT, // Use test port to avoid conflicts with production daemon
       ATTN_SOCKET_PATH: socketPath, // Test isolation: separate socket
       ATTN_DB_PATH: dbPath, // Test isolation: separate database
+      ATTN_MOCK_REVIEWER: '1', // Use mock reviewer for predictable E2E tests
       GITHUB_API_URL: ghUrl,
       GITHUB_TOKEN: 'test-token',
     },
@@ -236,11 +237,41 @@ async function updateSessionState(
   });
 }
 
+// Create a temporary git repo with uncommitted changes for testing
+async function createTestGitRepo(): Promise<{ repoPath: string; cleanup: () => void }> {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-test-repo-'));
+
+  // Initialize git repo
+  execSync('git init', { cwd: repoPath, stdio: 'pipe' });
+  execSync('git config user.email "test@test.com"', { cwd: repoPath, stdio: 'pipe' });
+  execSync('git config user.name "Test User"', { cwd: repoPath, stdio: 'pipe' });
+
+  // Create initial commit
+  fs.writeFileSync(path.join(repoPath, 'example.go'), 'package main\n\nfunc main() {\n}\n');
+  execSync('git add .', { cwd: repoPath, stdio: 'pipe' });
+  execSync('git commit -m "Initial commit"', { cwd: repoPath, stdio: 'pipe' });
+
+  // Create uncommitted changes
+  fs.writeFileSync(path.join(repoPath, 'example.go'), 'package main\n\nfunc main() {\n\tfmt.Println("Hello")\n}\n');
+
+  return {
+    repoPath,
+    cleanup: () => {
+      try {
+        fs.rmSync(repoPath, { recursive: true, force: true });
+      } catch (err) {
+        console.warn(`Failed to cleanup test repo: ${err}`);
+      }
+    },
+  };
+}
+
 // Export fixtures
 type DaemonFixture = {
   start: () => Promise<{ wsUrl: string; socketPath: string }>;
   injectSession: (s: { id: string; label: string; state: string; directory?: string }) => Promise<void>;
   updateSessionState: (id: string, state: string) => Promise<void>;
+  createTestRepo: () => Promise<{ repoPath: string; cleanup: () => void }>;
 };
 
 type Fixtures = {
@@ -322,6 +353,9 @@ export const test = base.extend<Fixtures>({
       updateSessionState: async (id, state) => {
         if (!socketPath) throw new Error('Daemon not started');
         await updateSessionState(socketPath, id, state);
+      },
+      createTestRepo: async () => {
+        return createTestGitRepo();
       },
     };
 

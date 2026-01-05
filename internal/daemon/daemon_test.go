@@ -327,18 +327,28 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 		t.Fatalf("Write approve command error: %v", err)
 	}
 
-	// Read response
-	_, responseData, err := conn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read response error: %v", err)
-	}
-	t.Logf("Response: %s", string(responseData))
-
-	// Parse response
+	// Read responses until we get pr_action_result (prs_updated may come first due to background polling)
 	var response protocol.PRActionResultMessage
-	err = json.Unmarshal(responseData, &response)
-	if err != nil {
-		t.Fatalf("Unmarshal response error: %v", err)
+	for i := 0; i < 10; i++ {
+		_, responseData, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("Read response error: %v", err)
+		}
+		t.Logf("Response %d: %s", i+1, string(responseData))
+
+		// Check if this is the pr_action_result event
+		var eventCheck struct {
+			Event string `json:"event"`
+		}
+		json.Unmarshal(responseData, &eventCheck)
+		if eventCheck.Event == "pr_action_result" {
+			err = json.Unmarshal(responseData, &response)
+			if err != nil {
+				t.Fatalf("Unmarshal response error: %v", err)
+			}
+			break
+		}
+		// Otherwise it's probably prs_updated from background polling, continue reading
 	}
 
 	// Verify response

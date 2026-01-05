@@ -2,10 +2,13 @@ package daemon
 
 import (
 	"context"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/reviewer"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // activeReviews tracks running review sessions for cancellation
@@ -13,6 +16,99 @@ var (
 	activeReviews   = make(map[string]context.CancelFunc)
 	activeReviewsMu sync.Mutex
 )
+
+// e2eMockReviewer is used for E2E testing when ATTN_MOCK_REVIEWER=1
+// It sends predictable events for automated testing
+type e2eMockReviewer struct {
+	store *store.Store
+}
+
+func (m *e2eMockReviewer) Run(ctx context.Context, config ReviewerConfig, onEvent func(ReviewerEvent)) error {
+	// Send started event
+	onEvent(ReviewerEvent{Type: "started"})
+
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		onEvent(ReviewerEvent{Type: "cancelled"})
+		return ctx.Err()
+	default:
+	}
+
+	// Simulate tool call
+	onEvent(ReviewerEvent{
+		Type: "tool_use",
+		ToolUse: &ReviewerToolUse{
+			Name:   "get_changed_files",
+			Input:  map[string]interface{}{},
+			Output: `[{"path": "example.go", "status": "modified"}]`,
+		},
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Send some text chunks
+	onEvent(ReviewerEvent{Type: "chunk", Content: "Reviewing changes...\n\n"})
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Another tool call
+	onEvent(ReviewerEvent{
+		Type: "tool_use",
+		ToolUse: &ReviewerToolUse{
+			Name:   "get_diff",
+			Input:  map[string]interface{}{"paths": []string{"example.go"}},
+			Output: "diff --git a/example.go...",
+		},
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	onEvent(ReviewerEvent{Type: "chunk", Content: "Found some issues in the code.\n\n"})
+
+	// Check for cancellation mid-review
+	select {
+	case <-ctx.Done():
+		onEvent(ReviewerEvent{Type: "cancelled"})
+		return ctx.Err()
+	default:
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Create a comment via store and send finding
+	comment, _ := m.store.AddComment(config.ReviewID, "example.go", 10, 10, "Consider adding error handling here", "agent")
+	if comment != nil {
+		onEvent(ReviewerEvent{
+			Type: "finding",
+			Finding: &ReviewerFinding{
+				Filepath:  "example.go",
+				LineStart: 10,
+				LineEnd:   10,
+				Content:   "Consider adding error handling here",
+				Severity:  "warning",
+				CommentID: comment.ID,
+			},
+		})
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Final summary
+	onEvent(ReviewerEvent{Type: "chunk", Content: "## Summary\n\nFound 1 issue that needs attention."})
+
+	// Check for final cancellation
+	select {
+	case <-ctx.Done():
+		onEvent(ReviewerEvent{Type: "cancelled"})
+		return ctx.Err()
+	default:
+	}
+
+	// Send complete event
+	onEvent(ReviewerEvent{Type: "complete", Success: true})
+	return nil
+}
 
 // handleStartReview starts a review agent for the given branch
 // For the walking skeleton, this sends hardcoded fake streaming events
@@ -111,10 +207,14 @@ func (d *Daemon) runReview(ctx context.Context, client *wsClient, msg *protocol.
 	reviewID := msg.ReviewID
 	d.logf("runReview called for reviewID=%s repoPath=%s", reviewID, msg.RepoPath)
 
-	// Create reviewer agent (use factory if provided, otherwise real reviewer)
+	// Create reviewer agent
+	// Priority: 1) factory (for unit tests), 2) env var mock (for E2E), 3) real reviewer
 	var agent Reviewer
 	if d.reviewerFactory != nil {
 		agent = d.reviewerFactory(d.store)
+	} else if os.Getenv("ATTN_MOCK_REVIEWER") == "1" {
+		d.logf("Using mock reviewer for E2E testing")
+		agent = &e2eMockReviewer{store: d.store}
 	} else {
 		agent = &realReviewerAdapter{r: reviewer.New(d.store).WithLogger(d.logf)}
 	}
