@@ -171,12 +171,22 @@ test.describe('Reviewer Agent', () => {
     // - 1 from paragraph "test-file.md:25"
     expect(clickableCount).toBeGreaterThanOrEqual(3);
 
-    // Test clicking a table filename
+    // Test clicking a table filename - verify it navigates and shows diff
     const tableFilename = page.locator('.reviewer-output-content table .file-reference.clickable').first();
     await expect(tableFilename).toBeVisible({ timeout: 2000 });
+    const clickedFileName = await tableFilename.textContent();
+    console.log('[Test] Clicking file reference:', clickedFileName);
+
     await tableFilename.click();
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(300);
+
+    // Verify the file is selected AND diff content is shown
     await expect(fileItem).toHaveClass(/selected/);
+    // Verify the diff viewer is showing content (CodeMirror content)
+    const diffContent = page.locator('.cm-content');
+    await expect(diffContent).toBeVisible({ timeout: 2000 });
+    const diffText = await diffContent.textContent();
+    console.log('[Test] Diff viewer shows content:', diffText?.substring(0, 100));
 
     // Test clicking a paragraph filename (the one with :25 line reference)
     const paragraphRefs = page.locator('.reviewer-output-content p .file-reference.clickable');
