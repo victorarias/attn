@@ -45,6 +45,7 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   review_id?: string;
   content?: string;
   finding?: ReviewFinding;
+  comment_id?: string;
 };
 
 export interface RateLimitState {
@@ -54,7 +55,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '15';
+const PROTOCOL_VERSION = '16';
 
 interface PRActionResult {
   success: boolean;
@@ -204,6 +205,7 @@ export interface ReviewerCallbacks {
   onReviewStarted?: (reviewId: string) => void;
   onReviewChunk?: (reviewId: string, content: string) => void;
   onReviewFinding?: (reviewId: string, finding: ReviewFinding, comment?: ReviewComment) => void;
+  onReviewCommentResolved?: (reviewId: string, commentId: string) => void;
   onReviewComplete?: (reviewId: string, success: boolean, error?: string) => void;
   onReviewCancelled?: (reviewId: string) => void;
 }
@@ -793,6 +795,12 @@ export function useDaemonSocket({
           case 'review_finding':
             if (data.review_id && data.finding && reviewer?.onReviewFinding) {
               reviewer.onReviewFinding(data.review_id, data.finding, data.comment);
+            }
+            break;
+
+          case 'review_comment_resolved':
+            if (data.review_id && data.comment_id && reviewer?.onReviewCommentResolved) {
+              reviewer.onReviewCommentResolved(data.review_id, data.comment_id);
             }
             break;
 

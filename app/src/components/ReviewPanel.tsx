@@ -133,6 +133,7 @@ interface ReviewPanelProps {
   sendCancelReview?: (reviewId: string) => void;
   reviewerState?: ReviewerState;
   agentComments?: ReviewComment[];
+  agentResolvedCommentIds?: string[];
 }
 
 export function ReviewPanel({
@@ -155,6 +156,7 @@ export function ReviewPanel({
   sendCancelReview,
   reviewerState,
   agentComments = [],
+  agentResolvedCommentIds = [],
 }: ReviewPanelProps) {
   // This prop is reserved for future use
   void _onSendToClaude;
@@ -301,6 +303,24 @@ export function ReviewPanel({
       return [...prev, ...newComments];
     });
   }, [agentComments]);
+
+  // Handle agent-resolved comments
+  useEffect(() => {
+    if (agentResolvedCommentIds.length === 0) return;
+
+    setAllReviewComments(prev => {
+      const resolvedSet = new Set(agentResolvedCommentIds);
+      let hasChanges = false;
+      const updated = prev.map(c => {
+        if (resolvedSet.has(c.id) && !c.resolved) {
+          hasChanges = true;
+          return { ...c, resolved: true, resolved_by: 'agent' as const };
+        }
+        return c;
+      });
+      return hasChanges ? updated : prev;
+    });
+  }, [agentResolvedCommentIds]);
 
   // Clear "changed" status when navigating away from a file
   useEffect(() => {

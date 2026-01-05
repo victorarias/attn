@@ -102,6 +102,9 @@ function App() {
   // Comments added by reviewer agent (passed to ReviewPanel)
   const [pendingAgentComments, setPendingAgentComments] = useState<import('./types/generated').ReviewComment[]>([]);
 
+  // Comment IDs resolved by reviewer agent (passed to ReviewPanel)
+  const [agentResolvedCommentIds, setAgentResolvedCommentIds] = useState<string[]>([]);
+
   // Hide loading screen on mount
   useEffect(() => {
     const loadingScreen = document.getElementById('loading-screen');
@@ -134,6 +137,7 @@ function App() {
     onReviewStarted: () => {
       setReviewerState({ isRunning: true, output: '' });
       setPendingAgentComments([]); // Clear pending comments when new review starts
+      setAgentResolvedCommentIds([]); // Clear resolved IDs when new review starts
     },
     onReviewChunk: (_reviewId: string, content: string) => {
       setReviewerState(prev => ({
@@ -147,6 +151,10 @@ function App() {
       if (comment) {
         setPendingAgentComments(prev => [...prev, comment]);
       }
+    },
+    onReviewCommentResolved: (_reviewId: string, commentId: string) => {
+      console.log('[App] Review comment resolved:', commentId);
+      setAgentResolvedCommentIds(prev => [...prev, commentId]);
     },
     onReviewComplete: (_reviewId: string, success: boolean, error?: string) => {
       setReviewerState(prev => ({
@@ -1013,6 +1021,7 @@ function App() {
         sendCancelReview={sendCancelReview}
         reviewerState={reviewerState}
         agentComments={pendingAgentComments}
+        agentResolvedCommentIds={agentResolvedCommentIds}
       />
       <ThumbsModal
         isOpen={thumbsOpen}

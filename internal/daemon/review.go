@@ -2,13 +2,10 @@ package daemon
 
 import (
 	"context"
-	"os/exec"
-	"strconv"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/reviewer"
 )
 
 // activeReviews tracks running review sessions for cancellation
@@ -45,7 +42,7 @@ func (d *Daemon) handleStartReview(client *wsClient, msg *protocol.StartReviewMe
 			activeReviewsMu.Unlock()
 		}()
 
-		d.runFakeReview(ctx, client, msg)
+		d.runReview(ctx, client, msg)
 	}()
 }
 
@@ -64,250 +61,166 @@ func (d *Daemon) handleCancelReview(client *wsClient, msg *protocol.CancelReview
 	}
 }
 
-// runFakeReview simulates a review with streaming output using real git status
-// This is the walking skeleton - will be replaced with real agent in Phase 3.3
-func (d *Daemon) runFakeReview(ctx context.Context, client *wsClient, msg *protocol.StartReviewMessage) {
-	reviewID := msg.ReviewID
+// realReviewerAdapter wraps the real reviewer to implement the Reviewer interface
+type realReviewerAdapter struct {
+	r *reviewer.Reviewer
+}
 
-	// Send review_started
-	d.sendToClient(client, map[string]interface{}{
-		"event":     protocol.EventReviewStarted,
-		"review_id": reviewID,
-	})
-
-	// Get real git status
-	status, err := getGitStatus(msg.RepoPath)
-	if err != nil || status.Error != nil {
-		d.sendToClient(client, map[string]interface{}{
-			"event":     protocol.EventReviewChunk,
-			"review_id": reviewID,
-			"content":   "⚠️ Could not access git repository\n",
-		})
-		d.sendToClient(client, map[string]interface{}{
-			"event":     protocol.EventReviewComplete,
-			"review_id": reviewID,
-			"success":   false,
-			"error":     "Failed to access git repository",
-		})
-		return
+func (a *realReviewerAdapter) Run(ctx context.Context, config ReviewerConfig, onEvent func(ReviewerEvent)) error {
+	realConfig := reviewer.ReviewConfig{
+		RepoPath:      config.RepoPath,
+		Branch:        config.Branch,
+		BaseBranch:    config.BaseBranch,
+		ReviewID:      config.ReviewID,
+		IsRereview:    config.IsRereview,
+		LastReviewSHA: config.LastReviewSHA,
 	}
 
-	// Collect all changed files, filter out lockfiles
-	var changedFiles []protocol.GitFileChange
-	skipPatterns := []string{"pnpm-lock.yaml", "package-lock.json", "yarn.lock", "go.sum", "Cargo.lock"}
-	isSkipFile := func(path string) bool {
-		for _, p := range skipPatterns {
-			if strings.HasSuffix(path, p) {
-				return true
+	return a.r.Run(ctx, realConfig, func(event reviewer.ReviewEvent) {
+		// Convert reviewer.ReviewEvent to daemon.ReviewerEvent
+		de := ReviewerEvent{
+			Type:       event.Type,
+			Content:    event.Content,
+			ResolvedID: event.ResolvedID,
+			Success:    event.Success,
+			Error:      event.Error,
+		}
+		if event.Finding != nil {
+			de.Finding = &ReviewerFinding{
+				Filepath:  event.Finding.Filepath,
+				LineStart: event.Finding.LineStart,
+				LineEnd:   event.Finding.LineEnd,
+				Content:   event.Finding.Content,
+				Severity:  event.Finding.Severity,
+				CommentID: event.Finding.CommentID,
 			}
 		}
-		return false
-	}
-
-	for _, f := range status.Staged {
-		if !isSkipFile(f.Path) {
-			changedFiles = append(changedFiles, f)
-		}
-	}
-	for _, f := range status.Unstaged {
-		if !isSkipFile(f.Path) {
-			changedFiles = append(changedFiles, f)
-		}
-	}
-
-	// Simulate streaming chunks with delays
-	chunks := []string{
-		"## Reviewing branch `" + msg.Branch + "`\n\n",
-		"Analyzing changes against `" + msg.BaseBranch + "`...\n\n",
-	}
-
-	for _, chunk := range chunks {
-		select {
-		case <-ctx.Done():
-			return // Review was cancelled
-		case <-time.After(200 * time.Millisecond):
-			d.sendToClient(client, map[string]interface{}{
-				"event":     protocol.EventReviewChunk,
-				"review_id": reviewID,
-				"content":   chunk,
-			})
-		}
-	}
-
-	if len(changedFiles) == 0 {
-		d.sendToClient(client, map[string]interface{}{
-			"event":     protocol.EventReviewChunk,
-			"review_id": reviewID,
-			"content":   "No files to review (only lockfiles changed).\n",
-		})
-		d.sendToClient(client, map[string]interface{}{
-			"event":     protocol.EventReviewComplete,
-			"review_id": reviewID,
-			"success":   true,
-		})
-		return
-	}
-
-	// Send file count
-	d.sendToClient(client, map[string]interface{}{
-		"event":     protocol.EventReviewChunk,
-		"review_id": reviewID,
-		"content":   "Found **" + strconv.Itoa(len(changedFiles)) + " files** to review.\n\n### Findings\n\n",
-	})
-
-	// Generate findings for the first file (or first few)
-	var findings []protocol.ReviewFinding
-	for i, file := range changedFiles {
-		if i >= 2 {
-			break // Max 2 findings for the mock
-		}
-
-		// Get the first modified line number from git diff
-		lineNum := getFirstModifiedLine(msg.RepoPath, file.Path)
-		if lineNum == 0 {
-			lineNum = 1 // Fallback
-		}
-
-		// Generate a mock finding based on file extension
-		content := generateMockFinding(file.Path)
-		severity := "suggestion"
-		if i == 0 {
-			severity = "warning"
-		}
-
-		findings = append(findings, protocol.ReviewFinding{
-			Filepath:  file.Path,
-			LineStart: lineNum,
-			LineEnd:   lineNum,
-			Content:   content,
-			Severity:  protocol.Ptr(severity),
-		})
-	}
-
-	for i, finding := range findings {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(400 * time.Millisecond):
-			// Create comment in SQLite first so we have the ID
-			comment, err := d.store.AddComment(reviewID, finding.Filepath, finding.LineStart, finding.LineEnd, finding.Content, "agent")
-			if err != nil {
-				d.logf("Error adding comment from finding: %v", err)
-				continue
-			}
-			d.logf("Created comment %d for finding in %s:%d", i+1, finding.Filepath, finding.LineStart)
-
-			// Send finding event with the created comment
-			d.sendToClient(client, map[string]interface{}{
-				"event":     protocol.EventReviewFinding,
-				"review_id": reviewID,
-				"finding":   finding,
-				"comment":   comment, // Include the full comment with ID
-			})
-
-			// Also send a chunk describing the finding
-			d.sendToClient(client, map[string]interface{}{
-				"event":     protocol.EventReviewChunk,
-				"review_id": reviewID,
-				"content":   "**" + finding.Filepath + ":" + itoa(finding.LineStart) + "** - " + finding.Content + "\n\n",
-			})
-		}
-	}
-
-	// Final chunk
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(200 * time.Millisecond):
-		d.sendToClient(client, map[string]interface{}{
-			"event":     protocol.EventReviewChunk,
-			"review_id": reviewID,
-			"content":   "\n---\n\nReview complete. Found **" + strconv.Itoa(len(findings)) + " issues** that need attention.\n",
-		})
-	}
-
-	// Send review_complete
-	d.sendToClient(client, map[string]interface{}{
-		"event":     protocol.EventReviewComplete,
-		"review_id": reviewID,
-		"success":   true,
+		onEvent(de)
 	})
 }
 
-// getFirstModifiedLine returns the first added/modified line number from git diff
-func getFirstModifiedLine(repoPath, filePath string) int {
-	// Try unstaged diff first, then staged
-	for _, cached := range []bool{false, true} {
-		args := []string{"diff", "--unified=0"}
-		if cached {
-			args = append(args, "--cached")
-		}
-		args = append(args, "--", filePath)
+// runReview executes a code review using the real reviewer agent
+func (d *Daemon) runReview(ctx context.Context, client *wsClient, msg *protocol.StartReviewMessage) {
+	reviewID := msg.ReviewID
+	d.logf("runReview called for reviewID=%s repoPath=%s", reviewID, msg.RepoPath)
 
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repoPath
-		output, err := cmd.Output()
-		if err != nil {
-			continue
-		}
+	// Create reviewer agent (use factory if provided, otherwise real reviewer)
+	var agent Reviewer
+	if d.reviewerFactory != nil {
+		agent = d.reviewerFactory(d.store)
+	} else {
+		agent = &realReviewerAdapter{r: reviewer.New(d.store).WithLogger(d.logf)}
+	}
 
-		// Parse diff output for @@ -X,Y +A,B @@ lines
-		for _, line := range strings.Split(string(output), "\n") {
-			if strings.HasPrefix(line, "@@") {
-				// Extract the +A part (new file line number)
-				parts := strings.Split(line, "+")
-				if len(parts) >= 2 {
-					numPart := strings.Split(parts[1], ",")[0]
-					numPart = strings.TrimSpace(numPart)
-					if n, err := strconv.Atoi(numPart); err == nil && n > 0 {
-						return n
+	// Configure the review
+	config := ReviewerConfig{
+		RepoPath:   msg.RepoPath,
+		Branch:     msg.Branch,
+		BaseBranch: msg.BaseBranch,
+		ReviewID:   reviewID,
+	}
+
+	// Run the review with event callback
+	d.logf("Calling agent.Run for reviewID=%s", reviewID)
+	err := agent.Run(ctx, config, func(event ReviewerEvent) {
+		d.logf("Review event: type=%s", event.Type)
+		switch event.Type {
+		case "started":
+			d.sendToClient(client, map[string]interface{}{
+				"event":     protocol.EventReviewStarted,
+				"review_id": reviewID,
+			})
+
+		case "chunk":
+			d.sendToClient(client, map[string]interface{}{
+				"event":     protocol.EventReviewChunk,
+				"review_id": reviewID,
+				"content":   event.Content,
+			})
+
+		case "finding":
+			if event.Finding != nil {
+				// Fetch the comment that was created by the MCP tool
+				comments, _ := d.store.GetComments(reviewID)
+				var comment *protocol.ReviewComment
+				for _, c := range comments {
+					if c.ID == event.Finding.CommentID {
+						// Convert store.ReviewComment to protocol.ReviewComment
+						var resolvedAt *string
+						if c.ResolvedAt != nil {
+							t := c.ResolvedAt.Format("2006-01-02T15:04:05Z")
+							resolvedAt = &t
+						}
+						var resolvedBy *string
+						if c.ResolvedBy != "" {
+							resolvedBy = &c.ResolvedBy
+						}
+						comment = &protocol.ReviewComment{
+							ID:         c.ID,
+							ReviewID:   c.ReviewID,
+							Filepath:   c.Filepath,
+							LineStart:  c.LineStart,
+							LineEnd:    c.LineEnd,
+							Content:    c.Content,
+							Author:     c.Author,
+							Resolved:   c.Resolved,
+							ResolvedBy: resolvedBy,
+							ResolvedAt: resolvedAt,
+							CreatedAt:  c.CreatedAt.Format("2006-01-02T15:04:05Z"),
+						}
+						break
 					}
 				}
+
+				finding := protocol.ReviewFinding{
+					Filepath:  event.Finding.Filepath,
+					LineStart: event.Finding.LineStart,
+					LineEnd:   event.Finding.LineEnd,
+					Content:   event.Finding.Content,
+					Severity:  protocol.Ptr(event.Finding.Severity),
+				}
+
+				d.sendToClient(client, map[string]interface{}{
+					"event":     protocol.EventReviewFinding,
+					"review_id": reviewID,
+					"finding":   finding,
+					"comment":   comment,
+				})
 			}
+
+		case "resolved":
+			d.sendToClient(client, map[string]interface{}{
+				"event":      protocol.EventReviewCommentResolved,
+				"review_id":  reviewID,
+				"comment_id": event.ResolvedID,
+			})
+
+		case "complete":
+			d.sendToClient(client, map[string]interface{}{
+				"event":     protocol.EventReviewComplete,
+				"review_id": reviewID,
+				"success":   event.Success,
+				"error":     event.Error,
+			})
+
+		case "error":
+			d.sendToClient(client, map[string]interface{}{
+				"event":     protocol.EventReviewComplete,
+				"review_id": reviewID,
+				"success":   false,
+				"error":     event.Error,
+			})
+
+		case "cancelled":
+			d.sendToClient(client, map[string]interface{}{
+				"event":     protocol.EventReviewCancelled,
+				"review_id": reviewID,
+			})
 		}
-	}
-	return 0
-}
+	})
 
-// generateMockFinding returns a mock finding message based on file type
-func generateMockFinding(filepath string) string {
-	switch {
-	case strings.HasSuffix(filepath, ".go"):
-		return "Consider adding error handling for this operation. Unhandled errors can lead to unexpected behavior."
-	case strings.HasSuffix(filepath, ".ts") || strings.HasSuffix(filepath, ".tsx"):
-		return "This component could benefit from memoization to prevent unnecessary re-renders."
-	case strings.HasSuffix(filepath, ".css"):
-		return "Consider using CSS custom properties (variables) for this color value to improve maintainability."
-	case strings.HasSuffix(filepath, ".js") || strings.HasSuffix(filepath, ".jsx"):
-		return "This function might throw. Consider wrapping in try-catch or adding error boundary."
-	case strings.HasSuffix(filepath, ".py"):
-		return "Consider adding type hints to improve code clarity and enable better IDE support."
-	case strings.HasSuffix(filepath, ".md"):
-		return "Documentation looks good! Consider adding an example for this section."
-	default:
-		return "Review this change carefully to ensure it follows project conventions."
+	d.logf("agent.Run completed for reviewID=%s, err=%v", reviewID, err)
+	if err != nil && err != context.Canceled {
+		d.logf("Review error: %v", err)
 	}
-}
-
-// itoa converts int to string (avoiding strconv import for simplicity)
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [11]byte
-	i := len(buf)
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		i--
-		buf[i] = byte(n%10) + '0'
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
 }

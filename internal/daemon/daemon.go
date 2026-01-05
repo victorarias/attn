@@ -31,22 +31,61 @@ type repoCache struct {
 	branches  []protocol.Branch
 }
 
+// ReviewerFactory creates a reviewer for testing
+type ReviewerFactory func(*store.Store) Reviewer
+
+// Reviewer interface for code review operations
+type Reviewer interface {
+	Run(ctx context.Context, config ReviewerConfig, onEvent func(ReviewerEvent)) error
+}
+
+// ReviewerConfig matches reviewer.ReviewConfig
+type ReviewerConfig struct {
+	RepoPath      string
+	Branch        string
+	BaseBranch    string
+	ReviewID      string
+	IsRereview    bool
+	LastReviewSHA string
+}
+
+// ReviewerEvent matches reviewer.ReviewEvent
+type ReviewerEvent struct {
+	Type       string // "started", "chunk", "finding", "resolved", "complete", "error", "cancelled"
+	Content    string
+	Finding    *ReviewerFinding
+	ResolvedID string // For resolved events
+	Success    bool
+	Error      string
+}
+
+// ReviewerFinding matches reviewer.Finding
+type ReviewerFinding struct {
+	Filepath  string
+	LineStart int
+	LineEnd   int
+	Content   string
+	Severity  string
+	CommentID string
+}
+
 // Daemon manages Claude sessions
 type Daemon struct {
-	socketPath  string
-	pidPath     string
-	pidFile     *os.File // Held open with flock for exclusive access
-	store       *store.Store
-	listener    net.Listener
-	httpServer  *http.Server
-	wsHub       *wsHub
-	done        chan struct{}
-	logger      *logging.Logger
-	ghClient    github.GitHubClient
-	classifier  Classifier // Optional, uses package-level classifier.Classify if nil
-	claudePath  string     // Resolved path to claude binary (found at startup)
-	repoCaches  map[string]*repoCache
-	repoCacheMu sync.RWMutex
+	socketPath      string
+	pidPath         string
+	pidFile         *os.File // Held open with flock for exclusive access
+	store           *store.Store
+	listener        net.Listener
+	httpServer      *http.Server
+	wsHub           *wsHub
+	done            chan struct{}
+	logger          *logging.Logger
+	ghClient        github.GitHubClient
+	classifier      Classifier       // Optional, uses package-level classifier.Classify if nil
+	reviewerFactory ReviewerFactory  // Optional, creates real reviewer if nil
+	claudePath      string           // Resolved path to claude binary (found at startup)
+	repoCaches      map[string]*repoCache
+	repoCacheMu     sync.RWMutex
 }
 
 // New creates a new daemon
