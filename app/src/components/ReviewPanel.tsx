@@ -15,6 +15,57 @@ import UnifiedDiffEditor, {
 } from './UnifiedDiffEditor';
 import './ReviewPanel.css';
 
+// Regex to match file references like "path/file.ext:123" or "file.ext:10-20"
+// Matches: filename with extension, colon, line number, optional dash and end line
+const FILE_REFERENCE_REGEX = /([^\s`"'<>()[\]{}]+\.[a-zA-Z0-9]+):(\d+)(?:-(\d+))?/g;
+
+// Helper to parse text and create elements with clickable file references
+function parseFileReferences(
+  text: string,
+  onFileClick: (filepath: string, line: number) => void
+): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  // Reset regex state
+  FILE_REFERENCE_REGEX.lastIndex = 0;
+
+  while ((match = FILE_REFERENCE_REGEX.exec(text)) !== null) {
+    // Add text before the match
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+
+    const [fullMatch, filepath, lineStart] = match;
+    const line = parseInt(lineStart, 10);
+
+    // Add clickable file reference
+    parts.push(
+      <span
+        key={`${match.index}-${filepath}`}
+        className="file-reference clickable"
+        onClick={(e) => {
+          e.stopPropagation();
+          onFileClick(filepath, line);
+        }}
+        title={`Open ${filepath} at line ${lineStart}`}
+      >
+        {fullMatch}
+      </span>
+    );
+
+    lastIndex = match.index + fullMatch.length;
+  }
+
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : [text];
+}
+
 // Auto-skip patterns for lockfiles and generated files
 const AUTO_SKIP_PATTERNS = [
   'pnpm-lock.yaml',
@@ -898,8 +949,44 @@ export function ReviewPanel({
               )}
               {reviewerEvents.map((event, index) => {
                 if (event.type === 'chunk') {
+                  // Custom components that make file references clickable
+                  const handleFileClick = (filepath: string, line: number) => {
+                    setSelectedFilePath(filepath);
+                    setScrollToLine(line);
+                  };
+
+                  // Process text children to find file references
+                  const processChildren = (children: React.ReactNode): React.ReactNode => {
+                    if (typeof children === 'string') {
+                      return parseFileReferences(children, handleFileClick);
+                    }
+                    if (Array.isArray(children)) {
+                      return children.map((child, i) => {
+                        if (typeof child === 'string') {
+                          const parsed = parseFileReferences(child, handleFileClick);
+                          return parsed.length === 1 && parsed[0] === child ? child : <span key={i}>{parsed}</span>;
+                        }
+                        return child;
+                      });
+                    }
+                    return children;
+                  };
+
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const markdownComponents: any = {
+                    p: ({ children, ...props }: { children?: React.ReactNode }) => (
+                      <p {...props}>{processChildren(children)}</p>
+                    ),
+                    li: ({ children, ...props }: { children?: React.ReactNode }) => (
+                      <li {...props}>{processChildren(children)}</li>
+                    ),
+                    td: ({ children, ...props }: { children?: React.ReactNode }) => (
+                      <td {...props}>{processChildren(children)}</td>
+                    ),
+                  };
+
                   return (
-                    <ReactMarkdown key={index} remarkPlugins={[remarkGfm]}>
+                    <ReactMarkdown key={index} remarkPlugins={[remarkGfm]} components={markdownComponents}>
                       {event.content}
                     </ReactMarkdown>
                   );

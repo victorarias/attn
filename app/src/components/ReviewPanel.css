@@ -547,6 +547,20 @@
   opacity: 1;
 }
 
+/* Clickable file references in markdown output */
+.file-reference.clickable {
+  color: #3b82f6;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.file-reference.clickable:hover {
+  color: #60a5fa;
+  text-decoration-style: solid;
+}
+
 .reviewer-starting {
   color: #858585;
   font-style: italic;
