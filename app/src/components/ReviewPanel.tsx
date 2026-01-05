@@ -1,6 +1,7 @@
 // app/src/components/ReviewPanel.tsx
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../hooks/useDaemonSocket';
 import type { ReviewComment } from '../types/generated';
 import type { ReviewerEvent } from '../hooks/useDaemonSocket';
@@ -132,6 +133,8 @@ interface ReviewPanelProps {
   reviewerError?: string;
   agentComments?: ReviewComment[];
   agentResolvedCommentIds?: string[];
+  // Navigation callback - opens file in main diff overlay
+  onOpenInDiffOverlay?: (filepath: string, line?: number) => void;
 }
 
 export function ReviewPanel({
@@ -157,6 +160,7 @@ export function ReviewPanel({
   reviewerError,
   agentComments = [],
   agentResolvedCommentIds = [],
+  onOpenInDiffOverlay,
 }: ReviewPanelProps) {
   // This prop is reserved for future use
   void _onSendToClaude;
@@ -740,6 +744,8 @@ export function ReviewPanel({
                     key={file.path}
                     className={`file-item ${selectedFilePath === file.path ? 'selected' : ''} ${viewedFiles.has(file.path) ? 'viewed' : ''} ${changedSinceViewed.has(file.path) ? 'changed' : ''}`}
                     onClick={() => setSelectedFilePath(file.path)}
+                    onDoubleClick={() => onOpenInDiffOverlay?.(file.path)}
+                    title="Double-click to open in diff viewer"
                   >
                     <span className="file-icon">{getFileIcon(file)}</span>
                     <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>
@@ -770,6 +776,8 @@ export function ReviewPanel({
                     key={file.path}
                     className={`file-item auto-skip ${selectedFilePath === file.path ? 'selected' : ''}`}
                     onClick={() => setSelectedFilePath(file.path)}
+                    onDoubleClick={() => onOpenInDiffOverlay?.(file.path)}
+                    title="Double-click to open in diff viewer"
                   >
                     <span className="file-icon">{getFileIcon(file)}</span>
                     <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>
@@ -873,21 +881,31 @@ export function ReviewPanel({
               {reviewerRunning && <span className="reviewer-spinner">⟳</span>}
               {reviewerError && <span className="reviewer-error">⚠ {reviewerError}</span>}
             </div>
-            <div className="reviewer-output-content">
+            <div className="reviewer-output-content" style={{ fontSize }}>
               {reviewerEvents.length === 0 && reviewerRunning && (
                 <span className="reviewer-starting">Starting review...</span>
               )}
               {reviewerEvents.map((event, index) => {
                 if (event.type === 'chunk') {
                   return (
-                    <ReactMarkdown key={index}>
+                    <ReactMarkdown key={index} remarkPlugins={[remarkGfm]}>
                       {event.content}
                     </ReactMarkdown>
                   );
                 } else {
-                  // tool_use
+                  // tool_use - make add_comment calls clickable
+                  const isAddComment = event.name === 'add_comment';
+                  const filepath = isAddComment ? String(event.input.filepath || '') : '';
+                  const lineStart = isAddComment ? Number(event.input.line_start) || undefined : undefined;
+                  const canNavigate = isAddComment && filepath && onOpenInDiffOverlay;
+
                   return (
-                    <div key={index} className="reviewer-tool-call">
+                    <div
+                      key={index}
+                      className={`reviewer-tool-call ${canNavigate ? 'clickable' : ''}`}
+                      onClick={canNavigate ? () => onOpenInDiffOverlay(filepath, lineStart) : undefined}
+                      title={canNavigate ? `Click to open ${filepath}` : undefined}
+                    >
                       <div className="tool-call-header">
                         <span className="tool-call-icon">⏺</span>
                         <span className="tool-call-name">{event.name}</span>

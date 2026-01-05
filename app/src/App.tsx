@@ -731,6 +731,24 @@ function App() {
     setDiffOverlay({ isOpen: true, path, staged, index: Math.max(0, index) });
   }, [gitStatus]);
 
+  // Open file in diff overlay (for ReviewPanel jump-to-file)
+  const handleOpenInDiffOverlay = useCallback((filepath: string, _line?: number) => {
+    // Find file in gitStatus to determine if staged
+    const allFiles = [
+      ...(gitStatus?.staged || []).map(f => ({ ...f, staged: true })),
+      ...(gitStatus?.unstaged || []).map(f => ({ ...f, staged: false })),
+      ...(gitStatus?.untracked || []).map(f => ({ ...f, staged: false })),
+    ];
+    // Prefer unstaged version (more common for review)
+    const file = allFiles.find(f => f.path === filepath && !f.staged) ||
+                 allFiles.find(f => f.path === filepath);
+    if (file) {
+      const index = allFiles.findIndex(f => f.path === filepath && f.staged === file.staged);
+      setDiffOverlay({ isOpen: true, path: filepath, staged: file.staged, index: Math.max(0, index) });
+      // TODO: scroll to line when DiffOverlay supports it
+    }
+  }, [gitStatus]);
+
   const handleDiffClose = useCallback(() => {
     setDiffOverlay({ isOpen: false, path: '', staged: false, index: 0 });
   }, []);
@@ -1031,6 +1049,7 @@ function App() {
         reviewerError={reviewerError}
         agentComments={pendingAgentComments}
         agentResolvedCommentIds={agentResolvedCommentIds}
+        onOpenInDiffOverlay={handleOpenInDiffOverlay}
       />
       <ThumbsModal
         isOpen={thumbsOpen}

@@ -498,6 +498,30 @@
   color: #858585;
 }
 
+.reviewer-output-content table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+  font-size: inherit;
+}
+
+.reviewer-output-content th,
+.reviewer-output-content td {
+  border: 1px solid #3c3c3c;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.reviewer-output-content th {
+  background: #252526;
+  color: #e0e0e0;
+  font-weight: 600;
+}
+
+.reviewer-output-content tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
 /* Tool calls styling - muted to not overwhelm agent text */
 .reviewer-tool-call {
   margin: 6px 0;
@@ -510,6 +534,16 @@
 }
 
 .reviewer-tool-call:hover {
+  opacity: 1;
+}
+
+.reviewer-tool-call.clickable {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.reviewer-tool-call.clickable:hover {
+  background: rgba(59, 130, 246, 0.1);
   opacity: 1;
 }
 
