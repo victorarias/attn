@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,8 +11,99 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 	"nhooyr.io/websocket"
 )
+
+// mockReviewer simulates the reviewer agent for testing
+type mockReviewer struct {
+	store *store.Store
+}
+
+func (m *mockReviewer) Run(ctx context.Context, config ReviewerConfig, onEvent func(ReviewerEvent)) error {
+	// Send started event
+	onEvent(ReviewerEvent{Type: "started"})
+
+	// Check for cancellation
+	select {
+	case <-ctx.Done():
+		onEvent(ReviewerEvent{Type: "cancelled"})
+		return ctx.Err()
+	default:
+	}
+
+	// Send some chunks
+	onEvent(ReviewerEvent{Type: "chunk", Content: "Reviewing changes..."})
+	onEvent(ReviewerEvent{Type: "chunk", Content: "Found some issues."})
+
+	// Create comments in store and send findings
+	for i, file := range []string{"example.go", "handler.go"} {
+		comment, _ := m.store.AddComment(config.ReviewID, file, 5, 5, "Test finding", "agent")
+		if comment != nil {
+			onEvent(ReviewerEvent{
+				Type: "finding",
+				Finding: &ReviewerFinding{
+					Filepath:  file,
+					LineStart: 5,
+					LineEnd:   5,
+					Content:   "Test finding",
+					Severity:  "warning",
+					CommentID: comment.ID,
+				},
+			})
+		}
+		// Small delay between findings
+		if i == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	// Check for cancellation again
+	select {
+	case <-ctx.Done():
+		onEvent(ReviewerEvent{Type: "cancelled"})
+		return ctx.Err()
+	default:
+	}
+
+	// Send complete event
+	onEvent(ReviewerEvent{Type: "complete", Success: true})
+	return nil
+}
+
+// mockReviewerFactory creates mock reviewers for testing
+func mockReviewerFactory(s *store.Store) Reviewer {
+	return &mockReviewer{store: s}
+}
+
+// slowMockReviewer simulates a slow reviewer for cancellation testing
+type slowMockReviewer struct {
+	store *store.Store
+}
+
+func (m *slowMockReviewer) Run(ctx context.Context, config ReviewerConfig, onEvent func(ReviewerEvent)) error {
+	// Send started event
+	onEvent(ReviewerEvent{Type: "started"})
+
+	// Simulate slow processing with cancellation checks
+	for i := 0; i < 50; i++ {
+		select {
+		case <-ctx.Done():
+			onEvent(ReviewerEvent{Type: "cancelled"})
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+			onEvent(ReviewerEvent{Type: "chunk", Content: "Processing..."})
+		}
+	}
+
+	onEvent(ReviewerEvent{Type: "complete", Success: true})
+	return nil
+}
+
+// slowMockReviewerFactory creates slow mock reviewers for cancellation testing
+func slowMockReviewerFactory(s *store.Store) Reviewer {
+	return &slowMockReviewer{store: s}
+}
 
 // createTestRepo creates a temporary git repo with modified files for testing
 func createTestRepo(t *testing.T) string {
@@ -85,10 +177,12 @@ func TestStartReview_EventSequence(t *testing.T) {
 	// Create a real git repo with modified files
 	repoPath := createTestRepo(t)
 
-	sockPath := filepath.Join("/tmp", "attn-review-test.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-review-test-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath)
 
-	harness := NewTestHarnessBuilder(sockPath).Build()
+	harness := NewTestHarnessBuilder(sockPath).
+		WithReviewerFactory(mockReviewerFactory).
+		Build()
 	harness.Start()
 	defer harness.Stop()
 
@@ -216,10 +310,12 @@ func TestCancelReview(t *testing.T) {
 	// Create a real git repo with modified files
 	repoPath := createTestRepo(t)
 
-	sockPath := filepath.Join("/tmp", "attn-review-cancel-test.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-review-cancel-test-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath)
 
-	harness := NewTestHarnessBuilder(sockPath).Build()
+	harness := NewTestHarnessBuilder(sockPath).
+		WithReviewerFactory(slowMockReviewerFactory).
+		Build()
 	harness.Start()
 	defer harness.Stop()
 

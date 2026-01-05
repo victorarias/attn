@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"path/filepath"
 	"testing"
@@ -13,7 +14,7 @@ import (
 
 func TestHarness_FakeClassifier(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19908")
-	sockPath := filepath.Join("/tmp", "attn-harness-classifier.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-harness-classifier-%d.sock", time.Now().UnixNano()))
 
 	harness := NewTestHarnessBuilder(sockPath).
 		WithDefaultClassifierState(protocol.StateIdle).
@@ -69,7 +70,7 @@ func TestHarness_FakeClassifier(t *testing.T) {
 
 func TestHarness_BroadcastRecorder(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19909")
-	sockPath := filepath.Join("/tmp", "attn-harness-recorder.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-harness-recorder-%d.sock", time.Now().UnixNano()))
 
 	harness := NewTestHarnessBuilder(sockPath).Build()
 
@@ -122,7 +123,7 @@ func TestHarness_BroadcastRecorder(t *testing.T) {
 
 func TestHarness_WaitForEvent(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19910")
-	sockPath := filepath.Join("/tmp", "attn-harness-wait.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-harness-wait-%d.sock", time.Now().UnixNano()))
 
 	harness := NewTestHarnessBuilder(sockPath).Build()
 
@@ -181,7 +182,7 @@ func TestHarness_ClassifierWithCustomResponses(t *testing.T) {
 
 func TestHarness_ConcurrentOperations(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19911")
-	sockPath := filepath.Join("/tmp", "attn-harness-concurrent.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-harness-concurrent-%d.sock", time.Now().UnixNano()))
 
 	harness := NewTestHarnessBuilder(sockPath).Build()
 

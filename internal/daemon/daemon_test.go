@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -269,8 +270,8 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 	}
 
 	// Create daemon with GitHub client
-	// Use /tmp directly to avoid long socket paths
-	sockPath := filepath.Join("/tmp", "attn-test-ws.sock")
+	// Use /tmp directly to avoid long socket paths, with unique suffix to prevent parallel test conflicts
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-ws-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath) // Clean up any existing socket
 	d := NewWithGitHubClient(sockPath, ghClient)
 
@@ -446,8 +447,8 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 	os.Setenv("ATTN_WS_PORT", wsPort)
 	defer os.Unsetenv("ATTN_WS_PORT")
 
-	// Use /tmp directly to avoid long socket paths
-	sockPath := filepath.Join("/tmp", "attn-test-mute-pr.sock")
+	// Use /tmp directly to avoid long socket paths, with unique suffix to prevent parallel test conflicts
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-mute-pr-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath) // Clean up any existing socket
 
 	d := NewForTesting(sockPath)
@@ -580,8 +581,8 @@ func TestDaemon_MuteRepo_ViaWebSocket(t *testing.T) {
 	os.Setenv("ATTN_WS_PORT", wsPort)
 	defer os.Unsetenv("ATTN_WS_PORT")
 
-	// Use /tmp directly to avoid long socket paths
-	sockPath := filepath.Join("/tmp", "attn-test-mute-repo.sock")
+	// Use /tmp directly to avoid long socket paths, with unique suffix to prevent parallel test conflicts
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-mute-repo-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath) // Clean up any existing socket
 
 	d := NewForTesting(sockPath)
@@ -687,8 +688,8 @@ func TestDaemon_InitialState_IncludesRepoStates(t *testing.T) {
 	os.Setenv("ATTN_WS_PORT", wsPort)
 	defer os.Unsetenv("ATTN_WS_PORT")
 
-	// Use /tmp directly to avoid long socket paths
-	sockPath := filepath.Join("/tmp", "attn-test-initial-repos.sock")
+	// Use /tmp directly to avoid long socket paths, with unique suffix to prevent parallel test conflicts
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-initial-repos-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath) // Clean up any existing socket
 
 	d := NewForTesting(sockPath)
@@ -769,7 +770,7 @@ func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
 	os.Setenv("ATTN_WS_PORT", wsPort)
 	defer os.Unsetenv("ATTN_WS_PORT")
 
-	sockPath := filepath.Join("/tmp", "attn-test-state-broadcast.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-state-broadcast-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath)
 
 	d := NewForTesting(sockPath)
@@ -851,7 +852,7 @@ func TestDaemon_StateTransitions_AllStates(t *testing.T) {
 	os.Setenv("ATTN_WS_PORT", wsPort)
 	defer os.Unsetenv("ATTN_WS_PORT")
 
-	sockPath := filepath.Join("/tmp", "attn-test-state-transitions.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-state-transitions-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath)
 
 	d := NewForTesting(sockPath)
@@ -931,7 +932,7 @@ func TestDaemon_InjectTestSession_BroadcastsToWebSocket(t *testing.T) {
 	os.Setenv("ATTN_WS_PORT", wsPort)
 	defer os.Unsetenv("ATTN_WS_PORT")
 
-	sockPath := filepath.Join("/tmp", "attn-test-inject-session.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-inject-session-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath)
 
 	d := NewForTesting(sockPath)
@@ -1020,7 +1021,7 @@ func TestDaemon_StopCommand_PendingTodos_SetsWaitingInput(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19906")
 
 	// Use /tmp directly to avoid long socket paths
-	sockPath := filepath.Join("/tmp", "attn-test-stop-pending.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-stop-pending-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath) // Clean up any existing socket
 
 	d := NewForTesting(sockPath)
@@ -1104,7 +1105,7 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 	// but that's different from the todos short-circuit path.
 
 	// Use /tmp directly to avoid long socket paths
-	sockPath := filepath.Join("/tmp", "attn-test-stop-completed.sock")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-stop-completed-%d.sock", time.Now().UnixNano()))
 	os.Remove(sockPath) // Clean up any existing socket
 
 	d := NewForTesting(sockPath)

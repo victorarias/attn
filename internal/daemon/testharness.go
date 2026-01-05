@@ -174,6 +174,7 @@ type TestHarnessBuilder struct {
 	socketPath      string
 	defaultState    string
 	ghClient        github.GitHubClient
+	reviewerFactory ReviewerFactory
 	recordBroadcast bool
 }
 
@@ -204,6 +205,12 @@ func (b *TestHarnessBuilder) WithoutBroadcastRecording() *TestHarnessBuilder {
 	return b
 }
 
+// WithReviewerFactory sets a custom reviewer factory for testing
+func (b *TestHarnessBuilder) WithReviewerFactory(factory ReviewerFactory) *TestHarnessBuilder {
+	b.reviewerFactory = factory
+	return b
+}
+
 // Build creates the test harness
 func (b *TestHarnessBuilder) Build() *TestHarness {
 	classifier := NewFakeClassifier(b.defaultState)
@@ -221,14 +228,15 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 	}
 
 	d := &Daemon{
-		socketPath: b.socketPath,
-		pidPath:    pidPath,
-		store:      sessionStore,
-		wsHub:      hub,
-		done:       make(chan struct{}),
-		logger:     nil,
-		ghClient:   b.ghClient,
-		classifier: classifier,
+		socketPath:      b.socketPath,
+		pidPath:         pidPath,
+		store:           sessionStore,
+		wsHub:           hub,
+		done:            make(chan struct{}),
+		logger:          nil,
+		ghClient:        b.ghClient,
+		classifier:      classifier,
+		reviewerFactory: b.reviewerFactory,
 	}
 
 	return &TestHarness{
