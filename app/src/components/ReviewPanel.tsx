@@ -30,9 +30,34 @@ const STANDALONE_FILE_REGEX = new RegExp(
   'g'
 );
 
+/**
+ * Find a matching file using suffix matching.
+ * Returns the full path if exactly ONE file matches, otherwise null.
+ *
+ * Examples:
+ * - "example.go" matches "src/example.go" (suffix match)
+ * - "server/go.mod" matches "myapp/server/go.mod" (suffix match)
+ * - Returns null if 0 matches or >1 matches
+ */
+function findMatchingFile(searchPath: string, availableFiles: string[]): string | null {
+  // Try exact match first
+  if (availableFiles.includes(searchPath)) {
+    return searchPath;
+  }
+
+  // Suffix match: find files ending with /searchPath
+  const suffix = '/' + searchPath;
+  const matches = availableFiles.filter(f => f.endsWith(suffix) || f === searchPath);
+
+  // Only return if exactly one match
+  return matches.length === 1 ? matches[0] : null;
+}
+
 // Helper to parse text and create elements with clickable file references
+// Only makes files clickable if they uniquely match a file in availableFiles
 function parseFileReferences(
   text: string,
+  availableFiles: string[],
   onFileClick: (filepath: string, line?: number) => void
 ): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
@@ -87,20 +112,28 @@ function parseFileReferences(
       parts.push(text.slice(lastIndex, m.index));
     }
 
-    // Add clickable file reference
-    parts.push(
-      <span
-        key={`${m.index}-${m.filepath}`}
-        className="file-reference clickable"
-        onClick={(e) => {
-          e.stopPropagation();
-          onFileClick(m.filepath, m.line);
-        }}
-        title={m.line ? `Open ${m.filepath} at line ${m.line}` : `Open ${m.filepath}`}
-      >
-        {m.fullMatch}
-      </span>
-    );
+    // Check if this file uniquely matches an available file
+    const resolvedPath = findMatchingFile(m.filepath, availableFiles);
+
+    if (resolvedPath) {
+      // Unique match - make it clickable
+      parts.push(
+        <span
+          key={`${m.index}-${m.filepath}`}
+          className="file-reference clickable"
+          onClick={(e) => {
+            e.stopPropagation();
+            onFileClick(resolvedPath, m.line);
+          }}
+          title={m.line ? `Open ${resolvedPath} at line ${m.line}` : `Open ${resolvedPath}`}
+        >
+          {m.fullMatch}
+        </span>
+      );
+    } else {
+      // No match or multiple matches - just render as plain text
+      parts.push(m.fullMatch);
+    }
 
     lastIndex = m.index + m.length;
   }
@@ -987,9 +1020,8 @@ export function ReviewPanel({
             />
             <div className="reviewer-output-header">
               <span>🤖 AI Review</span>
-              {/* Only show header spinner when content is streaming (has events) */}
-              {reviewerRunning && reviewerEvents.length > 0 && <span className="reviewer-spinner">⟳</span>}
               {reviewerError && <span className="reviewer-error">⚠ {reviewerError}</span>}
+              {reviewerRunning && <div className="reviewer-progress-line" />}
             </div>
             <div ref={reviewerOutputRef} className="reviewer-output-content" style={{ fontSize }}>
               {reviewerEvents.length === 0 && reviewerRunning && (
@@ -1001,14 +1033,13 @@ export function ReviewPanel({
                     </svg>
                   </div>
                   <div className="reviewer-loading-text">Analyzing your changes</div>
-                  <div className="reviewer-loading-dots">
-                    <span>.</span><span>.</span><span>.</span>
-                  </div>
                 </div>
               )}
               {reviewerEvents.map((event, index) => {
                 if (event.type === 'chunk') {
                   // Custom components that make file references clickable
+                  // Only files that uniquely match a changed file are clickable
+                  const availableFilePaths = allFiles.map(f => f.path);
                   const handleFileClick = (filepath: string, line?: number) => {
                     setSelectedFilePath(filepath);
                     setScrollToLine(line);
@@ -1017,12 +1048,12 @@ export function ReviewPanel({
                   // Process text children to find file references
                   const processChildren = (children: React.ReactNode): React.ReactNode => {
                     if (typeof children === 'string') {
-                      return parseFileReferences(children, handleFileClick);
+                      return parseFileReferences(children, availableFilePaths, handleFileClick);
                     }
                     if (Array.isArray(children)) {
                       return children.map((child, i) => {
                         if (typeof child === 'string') {
-                          const parsed = parseFileReferences(child, handleFileClick);
+                          const parsed = parseFileReferences(child, availableFilePaths, handleFileClick);
                           return parsed.length === 1 && parsed[0] === child ? child : <span key={i}>{parsed}</span>;
                         }
                         return child;
@@ -1074,18 +1105,21 @@ export function ReviewPanel({
                   // tool_use - make add_comment calls clickable to navigate to file
                   const isAddComment = event.name === 'add_comment';
                   const filepath = isAddComment ? String(event.input.filepath || '') : '';
-                  const canNavigate = isAddComment && filepath;
+                  // Use suffix matching to resolve filepath to a changed file
+                  const availableFilePaths = allFiles.map(f => f.path);
+                  const resolvedPath = filepath ? findMatchingFile(filepath, availableFilePaths) : null;
+                  const canNavigate = isAddComment && resolvedPath;
 
                   return (
                     <div
                       key={index}
                       className={`reviewer-tool-call ${canNavigate ? 'clickable' : ''}`}
-                      onClick={isAddComment && filepath ? () => {
+                      onClick={canNavigate ? () => {
                         const lineStart = Number(event.input.line_start) || undefined;
-                        setSelectedFilePath(filepath);
+                        setSelectedFilePath(resolvedPath);
                         setScrollToLine(lineStart);
                       } : undefined}
-                      title={canNavigate ? `Click to open ${filepath}` : undefined}
+                      title={canNavigate ? `Click to open ${resolvedPath}` : undefined}
                     >
                       <div className="tool-call-header">
                         <span className="tool-call-icon">⏺</span>

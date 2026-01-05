@@ -109,9 +109,9 @@ test.describe('Reviewer Agent', () => {
     // Wait for review to complete - the summary should appear
     await expect(page.locator('.reviewer-output-content')).toContainText('Summary', { timeout: 10000 });
 
-    // Verify spinner is gone (review complete)
-    const spinner = page.locator('.reviewer-spinner');
-    await expect(spinner).not.toBeVisible({ timeout: 5000 });
+    // Verify progress line is gone (review complete)
+    const progressLine = page.locator('.reviewer-progress-line');
+    await expect(progressLine).not.toBeVisible({ timeout: 5000 });
 
     // === Additional Feature Tests ===
 
@@ -152,9 +152,9 @@ test.describe('Reviewer Agent', () => {
     expect(parseInt(newFontSize)).toBe(parseInt(initialFontSize) + 1);
 
     // 4. Clickable filenames: verify clicking filenames navigates to file
-    // Test both table cells AND paragraph text
+    // Only files that exist in the changed files should be clickable
 
-    // Get all clickable file references
+    // Get all clickable file references - should only be example.go (the changed file)
     const clickableRefs = page.locator('.reviewer-output-content .file-reference.clickable');
     const clickableCount = await clickableRefs.count();
     console.log('[Test] Number of clickable file references:', clickableCount);
@@ -165,11 +165,28 @@ test.describe('Reviewer Agent', () => {
       console.log(`[Test] Clickable ref ${i}: "${text}"`);
     }
 
-    // We expect at least:
+    // We expect exactly the example.go references to be clickable:
     // - 2 from table (example.go rows)
     // - 1 from paragraph "See example.go for more details"
-    // - 1 from paragraph "test-file.md:25"
-    expect(clickableCount).toBeGreaterThanOrEqual(3);
+    // Files that don't exist in changed files (m2-client-walking.md, go.mod, go.sum, test-file.md)
+    // should NOT be clickable
+    expect(clickableCount).toBe(3);
+
+    // All clickable refs should be example.go
+    const allRefs = await clickableRefs.allTextContents();
+    console.log('[Test] All clickable refs:', allRefs);
+    expect(allRefs.every(ref => ref === 'example.go')).toBe(true);
+
+    // Verify non-existent files are NOT clickable (rendered as plain text)
+    // The mock output mentions these files but they're not in the changed files
+    const outputHtml = await page.locator('.reviewer-output-content').evaluate(el => el.innerHTML);
+    // These should appear as plain text (no clickable class)
+    expect(outputHtml).toContain('m2-client-walking.md');
+    expect(outputHtml).toContain('server/go.mod');
+    expect(outputHtml).toContain('test-file.md:25');
+    // But they should NOT have the clickable class
+    expect(outputHtml).not.toMatch(/file-reference clickable[^>]*>m2-client-walking\.md/);
+    expect(outputHtml).not.toMatch(/file-reference clickable[^>]*>server\/go\.mod/);
 
     // Test clicking a table filename - verify it navigates and shows diff
     const tableFilename = page.locator('.reviewer-output-content table .file-reference.clickable').first();
@@ -177,8 +194,22 @@ test.describe('Reviewer Agent', () => {
     const clickedFileName = await tableFilename.textContent();
     console.log('[Test] Clicking file reference:', clickedFileName);
 
+    // Log what files are in the list for debugging
+    const fileListItems = await page.locator('.file-item').allTextContents();
+    console.log('[Test] Files in list:', fileListItems);
+
     await tableFilename.click();
     await page.waitForTimeout(300);
+
+    // BUG CHECK: After clicking, the diff should NOT disappear
+    // If we see "Select a file to view diff", the path matching is broken
+    const placeholder = page.locator('.diff-placeholder');
+    const placeholderVisible = await placeholder.isVisible();
+    if (placeholderVisible) {
+      const placeholderText = await placeholder.textContent();
+      console.log('[Test] BUG: Diff placeholder visible:', placeholderText);
+      throw new Error(`BUG: Clicking "${clickedFileName}" caused diff to disappear. Path matching is broken.`);
+    }
 
     // Verify the file is selected AND diff content is shown
     await expect(fileItem).toHaveClass(/selected/);
@@ -187,42 +218,6 @@ test.describe('Reviewer Agent', () => {
     await expect(diffContent).toBeVisible({ timeout: 2000 });
     const diffText = await diffContent.textContent();
     console.log('[Test] Diff viewer shows content:', diffText?.substring(0, 100));
-
-    // Test clicking a paragraph filename (the one with :25 line reference)
-    const paragraphRefs = page.locator('.reviewer-output-content p .file-reference.clickable');
-    const paragraphCount = await paragraphRefs.count();
-    console.log('[Test] Number of paragraph file references:', paragraphCount);
-
-    if (paragraphCount > 0) {
-      // Should have "example.go" and "test-file.md:25" in paragraph
-      for (let i = 0; i < paragraphCount; i++) {
-        const text = await paragraphRefs.nth(i).textContent();
-        console.log(`[Test] Paragraph ref ${i}: "${text}"`);
-      }
-    } else {
-      // If no paragraph refs, log the paragraph HTML for debugging
-      const paragraphHtml = await page.locator('.reviewer-output-content p').last().evaluate(el => el.innerHTML);
-      console.log('[Test] Paragraph HTML (no clickable refs found):', paragraphHtml);
-      throw new Error('Expected clickable file references in paragraph text');
-    }
-
-    // 5. Test plain-text filenames (not in markdown table)
-    // This reproduces the user's actual issue - filenames like "m2-client-walking.md" in plain text
-    const allRefs = await clickableRefs.allTextContents();
-    console.log('[Test] All clickable refs:', allRefs);
-
-    // Should include filenames from plain text section
-    const hasM2File = allRefs.some(ref => ref.includes('m2-client-walking.md'));
-    const hasGoMod = allRefs.some(ref => ref.includes('go.mod'));
-    const hasGoSum = allRefs.some(ref => ref.includes('go.sum'));
-    console.log('[Test] Plain text files found:', { hasM2File, hasGoMod, hasGoSum });
-
-    if (!hasM2File || !hasGoMod || !hasGoSum) {
-      // Dump entire output for debugging
-      const outputHtml = await page.locator('.reviewer-output-content').evaluate(el => el.innerHTML);
-      console.log('[Test] Full output HTML:', outputHtml.substring(0, 2000));
-      throw new Error(`Missing plain-text file refs. Found: ${allRefs.join(', ')}`);
-    }
   });
 
   test('cancel review mid-stream', async ({ page, daemon }) => {
@@ -260,9 +255,9 @@ test.describe('Reviewer Agent', () => {
     const aiReviewBtn = page.locator('.review-agent-btn');
     await aiReviewBtn.click();
 
-    // Wait for review to start (spinner appears)
-    const spinner = page.locator('.reviewer-spinner');
-    await expect(spinner).toBeVisible({ timeout: 5000 });
+    // Wait for review to start (progress line appears)
+    const progressLine = page.locator('.reviewer-progress-line');
+    await expect(progressLine).toBeVisible({ timeout: 5000 });
 
     // Wait a moment for some output, then cancel
     await expect(page.locator('.reviewer-output-content')).toContainText('Reviewing', { timeout: 5000 });
@@ -273,8 +268,8 @@ test.describe('Reviewer Agent', () => {
     await expect(cancelBtn).toContainText('Cancel');
     await cancelBtn.click();
 
-    // Verify review stops (spinner disappears)
-    await expect(spinner).not.toBeVisible({ timeout: 5000 });
+    // Verify review stops (progress line disappears)
+    await expect(progressLine).not.toBeVisible({ timeout: 5000 });
 
     // Button should be back to "Review" state
     await expect(page.locator('.review-agent-btn')).toContainText('Review');
