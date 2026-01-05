@@ -1269,21 +1269,22 @@ export function UnifiedDiffEditor({
     });
   }, [lines, contextLines, expandedRegions, comments, newCommentLines, handleExpandRegion]);
 
-  // Scroll to line when scrollToLine prop changes
+  // Scroll to line when scrollToLine prop changes or content loads
+  // We depend on `lines` so we re-run when new file content arrives
   useEffect(() => {
     if (!scrollToLine || !editorViewRef.current) return;
 
     const view = editorViewRef.current;
-    const currentLines = linesRef.current;
 
-    // Find the doc line that corresponds to this modified file line
-    const targetLine = currentLines.find(
+    // Find the doc line index that corresponds to this modified file line
+    const targetIndex = lines.findIndex(
       (line) => line.type !== 'deleted' && line.modifiedLine === scrollToLine
     );
 
-    if (targetLine) {
+    if (targetIndex !== -1) {
       try {
-        const docLine = view.state.doc.line(targetLine.docLine);
+        const docLineNum = targetIndex + 1; // Convert 0-indexed to 1-indexed
+        const docLine = view.state.doc.line(docLineNum);
         view.dispatch({
           effects: EditorView.scrollIntoView(docLine.from, { y: 'center' }),
         });
@@ -1291,7 +1292,7 @@ export function UnifiedDiffEditor({
         console.warn('[UnifiedDiffEditor] Failed to scroll to line:', scrollToLine, e);
       }
     }
-  }, [scrollToLine]);
+  }, [scrollToLine, lines]);
 
   return (
     <div
