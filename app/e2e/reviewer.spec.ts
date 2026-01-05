@@ -112,6 +112,28 @@ test.describe('Reviewer Agent', () => {
     // Verify spinner is gone (review complete)
     const spinner = page.locator('.reviewer-spinner');
     await expect(spinner).not.toBeVisible({ timeout: 5000 });
+
+    // === Additional Feature Tests ===
+
+    // 1. Table rendering: verify markdown table is rendered as HTML table
+    const table = page.locator('.reviewer-output-content table');
+    await expect(table).toBeVisible({ timeout: 2000 });
+    await expect(table.locator('th').first()).toContainText('File');
+
+    // 2. Jump-to-file: verify add_comment tool call is clickable
+    const addCommentToolCall = page.locator('.reviewer-tool-call.clickable');
+    await expect(addCommentToolCall).toBeVisible({ timeout: 2000 });
+    // The clickable tool call should have cursor: pointer style
+    const cursor = await addCommentToolCall.evaluate(el => getComputedStyle(el).cursor);
+    expect(cursor).toBe('pointer');
+
+    // 3. Font size: verify Cmd+Plus increases font size
+    const outputContent = page.locator('.reviewer-output-content');
+    const initialFontSize = await outputContent.evaluate(el => getComputedStyle(el).fontSize);
+    await page.keyboard.press('Meta+=');
+    await page.waitForTimeout(100);
+    const newFontSize = await outputContent.evaluate(el => getComputedStyle(el).fontSize);
+    expect(parseInt(newFontSize)).toBe(parseInt(initialFontSize) + 1);
   });
 
   test('cancel review mid-stream', async ({ page, daemon }) => {

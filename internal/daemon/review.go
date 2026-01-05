@@ -96,8 +96,20 @@ func (m *e2eMockReviewer) Run(ctx context.Context, config ReviewerConfig, onEven
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Final summary
-	onEvent(ReviewerEvent{Type: "chunk", Content: "## Summary\n\nFound 1 issue that needs attention."})
+	// Simulate add_comment tool call (for jump-to-file testing)
+	onEvent(ReviewerEvent{
+		Type: "tool_use",
+		ToolUse: &ReviewerToolUse{
+			Name:   "add_comment",
+			Input:  map[string]interface{}{"filepath": "example.go", "line_start": 10, "line_end": 10, "content": "Test comment"},
+			Output: `{"success": true}`,
+		},
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Final summary with markdown table (for table rendering testing)
+	onEvent(ReviewerEvent{Type: "chunk", Content: "## Summary\n\n| File | Issues |\n|------|--------|\n| example.go | 1 |\n\nFound 1 issue that needs attention."})
 
 	// Check for final cancellation
 	select {
