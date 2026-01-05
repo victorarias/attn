@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../hooks/useDaemonSocket';
 import type { ReviewComment } from '../types/generated';
+import type { ReviewerEvent } from '../hooks/useDaemonSocket';
 import UnifiedDiffEditor, {
   buildUnifiedDocument,
   resolveAnchor,
@@ -104,12 +105,7 @@ interface ReviewFile {
   isAutoSkip: boolean;
 }
 
-// Reviewer agent streaming state
-interface ReviewerState {
-  isRunning: boolean;
-  output: string;
-  error?: string;
-}
+// ReviewerEvent is now imported from useDaemonSocket
 
 interface ReviewPanelProps {
   isOpen: boolean;
@@ -131,7 +127,9 @@ interface ReviewPanelProps {
   // Reviewer agent operations
   sendStartReview?: (reviewId: string, repoPath: string, branch: string, baseBranch: string) => void;
   sendCancelReview?: (reviewId: string) => void;
-  reviewerState?: ReviewerState;
+  reviewerEvents?: ReviewerEvent[];
+  reviewerRunning?: boolean;
+  reviewerError?: string;
   agentComments?: ReviewComment[];
   agentResolvedCommentIds?: string[];
 }
@@ -154,7 +152,9 @@ export function ReviewPanel({
   getComments,
   sendStartReview,
   sendCancelReview,
-  reviewerState,
+  reviewerEvents = [],
+  reviewerRunning = false,
+  reviewerError,
   agentComments = [],
   agentResolvedCommentIds = [],
 }: ReviewPanelProps) {
@@ -713,17 +713,17 @@ export function ReviewPanel({
           <div className="review-header-actions">
             {sendStartReview && reviewId && (
               <button
-                className={`review-agent-btn ${reviewerState?.isRunning ? 'running' : ''}`}
+                className={`review-agent-btn ${reviewerRunning ? 'running' : ''}`}
                 onClick={() => {
-                  if (reviewerState?.isRunning) {
+                  if (reviewerRunning) {
                     sendCancelReview?.(reviewId);
                   } else {
                     sendStartReview(reviewId, repoPath, branch, baseBranch);
                   }
                 }}
-                title={reviewerState?.isRunning ? 'Cancel review' : 'Run AI review'}
+                title={reviewerRunning ? 'Cancel review' : 'Run AI review'}
               >
-                {reviewerState?.isRunning ? '⏹ Cancel' : '🤖 Review'}
+                {reviewerRunning ? '⏹ Cancel' : '🤖 Review'}
               </button>
             )}
             <button className="review-close" onClick={onClose}>×</button>
@@ -840,7 +840,7 @@ export function ReviewPanel({
         </div>
 
         {/* Reviewer Agent Output Panel */}
-        {(reviewerState?.isRunning || reviewerState?.output) && (
+        {(reviewerRunning || reviewerEvents.length > 0) && (
           <div
             className="reviewer-output-panel"
             style={{ height: reviewerPanelHeight }}
@@ -870,13 +870,39 @@ export function ReviewPanel({
             />
             <div className="reviewer-output-header">
               <span>🤖 AI Review</span>
-              {reviewerState?.isRunning && <span className="reviewer-spinner">⟳</span>}
-              {reviewerState?.error && <span className="reviewer-error">⚠ {reviewerState.error}</span>}
+              {reviewerRunning && <span className="reviewer-spinner">⟳</span>}
+              {reviewerError && <span className="reviewer-error">⚠ {reviewerError}</span>}
             </div>
             <div className="reviewer-output-content">
-              <ReactMarkdown>
-                {reviewerState?.output || 'Starting review...'}
-              </ReactMarkdown>
+              {reviewerEvents.length === 0 && reviewerRunning && (
+                <span className="reviewer-starting">Starting review...</span>
+              )}
+              {reviewerEvents.map((event, index) => {
+                if (event.type === 'chunk') {
+                  return (
+                    <ReactMarkdown key={index}>
+                      {event.content}
+                    </ReactMarkdown>
+                  );
+                } else {
+                  // tool_use
+                  return (
+                    <div key={index} className="reviewer-tool-call">
+                      <div className="tool-call-header">
+                        <span className="tool-call-icon">⏺</span>
+                        <span className="tool-call-name">{event.name}</span>
+                        <span className="tool-call-input">
+                          ({Object.entries(event.input).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ')})
+                        </span>
+                      </div>
+                      <div className="tool-call-output">
+                        <span className="tool-call-output-icon">⎿</span>
+                        <pre>{event.output.length > 500 ? event.output.slice(0, 500) + '...' : event.output}</pre>
+                      </div>
+                    </div>
+                  );
+                }
+              })}
             </div>
           </div>
         )}

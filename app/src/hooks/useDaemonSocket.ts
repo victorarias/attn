@@ -46,6 +46,11 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   content?: string;
   finding?: ReviewFinding;
   comment_id?: string;
+  tool_use?: {
+    name: string;
+    input: Record<string, unknown>;
+    output: string;
+  };
 };
 
 export interface RateLimitState {
@@ -55,7 +60,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '16';
+const PROTOCOL_VERSION = '17';
 
 interface PRActionResult {
   success: boolean;
@@ -200,12 +205,25 @@ export interface FileDiffResult {
   error?: string;
 }
 
+// Tool use event data
+export interface ReviewToolUse {
+  name: string;
+  input: Record<string, unknown>;
+  output: string;
+}
+
+// Unified reviewer event type for ordered rendering
+export type ReviewerEvent =
+  | { type: 'chunk'; content: string }
+  | { type: 'tool_use'; name: string; input: Record<string, unknown>; output: string };
+
 // Reviewer event callbacks
 export interface ReviewerCallbacks {
   onReviewStarted?: (reviewId: string) => void;
   onReviewChunk?: (reviewId: string, content: string) => void;
   onReviewFinding?: (reviewId: string, finding: ReviewFinding, comment?: ReviewComment) => void;
   onReviewCommentResolved?: (reviewId: string, commentId: string) => void;
+  onReviewToolUse?: (reviewId: string, toolUse: ReviewToolUse) => void;
   onReviewComplete?: (reviewId: string, success: boolean, error?: string) => void;
   onReviewCancelled?: (reviewId: string) => void;
 }
@@ -319,6 +337,9 @@ export function useDaemonSocket({
             if (data.protocol_version && data.protocol_version !== PROTOCOL_VERSION) {
               console.error(`[Daemon] Protocol version mismatch: daemon=${data.protocol_version}, client=${PROTOCOL_VERSION}`);
               setConnectionError(`Version mismatch: Please run 'make install' (daemon v${data.protocol_version}, app v${PROTOCOL_VERSION})`);
+              // Open circuit immediately to prevent reconnection storm
+              // Version mismatch won't fix itself - requires manual intervention
+              circuitOpenRef.current = true;
               ws.close();
               return;
             }
@@ -801,6 +822,12 @@ export function useDaemonSocket({
           case 'review_comment_resolved':
             if (data.review_id && data.comment_id && reviewer?.onReviewCommentResolved) {
               reviewer.onReviewCommentResolved(data.review_id, data.comment_id);
+            }
+            break;
+
+          case 'review_tool_use':
+            if (data.review_id && data.tool_use && reviewer?.onReviewToolUse) {
+              reviewer.onReviewToolUse(data.review_id, data.tool_use);
             }
             break;
 

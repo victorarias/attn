@@ -497,3 +497,74 @@
   padding-left: 12px;
   color: #858585;
 }
+
+/* Tool calls styling - muted to not overwhelm agent text */
+.reviewer-tool-call {
+  margin: 6px 0;
+  padding: 4px 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  opacity: 0.7;
+}
+
+.reviewer-tool-call:hover {
+  opacity: 1;
+}
+
+.reviewer-starting {
+  color: #858585;
+  font-style: italic;
+}
+
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #858585;
+}
+
+.tool-call-icon {
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.tool-call-name {
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.tool-call-input {
+  color: #6b7280;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 400px;
+}
+
+.tool-call-output {
+  display: flex;
+  margin-top: 4px;
+  padding-left: 8px;
+  color: #6b7280;
+}
+
+.tool-call-output-icon {
+  color: #525252;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.tool-call-output pre {
+  margin: 0;
+  padding: 0;
+  background: none;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #6b7280;
+  overflow: hidden;
+}

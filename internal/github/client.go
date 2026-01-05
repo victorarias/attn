@@ -17,10 +17,14 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"golang.org/x/time/rate"
 )
 
 // ErrRateLimited is returned when GitHub rate limit is exceeded
 var ErrRateLimited = errors.New("GitHub rate limit exceeded")
+
+// ErrSelfRateLimited is returned when our self-imposed rate limit is exceeded
+var ErrSelfRateLimited = errors.New("self-imposed rate limit exceeded")
 
 // RateLimitInfo contains rate limit state for a resource
 type RateLimitInfo struct {
@@ -35,9 +39,13 @@ type Client struct {
 	token      string
 	httpClient *http.Client
 
-	// Rate limit tracking
+	// Rate limit tracking (GitHub's limits)
 	rateLimitsMu sync.RWMutex
 	rateLimits   map[string]*RateLimitInfo // keyed by resource ("core", "search")
+
+	// Self-imposed rate limiter to prevent accidental API spam
+	// Allows 1 request per second with burst of 60
+	selfLimiter *rate.Limiter
 }
 
 // NewClient creates a new GitHub API client.
@@ -79,6 +87,10 @@ func NewClient(baseURL string) (*Client, error) {
 			Timeout: 30 * time.Second,
 		},
 		rateLimits: make(map[string]*RateLimitInfo),
+		// Self-imposed rate limiter: 1 request/second average, burst of 60
+		// This prevents accidental API spam (e.g., reconnection storms)
+		// while still allowing normal usage patterns like app launch with many PRs
+		selfLimiter: rate.NewLimiter(rate.Limit(1), 60),
 	}, nil
 }
 
@@ -89,6 +101,11 @@ func (c *Client) IsAvailable() bool {
 
 // doRequest performs an HTTP request with proper GitHub headers
 func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error) {
+	// Check self-imposed rate limit first
+	if !c.selfLimiter.Allow() {
+		return nil, ErrSelfRateLimited
+	}
+
 	url := c.baseURL + path
 
 	var bodyReader io.Reader

@@ -51,10 +51,11 @@ type ReviewerConfig struct {
 
 // ReviewerEvent matches reviewer.ReviewEvent
 type ReviewerEvent struct {
-	Type       string // "started", "chunk", "finding", "resolved", "complete", "error", "cancelled"
+	Type       string // "started", "chunk", "finding", "resolved", "tool_use", "complete", "error", "cancelled"
 	Content    string
 	Finding    *ReviewerFinding
-	ResolvedID string // For resolved events
+	ResolvedID string           // For resolved events
+	ToolUse    *ReviewerToolUse // For tool_use events
 	Success    bool
 	Error      string
 }
@@ -67,6 +68,13 @@ type ReviewerFinding struct {
 	Content   string
 	Severity  string
 	CommentID string
+}
+
+// ReviewerToolUse matches reviewer.ToolUse
+type ReviewerToolUse struct {
+	Name   string
+	Input  map[string]any
+	Output string
 }
 
 // Daemon manages Claude sessions
@@ -807,7 +815,7 @@ func (d *Daemon) doPRPoll() {
 
 	prs, err := d.ghClient.FetchAll()
 	if err != nil {
-		// Check if it's a rate limit error
+		// Check if it's a rate limit error (GitHub or self-imposed)
 		if errors.Is(err, github.ErrRateLimited) {
 			// Get reset time from client state
 			if info := d.ghClient.GetRateLimit("search"); info != nil {
@@ -817,6 +825,8 @@ func (d *Daemon) doPRPoll() {
 				d.logf("PR poll rate limited (unknown reset time)")
 				d.broadcastRateLimited("search", time.Now().Add(60*time.Second))
 			}
+		} else if errors.Is(err, github.ErrSelfRateLimited) {
+			d.logf("PR poll: self-rate-limited, skipping")
 		} else {
 			d.logf("PR poll error: %v", err)
 		}
@@ -872,12 +882,16 @@ func (d *Daemon) doDetailRefresh() {
 	for _, pr := range prs {
 		details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
 		if err != nil {
-			// If rate limited, stop the loop and broadcast notification
+			// If rate limited (GitHub or self-imposed), stop the loop
 			if errors.Is(err, github.ErrRateLimited) {
 				d.logf("Detail refresh: rate limited, stopping refresh loop")
 				if _, resetAt := d.ghClient.IsRateLimited("core"); !resetAt.IsZero() {
 					d.broadcastRateLimited("core", resetAt)
 				}
+				break
+			}
+			if errors.Is(err, github.ErrSelfRateLimited) {
+				d.logf("Detail refresh: self-rate-limited, stopping refresh loop")
 				break
 			}
 			d.logf("Failed to fetch details for %s: %v", pr.ID, err)
@@ -935,12 +949,16 @@ func (d *Daemon) fetchAllPRDetails() {
 
 		details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
 		if err != nil {
-			// If rate limited, stop the loop and broadcast notification
+			// If rate limited (GitHub or self-imposed), stop the loop
 			if errors.Is(err, github.ErrRateLimited) {
 				d.logf("App launch: rate limited, stopping detail fetch loop")
 				if _, resetAt := d.ghClient.IsRateLimited("core"); !resetAt.IsZero() {
 					d.broadcastRateLimited("core", resetAt)
 				}
+				break
+			}
+			if errors.Is(err, github.ErrSelfRateLimited) {
+				d.logf("App launch: self-rate-limited, stopping detail fetch loop")
 				break
 			}
 			d.logf("Failed to fetch details for %s: %v", pr.ID, err)
@@ -1055,12 +1073,16 @@ func (d *Daemon) fetchPRDetailsImmediate(prID string) {
 
 	details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
 	if err != nil {
-		// If rate limited, broadcast notification
+		// If rate limited (GitHub or self-imposed), skip
 		if errors.Is(err, github.ErrRateLimited) {
 			d.logf("Immediate fetch for %s: rate limited", prID)
 			if _, resetAt := d.ghClient.IsRateLimited("core"); !resetAt.IsZero() {
 				d.broadcastRateLimited("core", resetAt)
 			}
+			return
+		}
+		if errors.Is(err, github.ErrSelfRateLimited) {
+			d.logf("Immediate fetch for %s: self-rate-limited", prID)
 			return
 		}
 		d.logf("Immediate fetch failed for %s: %v", prID, err)

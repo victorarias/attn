@@ -95,6 +95,13 @@ func (a *realReviewerAdapter) Run(ctx context.Context, config ReviewerConfig, on
 				CommentID: event.Finding.CommentID,
 			}
 		}
+		if event.ToolUse != nil {
+			de.ToolUse = &ReviewerToolUse{
+				Name:   event.ToolUse.Name,
+				Input:  event.ToolUse.Input,
+				Output: event.ToolUse.Output,
+			}
+		}
 		onEvent(de)
 	})
 }
@@ -194,6 +201,19 @@ func (d *Daemon) runReview(ctx context.Context, client *wsClient, msg *protocol.
 				"review_id":  reviewID,
 				"comment_id": event.ResolvedID,
 			})
+
+		case "tool_use":
+			if event.ToolUse != nil {
+				d.sendToClient(client, map[string]interface{}{
+					"event":     protocol.EventReviewToolUse,
+					"review_id": reviewID,
+					"tool_use": map[string]interface{}{
+						"name":   event.ToolUse.Name,
+						"input":  event.ToolUse.Input,
+						"output": event.ToolUse.Output,
+					},
+				})
+			}
 
 		case "complete":
 			d.sendToClient(client, map[string]interface{}{

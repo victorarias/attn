@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "16"
+const ProtocolVersion = "17"
 
 // Commands
 const (
@@ -116,6 +116,7 @@ const (
 	EventReviewChunk              = "review_chunk"
 	EventReviewFinding            = "review_finding"
 	EventReviewCommentResolved    = "review_comment_resolved"
+	EventReviewToolUse            = "review_tool_use"
 	EventReviewComplete           = "review_complete"
 	EventReviewCancelled          = "review_cancelled"
 )

@@ -12,4 +12,6 @@ require (
 	github.com/victorarias/claude-agent-sdk-go v0.0.0-00010101000000-000000000000
 )
 
+require golang.org/x/time v0.14.0 // indirect
+
 replace github.com/victorarias/claude-agent-sdk-go => ../claude-agent-sdk-go

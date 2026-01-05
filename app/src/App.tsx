@@ -20,7 +20,7 @@ import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { useSessionStore } from './store/sessions';
-import { useDaemonSocket, DaemonWorktree, GitStatusUpdate } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, GitStatusUpdate, ReviewerEvent, ReviewToolUse } from './hooks/useDaemonSocket';
 import { normalizeSessionState } from './types/sessionState';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
@@ -92,12 +92,10 @@ function App() {
   // Review panel state
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
 
-  // Reviewer agent state (for AI review streaming)
-  const [reviewerState, setReviewerState] = useState<{
-    isRunning: boolean;
-    output: string;
-    error?: string;
-  }>({ isRunning: false, output: '' });
+  // Reviewer agent state (unified events for ordered rendering)
+  const [reviewerEvents, setReviewerEvents] = useState<ReviewerEvent[]>([]);
+  const [reviewerRunning, setReviewerRunning] = useState(false);
+  const [reviewerError, setReviewerError] = useState<string | undefined>();
 
   // Comments added by reviewer agent (passed to ReviewPanel)
   const [pendingAgentComments, setPendingAgentComments] = useState<import('./types/generated').ReviewComment[]>([]);
@@ -135,15 +133,25 @@ function App() {
   // Reviewer callbacks for streaming events
   const reviewerCallbacks = useMemo(() => ({
     onReviewStarted: () => {
-      setReviewerState({ isRunning: true, output: '' });
+      setReviewerEvents([]);
+      setReviewerRunning(true);
+      setReviewerError(undefined);
       setPendingAgentComments([]); // Clear pending comments when new review starts
       setAgentResolvedCommentIds([]); // Clear resolved IDs when new review starts
     },
     onReviewChunk: (_reviewId: string, content: string) => {
-      setReviewerState(prev => ({
-        ...prev,
-        output: prev.output + content,
-      }));
+      // Consolidate consecutive chunks for efficient rendering
+      setReviewerEvents(prev => {
+        if (prev.length > 0 && prev[prev.length - 1].type === 'chunk') {
+          // Append to existing chunk
+          const updated = [...prev];
+          const lastChunk = updated[updated.length - 1] as { type: 'chunk'; content: string };
+          updated[updated.length - 1] = { type: 'chunk', content: lastChunk.content + content };
+          return updated;
+        }
+        // Create new chunk event
+        return [...prev, { type: 'chunk', content }];
+      });
     },
     onReviewFinding: (_reviewId: string, finding: { filepath: string; line_start: number; content: string }, comment?: import('./types/generated').ReviewComment) => {
       console.log('[App] Review finding:', finding.filepath, finding.line_start);
@@ -156,18 +164,17 @@ function App() {
       console.log('[App] Review comment resolved:', commentId);
       setAgentResolvedCommentIds(prev => [...prev, commentId]);
     },
+    onReviewToolUse: (_reviewId: string, toolUse: ReviewToolUse) => {
+      console.log('[App] Review tool use:', toolUse.name);
+      // Add tool use event - this breaks the chunk consolidation, creating a new text block after
+      setReviewerEvents(prev => [...prev, { type: 'tool_use', ...toolUse }]);
+    },
     onReviewComplete: (_reviewId: string, success: boolean, error?: string) => {
-      setReviewerState(prev => ({
-        ...prev,
-        isRunning: false,
-        error: success ? undefined : error,
-      }));
+      setReviewerRunning(false);
+      setReviewerError(success ? undefined : error);
     },
     onReviewCancelled: () => {
-      setReviewerState(prev => ({
-        ...prev,
-        isRunning: false,
-      }));
+      setReviewerRunning(false);
     },
   }), []);
 
@@ -1019,7 +1026,9 @@ function App() {
         getComments={sendGetComments}
         sendStartReview={sendStartReview}
         sendCancelReview={sendCancelReview}
-        reviewerState={reviewerState}
+        reviewerEvents={reviewerEvents}
+        reviewerRunning={reviewerRunning}
+        reviewerError={reviewerError}
         agentComments={pendingAgentComments}
         agentResolvedCommentIds={agentResolvedCommentIds}
       />
