@@ -970,7 +970,10 @@ export function UnifiedDiffEditor({
           minWidth: '0',
         },
         // Hide cursor in read-only mode
-        '.cm-cursor': {
+        '.cm-cursor, .cm-cursor-primary, .cm-cursor-secondary': {
+          display: 'none !important',
+        },
+        '.cm-cursorLayer': {
           display: 'none !important',
         },
         '.cm-gutters': {
