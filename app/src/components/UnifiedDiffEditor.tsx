@@ -582,6 +582,8 @@ class CommentWidget extends WidgetType {
       }, 0);
 
       textarea.addEventListener('keydown', (e) => {
+        // Stop all key events from bubbling to CodeMirror
+        e.stopPropagation();
         if (e.key === 'Escape') {
           e.preventDefault();
           onCancelEdit();
@@ -663,8 +665,9 @@ class NewCommentFormWidget extends WidgetType {
     const textarea = wrapper.querySelector('textarea')!;
     setTimeout(() => textarea.focus(), 0);
 
-    // Keyboard shortcuts
+    // Keyboard shortcuts - stop propagation to prevent CodeMirror from handling
     textarea.addEventListener('keydown', (e) => {
+      e.stopPropagation();
       if (e.key === 'Escape') {
         e.preventDefault();
         onCancel(docLine);
