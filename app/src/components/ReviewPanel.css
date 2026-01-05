@@ -561,9 +561,66 @@
   text-decoration-style: solid;
 }
 
-.reviewer-starting {
+/* Loading state - centered with animated spinner */
+.reviewer-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  gap: 16px;
   color: #858585;
-  font-style: italic;
+}
+
+.reviewer-loading-spinner {
+  width: 40px;
+  height: 40px;
+  color: #3b82f6;
+  animation: spin 1s linear infinite;
+}
+
+.reviewer-loading-spinner svg {
+  width: 100%;
+  height: 100%;
+}
+
+.reviewer-loading-text {
+  font-size: 15px;
+  font-weight: 500;
+  color: #a0a0a0;
+  letter-spacing: 0.01em;
+}
+
+.reviewer-loading-dots {
+  display: flex;
+  gap: 2px;
+  font-size: 20px;
+  color: #3b82f6;
+  line-height: 1;
+  margin-top: -8px;
+}
+
+.reviewer-loading-dots span {
+  animation: dot-pulse 1.4s ease-in-out infinite;
+}
+
+.reviewer-loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.reviewer-loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dot-pulse {
+  0%, 60%, 100% {
+    opacity: 0.2;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-4px);
+  }
 }
 
 .tool-call-header {

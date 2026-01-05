@@ -945,7 +945,18 @@ export function ReviewPanel({
             </div>
             <div ref={reviewerOutputRef} className="reviewer-output-content" style={{ fontSize }}>
               {reviewerEvents.length === 0 && reviewerRunning && (
-                <span className="reviewer-starting">Starting review...</span>
+                <div className="reviewer-loading">
+                  <div className="reviewer-loading-spinner">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10" strokeOpacity="0.2" />
+                      <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+                    </svg>
+                  </div>
+                  <div className="reviewer-loading-text">Analyzing your changes</div>
+                  <div className="reviewer-loading-dots">
+                    <span>.</span><span>.</span><span>.</span>
+                  </div>
+                </div>
               )}
               {reviewerEvents.map((event, index) => {
                 if (event.type === 'chunk') {
