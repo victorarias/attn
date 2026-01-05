@@ -97,11 +97,12 @@ func (m *e2eMockReviewer) Run(ctx context.Context, config ReviewerConfig, onEven
 	time.Sleep(50 * time.Millisecond)
 
 	// Simulate add_comment tool call (for jump-to-file testing)
+	// Uses line 40 which exists in the test file and requires scrolling
 	onEvent(ReviewerEvent{
 		Type: "tool_use",
 		ToolUse: &ReviewerToolUse{
 			Name:   "add_comment",
-			Input:  map[string]interface{}{"filepath": "example.go", "line_start": 10, "line_end": 10, "content": "Test comment"},
+			Input:  map[string]interface{}{"filepath": "example.go", "line_start": 40, "line_end": 40, "content": "Test comment"},
 			Output: `{"success": true}`,
 		},
 	})

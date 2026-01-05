@@ -1282,10 +1282,14 @@ export function UnifiedDiffEditor({
     );
 
     if (targetLine) {
-      const docLine = view.state.doc.line(targetLine.docLine);
-      view.dispatch({
-        effects: EditorView.scrollIntoView(docLine.from, { y: 'center' }),
-      });
+      try {
+        const docLine = view.state.doc.line(targetLine.docLine);
+        view.dispatch({
+          effects: EditorView.scrollIntoView(docLine.from, { y: 'center' }),
+        });
+      } catch (e) {
+        console.warn('[UnifiedDiffEditor] Failed to scroll to line:', scrollToLine, e);
+      }
     }
   }, [scrollToLine]);
 

@@ -246,13 +246,64 @@ async function createTestGitRepo(): Promise<{ repoPath: string; cleanup: () => v
   execSync('git config user.email "test@test.com"', { cwd: repoPath, stdio: 'pipe' });
   execSync('git config user.name "Test User"', { cwd: repoPath, stdio: 'pipe' });
 
-  // Create initial commit
-  fs.writeFileSync(path.join(repoPath, 'example.go'), 'package main\n\nfunc main() {\n}\n');
+  // Create initial commit with a larger file (50+ lines for scroll testing)
+  const initialContent = `package main
+
+import "fmt"
+
+func main() {
+	// Line 6
+	fmt.Println("Start")
+	// Line 8
+	// Line 9
+	// Line 10
+	doSomething()
+	// Line 12
+	// Line 13
+	// Line 14
+	// Line 15
+	// Line 16
+	// Line 17
+	// Line 18
+	// Line 19
+	// Line 20
+	// Line 21
+	// Line 22
+	// Line 23
+	// Line 24
+	// Line 25
+	// Line 26
+	// Line 27
+	// Line 28
+	// Line 29
+	// Line 30
+	// Line 31
+	// Line 32
+	// Line 33
+	// Line 34
+	// Line 35
+	// Line 36
+	// Line 37
+	// Line 38
+	// Line 39
+	// Line 40 - target for scroll test
+	fmt.Println("End")
+}
+
+func doSomething() {
+	// Helper function
+}
+`;
+  fs.writeFileSync(path.join(repoPath, 'example.go'), initialContent);
   execSync('git add .', { cwd: repoPath, stdio: 'pipe' });
   execSync('git commit -m "Initial commit"', { cwd: repoPath, stdio: 'pipe' });
 
-  // Create uncommitted changes
-  fs.writeFileSync(path.join(repoPath, 'example.go'), 'package main\n\nfunc main() {\n\tfmt.Println("Hello")\n}\n');
+  // Create uncommitted changes - modify line 40
+  const modifiedContent = initialContent.replace(
+    '// Line 40 - target for scroll test',
+    '// Line 40 - MODIFIED for review'
+  );
+  fs.writeFileSync(path.join(repoPath, 'example.go'), modifiedContent);
 
   return {
     repoPath,

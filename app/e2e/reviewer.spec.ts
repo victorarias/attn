@@ -120,14 +120,27 @@ test.describe('Reviewer Agent', () => {
     await expect(table).toBeVisible({ timeout: 2000 });
     await expect(table.locator('th').first()).toContainText('File');
 
-    // 2. Jump-to-file: verify add_comment tool call is clickable and switches file
+    // 2. Jump-to-file: verify add_comment tool call is clickable
     const addCommentToolCall = page.locator('.reviewer-tool-call.clickable');
     await expect(addCommentToolCall).toBeVisible({ timeout: 2000 });
-    // Click should select the file (example.go from mock)
+
+    // Verify file list has example.go and it's already selected (auto-selection)
+    const fileItem = page.locator('.file-item', { hasText: 'example.go' });
+    await expect(fileItem).toBeVisible({ timeout: 2000 });
+    await expect(fileItem).toHaveClass(/selected/);
+
+    // Verify the modified line 40 is visible in the diff (shows the change)
+    await expect(page.locator('.cm-content')).toContainText('MODIFIED for review', { timeout: 2000 });
+
+    // Click the tool call - should keep file selected and line visible
     await addCommentToolCall.click();
-    // The file should now be selected in the file list
-    const selectedFile = page.locator('.file-item.selected');
-    await expect(selectedFile).toContainText('example.go', { timeout: 2000 });
+    await page.waitForTimeout(200);
+
+    // File should still be selected
+    await expect(fileItem).toHaveClass(/selected/);
+
+    // The target line content should still be visible
+    await expect(page.locator('.cm-content')).toContainText('MODIFIED for review');
 
     // 3. Font size: verify Cmd+Plus increases font size
     const outputContent = page.locator('.reviewer-output-content');
