@@ -1,7 +1,7 @@
 // Mock daemon for testing components that interact with the daemon
 // Tracks all calls and allows controlling responses
 
-import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../../hooks/useDaemonSocket';
+import type { GitStatusUpdate, FileDiffResult, ReviewState, BranchDiffFilesResult } from '../../hooks/useDaemonSocket';
 import type { ReviewComment } from '../../types/generated';
 
 interface Call {
@@ -98,10 +98,24 @@ export class MockDaemon {
   }
 
   // Create mock functions that match the daemon API
-  createFetchDiff(): (path: string, staged: boolean) => Promise<FileDiffResult> {
-    return async (path: string, staged: boolean): Promise<FileDiffResult> => {
-      this.recordCall('fetchDiff', [path, staged]);
-      return this.getResponse<FileDiffResult>('fetchDiff', [path, staged]);
+  createFetchDiff(): (path: string, options?: { staged?: boolean; baseRef?: string }) => Promise<FileDiffResult> {
+    return async (path: string, options?: { staged?: boolean; baseRef?: string }): Promise<FileDiffResult> => {
+      this.recordCall('fetchDiff', [path, options]);
+      return this.getResponse<FileDiffResult>('fetchDiff', [path, options]);
+    };
+  }
+
+  createGetBranchDiffFiles(): (directory: string, baseRef?: string) => Promise<BranchDiffFilesResult> {
+    return async (directory: string, baseRef?: string): Promise<BranchDiffFilesResult> => {
+      this.recordCall('getBranchDiffFiles', [directory, baseRef]);
+      return this.getResponse<BranchDiffFilesResult>('getBranchDiffFiles', [directory, baseRef]);
+    };
+  }
+
+  createFetchRemotes(): (repo: string) => Promise<{ success: boolean; error?: string }> {
+    return async (repo: string): Promise<{ success: boolean; error?: string }> => {
+      this.recordCall('fetchRemotes', [repo]);
+      return this.getResponse<{ success: boolean; error?: string }>('fetchRemotes', [repo]);
     };
   }
 
@@ -196,6 +210,27 @@ export function createFileDiffResult(original: string, modified: string): FileDi
     success: true,
     original,
     modified,
+  };
+}
+
+export function createBranchDiffFilesResult(files: string[], options?: {
+  status?: string;
+  additions?: number;
+  deletions?: number;
+  has_uncommitted?: boolean;
+}): BranchDiffFilesResult {
+  const { status = 'modified', additions = 10, deletions = 5, has_uncommitted = false } = options || {};
+
+  return {
+    success: true,
+    base_ref: 'origin/main',
+    files: files.map(path => ({
+      path,
+      status,
+      additions,
+      deletions,
+      has_uncommitted,
+    })),
   };
 }
 

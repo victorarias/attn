@@ -1,11 +1,13 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, Branch, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const branch = Convert.toBranch(json);
+//   const branchDiffFile = Convert.toBranchDiffFile(json);
+//   const branchDiffFilesResultMessage = Convert.toBranchDiffFilesResultMessage(json);
 //   const branchesResultMessage = Convert.toBranchesResultMessage(json);
 //   const cancelReviewMessage = Convert.toCancelReviewMessage(json);
 //   const checkAttnStashMessage = Convert.toCheckAttnStashMessage(json);
@@ -31,6 +33,7 @@
 //   const fetchRemotesMessage = Convert.toFetchRemotesMessage(json);
 //   const fetchRemotesResultMessage = Convert.toFetchRemotesResultMessage(json);
 //   const fileDiffResultMessage = Convert.toFileDiffResultMessage(json);
+//   const getBranchDiffFilesMessage = Convert.toGetBranchDiffFilesMessage(json);
 //   const getCommentsMessage = Convert.toGetCommentsMessage(json);
 //   const getCommentsResultMessage = Convert.toGetCommentsResultMessage(json);
 //   const getDefaultBranchMessage = Convert.toGetDefaultBranchMessage(json);
@@ -171,6 +174,40 @@ export interface Branch {
     commit_time?: string;
     is_current?:  boolean;
     name:         string;
+    [property: string]: any;
+}
+
+export interface BranchDiffFile {
+    additions?:       number;
+    deletions?:       number;
+    has_uncommitted?: boolean;
+    old_path?:        string;
+    path:             string;
+    status:           string;
+    [property: string]: any;
+}
+
+export interface BranchDiffFilesResultMessage {
+    base_ref:  string;
+    directory: string;
+    error?:    string;
+    event:     BranchDiffFilesResultMessageEvent;
+    files:     FileElement[];
+    success:   boolean;
+    [property: string]: any;
+}
+
+export enum BranchDiffFilesResultMessageEvent {
+    BranchDiffFilesResult = "branch_diff_files_result",
+}
+
+export interface FileElement {
+    additions?:       number;
+    deletions?:       number;
+    has_uncommitted?: boolean;
+    old_path?:        string;
+    path:             string;
+    status:           string;
     [property: string]: any;
 }
 
@@ -464,6 +501,17 @@ export enum FileDiffResultMessageEvent {
     FileDiffResult = "file_diff_result",
 }
 
+export interface GetBranchDiffFilesMessage {
+    base_ref?: string;
+    cmd:       GetBranchDiffFilesMessageCmd;
+    directory: string;
+    [property: string]: any;
+}
+
+export enum GetBranchDiffFilesMessageCmd {
+    GetBranchDiffFiles = "get_branch_diff_files",
+}
+
 export interface GetCommentsMessage {
     cmd:       GetCommentsMessageCmd;
     filepath?: string;
@@ -510,6 +558,7 @@ export enum GetDefaultBranchResultMessageEvent {
 }
 
 export interface GetFileDiffMessage {
+    base_ref?: string;
     cmd:       GetFileDiffMessageCmd;
     directory: string;
     path:      string;
@@ -1445,6 +1494,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("Branch")), null, 2);
     }
 
+    public static toBranchDiffFile(json: string): BranchDiffFile {
+        return cast(JSON.parse(json), r("BranchDiffFile"));
+    }
+
+    public static branchDiffFileToJson(value: BranchDiffFile): string {
+        return JSON.stringify(uncast(value, r("BranchDiffFile")), null, 2);
+    }
+
+    public static toBranchDiffFilesResultMessage(json: string): BranchDiffFilesResultMessage {
+        return cast(JSON.parse(json), r("BranchDiffFilesResultMessage"));
+    }
+
+    public static branchDiffFilesResultMessageToJson(value: BranchDiffFilesResultMessage): string {
+        return JSON.stringify(uncast(value, r("BranchDiffFilesResultMessage")), null, 2);
+    }
+
     public static toBranchesResultMessage(json: string): BranchesResultMessage {
         return cast(JSON.parse(json), r("BranchesResultMessage"));
     }
@@ -1643,6 +1708,14 @@ export class Convert {
 
     public static fileDiffResultMessageToJson(value: FileDiffResultMessage): string {
         return JSON.stringify(uncast(value, r("FileDiffResultMessage")), null, 2);
+    }
+
+    public static toGetBranchDiffFilesMessage(json: string): GetBranchDiffFilesMessage {
+        return cast(JSON.parse(json), r("GetBranchDiffFilesMessage"));
+    }
+
+    public static getBranchDiffFilesMessageToJson(value: GetBranchDiffFilesMessage): string {
+        return JSON.stringify(uncast(value, r("GetBranchDiffFilesMessage")), null, 2);
     }
 
     public static toGetCommentsMessage(json: string): GetCommentsMessage {
@@ -2448,6 +2521,30 @@ const typeMap: any = {
         { json: "is_current", js: "is_current", typ: u(undefined, true) },
         { json: "name", js: "name", typ: "" },
     ], "any"),
+    "BranchDiffFile": o([
+        { json: "additions", js: "additions", typ: u(undefined, 0) },
+        { json: "deletions", js: "deletions", typ: u(undefined, 0) },
+        { json: "has_uncommitted", js: "has_uncommitted", typ: u(undefined, true) },
+        { json: "old_path", js: "old_path", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+        { json: "status", js: "status", typ: "" },
+    ], "any"),
+    "BranchDiffFilesResultMessage": o([
+        { json: "base_ref", js: "base_ref", typ: "" },
+        { json: "directory", js: "directory", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("BranchDiffFilesResultMessageEvent") },
+        { json: "files", js: "files", typ: a(r("FileElement")) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "FileElement": o([
+        { json: "additions", js: "additions", typ: u(undefined, 0) },
+        { json: "deletions", js: "deletions", typ: u(undefined, 0) },
+        { json: "has_uncommitted", js: "has_uncommitted", typ: u(undefined, true) },
+        { json: "old_path", js: "old_path", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+        { json: "status", js: "status", typ: "" },
+    ], "any"),
     "BranchesResultMessage": o([
         { json: "branches", js: "branches", typ: a(r("BranchElement")) },
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -2586,6 +2683,11 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "GetBranchDiffFilesMessage": o([
+        { json: "base_ref", js: "base_ref", typ: u(undefined, "") },
+        { json: "cmd", js: "cmd", typ: r("GetBranchDiffFilesMessageCmd") },
+        { json: "directory", js: "directory", typ: "" },
+    ], "any"),
     "GetCommentsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetCommentsMessageCmd") },
         { json: "filepath", js: "filepath", typ: u(undefined, "") },
@@ -2608,6 +2710,7 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "GetFileDiffMessage": o([
+        { json: "base_ref", js: "base_ref", typ: u(undefined, "") },
         { json: "cmd", js: "cmd", typ: r("GetFileDiffMessageCmd") },
         { json: "directory", js: "directory", typ: "" },
         { json: "path", js: "path", typ: "" },
@@ -3116,6 +3219,9 @@ const typeMap: any = {
     "ApprovePRMessageCmd": [
         "approve_pr",
     ],
+    "BranchDiffFilesResultMessageEvent": [
+        "branch_diff_files_result",
+    ],
     "BranchesResultMessageEvent": [
         "branches_result",
     ],
@@ -3190,6 +3296,9 @@ const typeMap: any = {
     ],
     "FileDiffResultMessageEvent": [
         "file_diff_result",
+    ],
+    "GetBranchDiffFilesMessageCmd": [
+        "get_branch_diff_files",
     ],
     "GetCommentsMessageCmd": [
         "get_comments",

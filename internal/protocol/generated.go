@@ -61,6 +61,46 @@ type Branch struct {
 	Name string `json:"name"`
 }
 
+type BranchDiffFile struct {
+	// Additions corresponds to the JSON schema field "additions".
+	Additions *int `json:"additions,omitempty"`
+
+	// Deletions corresponds to the JSON schema field "deletions".
+	Deletions *int `json:"deletions,omitempty"`
+
+	// HasUncommitted corresponds to the JSON schema field "has_uncommitted".
+	HasUncommitted *bool `json:"has_uncommitted,omitempty"`
+
+	// OldPath corresponds to the JSON schema field "old_path".
+	OldPath *string `json:"old_path,omitempty"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status string `json:"status"`
+}
+
+type BranchDiffFilesResultMessage struct {
+	// BaseRef corresponds to the JSON schema field "base_ref".
+	BaseRef string `json:"base_ref"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Files corresponds to the JSON schema field "files".
+	Files []BranchDiffFile `json:"files"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type BranchesResultMessage struct {
 	// Branches corresponds to the JSON schema field "branches".
 	Branches []Branch `json:"branches"`
@@ -357,6 +397,17 @@ type FileDiffResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type GetBranchDiffFilesMessage struct {
+	// BaseRef corresponds to the JSON schema field "base_ref".
+	BaseRef *string `json:"base_ref,omitempty"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+}
+
 type GetCommentsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -405,6 +456,9 @@ type GetDefaultBranchResultMessage struct {
 }
 
 type GetFileDiffMessage struct {
+	// BaseRef corresponds to the JSON schema field "base_ref".
+	BaseRef *string `json:"base_ref,omitempty"`
+
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 

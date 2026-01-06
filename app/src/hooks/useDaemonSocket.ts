@@ -60,7 +60,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '18';
+const PROTOCOL_VERSION = '19';
 
 interface PRActionResult {
   success: boolean;
@@ -202,6 +202,22 @@ export interface FileDiffResult {
   success: boolean;
   original: string;
   modified: string;
+  error?: string;
+}
+
+export interface BranchDiffFile {
+  path: string;
+  status: string;
+  old_path?: string;
+  additions?: number;
+  deletions?: number;
+  has_uncommitted?: boolean;
+}
+
+export interface BranchDiffFilesResult {
+  success: boolean;
+  base_ref: string;
+  files: BranchDiffFile[];
   error?: string;
 }
 
@@ -688,6 +704,24 @@ export function useDaemonSocket({
                 });
               } else {
                 pending.reject(new Error(data.error || 'Failed to get diff'));
+              }
+            }
+            break;
+          }
+
+          case 'branch_diff_files_result': {
+            const key = `get_branch_diff_files_${data.directory}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (pending) {
+              pendingActionsRef.current.delete(key);
+              if (data.success) {
+                pending.resolve({
+                  success: true,
+                  base_ref: data.base_ref || '',
+                  files: data.files || [],
+                });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to get branch diff files'));
               }
             }
             break;
@@ -1515,7 +1549,12 @@ export function useDaemonSocket({
   }, []);
 
   // Get file diff
-  const sendGetFileDiff = useCallback((directory: string, path: string, staged?: boolean): Promise<FileDiffResult> => {
+  // Options: staged (deprecated), baseRef (for PR-like branch diffs)
+  const sendGetFileDiff = useCallback((
+    directory: string,
+    path: string,
+    options?: { staged?: boolean; baseRef?: string }
+  ): Promise<FileDiffResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1531,7 +1570,8 @@ export function useDaemonSocket({
         cmd: 'get_file_diff',
         directory,
         path,
-        ...(staged !== undefined && { staged }),
+        ...(options?.staged !== undefined && { staged: options.staged }),
+        ...(options?.baseRef && { base_ref: options.baseRef }),
       }));
 
       setTimeout(() => {
@@ -1540,6 +1580,36 @@ export function useDaemonSocket({
           reject(new Error('Get file diff timed out'));
         }
       }, 10000);
+    });
+  }, []);
+
+  // Get all files changed between base ref and current working state (PR-like diff)
+  const sendGetBranchDiffFiles = useCallback((
+    directory: string,
+    baseRef?: string
+  ): Promise<BranchDiffFilesResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = `get_branch_diff_files_${directory}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({
+        cmd: 'get_branch_diff_files',
+        directory,
+        ...(baseRef && { base_ref: baseRef }),
+      }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get branch diff files timed out'));
+        }
+      }, 30000); // 30s timeout for potentially large diffs
     });
   }, []);
 
@@ -1852,6 +1922,7 @@ export function useDaemonSocket({
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendGetFileDiff,
+    sendGetBranchDiffFiles,
     getRepoInfo,
     getReviewState,
     markFileViewed,

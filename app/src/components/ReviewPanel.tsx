@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../hooks/useDaemonSocket';
+import type { GitStatusUpdate, FileDiffResult, ReviewState, BranchDiffFile, BranchDiffFilesResult } from '../hooks/useDaemonSocket';
 import type { ReviewComment } from '../types/generated';
 import type { ReviewerEvent } from '../hooks/useDaemonSocket';
 import UnifiedDiffEditor, {
@@ -235,22 +235,29 @@ function fromEditorAnchor(anchor: CommentAnchor): {
 interface ReviewFile {
   path: string;
   status: string;
-  staged: boolean;
+  staged: boolean;  // Deprecated, kept for compatibility
   additions?: number;
   deletions?: number;
   isAutoSkip: boolean;
+  hasUncommitted?: boolean;  // True if file has uncommitted changes on top of committed
+  oldPath?: string;  // For renames
 }
 
 // ReviewerEvent is now imported from useDaemonSocket
 
 interface ReviewPanelProps {
   isOpen: boolean;
-  gitStatus: GitStatusUpdate | null;
+  gitStatus: GitStatusUpdate | null;  // Still used for real-time updates
   repoPath: string;
   branch: string;
   baseBranch?: string;
   onClose: () => void;
-  fetchDiff: (path: string, staged: boolean) => Promise<FileDiffResult>;
+  // Diff fetching - options: baseRef for PR-like diffs
+  fetchDiff: (path: string, options?: { staged?: boolean; baseRef?: string }) => Promise<FileDiffResult>;
+  // Branch diff - fetches all files changed vs origin/main
+  sendGetBranchDiffFiles: (directory: string, baseRef?: string) => Promise<BranchDiffFilesResult>;
+  // Fetch remotes to ensure we have latest origin state
+  sendFetchRemotes: (repo: string) => Promise<{ success: boolean; error?: string }>;
   getReviewState: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: ReviewState; error?: string }>;
   markFileViewed: (reviewId: string, filepath: string, viewed: boolean) => Promise<{ success: boolean; error?: string }>;
   onSendToClaude?: (reference: string) => void;
@@ -281,6 +288,8 @@ export function ReviewPanel({
   baseBranch = 'main',
   onClose,
   fetchDiff,
+  sendGetBranchDiffFiles,
+  sendFetchRemotes,
   getReviewState,
   markFileViewed,
   onSendToClaude,
@@ -310,6 +319,12 @@ export function ReviewPanel({
   const [fontSize, setFontSize] = useState(13); // Default font size
   const [reviewerPanelHeight, setReviewerPanelHeight] = useState(400); // Default reviewer panel height
   const [scrollToLine, setScrollToLine] = useState<number | undefined>(undefined);
+
+  // Branch diff state - PR-like comparison against origin/main
+  const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
+  const [baseRef, setBaseRef] = useState<string>('');
+  const [_isLoadingBranchDiff, setIsLoadingBranchDiff] = useState(false);
+  // TODO: Use _isLoadingBranchDiff to show loading indicator in file list
   const [reviewerPanelCollapsed, setReviewerPanelCollapsed] = useState(false);
   const reviewerResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const reviewerOutputRef = useRef<HTMLDivElement>(null);
@@ -361,42 +376,48 @@ export function ReviewPanel({
   const [changedSinceViewed, setChangedSinceViewed] = useState<Set<string>>(new Set());
   const previousSelectedPathRef = useRef<string | null>(null);
 
-  // Build file list from git status
-  const { needsReviewFiles, autoSkipFiles } = useMemo(() => {
-    if (!gitStatus) return { needsReviewFiles: [], autoSkipFiles: [] };
+  // Fetch branch diff files when panel opens (PR-like comparison vs origin/main)
+  useEffect(() => {
+    if (isOpen && repoPath) {
+      setIsLoadingBranchDiff(true);
+      // Fetch remotes first to ensure we have latest origin state
+      sendFetchRemotes(repoPath)
+        .then(() => sendGetBranchDiffFiles(repoPath))
+        .then((result) => {
+          if (result.success) {
+            setBranchDiffFiles(result.files);
+            setBaseRef(result.base_ref);
+          }
+        })
+        .catch((err) => {
+          console.error('[ReviewPanel] Failed to fetch branch diff:', err);
+        })
+        .finally(() => {
+          setIsLoadingBranchDiff(false);
+        });
+    }
+  }, [isOpen, repoPath, sendFetchRemotes, sendGetBranchDiffFiles]);
 
-    const allFiles: ReviewFile[] = [
-      ...(gitStatus.staged || []).map(f => ({
-        path: f.path,
-        status: f.status,
-        staged: true,
-        additions: f.additions,
-        deletions: f.deletions,
-        isAutoSkip: AUTO_SKIP_PATTERNS.some(p => f.path.endsWith(p)),
-      })),
-      ...(gitStatus.unstaged || []).map(f => ({
-        path: f.path,
-        status: f.status,
-        staged: false,
-        additions: f.additions,
-        deletions: f.deletions,
-        isAutoSkip: AUTO_SKIP_PATTERNS.some(p => f.path.endsWith(p)),
-      })),
-      ...(gitStatus.untracked || []).map(f => ({
-        path: f.path,
-        status: 'untracked',
-        staged: false,
-        additions: f.additions,
-        deletions: f.deletions,
-        isAutoSkip: AUTO_SKIP_PATTERNS.some(p => f.path.endsWith(p)),
-      })),
-    ];
+  // Build file list from branch diff (PR-like: all changes vs origin/main)
+  const { needsReviewFiles, autoSkipFiles } = useMemo(() => {
+    if (branchDiffFiles.length === 0) return { needsReviewFiles: [], autoSkipFiles: [] };
+
+    const allFiles: ReviewFile[] = branchDiffFiles.map(f => ({
+      path: f.path,
+      status: f.status,
+      staged: false,  // Deprecated field, kept for compatibility
+      additions: f.additions,
+      deletions: f.deletions,
+      hasUncommitted: f.has_uncommitted,
+      oldPath: f.old_path,
+      isAutoSkip: AUTO_SKIP_PATTERNS.some(p => f.path.endsWith(p)),
+    }));
 
     return {
       needsReviewFiles: allFiles.filter(f => !f.isAutoSkip),
       autoSkipFiles: allFiles.filter(f => f.isAutoSkip),
     };
-  }, [gitStatus]);
+  }, [branchDiffFiles]);
 
   const allFiles = useMemo(() => [...needsReviewFiles, ...autoSkipFiles], [needsReviewFiles, autoSkipFiles]);
 
@@ -528,7 +549,6 @@ export function ReviewPanel({
 
     // Store current path to check if we're still viewing the same file when fetch completes
     const fetchPath = selectedFile.path;
-    const fetchStaged = selectedFile.staged;
     const isFirstView = !viewedFiles.has(fetchPath);
 
     // Only show loading on first view to avoid flickering during updates
@@ -537,7 +557,8 @@ export function ReviewPanel({
     }
     setError(null);
 
-    fetchDiff(fetchPath, fetchStaged)
+    // Use baseRef for PR-like diff comparison (origin/main vs working directory)
+    fetchDiff(fetchPath, { baseRef })
       .then((result) => {
         // Only update if we're still viewing the same file
         if (selectedFilePath !== fetchPath) return;
@@ -577,7 +598,7 @@ export function ReviewPanel({
         setLoading(false);
       });
   // Note: viewedFiles intentionally excluded - we read it but don't want re-runs when it changes
-  }, [diffFetchKey, selectedFile, selectedFilePath, fetchDiff, reviewId, markFileViewed]);
+  }, [diffFetchKey, selectedFile, selectedFilePath, fetchDiff, baseRef, reviewId, markFileViewed]);
 
   // Check for changes in viewed files when gitStatus updates (for files not currently selected)
   useEffect(() => {
@@ -592,9 +613,9 @@ export function ReviewPanel({
       const fileInChanges = allFiles.find(f => f.path === viewedPath);
       if (!fileInChanges) return; // File no longer in changes
 
-      // Fetch and check hash
+      // Fetch and check hash using baseRef for PR-like diff
       try {
-        const result = await fetchDiff(viewedPath, fileInChanges.staged);
+        const result = await fetchDiff(viewedPath, { baseRef });
         const newHash = hashContent(result.original + result.modified);
         const prevHash = viewedDiffHashesRef.current.get(viewedPath);
 
@@ -606,7 +627,7 @@ export function ReviewPanel({
         // Ignore errors for background checks
       }
     });
-  }, [gitStatus, viewedFiles, selectedFilePath, allFiles, fetchDiff]);
+  }, [gitStatus, viewedFiles, selectedFilePath, allFiles, fetchDiff, baseRef]);
 
   // Keyboard navigation
   useEffect(() => {

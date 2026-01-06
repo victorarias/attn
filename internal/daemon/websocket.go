@@ -15,6 +15,7 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -566,6 +567,11 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.logf("Getting file diff for %s in %s", diffMsg.Path, diffMsg.Directory)
 		go d.handleGetFileDiff(client, diffMsg)
 
+	case protocol.CmdGetBranchDiffFiles:
+		diffMsg := msg.(*protocol.GetBranchDiffFilesMessage)
+		d.logf("Getting branch diff files for %s", diffMsg.Directory)
+		go d.handleGetBranchDiffFiles(client, diffMsg)
+
 	case protocol.CmdGetRepoInfo:
 		repoMsg := msg.(*protocol.GetRepoInfoMessage)
 		d.logf("Getting repo info for %s", repoMsg.Repo)
@@ -791,8 +797,16 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 		Success:   false,
 	}
 
-	// Get original content from HEAD
-	origCmd := exec.Command("git", "show", "HEAD:"+msg.Path)
+	// Determine the ref to compare against
+	// If base_ref is provided, use it (for PR-like branch diffs)
+	// Otherwise, use HEAD (traditional behavior)
+	baseRef := "HEAD"
+	if msg.BaseRef != nil && *msg.BaseRef != "" {
+		baseRef = *msg.BaseRef
+	}
+
+	// Get original content from base ref
+	origCmd := exec.Command("git", "show", baseRef+":"+msg.Path)
 	origCmd.Dir = msg.Directory
 	origOutput, origErr := origCmd.Output()
 
@@ -804,7 +818,7 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 
 	var modified string
 	if msg.Staged != nil && *msg.Staged {
-		// Get staged version
+		// Get staged version (deprecated, kept for backward compatibility)
 		stagedCmd := exec.Command("git", "show", ":"+msg.Path)
 		stagedCmd.Dir = msg.Directory
 		stagedOutput, err := stagedCmd.Output()
@@ -815,7 +829,7 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 		}
 		modified = string(stagedOutput)
 	} else {
-		// Read current file from disk
+		// Read current file from disk (includes both committed and uncommitted changes)
 		filePath := filepath.Join(msg.Directory, msg.Path)
 		content, err := os.ReadFile(filePath)
 		if err != nil {
@@ -836,6 +850,63 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 	result.Modified = modified
 	result.Success = true
 
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleGetBranchDiffFiles(client *wsClient, msg *protocol.GetBranchDiffFilesMessage) {
+	result := protocol.BranchDiffFilesResultMessage{
+		Event:     protocol.EventBranchDiffFilesResult,
+		Directory: msg.Directory,
+		Success:   false,
+	}
+
+	// Determine base ref - use provided or default to origin/<default-branch>
+	baseRef := ""
+	if msg.BaseRef != nil && *msg.BaseRef != "" {
+		baseRef = *msg.BaseRef
+	} else {
+		// Get the default branch
+		defaultBranch, err := git.GetDefaultBranch(msg.Directory)
+		if err != nil {
+			result.Error = protocol.Ptr("Failed to get default branch: " + err.Error())
+			d.sendToClient(client, result)
+			return
+		}
+		baseRef = "origin/" + defaultBranch
+	}
+	result.BaseRef = baseRef
+
+	// Get the branch diff files
+	files, err := git.GetBranchDiffFiles(msg.Directory, baseRef)
+	if err != nil {
+		result.Error = protocol.Ptr("Failed to get branch diff: " + err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	// Convert to protocol types
+	protoFiles := make([]protocol.BranchDiffFile, len(files))
+	for i, f := range files {
+		protoFiles[i] = protocol.BranchDiffFile{
+			Path:   f.Path,
+			Status: f.Status,
+		}
+		if f.OldPath != "" {
+			protoFiles[i].OldPath = &f.OldPath
+		}
+		if f.Additions > 0 {
+			protoFiles[i].Additions = &f.Additions
+		}
+		if f.Deletions > 0 {
+			protoFiles[i].Deletions = &f.Deletions
+		}
+		if f.HasUncommitted {
+			protoFiles[i].HasUncommitted = &f.HasUncommitted
+		}
+	}
+
+	result.Files = protoFiles
+	result.Success = true
 	d.sendToClient(client, result)
 }
 

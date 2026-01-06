@@ -349,7 +349,24 @@ model GetFileDiffMessage {
   cmd: "get_file_diff";
   directory: string;
   path: string;
-  staged?: boolean;  // If true, show staged diff instead of working tree
+  staged?: boolean;  // DEPRECATED: If true, show staged diff instead of working tree
+  base_ref?: string; // If provided, compare against this ref instead of HEAD (for PR-like diffs)
+}
+
+// Branch diff file info for PR-like review
+model BranchDiffFile {
+  path: string;
+  status: string;           // "added", "modified", "deleted", "renamed"
+  old_path?: string;        // For renames
+  additions?: int32;
+  deletions?: int32;
+  has_uncommitted?: boolean; // True if file also has uncommitted changes
+}
+
+model GetBranchDiffFilesMessage {
+  cmd: "get_branch_diff_files";
+  directory: string;
+  base_ref?: string;  // Defaults to origin/<default-branch>
 }
 
 model GetRepoInfoMessage {
@@ -571,6 +588,15 @@ model FileDiffResultMessage {
   path: string;
   original: string;
   modified: string;
+  success: boolean;
+  error?: string;
+}
+
+model BranchDiffFilesResultMessage {
+  event: "branch_diff_files_result";
+  directory: string;
+  base_ref: string;           // Actual base ref used
+  files: BranchDiffFile[];
   success: boolean;
   error?: string;
 }

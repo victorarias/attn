@@ -3,6 +3,7 @@
 import {
   MockDaemon,
   createFileDiffResult,
+  createBranchDiffFilesResult,
   createReviewState,
 } from './mocks/daemon';
 
@@ -16,12 +17,20 @@ export interface RenderWithMockDaemonResult {
 export function setupDefaultResponses(mockDaemon: MockDaemon): void {
   // Default fetchDiff - returns empty diff
   mockDaemon.setResponse('fetchDiff', (args: unknown[]) => {
-    const [path] = args as [string, boolean];
+    const [path] = args as [string, { staged?: boolean; baseRef?: string }];
     return {
       ...createFileDiffResult('// original content', '// modified content'),
       path,
     };
   });
+
+  // Default getBranchDiffFiles - returns files matching git status
+  mockDaemon.setResponse('getBranchDiffFiles', () =>
+    createBranchDiffFilesResult(['src/App.tsx'])
+  );
+
+  // Default fetchRemotes - always succeeds
+  mockDaemon.setResponse('fetchRemotes', () => ({ success: true }));
 
   // Default getReviewState - returns empty viewed files
   mockDaemon.setResponse('getReviewState', () => createReviewState([]));
@@ -45,6 +54,7 @@ export {
   createMockDaemon,
   createGitStatus,
   createFileDiffResult,
+  createBranchDiffFilesResult,
   createReviewState,
   createReviewComment,
   createDeletedLineComment,

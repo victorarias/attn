@@ -4,6 +4,7 @@ import {
   createMockDaemon,
   createGitStatus,
   createFileDiffResult,
+  createBranchDiffFilesResult,
   createReviewComment,
   createDeletedLineComment,
   setupDefaultResponses,
@@ -49,6 +50,8 @@ describe('ReviewPanel', () => {
         branch="main"
         onClose={onClose}
         fetchDiff={mockDaemon.createFetchDiff()}
+        sendGetBranchDiffFiles={mockDaemon.createGetBranchDiffFiles()}
+        sendFetchRemotes={mockDaemon.createFetchRemotes()}
         getReviewState={mockDaemon.createGetReviewState()}
         markFileViewed={mockDaemon.createMarkFileViewed()}
       />
@@ -107,15 +110,77 @@ describe('ReviewPanel', () => {
 
       expect(mockDaemon.getCalls('getReviewState')[0].args).toEqual(['/test/repo', 'main']);
     });
+
+    it('fetches branch diff files on open', async () => {
+      // Configure branch diff response with specific files
+      mockDaemon.setResponse('getBranchDiffFiles', () =>
+        createBranchDiffFilesResult(['src/feature.ts', 'src/utils.ts'])
+      );
+
+      renderPanel();
+
+      // Should fetch branch diff files
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('getBranchDiffFiles')).toHaveLength(1);
+      });
+
+      // Should pass the repo path
+      expect(mockDaemon.getCalls('getBranchDiffFiles')[0].args[0]).toEqual('/test/repo');
+
+      // Files from branch diff should appear in the list
+      await waitFor(() => {
+        expect(getFileInList('src/feature.ts')).toBeInTheDocument();
+        expect(getFileInList('src/utils.ts')).toBeInTheDocument();
+      });
+    });
+
+    it('fetches remotes before getting branch diff', async () => {
+      renderPanel();
+
+      // Should fetch remotes first
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('fetchRemotes')).toHaveLength(1);
+      });
+
+      // Then get branch diff files
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('getBranchDiffFiles')).toHaveLength(1);
+      });
+    });
+
+    it('uses baseRef from branch diff result for file diffs', async () => {
+      // Configure branch diff response with a specific base_ref
+      mockDaemon.setResponse('getBranchDiffFiles', () => ({
+        success: true,
+        base_ref: 'origin/develop',
+        files: [{ path: 'src/App.tsx', status: 'modified', additions: 5, deletions: 2 }],
+      }));
+
+      renderPanel();
+
+      // Wait for diff to be fetched
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('fetchDiff').length).toBeGreaterThanOrEqual(1);
+      });
+
+      // The diff should use the baseRef from branch diff result
+      const diffCall = mockDaemon.getCalls('fetchDiff')[0];
+      expect(diffCall.args[1]).toHaveProperty('baseRef', 'origin/develop');
+    });
   });
 
   describe('file navigation', () => {
     it('fetches new diff when clicking different file', async () => {
       const gitStatus = createGitStatus(['src/App.tsx', 'src/utils.ts']);
 
+      // Configure branch diff files to match git status
+      mockDaemon.setResponse('getBranchDiffFiles', () =>
+        createBranchDiffFilesResult(['src/App.tsx', 'src/utils.ts'])
+      );
+
       // Set up different responses for each file
       mockDaemon.setResponse('fetchDiff', (args: unknown[]) => {
-        const [path] = args as [string, boolean];
+        const [path] = args as [string, { staged?: boolean }];
         return {
           ...createFileDiffResult(
             `// original ${path}`,
@@ -143,19 +208,25 @@ describe('ReviewPanel', () => {
         expect(utilsCalls).toHaveLength(1);
       });
 
-      // Verify the second file was fetched
+      // Verify the second file was fetched with baseRef
       const utilsCalls = mockDaemon.getCalls('fetchDiff').filter(c => c.args[0] === 'src/utils.ts');
-      expect(utilsCalls[0].args).toEqual(['src/utils.ts', false]);
+      expect(utilsCalls[0].args[0]).toEqual('src/utils.ts');
+      expect(utilsCalls[0].args[1]).toHaveProperty('baseRef');
     });
 
     it('displays correct content when responses arrive out of order', async () => {
       const gitStatus = createGitStatus(['file-A.tsx', 'file-B.tsx']);
 
+      // Configure branch diff files to match git status
+      mockDaemon.setResponse('getBranchDiffFiles', () =>
+        createBranchDiffFilesResult(['file-A.tsx', 'file-B.tsx'])
+      );
+
       // Create controlled responses - track all pending promises
       const pendingPromises: Map<string, (value: unknown) => void> = new Map();
 
       mockDaemon.setResponse('fetchDiff', (args: unknown[]) => {
-        const [path] = args as [string, boolean];
+        const [path] = args as [string, { baseRef?: string }];
         return new Promise((resolve) => {
           pendingPromises.set(path, resolve);
         });
@@ -236,6 +307,11 @@ describe('ReviewPanel', () => {
     it('clears CHANGED badge when navigating away from file', async () => {
       const gitStatus = createGitStatus(['file-A.tsx', 'file-B.tsx']);
 
+      // Configure branch diff files to match git status
+      mockDaemon.setResponse('getBranchDiffFiles', () =>
+        createBranchDiffFilesResult(['file-A.tsx', 'file-B.tsx'])
+      );
+
       renderPanel({ gitStatus });
 
       // Wait for initial load (file-A)
@@ -267,12 +343,12 @@ describe('ReviewPanel', () => {
       setupDefaultResponses(strictMock);
 
       // This test verifies the guard rail mechanism works
-      strictMock.createFetchDiff()('file1.tsx', false);
-      strictMock.createFetchDiff()('file2.tsx', false);
+      strictMock.createFetchDiff()('file1.tsx', { staged: false });
+      strictMock.createFetchDiff()('file2.tsx', { staged: false });
 
       // Third call should throw
       await expect(
-        strictMock.createFetchDiff()('file3.tsx', false)
+        strictMock.createFetchDiff()('file3.tsx', { staged: false })
       ).rejects.toThrow('Max calls exceeded');
     });
 
@@ -283,7 +359,7 @@ describe('ReviewPanel', () => {
 
       // Unexpected call should throw
       await expect(
-        strictMock.createFetchDiff()('file.tsx', false)
+        strictMock.createFetchDiff()('file.tsx', { staged: false })
       ).rejects.toThrow('Unexpected call to fetchDiff in strict mode');
     });
   });

@@ -134,7 +134,7 @@ function App() {
   }), []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, getRepoInfo, getReviewState, markFileViewed, sendAddComment, sendUpdateComment, sendResolveComment, sendWontFixComment, sendDeleteComment, sendGetComments, sendStartReview, sendCancelReview, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, sendGetBranchDiffFiles, getRepoInfo, getReviewState, markFileViewed, sendAddComment, sendUpdateComment, sendResolveComment, sendWontFixComment, sendDeleteComment, sendGetComments, sendStartReview, sendCancelReview, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -190,6 +190,7 @@ function App() {
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
         sendGetFileDiff={sendGetFileDiff}
+        sendGetBranchDiffFiles={sendGetBranchDiffFiles}
         getRepoInfo={getRepoInfo}
         getReviewState={getReviewState}
         markFileViewed={markFileViewed}
@@ -248,6 +249,7 @@ interface AppContentProps {
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
+  sendGetBranchDiffFiles: ReturnType<typeof useDaemonSocket>['sendGetBranchDiffFiles'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
   getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
   markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
@@ -301,6 +303,7 @@ function AppContent({
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
   sendGetFileDiff,
+  sendGetBranchDiffFiles,
   getRepoInfo,
   getReviewState,
   markFileViewed,
@@ -888,13 +891,14 @@ function AppContent({
     setReviewPanelOpen(true);
   }, []);
 
-  // Fetch diff for ReviewPanel (takes path and staged as parameters)
-  const fetchDiffForReview = useCallback(async (path: string, staged: boolean) => {
+  // Fetch diff for ReviewPanel
+  // Options: staged (deprecated), baseRef (for PR-like branch diffs)
+  const fetchDiffForReview = useCallback(async (path: string, options?: { staged?: boolean; baseRef?: string }) => {
     const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
     if (!activeLocalSession?.cwd) throw new Error('No active session');
     const daemonSession = daemonSessions.find((ds) => ds.id === activeLocalSession.id);
     if (!daemonSession) throw new Error('No daemon session found');
-    return sendGetFileDiff(daemonSession.directory, path, staged);
+    return sendGetFileDiff(daemonSession.directory, path, options);
   }, [sessions, activeSessionId, daemonSessions, sendGetFileDiff]);
 
   // Get active daemon session info for ReviewPanel
@@ -1132,6 +1136,8 @@ function AppContent({
         branch={activeDaemonSession?.branch || ''}
         onClose={handleCloseReviewPanel}
         fetchDiff={fetchDiffForReview}
+        sendGetBranchDiffFiles={sendGetBranchDiffFiles}
+        sendFetchRemotes={sendFetchRemotes}
         getReviewState={getReviewState}
         markFileViewed={markFileViewed}
         onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
