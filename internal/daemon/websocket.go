@@ -596,6 +596,11 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.logf("Resolving comment %s resolved=%v", commentMsg.CommentID, commentMsg.Resolved)
 		d.handleResolveComment(client, commentMsg)
 
+	case protocol.CmdWontFixComment:
+		commentMsg := msg.(*protocol.WontFixCommentMessage)
+		d.logf("Marking comment %s wont_fix=%v", commentMsg.CommentID, commentMsg.WontFix)
+		d.handleWontFixComment(client, commentMsg)
+
 	case protocol.CmdDeleteComment:
 		commentMsg := msg.(*protocol.DeleteCommentMessage)
 		d.logf("Deleting comment %s", commentMsg.CommentID)
@@ -947,6 +952,28 @@ func (d *Daemon) handleResolveComment(client *wsClient, msg *protocol.ResolveCom
 		resolvedBy = "user"
 	}
 	err := d.store.ResolveComment(msg.CommentID, msg.Resolved, resolvedBy)
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	result.Success = true
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleWontFixComment(client *wsClient, msg *protocol.WontFixCommentMessage) {
+	result := protocol.WontFixCommentResultMessage{
+		Event:   protocol.EventWontFixCommentResult,
+		Success: false,
+	}
+
+	// When marking as wont_fix from the UI, the user is the marker
+	wontFixBy := ""
+	if msg.WontFix {
+		wontFixBy = "user"
+	}
+	err := d.store.WontFixComment(msg.CommentID, msg.WontFix, wontFixBy)
 	if err != nil {
 		result.Error = protocol.Ptr(err.Error())
 		d.sendToClient(client, result)

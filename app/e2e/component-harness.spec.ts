@@ -18,6 +18,92 @@ test.describe('ReviewPanel Component', () => {
     await page.waitForSelector('.cm-line', { timeout: 5000 });
   });
 
+  test.describe('font size keyboard shortcuts', () => {
+    /**
+     * BUG: Cmd+/- expands all hunks without changing UI state
+     *
+     * Expected behavior:
+     * - Cmd+= and Cmd+- should only change font size
+     * - Collapsed regions should remain collapsed
+     * - UI toggle should stay on "Hunks"
+     *
+     * Current bug: Pressing Cmd+/- expands all hunks but the toggle still shows "Hunks"
+     */
+    test('Cmd+/- changes font size without affecting collapsed regions', async ({ page }) => {
+      // First verify we're in hunks mode with collapsed regions
+      const hunksBtn = page.locator('button.expand-btn', { hasText: 'Hunks' });
+      await expect(hunksBtn).toHaveClass(/active/);
+
+      const collapsedRegions = page.locator('.cm-collapsed-region');
+      const initialCount = await collapsedRegions.count();
+
+      // Skip if no collapsed regions (test harness might not create them properly)
+      if (initialCount === 0) {
+        console.log('No collapsed regions found - skipping keyboard shortcut test');
+        return;
+      }
+
+      // NOTE: Keyboard handlers are document-level, so we don't need to click/focus the editor.
+      // Clicking on the editor would trigger the comment form click handler, which auto-expands
+      // regions containing the clicked line.
+
+      // Press Cmd++ (font size increase)
+      await page.keyboard.press('Meta+=');
+      await page.waitForTimeout(200);
+
+      // Collapsed regions should still be there
+      const countAfterPlus = await collapsedRegions.count();
+      expect(countAfterPlus).toBe(initialCount);
+
+      // Hunks button should still be active
+      await expect(hunksBtn).toHaveClass(/active/);
+
+      // Press Cmd+- (font size decrease)
+      await page.keyboard.press('Meta+-');
+      await page.waitForTimeout(200);
+
+      // Collapsed regions should still be there
+      const countAfterMinus = await collapsedRegions.count();
+      expect(countAfterMinus).toBe(initialCount);
+
+      // Hunks button should still be active
+      await expect(hunksBtn).toHaveClass(/active/);
+    });
+
+    test('Cmd+/- preserves saved comments', async ({ page }) => {
+      // First add a comment
+      const lines = page.locator('.cm-line');
+      await lines.nth(3).click();
+
+      const textarea = page.locator('.unified-comment-textarea');
+      await expect(textarea).toBeVisible({ timeout: 3000 });
+
+      await textarea.fill('Test comment to preserve');
+      await page.locator('.save-btn').click();
+
+      // Verify comment is saved
+      const savedComment = page.locator('.unified-comment');
+      await expect(savedComment).toBeVisible();
+      await expect(savedComment).toContainText('Test comment to preserve');
+
+      // Change font size with Cmd+=
+      await page.keyboard.press('Meta+=');
+      await page.waitForTimeout(200);
+
+      // Comment should still be visible
+      await expect(savedComment).toBeVisible();
+      await expect(savedComment).toContainText('Test comment to preserve');
+
+      // Change font size with Cmd+-
+      await page.keyboard.press('Meta+-');
+      await page.waitForTimeout(200);
+
+      // Comment should still be visible
+      await expect(savedComment).toBeVisible();
+      await expect(savedComment).toContainText('Test comment to preserve');
+    });
+  });
+
   test.describe('hunk/full toggle', () => {
     /**
      * BUG: Hunk selection not working - shows full diff all the time

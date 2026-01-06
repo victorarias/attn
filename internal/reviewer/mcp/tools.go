@@ -134,6 +134,9 @@ type CommentInfo struct {
 	Resolved   bool    `json:"resolved"`
 	ResolvedBy string  `json:"resolved_by,omitempty"`
 	ResolvedAt *string `json:"resolved_at,omitempty"`
+	WontFix    bool    `json:"wont_fix"`
+	WontFixBy  string  `json:"wont_fix_by,omitempty"`
+	WontFixAt  *string `json:"wont_fix_at,omitempty"`
 }
 
 // ListComments returns all comments for the current review
@@ -154,10 +157,16 @@ func (t *Tools) ListComments() ([]CommentInfo, error) {
 			Author:     c.Author,
 			Resolved:   c.Resolved,
 			ResolvedBy: c.ResolvedBy,
+			WontFix:    c.WontFix,
+			WontFixBy:  c.WontFixBy,
 		}
 		if c.ResolvedAt != nil {
 			ts := c.ResolvedAt.Format("2006-01-02T15:04:05Z")
 			info.ResolvedAt = &ts
+		}
+		if c.WontFixAt != nil {
+			ts := c.WontFixAt.Format("2006-01-02T15:04:05Z")
+			info.WontFixAt = &ts
 		}
 		result[i] = info
 	}

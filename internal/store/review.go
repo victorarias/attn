@@ -165,6 +165,9 @@ type ReviewComment struct {
 	Resolved   bool
 	ResolvedBy string     // "user" or "agent" (empty if not resolved)
 	ResolvedAt *time.Time // when resolved (nil if not resolved)
+	WontFix    bool
+	WontFixBy  string     // "user" or "agent" (empty if not wont_fix)
+	WontFixAt  *time.Time // when marked wont_fix (nil if not wont_fix)
 	CreatedAt  time.Time
 }
 
@@ -204,7 +207,7 @@ func (s *Store) GetComments(reviewID string) ([]*ReviewComment, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, resolved_by, resolved_at, created_at
+		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, resolved_by, resolved_at, wont_fix, wont_fix_by, wont_fix_at, created_at
 		FROM review_comments WHERE review_id = ? ORDER BY filepath, line_start
 	`, reviewID)
 	if err != nil {
@@ -221,7 +224,7 @@ func (s *Store) GetCommentsForFile(reviewID, filepath string) ([]*ReviewComment,
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, resolved_by, resolved_at, created_at
+		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, resolved_by, resolved_at, wont_fix, wont_fix_by, wont_fix_at, created_at
 		FROM review_comments WHERE review_id = ? AND filepath = ? ORDER BY line_start
 	`, reviewID, filepath)
 	if err != nil {
@@ -238,14 +241,15 @@ func (s *Store) GetCommentByID(id string) (*ReviewComment, error) {
 	defer s.mu.RUnlock()
 
 	var comment ReviewComment
-	var resolved int
-	var resolvedAt, createdAt string
+	var resolved, wontFix int
+	var resolvedAt, wontFixAt, createdAt string
 
 	err := s.db.QueryRow(`
-		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, resolved_by, resolved_at, created_at
+		SELECT id, review_id, filepath, line_start, line_end, content, author, resolved, resolved_by, resolved_at, wont_fix, wont_fix_by, wont_fix_at, created_at
 		FROM review_comments WHERE id = ?
 	`, id).Scan(&comment.ID, &comment.ReviewID, &comment.Filepath, &comment.LineStart,
-		&comment.LineEnd, &comment.Content, &comment.Author, &resolved, &comment.ResolvedBy, &resolvedAt, &createdAt)
+		&comment.LineEnd, &comment.Content, &comment.Author, &resolved, &comment.ResolvedBy, &resolvedAt,
+		&wontFix, &comment.WontFixBy, &wontFixAt, &createdAt)
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +258,11 @@ func (s *Store) GetCommentByID(id string) (*ReviewComment, error) {
 	if resolvedAt != "" {
 		t, _ := time.Parse(time.RFC3339, resolvedAt)
 		comment.ResolvedAt = &t
+	}
+	comment.WontFix = wontFix == 1
+	if wontFixAt != "" {
+		t, _ := time.Parse(time.RFC3339, wontFixAt)
+		comment.WontFixAt = &t
 	}
 	comment.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	return &comment, nil
@@ -284,6 +293,25 @@ func (s *Store) ResolveComment(id string, resolved bool, resolvedBy string) erro
 	}
 	_, err := s.db.Exec(`UPDATE review_comments SET resolved = ?, resolved_by = ?, resolved_at = ? WHERE id = ?`,
 		resolvedInt, resolvedBy, resolvedAt, id)
+	return err
+}
+
+// WontFixComment sets the wont_fix status of a comment
+// wontFixBy should be "user" or "agent" when marking as wont_fix, or empty when unmarking
+func (s *Store) WontFixComment(id string, wontFix bool, wontFixBy string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	wontFixInt := 0
+	wontFixAt := ""
+	if wontFix {
+		wontFixInt = 1
+		wontFixAt = time.Now().UTC().Format(time.RFC3339)
+	} else {
+		wontFixBy = "" // Clear wontFixBy when unmarking
+	}
+	_, err := s.db.Exec(`UPDATE review_comments SET wont_fix = ?, wont_fix_by = ?, wont_fix_at = ? WHERE id = ?`,
+		wontFixInt, wontFixBy, wontFixAt, id)
 	return err
 }
 
@@ -406,16 +434,22 @@ func scanComments(rows *sql.Rows) ([]*ReviewComment, error) {
 	var comments []*ReviewComment
 	for rows.Next() {
 		var comment ReviewComment
-		var resolved int
-		var resolvedAt, createdAt string
+		var resolved, wontFix int
+		var resolvedAt, wontFixAt, createdAt string
 		if err := rows.Scan(&comment.ID, &comment.ReviewID, &comment.Filepath, &comment.LineStart,
-			&comment.LineEnd, &comment.Content, &comment.Author, &resolved, &comment.ResolvedBy, &resolvedAt, &createdAt); err != nil {
+			&comment.LineEnd, &comment.Content, &comment.Author, &resolved, &comment.ResolvedBy, &resolvedAt,
+			&wontFix, &comment.WontFixBy, &wontFixAt, &createdAt); err != nil {
 			return nil, err
 		}
 		comment.Resolved = resolved == 1
 		if resolvedAt != "" {
 			t, _ := time.Parse(time.RFC3339, resolvedAt)
 			comment.ResolvedAt = &t
+		}
+		comment.WontFix = wontFix == 1
+		if wontFixAt != "" {
+			t, _ := time.Parse(time.RFC3339, wontFixAt)
+			comment.WontFixAt = &t
 		}
 		comment.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		comments = append(comments, &comment)

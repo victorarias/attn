@@ -144,6 +144,53 @@ test.describe('UnifiedDiffEditor', () => {
       expect(calls[0][1]).toBe(true); // resolved = true
     });
 
+    test('won\'t fix button toggles state and updates button text', async ({ page }) => {
+      await addComment(page, 'Test comment');
+
+      const comment = page.locator('.unified-comment');
+      const wontFixBtn = comment.locator('.wontfix-btn');
+
+      // Initially not marked, button shows "Won't Fix"
+      await expect(comment).not.toHaveClass(/wont-fix/);
+      await expect(wontFixBtn).toHaveText("Won't Fix");
+
+      // Click to mark as won't fix
+      await wontFixBtn.click();
+      await expect(comment).toHaveClass(/wont-fix/);
+      await expect(wontFixBtn).toHaveText("Undo Won't Fix");
+
+      // Click again to undo
+      await wontFixBtn.click();
+      await expect(comment).not.toHaveClass(/wont-fix/);
+      await expect(wontFixBtn).toHaveText("Won't Fix");
+
+      // Verify mock calls
+      const calls = await page.evaluate(() => window.__HARNESS__.getCalls('wontFixComment'));
+      expect(calls).toHaveLength(2);
+      expect(calls[0][1]).toBe(true);  // First click: mark
+      expect(calls[1][1]).toBe(false); // Second click: undo
+    });
+
+    test('resolved and won\'t fix are mutually exclusive', async ({ page }) => {
+      await addComment(page, 'Test comment');
+
+      const comment = page.locator('.unified-comment');
+
+      // Mark as won't fix first
+      await comment.locator('.wontfix-btn').click();
+      await expect(comment).toHaveClass(/wont-fix/);
+
+      // Resolve - should clear won't fix
+      await comment.locator('.resolve-btn').click();
+      await expect(comment).toHaveClass(/resolved/);
+      await expect(comment).not.toHaveClass(/wont-fix/);
+
+      // Mark won't fix again - should clear resolved
+      await comment.locator('.wontfix-btn').click();
+      await expect(comment).toHaveClass(/wont-fix/);
+      await expect(comment).not.toHaveClass(/resolved/);
+    });
+
     test('delete button removes comment', async ({ page }) => {
       await addComment(page, 'Comment to delete');
 
@@ -294,6 +341,32 @@ test.describe('UnifiedDiffEditor', () => {
 
       const collapsedRegions = page.locator('.cm-collapsed-region');
       await expect(collapsedRegions).toHaveCount(0);
+    });
+
+    test('Cmd+/- does not affect collapsed regions', async ({ page }) => {
+      // Verify we have collapsed regions initially
+      const collapsedRegions = page.locator('.cm-collapsed-region');
+      const initialCount = await collapsedRegions.count();
+      expect(initialCount).toBeGreaterThan(0);
+
+      // Focus the editor
+      await page.locator('.cm-editor').click();
+
+      // Press Cmd++ (font size increase)
+      await page.keyboard.press('Meta+=');
+      await page.waitForTimeout(100);
+
+      // Collapsed regions should still be there
+      const countAfterPlus = await collapsedRegions.count();
+      expect(countAfterPlus).toBe(initialCount);
+
+      // Press Cmd+- (font size decrease)
+      await page.keyboard.press('Meta+-');
+      await page.waitForTimeout(100);
+
+      // Collapsed regions should still be there
+      const countAfterMinus = await collapsedRegions.count();
+      expect(countAfterMinus).toBe(initialCount);
     });
 
     test('regions containing comments auto-expand', async ({ page }) => {

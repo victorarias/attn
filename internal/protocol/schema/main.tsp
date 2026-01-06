@@ -391,6 +391,12 @@ model ResolveCommentMessage {
   resolved: boolean;
 }
 
+model WontFixCommentMessage {
+  cmd: "wont_fix_comment";
+  comment_id: string;
+  wont_fix: boolean;
+}
+
 model DeleteCommentMessage {
   cmd: "delete_comment";
   comment_id: string;
@@ -605,6 +611,9 @@ model ReviewComment {
   resolved: boolean;
   resolved_by?: string;  // "user" or "agent" (empty if not resolved)
   resolved_at?: string;  // ISO timestamp (empty if not resolved)
+  wont_fix: boolean;
+  wont_fix_by?: string;  // "user" or "agent" (empty if not wont_fix)
+  wont_fix_at?: string;  // ISO timestamp (empty if not wont_fix)
   created_at: string;    // ISO timestamp
 }
 
@@ -639,6 +648,12 @@ model UpdateCommentResultMessage {
 
 model ResolveCommentResultMessage {
   event: "resolve_comment_result";
+  success: boolean;
+  error?: string;
+}
+
+model WontFixCommentResultMessage {
+  event: "wont_fix_comment_result";
   success: boolean;
   error?: string;
 }

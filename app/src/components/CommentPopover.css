@@ -84,9 +84,83 @@
   color: #e0e0e0;
   font-size: 13px;
   line-height: 1.5;
-  white-space: pre-wrap;
   word-wrap: break-word;
   padding: 4px 0;
+}
+
+/* Markdown styles within comment content */
+.comment-content p {
+  margin: 0 0 8px 0;
+}
+
+.comment-content p:last-child {
+  margin-bottom: 0;
+}
+
+.comment-content code {
+  background: #1e1e1e;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+}
+
+.comment-content pre {
+  background: #1e1e1e;
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.comment-content pre code {
+  background: none;
+  padding: 0;
+}
+
+.comment-content ul,
+.comment-content ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.comment-content li {
+  margin: 4px 0;
+}
+
+.comment-content a {
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+.comment-content a:hover {
+  text-decoration: underline;
+}
+
+.comment-content blockquote {
+  border-left: 3px solid #454545;
+  margin: 8px 0;
+  padding-left: 12px;
+  color: #a0a0a0;
+}
+
+.comment-content strong {
+  font-weight: 600;
+}
+
+.comment-content h1,
+.comment-content h2,
+.comment-content h3,
+.comment-content h4 {
+  margin: 12px 0 8px 0;
+  font-weight: 600;
+}
+
+.comment-content h1:first-child,
+.comment-content h2:first-child,
+.comment-content h3:first-child,
+.comment-content h4:first-child {
+  margin-top: 0;
 }
 
 .comment-actions {
@@ -169,4 +243,39 @@
 .comment-btn.unresolve:hover:not(:disabled) {
   background: #3d3d3d;
   color: #e0e0e0;
+}
+
+.comment-btn.wontfix {
+  background: #d97706;
+  color: #fff;
+}
+
+.comment-btn.wontfix:hover:not(:disabled) {
+  background: #b45309;
+}
+
+.comment-btn.undo-wontfix {
+  background: transparent;
+  color: #808080;
+  border: 1px solid #454545;
+}
+
+.comment-btn.undo-wontfix:hover:not(:disabled) {
+  background: #3d3d3d;
+  color: #e0e0e0;
+}
+
+/* Won't fix state styling */
+.comment-popover.wont-fix {
+  opacity: 0.7;
+}
+
+.comment-wontfix-badge {
+  background: #d97706;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: auto;
 }

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "17"
+const ProtocolVersion = "18"
 
 // Commands
 const (
@@ -63,6 +63,7 @@ const (
 	CmdAddComment               = "add_comment"
 	CmdUpdateComment            = "update_comment"
 	CmdResolveComment           = "resolve_comment"
+	CmdWontFixComment           = "wont_fix_comment"
 	CmdDeleteComment            = "delete_comment"
 	CmdGetComments              = "get_comments"
 	CmdStartReview              = "start_review"
@@ -110,6 +111,7 @@ const (
 	EventAddCommentResult         = "add_comment_result"
 	EventUpdateCommentResult      = "update_comment_result"
 	EventResolveCommentResult     = "resolve_comment_result"
+	EventWontFixCommentResult     = "wont_fix_comment_result"
 	EventDeleteCommentResult      = "delete_comment_result"
 	EventGetCommentsResult        = "get_comments_result"
 	EventReviewStarted            = "review_started"
@@ -526,6 +528,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg ResolveCommentMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal resolve_comment: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWontFixComment:
+		var msg WontFixCommentMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal wont_fix_comment: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

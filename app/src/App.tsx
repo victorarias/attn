@@ -134,7 +134,7 @@ function App() {
   }), []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, getRepoInfo, getReviewState, markFileViewed, sendAddComment, sendUpdateComment, sendResolveComment, sendDeleteComment, sendGetComments, sendStartReview, sendCancelReview, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, getRepoInfo, getReviewState, markFileViewed, sendAddComment, sendUpdateComment, sendResolveComment, sendWontFixComment, sendDeleteComment, sendGetComments, sendStartReview, sendCancelReview, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -196,6 +196,7 @@ function App() {
         sendAddComment={sendAddComment}
         sendUpdateComment={sendUpdateComment}
         sendResolveComment={sendResolveComment}
+        sendWontFixComment={sendWontFixComment}
         sendDeleteComment={sendDeleteComment}
         sendGetComments={sendGetComments}
         sendStartReview={sendStartReview}
@@ -253,6 +254,7 @@ interface AppContentProps {
   sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
   sendUpdateComment: ReturnType<typeof useDaemonSocket>['sendUpdateComment'];
   sendResolveComment: ReturnType<typeof useDaemonSocket>['sendResolveComment'];
+  sendWontFixComment: ReturnType<typeof useDaemonSocket>['sendWontFixComment'];
   sendDeleteComment: ReturnType<typeof useDaemonSocket>['sendDeleteComment'];
   sendGetComments: ReturnType<typeof useDaemonSocket>['sendGetComments'];
   sendStartReview: ReturnType<typeof useDaemonSocket>['sendStartReview'];
@@ -305,6 +307,7 @@ function AppContent({
   sendAddComment,
   sendUpdateComment,
   sendResolveComment,
+  sendWontFixComment,
   sendDeleteComment,
   sendGetComments,
   sendStartReview,
@@ -1135,6 +1138,7 @@ function AppContent({
         addComment={sendAddComment}
         updateComment={sendUpdateComment}
         resolveComment={sendResolveComment}
+        wontFixComment={sendWontFixComment}
         deleteComment={sendDeleteComment}
         getComments={sendGetComments}
         sendStartReview={sendStartReview}

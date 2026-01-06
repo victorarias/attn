@@ -627,6 +627,25 @@ describe('Deleted-Line Comment Fixtures', () => {
       expect(calls[1].args).toEqual(['comment-1', false]);
     });
 
+    it('can mark/unmark comments as won\'t fix', async () => {
+      mockDaemon.setResponse('wontFixComment', () => ({ success: true }));
+
+      const wontFixComment = mockDaemon.createWontFixComment();
+
+      // Mark as won't fix
+      let result = await wontFixComment('comment-1', true);
+      expect(result.success).toBe(true);
+
+      // Undo won't fix
+      result = await wontFixComment('comment-1', false);
+      expect(result.success).toBe(true);
+
+      const calls = mockDaemon.getCalls('wontFixComment');
+      expect(calls).toHaveLength(2);
+      expect(calls[0].args).toEqual(['comment-1', true]);
+      expect(calls[1].args).toEqual(['comment-1', false]);
+    });
+
     it('can fetch comments and separate regular from deleted-line', async () => {
       const mixedComments = [
         createReviewComment({ id: 'regular-1', line_end: 5 }),

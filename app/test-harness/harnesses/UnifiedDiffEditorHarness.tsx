@@ -220,11 +220,33 @@ export function UnifiedDiffEditorHarness({ onReady }: HarnessProps) {
     setEditingCommentId(null);
   }, []);
 
-  // Mock resolveComment
+  // Mock resolveComment - clears wontFix when resolving (mutual exclusivity)
   const resolveComment = useCallback(async (id: string, resolved: boolean) => {
     window.__HARNESS__.recordCall('resolveComment', [id, resolved]);
     setComments((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, resolved } : c))
+      prev.map((c) => (c.id === id ? {
+        ...c,
+        resolved,
+        resolvedBy: resolved ? 'user' : undefined,
+        // Clear won't fix when resolving
+        wontFix: resolved ? false : c.wontFix,
+        wontFixBy: resolved ? undefined : c.wontFixBy,
+      } : c))
+    );
+  }, []);
+
+  // Mock wontFixComment - clears resolved when marking won't fix (mutual exclusivity)
+  const wontFixComment = useCallback(async (id: string, wontFix: boolean) => {
+    window.__HARNESS__.recordCall('wontFixComment', [id, wontFix]);
+    setComments((prev) =>
+      prev.map((c) => (c.id === id ? {
+        ...c,
+        wontFix,
+        wontFixBy: wontFix ? 'user' : undefined,
+        // Clear resolved when marking won't fix
+        resolved: wontFix ? false : c.resolved,
+        resolvedBy: wontFix ? undefined : c.resolvedBy,
+      } : c))
     );
   }, []);
 
@@ -348,6 +370,7 @@ export function UnifiedDiffEditorHarness({ onReady }: HarnessProps) {
           onStartEdit={startEdit}
           onCancelEdit={cancelEdit}
           onResolveComment={resolveComment}
+          onWontFixComment={wontFixComment}
           onDeleteComment={deleteComment}
         />
       </div>

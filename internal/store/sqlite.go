@@ -144,6 +144,11 @@ var migrations = []migration{
 		completed_at TEXT,
 		FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
 	)`},
+	{17, "add wont_fix tracking to review_comments", `
+		ALTER TABLE review_comments ADD COLUMN wont_fix INTEGER NOT NULL DEFAULT 0;
+		ALTER TABLE review_comments ADD COLUMN wont_fix_by TEXT NOT NULL DEFAULT '';
+		ALTER TABLE review_comments ADD COLUMN wont_fix_at TEXT NOT NULL DEFAULT '';
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

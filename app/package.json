@@ -46,6 +46,7 @@
     "codemirror": "^6.0.2",
     "diff": "^8.0.2",
     "focus-trap-react": "^11.0.4",
+    "marked": "^17.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

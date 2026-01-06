@@ -984,6 +984,15 @@ type ReviewComment struct {
 
 	// ReviewID corresponds to the JSON schema field "review_id".
 	ReviewID string `json:"review_id"`
+
+	// WontFix corresponds to the JSON schema field "wont_fix".
+	WontFix bool `json:"wont_fix"`
+
+	// WontFixAt corresponds to the JSON schema field "wont_fix_at".
+	WontFixAt *string `json:"wont_fix_at,omitempty"`
+
+	// WontFixBy corresponds to the JSON schema field "wont_fix_by".
+	WontFixBy *string `json:"wont_fix_by,omitempty"`
 }
 
 type ReviewCompleteMessage struct {
@@ -1324,6 +1333,28 @@ type WebSocketEvent struct {
 
 	// Worktrees corresponds to the JSON schema field "worktrees".
 	Worktrees []Worktree `json:"worktrees,omitempty"`
+}
+
+type WontFixCommentMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// CommentID corresponds to the JSON schema field "comment_id".
+	CommentID string `json:"comment_id"`
+
+	// WontFix corresponds to the JSON schema field "wont_fix".
+	WontFix bool `json:"wont_fix"`
+}
+
+type WontFixCommentResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type Worktree struct {

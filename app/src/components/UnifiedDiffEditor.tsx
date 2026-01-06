@@ -26,6 +26,7 @@ import { sql } from '@codemirror/lang-sql';
 import { java } from '@codemirror/lang-java';
 import { yaml } from '@codemirror/lang-yaml';
 import { diffLines } from 'diff';
+import { marked } from 'marked';
 import { ClaudeIcon } from './icons/ClaudeIcon';
 
 // ============================================================================
@@ -52,6 +53,8 @@ export interface InlineComment {
   content: string;
   resolved: boolean;
   resolvedBy?: 'user' | 'agent'; // Who resolved the comment
+  wontFix?: boolean;
+  wontFixBy?: 'user' | 'agent'; // Who marked won't fix
   author?: 'user' | 'agent';
   anchor?: CommentAnchor; // For persistence and staleness detection
   isOutdated?: boolean; // Line content changed since comment was created
@@ -88,6 +91,7 @@ export interface UnifiedDiffEditorProps {
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
   onResolveComment: (id: string, resolved: boolean) => Promise<void>;
+  onWontFixComment: (id: string, wontFix: boolean) => Promise<void>;
   onDeleteComment: (id: string) => Promise<void>;
   onSendToClaude?: (reference: string) => void;
 }
@@ -561,6 +565,7 @@ interface CommentWidgetConfig {
   onSaveEdit: (id: string, content: string) => void;
   onCancelEdit: () => void;
   onResolve: (id: string, resolved: boolean) => void;
+  onWontFix: (id: string, wontFix: boolean) => void;
   onDelete: (id: string) => void;
   onSendToClaude?: () => void;
 }
@@ -571,10 +576,10 @@ class CommentWidget extends WidgetType {
   }
 
   toDOM() {
-    const { comment, isEditing, onEdit, onSaveEdit, onCancelEdit, onResolve, onDelete, onSendToClaude } = this.config;
+    const { comment, isEditing, onEdit, onSaveEdit, onCancelEdit, onResolve, onWontFix, onDelete, onSendToClaude } = this.config;
 
     const wrapper = document.createElement('div');
-    wrapper.className = `unified-comment ${comment.resolved ? 'resolved' : ''}`;
+    wrapper.className = `unified-comment ${comment.resolved ? 'resolved' : ''} ${comment.wontFix ? 'wont-fix' : ''}`;
 
     if (isEditing) {
       // Edit mode
@@ -618,10 +623,16 @@ class CommentWidget extends WidgetType {
       const resolvedBadge = comment.resolved
         ? `<span class="unified-comment-resolved">Resolved by ${comment.resolvedBy === 'agent' ? 'Claude' : 'you'}</span>`
         : '';
+      const wontFixBadge = comment.wontFix
+        ? `<span class="unified-comment-wontfix">Won't Fix by ${comment.wontFixBy === 'agent' ? 'Claude' : 'you'}</span>`
+        : '';
       const sendToClaudeBtn = onSendToClaude
         ? `<button class="send-btn">Send to CC</button>`
         : '';
-      wrapper.innerHTML = `<div class="unified-comment-header"><div class="unified-comment-left"><span class="unified-comment-author">${comment.author === 'agent' ? 'Claude' : 'You'}</span>${resolvedBadge}</div><div class="unified-comment-actions"><button class="edit-btn">Edit</button>${sendToClaudeBtn}<button class="resolve-btn">${comment.resolved ? 'Unresolve' : 'Resolve'}</button><button class="delete-btn">Delete</button></div></div><div class="unified-comment-content">${escapeHtml(comment.content)}</div>`;
+      const wontFixBtn = comment.wontFix
+        ? `<button class="wontfix-btn">Undo Won't Fix</button>`
+        : `<button class="wontfix-btn">Won't Fix</button>`;
+      wrapper.innerHTML = `<div class="unified-comment-header"><div class="unified-comment-left"><span class="unified-comment-author">${comment.author === 'agent' ? 'Claude' : 'You'}</span>${resolvedBadge}${wontFixBadge}</div><div class="unified-comment-actions"><button class="edit-btn">Edit</button>${sendToClaudeBtn}<button class="resolve-btn">${comment.resolved ? 'Unresolve' : 'Resolve'}</button>${wontFixBtn}<button class="delete-btn">Delete</button></div></div><div class="unified-comment-content">${renderMarkdown(comment.content)}</div>`;
 
       wrapper.querySelector('.edit-btn')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -636,6 +647,11 @@ class CommentWidget extends WidgetType {
       wrapper.querySelector('.resolve-btn')?.addEventListener('click', (e) => {
         e.stopPropagation();
         onResolve(comment.id, !comment.resolved);
+      });
+
+      wrapper.querySelector('.wontfix-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onWontFix(comment.id, !comment.wontFix);
       });
 
       wrapper.querySelector('.delete-btn')?.addEventListener('click', (e) => {
@@ -767,6 +783,17 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
+/**
+ * Render markdown to HTML for inline comment display.
+ * Uses marked with GFM support and breaks enabled.
+ */
+function renderMarkdown(text: string): string {
+  return marked.parse(text, {
+    gfm: true,
+    breaks: true,
+  }) as string;
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -786,6 +813,7 @@ export function UnifiedDiffEditor({
   onStartEdit,
   onCancelEdit,
   onResolveComment,
+  onWontFixComment,
   onDeleteComment,
   onSendToClaude,
 }: UnifiedDiffEditorProps) {
@@ -1007,6 +1035,10 @@ export function UnifiedDiffEditor({
           borderLeftColor: '#22c55e',
           background: '#1e3a2f',
         },
+        '.unified-comment.wont-fix': {
+          borderLeftColor: '#d97706',
+          background: '#3a2f1e',
+        },
         '.unified-comment-header': {
           display: 'flex',
           alignItems: 'center',
@@ -1019,7 +1051,7 @@ export function UnifiedDiffEditor({
           gap: '8px',
         },
         '.unified-comment-author': {
-          fontSize: '12px',
+          fontSize: `${fontSize - 1}px`,
           fontWeight: '600',
           padding: '2px 8px',
           borderRadius: '4px',
@@ -1027,18 +1059,72 @@ export function UnifiedDiffEditor({
           background: '#2563eb',
         },
         '.unified-comment-resolved': {
-          fontSize: '11px',
+          fontSize: `${fontSize - 2}px`,
           fontWeight: '500',
           padding: '2px 8px',
           borderRadius: '4px',
           color: '#22c55e',
           background: 'rgba(34, 197, 94, 0.15)',
         },
+        '.unified-comment-wontfix': {
+          fontSize: `${fontSize - 2}px`,
+          fontWeight: '500',
+          padding: '2px 8px',
+          borderRadius: '4px',
+          color: '#d97706',
+          background: 'rgba(217, 119, 6, 0.15)',
+        },
         '.unified-comment-content': {
           color: '#e5e7eb',
-          fontSize: '13px',
+          fontSize: `${fontSize}px`,
           lineHeight: '1.4',
-          whiteSpace: 'pre-wrap',
+        },
+        '.unified-comment-content p': {
+          margin: '0 0 8px 0',
+        },
+        '.unified-comment-content p:last-child': {
+          marginBottom: '0',
+        },
+        '.unified-comment-content code': {
+          background: '#1f2937',
+          padding: '1px 4px',
+          borderRadius: '3px',
+          fontFamily: "'SF Mono', Monaco, Menlo, monospace",
+          fontSize: `${fontSize - 1}px`,
+        },
+        '.unified-comment-content pre': {
+          background: '#1f2937',
+          padding: '8px',
+          borderRadius: '4px',
+          overflowX: 'auto',
+          margin: '8px 0',
+        },
+        '.unified-comment-content pre code': {
+          background: 'none',
+          padding: '0',
+        },
+        '.unified-comment-content ul, .unified-comment-content ol': {
+          margin: '8px 0',
+          paddingLeft: '20px',
+        },
+        '.unified-comment-content li': {
+          margin: '4px 0',
+        },
+        '.unified-comment-content a': {
+          color: '#60a5fa',
+          textDecoration: 'none',
+        },
+        '.unified-comment-content a:hover': {
+          textDecoration: 'underline',
+        },
+        '.unified-comment-content blockquote': {
+          borderLeft: '3px solid #4b5563',
+          margin: '8px 0',
+          paddingLeft: '12px',
+          color: '#9ca3af',
+        },
+        '.unified-comment-content strong': {
+          fontWeight: '600',
         },
         '.unified-comment-actions': {
           display: 'flex',
@@ -1048,7 +1134,7 @@ export function UnifiedDiffEditor({
           background: 'transparent',
           border: '1px solid #4b5563',
           color: '#9ca3af',
-          fontSize: '11px',
+          fontSize: `${fontSize - 2}px`,
           padding: '2px 8px',
           borderRadius: '3px',
           cursor: 'pointer',
@@ -1063,6 +1149,14 @@ export function UnifiedDiffEditor({
         },
         '.unified-comment-actions .resolve-btn:hover': {
           background: '#22c55e',
+          color: '#fff',
+        },
+        '.unified-comment-actions .wontfix-btn': {
+          borderColor: '#d97706',
+          color: '#d97706',
+        },
+        '.unified-comment-actions .wontfix-btn:hover': {
+          background: '#d97706',
           color: '#fff',
         },
         '.unified-comment-actions .delete-btn': {
@@ -1099,7 +1193,7 @@ export function UnifiedDiffEditor({
           borderRadius: '4px',
           color: '#e5e7eb',
           fontFamily: 'inherit',
-          fontSize: '13px',
+          fontSize: `${fontSize}px`,
           lineHeight: '1.4',
           resize: 'vertical',
           boxSizing: 'border-box',
@@ -1121,7 +1215,7 @@ export function UnifiedDiffEditor({
           background: 'transparent',
           border: '1px solid #4b5563',
           color: '#9ca3af',
-          fontSize: '11px',
+          fontSize: `${fontSize - 2}px`,
           padding: '2px 8px',
           borderRadius: '3px',
           cursor: 'pointer',
@@ -1150,7 +1244,7 @@ export function UnifiedDiffEditor({
           borderTop: '1px solid #334155',
           borderBottom: '1px solid #334155',
           color: '#94a3b8',
-          fontSize: '12px',
+          fontSize: `${fontSize - 1}px`,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
           cursor: 'pointer',
           userSelect: 'none',
@@ -1160,7 +1254,7 @@ export function UnifiedDiffEditor({
           color: '#e2e8f0',
         },
         '.cm-collapsed-icon': {
-          fontSize: '14px',
+          fontSize: `${fontSize + 1}px`,
         },
         '.cm-collapsed-text': {
           fontWeight: '500',
@@ -1296,6 +1390,7 @@ export function UnifiedDiffEditor({
             onSaveEdit: onEditComment,
             onCancelEdit: onCancelEdit,
             onResolve: onResolveComment,
+            onWontFix: onWontFixComment,
             onDelete: onDeleteComment,
             onSendToClaude: sendToClaudeForComment,
           }),
@@ -1325,7 +1420,9 @@ export function UnifiedDiffEditor({
     );
 
     view.dispatch({ effects: setCommentWidgets.of(decorations) });
-  }, [comments, newCommentLines, editingCommentId, handleSaveComment, handleCancelComment, onStartEdit, onEditComment, onCancelEdit, onResolveComment, onDeleteComment, onSendToClaude, filePath]);
+  // NOTE: fontSize is included because the main editor effect recreates the EditorView when fontSize changes.
+  // Without fontSize here, this effect wouldn't re-run and comment widgets would be lost.
+  }, [comments, newCommentLines, editingCommentId, handleSaveComment, handleCancelComment, onStartEdit, onEditComment, onCancelEdit, onResolveComment, onWontFixComment, onDeleteComment, onSendToClaude, filePath, fontSize]);
 
   // Update collapsed region decorations when contextLines or expandedRegions change
   useEffect(() => {
@@ -1393,7 +1490,9 @@ export function UnifiedDiffEditor({
     view.dispatch({
       effects: setCollapsedDecorations.of(Decoration.set(decorations)),
     });
-  }, [lines, contextLines, expandedRegions, comments, newCommentLines, handleExpandRegion]);
+  // NOTE: fontSize is included because the main editor effect recreates the EditorView when fontSize changes.
+  // Without fontSize here, this effect wouldn't re-run and collapsed regions would be lost.
+  }, [lines, contextLines, expandedRegions, comments, newCommentLines, handleExpandRegion, fontSize]);
 
   // Scroll to line when scrollToLine prop changes or content loads
   // We depend on `lines` so we re-run when new file content arrives

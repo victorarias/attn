@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, Branch, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, Branch, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -103,6 +103,8 @@
 //   const updateCommentMessage = Convert.toUpdateCommentMessage(json);
 //   const updateCommentResultMessage = Convert.toUpdateCommentResultMessage(json);
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
+//   const wontFixCommentMessage = Convert.toWontFixCommentMessage(json);
+//   const wontFixCommentResultMessage = Convert.toWontFixCommentResultMessage(json);
 //   const worktree = Convert.toWorktree(json);
 //   const worktreeCreatedEvent = Convert.toWorktreeCreatedEvent(json);
 //
@@ -143,6 +145,9 @@ export interface Comment {
     resolved_at?: string;
     resolved_by?: string;
     review_id:    string;
+    wont_fix:     boolean;
+    wont_fix_at?: string;
+    wont_fix_by?: string;
     [property: string]: any;
 }
 
@@ -1084,6 +1089,9 @@ export interface ReviewComment {
     resolved_at?: string;
     resolved_by?: string;
     review_id:    string;
+    wont_fix:     boolean;
+    wont_fix_at?: string;
+    wont_fix_by?: string;
     [property: string]: any;
 }
 
@@ -1358,6 +1366,28 @@ export interface WebSocketEvent {
     success?:             boolean;
     worktrees?:           WorktreeElement[];
     [property: string]: any;
+}
+
+export interface WontFixCommentMessage {
+    cmd:        WontFixCommentMessageCmd;
+    comment_id: string;
+    wont_fix:   boolean;
+    [property: string]: any;
+}
+
+export enum WontFixCommentMessageCmd {
+    WontFixComment = "wont_fix_comment",
+}
+
+export interface WontFixCommentResultMessage {
+    error?:  string;
+    event:   WontFixCommentResultMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum WontFixCommentResultMessageEvent {
+    WontFixCommentResult = "wont_fix_comment_result",
 }
 
 export interface Worktree {
@@ -2191,6 +2221,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("WebSocketEvent")), null, 2);
     }
 
+    public static toWontFixCommentMessage(json: string): WontFixCommentMessage {
+        return cast(JSON.parse(json), r("WontFixCommentMessage"));
+    }
+
+    public static wontFixCommentMessageToJson(value: WontFixCommentMessage): string {
+        return JSON.stringify(uncast(value, r("WontFixCommentMessage")), null, 2);
+    }
+
+    public static toWontFixCommentResultMessage(json: string): WontFixCommentResultMessage {
+        return cast(JSON.parse(json), r("WontFixCommentResultMessage"));
+    }
+
+    public static wontFixCommentResultMessageToJson(value: WontFixCommentResultMessage): string {
+        return JSON.stringify(uncast(value, r("WontFixCommentResultMessage")), null, 2);
+    }
+
     public static toWorktree(json: string): Worktree {
         return cast(JSON.parse(json), r("Worktree"));
     }
@@ -2387,6 +2433,9 @@ const typeMap: any = {
         { json: "resolved_at", js: "resolved_at", typ: u(undefined, "") },
         { json: "resolved_by", js: "resolved_by", typ: u(undefined, "") },
         { json: "review_id", js: "review_id", typ: "" },
+        { json: "wont_fix", js: "wont_fix", typ: true },
+        { json: "wont_fix_at", js: "wont_fix_at", typ: u(undefined, "") },
+        { json: "wont_fix_by", js: "wont_fix_by", typ: u(undefined, "") },
     ], "any"),
     "ApprovePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
@@ -2883,6 +2932,9 @@ const typeMap: any = {
         { json: "resolved_at", js: "resolved_at", typ: u(undefined, "") },
         { json: "resolved_by", js: "resolved_by", typ: u(undefined, "") },
         { json: "review_id", js: "review_id", typ: "" },
+        { json: "wont_fix", js: "wont_fix", typ: true },
+        { json: "wont_fix_at", js: "wont_fix_at", typ: u(undefined, "") },
+        { json: "wont_fix_by", js: "wont_fix_by", typ: u(undefined, "") },
     ], "any"),
     "ReviewCompleteMessage": o([
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -3032,6 +3084,16 @@ const typeMap: any = {
         { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
         { json: "success", js: "success", typ: u(undefined, true) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
+    ], "any"),
+    "WontFixCommentMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WontFixCommentMessageCmd") },
+        { json: "comment_id", js: "comment_id", typ: "" },
+        { json: "wont_fix", js: "wont_fix", typ: true },
+    ], "any"),
+    "WontFixCommentResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("WontFixCommentResultMessageEvent") },
+        { json: "success", js: "success", typ: true },
     ], "any"),
     "Worktree": o([
         { json: "branch", js: "branch", typ: "" },
@@ -3316,6 +3378,12 @@ const typeMap: any = {
     ],
     "UpdateCommentResultMessageEvent": [
         "update_comment_result",
+    ],
+    "WontFixCommentMessageCmd": [
+        "wont_fix_comment",
+    ],
+    "WontFixCommentResultMessageEvent": [
+        "wont_fix_comment_result",
     ],
     "WorktreeCreatedEventEvent": [
         "worktree_created",

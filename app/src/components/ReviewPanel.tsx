@@ -192,6 +192,8 @@ function toEditorComment(
       content: comment.content,
       resolved: comment.resolved,
       resolvedBy: comment.resolved_by as 'user' | 'agent' | undefined,
+      wontFix: comment.wont_fix,
+      wontFixBy: comment.wont_fix_by as 'user' | 'agent' | undefined,
       author: comment.author as 'user' | 'agent',
       anchor,
       isOrphaned: true,
@@ -204,6 +206,8 @@ function toEditorComment(
     content: comment.content,
     resolved: comment.resolved,
     resolvedBy: comment.resolved_by as 'user' | 'agent' | undefined,
+    wontFix: comment.wont_fix,
+    wontFixBy: comment.wont_fix_by as 'user' | 'agent' | undefined,
     author: comment.author as 'user' | 'agent',
     anchor,
     isOutdated: result.isOutdated,
@@ -254,6 +258,7 @@ interface ReviewPanelProps {
   addComment?: (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => Promise<{ success: boolean; comment?: ReviewComment }>;
   updateComment?: (commentId: string, content: string) => Promise<{ success: boolean }>;
   resolveComment?: (commentId: string, resolved: boolean) => Promise<{ success: boolean }>;
+  wontFixComment?: (commentId: string, wontFix: boolean) => Promise<{ success: boolean }>;
   deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
   getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: ReviewComment[] }>;
   // Reviewer agent operations
@@ -282,6 +287,7 @@ export function ReviewPanel({
   addComment,
   updateComment,
   resolveComment,
+  wontFixComment,
   deleteComment,
   getComments,
   sendStartReview,
@@ -818,13 +824,21 @@ export function ReviewPanel({
     setEditingCommentId(null);
   }, []);
 
+  // Resolve comment - also clears won't fix (mutual exclusivity)
   const handleEditorResolveComment = useCallback(async (id: string, resolved: boolean) => {
     if (!resolveComment) return;
     try {
       const result = await resolveComment(id, resolved);
       if (result.success) {
         setAllReviewComments(prev =>
-          prev.map(c => c.id === id ? { ...c, resolved } : c)
+          prev.map(c => c.id === id ? {
+            ...c,
+            resolved,
+            resolved_by: resolved ? 'user' : '',
+            // Clear won't fix when resolving (mutual exclusivity)
+            wont_fix: resolved ? false : c.wont_fix,
+            wont_fix_by: resolved ? '' : c.wont_fix_by,
+          } : c)
         );
       } else {
         setCommentError('Failed to update comment');
@@ -834,6 +848,31 @@ export function ReviewPanel({
       console.error('Resolve comment error:', err);
     }
   }, [resolveComment]);
+
+  // Won't fix comment - also clears resolved (mutual exclusivity)
+  const handleEditorWontFixComment = useCallback(async (id: string, wontFix: boolean) => {
+    if (!wontFixComment) return;
+    try {
+      const result = await wontFixComment(id, wontFix);
+      if (result.success) {
+        setAllReviewComments(prev =>
+          prev.map(c => c.id === id ? {
+            ...c,
+            wont_fix: wontFix,
+            wont_fix_by: wontFix ? 'user' : '',
+            // Clear resolved when marking won't fix (mutual exclusivity)
+            resolved: wontFix ? false : c.resolved,
+            resolved_by: wontFix ? '' : c.resolved_by,
+          } : c)
+        );
+      } else {
+        setCommentError('Failed to update comment');
+      }
+    } catch (err) {
+      setCommentError('Failed to update comment');
+      console.error('Won\'t fix comment error:', err);
+    }
+  }, [wontFixComment]);
 
   const handleEditorDeleteComment = useCallback(async (id: string) => {
     if (!deleteComment) return;
@@ -995,6 +1034,7 @@ export function ReviewPanel({
                   onStartEdit={handleEditorStartEdit}
                   onCancelEdit={handleEditorCancelEdit}
                   onResolveComment={handleEditorResolveComment}
+                  onWontFixComment={handleEditorWontFixComment}
                   onDeleteComment={handleEditorDeleteComment}
                   onSendToClaude={handleSendToClaude}
                 />

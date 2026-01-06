@@ -215,6 +215,20 @@ Store uses pointers `[]*Session`, but API returns value slices `[]Session`. Use 
 - `Deref[T](p *T) T` - convert pointer to value (returns zero if nil)
 - `SessionsToValues()`, `PRsToValues()` - batch conversions
 
+### 6. Review Comments Have Multiple Consumers
+
+When modifying the `ReviewComment` data model (adding fields, changing behavior), update ALL consumers:
+
+1. **TypeSpec schema** (`internal/protocol/schema/main.tsp`) - source of truth for types
+2. **Store** (`internal/store/review.go`) - database schema and queries
+3. **Daemon handlers** (`internal/daemon/websocket.go`) - WebSocket commands
+4. **Frontend hooks** (`app/src/hooks/useDaemonSocket.ts`) - client-side API
+5. **Frontend UI** - components that display/edit comments
+6. **Reviewer agent MCP tools** (`internal/reviewer/mcp/tools.go`) - `CommentInfo` struct and `ListComments()`
+7. **Reviewer filtering** (`internal/reviewer/reviewer.go`) - logic that filters comments for re-reviews
+
+**Easy to miss:** The reviewer agent reads comments through its own MCP tools, not the WebSocket protocol. When adding fields like `wont_fix`, you must update both the `CommentInfo` struct in `mcp/tools.go` AND any filtering logic (e.g., excluding won't-fix comments from "needs attention" lists).
+
 ## Communication
 
 All IPC uses JSON over unix socket at `~/.attn/attn.sock`. Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates. WebSocket at `ws://localhost:9849` for real-time updates to the Tauri app.

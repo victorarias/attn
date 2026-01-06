@@ -165,11 +165,12 @@ func (r *Reviewer) Run(ctx context.Context, config ReviewConfig, onEvent func(Re
 	}
 
 	// Fetch existing comments for re-review context
+	// Exclude resolved and won't-fix comments (they don't need attention)
 	var unresolvedComments []*store.ReviewComment
 	if config.IsRereview {
 		if comments, err := r.store.GetComments(config.ReviewID); err == nil {
 			for _, c := range comments {
-				if !c.Resolved {
+				if !c.Resolved && !c.WontFix {
 					unresolvedComments = append(unresolvedComments, c)
 				}
 			}
