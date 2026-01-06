@@ -17,11 +17,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   - Supports code blocks, links, lists, bold/italic, blockquotes
   - Uses ReactMarkdown for saved comments, marked for CodeMirror widgets
 
+### Changed
+- **PR-like Branch Diff**: Review Panel now shows all changes vs origin/main instead of just uncommitted changes
+  - File list shows all files changed on the branch (committed + uncommitted)
+  - Diffs compare against base branch, not HEAD
+  - After committing, panel still shows all branch work
+  - Files with uncommitted changes marked with indicator
+  - Auto-fetches remotes before computing diff
+
 ### Fixed
 - **Font Size Shortcuts**: Cmd+/- no longer loses collapsed regions or comments
   - Added fontSize to effect dependencies so decorations rebuild after editor recreation
 - **Font Size Scaling**: Comment UI elements now scale with font size changes
   - Author badges, action buttons, textarea, collapsed regions all respect zoom level
+- **Git Status Parsing**: Fixed bug where file paths were truncated in uncommitted changes detection
 
 ---
 
