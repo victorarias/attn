@@ -161,6 +161,7 @@ func TestMockTransport_Cancellation(t *testing.T) {
 	transport := CancelableSequence("test-session", 100, 100*time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // Ensure cancel is always called to avoid context leak
 	if err := transport.Connect(ctx); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestMockTransport_Cancellation(t *testing.T) {
 	for range transport.Messages() {
 		msgCount++
 		if msgCount >= 3 {
-			cancel()
+			cancel() // Cancel early to test cancellation behavior
 			break
 		}
 	}

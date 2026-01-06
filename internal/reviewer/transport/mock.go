@@ -27,8 +27,8 @@ type MockTransport struct {
 	position int
 
 	// Connection state
-	connected    bool
-	closed       bool
+	connected     bool
+	closed        bool
 	channelClosed bool // Tracks if msgChan was closed (by error injection or Close)
 
 	// Error to return on Connect

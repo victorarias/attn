@@ -44,12 +44,12 @@ type Finding struct {
 
 // ReviewConfig contains configuration for a review.
 type ReviewConfig struct {
-	RepoPath          string
-	Branch            string
-	BaseBranch        string
-	ReviewID          string
-	IsRereview        bool
-	LastReviewSHA     string
+	RepoPath           string
+	Branch             string
+	BaseBranch         string
+	ReviewID           string
+	IsRereview         bool
+	LastReviewSHA      string
 	PreviousTranscript string // JSON transcript from previous review session
 }
 
@@ -62,9 +62,9 @@ type Reviewer struct {
 	transport types.Transport // Custom transport (mock for testing, nil for real)
 	logf      LogFunc         // Logger function (optional)
 
-	mu       sync.Mutex
-	running  bool
-	cancel   context.CancelFunc
+	mu      sync.Mutex
+	running bool
+	cancel  context.CancelFunc
 }
 
 // New creates a new Reviewer.
@@ -470,11 +470,11 @@ func (r *Reviewer) buildMCPServer(tools *mcp.Tools, reviewID string, onEvent fun
 
 // transcriptEvent mirrors the daemon's transcript event structure for parsing
 type transcriptEvent struct {
-	Type       string                 `json:"type"`
-	Content    string                 `json:"content,omitempty"`
-	ToolUse    *transcriptToolUse     `json:"tool_use,omitempty"`
-	Finding    *transcriptFinding     `json:"finding,omitempty"`
-	ResolvedID string                 `json:"resolved_id,omitempty"`
+	Type       string             `json:"type"`
+	Content    string             `json:"content,omitempty"`
+	ToolUse    *transcriptToolUse `json:"tool_use,omitempty"`
+	Finding    *transcriptFinding `json:"finding,omitempty"`
+	ResolvedID string             `json:"resolved_id,omitempty"`
 }
 
 type transcriptToolUse struct {

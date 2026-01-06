@@ -248,11 +248,11 @@ func (a *realReviewerAdapter) Run(ctx context.Context, config ReviewerConfig, on
 
 // transcriptEvent is a simplified event for storage in the transcript
 type transcriptEvent struct {
-	Type       string                 `json:"type"`
-	Content    string                 `json:"content,omitempty"`
-	ToolUse    *transcriptToolUse     `json:"tool_use,omitempty"`
-	Finding    *transcriptFinding     `json:"finding,omitempty"`
-	ResolvedID string                 `json:"resolved_id,omitempty"`
+	Type       string             `json:"type"`
+	Content    string             `json:"content,omitempty"`
+	ToolUse    *transcriptToolUse `json:"tool_use,omitempty"`
+	Finding    *transcriptFinding `json:"finding,omitempty"`
+	ResolvedID string             `json:"resolved_id,omitempty"`
 }
 
 type transcriptToolUse struct {

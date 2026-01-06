@@ -1,14 +1,13 @@
 package classifier
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/victorarias/claude-agent-sdk-go/sdk"
+	"github.com/victorarias/claude-agent-sdk-go/types"
 )
 
 const promptTemplate = `Analyze this text from an AI assistant and determine if it's waiting for user input.
@@ -58,57 +57,9 @@ func SetLogger(fn LogFunc) {
 	DefaultLogger = fn
 }
 
-// FindClaudePath searches for the claude binary in common locations.
-// Returns the absolute path or an error if not found.
-func FindClaudePath() (string, error) {
-	// Try PATH first (works when running from shell)
-	if path, err := exec.LookPath("claude"); err == nil {
-		return path, nil
-	}
-
-	// Common installation locations
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot get home dir: %w", err)
-	}
-
-	candidates := []string{
-		filepath.Join(home, ".local", "bin", "claude"),
-		filepath.Join(home, ".claude", "local", "claude"),
-		"/usr/local/bin/claude",
-		"/opt/homebrew/bin/claude",
-	}
-
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
-		}
-	}
-
-	return "", fmt.Errorf("claude binary not found in PATH or common locations")
-}
-
-// Classify calls Claude CLI to classify the text.
-// Deprecated: Use ClassifyWithPath instead for daemon context.
+// Classify uses the Claude Agent SDK to classify the text.
 // Returns "waiting_input" or "idle"
 func Classify(text string, timeout time.Duration) (string, error) {
-	// Early return for empty text - no need to find claude binary
-	if text == "" {
-		DefaultLogger("classifier: empty text, returning idle")
-		return "idle", nil
-	}
-
-	claudePath, err := FindClaudePath()
-	if err != nil {
-		DefaultLogger("classifier: %v", err)
-		return "waiting_input", err
-	}
-	return ClassifyWithPath(claudePath, text, timeout)
-}
-
-// ClassifyWithPath calls Claude CLI at the given path to classify the text.
-// Returns "waiting_input" or "idle"
-func ClassifyWithPath(claudePath, text string, timeout time.Duration) (string, error) {
 	if text == "" {
 		DefaultLogger("classifier: empty text, returning idle")
 		return "idle", nil
@@ -126,23 +77,28 @@ func ClassifyWithPath(claudePath, text string, timeout time.Duration) (string, e
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	DefaultLogger("classifier: calling claude CLI with %d second timeout (using haiku)", int(timeout.Seconds()))
-	cmd := exec.CommandContext(ctx, claudePath, "-p", prompt, "--print", "--model", "haiku", "--no-session-persistence")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdin = nil // Explicitly close stdin to prevent hanging
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	DefaultLogger("classifier: calling claude SDK with %d second timeout (haiku)", int(timeout.Seconds()))
 
-	if err := cmd.Run(); err != nil {
-		DefaultLogger("classifier: claude CLI error: %v, stderr: %s, stdout: %s", err, stderr.String(), stdout.String())
-		return "waiting_input", fmt.Errorf("claude cli: %w: %s", err, stderr.String())
+	messages, err := sdk.RunQuery(ctx, prompt, types.WithModel("haiku"))
+	if err != nil {
+		DefaultLogger("classifier: SDK error: %v", err)
+		return "waiting_input", fmt.Errorf("claude sdk: %w", err)
 	}
 
-	response := stdout.String()
-	DefaultLogger("classifier: claude CLI response: %s", strings.TrimSpace(response))
+	// Extract text from AssistantMessage
+	for _, msg := range messages {
+		if m, ok := msg.(*types.AssistantMessage); ok {
+			response := m.Text()
+			DefaultLogger("classifier: SDK response: %s", strings.TrimSpace(response))
 
-	result := ParseResponse(response)
-	DefaultLogger("classifier: parsed result: %s", result)
+			result := ParseResponse(response)
+			DefaultLogger("classifier: parsed result: %s", result)
 
-	return result, nil
+			return result, nil
+		}
+	}
+
+	// No assistant message found
+	DefaultLogger("classifier: no assistant message in response")
+	return "waiting_input", nil
 }

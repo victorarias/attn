@@ -90,9 +90,8 @@ type Daemon struct {
 	done            chan struct{}
 	logger          *logging.Logger
 	ghClient        github.GitHubClient
-	classifier      Classifier       // Optional, uses package-level classifier.Classify if nil
-	reviewerFactory ReviewerFactory  // Optional, creates real reviewer if nil
-	claudePath      string           // Resolved path to claude binary (found at startup)
+	classifier      Classifier      // Optional, uses package-level classifier.Classify if nil
+	reviewerFactory ReviewerFactory // Optional, creates real reviewer if nil
 	repoCaches      map[string]*repoCache
 	repoCacheMu     sync.RWMutex
 }
@@ -105,14 +104,6 @@ func New(socketPath string) *Daemon {
 	classifier.SetLogger(func(format string, args ...interface{}) {
 		logger.Infof(format, args...)
 	})
-
-	// Resolve claude binary path at startup
-	claudePath, err := classifier.FindClaudePath()
-	if err != nil {
-		logger.Infof("Claude CLI not found: %v (classifier will be disabled)", err)
-	} else {
-		logger.Infof("Claude CLI found at: %s", claudePath)
-	}
 
 	var ghClient github.GitHubClient
 	client, err := github.NewClient("")
@@ -147,7 +138,6 @@ func New(socketPath string) *Daemon {
 		done:       make(chan struct{}),
 		logger:     logger,
 		ghClient:   ghClient,
-		claudePath: claudePath,
 		repoCaches: make(map[string]*repoCache),
 	}
 }
@@ -612,12 +602,8 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	var state string
 	if d.classifier != nil {
 		state, err = d.classifier.Classify(lastMessage, 30*time.Second)
-	} else if d.claudePath != "" {
-		state, err = classifier.ClassifyWithPath(d.claudePath, lastMessage, 30*time.Second)
 	} else {
-		d.logf("classifySessionState: claude CLI not available, defaulting to waiting_input")
-		state = protocol.StateWaitingInput
-		err = nil
+		state, err = classifier.Classify(lastMessage, 30*time.Second)
 	}
 	if err != nil {
 		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)
