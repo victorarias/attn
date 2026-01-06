@@ -22,6 +22,7 @@ import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore } from './store/sessions';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse } from './hooks/useDaemonSocket';
 import { normalizeSessionState } from './types/sessionState';
+import type { SessionAgent } from './types/sessionAgent';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -541,6 +542,7 @@ function AppContent({
     label: string;
     cwd: string;
     daemonSessionId: string;
+    agent: SessionAgent;
   } | null>(null);
   const [forkError, setForkError] = useState<string | null>(null);
 
@@ -555,10 +557,10 @@ function AppContent({
   }, []);
 
   const handleLocationSelect = useCallback(
-    async (path: string) => {
+    async (path: string, agent: SessionAgent) => {
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
-      const sessionId = await createSession(folderName, path);
+      const sessionId = await createSession(folderName, path, undefined, agent);
       // Fit terminal after view becomes visible
       setTimeout(() => {
         const handle = terminalRefs.current.get(sessionId);
@@ -617,6 +619,7 @@ function AppContent({
       label: localSession.label,
       cwd: localSession.cwd,
       daemonSessionId: daemonSession.id,
+      agent: localSession.agent,
     });
     setForkError(null);
     setForkDialogOpen(true);
@@ -655,7 +658,7 @@ function AppContent({
       setForkParams(sessionId, forkTargetSession.daemonSessionId);
 
       // Create the forked session with the pre-generated ID
-      await createSession(name, targetCwd, sessionId);
+      await createSession(name, targetCwd, sessionId, forkTargetSession.agent);
 
       setForkDialogOpen(false);
       setForkTargetSession(null);

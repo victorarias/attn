@@ -82,8 +82,7 @@ async fn list_directory(path: String, prefix: Option<String>) -> Result<Vec<Stri
         Path::new(&path).to_path_buf()
     };
 
-    let entries = fs::read_dir(&dir_path)
-        .map_err(|e| format!("Cannot read directory: {}", e))?;
+    let entries = fs::read_dir(&dir_path).map_err(|e| format!("Cannot read directory: {}", e))?;
 
     let prefix_lower = prefix.map(|p| p.to_lowercase());
 

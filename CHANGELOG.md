@@ -16,6 +16,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Markdown Support**: Comment content now renders Markdown
   - Supports code blocks, links, lists, bold/italic, blockquotes
   - Uses ReactMarkdown for saved comments, marked for CodeMirror widgets
+- **Session Agent Picker**: Choose Codex or Claude when starting a new session
+  - Codex is the default selection
+  - Keyboard shortcuts for quick switching
 
 ### Changed
 - **PR-like Branch Diff**: Review Panel now shows all changes vs origin/main instead of just uncommitted changes
@@ -24,6 +27,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   - After committing, panel still shows all branch work
   - Files with uncommitted changes marked with indicator
   - Auto-fetches remotes before computing diff
+- **New Session Agent**: The Codex/Claude selection now persists across app restarts
 
 ### Fixed
 - **Font Size Shortcuts**: Cmd+/- no longer loses collapsed regions or comments
@@ -67,6 +71,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   - Walking skeleton with daemon integration
   - Mock transport for testing without real Claude API
   - Resolution tracking via MCP tools
+
+---
+
+## [2026-01-06]
+
+### Added
+- **PTY State Detection**: Infer session states from PTY output for non-hook agents (e.g. Codex)
+
+### Changed
+- Default to Codex for in-app sessions while testing
 
 ---
 

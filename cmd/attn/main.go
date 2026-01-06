@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
@@ -101,7 +104,19 @@ func runList() {
 func runWrapper() {
 	// If running inside the app, run claude directly
 	if os.Getenv("ATTN_INSIDE_APP") == "1" {
-		runClaudeDirectly()
+		agent := os.Getenv("ATTN_AGENT")
+		if agent == "" {
+			agent = "codex"
+		}
+		switch strings.ToLower(agent) {
+		case "codex":
+			runCodexDirectly()
+		case "claude":
+			runClaudeDirectly()
+		default:
+			fmt.Fprintf(os.Stderr, "warning: unknown ATTN_AGENT %q, defaulting to codex\n", agent)
+			runCodexDirectly()
+		}
 		return
 	}
 
@@ -232,6 +247,100 @@ func copyTranscriptForFork(parentSessionID, forkCwd string) error {
 	return nil
 }
 
+// findCodexTranscript searches Codex session logs for the most recent session
+// matching the given cwd and start time. Returns empty string if not found.
+func findCodexTranscript(cwd string, startedAt time.Time) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	sessionsDir := filepath.Join(homeDir, ".codex", "sessions")
+
+	type codexLine struct {
+		Type      string `json:"type"`
+		Timestamp string `json:"timestamp"`
+		Payload   struct {
+			Cwd       string `json:"cwd"`
+			Timestamp string `json:"timestamp"`
+		} `json:"payload"`
+	}
+
+	var bestPath string
+	var bestTime time.Time
+	cwdClean := filepath.Clean(cwd)
+
+	filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".jsonl") {
+			return nil
+		}
+
+		info, statErr := d.Info()
+		if statErr != nil {
+			return nil
+		}
+		// Skip files that are too old to be relevant
+		if info.ModTime().Before(startedAt.Add(-5 * time.Minute)) {
+			return nil
+		}
+
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			return nil
+		}
+
+		reader := bufio.NewReader(f)
+		line, readErr := reader.ReadBytes('\n')
+		f.Close()
+		if readErr != nil && len(line) == 0 {
+			return nil
+		}
+
+		var entry codexLine
+		if json.Unmarshal(bytes.TrimSpace(line), &entry) != nil {
+			return nil
+		}
+		if entry.Type != "session_meta" {
+			return nil
+		}
+
+		entryCwd := filepath.Clean(entry.Payload.Cwd)
+		if entryCwd != cwdClean {
+			return nil
+		}
+
+		ts := entry.Payload.Timestamp
+		if ts == "" {
+			ts = entry.Timestamp
+		}
+		if ts == "" {
+			return nil
+		}
+
+		sessionTime, parseErr := time.Parse(time.RFC3339Nano, ts)
+		if parseErr != nil {
+			return nil
+		}
+		if sessionTime.Before(startedAt.Add(-5 * time.Minute)) {
+			return nil
+		}
+
+		if bestPath == "" || sessionTime.After(bestTime) {
+			bestPath = path
+			bestTime = sessionTime
+		}
+
+		return nil
+	})
+
+	return bestPath
+}
+
 // runClaudeDirectly runs claude with hooks (used when inside the app)
 func runClaudeDirectly() {
 	// Parse flags
@@ -358,6 +467,132 @@ func runClaudeDirectly() {
 	// Wait for claude to exit
 	err = cmd.Wait()
 	cleanup()
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		os.Exit(1)
+	}
+}
+
+// runCodexDirectly runs codex (used when inside the app)
+func runCodexDirectly() {
+	// Parse flags
+	fs := flag.NewFlagSet("attn", flag.ContinueOnError)
+	labelFlag := fs.String("s", "", "session label")
+	resumeFlag := fs.String("resume", "", "session ID to resume from")
+	forkFlag := fs.Bool("fork-session", false, "fork the resumed session")
+
+	// Find where our flags end and codex flags begin
+	var attnArgs []string
+	var codexArgs []string
+
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-s" && i+1 < len(args) {
+			attnArgs = append(attnArgs, arg, args[i+1])
+			i++
+		} else if arg == "--resume" && i+1 < len(args) && args[i+1] != "--" {
+			attnArgs = append(attnArgs, arg, args[i+1])
+			i++
+		} else if arg == "--fork-session" {
+			attnArgs = append(attnArgs, arg)
+		} else if arg == "--" {
+			codexArgs = append(codexArgs, args[i+1:]...)
+			break
+		} else {
+			codexArgs = append(codexArgs, arg)
+		}
+	}
+
+	fs.Parse(attnArgs)
+
+	// Get label
+	label := *labelFlag
+	if label == "" {
+		label = wrapper.DefaultLabel()
+	}
+
+	// Get working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error getting cwd: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Ensure daemon is running
+	c := client.New("")
+	if !c.IsRunning() {
+		if err := startDaemonBackground(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not start daemon: %v\n", err)
+		}
+	}
+
+	// Use session ID from environment if provided (from frontend), otherwise generate
+	sessionID := os.Getenv("ATTN_SESSION_ID")
+	if sessionID == "" {
+		sessionID = wrapper.GenerateSessionID()
+	}
+	if err := c.Register(sessionID, label, cwd); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
+	}
+
+	if *resumeFlag != "" {
+		fmt.Fprintf(os.Stderr, "warning: codex resume/fork not supported yet (ignoring --resume/--fork-session)\n")
+	}
+	if *forkFlag {
+		// Keep silent beyond the resume warning; flag is meaningless without resume support.
+	}
+
+	// Build codex command
+	hasCwd := false
+	for i := 0; i < len(codexArgs); i++ {
+		if codexArgs[i] == "-C" || codexArgs[i] == "--cd" {
+			hasCwd = true
+			break
+		}
+	}
+	if !hasCwd {
+		codexArgs = append(codexArgs, "-C", cwd)
+	}
+
+	cmd := exec.Command("codex", codexArgs...)
+	cmd.Dir = cwd
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	startedAt := time.Now()
+
+	// Start codex (non-blocking so we can set up signal forwarding)
+	if err = cmd.Start(); err != nil {
+		c.Unregister(sessionID)
+		fmt.Fprintf(os.Stderr, "error starting codex: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Handle signals - forward to codex subprocess
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-sigChan
+		if cmd.Process != nil {
+			cmd.Process.Signal(syscall.SIGTERM)
+		}
+	}()
+
+	// Wait for codex to exit
+	err = cmd.Wait()
+
+	// Attempt stop/classification before unregistering
+	transcriptPath := findCodexTranscript(cwd, startedAt)
+	if sendErr := c.SendStop(sessionID, transcriptPath); sendErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not send stop: %v\n", sendErr)
+	}
+
+	c.Unregister(sessionID)
 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

@@ -39,9 +39,8 @@ static LOCALHOST_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 // ANSI escape code stripper
-static ANSI_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07").unwrap()
-});
+static ANSI_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07").unwrap());
 
 fn strip_ansi(text: &str) -> String {
     ANSI_REGEX.replace_all(text, "").to_string()
@@ -183,7 +182,9 @@ mod tests {
     fn test_extract_urls() {
         let text = "Check out https://github.com/foo/bar and http://example.com";
         let matches = extract_patterns(text.to_string());
-        assert!(matches.iter().any(|m| m.value == "https://github.com/foo/bar"));
+        assert!(matches
+            .iter()
+            .any(|m| m.value == "https://github.com/foo/bar"));
         assert!(matches.iter().any(|m| m.value == "http://example.com"));
     }
 
@@ -229,7 +230,13 @@ mod tests {
     fn test_deduplication() {
         let text = "https://github.com https://github.com https://github.com";
         let matches = extract_patterns(text.to_string());
-        assert_eq!(matches.iter().filter(|m| m.value == "https://github.com").count(), 1);
+        assert_eq!(
+            matches
+                .iter()
+                .filter(|m| m.value == "https://github.com")
+                .count(),
+            1
+        );
     }
 
     #[test]

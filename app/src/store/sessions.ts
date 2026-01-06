@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Terminal } from '@xterm/xterm';
 import type { UISessionState } from '../types/sessionState';
+import type { SessionAgent } from '../types/sessionAgent';
 
 export interface UtilityTerminal {
   id: string;
@@ -36,6 +37,7 @@ export interface Session {
   state: UISessionState;
   terminal: Terminal | null;
   cwd: string;
+  agent: SessionAgent;
   branch?: string;
   isWorktree?: boolean;
   terminalPanel: TerminalPanelState;
@@ -48,7 +50,7 @@ interface SessionStore {
 
   // Actions
   connect: () => Promise<void>;
-  createSession: (label: string, cwd: string, id?: string) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent) => Promise<string>;
   closeSession: (id: string) => void;
   setActiveSession: (id: string | null) => void;
   connectTerminal: (id: string, terminal: Terminal) => Promise<void>;
@@ -74,6 +76,7 @@ interface TestSession {
   label: string;
   state: UISessionState;
   cwd: string;
+  agent?: SessionAgent;
 }
 
 declare global {
@@ -127,15 +130,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  createSession: async (label: string, cwd: string, providedId?: string) => {
+  createSession: async (label: string, cwd: string, providedId?: string, agent?: SessionAgent) => {
     // Use provided ID or generate new one
     const id = providedId || crypto.randomUUID();
+    const resolvedAgent: SessionAgent = agent ?? 'codex';
     const session: Session = {
       id,
       label,
       state: 'working',
       terminal: null,
       cwd,
+      agent: resolvedAgent,
       terminalPanel: createDefaultPanelState(),
     };
 
@@ -208,6 +213,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           cols,
           rows,
           shell: false,
+          agent: session.agent,
           resume_session_id: forkParams?.resumeSessionId ?? null,
           fork_session: forkParams?.forkSession ?? null,
         },
@@ -376,7 +382,15 @@ declare global {
 if (import.meta.env.DEV) {
   window.__TEST_INJECT_SESSION = (session: TestSession) => {
     useSessionStore.setState((state) => ({
-      sessions: [...state.sessions, { ...session, terminal: null, terminalPanel: createDefaultPanelState() }],
+      sessions: [
+        ...state.sessions,
+        {
+          ...session,
+          agent: session.agent ?? 'codex',
+          terminal: null,
+          terminalPanel: createDefaultPanelState(),
+        },
+      ],
     }));
   };
 

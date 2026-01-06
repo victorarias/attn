@@ -143,3 +143,42 @@ func TestExtractLastAssistantMessage_MessageRoleAsAssistant(t *testing.T) {
 		t.Errorf("got %q, want %q", result, expected)
 	}
 }
+
+func TestExtractLastAssistantMessage_CodexEventMessage(t *testing.T) {
+	content := `{"type":"event_msg","payload":{"type":"user_message","message":"Hi"}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"Codex reply one."}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"Codex reply two."}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessage(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "Codex reply two."
+	if result != expected {
+		t.Errorf("got %q, want %q", result, expected)
+	}
+}
+
+func TestExtractLastAssistantMessage_CodexResponseItemOutputText(t *testing.T) {
+	content := `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"First output."}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Second output."}]}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessage(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "Second output."
+	if result != expected {
+		t.Errorf("got %q, want %q", result, expected)
+	}
+}

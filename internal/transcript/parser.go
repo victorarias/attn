@@ -43,20 +43,7 @@ func ExtractLastAssistantMessage(path string, maxChars int) (string, error) {
 			continue
 		}
 
-		var entry transcriptEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue // Skip malformed lines
-		}
-
-		// Check if this is an assistant message (either by type or message.role)
-		isAssistant := entry.Type == "assistant" || entry.Message.Role == "assistant"
-		if !isAssistant {
-			continue
-		}
-
-		// Extract text content from the message
-		content := extractTextContent(entry.Message.Content)
-		if content != "" {
+		if content := extractAssistantContent(line); content != "" {
 			lastAssistantContent = content
 		}
 	}
@@ -71,6 +58,66 @@ func ExtractLastAssistantMessage(path string, maxChars int) (string, error) {
 	}
 
 	return lastAssistantContent, nil
+}
+
+type codexEnvelope struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+type codexEventMessage struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+type codexResponseMessage struct {
+	Type    string          `json:"type"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
+// extractAssistantContent extracts assistant content from Claude Code or Codex JSONL lines.
+func extractAssistantContent(line []byte) string {
+	var entry transcriptEntry
+	if err := json.Unmarshal(line, &entry); err == nil {
+		// Check if this is an assistant message (either by type or message.role)
+		isAssistant := entry.Type == "assistant" || entry.Message.Role == "assistant"
+		if isAssistant {
+			content := extractTextContent(entry.Message.Content)
+			if content != "" {
+				return content
+			}
+		}
+	}
+
+	var codex codexEnvelope
+	if err := json.Unmarshal(line, &codex); err != nil {
+		return ""
+	}
+
+	switch codex.Type {
+	case "event_msg":
+		var payload codexEventMessage
+		if err := json.Unmarshal(codex.Payload, &payload); err != nil {
+			return ""
+		}
+		if payload.Type == "agent_message" && payload.Message != "" {
+			return payload.Message
+		}
+	case "response_item":
+		var payload codexResponseMessage
+		if err := json.Unmarshal(codex.Payload, &payload); err != nil {
+			return ""
+		}
+		if payload.Type == "message" && payload.Role == "assistant" {
+			content := extractTextContent(payload.Content)
+			if content != "" {
+				return content
+			}
+		}
+	}
+
+	return ""
 }
 
 // extractTextContent extracts text from the content field which can be:
@@ -92,7 +139,7 @@ func extractTextContent(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &blocks); err == nil {
 		var texts []string
 		for _, block := range blocks {
-			if block.Type == "text" && block.Text != "" {
+			if (block.Type == "text" || block.Type == "output_text") && block.Text != "" {
 				texts = append(texts, block.Text)
 			}
 		}

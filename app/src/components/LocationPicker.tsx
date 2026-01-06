@@ -5,6 +5,8 @@ import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
 import { PathInput } from './NewSessionDialog/PathInput';
 import { RepoOptions } from './NewSessionDialog/RepoOptions';
 import type { RecentLocation } from '../hooks/useDaemonSocket';
+import type { SessionAgent } from '../types/sessionAgent';
+import { useSettings } from '../contexts/SettingsContext';
 import './LocationPicker.css';
 
 interface RepoInfo {
@@ -21,7 +23,7 @@ interface RepoInfo {
 interface LocationPickerProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (path: string) => void;
+  onSelect: (path: string, agent: SessionAgent) => void;
   onGetRecentLocations?: () => Promise<{ locations: RecentLocation[] }>;
   onGetRepoInfo?: (mainRepo: string) => Promise<{ success: boolean; info?: RepoInfo; error?: string }>;
   onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string) => Promise<{ success: boolean; path?: string }>;
@@ -32,6 +34,16 @@ interface LocationPickerProps {
 }
 
 const MAX_RECENT_LOCATIONS = 10;
+const SESSION_AGENT_KEY = 'new_session_agent';
+
+const normalizeAgent = (value?: string): SessionAgent | null => {
+  if (!value) return null;
+  const lower = value.toLowerCase();
+  if (lower === 'codex' || lower === 'claude') {
+    return lower as SessionAgent;
+  }
+  return null;
+};
 
 type Mode = 'path-input' | 'repo-options';
 
@@ -47,6 +59,7 @@ interface State {
   // Tracks if user has intentionally selected since last Tab
   // (typing or arrow navigation = intentional, Tab auto-selects first child = not intentional)
   hasSelectedSinceTab: boolean;
+  agent: SessionAgent;
 }
 
 export function LocationPicker({
@@ -61,6 +74,7 @@ export function LocationPicker({
   onError,
   projectsDirectory,
 }: LocationPickerProps) {
+  const { settings, setSetting } = useSettings();
   const [state, setState] = useState<State>({
     mode: 'path-input',
     inputValue: '',
@@ -71,6 +85,7 @@ export function LocationPicker({
     homePath: '/Users',
     refreshing: false,
     hasSelectedSinceTab: false, // Start false - user hasn't navigated yet
+    agent: 'codex',
   });
 
   const { suggestions: fsSuggestions, currentDir } = useFilesystemSuggestions(state.inputValue);
@@ -126,6 +141,12 @@ export function LocationPicker({
       }));
     }
   }, [isOpen, projectsDirectory, state.homePath]);
+
+  const savedAgent = normalizeAgent(settings[SESSION_AGENT_KEY]);
+  useEffect(() => {
+    if (!savedAgent) return;
+    setState(prev => (prev.agent === savedAgent ? prev : { ...prev, agent: savedAgent }));
+  }, [savedAgent]);
 
   // Filter recent locations based on input
   // Expand ~ to home path so filtering works with stored full paths
@@ -200,7 +221,7 @@ export function LocationPicker({
             }));
           } else {
             // Failed to get repo info, just select the path
-            onSelect(path);
+            onSelect(path, state.agent);
             onClose();
           }
           return;
@@ -211,11 +232,16 @@ export function LocationPicker({
       }
 
       // Not a git repo, just select it
-      onSelect(path);
+      onSelect(path, state.agent);
       onClose();
     },
-    [onSelect, onClose, onGetRepoInfo, state.homePath]
+    [onSelect, onClose, onGetRepoInfo, state.homePath, state.agent]
   );
+
+  const handleAgentChange = useCallback((agent: SessionAgent) => {
+    setState(prev => ({ ...prev, agent }));
+    setSetting(SESSION_AGENT_KEY, agent);
+  }, [setSetting]);
 
   const handlePathInputChange = useCallback((value: string) => {
     setState(prev => ({ ...prev, inputValue: value, hasSelectedSinceTab: true }));
@@ -235,22 +261,22 @@ export function LocationPicker({
   // RepoOptions callbacks
   const handleSelectMainRepo = useCallback(() => {
     if (state.selectedRepo) {
-      onSelect(state.selectedRepo);
+      onSelect(state.selectedRepo, state.agent);
       onClose();
     }
-  }, [state.selectedRepo, onSelect, onClose]);
+  }, [state.selectedRepo, state.agent, onSelect, onClose]);
 
   const handleSelectWorktree = useCallback((path: string) => {
-    onSelect(path);
+    onSelect(path, state.agent);
     onClose();
-  }, [onSelect, onClose]);
+  }, [onSelect, onClose, state.agent]);
 
   const handleSelectBranch = useCallback((_branch: string) => {
     if (state.selectedRepo) {
-      onSelect(state.selectedRepo);
+      onSelect(state.selectedRepo, state.agent);
       onClose();
     }
-  }, [state.selectedRepo, onSelect, onClose]);
+  }, [state.selectedRepo, state.agent, onSelect, onClose]);
 
   const handleCreateWorktree = useCallback(async (branchName: string, startingFrom: string) => {
     if (!state.selectedRepo || !onCreateWorktree) return;
@@ -258,13 +284,13 @@ export function LocationPicker({
     try {
       const result = await onCreateWorktree(state.selectedRepo, branchName, undefined, startingFrom);
       if (result.success && result.path) {
-        onSelect(result.path);
+        onSelect(result.path, state.agent);
         onClose();
       }
     } catch (err) {
       console.error('[LocationPicker] Failed to create worktree:', err);
     }
-  }, [state.selectedRepo, onCreateWorktree, onSelect, onClose]);
+  }, [state.selectedRepo, onCreateWorktree, onSelect, onClose, state.agent]);
 
   const handleRefresh = useCallback(async () => {
     if (!state.selectedRepo || !onGetRepoInfo || state.refreshing) return;
@@ -300,6 +326,19 @@ export function LocationPicker({
     if (!isOpen) return;
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && !e.metaKey && !e.ctrlKey) {
+        if (e.code === 'Digit1') {
+          e.preventDefault();
+          handleAgentChange('codex');
+          return;
+        }
+        if (e.code === 'Digit2') {
+          e.preventDefault();
+          handleAgentChange('claude');
+          return;
+        }
+      }
+
       if (e.key === 'Escape') {
         e.preventDefault();
         if (state.mode === 'repo-options') {
@@ -335,7 +374,7 @@ export function LocationPicker({
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isOpen, state.mode, state.selectedIndex, handleBack, onClose, filteredRecent, fsSuggestions]);
+  }, [isOpen, state.mode, state.selectedIndex, handleBack, onClose, filteredRecent, fsSuggestions, handleAgentChange]);
 
   // Transform RepoInfo from snake_case to camelCase for RepoOptions
   const transformedRepoInfo = state.repoInfo ? {
@@ -354,6 +393,31 @@ export function LocationPicker({
   return (
     <div className="location-picker-overlay" onClick={onClose}>
       <div className="location-picker" onClick={(e) => e.stopPropagation()}>
+        <div className="picker-agent-bar">
+          <div className="picker-agent-label">SESSION AGENT</div>
+          <div className="agent-toggle" role="radiogroup" aria-label="Session agent">
+            <button
+              type="button"
+              className={`agent-option ${state.agent === 'codex' ? 'active' : ''}`}
+              onClick={() => handleAgentChange('codex')}
+              role="radio"
+              aria-checked={state.agent === 'codex'}
+            >
+              <span className="agent-option-name">Codex</span>
+              <kbd className="agent-shortcut">⌥1</kbd>
+            </button>
+            <button
+              type="button"
+              className={`agent-option ${state.agent === 'claude' ? 'active' : ''}`}
+              onClick={() => handleAgentChange('claude')}
+              role="radio"
+              aria-checked={state.agent === 'claude'}
+            >
+              <span className="agent-option-name">Claude</span>
+              <kbd className="agent-shortcut">⌥2</kbd>
+            </button>
+          </div>
+        </div>
         {state.mode === 'path-input' ? (
           <>
             <div className="picker-header">
@@ -458,7 +522,7 @@ export function LocationPicker({
             } : undefined}
             onDeleteBranch={onDeleteBranch ? async (branch) => {
               if (state.selectedRepo) {
-                await onDeleteBranch(state.selectedRepo, branch, false);
+                await onDeleteBranch(state.selectedRepo, branch, true);
                 // Refresh repo info after delete
                 if (onGetRepoInfo) {
                   const result = await onGetRepoInfo(state.selectedRepo);
