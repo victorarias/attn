@@ -18,6 +18,22 @@ import (
 	"nhooyr.io/websocket"
 )
 
+// waitForSocket waits for a unix socket to be ready for connections.
+// This is more reliable than fixed sleeps, especially in CI environments.
+func waitForSocket(t *testing.T, sockPath string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("unix", sockPath, 10*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("socket %s not ready after %v", sockPath, timeout)
+}
+
 func TestDaemon_RegisterAndQuery(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19900")
 
@@ -1125,7 +1141,7 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 		os.Remove(sockPath)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForSocket(t, sockPath, 2*time.Second)
 
 	c := client.New(sockPath)
 
