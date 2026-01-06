@@ -52,8 +52,13 @@ func TestCheckoutRemoteBranch(t *testing.T) {
 }
 
 func TestListBranchesWithCommits(t *testing.T) {
-	// Create temp git repo
-	mainDir := t.TempDir()
+	// Create temp directory with subdirectories for main repo and worktree
+	tmpDir := t.TempDir()
+	mainDir := filepath.Join(tmpDir, "main")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
+		t.Fatalf("Failed to create main dir: %v", err)
+	}
+
 	runGit(t, mainDir, "init")
 	runGit(t, mainDir, "config", "user.email", "test@test.com")
 	runGit(t, mainDir, "config", "user.name", "Test")
@@ -77,7 +82,7 @@ func TestListBranchesWithCommits(t *testing.T) {
 	runGit(t, mainDir, "checkout", "main")
 
 	// Create a worktree for feature-a (should be excluded from results)
-	wtDir := filepath.Join(t.TempDir(), "wt")
+	wtDir := filepath.Join(tmpDir, "wt")
 	runGit(t, mainDir, "worktree", "add", wtDir, "feature-a")
 
 	// List branches with commits

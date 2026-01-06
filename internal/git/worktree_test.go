@@ -8,12 +8,16 @@ import (
 )
 
 func TestListWorktrees(t *testing.T) {
-	mainDir := t.TempDir()
+	tmpDir := t.TempDir()
+	mainDir := filepath.Join(tmpDir, "main")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
+		t.Fatalf("Failed to create main dir: %v", err)
+	}
 	runGit(t, mainDir, "init")
 	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
 
 	// Create a worktree
-	wtDir := filepath.Join(t.TempDir(), "wt")
+	wtDir := filepath.Join(tmpDir, "wt")
 	runGit(t, mainDir, "worktree", "add", "-b", "feature", wtDir)
 
 	worktrees, err := ListWorktrees(mainDir)
@@ -40,11 +44,15 @@ func TestListWorktrees(t *testing.T) {
 }
 
 func TestCreateWorktree(t *testing.T) {
-	mainDir := t.TempDir()
+	tmpDir := t.TempDir()
+	mainDir := filepath.Join(tmpDir, "main")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
+		t.Fatalf("Failed to create main dir: %v", err)
+	}
 	runGit(t, mainDir, "init")
 	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
 
-	wtDir := filepath.Join(t.TempDir(), "new-wt")
+	wtDir := filepath.Join(tmpDir, "new-wt")
 	err := CreateWorktree(mainDir, "new-feature", wtDir)
 	if err != nil {
 		t.Fatalf("CreateWorktree failed: %v", err)
@@ -66,11 +74,15 @@ func TestCreateWorktree(t *testing.T) {
 }
 
 func TestDeleteWorktree(t *testing.T) {
-	mainDir := t.TempDir()
+	tmpDir := t.TempDir()
+	mainDir := filepath.Join(tmpDir, "main")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
+		t.Fatalf("Failed to create main dir: %v", err)
+	}
 	runGit(t, mainDir, "init")
 	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
 
-	wtDir := filepath.Join(t.TempDir(), "wt-to-delete")
+	wtDir := filepath.Join(tmpDir, "wt-to-delete")
 	runGit(t, mainDir, "worktree", "add", "-b", "temp", wtDir)
 
 	err := DeleteWorktree(mainDir, wtDir)

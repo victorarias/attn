@@ -165,6 +165,12 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// For in-memory databases, ensure we use a single connection to avoid
+	// connection pooling issues (each :memory: connection is a separate DB)
+	if dbPath == ":memory:" {
+		db.SetMaxOpenConns(1)
+	}
+
 	// Create base schema (includes schema_migrations table)
 	if _, err := db.Exec(baseSchema); err != nil {
 		db.Close()

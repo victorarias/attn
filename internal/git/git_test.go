@@ -30,12 +30,17 @@ func TestGetBranchInfo_MainRepo(t *testing.T) {
 }
 
 func TestGetBranchInfo_Worktree(t *testing.T) {
-	// Create temp git repo with worktree
-	mainDir := t.TempDir()
+	// Create temp git repo with worktree - use single tmpDir with subdirs
+	// to avoid flakiness when running tests in parallel
+	tmpDir := t.TempDir()
+	mainDir := filepath.Join(tmpDir, "main")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
+		t.Fatalf("Failed to create main dir: %v", err)
+	}
 	runGit(t, mainDir, "init")
 	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
 
-	wtDir := filepath.Join(t.TempDir(), "wt")
+	wtDir := filepath.Join(tmpDir, "wt")
 	runGit(t, mainDir, "worktree", "add", "-b", "feature", wtDir)
 
 	info, err := GetBranchInfo(wtDir)
