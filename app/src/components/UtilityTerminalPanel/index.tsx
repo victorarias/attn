@@ -80,11 +80,13 @@ export function UtilityTerminalPanel({
 
     try {
       await invoke('pty_spawn', {
-        id: ptyId,
-        cwd,
-        cols: 80,
-        rows: 24,
-        shell: true, // Utility terminals spawn a plain shell, not attn/Claude
+        args: {
+          id: ptyId,
+          cwd,
+          cols: 80,
+          rows: 24,
+          shell: true, // Utility terminals spawn a plain shell, not attn/Claude
+        },
       });
 
       const terminalId = onAddTerminal(ptyId);

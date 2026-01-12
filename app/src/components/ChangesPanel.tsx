@@ -1,10 +1,12 @@
 // app/src/components/ChangesPanel.tsx
 import { useMemo, memo, useCallback } from 'react';
-import type { GitStatusUpdate } from '../hooks/useDaemonSocket';
+import type { BranchDiffFile } from '../hooks/useDaemonSocket';
 import './ChangesPanel.css';
 
 interface ChangesPanelProps {
-  gitStatus: GitStatusUpdate | null;
+  branchDiffFiles: BranchDiffFile[];
+  branchDiffBaseRef?: string;
+  branchDiffError?: string | null;
   attentionCount: number;
   selectedFile: string | null;
   onFileSelect: (path: string, staged: boolean) => void;
@@ -12,11 +14,12 @@ interface ChangesPanelProps {
   onReviewClick?: () => void;
 }
 
-type GitFileChange = {
+type BranchChange = {
   path: string;
   status: string;
   additions?: number;
   deletions?: number;
+  hasUncommitted?: boolean;
 };
 
 type TreeNode = {
@@ -43,9 +46,9 @@ function abbreviatePath(path: string): string {
 }
 
 // Build tree structure from flat file list
-function buildTree(files: GitFileChange[]): TreeNode[] {
+function buildTree(files: BranchChange[]): TreeNode[] {
   // Group files by directory
-  const dirToFiles: Map<string, GitFileChange[]> = new Map();
+  const dirToFiles: Map<string, BranchChange[]> = new Map();
 
   files.forEach(file => {
     const parts = file.path.split('/');
@@ -103,7 +106,9 @@ function buildTree(files: GitFileChange[]): TreeNode[] {
 }
 
 export const ChangesPanel = memo(function ChangesPanel({
-  gitStatus,
+  branchDiffFiles,
+  branchDiffBaseRef,
+  branchDiffError,
   attentionCount,
   selectedFile,
   onFileSelect,
@@ -111,28 +116,14 @@ export const ChangesPanel = memo(function ChangesPanel({
   onReviewClick,
 }: ChangesPanelProps) {
   const totalStats = useMemo(() => {
-    if (!gitStatus) return { files: 0, additions: 0, deletions: 0 };
+    const additions = branchDiffFiles.reduce((sum, f) => sum + (f.additions || 0), 0);
+    const deletions = branchDiffFiles.reduce((sum, f) => sum + (f.deletions || 0), 0);
 
-    const allFiles = [...gitStatus.staged, ...gitStatus.unstaged, ...gitStatus.untracked];
-    const additions = allFiles.reduce((sum, f) => sum + (f.additions || 0), 0);
-    const deletions = allFiles.reduce((sum, f) => sum + (f.deletions || 0), 0);
-
-    return { files: allFiles.length, additions, deletions };
-  }, [gitStatus]);
+    return { files: branchDiffFiles.length, additions, deletions };
+  }, [branchDiffFiles]);
 
   // Memoize tree building to avoid rebuilding on every render
-  const stagedTree = useMemo(() =>
-    gitStatus?.staged ? buildTree(gitStatus.staged) : [],
-    [gitStatus?.staged]
-  );
-  const unstagedTree = useMemo(() =>
-    gitStatus?.unstaged ? buildTree(gitStatus.unstaged) : [],
-    [gitStatus?.unstaged]
-  );
-  const untrackedTree = useMemo(() =>
-    gitStatus?.untracked ? buildTree(gitStatus.untracked) : [],
-    [gitStatus?.untracked]
-  );
+  const branchTree = useMemo(() => buildTree(branchDiffFiles), [branchDiffFiles]);
 
   const getStatusIcon = useCallback((status: string) => {
     switch (status) {
@@ -211,38 +202,23 @@ export const ChangesPanel = memo(function ChangesPanel({
       {totalStats.files > 0 && (
         <div className="changes-summary">
           <span>{totalStats.files} files</span>
+          {branchDiffBaseRef && <span>vs {branchDiffBaseRef}</span>}
           {totalStats.additions > 0 && <span className="stat-add">+{totalStats.additions}</span>}
           {totalStats.deletions > 0 && <span className="stat-del">-{totalStats.deletions}</span>}
         </div>
       )}
 
       <div className="changes-body">
-        {gitStatus?.error ? (
-          <div className="changes-error">{gitStatus.error}</div>
+        {branchDiffError ? (
+          <div className="changes-error">{branchDiffError}</div>
         ) : totalStats.files === 0 ? (
           <div className="changes-empty">No changes</div>
         ) : (
           <>
-            {stagedTree.length > 0 && (
-              <div className="changes-section">
-                <div className="section-header">Staged ({gitStatus?.staged?.length || 0})</div>
-                {renderTree(stagedTree, 0, true)}
-              </div>
-            )}
-
-            {unstagedTree.length > 0 && (
-              <div className="changes-section">
-                <div className="section-header">Changes ({gitStatus?.unstaged?.length || 0})</div>
-                {renderTree(unstagedTree, 0, false)}
-              </div>
-            )}
-
-            {untrackedTree.length > 0 && (
-              <div className="changes-section">
-                <div className="section-header">Untracked ({gitStatus?.untracked?.length || 0})</div>
-                {renderTree(untrackedTree, 0, false)}
-              </div>
-            )}
+            <div className="changes-section">
+              <div className="section-header">Files ({branchDiffFiles.length})</div>
+              {renderTree(branchTree, 0, false)}
+            </div>
           </>
         )}
       </div>

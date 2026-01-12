@@ -19,6 +19,9 @@ function installGlobalListener() {
       if (matchesShortcut(e, def)) {
         const shortcutHandlers = handlers.get(id as ShortcutId);
         if (shortcutHandlers && shortcutHandlers.size > 0) {
+          if (id === 'session.refreshPRs' && isTerminalTarget(e.target)) {
+            return;
+          }
           e.preventDefault();
           e.stopPropagation(); // Prevent event from reaching xterm
           // Call all registered handlers for this shortcut
@@ -30,6 +33,11 @@ function installGlobalListener() {
       }
     }
   }, true); // capture phase to get events before xterm
+}
+
+function isTerminalTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.closest('.xterm, .terminal-container, .utility-terminal-panel') !== null;
 }
 
 /**

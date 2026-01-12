@@ -84,7 +84,7 @@ func TestGetChangedFiles(t *testing.T) {
 	s := createTestStore(t)
 	defer s.Close()
 
-	tools := NewTools(repoPath, "test-review", s)
+	tools := NewTools(repoPath, "test-review", "HEAD", s)
 
 	files, err := tools.GetChangedFiles()
 	if err != nil {
@@ -104,8 +104,8 @@ func TestGetChangedFiles(t *testing.T) {
 	if status, ok := fileMap["example.go"]; !ok || status != "modified" {
 		t.Errorf("Expected example.go with status 'modified', got %v", fileMap)
 	}
-	if status, ok := fileMap["handler.go"]; !ok || status != "added" {
-		t.Errorf("Expected handler.go with status 'added', got %v", fileMap)
+	if status, ok := fileMap["handler.go"]; !ok || status != "untracked" {
+		t.Errorf("Expected handler.go with status 'untracked', got %v", fileMap)
 	}
 }
 
@@ -114,7 +114,7 @@ func TestGetDiff(t *testing.T) {
 	s := createTestStore(t)
 	defer s.Close()
 
-	tools := NewTools(repoPath, "test-review", s)
+	tools := NewTools(repoPath, "test-review", "HEAD", s)
 
 	// Test getting diff for specific file
 	diffs, err := tools.GetDiff([]string{"example.go"})
@@ -140,9 +140,9 @@ func TestGetDiff(t *testing.T) {
 		t.Fatalf("GetDiff (all) failed: %v", err)
 	}
 
-	// Should only get diff for modified file (untracked files don't have diffs)
-	if len(allDiffs) != 1 {
-		t.Errorf("Expected 1 diff for all files, got %d: %+v", len(allDiffs), allDiffs)
+	// Expect diffs for modified and untracked files
+	if len(allDiffs) != 2 {
+		t.Errorf("Expected 2 diffs for all files, got %d: %+v", len(allDiffs), allDiffs)
 	}
 }
 
@@ -152,7 +152,7 @@ func TestCommentOperations(t *testing.T) {
 	defer s.Close()
 
 	reviewID := "test-review-123"
-	tools := NewTools(repoPath, reviewID, s)
+	tools := NewTools(repoPath, reviewID, "HEAD", s)
 
 	// Initially no comments
 	comments, err := tools.ListComments()

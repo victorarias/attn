@@ -117,7 +117,7 @@ func (r *Reviewer) Run(ctx context.Context, config ReviewConfig, onEvent func(Re
 	onEvent(ReviewEvent{Type: "started"})
 
 	// Create MCP tools
-	tools := mcp.NewTools(config.RepoPath, config.ReviewID, r.store)
+			tools := mcp.NewTools(config.RepoPath, config.ReviewID, config.BaseBranch, r.store)
 
 	// Build MCP server with review tools
 	mcpServer := r.buildMCPServer(tools, config.ReviewID, onEvent)

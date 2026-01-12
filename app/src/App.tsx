@@ -20,7 +20,7 @@ import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore } from './store/sessions';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse, BranchDiffFile } from './hooks/useDaemonSocket';
 import { normalizeSessionState } from './types/sessionState';
 import type { SessionAgent } from './types/sessionAgent';
 import { useDaemonStore } from './store/daemonSessions';
@@ -50,6 +50,9 @@ function App() {
 
   // Git status state
   const [gitStatus, setGitStatus] = useState<GitStatusUpdate | null>(null);
+  const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
+  const [branchDiffBaseRef, setBranchDiffBaseRef] = useState('');
+  const [branchDiffError, setBranchDiffError] = useState<string | null>(null);
 
   const {
     daemonSessions,
@@ -911,6 +914,53 @@ function AppContent({
     return daemonSessions.find((ds) => ds.id === activeLocalSession.id) || null;
   }, [sessions, activeSessionId, daemonSessions]);
 
+  const branchDiffRequestId = useRef(0);
+  const refreshBranchDiff = useCallback(async (directory: string) => {
+    const requestId = ++branchDiffRequestId.current;
+    setBranchDiffError(null);
+    try {
+      const result = await sendGetBranchDiffFiles(directory);
+      if (requestId !== branchDiffRequestId.current) return;
+      if (result.success) {
+        setBranchDiffFiles(result.files);
+        setBranchDiffBaseRef(result.base_ref);
+      } else {
+        setBranchDiffFiles([]);
+        setBranchDiffBaseRef(result.base_ref || '');
+        setBranchDiffError(result.error || 'Failed to load branch diff');
+      }
+    } catch (err) {
+      if (requestId !== branchDiffRequestId.current) return;
+      setBranchDiffFiles([]);
+      setBranchDiffBaseRef('');
+      setBranchDiffError(err instanceof Error ? err.message : 'Failed to load branch diff');
+    }
+  }, [sendGetBranchDiffFiles]);
+
+  useEffect(() => {
+    if (view !== 'session' || !activeDaemonSession?.directory) {
+      setBranchDiffFiles([]);
+      setBranchDiffBaseRef('');
+      setBranchDiffError(null);
+      return;
+    }
+
+    refreshBranchDiff(activeDaemonSession.directory);
+    const intervalId = window.setInterval(() => {
+      refreshBranchDiff(activeDaemonSession.directory);
+    }, 30000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [view, activeDaemonSession?.directory, refreshBranchDiff]);
+
+  useEffect(() => {
+    if (!gitStatus || !activeDaemonSession?.directory) return;
+    if (gitStatus.directory !== activeDaemonSession.directory) return;
+    refreshBranchDiff(activeDaemonSession.directory);
+  }, [gitStatus, activeDaemonSession?.directory, refreshBranchDiff]);
+
   // Review panel handlers
   const handleOpenReviewPanel = useCallback(() => {
     setInitialReviewFile(null); // No specific file, let ReviewPanel pick first
@@ -1076,7 +1126,9 @@ function AppContent({
           })()}
         </div>
         <ChangesPanel
-          gitStatus={gitStatus}
+          branchDiffFiles={branchDiffFiles}
+          branchDiffBaseRef={branchDiffBaseRef}
+          branchDiffError={branchDiffError}
           attentionCount={attentionCount}
           selectedFile={null}
           onFileSelect={handleFileSelect}
@@ -1137,6 +1189,7 @@ function AppContent({
         gitStatus={gitStatus}
         repoPath={activeDaemonSession?.directory || ''}
         branch={activeDaemonSession?.branch || ''}
+        baseBranch={branchDiffBaseRef || undefined}
         onClose={handleCloseReviewPanel}
         fetchDiff={fetchDiffForReview}
         sendGetBranchDiffFiles={sendGetBranchDiffFiles}

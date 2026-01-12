@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -13,14 +14,16 @@ import (
 type Tools struct {
 	repoPath string
 	reviewID string
+	baseRef  string
 	store    *store.Store
 }
 
 // NewTools creates a new Tools instance
-func NewTools(repoPath, reviewID string, store *store.Store) *Tools {
+func NewTools(repoPath, reviewID, baseRef string, store *store.Store) *Tools {
 	return &Tools{
 		repoPath: repoPath,
 		reviewID: reviewID,
+		baseRef:  baseRef,
 		store:    store,
 	}
 }
@@ -33,40 +36,17 @@ type ChangedFile struct {
 
 // GetChangedFiles returns a list of files that have been changed in the working tree
 func (t *Tools) GetChangedFiles() ([]ChangedFile, error) {
-	// Get status with porcelain format
-	cmd := exec.Command("git", "status", "--porcelain", "-z")
-	cmd.Dir = t.repoPath
-	output, err := cmd.Output()
+	baseRef := t.getBaseRef()
+	changed, err := git.GetBranchDiffFiles(t.repoPath, baseRef)
 	if err != nil {
 		return nil, err
 	}
 
-	var files []ChangedFile
-	entries := strings.Split(string(output), "\x00")
-	for _, entry := range entries {
-		if len(entry) < 4 {
-			continue
-		}
-		// Format: XY PATH where X is index status, Y is worktree status
-		indexStatus := entry[0]
-		worktreeStatus := entry[1]
-		path := entry[3:]
-
-		// Skip renames (R) for now - they have two paths
-		if indexStatus == 'R' || worktreeStatus == 'R' {
-			continue
-		}
-
-		status := "modified"
-		if indexStatus == 'A' || worktreeStatus == '?' {
-			status = "added"
-		} else if indexStatus == 'D' || worktreeStatus == 'D' {
-			status = "deleted"
-		}
-
+	files := make([]ChangedFile, 0, len(changed))
+	for _, f := range changed {
 		files = append(files, ChangedFile{
-			Path:   path,
-			Status: status,
+			Path:   f.Path,
+			Status: f.Status,
 		})
 	}
 
@@ -77,27 +57,38 @@ func (t *Tools) GetChangedFiles() ([]ChangedFile, error) {
 // If paths is empty, returns the diff for all changed files
 func (t *Tools) GetDiff(paths []string) (map[string]string, error) {
 	result := make(map[string]string)
+	baseRef := t.getBaseRef()
+	statusByPath := make(map[string]string)
 
 	// Get list of files to diff
 	var filesToDiff []string
 	if len(paths) == 0 {
-		changed, err := t.GetChangedFiles()
+		changed, err := git.GetBranchDiffFiles(t.repoPath, baseRef)
 		if err != nil {
 			return nil, err
 		}
 		for _, f := range changed {
 			filesToDiff = append(filesToDiff, f.Path)
+			statusByPath[f.Path] = f.Status
 		}
 	} else {
 		filesToDiff = paths
 	}
 
+	if len(statusByPath) == 0 {
+		changed, err := git.GetBranchDiffFiles(t.repoPath, baseRef)
+		if err == nil {
+			for _, f := range changed {
+				statusByPath[f.Path] = f.Status
+			}
+		}
+	}
+
 	for _, path := range filesToDiff {
-		// Try unstaged diff first
-		diff, err := t.getDiffForFile(path, false)
-		if err != nil || diff == "" {
-			// Try staged diff
-			diff, _ = t.getDiffForFile(path, true)
+		status := statusByPath[path]
+		diff, err := t.getDiffForFile(path, status, baseRef)
+		if err != nil {
+			return nil, err
 		}
 		if diff != "" {
 			result[path] = diff
@@ -107,20 +98,31 @@ func (t *Tools) GetDiff(paths []string) (map[string]string, error) {
 	return result, nil
 }
 
-func (t *Tools) getDiffForFile(path string, staged bool) (string, error) {
-	args := []string{"diff"}
-	if staged {
-		args = append(args, "--cached")
+func (t *Tools) getDiffForFile(path, status, baseRef string) (string, error) {
+	if status == "untracked" {
+		return t.runGitDiff("diff", "--no-index", "--", "/dev/null", path)
 	}
-	args = append(args, "--", path)
+	return t.runGitDiff("diff", baseRef, "--", path)
+}
 
+func (t *Tools) runGitDiff(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = t.repoPath
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			return string(output), nil
+		}
 		return "", err
 	}
 	return string(output), nil
+}
+
+func (t *Tools) getBaseRef() string {
+	if strings.TrimSpace(t.baseRef) != "" {
+		return t.baseRef
+	}
+	return "HEAD"
 }
 
 // CommentInfo represents a comment with resolution info

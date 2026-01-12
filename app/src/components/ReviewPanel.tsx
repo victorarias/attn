@@ -939,7 +939,8 @@ export function ReviewPanel({
                   if (reviewerRunning) {
                     sendCancelReview?.(reviewId);
                   } else {
-                    sendStartReview(reviewId, repoPath, branch, baseBranch);
+                    const reviewBaseRef = baseRef || baseBranch;
+                    sendStartReview(reviewId, repoPath, branch, reviewBaseRef);
                   }
                 }}
                 title={reviewerRunning ? 'Cancel review' : 'Run AI review'}
