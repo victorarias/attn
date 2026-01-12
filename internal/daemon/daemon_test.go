@@ -241,6 +241,9 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid projects_directory", "projects_directory", t.TempDir(), false},
+		{"empty claude_executable", "claude_executable", "", false},
+		{"empty codex_executable", "codex_executable", "", false},
+		{"invalid claude_executable", "claude_executable", "not-a-real-binary-123", true},
 		{"invalid key", "unknown_setting", "value", true},
 		{"empty projects_directory", "projects_directory", "", true},
 		{"relative path", "projects_directory", "relative/path", true},

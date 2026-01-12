@@ -337,6 +337,7 @@ function AppContent({
     setActiveUtilityTerminal,
     renameUtilityTerminal,
     setForkParams,
+    setLauncherConfig,
   } = useSessionStore();
 
   // UI scale for font sizing (Cmd+/Cmd-) - now uses SettingsContext
@@ -366,6 +367,13 @@ function AppContent({
       sendClearSessions();
     }
   }, [hasReceivedInitialState, sendClearSessions]);
+
+  useEffect(() => {
+    setLauncherConfig({
+      claudeExecutable: settings.claude_executable || '',
+      codexExecutable: settings.codex_executable || '',
+    });
+  }, [settings, setLauncherConfig]);
 
   // Refresh PRs with proper async handling
   const handleRefreshPRs = useCallback(async () => {

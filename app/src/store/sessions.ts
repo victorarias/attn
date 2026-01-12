@@ -43,10 +43,16 @@ export interface Session {
   terminalPanel: TerminalPanelState;
 }
 
+interface LauncherConfig {
+  claudeExecutable: string;
+  codexExecutable: string;
+}
+
 interface SessionStore {
   sessions: Session[];
   activeSessionId: string | null;
   connected: boolean;
+  launcherConfig: LauncherConfig;
 
   // Actions
   connect: () => Promise<void>;
@@ -56,6 +62,7 @@ interface SessionStore {
   connectTerminal: (id: string, terminal: Terminal) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
   setForkParams: (sessionId: string, resumeSessionId: string) => void;
+  setLauncherConfig: (config: LauncherConfig) => void;
 
   // Terminal panel actions
   openTerminalPanel: (sessionId: string) => void;
@@ -90,6 +97,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
   connected: false,
+  launcherConfig: {
+    claudeExecutable: '',
+    codexExecutable: '',
+  },
 
   connect: async () => {
     if (get().connected) return;
@@ -185,7 +196,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   connectTerminal: async (id: string, terminal: Terminal) => {
-    const { sessions, connected } = get();
+    const { sessions, connected, launcherConfig } = get();
     const session = sessions.find((s) => s.id === id);
     if (!session) return;
 
@@ -216,6 +227,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           agent: session.agent,
           resume_session_id: forkParams?.resumeSessionId ?? null,
           fork_session: forkParams?.forkSession ?? null,
+          ...(launcherConfig.claudeExecutable
+            ? { claude_executable: launcherConfig.claudeExecutable }
+            : {}),
+          ...(launcherConfig.codexExecutable
+            ? { codex_executable: launcherConfig.codexExecutable }
+            : {}),
         },
       });
 
@@ -259,6 +276,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   setForkParams: (sessionId: string, resumeSessionId: string) => {
     pendingForkParams.set(sessionId, { resumeSessionId, forkSession: true });
+  },
+
+  setLauncherConfig: (config: LauncherConfig) => {
+    set({ launcherConfig: config });
   },
 
   openTerminalPanel: (sessionId: string) => {

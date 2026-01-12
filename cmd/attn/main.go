@@ -124,6 +124,13 @@ func runWrapper() {
 	openAppWithDeepLink()
 }
 
+func resolveExecutable(envKey, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(envKey)); value != "" {
+		return value
+	}
+	return fallback
+}
+
 // openAppWithDeepLink opens the Tauri app with a deep link to spawn a session
 func openAppWithDeepLink() {
 	cwd, err := os.Getwd()
@@ -437,7 +444,8 @@ func runClaudeDirectly() {
 
 	claudeCmd = append(claudeCmd, claudeArgs...)
 
-	cmd := exec.Command("claude", claudeCmd...)
+	claudeExecutable := resolveExecutable("ATTN_CLAUDE_EXECUTABLE", "claude")
+	cmd := exec.Command(claudeExecutable, claudeCmd...)
 	cmd.Dir = cwd
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -558,7 +566,8 @@ func runCodexDirectly() {
 		codexArgs = append(codexArgs, "-C", cwd)
 	}
 
-	cmd := exec.Command("codex", codexArgs...)
+	codexExecutable := resolveExecutable("ATTN_CODEX_EXECUTABLE", "codex")
+	cmd := exec.Command(codexExecutable, codexArgs...)
 	cmd.Dir = cwd
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

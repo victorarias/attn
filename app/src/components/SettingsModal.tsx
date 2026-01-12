@@ -1,5 +1,5 @@
 // app/src/components/SettingsModal.tsx
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { DaemonSettings } from '../hooks/useDaemonSocket';
 import './SettingsModal.css';
@@ -22,9 +22,20 @@ export function SettingsModal({
   onSetSetting,
 }: SettingsModalProps) {
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
+  const [claudeExecutable, setClaudeExecutable] = useState(settings.claude_executable || '');
+  const [codexExecutable, setCodexExecutable] = useState(settings.codex_executable || '');
 
   // Sync with settings when modal opens
   const actualProjectsDir = settings.projects_directory || '';
+  const actualClaudeExecutable = settings.claude_executable || '';
+  const actualCodexExecutable = settings.codex_executable || '';
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setProjectsDir(actualProjectsDir);
+    setClaudeExecutable(actualClaudeExecutable);
+    setCodexExecutable(actualCodexExecutable);
+  }, [isOpen, actualProjectsDir, actualClaudeExecutable, actualCodexExecutable]);
 
   const handleBrowse = useCallback(async () => {
     const selected = await open({
@@ -56,6 +67,42 @@ export function SettingsModal({
     }
   }, [projectsDir, actualProjectsDir, onSetSetting]);
 
+  const handleClaudeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setClaudeExecutable(e.target.value);
+  }, []);
+
+  const handleCodexChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setCodexExecutable(e.target.value);
+  }, []);
+
+  const handleClaudeBlur = useCallback(() => {
+    if (claudeExecutable !== actualClaudeExecutable) {
+      onSetSetting('claude_executable', claudeExecutable);
+    }
+  }, [claudeExecutable, actualClaudeExecutable, onSetSetting]);
+
+  const handleCodexBlur = useCallback(() => {
+    if (codexExecutable !== actualCodexExecutable) {
+      onSetSetting('codex_executable', codexExecutable);
+    }
+  }, [codexExecutable, actualCodexExecutable, onSetSetting]);
+
+  const handleClaudeKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      if (claudeExecutable !== actualClaudeExecutable) {
+        onSetSetting('claude_executable', claudeExecutable);
+      }
+    }
+  }, [claudeExecutable, actualClaudeExecutable, onSetSetting]);
+
+  const handleCodexKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      if (codexExecutable !== actualCodexExecutable) {
+        onSetSetting('codex_executable', codexExecutable);
+      }
+    }
+  }, [codexExecutable, actualCodexExecutable, onSetSetting]);
+
   if (!isOpen) return null;
 
   return (
@@ -84,6 +131,39 @@ export function SettingsModal({
               <button className="browse-btn" onClick={handleBrowse}>
                 Browse
               </button>
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <h3>Executables</h3>
+            <p className="settings-description">
+              Override the CLI used to launch agents. Leave empty to use the default on your PATH.
+            </p>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-claude-exec">Claude Code</label>
+              <input
+                id="settings-claude-exec"
+                type="text"
+                value={claudeExecutable}
+                onChange={handleClaudeChange}
+                onBlur={handleClaudeBlur}
+                onKeyDown={handleClaudeKeyDown}
+                placeholder="claude"
+                className="settings-input"
+              />
+            </div>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-codex-exec">Codex (Cortex)</label>
+              <input
+                id="settings-codex-exec"
+                type="text"
+                value={codexExecutable}
+                onChange={handleCodexChange}
+                onBlur={handleCodexBlur}
+                onKeyDown={handleCodexKeyDown}
+                placeholder="codex"
+                className="settings-input"
+              />
             </div>
           </div>
 

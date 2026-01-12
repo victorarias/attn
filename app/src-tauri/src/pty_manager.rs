@@ -35,6 +35,10 @@ pub struct PtySpawnArgs {
     pub detect_state: Option<bool>,
     #[serde(default)]
     pub agent: Option<String>,
+    #[serde(default)]
+    pub claude_executable: Option<String>,
+    #[serde(default)]
+    pub codex_executable: Option<String>,
 }
 
 /// Validate that a string is a valid UUID format.
@@ -616,6 +620,8 @@ pub async fn pty_spawn(
         resume_session_id,
         fork_session,
         agent,
+        claude_executable,
+        codex_executable,
         detect_state: _,
     } = args;
     let pty_system = native_pty_system();
@@ -671,6 +677,16 @@ pub async fn pty_spawn(
         cmd.env("ATTN_INSIDE_APP", "1");
         cmd.env("ATTN_SESSION_ID", id.clone());
         cmd.env("ATTN_AGENT", resolved_agent);
+        if let Some(path) = claude_executable {
+            if !path.is_empty() {
+                cmd.env("ATTN_CLAUDE_EXECUTABLE", path);
+            }
+        }
+        if let Some(path) = codex_executable {
+            if !path.is_empty() {
+                cmd.env("ATTN_CODEX_EXECUTABLE", path);
+            }
+        }
         // Pass session ID via env var so attn uses the same ID as frontend
         cmd.arg(format!(
             "exec {attn_path}{fork_flags}"

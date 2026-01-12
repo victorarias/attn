@@ -24,6 +24,8 @@ import (
 const (
 	SettingProjectsDirectory = "projects_directory"
 	SettingUIScale           = "uiScale"
+	SettingClaudeExecutable  = "claude_executable"
+	SettingCodexExecutable   = "codex_executable"
 )
 
 // wsClient represents a connected WebSocket client
@@ -676,6 +678,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateProjectsDirectory(value)
 	case SettingUIScale:
 		return validateUIScale(value)
+	case SettingClaudeExecutable, SettingCodexExecutable:
+		return validateExecutableSetting(value)
 	default:
 		return fmt.Errorf("unknown setting: %s", key)
 	}
@@ -727,6 +731,27 @@ func validateProjectsDirectory(path string) error {
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("path exists but is not a directory")
+	}
+
+	return nil
+}
+
+func validateExecutableSetting(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+
+	path, err := exec.LookPath(value)
+	if err != nil {
+		return fmt.Errorf("executable not found: %w", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("cannot access executable: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("executable path points to a directory")
 	}
 
 	return nil
