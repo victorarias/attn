@@ -153,7 +153,7 @@ export function SettingsModal({
               />
             </div>
             <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-codex-exec">Codex (Cortex)</label>
+              <label className="settings-label" htmlFor="settings-codex-exec">Codex</label>
               <input
                 id="settings-codex-exec"
                 type="text"
