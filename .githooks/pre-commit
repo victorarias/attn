@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+unset GIT_DIR
+unset GIT_WORK_TREE
+unset GIT_INDEX_FILE
+
+go test ./...
 pnpm -C app exec tsc --noEmit
+pnpm -C app test
