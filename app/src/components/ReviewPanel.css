@@ -93,6 +93,12 @@
   opacity: 0.6;
 }
 
+.review-tree-dir {
+  color: #9ca3af;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
 .file-item {
   display: flex;
   align-items: center;
@@ -363,6 +369,27 @@
 .review-agent-btn.running:hover {
   background: #b91c1c;
   border-color: #dc2626;
+}
+
+.review-send-btn {
+  background: #1f2937;
+  border: 1px solid #374151;
+  color: #e5e7eb;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.review-send-btn:hover {
+  background: #111827;
+  border-color: #4b5563;
+}
+
+.review-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Reviewer output panel at bottom of diff area */

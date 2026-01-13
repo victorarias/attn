@@ -1376,7 +1376,7 @@ export function UnifiedDiffEditor({
         const sendToClaudeForComment = onSendToClaude && filePath && comment.anchor
           ? () => {
               const lineNum = comment.anchor!.line;
-              const reference = `@${filePath}:L${lineNum}`;
+              const reference = `@${filePath}:L${lineNum}\nComment: ${comment.content}`;
               onSendToClaude(reference);
             }
           : undefined;

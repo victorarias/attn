@@ -232,6 +232,15 @@ function fromEditorAnchor(anchor: CommentAnchor): {
   };
 }
 
+// Abbreviate path for display
+function abbreviatePath(path: string): string {
+  const parts = path.split('/');
+  if (parts.length <= 3) return path;
+  const filename = parts.pop()!;
+  const dir = parts.slice(-2).join('/');
+  return `.../${dir}/${filename}`;
+}
+
 interface ReviewFile {
   path: string;
   status: string;
@@ -241,6 +250,64 @@ interface ReviewFile {
   isAutoSkip: boolean;
   hasUncommitted?: boolean;  // True if file has uncommitted changes on top of committed
   oldPath?: string;  // For renames
+}
+
+type TreeNode = {
+  type: 'file' | 'dir';
+  name: string;
+  fullPath?: string;
+  file?: ReviewFile;
+  children?: TreeNode[];
+};
+
+function buildTree(files: ReviewFile[]): TreeNode[] {
+  const dirToFiles: Map<string, ReviewFile[]> = new Map();
+
+  files.forEach(file => {
+    const parts = file.path.split('/');
+    if (parts.length === 1) {
+      if (!dirToFiles.has('')) {
+        dirToFiles.set('', []);
+      }
+      dirToFiles.get('')!.push(file);
+    } else {
+      const dir = parts.slice(0, -1).join('/');
+      if (!dirToFiles.has(dir)) {
+        dirToFiles.set(dir, []);
+      }
+      dirToFiles.get(dir)!.push(file);
+    }
+  });
+
+  const result: TreeNode[] = [];
+  const sortedDirs = Array.from(dirToFiles.keys()).sort();
+
+  sortedDirs.forEach(dir => {
+    const filesInDir = dirToFiles.get(dir)!;
+
+    if (dir === '') {
+      filesInDir.forEach(file => {
+        result.push({
+          type: 'file',
+          name: file.path,
+          file,
+        });
+      });
+    } else {
+      result.push({
+        type: 'dir',
+        name: abbreviatePath(dir),
+        fullPath: dir,
+        children: filesInDir.map(file => ({
+          type: 'file',
+          name: file.path.split('/').pop() || file.path,
+          file,
+        })),
+      });
+    }
+  });
+
+  return result;
 }
 
 // ReviewerEvent is now imported from useDaemonSocket
@@ -362,6 +429,11 @@ export function ReviewPanel({
     return allReviewComments.filter(c => c.filepath === selectedFilePath);
   }, [allReviewComments, selectedFilePath]);
 
+  const unresolvedComments = useMemo(
+    () => allReviewComments.filter(c => !c.resolved && !c.wont_fix),
+    [allReviewComments]
+  );
+
   // Compute comment counts per file
   const fileCommentCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -420,6 +492,8 @@ export function ReviewPanel({
   }, [branchDiffFiles]);
 
   const allFiles = useMemo(() => [...needsReviewFiles, ...autoSkipFiles], [needsReviewFiles, autoSkipFiles]);
+  const needsReviewTree = useMemo(() => buildTree(needsReviewFiles), [needsReviewFiles]);
+  const autoSkipTree = useMemo(() => buildTree(autoSkipFiles), [autoSkipFiles]);
 
   // Derive selectedFile from path (stable across gitStatus updates)
   const selectedFile = useMemo(() => {
@@ -749,15 +823,6 @@ export function ReviewPanel({
     }
   }, []);
 
-  // Abbreviate path for display
-  const abbreviatePath = useCallback((path: string) => {
-    const parts = path.split('/');
-    if (parts.length <= 3) return path;
-    const filename = parts.pop()!;
-    const dir = parts.slice(-2).join('/');
-    return `.../${dir}/${filename}`;
-  }, []);
-
   // ============================================================================
   // UnifiedDiffEditor Integration
   // ============================================================================
@@ -916,6 +981,80 @@ export function ReviewPanel({
     onClose();
   }, [onSendToClaude, onClose]);
 
+  const renderTree = useCallback((nodes: TreeNode[], depth: number, isAutoSkip: boolean) => {
+    return nodes.map((node, index) => {
+      if (node.type === 'dir') {
+        return (
+          <div key={`dir-${node.fullPath}-${index}`}>
+            <div
+              className="review-tree-dir"
+              style={{ paddingLeft: `${depth * 12 + 12}px` }}
+              title={node.fullPath}
+            >
+              {node.name}
+            </div>
+            {node.children && renderTree(node.children, depth + 1, isAutoSkip)}
+          </div>
+        );
+      }
+
+      const file = node.file!;
+      const isSelected = selectedFilePath === file.path;
+      const isViewed = viewedFiles.has(file.path);
+      const isChanged = changedSinceViewed.has(file.path);
+      return (
+        <div
+          key={`file-${file.path}-${index}`}
+          className={`file-item ${isSelected ? 'selected' : ''} ${isViewed ? 'viewed' : ''} ${isChanged ? 'changed' : ''} ${isAutoSkip ? 'auto-skip' : ''}`}
+          style={{ paddingLeft: `${depth * 12 + 12}px` }}
+          onClick={() => setSelectedFilePath(file.path)}
+        >
+          <span className="file-icon">{getFileIcon(file)}</span>
+          <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>
+          <span className="file-name" title={file.path}>{node.name}</span>
+          {(file.additions !== undefined || file.deletions !== undefined) && (
+            <span className="file-stats">
+              {file.additions !== undefined && file.additions > 0 && (
+                <span className="stat-add">+{file.additions}</span>
+              )}
+              {file.deletions !== undefined && file.deletions > 0 && (
+                <span className="stat-del">-{file.deletions}</span>
+              )}
+            </span>
+          )}
+          {fileCommentCounts[file.path] > 0 && (
+            <span className="file-comment-count">{fileCommentCounts[file.path]}</span>
+          )}
+        </div>
+      );
+    });
+  }, [selectedFilePath, viewedFiles, changedSinceViewed, getFileIcon, getStatusLabel, fileCommentCounts]);
+
+  const handleSendUnresolvedToClaude = useCallback(() => {
+    if (!onSendToClaude || unresolvedComments.length === 0) return;
+
+    const byFile = new Map<string, ReviewComment[]>();
+    for (const comment of unresolvedComments) {
+      const list = byFile.get(comment.filepath) || [];
+      list.push(comment);
+      byFile.set(comment.filepath, list);
+    }
+
+    const lines: string[] = ['Unresolved review comments:'];
+    for (const [filepath, fileComments] of byFile.entries()) {
+      lines.push(`\n${filepath}`);
+      for (const comment of fileComments) {
+        const lineStart = comment.line_start;
+        const lineEnd = Math.abs(comment.line_end);
+        const side = comment.line_end < 0 ? 'original' : 'modified';
+        const lineRef = lineStart === lineEnd ? `L${lineStart}` : `L${lineStart}-L${lineEnd}`;
+        lines.push(`- @${filepath}:${lineRef} (${side}) ${comment.content}`);
+      }
+    }
+
+    handleSendToClaude(lines.join('\n'));
+  }, [onSendToClaude, unresolvedComments, handleSendToClaude]);
+
   if (!isOpen) return null;
 
   const currentFileIndex = selectedFile ? allFiles.findIndex(f => f.path === selectedFile.path) : -1;
@@ -948,6 +1087,16 @@ export function ReviewPanel({
                 {reviewerRunning ? '⏹ Cancel' : '🤖 Review'}
               </button>
             )}
+            {onSendToClaude && (
+              <button
+                className="review-send-btn"
+                onClick={handleSendUnresolvedToClaude}
+                disabled={unresolvedComments.length === 0}
+                title="Send unresolved comments to Claude Code"
+              >
+                Send unresolved
+              </button>
+            )}
             <button className="review-close" onClick={onClose}>×</button>
           </div>
         </div>
@@ -957,47 +1106,14 @@ export function ReviewPanel({
             {needsReviewFiles.length > 0 && (
               <div className="file-group">
                 <div className="file-group-header">NEEDS REVIEW</div>
-                {needsReviewFiles.map(file => (
-                  <div
-                    key={file.path}
-                    className={`file-item ${selectedFilePath === file.path ? 'selected' : ''} ${viewedFiles.has(file.path) ? 'viewed' : ''} ${changedSinceViewed.has(file.path) ? 'changed' : ''}`}
-                    onClick={() => setSelectedFilePath(file.path)}
-                  >
-                    <span className="file-icon">{getFileIcon(file)}</span>
-                    <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>
-                    <span className="file-name" title={file.path}>{abbreviatePath(file.path)}</span>
-                    {(file.additions !== undefined || file.deletions !== undefined) && (
-                      <span className="file-stats">
-                        {file.additions !== undefined && file.additions > 0 && (
-                          <span className="stat-add">+{file.additions}</span>
-                        )}
-                        {file.deletions !== undefined && file.deletions > 0 && (
-                          <span className="stat-del">-{file.deletions}</span>
-                        )}
-                      </span>
-                    )}
-                    {fileCommentCounts[file.path] > 0 && (
-                      <span className="file-comment-count">{fileCommentCounts[file.path]}</span>
-                    )}
-                  </div>
-                ))}
+                {renderTree(needsReviewTree, 0, false)}
               </div>
             )}
 
             {autoSkipFiles.length > 0 && (
               <div className="file-group auto-skip">
                 <div className="file-group-header">AUTO-SKIP</div>
-                {autoSkipFiles.map(file => (
-                  <div
-                    key={file.path}
-                    className={`file-item auto-skip ${selectedFilePath === file.path ? 'selected' : ''}`}
-                    onClick={() => setSelectedFilePath(file.path)}
-                  >
-                    <span className="file-icon">{getFileIcon(file)}</span>
-                    <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>
-                    <span className="file-name" title={file.path}>{abbreviatePath(file.path)}</span>
-                  </div>
-                ))}
+                {renderTree(autoSkipTree, 0, true)}
               </div>
             )}
 
