@@ -50,9 +50,6 @@ function App() {
 
   // Git status state
   const [gitStatus, setGitStatus] = useState<GitStatusUpdate | null>(null);
-  const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
-  const [branchDiffBaseRef, setBranchDiffBaseRef] = useState('');
-  const [branchDiffError, setBranchDiffError] = useState<string | null>(null);
 
   const {
     daemonSessions,
@@ -347,6 +344,9 @@ function AppContent({
   // Track PR refresh state for progress indicator
   const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
+  const [branchDiffBaseRef, setBranchDiffBaseRef] = useState('');
+  const [branchDiffError, setBranchDiffError] = useState<string | null>(null);
 
   // Worktree cleanup prompt state
   const [closedWorktree, setClosedWorktree] = useState<{ path: string; branch?: string } | null>(null);

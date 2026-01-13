@@ -26,7 +26,7 @@ type TreeNode = {
   type: 'file' | 'dir';
   name: string;  // abbreviated path for dirs, filename for files
   fullPath?: string;  // for dirs
-  file?: GitFileChange;  // for files
+  file?: BranchChange;  // for files
   children?: TreeNode[];  // for dirs
 };
 
