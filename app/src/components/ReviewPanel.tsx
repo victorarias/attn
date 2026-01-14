@@ -608,6 +608,24 @@ export function ReviewPanel({
     }
   }, [isOpen]);
 
+  const previousRepoPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen) return;
+    const prevRepo = previousRepoPathRef.current;
+    if (prevRepo && prevRepo !== repoPath) {
+      setSelectedFilePath(null);
+      setDiffContent(null);
+      setError(null);
+      setLoading(false);
+      setExpandedContext(0);
+      setScrollToLine(undefined);
+      viewedDiffHashesRef.current.clear();
+      setChangedSinceViewed(new Set());
+      setViewedFiles(new Set());
+    }
+    previousRepoPathRef.current = repoPath;
+  }, [isOpen, repoPath]);
+
   // Create a stable key that changes when we need to refetch the diff
   // This includes the file path and a representation of the git status for that file
   const diffFetchKey = useMemo(() => {

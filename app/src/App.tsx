@@ -946,6 +946,13 @@ function AppContent({
   }, [sendGetBranchDiffFiles]);
 
   useEffect(() => {
+    branchDiffRequestId.current += 1;
+    setBranchDiffFiles([]);
+    setBranchDiffBaseRef('');
+    setBranchDiffError(null);
+  }, [activeDaemonSession?.directory]);
+
+  useEffect(() => {
     if (view !== 'session' || !activeDaemonSession?.directory) {
       setBranchDiffFiles([]);
       setBranchDiffBaseRef('');

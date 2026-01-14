@@ -123,6 +123,7 @@ export const ChangesPanel = memo(function ChangesPanel({
 
     return { files: branchDiffFiles.length, additions, deletions };
   }, [branchDiffFiles]);
+  const isLoading = !branchDiffError && totalStats.files === 0;
 
   // Memoize tree building to avoid rebuilding on every render
   const branchTree = useMemo(() => buildTree(branchDiffFiles), [branchDiffFiles]);
@@ -218,15 +219,20 @@ export const ChangesPanel = memo(function ChangesPanel({
       <div className="changes-body">
         {branchDiffError ? (
           <div className="changes-error">{branchDiffError}</div>
+        ) : isLoading ? (
+          <div className="changes-loading">
+            <div className="loading-header" />
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div key={index} className="loading-row" />
+            ))}
+          </div>
         ) : totalStats.files === 0 ? (
           <div className="changes-empty">No changes</div>
         ) : (
-          <>
-            <div className="changes-section">
-              <div className="section-header">Files ({branchDiffFiles.length})</div>
-              {renderTree(branchTree, 0, false)}
-            </div>
-          </>
+          <div className="changes-section">
+            <div className="section-header">Files ({branchDiffFiles.length})</div>
+            {renderTree(branchTree, 0, false)}
+          </div>
         )}
       </div>
     </div>
