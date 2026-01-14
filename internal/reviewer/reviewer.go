@@ -126,8 +126,13 @@ func (r *Reviewer) Run(ctx context.Context, config ReviewConfig, onEvent func(Re
 	// MCP tools must be explicitly allowed using format: mcp__<server_name>__<tool_name>
 	opts := []types.Option{
 		types.WithModel("claude-opus-4-5"),
+		types.WithCwd(config.RepoPath),
+		types.WithTools("Read", "Glob", "Grep"),
 		sdk.WithClientMCPServer(mcpServer),
 		types.WithAllowedTools(
+			"Read",
+			"Glob",
+			"Grep",
 			"mcp__attn-reviewer__get_changed_files",
 			"mcp__attn-reviewer__get_diff",
 			"mcp__attn-reviewer__list_comments",
@@ -557,6 +562,9 @@ func (r *Reviewer) buildPrompt(config ReviewConfig, unresolvedComments []*store.
 You have access to these tools and MUST use them immediately without asking for permission:
 - get_changed_files() - lists modified files
 - get_diff(paths) - shows diff content
+- Read(file_path) - reads a file from the repo
+- Glob(pattern) - lists files matching a pattern in the repo
+- Grep(pattern) - searches file contents in the repo
 - list_comments() - shows existing review comments
 - add_comment(filepath, line_start, line_end, content) - adds a review comment
 - resolve_comment(id) - marks a comment as resolved
@@ -564,7 +572,7 @@ You have access to these tools and MUST use them immediately without asking for 
 Workflow:
 1. Call get_changed_files() to see what changed
 2. Call list_comments() to see existing feedback
-3. Review each file - use get_diff() to see the changes
+3. Review each file - use get_diff() to see the changes (Read/Glob/Grep if you need full context)
 4. Use add_comment() for issues you find
 5. Use resolve_comment() if a previous issue was fixed
 
@@ -575,6 +583,7 @@ Focus on:
 - Security concerns
 
 Be constructive and helpful. Focus on significant issues, not style nitpicks.
+The working directory is scoped to the repo root for this session.
 Do NOT ask for permission - you already have it. Start reviewing immediately.
 `, config.Branch, config.BaseBranch)
 
