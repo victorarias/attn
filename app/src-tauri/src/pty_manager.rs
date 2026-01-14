@@ -5,6 +5,10 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+#[cfg(unix)]
+use nix::sys::signal::{kill, Signal};
+#[cfg(unix)]
+use nix::unistd::Pid;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -872,8 +876,19 @@ pub async fn pty_kill(state: State<'_, PtyState>, id: String) -> Result<(), Stri
     // Kill the child process before removing session
     if let Some(session) = sessions.get(&id) {
         if let Ok(mut child) = session.child.lock() {
-            // kill() sends SIGHUP to the child process
-            let _ = child.kill();
+            let pid = child.process_id().unwrap_or(0);
+            if pid > 0 {
+                #[cfg(unix)]
+                {
+                    let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = child.kill();
+                }
+            } else {
+                let _ = child.kill();
+            }
         }
     }
 
