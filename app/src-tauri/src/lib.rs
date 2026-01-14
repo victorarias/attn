@@ -2,6 +2,9 @@ mod pty_manager;
 mod thumbs;
 
 use pty_manager::PtyState;
+use std::env;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -111,6 +114,82 @@ async fn list_directory(path: String, prefix: Option<String>) -> Result<Vec<Stri
     Ok(directories)
 }
 
+fn shell_escape_unix(arg: &str) -> String {
+    if arg.is_empty() {
+        return "''".to_string();
+    }
+    let escaped = arg.replace('\'', "'\\''");
+    format!("'{}'", escaped)
+}
+
+fn shell_escape_windows(arg: &str) -> String {
+    if arg.is_empty() {
+        return "\"\"".to_string();
+    }
+    format!("\"{}\"", arg.replace('"', "\\\""))
+}
+
+#[tauri::command]
+fn open_in_editor(cwd: String, file_path: Option<String>, editor: Option<String>) -> Result<(), String> {
+    let editor = editor
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| env::var("EDITOR").ok())
+        .or_else(|| env::var("VISUAL").ok())
+        .ok_or_else(|| "EDITOR (or VISUAL) is not set".to_string())?;
+
+    let cwd_path = PathBuf::from(&cwd);
+    if !cwd_path.exists() {
+        return Err(format!("Directory does not exist: {}", cwd));
+    }
+
+    let mut args: Vec<String> = Vec::new();
+    if let Some(path) = file_path {
+        let path_buf = Path::new(&path);
+        let resolved = if path_buf.is_absolute() {
+            path_buf.to_path_buf()
+        } else {
+            cwd_path.join(path_buf)
+        };
+        args.push(resolved.to_string_lossy().to_string());
+    } else {
+        args.push(".".to_string());
+    }
+
+    let command_line = if cfg!(windows) {
+        let mut cmd = editor.clone();
+        for arg in &args {
+            cmd.push(' ');
+            cmd.push_str(&shell_escape_windows(arg));
+        }
+        cmd
+    } else {
+        let mut cmd = editor.clone();
+        for arg in &args {
+            cmd.push(' ');
+            cmd.push_str(&shell_escape_unix(arg));
+        }
+        cmd
+    };
+
+    let mut command = if cfg!(windows) {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg(command_line);
+        cmd
+    } else {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-lc").arg(command_line);
+        cmd
+    };
+
+    command
+        .current_dir(&cwd_path)
+        .spawn()
+        .map_err(|e| format!("Failed to open editor: {}", e))?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -128,6 +207,7 @@ pub fn run() {
             list_directory,
             is_daemon_running,
             start_daemon,
+            open_in_editor,
             thumbs::extract_patterns,
             thumbs::reveal_in_finder,
         ])

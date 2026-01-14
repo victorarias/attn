@@ -24,18 +24,21 @@ export function SettingsModal({
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
   const [claudeExecutable, setClaudeExecutable] = useState(settings.claude_executable || '');
   const [codexExecutable, setCodexExecutable] = useState(settings.codex_executable || '');
+  const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
 
   // Sync with settings when modal opens
   const actualProjectsDir = settings.projects_directory || '';
   const actualClaudeExecutable = settings.claude_executable || '';
   const actualCodexExecutable = settings.codex_executable || '';
+  const actualEditorExecutable = settings.editor_executable || '';
 
   useEffect(() => {
     if (!isOpen) return;
     setProjectsDir(actualProjectsDir);
     setClaudeExecutable(actualClaudeExecutable);
     setCodexExecutable(actualCodexExecutable);
-  }, [isOpen, actualProjectsDir, actualClaudeExecutable, actualCodexExecutable]);
+    setEditorExecutable(actualEditorExecutable);
+  }, [isOpen, actualProjectsDir, actualClaudeExecutable, actualCodexExecutable, actualEditorExecutable]);
 
   const handleBrowse = useCallback(async () => {
     const selected = await open({
@@ -75,6 +78,10 @@ export function SettingsModal({
     setCodexExecutable(e.target.value);
   }, []);
 
+  const handleEditorChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setEditorExecutable(e.target.value);
+  }, []);
+
   const handleClaudeBlur = useCallback(() => {
     if (claudeExecutable !== actualClaudeExecutable) {
       onSetSetting('claude_executable', claudeExecutable);
@@ -86,6 +93,12 @@ export function SettingsModal({
       onSetSetting('codex_executable', codexExecutable);
     }
   }, [codexExecutable, actualCodexExecutable, onSetSetting]);
+
+  const handleEditorBlur = useCallback(() => {
+    if (editorExecutable !== actualEditorExecutable) {
+      onSetSetting('editor_executable', editorExecutable);
+    }
+  }, [editorExecutable, actualEditorExecutable, onSetSetting]);
 
   const handleClaudeKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -102,6 +115,14 @@ export function SettingsModal({
       }
     }
   }, [codexExecutable, actualCodexExecutable, onSetSetting]);
+
+  const handleEditorKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      if (editorExecutable !== actualEditorExecutable) {
+        onSetSetting('editor_executable', editorExecutable);
+      }
+    }
+  }, [editorExecutable, actualEditorExecutable, onSetSetting]);
 
   if (!isOpen) return null;
 
@@ -162,6 +183,19 @@ export function SettingsModal({
                 onBlur={handleCodexBlur}
                 onKeyDown={handleCodexKeyDown}
                 placeholder="codex"
+                className="settings-input"
+              />
+            </div>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-editor-exec">Editor</label>
+              <input
+                id="settings-editor-exec"
+                type="text"
+                value={editorExecutable}
+                onChange={handleEditorChange}
+                onBlur={handleEditorBlur}
+                onKeyDown={handleEditorKeyDown}
+                placeholder="$EDITOR"
                 className="settings-input"
               />
             </div>

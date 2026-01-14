@@ -26,6 +26,7 @@ const (
 	SettingUIScale           = "uiScale"
 	SettingClaudeExecutable  = "claude_executable"
 	SettingCodexExecutable   = "codex_executable"
+	SettingEditorExecutable  = "editor_executable"
 )
 
 // wsClient represents a connected WebSocket client
@@ -680,6 +681,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateUIScale(value)
 	case SettingClaudeExecutable, SettingCodexExecutable:
 		return validateExecutableSetting(value)
+	case SettingEditorExecutable:
+		return validateEditorSetting(value)
 	default:
 		return fmt.Errorf("unknown setting: %s", key)
 	}
@@ -755,6 +758,53 @@ func validateExecutableSetting(value string) error {
 	}
 
 	return nil
+}
+
+func validateEditorSetting(value string) error {
+	editor := strings.TrimSpace(value)
+	if editor == "" {
+		return nil
+	}
+
+	binary := extractCommandBinary(editor)
+	if binary == "" {
+		return fmt.Errorf("invalid editor command")
+	}
+
+	path, err := exec.LookPath(binary)
+	if err != nil {
+		return fmt.Errorf("executable not found: %w", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("cannot access executable: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("executable path points to a directory")
+	}
+
+	return nil
+}
+
+func extractCommandBinary(command string) string {
+	if command == "" {
+		return ""
+	}
+	if command[0] == '"' || command[0] == '\'' {
+		quote := command[0]
+		for i := 1; i < len(command); i++ {
+			if command[i] == quote {
+				return command[1:i]
+			}
+		}
+		return ""
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 func (d *Daemon) handleSubscribeGitStatus(client *wsClient, msg *protocol.SubscribeGitStatusMessage) {

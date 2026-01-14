@@ -32,6 +32,22 @@
   gap: 8px;
 }
 
+.editor-btn {
+  background: rgba(31, 41, 55, 0.7);
+  border: 1px solid #374151;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  color: #e5e7eb;
+  font-weight: 500;
+}
+
+.editor-btn:hover {
+  background: rgba(17, 24, 39, 0.9);
+  border-color: #4b5563;
+}
+
 .review-btn {
   background: rgba(59, 130, 246, 0.15);
   border: 1px solid rgba(59, 130, 246, 0.3);

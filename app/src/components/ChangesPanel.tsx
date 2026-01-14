@@ -12,6 +12,7 @@ interface ChangesPanelProps {
   onFileSelect: (path: string, staged: boolean) => void;
   onAttentionClick: () => void;
   onReviewClick?: () => void;
+  onOpenEditor?: () => void;
 }
 
 type BranchChange = {
@@ -114,6 +115,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   onFileSelect,
   onAttentionClick,
   onReviewClick,
+  onOpenEditor,
 }: ChangesPanelProps) {
   const totalStats = useMemo(() => {
     const additions = branchDiffFiles.reduce((sum, f) => sum + (f.additions || 0), 0);
@@ -186,6 +188,11 @@ export const ChangesPanel = memo(function ChangesPanel({
       <div className="changes-header">
         <span className="changes-title">Changes</span>
         <div className="changes-header-actions">
+          {onOpenEditor && (
+            <button className="editor-btn" onClick={onOpenEditor} title="Open project in $EDITOR">
+              Open
+            </button>
+          )}
           {totalStats.files > 0 && onReviewClick && (
             <button className="review-btn" onClick={onReviewClick} title="Review changes (r)">
               Review

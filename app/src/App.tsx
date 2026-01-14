@@ -980,6 +980,36 @@ function AppContent({
     setInitialReviewFile(null);
   }, []);
 
+  const handleOpenEditor = useCallback(async (cwd: string, filePath?: string) => {
+    try {
+      await invoke('open_in_editor', {
+        cwd,
+        filePath,
+        editor: settings.editor_executable || '',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showError(message || 'Failed to open editor');
+    }
+  }, [settings.editor_executable, showError]);
+
+  const handleOpenEditorForSession = useCallback(() => {
+    const activeSession = sessions.find((s) => s.id === activeSessionId);
+    if (!activeSession?.cwd) {
+      showError('No active session directory');
+      return;
+    }
+    handleOpenEditor(activeSession.cwd);
+  }, [sessions, activeSessionId, handleOpenEditor, showError]);
+
+  const handleOpenEditorForReview = useCallback((filePath?: string) => {
+    if (!activeDaemonSession?.directory) {
+      showError('No repo directory available');
+      return;
+    }
+    handleOpenEditor(activeDaemonSession.directory, filePath);
+  }, [activeDaemonSession?.directory, handleOpenEditor, showError]);
+
   // Send code reference to the active Claude terminal
   const handleSendToClaude = useCallback((reference: string) => {
     if (!activeSessionId) return;
@@ -1142,6 +1172,7 @@ function AppContent({
           onFileSelect={handleFileSelect}
           onAttentionClick={toggleDrawer}
           onReviewClick={handleOpenReviewPanel}
+          onOpenEditor={activeSessionId ? handleOpenEditorForSession : undefined}
         />
         <AttentionDrawer
           isOpen={drawerOpen}
@@ -1219,6 +1250,7 @@ function AppContent({
         agentComments={pendingAgentComments}
         agentResolvedCommentIds={agentResolvedCommentIds}
         initialSelectedFile={initialReviewFile || undefined}
+        onOpenEditor={handleOpenEditorForReview}
       />
       <ThumbsModal
         isOpen={thumbsOpen}

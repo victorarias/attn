@@ -328,6 +328,7 @@ interface ReviewPanelProps {
   getReviewState: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: ReviewState; error?: string }>;
   markFileViewed: (reviewId: string, filepath: string, viewed: boolean) => Promise<{ success: boolean; error?: string }>;
   onSendToClaude?: (reference: string) => void;
+  onOpenEditor?: (filePath?: string) => void;
   // Comment operations
   addComment?: (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => Promise<{ success: boolean; comment?: ReviewComment }>;
   updateComment?: (commentId: string, content: string) => Promise<{ success: boolean }>;
@@ -360,6 +361,7 @@ export function ReviewPanel({
   getReviewState,
   markFileViewed,
   onSendToClaude,
+  onOpenEditor,
   addComment,
   updateComment,
   resolveComment,
@@ -1085,6 +1087,16 @@ export function ReviewPanel({
                 title={reviewerRunning ? 'Cancel review' : 'Run AI review'}
               >
                 {reviewerRunning ? '⏹ Cancel' : '🤖 Review'}
+              </button>
+            )}
+            {onOpenEditor && (
+              <button
+                className="review-open-btn"
+                onClick={() => onOpenEditor(selectedFilePath || undefined)}
+                disabled={!repoPath}
+                title={selectedFilePath ? 'Open file in $EDITOR' : 'Open project in $EDITOR'}
+              >
+                Open in Editor
               </button>
             )}
             {onSendToClaude && (

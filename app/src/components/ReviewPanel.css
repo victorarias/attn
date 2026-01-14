@@ -392,6 +392,27 @@
   cursor: not-allowed;
 }
 
+.review-open-btn {
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.review-open-btn:hover {
+  background: #0b1220;
+  border-color: #475569;
+}
+
+.review-open-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Reviewer output panel at bottom of diff area */
 .reviewer-output-panel {
   background: #1a1a1a;
