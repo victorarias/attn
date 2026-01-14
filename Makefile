@@ -27,15 +27,21 @@ test-frontend:
 
 test-all: test test-frontend
 
+UNAME_S := $(shell uname -s)
+
 install: build
 	@mkdir -p $(INSTALL_DIR)
 	@# Use cat to avoid copying extended attributes that trigger Gatekeeper
 	cat $(BINARY_NAME) > $(INSTALL_DIR)/$(BINARY_NAME)
 	chmod +x $(INSTALL_DIR)/$(BINARY_NAME)
-	@# Remove quarantine attribute if present
-	-xattr -d com.apple.quarantine $(INSTALL_DIR)/$(BINARY_NAME) 2>/dev/null || true
-	@# Ad-hoc sign the binary to satisfy Gatekeeper
-	codesign -s - -f $(INSTALL_DIR)/$(BINARY_NAME)
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		# Remove quarantine attribute if present (macOS) \
+		xattr -d com.apple.quarantine $(INSTALL_DIR)/$(BINARY_NAME) 2>/dev/null || true; \
+		# Ad-hoc sign the binary to satisfy Gatekeeper (macOS) \
+		codesign -s - -f $(INSTALL_DIR)/$(BINARY_NAME); \
+	else \
+		echo "Skipping macOS quarantine removal and codesign on $(UNAME_S)"; \
+	fi
 	@# Kill running daemon and restart with new code
 	-pkill -f "$(BINARY_NAME) daemon" 2>/dev/null || true
 	@sleep 0.2

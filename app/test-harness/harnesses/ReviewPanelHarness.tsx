@@ -6,7 +6,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { ReviewPanel } from '../../src/components/ReviewPanel';
-import type { GitStatusUpdate, FileDiffResult, ReviewState } from '../../src/hooks/useDaemonSocket';
+import type { BranchDiffFilesResult, GitStatusUpdate, FileDiffResult, ReviewState } from '../../src/hooks/useDaemonSocket';
 import type { ReviewComment } from '../../src/types/generated';
 import type { HarnessProps } from '../types';
 import '../../src/components/ReviewPanel.css';
@@ -77,6 +77,20 @@ const REVIEW_STATE: ReviewState = {
   viewed_files: [],
 };
 
+const BRANCH_DIFF_FILES: BranchDiffFilesResult = {
+  success: true,
+  base_ref: 'origin/main',
+  files: [
+    {
+      path: 'src/example.ts',
+      status: 'modified',
+      additions: 2,
+      deletions: 3,
+      has_uncommitted: false,
+    },
+  ],
+};
+
 export function ReviewPanelHarness({ onReady, setTriggerRerender }: HarnessProps) {
   const [savedComments, setSavedComments] = useState<ReviewComment[]>([]);
   // Force re-renders by changing props that trigger the editor effect
@@ -106,6 +120,19 @@ export function ReviewPanelHarness({ onReady, setTriggerRerender }: HarnessProps
     async (_repoPath: string, _branch: string): Promise<{ success: boolean; state?: ReviewState }> => {
       window.__HARNESS__.recordCall('getReviewState', [_repoPath, _branch]);
       return { success: true, state: REVIEW_STATE };
+    },
+    []
+  );
+
+  const sendFetchRemotes = useCallback(async (_repoPath: string): Promise<{ success: boolean; error?: string }> => {
+    window.__HARNESS__.recordCall('sendFetchRemotes', [_repoPath]);
+    return { success: true };
+  }, []);
+
+  const sendGetBranchDiffFiles = useCallback(
+    async (_repoPath: string): Promise<BranchDiffFilesResult> => {
+      window.__HARNESS__.recordCall('sendGetBranchDiffFiles', [_repoPath]);
+      return BRANCH_DIFF_FILES;
     },
     []
   );
@@ -193,6 +220,8 @@ export function ReviewPanelHarness({ onReady, setTriggerRerender }: HarnessProps
         window.__HARNESS__.recordCall('onClose', []);
       }}
       fetchDiff={fetchDiff}
+      sendFetchRemotes={sendFetchRemotes}
+      sendGetBranchDiffFiles={sendGetBranchDiffFiles}
       getReviewState={getReviewState}
       markFileViewed={markFileViewed}
       addComment={addComment}

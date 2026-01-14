@@ -59,7 +59,7 @@ test.describe('Settings', () => {
     await expect(modal).toBeVisible({ timeout: 2000 });
 
     // Type a projects directory
-    const input = modal.locator('.settings-input');
+    const input = modal.locator('.projects-dir-input .settings-input');
     await input.fill('/Users/test/projects');
     await input.blur();
 

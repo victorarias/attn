@@ -12,6 +12,8 @@ test.describe('ReviewPanel Component', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/test-harness/?component=ReviewPanel');
 
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true, null, { timeout: 10000 });
+
     // Wait for CodeMirror to fully initialize
     await page.waitForSelector('.cm-editor .cm-content', { timeout: 10000 });
     // Wait for diff lines to render (UnifiedDiffEditor uses .cm-line, .cm-deleted-line, etc.)

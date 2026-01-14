@@ -18,8 +18,26 @@ async function injectLocalSession(
 // Helper to create a session in both local store AND daemon
 async function createSession(
   page: import('@playwright/test').Page,
-  daemon: { injectSession: (s: { id: string; label: string; state: string; directory?: string }) => Promise<void> },
-  session: { id: string; label: string; state: string; cwd?: string }
+  daemon: {
+    injectSession: (s: {
+      id: string;
+      label: string;
+      state: string;
+      directory?: string;
+      is_worktree?: boolean;
+      branch?: string;
+      main_repo?: string;
+    }) => Promise<void>;
+  },
+  session: {
+    id: string;
+    label: string;
+    state: string;
+    cwd?: string;
+    is_worktree?: boolean;
+    branch?: string;
+    main_repo?: string;
+  }
 ) {
   const cwd = session.cwd || '/tmp/test';
   await injectLocalSession(page, { ...session, cwd });
@@ -28,6 +46,9 @@ async function createSession(
     label: session.label,
     state: session.state,
     directory: cwd,
+    is_worktree: session.is_worktree,
+    branch: session.branch,
+    main_repo: session.main_repo,
   });
 }
 
@@ -158,6 +179,59 @@ test.describe('Keyboard Shortcuts', () => {
 
       // Should be viewing a terminal (the waiting session)
       await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+    });
+  });
+
+  test.describe('Worktree Cleanup Prompt', () => {
+    test('traps focus and supports arrow navigation', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.addInitScript(() => {
+        localStorage.setItem('alwaysKeepWorktrees', 'false');
+      });
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await createSession(page, daemon, {
+        id: 's1',
+        label: 'Worktree',
+        state: 'working',
+        cwd: '/tmp/test/worktree-1',
+        is_worktree: true,
+        branch: 'feature/cleanup',
+      });
+
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+      await page.locator('[data-testid="session-s1"]').click();
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+
+      await page.keyboard.press('Meta+w');
+
+      const dialog = page.locator('.worktree-cleanup-prompt .cleanup-content');
+      await expect(dialog).toBeVisible({ timeout: 2000 });
+
+      const keep = page.locator('.cleanup-btn.keep');
+      const del = page.locator('.cleanup-btn.delete');
+      const always = page.locator('.cleanup-btn.always');
+
+      await expect(keep).toBeFocused();
+
+      await page.keyboard.press('ArrowRight');
+      await expect(del).toBeFocused();
+
+      await page.keyboard.press('ArrowRight');
+      await expect(always).toBeFocused();
+
+      await page.keyboard.press('ArrowLeft');
+      await expect(del).toBeFocused();
+
+      await page.keyboard.press('Tab');
+      await expect(always).toBeFocused();
+
+      await page.keyboard.press('Tab');
+      await expect(keep).toBeFocused();
+
+      await page.keyboard.press('Shift+Tab');
+      await expect(always).toBeFocused();
     });
   });
 

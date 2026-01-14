@@ -192,7 +192,15 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
 // Session injection helper
 async function injectTestSession(
   socketPath: string,
-  session: { id: string; label: string; state: string; directory?: string }
+  session: {
+    id: string;
+    label: string;
+    state: string;
+    directory?: string;
+    is_worktree?: boolean;
+    branch?: string;
+    main_repo?: string;
+  }
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const client = net.createConnection(socketPath, () => {
@@ -207,6 +215,9 @@ async function injectTestSession(
           last_seen: new Date().toISOString(),
           todos: null,
           muted: false,
+          ...(session.is_worktree !== undefined ? { is_worktree: session.is_worktree } : {}),
+          ...(session.branch ? { branch: session.branch } : {}),
+          ...(session.main_repo ? { main_repo: session.main_repo } : {}),
         },
       };
       client.write(JSON.stringify(msg));
@@ -320,7 +331,15 @@ func doSomething() {
 // Export fixtures
 type DaemonFixture = {
   start: () => Promise<{ wsUrl: string; socketPath: string }>;
-  injectSession: (s: { id: string; label: string; state: string; directory?: string }) => Promise<void>;
+  injectSession: (s: {
+    id: string;
+    label: string;
+    state: string;
+    directory?: string;
+    is_worktree?: boolean;
+    branch?: string;
+    main_repo?: string;
+  }) => Promise<void>;
   updateSessionState: (id: string, state: string) => Promise<void>;
   createTestRepo: () => Promise<{ repoPath: string; cleanup: () => void }>;
 };
