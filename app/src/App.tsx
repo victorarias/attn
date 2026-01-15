@@ -334,6 +334,7 @@ function AppContent({
     setActiveUtilityTerminal,
     renameUtilityTerminal,
     setForkParams,
+    setResumePicker,
     setLauncherConfig,
   } = useSessionStore();
 
@@ -568,10 +569,17 @@ function AppContent({
   }, []);
 
   const handleLocationSelect = useCallback(
-    async (path: string, agent: SessionAgent) => {
+    async (path: string, agent: SessionAgent, resumeEnabled?: boolean) => {
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
-      const sessionId = await createSession(folderName, path, undefined, agent);
+      let sessionId: string;
+      if (resumeEnabled) {
+        sessionId = crypto.randomUUID();
+        setResumePicker(sessionId);
+        await createSession(folderName, path, sessionId, agent);
+      } else {
+        sessionId = await createSession(folderName, path, undefined, agent);
+      }
       // Fit terminal after view becomes visible
       setTimeout(() => {
         const handle = terminalRefs.current.get(sessionId);
@@ -579,7 +587,7 @@ function AppContent({
         handle?.focus();
       }, 100);
     },
-    [createSession]
+    [createSession, setResumePicker]
   );
 
   const closeLocationPicker = useCallback(() => {

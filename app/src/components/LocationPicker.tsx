@@ -23,7 +23,7 @@ interface RepoInfo {
 interface LocationPickerProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (path: string, agent: SessionAgent) => void;
+  onSelect: (path: string, agent: SessionAgent, resumeEnabled?: boolean) => void;
   onGetRecentLocations?: () => Promise<{ locations: RecentLocation[] }>;
   onGetRepoInfo?: (mainRepo: string) => Promise<{ success: boolean; info?: RepoInfo; error?: string }>;
   onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string) => Promise<{ success: boolean; path?: string }>;
@@ -60,6 +60,7 @@ interface State {
   // (typing or arrow navigation = intentional, Tab auto-selects first child = not intentional)
   hasSelectedSinceTab: boolean;
   agent: SessionAgent;
+  resumeEnabled: boolean;
 }
 
 export function LocationPicker({
@@ -86,6 +87,7 @@ export function LocationPicker({
     refreshing: false,
     hasSelectedSinceTab: false, // Start false - user hasn't navigated yet
     agent: 'codex',
+    resumeEnabled: false,
   });
 
   const { suggestions: fsSuggestions, currentDir } = useFilesystemSuggestions(state.inputValue);
@@ -138,6 +140,7 @@ export function LocationPicker({
         repoInfo: null,
         refreshing: false,
         hasSelectedSinceTab: false, // User hasn't navigated yet
+        resumeEnabled: false,
       }));
     }
   }, [isOpen, projectsDirectory, state.homePath]);
@@ -221,7 +224,7 @@ export function LocationPicker({
             }));
           } else {
             // Failed to get repo info, just select the path
-            onSelect(path, state.agent);
+            onSelect(path, state.agent, state.resumeEnabled);
             onClose();
           }
           return;
@@ -232,16 +235,23 @@ export function LocationPicker({
       }
 
       // Not a git repo, just select it
-      onSelect(path, state.agent);
+      onSelect(path, state.agent, state.resumeEnabled);
       onClose();
     },
-    [onSelect, onClose, onGetRepoInfo, state.homePath, state.agent]
+    [onSelect, onClose, onGetRepoInfo, state.homePath, state.agent, state.resumeEnabled]
   );
 
   const handleAgentChange = useCallback((agent: SessionAgent) => {
     setState(prev => ({ ...prev, agent }));
     setSetting(SESSION_AGENT_KEY, agent);
   }, [setSetting]);
+
+  const handleResumeToggle = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      resumeEnabled: !prev.resumeEnabled,
+    }));
+  }, []);
 
   const handlePathInputChange = useCallback((value: string) => {
     setState(prev => ({ ...prev, inputValue: value, hasSelectedSinceTab: true }));
@@ -261,22 +271,22 @@ export function LocationPicker({
   // RepoOptions callbacks
   const handleSelectMainRepo = useCallback(() => {
     if (state.selectedRepo) {
-      onSelect(state.selectedRepo, state.agent);
+      onSelect(state.selectedRepo, state.agent, state.resumeEnabled);
       onClose();
     }
-  }, [state.selectedRepo, state.agent, onSelect, onClose]);
+  }, [state.selectedRepo, state.agent, state.resumeEnabled, onSelect, onClose]);
 
   const handleSelectWorktree = useCallback((path: string) => {
-    onSelect(path, state.agent);
+    onSelect(path, state.agent, state.resumeEnabled);
     onClose();
-  }, [onSelect, onClose, state.agent]);
+  }, [onSelect, onClose, state.agent, state.resumeEnabled]);
 
   const handleSelectBranch = useCallback((_branch: string) => {
     if (state.selectedRepo) {
-      onSelect(state.selectedRepo, state.agent);
+      onSelect(state.selectedRepo, state.agent, state.resumeEnabled);
       onClose();
     }
-  }, [state.selectedRepo, state.agent, onSelect, onClose]);
+  }, [state.selectedRepo, state.agent, state.resumeEnabled, onSelect, onClose]);
 
   const handleCreateWorktree = useCallback(async (branchName: string, startingFrom: string) => {
     if (!state.selectedRepo || !onCreateWorktree) return;
@@ -337,6 +347,14 @@ export function LocationPicker({
           handleAgentChange('claude');
           return;
         }
+        if (e.code === 'Digit3') {
+          e.preventDefault();
+          setState(prev => ({
+            ...prev,
+            resumeEnabled: !prev.resumeEnabled,
+          }));
+          return;
+        }
       }
 
       if (e.key === 'Escape') {
@@ -395,26 +413,37 @@ export function LocationPicker({
       <div className="location-picker" onClick={(e) => e.stopPropagation()}>
         <div className="picker-agent-bar">
           <div className="picker-agent-label">SESSION AGENT</div>
-          <div className="agent-toggle" role="radiogroup" aria-label="Session agent">
+          <div className="picker-agent-controls">
+            <div className="agent-toggle" role="radiogroup" aria-label="Session agent">
+              <button
+                type="button"
+                className={`agent-option ${state.agent === 'codex' ? 'active' : ''}`}
+                onClick={() => handleAgentChange('codex')}
+                role="radio"
+                aria-checked={state.agent === 'codex'}
+              >
+                <span className="agent-option-name">Codex</span>
+                <kbd className="agent-shortcut">⌥1</kbd>
+              </button>
+              <button
+                type="button"
+                className={`agent-option ${state.agent === 'claude' ? 'active' : ''}`}
+                onClick={() => handleAgentChange('claude')}
+                role="radio"
+                aria-checked={state.agent === 'claude'}
+              >
+                <span className="agent-option-name">Claude</span>
+                <kbd className="agent-shortcut">⌥2</kbd>
+              </button>
+            </div>
             <button
               type="button"
-              className={`agent-option ${state.agent === 'codex' ? 'active' : ''}`}
-              onClick={() => handleAgentChange('codex')}
-              role="radio"
-              aria-checked={state.agent === 'codex'}
+              className={`resume-toggle ${state.resumeEnabled ? 'active' : ''}`}
+              onClick={handleResumeToggle}
+              aria-pressed={state.resumeEnabled}
             >
-              <span className="agent-option-name">Codex</span>
-              <kbd className="agent-shortcut">⌥1</kbd>
-            </button>
-            <button
-              type="button"
-              className={`agent-option ${state.agent === 'claude' ? 'active' : ''}`}
-              onClick={() => handleAgentChange('claude')}
-              role="radio"
-              aria-checked={state.agent === 'claude'}
-            >
-              <span className="agent-option-name">Claude</span>
-              <kbd className="agent-shortcut">⌥2</kbd>
+              <span className="resume-toggle-label">Resume</span>
+              <kbd className="agent-shortcut">⌥3</kbd>
             </button>
           </div>
         </div>

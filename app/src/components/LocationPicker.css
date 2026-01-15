@@ -62,6 +62,12 @@
   color: #5a5a65;
 }
 
+.picker-agent-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .agent-toggle {
   display: inline-flex;
   gap: 4px;
@@ -117,6 +123,42 @@
   background: rgba(255, 255, 255, 0.45);
 }
 
+.resume-toggle {
+  border: 1px solid #2a2a30;
+  border-radius: 999px;
+  background: #0d0d10;
+  color: #8a8a95;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 11px;
+  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.12s ease-out;
+}
+
+.resume-toggle:hover:not(:disabled) {
+  color: #e8e8ec;
+}
+
+.resume-toggle:focus-visible {
+  outline: 2px solid rgba(255, 107, 53, 0.7);
+  outline-offset: 2px;
+}
+
+.resume-toggle.active {
+  background: linear-gradient(180deg, #ff6b35 0%, #ff874f 100%);
+  color: #0b0b0d;
+  box-shadow: 0 6px 16px rgba(255, 107, 53, 0.25);
+}
+
+.resume-toggle.active .agent-shortcut {
+  border-color: rgba(0, 0, 0, 0.2);
+  color: #3a1a0e;
+  background: rgba(255, 255, 255, 0.45);
+}
+
 /* Header */
 .picker-header {
   padding: 16px 16px 12px;
@@ -134,6 +176,7 @@
   margin-bottom: 12px;
   text-shadow: 0 0 20px rgba(255, 107, 53, 0.3);
 }
+
 
 /* Input wrapper */
 .picker-input-wrap {

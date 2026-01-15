@@ -208,7 +208,7 @@ func findTranscript(sessionID string) string {
 }
 
 // copyTranscriptForFork copies the parent transcript to the fork's project directory.
-// This is needed because Claude's --resume only looks in the current project directory.
+// This is needed because Claude's resume only looks in the current project directory.
 func copyTranscriptForFork(parentSessionID, forkCwd string) error {
 	// Find the parent transcript
 	srcPath := findTranscript(parentSessionID)
@@ -355,6 +355,7 @@ func runClaudeDirectly() {
 	labelFlag := fs.String("s", "", "session label")
 	resumeFlag := fs.String("resume", "", "session ID to resume from")
 	forkFlag := fs.Bool("fork-session", false, "fork the resumed session")
+	resumePicker := false
 
 	// Find where our flags end and claude flags begin
 	var attnArgs []string
@@ -366,9 +367,13 @@ func runClaudeDirectly() {
 		if arg == "-s" && i+1 < len(args) {
 			attnArgs = append(attnArgs, arg, args[i+1])
 			i++
-		} else if arg == "--resume" && i+1 < len(args) && args[i+1] != "--" {
-			attnArgs = append(attnArgs, arg, args[i+1])
-			i++
+		} else if arg == "--resume" {
+			if i+1 < len(args) && args[i+1] != "--" {
+				attnArgs = append(attnArgs, arg, args[i+1])
+				i++
+			} else {
+				resumePicker = true
+			}
 		} else if arg == "--fork-session" {
 			attnArgs = append(attnArgs, arg)
 		} else if arg == "--" {
@@ -436,10 +441,12 @@ func runClaudeDirectly() {
 			fmt.Fprintf(os.Stderr, "warning: could not copy transcript for fork: %v\n", err)
 			// Continue anyway - Claude will start fresh if transcript not found
 		}
-		claudeCmd = append(claudeCmd, "--resume", *resumeFlag)
+		claudeCmd = append(claudeCmd, "-r", *resumeFlag)
 		if *forkFlag {
 			claudeCmd = append(claudeCmd, "--fork-session")
 		}
+	} else if resumePicker {
+		claudeCmd = append(claudeCmd, "-r")
 	}
 
 	claudeCmd = append(claudeCmd, claudeArgs...)
@@ -491,6 +498,7 @@ func runCodexDirectly() {
 	labelFlag := fs.String("s", "", "session label")
 	resumeFlag := fs.String("resume", "", "session ID to resume from")
 	forkFlag := fs.Bool("fork-session", false, "fork the resumed session")
+	resumePicker := false
 
 	// Find where our flags end and codex flags begin
 	var attnArgs []string
@@ -502,9 +510,13 @@ func runCodexDirectly() {
 		if arg == "-s" && i+1 < len(args) {
 			attnArgs = append(attnArgs, arg, args[i+1])
 			i++
-		} else if arg == "--resume" && i+1 < len(args) && args[i+1] != "--" {
-			attnArgs = append(attnArgs, arg, args[i+1])
-			i++
+		} else if arg == "--resume" {
+			if i+1 < len(args) && args[i+1] != "--" {
+				attnArgs = append(attnArgs, arg, args[i+1])
+				i++
+			} else {
+				resumePicker = true
+			}
 		} else if arg == "--fork-session" {
 			attnArgs = append(attnArgs, arg)
 		} else if arg == "--" {
@@ -547,14 +559,16 @@ func runCodexDirectly() {
 		fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
 	}
 
-	if *resumeFlag != "" {
-		fmt.Fprintf(os.Stderr, "warning: codex resume/fork not supported yet (ignoring --resume/--fork-session)\n")
-	}
 	if *forkFlag {
-		// Keep silent beyond the resume warning; flag is meaningless without resume support.
+		fmt.Fprintf(os.Stderr, "warning: codex fork not supported yet (ignoring --fork-session)\n")
 	}
 
 	// Build codex command
+	if *resumeFlag != "" {
+		codexArgs = append([]string{"resume", *resumeFlag}, codexArgs...)
+	} else if resumePicker {
+		codexArgs = append([]string{"resume"}, codexArgs...)
+	}
 	hasCwd := false
 	for i := 0; i < len(codexArgs); i++ {
 		if codexArgs[i] == "-C" || codexArgs[i] == "--cd" {

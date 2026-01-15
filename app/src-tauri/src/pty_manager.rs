@@ -34,6 +34,8 @@ pub struct PtySpawnArgs {
     #[serde(default)]
     pub resume_session_id: Option<String>,
     #[serde(default)]
+    pub resume_picker: Option<bool>,
+    #[serde(default)]
     pub fork_session: Option<bool>,
     #[serde(default)]
     pub detect_state: Option<bool>,
@@ -622,6 +624,7 @@ pub async fn pty_spawn(
         rows,
         shell,
         resume_session_id,
+        resume_picker,
         fork_session,
         agent,
         claude_executable,
@@ -667,10 +670,15 @@ pub async fn pty_spawn(
             }
         }
 
-        // Build fork flags if provided
-        let fork_flags = match (&resume_session_id, fork_session.unwrap_or(false)) {
-            (Some(resume_id), true) => format!(" --resume '{}' --fork-session", resume_id),
-            (Some(resume_id), false) => format!(" --resume '{}'", resume_id),
+        // Build resume/fork flags if provided
+        let fork_flags = match (
+            &resume_session_id,
+            resume_picker.unwrap_or(false),
+            fork_session.unwrap_or(false),
+        ) {
+            (Some(resume_id), _, true) => format!(" --resume '{}' --fork-session", resume_id),
+            (Some(resume_id), _, false) => format!(" --resume '{}'", resume_id),
+            (None, true, false) => " --resume".to_string(),
             _ => String::new(),
         };
 

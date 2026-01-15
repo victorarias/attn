@@ -62,6 +62,7 @@ interface SessionStore {
   connectTerminal: (id: string, terminal: Terminal) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
   setForkParams: (sessionId: string, resumeSessionId: string) => void;
+  setResumePicker: (sessionId: string) => void;
   setLauncherConfig: (config: LauncherConfig) => void;
 
   // Terminal panel actions
@@ -75,7 +76,7 @@ interface SessionStore {
 }
 
 const pendingConnections = new Set<string>();
-const pendingForkParams = new Map<string, { resumeSessionId: string; forkSession: boolean }>();
+const pendingForkParams = new Map<string, { resumeSessionId?: string; forkSession?: boolean; resumePicker?: boolean }>();
 
 // Test helper for E2E - allows injecting sessions without PTY
 interface TestSession {
@@ -227,6 +228,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           agent: session.agent,
           resume_session_id: forkParams?.resumeSessionId ?? null,
           fork_session: forkParams?.forkSession ?? null,
+          resume_picker: forkParams?.resumePicker ?? null,
           ...(launcherConfig.claudeExecutable
             ? { claude_executable: launcherConfig.claudeExecutable }
             : {}),
@@ -276,6 +278,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   setForkParams: (sessionId: string, resumeSessionId: string) => {
     pendingForkParams.set(sessionId, { resumeSessionId, forkSession: true });
+  },
+  setResumePicker: (sessionId: string) => {
+    pendingForkParams.set(sessionId, { resumePicker: true });
   },
 
   setLauncherConfig: (config: LauncherConfig) => {
