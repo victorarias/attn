@@ -40,6 +40,14 @@ make install-all
 
 Launch **attn** from Applications and click **+** to start a session.
 
+## Key flows (fast + fun)
+
+- **Start**: Cmd+N → pick agent → pick path → go.
+- **Resume**: Cmd+N → Option-3 → use the agent picker → back in business.
+- **Fork (Claude)**: Cmd+Shift+F → name it → optionally create a worktree → explore.
+- **Worktree**: Cmd+Shift+N → pick repo → choose branch → parallel universe unlocked.
+- **Review**: open a session on a branch that differs from origin/main → click **Review**.
+
 ## Installation
 
 > **Alpha**: No pre-built releases yet. You'll need to build from source.
@@ -81,6 +89,33 @@ Launch **attn** from Applications. The app lists all active sessions with their 
 - Cmd+F: Quick Find in terminal
 
 See `app/src/shortcuts/registry.ts` for the full list. Keyboard-first is the intended experience.
+
+### Review panel (review dialog)
+
+Open a session on a branch that differs from `origin/main`. The **Review** button appears in the
+header; click it to open the review panel. From there you can:
+
+- Browse changed files and diffs
+- Add inline comments
+- Mark files as viewed
+- Resolve or delete comments
+- Trigger a Claude Code review that leaves comments automatically
+- Send review comments to the main Claude session as a pre-written prompt
+
+It’s designed to keep review context in the same place as your sessions, so you can bounce between
+coding and reviewing without losing your flow.
+
+## Shortcut cheat sheet (most useful)
+
+- Cmd+N: new session
+- Cmd+Shift+N: new session (worktree)
+- Option-1 / Option-2 / Option-3: Codex / Claude / Resume
+- Cmd+Shift+F: fork Claude session
+- Cmd+F: Quick Find
+- Cmd+K: attention drawer (PRs + sessions needing input)
+- Cmd+` : toggle utility terminal panel
+- Cmd+ArrowUp / Cmd+ArrowDown: previous / next session
+- Cmd+R: refresh PRs
 
 ### CLI
 
