@@ -431,7 +431,15 @@ func runClaudeDirectly() {
 	}
 
 	// Build claude command
-	claudeCmd := []string{"--session-id", sessionID, "--settings", hooksPath}
+	useSessionID := true
+	if (*resumeFlag != "" || resumePicker) && !*forkFlag {
+		// Claude forbids --session-id with --resume unless --fork-session is set
+		useSessionID = false
+	}
+	claudeCmd := []string{"--settings", hooksPath}
+	if useSessionID {
+		claudeCmd = append([]string{"--session-id", sessionID}, claudeCmd...)
+	}
 
 	// Add fork flags if resuming
 	if *resumeFlag != "" {
