@@ -34,10 +34,9 @@ install: build
 	@# Use cat to avoid copying extended attributes that trigger Gatekeeper
 	cat $(BINARY_NAME) > $(INSTALL_DIR)/$(BINARY_NAME)
 	chmod +x $(INSTALL_DIR)/$(BINARY_NAME)
+	@# macOS: remove quarantine attribute and ad-hoc sign binary
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		# Remove quarantine attribute if present (macOS) \
 		xattr -d com.apple.quarantine $(INSTALL_DIR)/$(BINARY_NAME) 2>/dev/null || true; \
-		# Ad-hoc sign the binary to satisfy Gatekeeper (macOS) \
 		codesign -s - -f $(INSTALL_DIR)/$(BINARY_NAME); \
 	else \
 		echo "Skipping macOS quarantine removal and codesign on $(UNAME_S)"; \
