@@ -469,7 +469,8 @@ function AppContent({
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
   // View state management
-  const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'session' | 'review'>('dashboard');
+  const previousViewRef = useRef<'dashboard' | 'session'>('session');
 
   // When activeSessionId changes, update view
   useEffect(() => {
@@ -912,7 +913,11 @@ function AppContent({
   const handleFileSelect = useCallback((path: string, _staged: boolean) => {
     setInitialReviewFile(path);
     setReviewPanelOpen(true);
-  }, []);
+    if (view !== 'review') {
+      previousViewRef.current = view === 'dashboard' ? 'dashboard' : 'session';
+    }
+    setView('review');
+  }, [view]);
 
   // Fetch diff for ReviewPanel
   // Options: staged (deprecated), baseRef (for PR-like branch diffs)
@@ -987,14 +992,33 @@ function AppContent({
 
   // Review panel handlers
   const handleOpenReviewPanel = useCallback(() => {
+    if (view !== 'review') {
+      previousViewRef.current = view === 'dashboard' ? 'dashboard' : 'session';
+    }
     setInitialReviewFile(null); // No specific file, let ReviewPanel pick first
     setReviewPanelOpen(true);
-  }, []);
+    setView('review');
+  }, [view]);
 
   const handleCloseReviewPanel = useCallback(() => {
     setReviewPanelOpen(false);
     setInitialReviewFile(null);
+    setView(previousViewRef.current);
   }, []);
+
+  useEffect(() => {
+    if (!reviewPanelOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        handleCloseReviewPanel();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [reviewPanelOpen, handleCloseReviewPanel]);
 
   const handleOpenEditor = useCallback(async (cwd: string, filePath?: string) => {
     try {
@@ -1095,7 +1119,7 @@ function AppContent({
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
-    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen && !forkDialogOpen,
+    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen && !forkDialogOpen && !reviewPanelOpen,
   });
 
   return (
@@ -1239,35 +1263,37 @@ function AppContent({
         onDelete={handleWorktreeDelete}
         onAlwaysKeep={handleWorktreeAlwaysKeep}
       />
-      <ReviewPanel
-        isOpen={reviewPanelOpen}
-        gitStatus={gitStatus}
-        repoPath={activeDaemonSession?.directory || ''}
-        branch={activeDaemonSession?.branch || ''}
-        baseBranch={branchDiffBaseRef || undefined}
-        onClose={handleCloseReviewPanel}
-        fetchDiff={fetchDiffForReview}
-        sendGetBranchDiffFiles={sendGetBranchDiffFiles}
-        sendFetchRemotes={sendFetchRemotes}
-        getReviewState={getReviewState}
-        markFileViewed={markFileViewed}
-        onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
-        addComment={sendAddComment}
-        updateComment={sendUpdateComment}
-        resolveComment={sendResolveComment}
-        wontFixComment={sendWontFixComment}
-        deleteComment={sendDeleteComment}
-        getComments={sendGetComments}
-        sendStartReview={sendStartReview}
-        sendCancelReview={sendCancelReview}
-        reviewerEvents={reviewerEvents}
-        reviewerRunning={reviewerRunning}
-        reviewerError={reviewerError}
-        agentComments={pendingAgentComments}
-        agentResolvedCommentIds={agentResolvedCommentIds}
-        initialSelectedFile={initialReviewFile || undefined}
-        onOpenEditor={handleOpenEditorForReview}
-      />
+      <div className={`view-container review-view ${view === 'review' ? 'visible' : 'hidden'}`}>
+        <ReviewPanel
+          isOpen={reviewPanelOpen}
+          gitStatus={gitStatus}
+          repoPath={activeDaemonSession?.directory || ''}
+          branch={activeDaemonSession?.branch || ''}
+          baseBranch={branchDiffBaseRef || undefined}
+          onClose={handleCloseReviewPanel}
+          fetchDiff={fetchDiffForReview}
+          sendGetBranchDiffFiles={sendGetBranchDiffFiles}
+          sendFetchRemotes={sendFetchRemotes}
+          getReviewState={getReviewState}
+          markFileViewed={markFileViewed}
+          onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
+          addComment={sendAddComment}
+          updateComment={sendUpdateComment}
+          resolveComment={sendResolveComment}
+          wontFixComment={sendWontFixComment}
+          deleteComment={sendDeleteComment}
+          getComments={sendGetComments}
+          sendStartReview={sendStartReview}
+          sendCancelReview={sendCancelReview}
+          reviewerEvents={reviewerEvents}
+          reviewerRunning={reviewerRunning}
+          reviewerError={reviewerError}
+          agentComments={pendingAgentComments}
+          agentResolvedCommentIds={agentResolvedCommentIds}
+          initialSelectedFile={initialReviewFile || undefined}
+          onOpenEditor={handleOpenEditorForReview}
+        />
+      </div>
       <ThumbsModal
         isOpen={thumbsOpen}
         terminalText={thumbsText}

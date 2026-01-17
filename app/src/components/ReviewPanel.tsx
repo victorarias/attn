@@ -1080,8 +1080,6 @@ export function ReviewPanel({
   const currentFileIndex = selectedFile ? allFiles.findIndex(f => f.path === selectedFile.path) : -1;
 
   return (
-    <>
-      <div className="review-panel-backdrop" onClick={onClose} />
       <div className="review-panel">
         <div className="review-header">
           <span className="review-title">
@@ -1127,7 +1125,9 @@ export function ReviewPanel({
                 Send unresolved
               </button>
             )}
-            <button className="review-close" onClick={onClose}>×</button>
+            <button className="review-close" onClick={onClose} title="Exit review (Esc)">
+              Exit <kbd>Esc</kbd>
+            </button>
           </div>
         </div>
 
@@ -1398,7 +1398,5 @@ export function ReviewPanel({
           </div>
         )}
       </div>
-
-    </>
   );
 }

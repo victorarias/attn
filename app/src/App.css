@@ -68,6 +68,14 @@ html, body, #root {
   z-index: 1;
 }
 
+.view-container.review-view {
+  background: #1e1e1e;
+  opacity: 0;
+  transform: translateY(12px) scale(0.995);
+  transition: opacity 180ms ease, transform 220ms ease;
+  will-change: opacity, transform;
+}
+
 .view-container.hidden {
   z-index: 0;
   pointer-events: none;
@@ -75,6 +83,16 @@ html, body, #root {
 
 .view-container.visible {
   z-index: 2;
+}
+
+.view-container.review-view.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.view-container.review-view.hidden {
+  opacity: 0;
+  transform: translateY(12px) scale(0.995);
 }
 
 .terminal-pane {

@@ -14,6 +14,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Session Agent Persistence**: "New session" agent choice (Codex/Claude) now saves in daemon settings so it survives app restarts
 
+### Changed
+- **Review Mode**: Review panel now opens as a full-screen focus view with animated transition and clearer keyboard dismissal
+
 ---
 
 ## [2026-01-06]

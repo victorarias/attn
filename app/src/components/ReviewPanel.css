@@ -1,27 +1,17 @@
 /* app/src/components/ReviewPanel.css */
 
-.review-panel-backdrop {
-  position: fixed;
+.review-panel {
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
-  z-index: 1000;
-}
-
-.review-panel {
-  position: fixed;
-  top: 24px;
-  left: 24px;
-  right: 24px;
-  bottom: 24px;
   background: #1e1e1e;
-  border: 1px solid #3c3c3c;
-  border-radius: 8px;
+  border: none;
+  border-radius: 0;
   display: flex;
   flex-direction: column;
-  z-index: 1001;
+  z-index: 1;
   overflow: hidden;
 }
 
@@ -47,17 +37,29 @@
 }
 
 .review-close {
-  background: none;
-  border: none;
-  color: #858585;
-  font-size: 20px;
+  background: #2d2d30;
+  border: 1px solid #3c3c3c;
+  color: #e0e0e0;
+  font-size: 12px;
   cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .review-close:hover {
-  color: #e0e0e0;
+  background: #3a3a3d;
+}
+
+.review-close kbd {
+  background: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: #b8b8b8;
 }
 
 .review-body {
