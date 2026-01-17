@@ -241,9 +241,13 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid projects_directory", "projects_directory", t.TempDir(), false},
+		{"valid new_session_agent codex", "new_session_agent", "codex", false},
+		{"valid new_session_agent claude", "new_session_agent", "claude", false},
+		{"empty new_session_agent", "new_session_agent", "", false},
 		{"empty claude_executable", "claude_executable", "", false},
 		{"empty codex_executable", "codex_executable", "", false},
 		{"invalid claude_executable", "claude_executable", "not-a-real-binary-123", true},
+		{"invalid new_session_agent", "new_session_agent", "gpt", true},
 		{"invalid key", "unknown_setting", "value", true},
 		{"empty projects_directory", "projects_directory", "", true},
 		{"relative path", "projects_directory", "relative/path", true},

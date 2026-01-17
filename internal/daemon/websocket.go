@@ -27,6 +27,7 @@ const (
 	SettingClaudeExecutable  = "claude_executable"
 	SettingCodexExecutable   = "codex_executable"
 	SettingEditorExecutable  = "editor_executable"
+	SettingNewSessionAgent   = "new_session_agent"
 )
 
 // wsClient represents a connected WebSocket client
@@ -683,6 +684,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateExecutableSetting(value)
 	case SettingEditorExecutable:
 		return validateEditorSetting(value)
+	case SettingNewSessionAgent:
+		return validateNewSessionAgent(value)
 	default:
 		return fmt.Errorf("unknown setting: %s", key)
 	}
@@ -784,6 +787,18 @@ func validateEditorSetting(value string) error {
 		return fmt.Errorf("executable path points to a directory")
 	}
 
+	return nil
+}
+
+func validateNewSessionAgent(value string) error {
+	agent := strings.TrimSpace(value)
+	if agent == "" {
+		return nil
+	}
+	lower := strings.ToLower(agent)
+	if lower != "codex" && lower != "claude" {
+		return fmt.Errorf("unknown agent: %s", value)
+	}
 	return nil
 }
 
