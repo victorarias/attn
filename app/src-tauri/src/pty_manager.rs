@@ -4,11 +4,11 @@
 //! No Unix socket, no separate process.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 #[cfg(unix)]
 use nix::sys::signal::{kill, Signal};
 #[cfg(unix)]
 use nix::unistd::Pid;
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -732,9 +732,7 @@ pub async fn pty_spawn(
             }
         }
         // Pass session ID via env var so attn uses the same ID as frontend
-        cmd.arg(format!(
-            "exec {attn_path}{fork_flags}"
-        ));
+        cmd.arg(format!("exec {attn_path}{fork_flags}"));
         cmd
     };
 
@@ -939,7 +937,11 @@ pub async fn pty_resize(
 }
 
 #[tauri::command]
-pub async fn pty_kill(state: State<'_, PtyState>, app: AppHandle, id: String) -> Result<(), String> {
+pub async fn pty_kill(
+    state: State<'_, PtyState>,
+    app: AppHandle,
+    id: String,
+) -> Result<(), String> {
     if mock_pty_enabled() {
         let mut sessions = state.mock_sessions.lock().map_err(|_| "Lock poisoned")?;
         if sessions.remove(&id).is_none() {

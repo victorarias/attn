@@ -130,7 +130,11 @@ fn shell_escape_windows(arg: &str) -> String {
 }
 
 #[tauri::command]
-fn open_in_editor(cwd: String, file_path: Option<String>, editor: Option<String>) -> Result<(), String> {
+fn open_in_editor(
+    cwd: String,
+    file_path: Option<String>,
+    editor: Option<String>,
+) -> Result<(), String> {
     let editor = editor
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
