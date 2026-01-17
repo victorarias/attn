@@ -1,4 +1,4 @@
-.PHONY: build install test test-v test-quick test-watch test-all test-frontend clean generate-types check-types build-app install-app install-all dist
+.PHONY: build install test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app install-app install-all dist
 
 BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
@@ -24,6 +24,11 @@ test-watch:
 
 test-frontend:
 	cd app && pnpm run test
+
+test-e2e:
+	cd app && pnpm run e2e
+
+test-harness: test test-frontend test-e2e
 
 test-all: test test-frontend
 

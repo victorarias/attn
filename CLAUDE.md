@@ -20,11 +20,18 @@ make dist           # Create DMG at app/src-tauri/target/release/bundle/dmg/
 # Testing
 make test           # Run Go tests
 make test-frontend  # Run frontend tests (vitest)
+make test-e2e       # Run Playwright E2E tests (browser, mock PTY)
+make test-harness   # Run Go + frontend + E2E tests
 make test-all       # Run Go + frontend tests
 go test ./internal/store -run TestList  # Run single test
 ```
 
 **Dev workflow:** Use `make install` for daemon changes (fast iteration). Use `make install-app` when you need to test the full packaged app.
+
+## Testing Principles
+
+- Do not add tests that only re-check compile-time guarantees (types, lint-only checks, build-only coverage).
+- Do not copy production code into tests; tests should exercise behavior, not mirror implementation.
 
 ## CLI Usage
 

@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-01-17]
 
+### Added
+- **Mock PTY Mode**: Optional PTY stub for tests and development when real agent terminals aren't available
+
 ### Fixed
 - **Session Agent Persistence**: "New session" agent choice (Codex/Claude) now saves in daemon settings so it survives app restarts
 

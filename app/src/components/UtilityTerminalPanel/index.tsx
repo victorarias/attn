@@ -1,13 +1,12 @@
 // app/src/components/UtilityTerminalPanel/index.tsx
 import { useRef, useCallback, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { Terminal, TerminalHandle } from '../Terminal';
 import { TabBar } from './TabBar';
 import { ResizeHandle } from './ResizeHandle';
 import { useShortcut } from '../../shortcuts';
 import type { TerminalPanelState } from '../../store/sessions';
+import { listenPtyEvents, ptyKill, ptyResize, ptySpawn, ptyWrite } from '../../pty/bridge';
 import './UtilityTerminalPanel.css';
 
 interface UtilityTerminalPanelProps {
@@ -43,7 +42,7 @@ export function UtilityTerminalPanel({
 
   // Listen for PTY events for utility terminals
   useEffect(() => {
-    const unlisten = listen<any>('pty-event', (event) => {
+    const unlisten = listenPtyEvents((event) => {
       const msg = event.payload;
       const terminalId = ptyIdToTerminalId.current.get(msg.id);
       if (!terminalId) return;
@@ -79,7 +78,7 @@ export function UtilityTerminalPanel({
     const ptyId = `util-pty-${Date.now()}`;
 
     try {
-      await invoke('pty_spawn', {
+      await ptySpawn({
         args: {
           id: ptyId,
           cwd,
@@ -113,7 +112,7 @@ export function UtilityTerminalPanel({
     (terminalId: string) => {
       const terminal = panel.terminals.find((t) => t.id === terminalId);
       if (terminal) {
-        invoke('pty_kill', { id: terminal.ptyId }).catch(console.error);
+        ptyKill({ id: terminal.ptyId }).catch(console.error);
         ptyIdToTerminalId.current.delete(terminal.ptyId);
         xtermRefs.current.delete(terminalId);
         terminalRefs.current.delete(terminalId);
@@ -151,7 +150,7 @@ export function UtilityTerminalPanel({
 
       // Terminal input -> PTY
       xterm.onData((data: string) => {
-        invoke('pty_write', { id: ptyId, data }).catch(console.error);
+        ptyWrite({ id: ptyId, data }).catch(console.error);
       });
     },
     []
@@ -159,7 +158,7 @@ export function UtilityTerminalPanel({
 
   const handleTerminalResize = useCallback(
     (ptyId: string) => (cols: number, rows: number) => {
-      invoke('pty_resize', { id: ptyId, cols, rows }).catch(console.error);
+      ptyResize({ id: ptyId, cols, rows }).catch(console.error);
     },
     []
   );

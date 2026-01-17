@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 /// Arguments for pty_spawn command
@@ -233,6 +234,10 @@ fn parse_bool_env(var: &str) -> Option<bool> {
         "0" | "false" | "no" | "off" => Some(false),
         _ => None,
     }
+}
+
+fn mock_pty_enabled() -> bool {
+    parse_bool_env("ATTN_MOCK_PTY").unwrap_or(false)
 }
 
 fn attn_socket_path() -> Option<PathBuf> {
@@ -604,10 +609,13 @@ struct PtySession {
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
 }
 
+struct MockPtySession {}
+
 /// Global PTY state managed by Tauri
 #[derive(Default)]
 pub struct PtyState {
     sessions: Arc<Mutex<HashMap<String, PtySession>>>,
+    mock_sessions: Arc<Mutex<HashMap<String, MockPtySession>>>,
 }
 
 #[tauri::command]
@@ -631,6 +639,30 @@ pub async fn pty_spawn(
         codex_executable,
         detect_state: _,
     } = args;
+    if mock_pty_enabled() {
+        let session_id = id.clone();
+        state
+            .mock_sessions
+            .lock()
+            .map_err(|_| "Lock poisoned")?
+            .insert(id.clone(), MockPtySession {});
+
+        let app_handle = app.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(30));
+            let banner = format!("attn mock pty: {}\r\n", session_id);
+            let data = BASE64.encode(banner.as_bytes());
+            let _ = app_handle.emit(
+                "pty-event",
+                json!({
+                    "event": "data",
+                    "id": session_id,
+                    "data": data,
+                }),
+            );
+        });
+        return Ok(0);
+    }
     let pty_system = native_pty_system();
 
     let pair = pty_system
@@ -841,7 +873,29 @@ pub async fn pty_spawn(
 }
 
 #[tauri::command]
-pub async fn pty_write(state: State<'_, PtyState>, id: String, data: String) -> Result<(), String> {
+pub async fn pty_write(
+    state: State<'_, PtyState>,
+    app: AppHandle,
+    id: String,
+    data: String,
+) -> Result<(), String> {
+    if mock_pty_enabled() {
+        let sessions = state.mock_sessions.lock().map_err(|_| "Lock poisoned")?;
+        if !sessions.contains_key(&id) {
+            return Err("Session not found".to_string());
+        }
+        let encoded = BASE64.encode(data.as_bytes());
+        let _ = app.emit(
+            "pty-event",
+            json!({
+                "event": "data",
+                "id": id,
+                "data": encoded,
+            }),
+        );
+        return Ok(());
+    }
+
     let sessions = state.sessions.lock().map_err(|_| "Lock poisoned")?;
     let session = sessions.get(&id).ok_or("Session not found")?;
 
@@ -861,6 +915,13 @@ pub async fn pty_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    if mock_pty_enabled() {
+        let sessions = state.mock_sessions.lock().map_err(|_| "Lock poisoned")?;
+        if !sessions.contains_key(&id) {
+            return Err("Session not found".to_string());
+        }
+        return Ok(());
+    }
     let sessions = state.sessions.lock().map_err(|_| "Lock poisoned")?;
     let session = sessions.get(&id).ok_or("Session not found")?;
 
@@ -878,7 +939,23 @@ pub async fn pty_resize(
 }
 
 #[tauri::command]
-pub async fn pty_kill(state: State<'_, PtyState>, id: String) -> Result<(), String> {
+pub async fn pty_kill(state: State<'_, PtyState>, app: AppHandle, id: String) -> Result<(), String> {
+    if mock_pty_enabled() {
+        let mut sessions = state.mock_sessions.lock().map_err(|_| "Lock poisoned")?;
+        if sessions.remove(&id).is_none() {
+            return Err("Session not found".to_string());
+        }
+        let _ = app.emit(
+            "pty-event",
+            json!({
+                "event": "exit",
+                "id": id,
+                "code": 0,
+            }),
+        );
+        return Ok(());
+    }
+
     let mut sessions = state.sessions.lock().map_err(|_| "Lock poisoned")?;
 
     // Kill the child process before removing session

@@ -1,9 +1,8 @@
 import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { Terminal } from '@xterm/xterm';
 import type { UISessionState } from '../types/sessionState';
 import type { SessionAgent } from '../types/sessionAgent';
+import { listenPtyEvents, ptyKill, ptyResize, ptySpawn, ptyWrite } from '../pty/bridge';
 
 export interface UtilityTerminal {
   id: string;
@@ -108,7 +107,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     try {
       // Listen for PTY events (no connect call needed - PTY is native now)
-      await listen<any>('pty-event', (event) => {
+      await listenPtyEvents((event) => {
         const msg = event.payload;
         const { sessions } = get();
         const session = sessions.find((s) => s.id === msg.id);
@@ -170,12 +169,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
     if (session) {
       // Kill main session PTY
-      invoke('pty_kill', { id }).catch(console.error);
+      ptyKill({ id }).catch(console.error);
       session.terminal?.dispose();
 
       // Kill all utility terminal PTYs
       for (const utilTerminal of session.terminalPanel.terminals) {
-        invoke('pty_kill', { id: utilTerminal.ptyId }).catch(console.error);
+        ptyKill({ id: utilTerminal.ptyId }).catch(console.error);
       }
     }
 
@@ -218,7 +217,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const forkParams = pendingForkParams.get(id);
       pendingForkParams.delete(id);
 
-      await invoke('pty_spawn', {
+      await ptySpawn({
         args: {
           id,
           cwd: session.cwd,
@@ -240,7 +239,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
       // Terminal input -> PTY
       const sendToPty = (data: string) => {
-        invoke('pty_write', { id, data }).catch(console.error);
+        ptyWrite({ id, data }).catch(console.error);
       };
       terminal.onData(sendToPty);
 
@@ -273,7 +272,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   resizeSession: (id: string, cols: number, rows: number) => {
-    invoke('pty_resize', { id, cols, rows }).catch(console.error);
+    ptyResize({ id, cols, rows }).catch(console.error);
   },
 
   setForkParams: (sessionId: string, resumeSessionId: string) => {

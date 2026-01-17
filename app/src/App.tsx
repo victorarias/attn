@@ -20,6 +20,7 @@ import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore } from './store/sessions';
+import { ptyWrite } from './pty/bridge';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse, BranchDiffFile } from './hooks/useDaemonSocket';
 import { normalizeSessionState } from './types/sessionState';
 import type { SessionAgent } from './types/sessionAgent';
@@ -1028,7 +1029,7 @@ function AppContent({
   // Send code reference to the active Claude terminal
   const handleSendToClaude = useCallback((reference: string) => {
     if (!activeSessionId) return;
-    invoke('pty_write', { id: activeSessionId, data: reference }).catch(console.error);
+    ptyWrite({ id: activeSessionId, data: reference }).catch(console.error);
     // Focus the terminal so user can start typing
     setTimeout(() => {
       const handle = terminalRefs.current.get(activeSessionId);
