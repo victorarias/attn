@@ -33,6 +33,14 @@ const mockEnabled = (): boolean => {
 
 const emitMock = (payload: PtyEventPayload) => {
   const event = { payload };
+  if (typeof window !== 'undefined') {
+    const store = (window as unknown as { __TEST_PTY_EVENTS?: PtyEventPayload[] }).__TEST_PTY_EVENTS;
+    if (Array.isArray(store)) {
+      store.push(payload);
+    } else {
+      (window as unknown as { __TEST_PTY_EVENTS?: PtyEventPayload[] }).__TEST_PTY_EVENTS = [payload];
+    }
+  }
   for (const handler of mockListeners) {
     handler(event);
   }

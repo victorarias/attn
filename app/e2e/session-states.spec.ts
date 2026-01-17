@@ -63,6 +63,31 @@ test.describe('Session State Changes', () => {
     await expect(page.locator('[data-testid="session-s3"][data-state="idle"]')).toBeVisible();
   });
 
+  test('mock PTY output appears when opening a session', async ({ page, daemon }) => {
+    await daemon.start();
+    await page.goto('/');
+    await page.waitForSelector('.dashboard');
+
+    await createSession(page, daemon, { id: 's1', label: 'Terminal Session', state: 'working', cwd: '/tmp/test/s1' });
+    await page.locator('[data-testid="session-s1"]').click();
+
+    const activeTerminal = page.locator('.view-container.visible .terminal-wrapper.active');
+    await expect(activeTerminal).toBeVisible({ timeout: 5000 });
+
+    await page.waitForFunction(() => {
+      const events = (window as any).__TEST_PTY_EVENTS as Array<{ event: string; data?: string }> | undefined;
+      if (!events || events.length === 0) return false;
+      return events.some((evt) => {
+        if (evt.event !== 'data' || !evt.data) return false;
+        try {
+          return atob(evt.data).includes('attn mock pty');
+        } catch {
+          return false;
+        }
+      });
+    }, null, { timeout: 10000 });
+  });
+
   test('state indicator colors match design spec', async ({ page, daemon }) => {
     await daemon.start();
     await page.goto('/');
