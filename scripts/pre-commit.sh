@@ -23,8 +23,18 @@ header "Go tests"
 (go test ./...)
 
 header "Go build"
-(go build -o /tmp/attn-precommit-build ./cmd/attn)
-rm -f /tmp/attn-precommit-build
+tmp_bin="$(mktemp -t attn-precommit.XXXXXX)"
+go build -o "$tmp_bin" ./cmd/attn
+
+header "Tauri daemon binary"
+target_triple="$(rustc -vV | awk '/host:/ {print $2}')"
+tauri_bin_dir="$root/app/src-tauri/binaries"
+tauri_bin_path="$tauri_bin_dir/attn-$target_triple"
+mkdir -p "$tauri_bin_dir"
+if [ ! -f "$tauri_bin_path" ]; then
+  cp "$tmp_bin" "$tauri_bin_path"
+fi
+rm -f "$tmp_bin"
 
 header "Frontend tests"
 (cd "$root/app" && pnpm run test)
@@ -41,6 +51,10 @@ if ! command -v pkg-config >/dev/null 2>&1; then
   echo "Debian/Ubuntu: sudo apt-get install -y pkg-config"
   echo "macOS: brew install pkgconf"
   exit 1
+fi
+
+if [ -z "${PKG_CONFIG_PATH:-}" ] && [ -d "$HOME/.nix-profile/lib/pkgconfig" ]; then
+  export PKG_CONFIG_PATH="$HOME/.nix-profile/lib/pkgconfig:$HOME/.nix-profile/share/pkgconfig"
 fi
 
 (cd "$root/app/src-tauri" && cargo fmt -- --check)
