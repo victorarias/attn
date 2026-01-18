@@ -296,6 +296,17 @@
   animation: flash-pending 1s ease-in-out infinite;
 }
 
+.mini-badge.unknown {
+  background: transparent;
+  border: 1px solid #6b7280;
+  color: #6b7280;
+  font-size: 8px;
+  line-height: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 @keyframes flash-pending {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }

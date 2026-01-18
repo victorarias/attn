@@ -2,9 +2,11 @@
 /* Unified state indicator component - replaces state-indicator, state-dot, item-dot */
 
 .state-indicator {
-  display: inline-block;
+  display: inline-flex;
   border-radius: 50%;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Sizes */
@@ -21,6 +23,27 @@
 .state-indicator--lg {
   width: 10px;
   height: 10px;
+}
+
+/* Unknown state */
+.state-indicator--unknown {
+  background: transparent;
+  border: 1px solid #6b7280;
+  color: #6b7280;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.state-indicator--sm.state-indicator--unknown {
+  font-size: 8px;
+}
+
+.state-indicator--md.state-indicator--unknown {
+  font-size: 10px;
+}
+
+.state-indicator--lg.state-indicator--unknown {
+  font-size: 12px;
 }
 
 /* Session states */

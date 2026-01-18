@@ -13,14 +13,14 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-use std::fs;
-use std::io::{Read, Write};
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, State};
 
 /// Arguments for pty_spawn command
@@ -360,6 +360,195 @@ fn strip_ansi(input: &str) -> String {
     out
 }
 
+fn normalize_input(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim_end_matches('\n')
+        .to_string()
+}
+
+fn codex_sessions_root() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join(".codex").join("sessions"))
+}
+
+fn list_jsonl_files(root: &Path) -> Vec<PathBuf> {
+    let mut results = Vec::new();
+    let Ok(entries) = fs::read_dir(root) else {
+        return results;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            results.extend(list_jsonl_files(&path));
+            continue;
+        }
+        if let Some(ext) = path.extension() {
+            if ext == "jsonl" {
+                results.push(path);
+            }
+        }
+    }
+
+    results
+}
+
+fn read_session_meta_cwd(path: &Path) -> Option<String> {
+    let file = File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut first_line = String::new();
+    reader.read_line(&mut first_line).ok()?;
+    let value: serde_json::Value = serde_json::from_str(first_line.trim()).ok()?;
+    if value.get("type")?.as_str()? != "session_meta" {
+        return None;
+    }
+    let payload = value.get("payload")?;
+    payload.get("cwd")?.as_str().map(|s| s.to_string())
+}
+
+fn extract_message_text(content: &serde_json::Value) -> Option<String> {
+    let arr = content.as_array()?;
+    let mut out = String::new();
+    for item in arr {
+        let kind = item.get("type")?.as_str()?;
+        if kind != "input_text" && kind != "output_text" {
+            continue;
+        }
+        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(text);
+        }
+    }
+    if out.trim().is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn extract_user_message(value: &serde_json::Value) -> Option<String> {
+    let payload = value.get("payload")?;
+    if value.get("type").and_then(|v| v.as_str()) == Some("event_msg") {
+        if payload.get("type").and_then(|v| v.as_str()) != Some("user_message") {
+            return None;
+        }
+        return payload
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+    }
+
+    if value.get("type").and_then(|v| v.as_str()) == Some("response_item") {
+        if payload.get("type").and_then(|v| v.as_str()) != Some("message") {
+            return None;
+        }
+        if payload.get("role").and_then(|v| v.as_str()) != Some("user") {
+            return None;
+        }
+        let content = payload.get("content")?;
+        return extract_message_text(content);
+    }
+
+    None
+}
+
+fn extract_assistant_message(value: &serde_json::Value) -> Option<String> {
+    let payload = value.get("payload")?;
+    if value.get("type").and_then(|v| v.as_str()) == Some("event_msg") {
+        if payload.get("type").and_then(|v| v.as_str()) != Some("agent_message") {
+            return None;
+        }
+        return payload
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+    }
+
+    if value.get("type").and_then(|v| v.as_str()) == Some("response_item") {
+        if payload.get("type").and_then(|v| v.as_str()) != Some("message") {
+            return None;
+        }
+        if payload.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+            return None;
+        }
+        let content = payload.get("content")?;
+        return extract_message_text(content);
+    }
+
+    None
+}
+
+fn update_input_history(session: &mut PtySession, data: &str) {
+    for ch in data.chars() {
+        if session.input_escape {
+            if ch.is_ascii_alphabetic() || ch == '~' {
+                session.input_escape = false;
+            }
+            continue;
+        }
+        if ch == '\u{1b}' {
+            session.input_escape = true;
+            continue;
+        }
+        if ch == '\x7f' || ch == '\u{8}' {
+            session.input_history.pop();
+            continue;
+        }
+        if ch == '\r' {
+            session.input_history.push('\n');
+            continue;
+        }
+        if ch.is_control() && ch != '\n' && ch != '\t' {
+            continue;
+        }
+        session.input_history.push(ch);
+    }
+
+    const MAX_HISTORY: usize = 20000;
+    if session.input_history.len() > MAX_HISTORY {
+        session.input_history = trim_history(&session.input_history, MAX_HISTORY);
+    }
+}
+
+fn send_stop_update(session_id: &str, transcript_path: &Path) {
+    let Some(socket_path) = attn_socket_path() else {
+        return;
+    };
+
+    if let Ok(mut stream) = UnixStream::connect(socket_path) {
+        let msg = json!({
+            "cmd": "stop",
+            "id": session_id,
+            "transcript_path": transcript_path.to_string_lossy()
+        });
+        let _ = stream.write_all(msg.to_string().as_bytes());
+    }
+}
+
+fn input_history_contains(history: &str, text: &str) -> bool {
+    let history = normalize_input(history);
+    let text = normalize_input(text);
+    if text.is_empty() {
+        return false;
+    }
+    history.contains(&text)
+}
+
+fn trim_history(history: &str, max_len: usize) -> String {
+    if history.len() <= max_len {
+        return history.to_string();
+    }
+
+    let mut start = history.len() - max_len;
+    while start < history.len() && !history.is_char_boundary(start) {
+        start += 1;
+    }
+    history[start..].to_string()
+}
+
 fn tail_lines(text: &str, max_lines: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let start = lines.len().saturating_sub(max_lines);
@@ -601,12 +790,166 @@ fn classify_state(text: &str, heuristics: &StateHeuristics) -> Option<&'static s
     None
 }
 
+fn start_transcript_match_thread(
+    app: AppHandle,
+    sessions_ref: Arc<Mutex<HashMap<String, PtySession>>>,
+    session_id: String,
+) {
+    thread::spawn(move || {
+        let mut offsets: HashMap<PathBuf, u64> = HashMap::new();
+        let mut matched_path: Option<PathBuf> = None;
+        let mut last_assistant: Option<String> = None;
+        loop {
+            let (cwd, start_time, input_history, agent, transcript_path) = {
+                let sessions = match sessions_ref.lock() {
+                    Ok(sessions) => sessions,
+                    Err(_) => return,
+                };
+                let Some(session) = sessions.get(&session_id) else {
+                    return;
+                };
+                (
+                    session.cwd.clone(),
+                    session.start_time,
+                    session.input_history.clone(),
+                    session.agent.clone(),
+                    session.transcript_path.clone(),
+                )
+            };
+
+            if agent != "codex" {
+                return;
+            }
+
+            let Some(root) = codex_sessions_root() else {
+                thread::sleep(Duration::from_millis(750));
+                continue;
+            };
+
+            let files = list_jsonl_files(&root);
+            if files.is_empty() {
+                thread::sleep(Duration::from_millis(750));
+                continue;
+            }
+
+            if matched_path.is_none() {
+                if let Some(path) = transcript_path {
+                    matched_path = Some(path);
+                }
+            }
+
+            for path in files {
+                let metadata = match fs::metadata(&path) {
+                    Ok(metadata) => metadata,
+                    Err(_) => continue,
+                };
+                let min_time = start_time
+                    .checked_sub(Duration::from_secs(300))
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
+                if let Ok(modified) = metadata.modified() {
+                    if modified < min_time {
+                        continue;
+                    }
+                }
+
+                let Some(meta_cwd) = read_session_meta_cwd(&path) else {
+                    continue;
+                };
+                if meta_cwd != cwd {
+                    continue;
+                }
+
+                offsets.entry(path).or_insert(0);
+            }
+
+            let paths_to_check: Vec<PathBuf> = if let Some(path) = matched_path.clone() {
+                vec![path]
+            } else {
+                offsets.keys().cloned().collect()
+            };
+
+            for path in paths_to_check {
+                let Some(offset) = offsets.get_mut(&path) else {
+                    continue;
+                };
+                let file = match File::open(&path) {
+                    Ok(file) => file,
+                    Err(_) => continue,
+                };
+                let mut reader = BufReader::new(file);
+                if reader.seek(SeekFrom::Start(*offset)).is_err() {
+                    *offset = 0;
+                    continue;
+                }
+
+                let mut last_user: Option<String> = None;
+                let mut last_assistant_seen: Option<String> = None;
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim_end()) {
+                        if let Some(text) = extract_user_message(&value) {
+                            last_user = Some(text);
+                        }
+                        if let Some(text) = extract_assistant_message(&value) {
+                            last_assistant_seen = Some(text);
+                        }
+                    }
+                    line.clear();
+                }
+
+                if let Ok(pos) = reader.seek(SeekFrom::Current(0)) {
+                    *offset = pos;
+                }
+
+                if matched_path.is_none() {
+                    if let Some(text) = last_user {
+                        if input_history_contains(&input_history, &text) {
+                            matched_path = Some(path.clone());
+                            if let Ok(mut sessions) = sessions_ref.lock() {
+                                if let Some(session) = sessions.get_mut(&session_id) {
+                                    session.transcript_path = Some(path.clone());
+                                }
+                            }
+                            let _ = app.emit(
+                                "pty-event",
+                                json!({
+                                    "event": "transcript",
+                                    "id": session_id,
+                                    "matched": true
+                                }),
+                            );
+                            send_stop_update(&session_id, &path);
+                        }
+                    }
+                }
+
+                if let Some(path) = matched_path.as_ref() {
+                    if let Some(text) = last_assistant_seen {
+                        if last_assistant.as_deref() != Some(text.as_str()) {
+                            last_assistant = Some(text);
+                            send_stop_update(&session_id, path);
+                        }
+                    }
+                }
+            }
+
+            thread::sleep(Duration::from_millis(750));
+        }
+    });
+}
+
 /// Holds a PTY session's resources
 struct PtySession {
     #[allow(dead_code)]
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
+    cwd: String,
+    agent: String,
+    start_time: SystemTime,
+    input_history: String,
+    input_escape: bool,
+    transcript_path: Option<PathBuf>,
 }
 
 struct MockPtySession {}
@@ -682,6 +1025,8 @@ pub async fn pty_spawn(
     let login_shell = get_user_login_shell()
         .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()));
 
+    let resolved_agent = normalize_agent(agent.as_deref());
+
     let mut cmd = if is_shell {
         // Plain shell for utility terminals
         let mut cmd = CommandBuilder::new(&login_shell);
@@ -717,7 +1062,6 @@ pub async fn pty_spawn(
         let mut cmd = CommandBuilder::new(&login_shell);
         cmd.arg("-l");
         cmd.arg("-c");
-        let resolved_agent = normalize_agent(agent.as_deref());
         cmd.env("ATTN_INSIDE_APP", "1");
         cmd.env("ATTN_SESSION_ID", id.clone());
         cmd.env("ATTN_AGENT", resolved_agent);
@@ -763,6 +1107,12 @@ pub async fn pty_spawn(
         master: Arc::new(Mutex::new(pair.master)),
         writer: Arc::new(Mutex::new(writer)),
         child: Arc::new(Mutex::new(child)),
+        cwd: cwd.clone(),
+        agent: resolved_agent.to_string(),
+        start_time: SystemTime::now(),
+        input_history: String::new(),
+        input_escape: false,
+        transcript_path: None,
     };
 
     state
@@ -770,6 +1120,10 @@ pub async fn pty_spawn(
         .lock()
         .map_err(|_| "Lock poisoned")?
         .insert(id.clone(), session);
+
+    if resolved_agent == "codex" {
+        start_transcript_match_thread(app.clone(), Arc::clone(&state.sessions), id.clone());
+    }
 
     // Spawn reader thread - streams output to frontend
     let session_id = id.clone();
@@ -821,7 +1175,36 @@ pub async fn pty_spawn(
                         );
                     }
 
-                    if detect_state_enabled && boundary > 0 {
+                    let (allow_state_detection, allow_pending_only) = if detect_state_enabled {
+                        if let Ok(sessions) = sessions_ref.lock() {
+                            if let Some(session) = sessions.get(&session_id) {
+                                if session.agent == "codex" {
+                                    (false, session.transcript_path.is_some())
+                                } else {
+                                    (true, false)
+                                }
+                            } else {
+                                (false, false)
+                            }
+                        } else {
+                            (false, false)
+                        }
+                    } else {
+                        (false, false)
+                    };
+
+                    if allow_pending_only && boundary > 0 {
+                        let chunk = String::from_utf8_lossy(&combined[..boundary]);
+                        let cleaned = strip_ansi(&chunk);
+                        if !cleaned.is_empty() && is_pending_approval(&cleaned) {
+                            if last_state.as_deref() != Some(STATE_PENDING_APPROVAL) {
+                                send_state_update(&session_id, STATE_PENDING_APPROVAL);
+                                last_state = Some(STATE_PENDING_APPROVAL);
+                            }
+                        }
+                    }
+
+                    if allow_state_detection && boundary > 0 {
                         let chunk = String::from_utf8_lossy(&combined[..boundary]);
                         let cleaned = strip_ansi(&chunk);
                         if !cleaned.is_empty() {
@@ -892,6 +1275,14 @@ pub async fn pty_write(
             }),
         );
         return Ok(());
+    }
+
+    {
+        let mut sessions = state.sessions.lock().map_err(|_| "Lock poisoned")?;
+        let session = sessions.get_mut(&id).ok_or("Session not found")?;
+        if session.agent == "codex" {
+            update_input_history(session, &data);
+        }
     }
 
     let sessions = state.sessions.lock().map_err(|_| "Lock poisoned")?;
@@ -987,6 +1378,72 @@ pub async fn pty_kill(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Error;
+    #[cfg(unix)]
+    use nix::libc;
+
+    #[derive(Debug)]
+    struct TestMasterPty;
+
+    impl MasterPty for TestMasterPty {
+        fn resize(&self, _size: PtySize) -> Result<(), Error> {
+            Ok(())
+        }
+
+        fn get_size(&self) -> Result<PtySize, Error> {
+            Ok(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+        }
+
+        fn try_clone_reader(&self) -> Result<Box<dyn std::io::Read + Send>, Error> {
+            Ok(Box::new(std::io::empty()))
+        }
+
+        fn take_writer(&self) -> Result<Box<dyn std::io::Write + Send>, Error> {
+            Ok(Box::new(std::io::sink()))
+        }
+
+        #[cfg(unix)]
+        fn process_group_leader(&self) -> Option<libc::pid_t> {
+            None
+        }
+
+        #[cfg(unix)]
+        fn as_raw_fd(&self) -> Option<std::os::unix::io::RawFd> {
+            None
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestChild;
+
+    impl portable_pty::ChildKiller for TestChild {
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+            Box::new(TestChild)
+        }
+    }
+
+    impl portable_pty::Child for TestChild {
+        fn try_wait(&mut self) -> std::io::Result<Option<portable_pty::ExitStatus>> {
+            Ok(None)
+        }
+
+        fn wait(&mut self) -> std::io::Result<portable_pty::ExitStatus> {
+            Ok(portable_pty::ExitStatus::with_exit_code(0))
+        }
+
+        fn process_id(&self) -> Option<u32> {
+            None
+        }
+    }
 
     fn state_from_text(raw: &str) -> Option<&'static str> {
         classify_state(raw, &DEFAULT_HEURISTICS)
@@ -1124,5 +1581,94 @@ $ make install\n\
     fn working_status_line_is_not_assistant_text() {
         let lines = ["• Working(0s • esc to interrupt) › Improve documentation 100% context left"];
         assert!(last_assistant_text(&lines, &DEFAULT_HEURISTICS).is_none());
+    }
+
+    #[test]
+    fn normalize_input_preserves_multiline() {
+        let text = "line one\r\nline two\rline three\n";
+        assert_eq!(normalize_input(text), "line one\nline two\nline three");
+    }
+
+    #[test]
+    fn update_input_history_tracks_backspace_and_escape() {
+        let mut session = PtySession {
+            master: Arc::new(Mutex::new(Box::new(TestMasterPty))),
+            writer: Arc::new(Mutex::new(Box::new(std::io::sink()))),
+            child: Arc::new(Mutex::new(Box::new(TestChild))),
+            cwd: "/tmp".to_string(),
+            agent: "codex".to_string(),
+            start_time: SystemTime::now(),
+            input_history: String::new(),
+            input_escape: false,
+            transcript_path: None,
+        };
+
+        update_input_history(&mut session, "abc\x7f");
+        update_input_history(&mut session, "\u{1b}[A");
+        update_input_history(&mut session, "d\r");
+        assert_eq!(session.input_history, "abd\n");
+    }
+
+    #[test]
+    fn input_history_contains_multiline_prompt() {
+        let mut session = PtySession {
+            master: Arc::new(Mutex::new(Box::new(TestMasterPty))),
+            writer: Arc::new(Mutex::new(Box::new(std::io::sink()))),
+            child: Arc::new(Mutex::new(Box::new(TestChild))),
+            cwd: "/tmp".to_string(),
+            agent: "codex".to_string(),
+            start_time: SystemTime::now(),
+            input_history: String::new(),
+            input_escape: false,
+            transcript_path: None,
+        };
+
+        update_input_history(&mut session, "line one\rline two\rline three\r");
+        assert!(input_history_contains(
+            &session.input_history,
+            "line one\nline two\nline three"
+        ));
+    }
+
+    #[test]
+    fn trim_history_preserves_utf8_boundaries() {
+        let history = "🙂".repeat(6000);
+        let trimmed = trim_history(&history, 20000);
+
+        assert!(trimmed.len() <= 20000);
+        assert!(history.ends_with(&trimmed));
+    }
+
+    #[test]
+    fn extract_user_message_from_event_msg() {
+        let value = serde_json::json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "user_message",
+                "message": "hello world"
+            }
+        });
+        assert_eq!(
+            extract_user_message(&value),
+            Some("hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_assistant_message_from_response_item() {
+        let value = serde_json::json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    { "type": "output_text", "text": "all set" }
+                ]
+            }
+        });
+        assert_eq!(
+            extract_assistant_message(&value),
+            Some("all set".to_string())
+        );
     }
 }
