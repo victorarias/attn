@@ -59,3 +59,36 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: E2E
+        run: pnpm run e2e
+
+  rust:
+    name: Rust (Tauri)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libssl-dev \
+            libclang-dev
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo fmt
+        run: cargo fmt -- --check
+
+      - name: Cargo test
+        run: cargo test
