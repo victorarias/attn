@@ -46,6 +46,11 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -59,6 +64,16 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Build attn binary
+        run: |
+          cd ..
+          go build -o /tmp/attn ./cmd/attn
+          mkdir -p ~/.local/bin
+          cp /tmp/attn ~/.local/bin/attn
+          target_triple="x86_64-unknown-linux-gnu"
+          mkdir -p app/src-tauri/binaries
+          cp /tmp/attn "app/src-tauri/binaries/attn-${target_triple}"
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
@@ -87,8 +102,22 @@ jobs:
             libssl-dev \
             libclang-dev
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Build attn binary
+        run: |
+          cd ../..
+          go build -o /tmp/attn ./cmd/attn
+          target_triple="$(rustc -vV | awk '/host:/ {print $2}')"
+          mkdir -p app/src-tauri/binaries
+          cp /tmp/attn "app/src-tauri/binaries/attn-${target_triple}"
+          cd app/src-tauri
 
       - name: Cargo fmt
         run: cargo fmt -- --check
