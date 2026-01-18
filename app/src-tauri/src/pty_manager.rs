@@ -435,7 +435,10 @@ fn extract_user_message(value: &serde_json::Value) -> Option<String> {
         if payload.get("type").and_then(|v| v.as_str()) != Some("user_message") {
             return None;
         }
-        return payload.get("message").and_then(|v| v.as_str()).map(|s| s.to_string());
+        return payload
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
     }
 
     if value.get("type").and_then(|v| v.as_str()) == Some("response_item") {
@@ -458,7 +461,10 @@ fn extract_assistant_message(value: &serde_json::Value) -> Option<String> {
         if payload.get("type").and_then(|v| v.as_str()) != Some("agent_message") {
             return None;
         }
-        return payload.get("message").and_then(|v| v.as_str()).map(|s| s.to_string());
+        return payload
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
     }
 
     if value.get("type").and_then(|v| v.as_str()) == Some("response_item") {
@@ -1607,7 +1613,10 @@ $ make install\n\
         };
 
         update_input_history(&mut session, "line one\rline two\rline three\r");
-        assert!(input_history_contains(&session.input_history, "line one\nline two\nline three"));
+        assert!(input_history_contains(
+            &session.input_history,
+            "line one\nline two\nline three"
+        ));
     }
 
     #[test]
@@ -1619,7 +1628,10 @@ $ make install\n\
                 "message": "hello world"
             }
         });
-        assert_eq!(extract_user_message(&value), Some("hello world".to_string()));
+        assert_eq!(
+            extract_user_message(&value),
+            Some("hello world".to_string())
+        );
     }
 
     #[test]
@@ -1634,6 +1646,9 @@ $ make install\n\
                 ]
             }
         });
-        assert_eq!(extract_assistant_message(&value), Some("all set".to_string()));
+        assert_eq!(
+            extract_assistant_message(&value),
+            Some("all set".to_string())
+        );
     }
 }
