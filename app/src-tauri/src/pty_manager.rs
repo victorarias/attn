@@ -509,8 +509,7 @@ fn update_input_history(session: &mut PtySession, data: &str) {
 
     const MAX_HISTORY: usize = 20000;
     if session.input_history.len() > MAX_HISTORY {
-        let start = session.input_history.len() - MAX_HISTORY;
-        session.input_history = session.input_history[start..].to_string();
+        session.input_history = trim_history(&session.input_history, MAX_HISTORY);
     }
 }
 
@@ -536,6 +535,18 @@ fn input_history_contains(history: &str, text: &str) -> bool {
         return false;
     }
     history.contains(&text)
+}
+
+fn trim_history(history: &str, max_len: usize) -> String {
+    if history.len() <= max_len {
+        return history.to_string();
+    }
+
+    let mut start = history.len() - max_len;
+    while start < history.len() && !history.is_char_boundary(start) {
+        start += 1;
+    }
+    history[start..].to_string()
 }
 
 fn tail_lines(text: &str, max_lines: usize) -> String {
@@ -1617,6 +1628,15 @@ $ make install\n\
             &session.input_history,
             "line one\nline two\nline three"
         ));
+    }
+
+    #[test]
+    fn trim_history_preserves_utf8_boundaries() {
+        let history = "🙂".repeat(6000);
+        let trimmed = trim_history(&history, 20000);
+
+        assert!(trimmed.len() <= 20000);
+        assert!(history.ends_with(&trimmed));
     }
 
     #[test]
