@@ -9,6 +9,7 @@ interface StateIndicatorProps {
   state: StateIndicatorState;
   size?: StateIndicatorSize;
   kind?: StateIndicatorKind;
+  unknown?: boolean;
   className?: string;
 }
 
@@ -16,15 +17,19 @@ export function StateIndicator({
   state,
   size = 'md',
   kind = 'session',
+  unknown = false,
   className = '',
 }: StateIndicatorProps) {
   // Normalize state for CSS class (waiting_input -> waiting-input)
-  const stateClass = state.replace('_', '-');
+  const stateClass = unknown ? 'unknown' : state.replace('_', '-');
 
   return (
     <span
       className={`state-indicator state-indicator--${size} state-indicator--${stateClass} state-indicator--${kind} ${className}`.trim()}
       data-testid="state-indicator"
-    />
+      aria-label={unknown ? 'state unknown' : undefined}
+    >
+      {unknown ? '?' : null}
+    </span>
   );
 }

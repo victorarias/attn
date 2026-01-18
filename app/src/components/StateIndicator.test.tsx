@@ -60,4 +60,11 @@ describe('StateIndicator', () => {
     expect(indicator).toHaveClass('state-indicator--waiting-input');
     expect(indicator).not.toHaveClass('state-indicator--waiting_input');
   });
+
+  it('renders unknown state with question mark', () => {
+    render(<StateIndicator state="idle" unknown />);
+    const indicator = screen.getByTestId('state-indicator');
+    expect(indicator).toHaveClass('state-indicator--unknown');
+    expect(indicator).toHaveTextContent('?');
+  });
 });

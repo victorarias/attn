@@ -15,6 +15,7 @@ export const PTY_EVENTS = {
   DATA: 'data',
   EXIT: 'exit',
   ERROR: 'error',
+  TRANSCRIPT: 'transcript',
 } as const;
 
 // Command types (client → server)
@@ -75,11 +76,18 @@ export interface PtyErrorEvent {
   error: string;
 }
 
+export interface PtyTranscriptEvent {
+  event: typeof PTY_EVENTS.TRANSCRIPT;
+  id: string;
+  matched: boolean;
+}
+
 export type PtyEvent =
   | PtySpawnedEvent
   | PtyDataEvent
   | PtyExitEvent
-  | PtyErrorEvent;
+  | PtyErrorEvent
+  | PtyTranscriptEvent;
 
 // Type guards for events
 export function isPtySpawnedEvent(event: PtyEvent): event is PtySpawnedEvent {
@@ -96,4 +104,8 @@ export function isPtyExitEvent(event: PtyEvent): event is PtyExitEvent {
 
 export function isPtyErrorEvent(event: PtyEvent): event is PtyErrorEvent {
   return event.event === PTY_EVENTS.ERROR;
+}
+
+export function isPtyTranscriptEvent(event: PtyEvent): event is PtyTranscriptEvent {
+  return event.event === PTY_EVENTS.TRANSCRIPT;
 }

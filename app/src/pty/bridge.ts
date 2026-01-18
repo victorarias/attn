@@ -18,7 +18,8 @@ export interface PtySpawnArgs {
 type PtyEventPayload =
   | { event: 'data'; id: string; data: string }
   | { event: 'exit'; id: string; code: number }
-  | { event: 'error'; id: string; error: string };
+  | { event: 'error'; id: string; error: string }
+  | { event: 'transcript'; id: string; matched: boolean };
 
 type PtyEventHandler = (event: { payload: PtyEventPayload }) => void;
 

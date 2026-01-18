@@ -37,6 +37,7 @@ export interface Session {
   terminal: Terminal | null;
   cwd: string;
   agent: SessionAgent;
+  transcriptMatched: boolean;
   branch?: string;
   isWorktree?: boolean;
   terminalPanel: TerminalPanelState;
@@ -112,6 +113,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         const { sessions } = get();
         const session = sessions.find((s) => s.id === msg.id);
 
+        if (msg.event === 'transcript') {
+          if (typeof msg.matched === 'boolean') {
+            const updated = sessions.map((entry) =>
+              entry.id === msg.id ? { ...entry, transcriptMatched: msg.matched } : entry,
+            );
+            set({ sessions: updated });
+          }
+          return;
+        }
+
         if (!session?.terminal) return;
 
         switch (msg.event) {
@@ -152,6 +163,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       terminal: null,
       cwd,
       agent: resolvedAgent,
+      transcriptMatched: resolvedAgent !== 'codex',
       terminalPanel: createDefaultPanelState(),
     };
 
@@ -412,6 +424,7 @@ if (import.meta.env.DEV) {
         {
           ...session,
           agent: session.agent ?? 'codex',
+          transcriptMatched: (session.agent ?? 'codex') !== 'codex',
           terminal: null,
           terminalPanel: createDefaultPanelState(),
         },

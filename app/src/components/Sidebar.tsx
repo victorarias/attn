@@ -5,6 +5,8 @@ interface LocalSession {
   id: string;
   label: string;
   state: 'working' | 'waiting_input' | 'idle' | 'pending_approval';
+  agent?: string;
+  transcriptMatched?: boolean;
   branch?: string;
   isWorktree?: boolean;
   cwd?: string;
@@ -73,8 +75,12 @@ export function Sidebar({
               title={`${session.label} (⌘${index + 1})`}
             >
               ▸
-              {(session.state === 'waiting_input' || session.state === 'pending_approval') && (
-                <span className={`mini-badge ${session.state === 'pending_approval' ? 'pending' : ''}`} />
+              {session.agent === 'codex' && session.transcriptMatched === false ? (
+                <span className="mini-badge unknown">?</span>
+              ) : (
+                (session.state === 'waiting_input' || session.state === 'pending_approval') && (
+                  <span className={`mini-badge ${session.state === 'pending_approval' ? 'pending' : ''}`} />
+                )
               )}
             </button>
           ))}
@@ -113,6 +119,7 @@ export function Sidebar({
           if (isSingleSession) {
             const session = group.sessions[0];
             const globalIndex = sessions.findIndex(s => s.id === session.id);
+            const unknown = session.agent === 'codex' && session.transcriptMatched === false;
             return (
               <div
                 key={session.id}
@@ -121,7 +128,7 @@ export function Sidebar({
                 data-state={session.state}
                 onClick={() => onSelectSession(session.id)}
               >
-                <StateIndicator state={session.state} size="md" />
+                <StateIndicator state={session.state} size="md" unknown={unknown} />
                 <div className="session-info">
                   <span className="session-label">{session.label}</span>
                   {session.branch && (
@@ -154,6 +161,7 @@ export function Sidebar({
               </div>
               {group.sessions.map((session) => {
                 const globalIndex = sessions.findIndex(s => s.id === session.id);
+                const unknown = session.agent === 'codex' && session.transcriptMatched === false;
                 return (
                   <div
                     key={session.id}
@@ -162,7 +170,7 @@ export function Sidebar({
                     data-state={session.state}
                     onClick={() => onSelectSession(session.id)}
                   >
-                    <StateIndicator state={session.state} size="md" />
+                    <StateIndicator state={session.state} size="md" unknown={unknown} />
                     <span className="session-label">{session.label}</span>
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <span className="session-shortcut">⌘{globalIndex + 1}</span>
