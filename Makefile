@@ -7,25 +7,37 @@ BUILD_DIR=./cmd/attn
 build:
 	go build -o $(BINARY_NAME) $(BUILD_DIR)
 
-test:
-	gotestsum --format testdox -- ./...
+GOTESTSUM=$(HOME)/go/bin/gotestsum
+
+$(GOTESTSUM):
+	go install gotest.tools/gotestsum@latest
+
+test: $(GOTESTSUM)
+	$(GOTESTSUM) --format testdox -- ./...
 
 # Verbose test output (shows all test names as they run)
-test-v:
-	gotestsum --format standard-verbose -- ./...
+test-v: $(GOTESTSUM)
+	$(GOTESTSUM) --format standard-verbose -- ./...
 
 # Quick test (dots only, fastest)
-test-quick:
-	gotestsum --format dots -- ./...
+test-quick: $(GOTESTSUM)
+	$(GOTESTSUM) --format dots -- ./...
 
 # Watch mode - re-runs tests on file changes
-test-watch:
-	gotestsum --watch --format testdox -- ./...
+test-watch: $(GOTESTSUM)
+	$(GOTESTSUM) --watch --format testdox -- ./...
 
 test-frontend:
 	cd app && pnpm run test
 
 test-e2e:
+	@# Ensure stale Vite test server is not running
+	@if command -v fuser >/dev/null 2>&1; then \
+		fuser -k 1421/tcp 2>/dev/null || true; \
+	elif command -v lsof >/dev/null 2>&1; then \
+		lsof -ti tcp:1421 | xargs -r kill 2>/dev/null || true; \
+	fi
+	-pkill -f "vite.*1421" 2>/dev/null || true
 	cd app && pnpm run e2e
 
 test-harness: test test-frontend test-e2e

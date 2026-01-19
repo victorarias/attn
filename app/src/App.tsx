@@ -28,6 +28,7 @@ import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useUIScale } from './hooks/useUIScale';
+import { useOpenPR } from './hooks/useOpenPR';
 import { getRepoName } from './utils/repo';
 import './App.css';
 
@@ -136,7 +137,7 @@ function App() {
   }), []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, sendGetBranchDiffFiles, getRepoInfo, getReviewState, markFileViewed, sendAddComment, sendUpdateComment, sendResolveComment, sendWontFixComment, sendDeleteComment, sendGetComments, sendStartReview, sendCancelReview, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendFetchPRDetails, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, sendGetBranchDiffFiles, getRepoInfo, getReviewState, markFileViewed, sendAddComment, sendUpdateComment, sendResolveComment, sendWontFixComment, sendDeleteComment, sendGetComments, sendStartReview, sendCancelReview, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
@@ -188,6 +189,7 @@ function App() {
         sendCommitWIP={sendCommitWIP}
         sendGetDefaultBranch={sendGetDefaultBranch}
         sendFetchRemotes={sendFetchRemotes}
+        sendFetchPRDetails={sendFetchPRDetails}
         sendListRemoteBranches={sendListRemoteBranches}
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
@@ -247,6 +249,7 @@ interface AppContentProps {
   sendCommitWIP: ReturnType<typeof useDaemonSocket>['sendCommitWIP'];
   sendGetDefaultBranch: ReturnType<typeof useDaemonSocket>['sendGetDefaultBranch'];
   sendFetchRemotes: ReturnType<typeof useDaemonSocket>['sendFetchRemotes'];
+  sendFetchPRDetails: ReturnType<typeof useDaemonSocket>['sendFetchPRDetails'];
   sendListRemoteBranches: ReturnType<typeof useDaemonSocket>['sendListRemoteBranches'];
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
@@ -301,6 +304,7 @@ function AppContent({
   sendCommitWIP,
   sendGetDefaultBranch,
   sendFetchRemotes,
+  sendFetchPRDetails,
   sendListRemoteBranches,
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
@@ -748,76 +752,67 @@ function AppContent({
     [setActiveSession]
   );
 
+  const openPR = useOpenPR({
+    settings,
+    sendFetchPRDetails,
+    sendFetchRemotes,
+    sendCreateWorktreeFromBranch,
+    createSession,
+  });
+
   // Handle opening a PR in a worktree
   const handleOpenPR = useCallback(
-    async (pr: { repo: string; number: number; title: string; head_branch?: string }) => {
+    async (pr: DaemonPR) => {
       console.log(`[App] Open PR requested: ${pr.repo}#${pr.number} - ${pr.title}`);
 
-      // Check if projects_directory is configured
-      const projectsDir = settings.projects_directory;
-      if (!projectsDir) {
-        alert('Please configure your Projects Directory in Settings first.\n\nThis tells the app where to find your local git repositories.');
+      const result = await openPR(pr);
+      if (result.success) {
+        console.log(`[App] Worktree created at ${result.worktreePath}`);
+        // Fit terminal after view becomes visible
+        setTimeout(() => {
+          const handle = terminalRefs.current.get(result.sessionId);
+          handle?.fit();
+          handle?.focus();
+        }, 100);
         return;
       }
 
-      // Check if PR has head_branch
-      if (!pr.head_branch) {
-        alert('PR branch information not available.\n\nTry refreshing PRs (⌘R) to fetch branch details.');
-        return;
-      }
-
-      const repoName = getRepoName(pr.repo);
-      // Normalize path: remove trailing slash from projectsDir if present
-      const normalizedProjectsDir = projectsDir.replace(/\/+$/, '');
-      const localRepoPath = `${normalizedProjectsDir}/${repoName}`;
-
-      console.log(`[App] Creating worktree for ${pr.repo}#${pr.number} branch ${pr.head_branch} in ${localRepoPath}`);
-
-      try {
-        // Fetch remote first to ensure the PR branch is available locally
-        console.log(`[App] Fetching remotes for ${localRepoPath}`);
-        await sendFetchRemotes(localRepoPath);
-
-        // Create worktree from the remote branch (PR branches already exist on remote)
-        // Using origin/<branch> to track the remote branch
-        const remoteBranch = `origin/${pr.head_branch}`;
-        console.log(`[App] Creating worktree from remote branch ${remoteBranch}`);
-        const result = await sendCreateWorktreeFromBranch(localRepoPath, remoteBranch);
-
-        if (result.success && result.path) {
-          console.log(`[App] Worktree created at ${result.path}`);
-
-          // Create a new session in the worktree directory
-          const label = `${repoName}#${pr.number}`;
-          const sessionId = await createSession(label, result.path);
-
-          // Fit terminal after view becomes visible
-          setTimeout(() => {
-            const handle = terminalRefs.current.get(sessionId);
-            handle?.fit();
-            handle?.focus();
-          }, 100);
-        } else {
-          throw new Error(result.error || 'Failed to create worktree');
-        }
-      } catch (err) {
-        console.error('[App] Failed to open PR:', err);
-        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-
-        // Check for common errors
-        if (errorMsg.includes('not a git repository') || errorMsg.includes('does not exist')) {
-          alert(`Could not find local repository at:\n${localRepoPath}\n\nMake sure the repository is cloned in your Projects Directory.`);
-        } else if (errorMsg.includes('already exists')) {
-          // Worktree already exists - find it and create session there
-          const worktreePath = `${localRepoPath}/../${repoName}-${pr.head_branch}`;
-          console.log(`[App] Worktree may already exist, trying to create session at ${worktreePath}`);
-          alert(`A worktree for this branch may already exist.\n\nError: ${errorMsg}`);
-        } else {
-          alert(`Failed to open PR: ${errorMsg}`);
+      const errorMsg = result.error.message || '';
+      switch (result.error.kind) {
+        case 'missing_projects_directory':
+          alert('Please configure your Projects Directory in Settings first.\n\nThis tells the app where to find your local git repositories.');
+          break;
+        case 'missing_head_branch':
+          alert('PR branch information not available.\n\nTry refreshing PRs (⌘R) to fetch branch details.');
+          break;
+        case 'fetch_pr_details_failed':
+          alert(`Failed to fetch PR details.\n\n${errorMsg || 'Try refreshing PRs (⌘R) and try again.'}`);
+          break;
+        case 'fetch_remotes_failed':
+        case 'create_worktree_failed':
+        case 'create_session_failed':
+        case 'unknown': {
+          const projectsDir = settings.projects_directory;
+          const normalizedProjectsDir = projectsDir ? projectsDir.replace(/\/+$/, '') : '';
+          const localRepoPath = normalizedProjectsDir
+            ? `${normalizedProjectsDir}/${getRepoName(pr.repo)}`
+            : '';
+          if (errorMsg.includes('not a git repository') || errorMsg.includes('does not exist')) {
+            if (localRepoPath) {
+              alert(`Could not find local repository at:\n${localRepoPath}\n\nMake sure the repository is cloned in your Projects Directory.`);
+            } else {
+              alert(`Could not find local repository for ${pr.repo}.\n\nMake sure the repository is cloned in your Projects Directory.`);
+            }
+          } else if (errorMsg.includes('already exists')) {
+            alert(`A worktree for this branch may already exist.\n\nError: ${errorMsg}`);
+          } else {
+            alert(`Failed to open PR: ${errorMsg || 'Unknown error'}`);
+          }
+          break;
         }
       }
     },
-    [settings, sendFetchRemotes, sendCreateWorktreeFromBranch, createSession]
+    [openPR]
   );
 
   // Worktree cleanup prompt handlers

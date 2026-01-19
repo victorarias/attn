@@ -6,6 +6,17 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-01-19]
+
+### Added
+- **PRs Panel Harness**: Playwright test harness for the dashboard PRs panel
+- **PRs Harness Scenarios**: Additional test cases for PR action wiring and error flows (fetch details, missing projects dir, fetch remotes, worktree creation)
+
+### Fixed
+- **Open PR Worktrees**: Fetch missing PR branch details on demand before creating worktrees
+
+---
+
 ## [2026-01-17]
 
 ### Added

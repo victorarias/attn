@@ -410,6 +410,26 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			d.sendToClient(client, result)
 		}()
 
+	case protocol.CmdFetchPRDetails:
+		d.logf("Fetching PR details for repo")
+		fetchMsg := msg.(*protocol.FetchPRDetailsMessage)
+		go func() {
+			updatedPRs, err := d.fetchPRDetailsForRepo(fetchMsg.Repo)
+			result := protocol.WebSocketEvent{
+				Event:   protocol.EventFetchPRDetailsResult,
+				Success: protocol.Ptr(err == nil),
+			}
+			if err != nil {
+				result.Error = protocol.Ptr(err.Error())
+				d.logf("Fetch PR details failed: %v", err)
+			} else {
+				result.Prs = protocol.PRsToValues(updatedPRs)
+				d.broadcastPRs()
+				d.logf("Fetch PR details succeeded")
+			}
+			d.sendToClient(client, result)
+		}()
+
 	case protocol.CmdClearSessions:
 		d.logf("Clearing all sessions")
 		d.store.ClearSessions()
