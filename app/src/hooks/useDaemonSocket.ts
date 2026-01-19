@@ -60,10 +60,16 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '19';
+const PROTOCOL_VERSION = '20';
 
 interface PRActionResult {
   success: boolean;
+  error?: string;
+}
+
+interface FetchPRDetailsResult {
+  success: boolean;
+  prs?: DaemonPR[];
   error?: string;
 }
 
@@ -455,6 +461,19 @@ export function useDaemonSocket({
                 pending.resolve({ success: true });
               } else {
                 pending.reject(new Error(data.error || 'Refresh failed'));
+              }
+            }
+            break;
+          }
+
+          case 'fetch_pr_details_result': {
+            const pending = pendingActionsRef.current.get('fetch_pr_details');
+            if (pending) {
+              pendingActionsRef.current.delete('fetch_pr_details');
+              if (data.success) {
+                pending.resolve({ success: true, prs: data.prs || [] });
+              } else {
+                pending.reject(new Error(data.error || 'Fetch PR details failed'));
               }
             }
             break;
@@ -1095,6 +1114,29 @@ export function useDaemonSocket({
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
           reject(new Error('Refresh timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  // Fetch PR details (branch, status) for a repo
+  const sendFetchPRDetails = useCallback((repo: string): Promise<FetchPRDetailsResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'fetch_pr_details';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'fetch_pr_details', repo }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Fetch PR details timed out'));
         }
       }, 30000);
     });
@@ -1898,6 +1940,7 @@ export function useDaemonSocket({
     sendMutePR,
     sendMuteRepo,
     sendRefreshPRs,
+    sendFetchPRDetails,
     sendClearSessions,
     sendUnregisterSession,
     sendPRVisited,

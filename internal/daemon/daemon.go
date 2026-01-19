@@ -728,14 +728,13 @@ func (d *Daemon) handleQueryRepos(conn net.Conn, msg *protocol.QueryReposMessage
 	json.NewEncoder(conn).Encode(resp)
 }
 
-func (d *Daemon) handleFetchPRDetails(conn net.Conn, msg *protocol.FetchPRDetailsMessage) {
+func (d *Daemon) fetchPRDetailsForRepo(repo string) ([]*protocol.PR, error) {
 	if d.ghClient == nil || !d.ghClient.IsAvailable() {
-		d.sendError(conn, "GitHub client not available")
-		return
+		return nil, fmt.Errorf("GitHub client not available")
 	}
 
 	// Get all PRs for this repo
-	prs := d.store.ListPRsByRepo(msg.Repo)
+	prs := d.store.ListPRsByRepo(repo)
 
 	// Fetch details for each PR that needs refresh
 	for _, pr := range prs {
@@ -750,7 +749,17 @@ func (d *Daemon) handleFetchPRDetails(conn net.Conn, msg *protocol.FetchPRDetail
 	}
 
 	// Return updated PRs
-	updatedPRs := d.store.ListPRsByRepo(msg.Repo)
+	updatedPRs := d.store.ListPRsByRepo(repo)
+	return updatedPRs, nil
+}
+
+func (d *Daemon) handleFetchPRDetails(conn net.Conn, msg *protocol.FetchPRDetailsMessage) {
+	updatedPRs, err := d.fetchPRDetailsForRepo(msg.Repo)
+	if err != nil {
+		d.sendError(conn, err.Error())
+		return
+	}
+
 	resp := protocol.Response{
 		Ok:  true,
 		Prs: protocol.PRsToValues(updatedPRs),
