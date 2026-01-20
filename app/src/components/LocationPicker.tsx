@@ -86,7 +86,7 @@ export function LocationPicker({
     homePath: '/Users',
     refreshing: false,
     hasSelectedSinceTab: false, // Start false - user hasn't navigated yet
-    agent: 'codex',
+    agent: 'claude',
     resumeEnabled: false,
   });
 

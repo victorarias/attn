@@ -405,6 +405,11 @@
   color: #888;
   text-decoration: none;
   overflow: hidden;
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
 }
 
 .pr-row:hover {
@@ -414,7 +419,6 @@
 .pr-row:hover .pr-link,
 .pr-row:hover .pr-link * {
   color: #e8e8e8;
-  pointer-events: none; /* Allow action buttons to receive clicks */
 }
 
 .pr-role {

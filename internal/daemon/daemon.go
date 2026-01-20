@@ -9,7 +9,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -100,6 +102,12 @@ type Daemon struct {
 func New(socketPath string) *Daemon {
 	logger, _ := logging.New(logging.DefaultLogPath())
 
+	if runtime.GOOS == "darwin" {
+		if err := updatePathFromHelper(); err != nil {
+			logger.Infof("path_helper failed: %v", err)
+		}
+	}
+
 	// Wire up classifier logger to daemon logger
 	classifier.SetLogger(func(format string, args ...interface{}) {
 		logger.Infof(format, args...)
@@ -140,6 +148,63 @@ func New(socketPath string) *Daemon {
 		ghClient:   ghClient,
 		repoCaches: make(map[string]*repoCache),
 	}
+}
+
+func updatePathFromHelper() error {
+	cmd := exec.Command("/usr/libexec/path_helper", "-s")
+	output, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	helperPath := extractPathFromShellOutput(string(output))
+	if helperPath == "" {
+		return fmt.Errorf("path_helper output missing PATH")
+	}
+
+	currentPath := os.Getenv("PATH")
+	if currentPath == "" {
+		return os.Setenv("PATH", helperPath)
+	}
+
+	mergedPath := mergePaths(currentPath, helperPath)
+	return os.Setenv("PATH", mergedPath)
+}
+
+func extractPathFromShellOutput(output string) string {
+	// path_helper -s outputs: PATH="..."; export PATH;
+	const prefix = "PATH=\""
+	start := strings.Index(output, prefix)
+	if start == -1 {
+		return ""
+	}
+	start += len(prefix)
+	end := strings.Index(output[start:], "\"")
+	if end == -1 {
+		return ""
+	}
+	return output[start : start+end]
+}
+
+func mergePaths(primary, secondary string) string {
+	seen := make(map[string]bool)
+	merged := make([]string, 0)
+
+	addParts := func(path string) {
+		for _, part := range strings.Split(path, ":") {
+			if part == "" {
+				continue
+			}
+			if !seen[part] {
+				seen[part] = true
+				merged = append(merged, part)
+			}
+		}
+	}
+
+	addParts(primary)
+	addParts(secondary)
+	return strings.Join(merged, ":")
 }
 
 // NewForTesting creates a daemon with a non-persistent store for tests
