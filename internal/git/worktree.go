@@ -78,7 +78,11 @@ func CreateWorktreeFromPoint(repoDir, branch, path, startingFrom string) error {
 // CreateWorktreeFromBranch creates a worktree from an existing branch
 func CreateWorktreeFromBranch(repoDir, branch, path string) error {
 	cmd := exec.Command("git", "worktree", "add", ExpandPath(path), branch)
-	cmd.Dir = ExpandPath(repoDir)
+	resolvedDir, err := ResolveRepoDir(repoDir)
+	if err != nil {
+		return err
+	}
+	cmd.Dir = resolvedDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree add failed: %s", out)
 	}
@@ -97,7 +101,11 @@ func CreateWorktreeFromRemoteBranch(repoDir, remoteBranch, path string) (string,
 
 	// git worktree add <path> -b <local-branch> <remote-branch>
 	cmd := exec.Command("git", "worktree", "add", ExpandPath(path), "-b", localBranch, remoteBranch)
-	cmd.Dir = ExpandPath(repoDir)
+	resolvedDir, err := ResolveRepoDir(repoDir)
+	if err != nil {
+		return "", err
+	}
+	cmd.Dir = resolvedDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s", out)
 	}

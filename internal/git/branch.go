@@ -187,9 +187,17 @@ func GetCurrentBranch(repoDir string) (string, error) {
 // FetchRemotes fetches all remotes with prune.
 func FetchRemotes(repoDir string) error {
 	cmd := exec.Command("git", "fetch", "--all", "--prune")
-	cmd.Dir = ExpandPath(repoDir)
+	resolvedDir, err := ResolveRepoDir(repoDir)
+	if err != nil {
+		return err
+	}
+	cmd.Dir = resolvedDir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git fetch failed: %s", out)
+		outStr := strings.TrimSpace(string(out))
+		if outStr == "" {
+			return fmt.Errorf("git fetch failed: %w", err)
+		}
+		return fmt.Errorf("git fetch failed: %s (%w)", outStr, err)
 	}
 	return nil
 }

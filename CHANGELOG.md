@@ -14,6 +14,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Open PR Worktrees**: Fetch missing PR branch details on demand before creating worktrees
+- **macOS PATH Recovery**: Rebuild PATH via `path_helper` for Finder-launched daemon so `gh`/`git` are available
+- **Fetch Remotes Errors**: Surface underlying git error details when fetch fails
+- **Projects Directory Fallback**: Resolve repos one level deeper under the projects directory when needed
+- **Repo Safety Checks**: Validate git worktree status and prefer matches whose `origin` repo name matches the PR repo
 
 ---
 
