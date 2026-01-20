@@ -765,7 +765,7 @@ function AppContent({
     async (pr: DaemonPR) => {
       console.log(`[App] Open PR requested: ${pr.repo}#${pr.number} - ${pr.title}`);
 
-      const defaultAgent = (settings.new_session_agent as SessionAgent) || 'codex';
+      const defaultAgent = (settings.new_session_agent as SessionAgent) || 'claude';
       const result = await openPR(pr, defaultAgent);
       if (result.success) {
         console.log(`[App] Worktree created at ${result.worktreePath}`);

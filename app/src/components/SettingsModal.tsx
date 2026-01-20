@@ -26,14 +26,14 @@ export function SettingsModal({
   const [claudeExecutable, setClaudeExecutable] = useState(settings.claude_executable || '');
   const [codexExecutable, setCodexExecutable] = useState(settings.codex_executable || '');
   const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
-  const [defaultAgent, setDefaultAgent] = useState<SessionAgent>((settings.new_session_agent as SessionAgent) || 'codex');
+  const [defaultAgent, setDefaultAgent] = useState<SessionAgent>((settings.new_session_agent as SessionAgent) || 'claude');
 
   // Sync with settings when modal opens
   const actualProjectsDir = settings.projects_directory || '';
   const actualClaudeExecutable = settings.claude_executable || '';
   const actualCodexExecutable = settings.codex_executable || '';
   const actualEditorExecutable = settings.editor_executable || '';
-  const actualDefaultAgent = (settings.new_session_agent as SessionAgent) || 'codex';
+  const actualDefaultAgent = (settings.new_session_agent as SessionAgent) || 'claude';
 
   useEffect(() => {
     if (!isOpen) return;

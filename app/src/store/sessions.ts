@@ -155,7 +155,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   createSession: async (label: string, cwd: string, providedId?: string, agent?: SessionAgent) => {
     // Use provided ID or generate new one
     const id = providedId || crypto.randomUUID();
-    const resolvedAgent: SessionAgent = agent ?? 'codex';
+    const resolvedAgent: SessionAgent = agent ?? 'claude';
     const session: Session = {
       id,
       label,

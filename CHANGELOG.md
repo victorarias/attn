@@ -12,6 +12,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **PRs Panel Harness**: Playwright test harness for the dashboard PRs panel
 - **PRs Harness Scenarios**: Additional test cases for PR action wiring and error flows (fetch details, missing projects dir, fetch remotes, worktree creation)
 - **Default Session Agent Setting**: Configure Codex/Claude in Settings and use it for PR opens
+- **Claude Default Agent**: Default to Claude when no session agent setting exists
 
 ### Fixed
 - **Open PR Worktrees**: Fetch missing PR branch details on demand before creating worktrees
