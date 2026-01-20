@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import type { DaemonPR, DaemonSettings } from './useDaemonSocket';
+import type { SessionAgent } from '../types/sessionAgent';
 import { getRepoName } from '../utils/repo';
 
 export type OpenPRErrorKind =
@@ -28,7 +29,7 @@ export interface UseOpenPRDeps {
     repoPath: string,
     branch: string
   ) => Promise<{ success: boolean; path?: string; error?: string }>;
-  createSession: (label: string, cwd: string) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent) => Promise<string>;
 }
 
 export function useOpenPR({
@@ -38,7 +39,7 @@ export function useOpenPR({
   sendCreateWorktreeFromBranch,
   createSession,
 }: UseOpenPRDeps) {
-  return useCallback(async (pr: DaemonPR): Promise<OpenPRResult> => {
+  return useCallback(async (pr: DaemonPR, agent?: SessionAgent): Promise<OpenPRResult> => {
     const projectsDir = settings.projects_directory;
     if (!projectsDir) {
       return { success: false, error: { kind: 'missing_projects_directory' } };
@@ -110,7 +111,7 @@ export function useOpenPR({
     const label = `${repoName}#${pr.number}`;
     let sessionId: string;
     try {
-      sessionId = await createSession(label, worktreeResult.path);
+      sessionId = await createSession(label, worktreeResult.path, undefined, agent);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { success: false, error: { kind: 'create_session_failed', message } };

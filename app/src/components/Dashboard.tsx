@@ -8,6 +8,7 @@ import { StateIndicator } from './StateIndicator';
 import { useDaemonContext } from '../contexts/DaemonContext';
 import { useDaemonStore } from '../store/daemonSessions';
 import { getRepoName } from '../utils/repo';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import './Dashboard.css';
 
 interface DashboardProps {
@@ -333,12 +334,16 @@ export function Dashboard({
                             className={`pr-row ${fadingPRs.has(pr.id) ? 'fading-out' : ''} ${isApprovedNoChanges ? 'approved' : ''}`}
                             data-testid="pr-card"
                           >
-                            <a
-                              href={pr.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              type="button"
                               className="pr-link"
-                              onClick={() => sendPRVisited(pr.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                sendPRVisited(pr.id);
+                                openUrl(pr.url).catch((err) =>
+                                  console.error('[Dashboard] Failed to open PR URL:', err)
+                                );
+                              }}
                             >
                               <span className={`pr-role ${pr.role}`}>
                                 {pr.role === 'reviewer' ? '👀' : '✏️'}
@@ -348,7 +353,7 @@ export function Dashboard({
                               {pr.role === 'author' && (
                                 <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
                               )}
-                            </a>
+                            </button>
                             <div className="pr-badges">
                               {pr.has_new_changes && (
                                 <span className="badge-changes" title="New commits/comments since your last visit">updated</span>

@@ -2,6 +2,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { DaemonSettings } from '../hooks/useDaemonSocket';
+import type { SessionAgent } from '../types/sessionAgent';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -25,12 +26,14 @@ export function SettingsModal({
   const [claudeExecutable, setClaudeExecutable] = useState(settings.claude_executable || '');
   const [codexExecutable, setCodexExecutable] = useState(settings.codex_executable || '');
   const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
+  const [defaultAgent, setDefaultAgent] = useState<SessionAgent>((settings.new_session_agent as SessionAgent) || 'codex');
 
   // Sync with settings when modal opens
   const actualProjectsDir = settings.projects_directory || '';
   const actualClaudeExecutable = settings.claude_executable || '';
   const actualCodexExecutable = settings.codex_executable || '';
   const actualEditorExecutable = settings.editor_executable || '';
+  const actualDefaultAgent = (settings.new_session_agent as SessionAgent) || 'codex';
 
   useEffect(() => {
     if (!isOpen) return;
@@ -38,7 +41,8 @@ export function SettingsModal({
     setClaudeExecutable(actualClaudeExecutable);
     setCodexExecutable(actualCodexExecutable);
     setEditorExecutable(actualEditorExecutable);
-  }, [isOpen, actualProjectsDir, actualClaudeExecutable, actualCodexExecutable, actualEditorExecutable]);
+    setDefaultAgent(actualDefaultAgent);
+  }, [isOpen, actualProjectsDir, actualClaudeExecutable, actualCodexExecutable, actualEditorExecutable, actualDefaultAgent]);
 
   const handleBrowse = useCallback(async () => {
     const selected = await open({
@@ -124,6 +128,13 @@ export function SettingsModal({
     }
   }, [editorExecutable, actualEditorExecutable, onSetSetting]);
 
+  const handleDefaultAgentChange = useCallback((agent: SessionAgent) => {
+    setDefaultAgent(agent);
+    if (agent !== actualDefaultAgent) {
+      onSetSetting('new_session_agent', agent);
+    }
+  }, [actualDefaultAgent, onSetSetting]);
+
   if (!isOpen) return null;
 
   return (
@@ -198,6 +209,31 @@ export function SettingsModal({
                 placeholder="$EDITOR"
                 className="settings-input"
               />
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <h3>Default Session Agent</h3>
+            <p className="settings-description">
+              Used for new sessions and when opening PRs. You can override per session in the new session dialog.
+            </p>
+            <div className="settings-agent-toggle" role="radiogroup" aria-label="Default session agent">
+              <button
+                type="button"
+                className={`agent-option ${defaultAgent === 'codex' ? 'active' : ''}`}
+                onClick={() => handleDefaultAgentChange('codex')}
+                aria-checked={defaultAgent === 'codex'}
+              >
+                Codex
+              </button>
+              <button
+                type="button"
+                className={`agent-option ${defaultAgent === 'claude' ? 'active' : ''}`}
+                onClick={() => handleDefaultAgentChange('claude')}
+                aria-checked={defaultAgent === 'claude'}
+              >
+                Claude
+              </button>
             </div>
           </div>
 

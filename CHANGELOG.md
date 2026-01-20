@@ -11,6 +11,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **PRs Panel Harness**: Playwright test harness for the dashboard PRs panel
 - **PRs Harness Scenarios**: Additional test cases for PR action wiring and error flows (fetch details, missing projects dir, fetch remotes, worktree creation)
+- **Default Session Agent Setting**: Configure Codex/Claude in Settings and use it for PR opens
 
 ### Fixed
 - **Open PR Worktrees**: Fetch missing PR branch details on demand before creating worktrees
@@ -18,6 +19,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Fetch Remotes Errors**: Surface underlying git error details when fetch fails
 - **Projects Directory Fallback**: Resolve repos one level deeper under the projects directory when needed
 - **Repo Safety Checks**: Validate git worktree status and prefer matches whose `origin` repo name matches the PR repo
+- **PR Title Links**: Open PR URLs from the dashboard title click
+- **PTY Mock Detection**: Use Tauri runtime detection to avoid accidental mock PTY sessions
 
 ---
 

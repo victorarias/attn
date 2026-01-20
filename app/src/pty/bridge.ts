@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 export interface PtySpawnArgs {
@@ -29,7 +29,7 @@ const mockSessions = new Set<string>();
 const mockEnabled = (): boolean => {
   if (import.meta.env.VITE_MOCK_PTY === '1') return true;
   if (typeof window === 'undefined') return true;
-  return !(window as unknown as { __TAURI__?: unknown }).__TAURI__;
+  return !isTauri();
 };
 
 const emitMock = (payload: PtyEventPayload) => {

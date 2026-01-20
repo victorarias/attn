@@ -171,6 +171,38 @@
   margin-bottom: 0;
 }
 
+.settings-agent-toggle {
+  display: inline-flex;
+  gap: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 6px;
+}
+
+.settings-agent-toggle .agent-option {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.settings-agent-toggle .agent-option:hover {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-agent-toggle .agent-option.active {
+  color: #0b0f1c;
+  background: linear-gradient(135deg, #7dd3fc, #38bdf8);
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 8px 16px rgba(56, 189, 248, 0.25);
+}
+
 .settings-label {
   font-size: 12px;
   color: #bbb;
