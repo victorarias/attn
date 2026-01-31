@@ -89,6 +89,24 @@ describe('usePRsNeedingAttention', () => {
     expect(result.current.activePRs[0].id).toBe('pr-1');
   });
 
+  it('filters out author-muted PRs', () => {
+    vi.mocked(useDaemonStore).mockReturnValue({
+      isRepoMuted: () => false,
+      isAuthorMuted: (author: string) => author === 'muted-author',
+      repoStates: [],
+      authorStates: [],
+    } as ReturnType<typeof useDaemonStore>);
+
+    const prs = [
+      createPR({ id: 'pr-1', author: 'active-author' }),
+      createPR({ id: 'pr-2', author: 'muted-author' }),
+    ];
+    const { result } = renderHook(() => usePRsNeedingAttention(prs));
+
+    expect(result.current.activePRs).toHaveLength(1);
+    expect(result.current.activePRs[0].id).toBe('pr-1');
+  });
+
   it('filters out hidden PRs', () => {
     const prs = [
       createPR({ id: 'pr-1' }),
