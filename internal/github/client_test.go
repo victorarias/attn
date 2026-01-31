@@ -26,6 +26,8 @@ func TestNewClient_DefaultsToGitHubAPI(t *testing.T) {
 	// Use a real-looking token (not "test-token") since test-token is blocked
 	// when targeting real GitHub API
 	os.Setenv("GITHUB_TOKEN", "ghp_xxxxxxxxxxxx")
+	os.Unsetenv("GITHUB_API_URL")
+	os.Unsetenv("GITHUB_BASE_URL")
 	defer os.Unsetenv("GITHUB_TOKEN")
 
 	client, err := NewClient("")
@@ -40,6 +42,8 @@ func TestNewClient_DefaultsToGitHubAPI(t *testing.T) {
 
 func TestNewClient_BlocksTestTokenWithRealAPI(t *testing.T) {
 	os.Setenv("GITHUB_TOKEN", "test-token")
+	os.Unsetenv("GITHUB_API_URL")
+	os.Unsetenv("GITHUB_BASE_URL")
 	defer os.Unsetenv("GITHUB_TOKEN")
 
 	// Should fail because test-token + real API is blocked
