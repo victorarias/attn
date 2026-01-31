@@ -60,12 +60,18 @@ export function Dashboard({
   const [fadingPRs, setFadingPRs] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { sendMuteRepo, sendMuteAuthor, sendPRVisited } = useDaemonContext();
-  const { repoStates } = useDaemonStore();
+  const { repoStates, authorStates } = useDaemonStore();
 
   // Get list of muted repos for settings modal
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates]
+  );
+
+  // Get list of muted authors for settings modal
+  const mutedAuthors = useMemo(() =>
+    authorStates.filter(a => a.muted).map(a => a.author),
+    [authorStates]
   );
 
 
@@ -366,22 +372,11 @@ export function Dashboard({
                                 <span className={`ci-status ${pr.ci_status}`} title={`CI ${pr.ci_status}`}></span>
                               )}
                             </div>
-                            {pr.author && (
-                              <button
-                                className="author-mute-btn"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  sendMuteAuthor(pr.author);
-                                }}
-                                title={`Mute all PRs by ${pr.author}`}
-                              >
-                                👤 {pr.author}
-                              </button>
-                            )}
                             <PRActions
                               repo={pr.repo}
                               number={pr.number}
                               prId={pr.id}
+                              author={pr.author}
                               onActionComplete={handleActionComplete}
                               onOpen={onOpenPR ? () => onOpenPR(pr) : undefined}
                             />
@@ -408,6 +403,8 @@ export function Dashboard({
         onClose={() => setSettingsOpen(false)}
         mutedRepos={mutedRepos}
         onUnmuteRepo={sendMuteRepo}
+        mutedAuthors={mutedAuthors}
+        onUnmuteAuthor={sendMuteAuthor}
         settings={settings}
         onSetSetting={onSetSetting}
       />

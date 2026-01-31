@@ -469,8 +469,8 @@
   outline-offset: 1px;
 }
 
-/* Author mute button (per-PR) */
-.author-mute-btn {
+/* Author mute button (per-PR) - hidden until row hover */
+.pr-row .author-mute-btn {
   background: #252528;
   border: 1px solid #3a3a3d;
   border-radius: 4px;
@@ -478,9 +478,15 @@
   font-size: var(--font-size-xs);
   padding: 2px 6px;
   cursor: pointer;
-  transition: all 150ms;
+  transition: opacity 150ms ease-out;
   margin-left: auto;
   white-space: nowrap;
+  opacity: 0;
+}
+
+.pr-row:hover .author-mute-btn,
+.pr-row:focus-within .author-mute-btn {
+  opacity: 1;
 }
 
 .author-mute-btn:hover {

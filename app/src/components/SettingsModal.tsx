@@ -10,6 +10,8 @@ interface SettingsModalProps {
   onClose: () => void;
   mutedRepos: string[];
   onUnmuteRepo: (repo: string) => void;
+  mutedAuthors: string[];
+  onUnmuteAuthor: (author: string) => void;
   settings: DaemonSettings;
   onSetSetting: (key: string, value: string) => void;
 }
@@ -19,6 +21,8 @@ export function SettingsModal({
   onClose,
   mutedRepos,
   onUnmuteRepo,
+  mutedAuthors,
+  onUnmuteAuthor,
   settings,
   onSetSetting,
 }: SettingsModalProps) {
@@ -249,6 +253,27 @@ export function SettingsModal({
                     <button
                       className="unmute-btn"
                       onClick={() => onUnmuteRepo(repo)}
+                    >
+                      Unmute
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="settings-section">
+            <h3>Muted Authors</h3>
+            {mutedAuthors.length === 0 ? (
+              <p className="settings-empty">No muted authors</p>
+            ) : (
+              <ul className="muted-repos-list">
+                {mutedAuthors.map(author => (
+                  <li key={author} className="muted-repo-item">
+                    <span className="muted-repo-name">👤 {author}</span>
+                    <button
+                      className="unmute-btn"
+                      onClick={() => onUnmuteAuthor(author)}
                     >
                       Unmute
                     </button>

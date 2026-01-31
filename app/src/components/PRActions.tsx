@@ -14,14 +14,15 @@ interface PRActionsProps {
   repo: string;
   number: number;
   prId: string;
+  author?: string;
   compact?: boolean;
   onMuted?: () => void;
   onActionComplete?: (prId: string, action: 'approve' | 'merge') => void;
   onOpen?: () => void;
 }
 
-export function PRActions({ repo, number, prId, compact = false, onMuted, onActionComplete, onOpen }: PRActionsProps) {
-  const { sendPRAction, sendMutePR } = useDaemonContext();
+export function PRActions({ repo, number, prId, author, compact = false, onMuted, onActionComplete, onOpen }: PRActionsProps) {
+  const { sendPRAction, sendMutePR, sendMuteAuthor } = useDaemonContext();
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
   const [approveState, setApproveState] = useState<ActionState>({ loading: false, success: false, error: null });
   const [mergeState, setMergeState] = useState<ActionState>({ loading: false, success: false, error: null });
@@ -147,6 +148,21 @@ export function PRActions({ repo, number, prId, compact = false, onMuted, onActi
         >
           {compact ? '⊘' : 'Mute'}
         </button>
+        {author && !compact && (
+          <button
+            className="pr-action-btn author-btn"
+            data-testid="mute-author-button"
+            data-action="mute-author"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              sendMuteAuthor(author);
+            }}
+            title={`Mute all PRs by ${author}`}
+          >
+            👤 {author}
+          </button>
+        )}
       </div>
 
       {showMergeConfirm && createPortal(
