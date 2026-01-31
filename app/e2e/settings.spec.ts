@@ -104,7 +104,7 @@ test.describe('Settings', () => {
     await expect(modal).toBeVisible({ timeout: 2000 });
 
     // Muted repo should appear in list
-    const mutedRepoItem = modal.locator('.muted-repo-item').filter({ hasText: 'test/settings-repo' });
+    const mutedRepoItem = modal.locator('.muted-item').filter({ hasText: 'test/settings-repo' });
     await expect(mutedRepoItem).toBeVisible();
   });
 
@@ -135,7 +135,7 @@ test.describe('Settings', () => {
     await expect(modal).toBeVisible({ timeout: 2000 });
 
     // Click unmute button
-    const mutedRepoItem = modal.locator('.muted-repo-item').filter({ hasText: 'test/unmute-repo' });
+    const mutedRepoItem = modal.locator('.muted-item').filter({ hasText: 'test/unmute-repo' });
     await mutedRepoItem.locator('.unmute-btn').click();
 
     // Close modal
