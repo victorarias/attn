@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AuthorState, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AuthorState, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -67,7 +67,6 @@
 //   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
 //   const pRRole = Convert.toPRRole(json);
 //   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
-//   const queryAuthorsMessage = Convert.toQueryAuthorsMessage(json);
 //   const queryMessage = Convert.toQueryMessage(json);
 //   const queryPRsMessage = Convert.toQueryPRsMessage(json);
 //   const queryReposMessage = Convert.toQueryReposMessage(json);
@@ -966,16 +965,6 @@ export interface PRVisitedMessage {
 
 export enum PRVisitedMessageCmd {
     PRVisited = "pr_visited",
-}
-
-export interface QueryAuthorsMessage {
-    cmd:     QueryAuthorsMessageCmd;
-    filter?: string;
-    [property: string]: any;
-}
-
-export enum QueryAuthorsMessageCmd {
-    QueryAuthors = "query_authors",
 }
 
 export interface QueryMessage {
@@ -2021,14 +2010,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("PRVisitedMessage")), null, 2);
     }
 
-    public static toQueryAuthorsMessage(json: string): QueryAuthorsMessage {
-        return cast(JSON.parse(json), r("QueryAuthorsMessage"));
-    }
-
-    public static queryAuthorsMessageToJson(value: QueryAuthorsMessage): string {
-        return JSON.stringify(uncast(value, r("QueryAuthorsMessage")), null, 2);
-    }
-
     public static toQueryMessage(json: string): QueryMessage {
         return cast(JSON.parse(json), r("QueryMessage"));
     }
@@ -3001,10 +2982,6 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("PRVisitedMessageCmd") },
         { json: "id", js: "id", typ: "" },
     ], "any"),
-    "QueryAuthorsMessage": o([
-        { json: "cmd", js: "cmd", typ: r("QueryAuthorsMessageCmd") },
-        { json: "filter", js: "filter", typ: u(undefined, "") },
-    ], "any"),
     "QueryMessage": o([
         { json: "cmd", js: "cmd", typ: r("QueryMessageCmd") },
         { json: "filter", js: "filter", typ: u(undefined, "") },
@@ -3480,9 +3457,6 @@ const typeMap: any = {
     ],
     "PRVisitedMessageCmd": [
         "pr_visited",
-    ],
-    "QueryAuthorsMessageCmd": [
-        "query_authors",
     ],
     "QueryMessageCmd": [
         "query",

@@ -836,14 +836,6 @@ type PRVisitedMessage struct {
 	ID string `json:"id"`
 }
 
-type QueryAuthorsMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Filter corresponds to the JSON schema field "filter".
-	Filter *string `json:"filter,omitempty"`
-}
-
 type QueryMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`

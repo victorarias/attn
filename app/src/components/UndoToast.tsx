@@ -7,14 +7,14 @@ export function UndoToast() {
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState('');
   const [countdown, setCountdown] = useState(5);
-  const { lastMuted, clearLastMuted, sendMutePR, sendMuteRepo } = useDaemonContext();
+  const { lastMuted, clearLastMuted, sendMutePR, sendMuteRepo, sendMuteAuthor } = useDaemonContext();
   const lastTimestampRef = useRef<number | null>(null);
 
   // Watch for new mutes by tracking the lastMuted timestamp
   useEffect(() => {
     if (lastMuted && lastMuted.timestamp !== lastTimestampRef.current) {
       lastTimestampRef.current = lastMuted.timestamp;
-      const itemType = lastMuted.type === 'pr' ? 'PR' : 'Repository';
+      const itemType = lastMuted.type === 'pr' ? 'PR' : lastMuted.type === 'repo' ? 'Repository' : 'Author';
       setMessage(`${itemType} muted`);
       setVisible(true);
       setCountdown(5);
@@ -44,13 +44,15 @@ export function UndoToast() {
       // Toggle the mute back (unmute)
       if (lastMuted.type === 'pr') {
         sendMutePR(lastMuted.id);
-      } else {
+      } else if (lastMuted.type === 'repo') {
         sendMuteRepo(lastMuted.id);
+      } else {
+        sendMuteAuthor(lastMuted.id);
       }
       clearLastMuted();
       setVisible(false);
     }
-  }, [lastMuted, sendMutePR, sendMuteRepo, clearLastMuted]);
+  }, [lastMuted, sendMutePR, sendMuteRepo, sendMuteAuthor, clearLastMuted]);
 
   if (!visible) return null;
 

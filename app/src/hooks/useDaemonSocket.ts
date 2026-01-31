@@ -256,7 +256,7 @@ interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
-  onAuthorsUpdate?: (authors: AuthorState[]) => void;
+  onAuthorsUpdate: (authors: AuthorState[]) => void;
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
   onSettingsUpdate?: (settings: DaemonSettings) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
@@ -384,7 +384,7 @@ export function useDaemonSocket({
             }
             if (data.authors) {
               authorsRef.current = data.authors;
-              onAuthorsUpdate?.(data.authors);
+              onAuthorsUpdate(data.authors);
             }
             if (data.settings) {
               settingsRef.current = data.settings;
@@ -443,7 +443,7 @@ export function useDaemonSocket({
           case 'authors_updated':
             if (data.authors) {
               authorsRef.current = data.authors;
-              onAuthorsUpdate?.(data.authors);
+              onAuthorsUpdate(data.authors);
             }
             break;
 
@@ -1128,7 +1128,7 @@ export function useDaemonSocket({
       updatedAuthors = [...authorsRef.current, { author, muted: true }];
     }
     authorsRef.current = updatedAuthors;
-    onAuthorsUpdate?.(updatedAuthors);
+    onAuthorsUpdate(updatedAuthors);
 
     ws.send(JSON.stringify({ cmd: 'mute_author', author }));
   }, [onAuthorsUpdate]);
