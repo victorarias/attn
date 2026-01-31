@@ -809,8 +809,8 @@ func (s *Store) ListRepoStates() []*protocol.RepoState {
 	return result
 }
 
-// GetOwnerState returns the state for an owner, or nil if not set
-func (s *Store) GetOwnerState(owner string) *protocol.OwnerState {
+// GetAuthorState returns the state for a PR author, or nil if not set
+func (s *Store) GetAuthorState(author string) *protocol.AuthorState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -818,11 +818,11 @@ func (s *Store) GetOwnerState(owner string) *protocol.OwnerState {
 		return nil
 	}
 
-	var state protocol.OwnerState
+	var state protocol.AuthorState
 	var muted int
 
-	err := s.db.QueryRow("SELECT owner, muted FROM owners WHERE owner = ?", owner).Scan(
-		&state.Owner, &muted,
+	err := s.db.QueryRow("SELECT author, muted FROM authors WHERE author = ?", author).Scan(
+		&state.Author, &muted,
 	)
 	if err != nil {
 		return nil
@@ -832,8 +832,8 @@ func (s *Store) GetOwnerState(owner string) *protocol.OwnerState {
 	return &state
 }
 
-// ToggleMuteOwner toggles an owner's muted state
-func (s *Store) ToggleMuteOwner(owner string) {
+// ToggleMuteAuthor toggles a PR author's muted state
+func (s *Store) ToggleMuteAuthor(author string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -842,12 +842,12 @@ func (s *Store) ToggleMuteOwner(owner string) {
 	}
 
 	// Insert if not exists, then toggle
-	s.execLog("INSERT OR IGNORE INTO owners (owner, muted) VALUES (?, 0)", owner)
-	s.execLog("UPDATE owners SET muted = NOT muted WHERE owner = ?", owner)
+	s.execLog("INSERT OR IGNORE INTO authors (author, muted) VALUES (?, 0)", author)
+	s.execLog("UPDATE authors SET muted = NOT muted WHERE author = ?", author)
 }
 
-// ListOwnerStates returns all owner states
-func (s *Store) ListOwnerStates() []*protocol.OwnerState {
+// ListAuthorStates returns all author states
+func (s *Store) ListAuthorStates() []*protocol.AuthorState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -855,18 +855,18 @@ func (s *Store) ListOwnerStates() []*protocol.OwnerState {
 		return nil
 	}
 
-	rows, err := s.db.Query("SELECT owner, muted FROM owners")
+	rows, err := s.db.Query("SELECT author, muted FROM authors")
 	if err != nil {
 		return nil
 	}
 	defer rows.Close()
 
-	var result []*protocol.OwnerState
+	var result []*protocol.AuthorState
 	for rows.Next() {
-		var state protocol.OwnerState
+		var state protocol.AuthorState
 		var muted int
 
-		err := rows.Scan(&state.Owner, &muted)
+		err := rows.Scan(&state.Author, &muted)
 		if err != nil {
 			continue
 		}

@@ -209,7 +209,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Sessions:        protocol.SessionsToValues(d.store.List("")),
 		Prs:             protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:           protocol.RepoStatesToValues(d.store.ListRepoStates()),
-		Owners:          protocol.OwnerStatesToValues(d.store.ListOwnerStates()),
+		Authors:         protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
 		Settings:        settings,
 	}
 	data, err := json.Marshal(event)
@@ -394,10 +394,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		}
 		d.broadcastRepoStates()
 
-	case protocol.CmdMuteOwner:
-		muteMsg := msg.(*protocol.MuteOwnerMessage)
-		d.store.ToggleMuteOwner(muteMsg.Owner)
-		d.broadcastOwnerStates()
+	case protocol.CmdMuteAuthor:
+		muteMsg := msg.(*protocol.MuteAuthorMessage)
+		d.store.ToggleMuteAuthor(muteMsg.Author)
+		d.broadcastAuthorStates()
 
 	case protocol.CmdRefreshPRs:
 		d.logf("Refreshing PRs on request")
@@ -675,11 +675,11 @@ func (d *Daemon) broadcastRepoStates() {
 	})
 }
 
-// broadcastOwnerStates sends updated owner states to all WebSocket clients
-func (d *Daemon) broadcastOwnerStates() {
+// broadcastAuthorStates sends updated author states to all WebSocket clients
+func (d *Daemon) broadcastAuthorStates() {
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:  protocol.EventOwnersUpdated,
-		Owners: protocol.OwnerStatesToValues(d.store.ListOwnerStates()),
+		Event:   protocol.EventAuthorsUpdated,
+		Authors: protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
 	})
 }
 

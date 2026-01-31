@@ -469,30 +469,26 @@
   outline-offset: 1px;
 }
 
-/* Repo actions container */
-.repo-actions {
-  display: flex;
-  gap: 4px;
-}
-
-/* Owner mute button */
-.owner-mute-btn {
+/* Author mute button (per-PR) */
+.author-mute-btn {
   background: #252528;
   border: 1px solid #3a3a3d;
   border-radius: 4px;
   color: #888;
-  font-size: var(--font-size-sm);
-  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+  padding: 2px 6px;
   cursor: pointer;
   transition: all 150ms;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
-.owner-mute-btn:hover {
+.author-mute-btn:hover {
   background: rgba(85, 85, 85, 0.3);
   color: #bbb;
 }
 
-.owner-mute-btn:focus {
+.author-mute-btn:focus {
   outline: 2px solid #ff6b35;
   outline-offset: 1px;
 }

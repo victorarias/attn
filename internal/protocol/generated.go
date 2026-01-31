@@ -47,6 +47,14 @@ type ApprovePRMessage struct {
 	Repo string `json:"repo"`
 }
 
+type AuthorState struct {
+	// Author corresponds to the JSON schema field "author".
+	Author string `json:"author"`
+
+	// Muted corresponds to the JSON schema field "muted".
+	Muted bool `json:"muted"`
+}
+
 type Branch struct {
 	// CommitHash corresponds to the JSON schema field "commit_hash".
 	CommitHash *string `json:"commit_hash,omitempty"`
@@ -685,6 +693,14 @@ type MergePRMessage struct {
 	Repo string `json:"repo"`
 }
 
+type MuteAuthorMessage struct {
+	// Author corresponds to the JSON schema field "author".
+	Author string `json:"author"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
 type MuteMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -728,6 +744,9 @@ type OwnerState struct {
 type PR struct {
 	// ApprovedByMe corresponds to the JSON schema field "approved_by_me".
 	ApprovedByMe bool `json:"approved_by_me"`
+
+	// Author corresponds to the JSON schema field "author".
+	Author string `json:"author"`
 
 	// CIStatus corresponds to the JSON schema field "ci_status".
 	CIStatus *string `json:"ci_status,omitempty"`
@@ -831,6 +850,14 @@ type PRVisitedMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+}
+
+type QueryAuthorsMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Filter corresponds to the JSON schema field "filter".
+	Filter *string `json:"filter,omitempty"`
 }
 
 type QueryMessage struct {
@@ -996,14 +1023,14 @@ type ResolveCommentResultMessage struct {
 }
 
 type Response struct {
+	// Authors corresponds to the JSON schema field "authors".
+	Authors []AuthorState `json:"authors,omitempty"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
 
 	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
-
-	// Owners corresponds to the JSON schema field "owners".
-	Owners []OwnerState `json:"owners,omitempty"`
 
 	// Prs corresponds to the JSON schema field "prs".
 	Prs []PR `json:"prs,omitempty"`
@@ -1360,6 +1387,9 @@ type UpdateCommentResultMessage struct {
 }
 
 type WebSocketEvent struct {
+	// Authors corresponds to the JSON schema field "authors".
+	Authors []AuthorState `json:"authors,omitempty"`
+
 	// Branch corresponds to the JSON schema field "branch".
 	Branch *string `json:"branch,omitempty"`
 
@@ -1380,9 +1410,6 @@ type WebSocketEvent struct {
 
 	// Found corresponds to the JSON schema field "found".
 	Found *bool `json:"found,omitempty"`
-
-	// Owners corresponds to the JSON schema field "owners".
-	Owners []OwnerState `json:"owners,omitempty"`
 
 	// ProtocolVersion corresponds to the JSON schema field "protocol_version".
 	ProtocolVersion *string `json:"protocol_version,omitempty"`

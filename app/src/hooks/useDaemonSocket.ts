@@ -5,7 +5,7 @@ import type {
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
   RepoState as GeneratedRepoState,
-  OwnerState as GeneratedOwnerState,
+  AuthorState as GeneratedAuthorState,
   WebSocketEvent as GeneratedWebSocketEvent,
   RecentLocation as GeneratedRecentLocation,
   BranchElement as GeneratedBranch,
@@ -22,7 +22,7 @@ export type DaemonSession = GeneratedSession;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
 export type RepoState = GeneratedRepoState;
-export type OwnerState = GeneratedOwnerState;
+export type AuthorState = GeneratedAuthorState;
 export type RecentLocation = GeneratedRecentLocation;
 export type Branch = GeneratedBranch;
 export type ReviewFinding = GeneratedReviewFinding;
@@ -256,7 +256,7 @@ interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
-  onOwnersUpdate?: (owners: OwnerState[]) => void;
+  onAuthorsUpdate?: (authors: AuthorState[]) => void;
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
   onSettingsUpdate?: (settings: DaemonSettings) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
@@ -305,7 +305,7 @@ export function useDaemonSocket({
   onSessionsUpdate,
   onPRsUpdate,
   onReposUpdate,
-  onOwnersUpdate,
+  onAuthorsUpdate,
   onWorktreesUpdate,
   onSettingsUpdate,
   onGitStatusUpdate,
@@ -316,7 +316,7 @@ export function useDaemonSocket({
   const sessionsRef = useRef<DaemonSession[]>([]);
   const prsRef = useRef<DaemonPR[]>([]);
   const reposRef = useRef<RepoState[]>([]);
-  const ownersRef = useRef<OwnerState[]>([]);
+  const authorsRef = useRef<AuthorState[]>([]);
   const settingsRef = useRef<DaemonSettings>({});
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
@@ -382,9 +382,9 @@ export function useDaemonSocket({
               reposRef.current = data.repos;
               onReposUpdate(data.repos);
             }
-            if (data.owners) {
-              ownersRef.current = data.owners;
-              onOwnersUpdate?.(data.owners);
+            if (data.authors) {
+              authorsRef.current = data.authors;
+              onAuthorsUpdate?.(data.authors);
             }
             if (data.settings) {
               settingsRef.current = data.settings;
@@ -440,10 +440,10 @@ export function useDaemonSocket({
             }
             break;
 
-          case 'owners_updated':
-            if (data.owners) {
-              ownersRef.current = data.owners;
-              onOwnersUpdate?.(data.owners);
+          case 'authors_updated':
+            if (data.authors) {
+              authorsRef.current = data.authors;
+              onAuthorsUpdate?.(data.authors);
             }
             break;
 
@@ -1008,7 +1008,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onOwnersUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate]);
 
   useEffect(() => {
     connect();
@@ -1111,27 +1111,27 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'mute_repo', repo }));
   }, [onReposUpdate]);
 
-  // Mute an owner with optimistic update
-  const sendMuteOwner = useCallback((owner: string) => {
+  // Mute a PR author with optimistic update
+  const sendMuteAuthor = useCallback((author: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-    // Optimistic update - toggle owner muted state immediately
-    const existingOwner = ownersRef.current.find(o => o.owner === owner);
-    let updatedOwners: OwnerState[];
-    if (existingOwner) {
-      updatedOwners = ownersRef.current.map(o =>
-        o.owner === owner ? { ...o, muted: !o.muted } : o
+    // Optimistic update - toggle author muted state immediately
+    const existingAuthor = authorsRef.current.find(a => a.author === author);
+    let updatedAuthors: AuthorState[];
+    if (existingAuthor) {
+      updatedAuthors = authorsRef.current.map(a =>
+        a.author === author ? { ...a, muted: !a.muted } : a
       );
     } else {
-      // Owner doesn't exist in state yet, add it as muted
-      updatedOwners = [...ownersRef.current, { owner, muted: true }];
+      // Author doesn't exist in state yet, add it as muted
+      updatedAuthors = [...authorsRef.current, { author, muted: true }];
     }
-    ownersRef.current = updatedOwners;
-    onOwnersUpdate?.(updatedOwners);
+    authorsRef.current = updatedAuthors;
+    onAuthorsUpdate?.(updatedAuthors);
 
-    ws.send(JSON.stringify({ cmd: 'mute_owner', owner }));
-  }, [onOwnersUpdate]);
+    ws.send(JSON.stringify({ cmd: 'mute_author', author }));
+  }, [onAuthorsUpdate]);
 
   // Request daemon to refresh PRs from GitHub
   const sendRefreshPRs = useCallback((): Promise<PRActionResult> => {
@@ -1977,7 +1977,7 @@ export function useDaemonSocket({
     sendPRAction,
     sendMutePR,
     sendMuteRepo,
-    sendMuteOwner,
+    sendMuteAuthor,
     sendRefreshPRs,
     sendFetchPRDetails,
     sendClearSessions,

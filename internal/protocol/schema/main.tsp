@@ -52,6 +52,7 @@ model PR {
   number: int32;
   title: string;
   url: string;
+  author: string;               // GitHub username of PR author
   role: PRRole;
   state: string;
   reason: string;               // Why it needs attention
@@ -92,8 +93,8 @@ model RepoState {
   collapsed: boolean;
 }
 
-model OwnerState {
-  owner: string;
+model AuthorState {
+  author: string;                // GitHub username
   muted: boolean;
 }
 
@@ -183,13 +184,13 @@ model MuteRepoMessage {
   repo: string;
 }
 
-model MuteOwnerMessage {
-  cmd: "mute_owner";
-  owner: string;
+model MuteAuthorMessage {
+  cmd: "mute_author";
+  author: string;
 }
 
-model QueryOwnersMessage {
-  cmd: "query_owners";
+model QueryAuthorsMessage {
+  cmd: "query_authors";
   filter?: string;
 }
 
@@ -760,7 +761,7 @@ model Response {
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
-  owners?: OwnerState[];
+  authors?: AuthorState[];
 }
 
 model WebSocketEvent {
@@ -770,7 +771,7 @@ model WebSocketEvent {
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
-  owners?: OwnerState[];
+  authors?: AuthorState[];
   worktrees?: Worktree[];
   branches?: Branch[];
   recent_locations?: RecentLocation[];

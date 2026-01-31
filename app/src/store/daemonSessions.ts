@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { DaemonSession, DaemonPR, RepoState, OwnerState } from '../hooks/useDaemonSocket';
+import { DaemonSession, DaemonPR, RepoState, AuthorState } from '../hooks/useDaemonSocket';
 
 interface DaemonStore {
   // Sessions from daemon (attn-tracked sessions)
@@ -14,15 +14,15 @@ interface DaemonStore {
   repoStates: RepoState[];
   setRepoStates: (repos: RepoState[]) => void;
 
-  // Owner states from daemon (muted)
-  ownerStates: OwnerState[];
-  setOwnerStates: (owners: OwnerState[]) => void;
+  // Author states from daemon (muted PR authors like bots)
+  authorStates: AuthorState[];
+  setAuthorStates: (authors: AuthorState[]) => void;
 
   // Helper to check if a repo is muted
   isRepoMuted: (repo: string) => boolean;
 
-  // Helper to check if an owner is muted
-  isOwnerMuted: (owner: string) => boolean;
+  // Helper to check if a PR author is muted
+  isAuthorMuted: (author: string) => boolean;
 
   // Connection status
   isConnected: boolean;
@@ -39,16 +39,16 @@ export const useDaemonStore = create<DaemonStore>((set, get) => ({
   repoStates: [],
   setRepoStates: (repos) => set({ repoStates: repos }),
 
-  ownerStates: [],
-  setOwnerStates: (owners) => set({ ownerStates: owners }),
+  authorStates: [],
+  setAuthorStates: (authors) => set({ authorStates: authors }),
 
   isRepoMuted: (repo) => {
     const state = get().repoStates.find(r => r.repo === repo);
     return state?.muted ?? false;
   },
 
-  isOwnerMuted: (owner) => {
-    const state = get().ownerStates.find(o => o.owner === owner);
+  isAuthorMuted: (author) => {
+    const state = get().authorStates.find(a => a.author === author);
     return state?.muted ?? false;
   },
 

@@ -59,7 +59,7 @@ function App() {
     prs,
     setPRs,
     setRepoStates,
-    setOwnerStates,
+    setAuthorStates,
   } = useDaemonStore();
 
   // Hide loading screen on mount
@@ -142,7 +142,7 @@ function App() {
     sendPRAction,
     sendMutePR,
     sendMuteRepo,
-    sendMuteOwner,
+    sendMuteAuthor,
     sendPRVisited,
     sendRefreshPRs,
     sendClearSessions,
@@ -186,7 +186,7 @@ function App() {
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
-    onOwnersUpdate: setOwnerStates,
+    onAuthorsUpdate: setAuthorStates,
     onSettingsUpdate: setSettings,
     onWorktreesUpdate: setWorktrees,
     onGitStatusUpdate: setGitStatus,
@@ -216,7 +216,7 @@ function App() {
         sendPRAction={sendPRAction}
         sendMutePR={sendMutePR}
         sendMuteRepo={sendMuteRepo}
-        sendMuteOwner={sendMuteOwner}
+        sendMuteAuthor={sendMuteAuthor}
         sendPRVisited={sendPRVisited}
         sendRefreshPRs={sendRefreshPRs}
         sendClearSessions={sendClearSessions}
@@ -277,7 +277,7 @@ interface AppContentProps {
   sendPRAction: ReturnType<typeof useDaemonSocket>['sendPRAction'];
   sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
   sendMuteRepo: ReturnType<typeof useDaemonSocket>['sendMuteRepo'];
-  sendMuteOwner: ReturnType<typeof useDaemonSocket>['sendMuteOwner'];
+  sendMuteAuthor: ReturnType<typeof useDaemonSocket>['sendMuteAuthor'];
   sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
   sendClearSessions: ReturnType<typeof useDaemonSocket>['sendClearSessions'];
@@ -333,7 +333,7 @@ function AppContent({
   sendPRAction,
   sendMutePR,
   sendMuteRepo,
-  sendMuteOwner,
+  sendMuteAuthor,
   sendPRVisited,
   sendRefreshPRs,
   sendClearSessions,
@@ -1168,7 +1168,7 @@ function AppContent({
   });
 
   return (
-    <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo} sendMuteOwner={sendMuteOwner} sendPRVisited={sendPRVisited}>
+    <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo} sendMuteAuthor={sendMuteAuthor} sendPRVisited={sendPRVisited}>
     <div className="app">
       {/* Error banner for version mismatch */}
       {connectionError && (

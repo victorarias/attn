@@ -19,6 +19,7 @@ function createPR(overrides: Partial<DaemonPR> = {}): DaemonPR {
     number: 1,
     title: 'Test PR',
     url: 'https://github.com/org/repo/pull/1',
+    author: 'test-user',
     role: PRRole.Reviewer,
     state: 'waiting',
     reason: 'review_requested',
@@ -34,12 +35,12 @@ function createPR(overrides: Partial<DaemonPR> = {}): DaemonPR {
 
 describe('usePRsNeedingAttention', () => {
   beforeEach(() => {
-    // Default mock: no repos or owners muted
+    // Default mock: no repos or authors muted
     vi.mocked(useDaemonStore).mockReturnValue({
       isRepoMuted: () => false,
-      isOwnerMuted: () => false,
+      isAuthorMuted: () => false,
       repoStates: [],
-      ownerStates: [],
+      authorStates: [],
     } as ReturnType<typeof useDaemonStore>);
   });
 
@@ -73,9 +74,9 @@ describe('usePRsNeedingAttention', () => {
   it('filters out repo-muted PRs', () => {
     vi.mocked(useDaemonStore).mockReturnValue({
       isRepoMuted: (repo: string) => repo === 'org/muted-repo',
-      isOwnerMuted: () => false,
+      isAuthorMuted: () => false,
       repoStates: [],
-      ownerStates: [],
+      authorStates: [],
     } as ReturnType<typeof useDaemonStore>);
 
     const prs = [
@@ -142,9 +143,9 @@ describe('usePRsNeedingAttention', () => {
   it('handles combined filters correctly', () => {
     vi.mocked(useDaemonStore).mockReturnValue({
       isRepoMuted: (repo: string) => repo === 'org/muted',
-      isOwnerMuted: () => false,
+      isAuthorMuted: () => false,
       repoStates: [],
-      ownerStates: [],
+      authorStates: [],
     } as ReturnType<typeof useDaemonStore>);
 
     const prs = [
@@ -180,10 +181,10 @@ describe('usePRsNeedingAttention', () => {
 
       vi.mocked(useDaemonStore).mockReturnValue({
         isRepoMuted: stableIsRepoMuted,
-        isOwnerMuted: () => false,
+        isAuthorMuted: () => false,
         // Include repoStates to allow the hook to subscribe to it
         repoStates: [],
-        ownerStates: [],
+        authorStates: [],
       } as unknown as ReturnType<typeof useDaemonStore>);
 
       const prs = [createPR({ id: 'pr-1', repo: 'org/repo' })];
@@ -199,9 +200,9 @@ describe('usePRsNeedingAttention', () => {
       // Update the mock to return new repoStates (simulating zustand store update)
       vi.mocked(useDaemonStore).mockReturnValue({
         isRepoMuted: stableIsRepoMuted, // Same function reference!
-        isOwnerMuted: () => false,
+        isAuthorMuted: () => false,
         repoStates: [{ repo: 'org/repo', muted: true, collapsed: false }],
-        ownerStates: [],
+        authorStates: [],
       } as unknown as ReturnType<typeof useDaemonStore>);
 
       // Rerender to trigger the hook (simulating component rerender from store subscription)

@@ -149,8 +149,8 @@ var migrations = []migration{
 		ALTER TABLE review_comments ADD COLUMN wont_fix_by TEXT NOT NULL DEFAULT '';
 		ALTER TABLE review_comments ADD COLUMN wont_fix_at TEXT NOT NULL DEFAULT '';
 	`},
-	{18, "create owners table", `CREATE TABLE IF NOT EXISTS owners (
-		owner TEXT PRIMARY KEY,
+	{18, "create authors table", `CREATE TABLE IF NOT EXISTS authors (
+		author TEXT PRIMARY KEY,
 		muted INTEGER NOT NULL DEFAULT 0
 	)`},
 }

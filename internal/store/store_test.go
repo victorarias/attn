@@ -375,41 +375,41 @@ func TestStore_ListRepoStates(t *testing.T) {
 	}
 }
 
-func TestStore_OwnerState(t *testing.T) {
+func TestStore_AuthorState(t *testing.T) {
 	s := New()
 
-	// Initially no owner state
-	state := s.GetOwnerState("octocat")
+	// Initially no author state
+	state := s.GetAuthorState("dependabot")
 	if state != nil {
-		t.Error("expected nil for unknown owner")
+		t.Error("expected nil for unknown author")
 	}
 
 	// Toggle mute creates state
-	s.ToggleMuteOwner("octocat")
-	state = s.GetOwnerState("octocat")
+	s.ToggleMuteAuthor("dependabot")
+	state = s.GetAuthorState("dependabot")
 	if state == nil {
-		t.Fatal("expected owner state after toggle")
+		t.Fatal("expected author state after toggle")
 	}
 	if !state.Muted {
-		t.Error("owner should be muted")
+		t.Error("author should be muted")
 	}
 
 	// Toggle again unmutes
-	s.ToggleMuteOwner("octocat")
-	state = s.GetOwnerState("octocat")
+	s.ToggleMuteAuthor("dependabot")
+	state = s.GetAuthorState("dependabot")
 	if state.Muted {
-		t.Error("owner should be unmuted")
+		t.Error("author should be unmuted")
 	}
 }
 
-func TestStore_ListOwnerStates(t *testing.T) {
+func TestStore_ListAuthorStates(t *testing.T) {
 	s := New()
 
-	s.ToggleMuteOwner("owner-a")
-	s.ToggleMuteOwner("owner-b")
+	s.ToggleMuteAuthor("dependabot")
+	s.ToggleMuteAuthor("renovate")
 
-	states := s.ListOwnerStates()
+	states := s.ListAuthorStates()
 	if len(states) != 2 {
-		t.Errorf("expected 2 owner states, got %d", len(states))
+		t.Errorf("expected 2 author states, got %d", len(states))
 	}
 }

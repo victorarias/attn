@@ -25,10 +25,10 @@ const (
 	CmdQueryPRs                 = "query_prs"
 	CmdMutePR                   = "mute_pr"
 	CmdMuteRepo                 = "mute_repo"
-	CmdMuteOwner                = "mute_owner"
+	CmdMuteAuthor               = "mute_author"
 	CmdCollapseRepo             = "collapse_repo"
 	CmdQueryRepos               = "query_repos"
-	CmdQueryOwners              = "query_owners"
+	CmdQueryAuthors             = "query_authors"
 	CmdFetchPRDetails           = "fetch_pr_details"
 	CmdRefreshPRs               = "refresh_prs"
 	CmdClearSessions            = "clear_sessions"
@@ -82,7 +82,7 @@ const (
 	EventSessionsUpdated          = "sessions_updated"
 	EventPRsUpdated               = "prs_updated"
 	EventReposUpdated             = "repos_updated"
-	EventOwnersUpdated            = "owners_updated"
+	EventAuthorsUpdated           = "authors_updated"
 	EventInitialState             = "initial_state"
 	EventPRActionResult           = "pr_action_result"
 	EventRefreshPRsResult         = "refresh_prs_result"
@@ -271,8 +271,8 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdMuteOwner:
-		var msg MuteOwnerMessage
+	case CmdMuteAuthor:
+		var msg MuteAuthorMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
@@ -292,8 +292,8 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdQueryOwners:
-		var msg QueryOwnersMessage
+	case CmdQueryAuthors:
+		var msg QueryAuthorsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

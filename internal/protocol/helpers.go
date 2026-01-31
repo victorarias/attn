@@ -111,14 +111,14 @@ func RepoStatesToValues(repos []*RepoState) []RepoState {
 	return result
 }
 
-func OwnerStatesToValues(owners []*OwnerState) []OwnerState {
-	if owners == nil {
+func AuthorStatesToValues(authors []*AuthorState) []AuthorState {
+	if authors == nil {
 		return nil
 	}
-	result := make([]OwnerState, len(owners))
-	for i, o := range owners {
-		if o != nil {
-			result[i] = *o
+	result := make([]AuthorState, len(authors))
+	for i, a := range authors {
+		if a != nil {
+			result[i] = *a
 		}
 	}
 	return result

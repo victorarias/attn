@@ -280,7 +280,10 @@ type searchItem struct {
 	Draft         bool   `json:"draft"`
 	RepositoryURL string `json:"repository_url"`
 	Comments      int    `json:"comments"` // Comment count for change detection
-	PullRequest   *struct {
+	User          *struct {
+		Login string `json:"login"` // PR author username
+	} `json:"user"`
+	PullRequest *struct {
 		URL string `json:"url"` // PR API URL to fetch head SHA
 	} `json:"pull_request"`
 }
@@ -319,12 +322,17 @@ func (c *Client) SearchAuthoredPRs() ([]*protocol.PR, error) {
 		}
 
 		repo := extractRepoFromURL(item.RepositoryURL)
+		author := ""
+		if item.User != nil {
+			author = item.User.Login
+		}
 		prs = append(prs, &protocol.PR{
 			ID:           fmt.Sprintf("%s#%d", repo, item.Number),
 			Repo:         repo,
 			Number:       item.Number,
 			Title:        item.Title,
 			URL:          item.HTMLURL,
+			Author:       author,
 			Role:         protocol.PRRoleAuthor,
 			State:        protocol.PRStateWaiting,
 			Reason:       "",
@@ -359,12 +367,17 @@ func (c *Client) SearchReviewRequestedPRs() ([]*protocol.PR, error) {
 		}
 
 		repo := extractRepoFromURL(item.RepositoryURL)
+		author := ""
+		if item.User != nil {
+			author = item.User.Login
+		}
 		prs = append(prs, &protocol.PR{
 			ID:           fmt.Sprintf("%s#%d", repo, item.Number),
 			Repo:         repo,
 			Number:       item.Number,
 			Title:        item.Title,
 			URL:          item.HTMLURL,
+			Author:       author,
 			Role:         protocol.PRRoleReviewer,
 			State:        protocol.PRStateWaiting,
 			Reason:       protocol.PRReasonReviewNeeded,
@@ -400,12 +413,17 @@ func (c *Client) SearchReviewedByMePRs() ([]*protocol.PR, error) {
 		}
 
 		repo := extractRepoFromURL(item.RepositoryURL)
+		author := ""
+		if item.User != nil {
+			author = item.User.Login
+		}
 		prs = append(prs, &protocol.PR{
 			ID:           fmt.Sprintf("%s#%d", repo, item.Number),
 			Repo:         repo,
 			Number:       item.Number,
 			Title:        item.Title,
 			URL:          item.HTMLURL,
+			Author:       author,
 			Role:         protocol.PRRoleReviewer,
 			State:        protocol.PRStateWaiting,
 			Reason:       protocol.PRReasonReviewNeeded,

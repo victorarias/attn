@@ -59,7 +59,7 @@ export function Dashboard({
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
   const [fadingPRs, setFadingPRs] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { sendMuteRepo, sendMuteOwner, sendPRVisited } = useDaemonContext();
+  const { sendMuteRepo, sendMuteAuthor, sendPRVisited } = useDaemonContext();
   const { repoStates } = useDaemonStore();
 
   // Get list of muted repos for settings modal
@@ -68,11 +68,6 @@ export function Dashboard({
     [repoStates]
   );
 
-  // Helper to extract owner from repo name (e.g., "spotify/backstage" -> "spotify")
-  const getOwnerFromRepo = useCallback((repo: string) => {
-    const parts = repo.split('/');
-    return parts[0] || '';
-  }, []);
 
   // PRs that are fully hidden (after fade animation)
   const [hiddenPRs, setHiddenPRs] = useState<Set<string>>(new Set());
@@ -318,28 +313,16 @@ export function Dashboard({
                           {authorCount > 0 && <span className="count author">{authorCount} yours</span>}
                         </span>
                       </div>
-                      <div className="repo-actions">
-                        <button
-                          className="owner-mute-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            sendMuteOwner(getOwnerFromRepo(repo));
-                          }}
-                          title={`Mute all PRs from ${getOwnerFromRepo(repo)}/*`}
-                        >
-                          👤
-                        </button>
-                        <button
-                          className="repo-mute-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            sendMuteRepo(repo);
-                          }}
-                          title="Mute all PRs from this repo"
-                        >
-                          ⊘
-                        </button>
-                      </div>
+                      <button
+                        className="repo-mute-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          sendMuteRepo(repo);
+                        }}
+                        title="Mute all PRs from this repo"
+                      >
+                        ⊘
+                      </button>
                     </div>
                     {!isCollapsed && (
                       <div className="repo-prs">
@@ -383,6 +366,18 @@ export function Dashboard({
                                 <span className={`ci-status ${pr.ci_status}`} title={`CI ${pr.ci_status}`}></span>
                               )}
                             </div>
+                            {pr.author && (
+                              <button
+                                className="author-mute-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  sendMuteAuthor(pr.author);
+                                }}
+                                title={`Mute all PRs by ${pr.author}`}
+                              >
+                                👤 {pr.author}
+                              </button>
+                            )}
                             <PRActions
                               repo={pr.repo}
                               number={pr.number}
