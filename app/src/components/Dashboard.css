@@ -469,6 +469,34 @@
   outline-offset: 1px;
 }
 
+/* Repo actions container */
+.repo-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* Owner mute button */
+.owner-mute-btn {
+  background: #252528;
+  border: 1px solid #3a3a3d;
+  border-radius: 4px;
+  color: #888;
+  font-size: var(--font-size-sm);
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.owner-mute-btn:hover {
+  background: rgba(85, 85, 85, 0.3);
+  color: #bbb;
+}
+
+.owner-mute-btn:focus {
+  outline: 2px solid #ff6b35;
+  outline-offset: 1px;
+}
+
 /* Fade out animation for PRs after approve/merge */
 .pr-row.fading-out {
   opacity: 0;
