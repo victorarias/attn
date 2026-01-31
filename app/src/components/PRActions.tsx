@@ -150,7 +150,7 @@ export function PRActions({ repo, number, prId, author, compact = false, onMuted
         </button>
         {author && !compact && (
           <button
-            className="pr-action-btn author-btn"
+            className="author-mute-btn"
             data-testid="mute-author-button"
             data-action="mute-author"
             onClick={(e) => {

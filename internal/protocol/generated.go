@@ -709,14 +709,6 @@ type MuteMessage struct {
 	ID string `json:"id"`
 }
 
-type MuteOwnerMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Owner corresponds to the JSON schema field "owner".
-	Owner string `json:"owner"`
-}
-
 type MutePRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -731,14 +723,6 @@ type MuteRepoMessage struct {
 
 	// Repo corresponds to the JSON schema field "repo".
 	Repo string `json:"repo"`
-}
-
-type OwnerState struct {
-	// Muted corresponds to the JSON schema field "muted".
-	Muted bool `json:"muted"`
-
-	// Owner corresponds to the JSON schema field "owner".
-	Owner string `json:"owner"`
 }
 
 type PR struct {
@@ -861,14 +845,6 @@ type QueryAuthorsMessage struct {
 }
 
 type QueryMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Filter corresponds to the JSON schema field "filter".
-	Filter *string `json:"filter,omitempty"`
-}
-
-type QueryOwnersMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 

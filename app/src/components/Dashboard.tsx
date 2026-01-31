@@ -74,7 +74,6 @@ export function Dashboard({
     [authorStates]
   );
 
-
   // PRs that are fully hidden (after fade animation)
   const [hiddenPRs, setHiddenPRs] = useState<Set<string>>(new Set());
 
