@@ -19,7 +19,7 @@ func Format(sessions []protocol.Session) string {
 // FormatWithPRs formats sessions and PRs for status bar
 func FormatWithPRs(sessions []protocol.Session, prs []protocol.PR) string {
 	// Use attention aggregator to get items needing attention
-	agg := attention.NewAggregator(nil) // No repo muting in this variant
+	agg := attention.NewAggregator(nil, nil) // No repo/author muting in this variant
 	result := agg.Aggregate(sessions, prs)
 
 	if result.TotalCount == 0 {
@@ -80,10 +80,10 @@ func FormatWithPRs(sessions []protocol.Session, prs []protocol.PR) string {
 	return strings.Join(parts, " | ")
 }
 
-// FormatWithPRsAndRepos formats status with repo-aware PR display
-func FormatWithPRsAndRepos(sessions []protocol.Session, prs []protocol.PR, repos []protocol.RepoState) string {
-	// Use attention aggregator with repo muting
-	agg := attention.NewAggregator(repos)
+// FormatWithPRsAndRepos formats status with repo and author-aware PR display
+func FormatWithPRsAndRepos(sessions []protocol.Session, prs []protocol.PR, repos []protocol.RepoState, authors []protocol.AuthorState) string {
+	// Use attention aggregator with repo and author muting
+	agg := attention.NewAggregator(repos, authors)
 	result := agg.Aggregate(sessions, prs)
 
 	if result.TotalCount == 0 {
@@ -99,18 +99,24 @@ func FormatWithPRsAndRepos(sessions []protocol.Session, prs []protocol.PR, repos
 
 	// PRs part - group by repo for display
 	if result.PRCount > 0 {
-		// Build muted repos set for filtering
+		// Build muted repos and authors sets for filtering
 		mutedRepos := make(map[string]bool)
 		for _, r := range repos {
 			if r.Muted {
 				mutedRepos[r.Repo] = true
 			}
 		}
+		mutedAuthors := make(map[string]bool)
+		for _, a := range authors {
+			if a.Muted {
+				mutedAuthors[a.Author] = true
+			}
+		}
 
 		// Count PRs by repo
 		repoCount := make(map[string]int)
 		for _, pr := range prs {
-			if pr.Muted || mutedRepos[pr.Repo] {
+			if pr.Muted || mutedRepos[pr.Repo] || mutedAuthors[pr.Author] {
 				continue
 			}
 			if pr.State == protocol.PRStateWaiting {

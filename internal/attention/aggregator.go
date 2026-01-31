@@ -8,18 +8,25 @@ import (
 
 // Aggregator combines multiple attention sources into a unified view.
 type Aggregator struct {
-	mutedRepos map[string]bool
+	mutedRepos   map[string]bool
+	mutedAuthors map[string]bool
 }
 
-// NewAggregator creates an Aggregator with the given muted repos.
-func NewAggregator(repos []protocol.RepoState) *Aggregator {
+// NewAggregator creates an Aggregator with the given muted repos and authors.
+func NewAggregator(repos []protocol.RepoState, authors []protocol.AuthorState) *Aggregator {
 	mutedRepos := make(map[string]bool)
 	for _, r := range repos {
 		if r.Muted {
 			mutedRepos[r.Repo] = true
 		}
 	}
-	return &Aggregator{mutedRepos: mutedRepos}
+	mutedAuthors := make(map[string]bool)
+	for _, a := range authors {
+		if a.Muted {
+			mutedAuthors[a.Author] = true
+		}
+	}
+	return &Aggregator{mutedRepos: mutedRepos, mutedAuthors: mutedAuthors}
 }
 
 // Result holds the aggregated attention data.
@@ -50,8 +57,9 @@ func (a *Aggregator) Aggregate(sessions []protocol.Session, prs []protocol.PR) R
 	// Process PRs
 	for i := range prs {
 		adapter := PRAdapter{
-			PR:        &prs[i],
-			RepoMuted: a.mutedRepos[prs[i].Repo],
+			PR:          &prs[i],
+			RepoMuted:   a.mutedRepos[prs[i].Repo],
+			AuthorMuted: a.mutedAuthors[prs[i].Author],
 		}
 		if adapter.NeedsAttention() {
 			items = append(items, FromSource(adapter))

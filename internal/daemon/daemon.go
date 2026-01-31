@@ -502,6 +502,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleCollapseRepo(conn, msg.(*protocol.CollapseRepoMessage))
 	case protocol.CmdQueryRepos:
 		d.handleQueryRepos(conn, msg.(*protocol.QueryReposMessage))
+	case protocol.CmdQueryAuthors:
+		d.handleQueryAuthors(conn, msg.(*protocol.QueryAuthorsMessage))
 	case protocol.CmdFetchPRDetails:
 		d.handleFetchPRDetails(conn, msg.(*protocol.FetchPRDetailsMessage))
 	case protocol.CmdInjectTestPR:
@@ -789,6 +791,15 @@ func (d *Daemon) handleQueryRepos(conn net.Conn, msg *protocol.QueryReposMessage
 	resp := protocol.Response{
 		Ok:    true,
 		Repos: protocol.RepoStatesToValues(repos),
+	}
+	json.NewEncoder(conn).Encode(resp)
+}
+
+func (d *Daemon) handleQueryAuthors(conn net.Conn, msg *protocol.QueryAuthorsMessage) {
+	authors := d.store.ListAuthorStates()
+	resp := protocol.Response{
+		Ok:      true,
+		Authors: protocol.AuthorStatesToValues(authors),
 	}
 	json.NewEncoder(conn).Encode(resp)
 }

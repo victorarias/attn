@@ -230,5 +230,44 @@ describe('usePRsNeedingAttention', () => {
       // THIS IS THE BUG: if this fails, the hook is not reacting to repoStates changes
       expect(result.current.activePRs).toHaveLength(0);
     });
+
+    it('reacts immediately when author mute state changes', () => {
+      // Simulate zustand behavior: isAuthorMuted is a STABLE function that reads from changing state
+      const mutedAuthors = new Set<string>();
+
+      // Create a stable function reference (simulating zustand's stable selector)
+      const stableIsAuthorMuted = (author: string) => mutedAuthors.has(author);
+
+      vi.mocked(useDaemonStore).mockReturnValue({
+        isRepoMuted: () => false,
+        isAuthorMuted: stableIsAuthorMuted,
+        repoStates: [],
+        authorStates: [],
+      } as unknown as ReturnType<typeof useDaemonStore>);
+
+      const prs = [createPR({ id: 'pr-1', author: 'some-author' })];
+      const { result, rerender } = renderHook(() => usePRsNeedingAttention(prs));
+
+      // Initially, author is not muted
+      expect(result.current.activePRs).toHaveLength(1);
+      expect(result.current.activePRs[0].id).toBe('pr-1');
+
+      // Simulate muting the author (store state changes, but isAuthorMuted reference is stable)
+      mutedAuthors.add('some-author');
+
+      // Update the mock to return new authorStates (simulating zustand store update)
+      vi.mocked(useDaemonStore).mockReturnValue({
+        isRepoMuted: () => false,
+        isAuthorMuted: stableIsAuthorMuted, // Same function reference!
+        repoStates: [],
+        authorStates: [{ author: 'some-author', muted: true }],
+      } as unknown as ReturnType<typeof useDaemonStore>);
+
+      // Rerender to trigger the hook (simulating component rerender from store subscription)
+      rerender();
+
+      // The PR should now be filtered out
+      expect(result.current.activePRs).toHaveLength(0);
+    });
   });
 });

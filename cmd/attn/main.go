@@ -83,7 +83,8 @@ func runStatus() {
 	}
 	prs, _ := c.QueryPRs("")
 	repos, _ := c.QueryRepos()
-	fmt.Println(status.FormatWithPRsAndRepos(sessions, prs, repos))
+	authors, _ := c.QueryAuthors()
+	fmt.Println(status.FormatWithPRsAndRepos(sessions, prs, repos, authors))
 }
 
 func runList() {

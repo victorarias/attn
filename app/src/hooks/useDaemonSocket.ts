@@ -283,6 +283,7 @@ const DEFAULT_WS_URL = `ws://127.0.0.1:${import.meta.env.VITE_DAEMON_PORT || '98
 // 2. OPTIMISTIC FIRE-AND-FORGET (for toggles that rarely fail):
 //    - sendMutePR: Toggle mute state
 //    - sendMuteRepo: Toggle repo mute state
+//    - sendMuteAuthor: Toggle author mute state
 //    - sendPRVisited: Clear notification flag
 //    - sendSetSetting: Update user preference
 //    - sendClearSessions: Dev/admin action

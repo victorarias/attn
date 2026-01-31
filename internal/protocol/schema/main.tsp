@@ -200,6 +200,10 @@ model QueryReposMessage {
   filter?: string;
 }
 
+model QueryAuthorsMessage {
+  cmd: "query_authors";
+}
+
 model FetchPRDetailsMessage {
   cmd: "fetch_pr_details";
   repo: string;
