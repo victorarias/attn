@@ -47,6 +47,10 @@ func (r *ClientRegistry) FetchAllPRs() ([]*protocol.PR, error)  // aggregates al
 - API URL: `github.com` → `https://api.github.com`, others → `https://<host>/api/v3`
 - Token: `gh auth token -h <host>`
 
+**API URL assumption**: The `gh` CLI does not expose API URLs programmatically. We assume the standard GHES pattern `https://<host>/api/v3`. Custom ports or non-standard schemes are **not supported** - users with non-standard setups can use `GITHUB_API_URL` env var as fallback.
+
+**New client factory**: Create `NewClientForHost(host, token string)` that bypasses env var logic to avoid token cross-contamination between hosts.
+
 ### 3. Host Discovery
 
 On daemon startup:
@@ -74,10 +78,10 @@ For each host with `state: "success"`:
 
 ### 4. Database Schema
 
-Add `host` column to `prs` table:
+Add `host` column to `prs` table and migrate related tables:
 
 ```sql
--- Migration
+-- Migration for prs table
 ALTER TABLE prs ADD COLUMN host TEXT NOT NULL DEFAULT 'github.com';
 
 -- Update primary key concept (SQLite doesn't support PK changes, so use unique index)
@@ -85,9 +89,14 @@ CREATE UNIQUE INDEX idx_prs_host_repo_number ON prs(host, repo, number);
 
 -- Update ID format in existing rows
 UPDATE prs SET id = 'github.com:' || id WHERE id NOT LIKE '%:%';
+
+-- Migration for pr_interactions table (preserve visit/approval history)
+UPDATE pr_interactions SET pr_id = 'github.com:' || pr_id WHERE pr_id NOT LIKE '%:%';
 ```
 
 **Note**: The `id` column remains the primary key but now includes the host prefix.
+
+**Repo state table (`repos`) stays unchanged**: Mute/collapse operations are intentionally **global** across hosts. If you mute `acme/widget`, it's muted whether the PR is from github.com or GHE. This matches user expectation - same repo name = same project.
 
 ### 5. Protocol Changes
 
@@ -102,9 +111,37 @@ model PR {
 }
 ```
 
-**WebSocket commands** - no signature change needed since PR ID now contains host:
-- `approve_pr { id: "ghe.corp.com:acme/widget#42" }` - parse host from ID
-- `merge_pr { id: "ghe.corp.com:acme/widget#42", method: "squash" }` - parse host from ID
+**WebSocket commands** - change to use PR `id` instead of `repo`+`number`:
+
+**Before** (current):
+```typespec
+model ApprovePRMessage {
+  cmd: "approve_pr";
+  repo: string;
+  number: int32;
+}
+```
+
+**After** (new):
+```typespec
+model ApprovePRMessage {
+  cmd: "approve_pr";
+  id: string;  // "host:owner/repo#number" - contains routing info
+}
+
+model MergePRMessage {
+  cmd: "merge_pr";
+  id: string;  // "host:owner/repo#number"
+  method: string;
+}
+
+model FetchPRDetailsMessage {
+  cmd: "fetch_pr_details";
+  id: string;  // "host:owner/repo#number" - route to correct host
+}
+```
+
+This is a **breaking protocol change** - bump `ProtocolVersion`.
 
 ### 6. PR Polling
 

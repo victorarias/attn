@@ -21,7 +21,7 @@ These tasks add infrastructure without changing existing behavior.
 
 **Tests**: Version parsing, comparison logic
 
-**Acceptance**: Daemon logs warning if gh < 2.81.0
+**Acceptance**: Daemon exits with clear error if gh < 2.81.0
 
 ---
 
@@ -59,7 +59,8 @@ type HostInfo struct {
 - Add `ClientRegistry` struct with `map[string]*Client`
 - Add methods: `Get(host)`, `Hosts()`, `Register(host, client)`, `Remove(host)`
 - Add `NewClientRegistry() *ClientRegistry`
-- Add `NewClientForHost(host HostInfo) (*Client, error)` factory function
+- Add `NewClientForHost(host, apiURL, token string) (*Client, error)` factory function
+  - **Important**: This bypasses `GITHUB_TOKEN` env var to avoid token cross-contamination between hosts
 
 **Tests**: Registry CRUD operations
 
@@ -94,10 +95,15 @@ These tasks change the PR data model to support multiple hosts.
 **Work**:
 - Add `host: string` field to `PR` model
 - Document new ID format in comments: `host:owner/repo#number`
+- **Change action messages to use `id` instead of `repo`+`number`**:
+  - `ApprovePRMessage`: replace `repo`+`number` with `id: string`
+  - `MergePRMessage`: replace `repo`+`number` with `id: string`
+  - `FetchPRDetailsMessage`: replace `repo` with `id: string`
+- Update `PRActionResultMessage` to use `id` instead of `repo`+`number`
 
 **Run**: `make generate-types` to update Go and TypeScript types
 
-**Acceptance**: Generated types include `host` field
+**Acceptance**: Generated types include `host` field, action messages use `id`
 
 ---
 
@@ -108,12 +114,15 @@ These tasks change the PR data model to support multiple hosts.
 **Work**:
 - Add migration to add `host` column: `ALTER TABLE prs ADD COLUMN host TEXT NOT NULL DEFAULT 'github.com'`
 - Update existing IDs: `UPDATE prs SET id = 'github.com:' || id WHERE id NOT LIKE '%:%'`
+- **Migrate `pr_interactions` table**: `UPDATE pr_interactions SET pr_id = 'github.com:' || pr_id WHERE pr_id NOT LIKE '%:%'`
 - Add unique index on `(host, repo, number)`
 - Update all SQL queries to include `host` column
 
-**Tests**: Migration runs cleanly, existing data preserved
+**Note**: The `repos` table (mute/collapse state) is **intentionally NOT migrated** - mute/collapse is global across hosts with same repo name.
 
-**Acceptance**: Database has `host` column, existing PRs migrated
+**Tests**: Migration runs cleanly, existing data preserved, pr_interactions history intact
+
+**Acceptance**: Database has `host` column, existing PRs and interactions migrated
 
 ---
 
@@ -314,7 +323,8 @@ These tasks change the PR data model to support multiple hosts.
 
 ### Breaking Changes
 - PR ID format: `owner/repo#42` → `github.com:owner/repo#42`
-- Database migration required
+- Action messages: `approve_pr`/`merge_pr`/`fetch_pr_details` now use `id` instead of `repo`+`number`
+- Database migration required (both `prs` and `pr_interactions` tables)
 - Protocol version bump required
 
 ---
