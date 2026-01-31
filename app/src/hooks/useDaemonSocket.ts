@@ -5,6 +5,7 @@ import type {
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
   RepoState as GeneratedRepoState,
+  OwnerState as GeneratedOwnerState,
   WebSocketEvent as GeneratedWebSocketEvent,
   RecentLocation as GeneratedRecentLocation,
   BranchElement as GeneratedBranch,
@@ -21,6 +22,7 @@ export type DaemonSession = GeneratedSession;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
 export type RepoState = GeneratedRepoState;
+export type OwnerState = GeneratedOwnerState;
 export type RecentLocation = GeneratedRecentLocation;
 export type Branch = GeneratedBranch;
 export type ReviewFinding = GeneratedReviewFinding;
@@ -60,7 +62,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '20';
+const PROTOCOL_VERSION = '21';
 
 interface PRActionResult {
   success: boolean;
@@ -254,6 +256,7 @@ interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
+  onOwnersUpdate?: (owners: OwnerState[]) => void;
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
   onSettingsUpdate?: (settings: DaemonSettings) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
@@ -302,6 +305,7 @@ export function useDaemonSocket({
   onSessionsUpdate,
   onPRsUpdate,
   onReposUpdate,
+  onOwnersUpdate,
   onWorktreesUpdate,
   onSettingsUpdate,
   onGitStatusUpdate,
@@ -312,6 +316,7 @@ export function useDaemonSocket({
   const sessionsRef = useRef<DaemonSession[]>([]);
   const prsRef = useRef<DaemonPR[]>([]);
   const reposRef = useRef<RepoState[]>([]);
+  const ownersRef = useRef<OwnerState[]>([]);
   const settingsRef = useRef<DaemonSettings>({});
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
@@ -377,6 +382,10 @@ export function useDaemonSocket({
               reposRef.current = data.repos;
               onReposUpdate(data.repos);
             }
+            if (data.owners) {
+              ownersRef.current = data.owners;
+              onOwnersUpdate?.(data.owners);
+            }
             if (data.settings) {
               settingsRef.current = data.settings;
               onSettingsUpdate?.(data.settings);
@@ -428,6 +437,13 @@ export function useDaemonSocket({
             if (data.repos) {
               reposRef.current = data.repos;
               onReposUpdate(data.repos);
+            }
+            break;
+
+          case 'owners_updated':
+            if (data.owners) {
+              ownersRef.current = data.owners;
+              onOwnersUpdate?.(data.owners);
             }
             break;
 
@@ -992,7 +1008,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onOwnersUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate]);
 
   useEffect(() => {
     connect();
@@ -1094,6 +1110,28 @@ export function useDaemonSocket({
 
     ws.send(JSON.stringify({ cmd: 'mute_repo', repo }));
   }, [onReposUpdate]);
+
+  // Mute an owner with optimistic update
+  const sendMuteOwner = useCallback((owner: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Optimistic update - toggle owner muted state immediately
+    const existingOwner = ownersRef.current.find(o => o.owner === owner);
+    let updatedOwners: OwnerState[];
+    if (existingOwner) {
+      updatedOwners = ownersRef.current.map(o =>
+        o.owner === owner ? { ...o, muted: !o.muted } : o
+      );
+    } else {
+      // Owner doesn't exist in state yet, add it as muted
+      updatedOwners = [...ownersRef.current, { owner, muted: true }];
+    }
+    ownersRef.current = updatedOwners;
+    onOwnersUpdate?.(updatedOwners);
+
+    ws.send(JSON.stringify({ cmd: 'mute_owner', owner }));
+  }, [onOwnersUpdate]);
 
   // Request daemon to refresh PRs from GitHub
   const sendRefreshPRs = useCallback((): Promise<PRActionResult> => {
@@ -1939,6 +1977,7 @@ export function useDaemonSocket({
     sendPRAction,
     sendMutePR,
     sendMuteRepo,
+    sendMuteOwner,
     sendRefreshPRs,
     sendFetchPRDetails,
     sendClearSessions,

@@ -374,3 +374,42 @@ func TestStore_ListRepoStates(t *testing.T) {
 		t.Errorf("expected 2 repo states, got %d", len(states))
 	}
 }
+
+func TestStore_OwnerState(t *testing.T) {
+	s := New()
+
+	// Initially no owner state
+	state := s.GetOwnerState("octocat")
+	if state != nil {
+		t.Error("expected nil for unknown owner")
+	}
+
+	// Toggle mute creates state
+	s.ToggleMuteOwner("octocat")
+	state = s.GetOwnerState("octocat")
+	if state == nil {
+		t.Fatal("expected owner state after toggle")
+	}
+	if !state.Muted {
+		t.Error("owner should be muted")
+	}
+
+	// Toggle again unmutes
+	s.ToggleMuteOwner("octocat")
+	state = s.GetOwnerState("octocat")
+	if state.Muted {
+		t.Error("owner should be unmuted")
+	}
+}
+
+func TestStore_ListOwnerStates(t *testing.T) {
+	s := New()
+
+	s.ToggleMuteOwner("owner-a")
+	s.ToggleMuteOwner("owner-b")
+
+	states := s.ListOwnerStates()
+	if len(states) != 2 {
+		t.Errorf("expected 2 owner states, got %d", len(states))
+	}
+}

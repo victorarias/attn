@@ -12,7 +12,7 @@ pnpm run dev    # Starts tauri dev with hot reload
 
 ### Key Components
 
-- **App.tsx**: Main layout, state orchestration
+- **App.tsx**: Main layout, state orchestration (see App/AppContent Split below)
 - **Sidebar.tsx**: Session/PR list with state indicators
 - **Dashboard.tsx**: Terminal tabs and main content area
 - **Terminal.tsx**: xterm.js integration with PTY bridge
@@ -22,6 +22,22 @@ pnpm run dev    # Starts tauri dev with hot reload
 - **DiffOverlay.tsx**: Monaco-based diff viewing
 - **BranchPicker.tsx**: Branch selection UI
 - **AttentionDrawer.tsx**: Quick view of items needing attention
+
+### App/AppContent Split
+
+`App.tsx` has a split structure to allow `SettingsProvider` to wrap content that needs settings access:
+
+- **`App()`** - Outer component that connects to daemon via `useDaemonSocket` and manages top-level state
+- **`AppContent()`** - Inner component that receives daemon state and functions as props
+
+**When adding new daemon socket functions** (like `sendMuteOwner`), you must update FOUR places:
+
+1. **Destructure from `useDaemonSocket`** in `App()` (~line 141)
+2. **Add to `AppContentProps` interface** (~line 262)
+3. **Add to `AppContent()` parameters** (~line 318)
+4. **Pass to `<AppContent ...>`** in `App()`'s return (~line 202)
+
+Missing any of these causes confusing TypeScript errors where the variable appears "declared but never read" in one scope and "cannot find name" in another.
 
 ### State Management
 

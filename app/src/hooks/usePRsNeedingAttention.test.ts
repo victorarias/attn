@@ -34,9 +34,12 @@ function createPR(overrides: Partial<DaemonPR> = {}): DaemonPR {
 
 describe('usePRsNeedingAttention', () => {
   beforeEach(() => {
-    // Default mock: no repos muted
+    // Default mock: no repos or owners muted
     vi.mocked(useDaemonStore).mockReturnValue({
       isRepoMuted: () => false,
+      isOwnerMuted: () => false,
+      repoStates: [],
+      ownerStates: [],
     } as ReturnType<typeof useDaemonStore>);
   });
 
@@ -70,6 +73,9 @@ describe('usePRsNeedingAttention', () => {
   it('filters out repo-muted PRs', () => {
     vi.mocked(useDaemonStore).mockReturnValue({
       isRepoMuted: (repo: string) => repo === 'org/muted-repo',
+      isOwnerMuted: () => false,
+      repoStates: [],
+      ownerStates: [],
     } as ReturnType<typeof useDaemonStore>);
 
     const prs = [
@@ -136,6 +142,9 @@ describe('usePRsNeedingAttention', () => {
   it('handles combined filters correctly', () => {
     vi.mocked(useDaemonStore).mockReturnValue({
       isRepoMuted: (repo: string) => repo === 'org/muted',
+      isOwnerMuted: () => false,
+      repoStates: [],
+      ownerStates: [],
     } as ReturnType<typeof useDaemonStore>);
 
     const prs = [
@@ -171,8 +180,10 @@ describe('usePRsNeedingAttention', () => {
 
       vi.mocked(useDaemonStore).mockReturnValue({
         isRepoMuted: stableIsRepoMuted,
+        isOwnerMuted: () => false,
         // Include repoStates to allow the hook to subscribe to it
         repoStates: [],
+        ownerStates: [],
       } as unknown as ReturnType<typeof useDaemonStore>);
 
       const prs = [createPR({ id: 'pr-1', repo: 'org/repo' })];
@@ -188,7 +199,9 @@ describe('usePRsNeedingAttention', () => {
       // Update the mock to return new repoStates (simulating zustand store update)
       vi.mocked(useDaemonStore).mockReturnValue({
         isRepoMuted: stableIsRepoMuted, // Same function reference!
+        isOwnerMuted: () => false,
         repoStates: [{ repo: 'org/repo', muted: true, collapsed: false }],
+        ownerStates: [],
       } as unknown as ReturnType<typeof useDaemonStore>);
 
       // Rerender to trigger the hook (simulating component rerender from store subscription)

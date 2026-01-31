@@ -92,6 +92,11 @@ model RepoState {
   collapsed: boolean;
 }
 
+model OwnerState {
+  owner: string;
+  muted: boolean;
+}
+
 model RecentLocation {
   path: string;
   label: string;
@@ -176,6 +181,16 @@ model MutePRMessage {
 model MuteRepoMessage {
   cmd: "mute_repo";
   repo: string;
+}
+
+model MuteOwnerMessage {
+  cmd: "mute_owner";
+  owner: string;
+}
+
+model QueryOwnersMessage {
+  cmd: "query_owners";
+  filter?: string;
 }
 
 model CollapseRepoMessage {
@@ -745,6 +760,7 @@ model Response {
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
+  owners?: OwnerState[];
 }
 
 model WebSocketEvent {
@@ -754,6 +770,7 @@ model WebSocketEvent {
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
+  owners?: OwnerState[];
   worktrees?: Worktree[];
   branches?: Branch[];
   recent_locations?: RecentLocation[];

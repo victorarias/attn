@@ -809,6 +809,74 @@ func (s *Store) ListRepoStates() []*protocol.RepoState {
 	return result
 }
 
+// GetOwnerState returns the state for an owner, or nil if not set
+func (s *Store) GetOwnerState(owner string) *protocol.OwnerState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil
+	}
+
+	var state protocol.OwnerState
+	var muted int
+
+	err := s.db.QueryRow("SELECT owner, muted FROM owners WHERE owner = ?", owner).Scan(
+		&state.Owner, &muted,
+	)
+	if err != nil {
+		return nil
+	}
+
+	state.Muted = muted == 1
+	return &state
+}
+
+// ToggleMuteOwner toggles an owner's muted state
+func (s *Store) ToggleMuteOwner(owner string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	// Insert if not exists, then toggle
+	s.execLog("INSERT OR IGNORE INTO owners (owner, muted) VALUES (?, 0)", owner)
+	s.execLog("UPDATE owners SET muted = NOT muted WHERE owner = ?", owner)
+}
+
+// ListOwnerStates returns all owner states
+func (s *Store) ListOwnerStates() []*protocol.OwnerState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil
+	}
+
+	rows, err := s.db.Query("SELECT owner, muted FROM owners")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var result []*protocol.OwnerState
+	for rows.Next() {
+		var state protocol.OwnerState
+		var muted int
+
+		err := rows.Scan(&state.Owner, &muted)
+		if err != nil {
+			continue
+		}
+
+		state.Muted = muted == 1
+		result = append(result, &state)
+	}
+	return result
+}
+
 // MarkPRVisited marks a PR as visited by the user, updating the interaction record
 // and clearing HasNewChanges for subsequent polls
 func (s *Store) MarkPRVisited(prID string) {

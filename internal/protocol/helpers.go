@@ -111,6 +111,19 @@ func RepoStatesToValues(repos []*RepoState) []RepoState {
 	return result
 }
 
+func OwnerStatesToValues(owners []*OwnerState) []OwnerState {
+	if owners == nil {
+		return nil
+	}
+	result := make([]OwnerState, len(owners))
+	for i, o := range owners {
+		if o != nil {
+			result[i] = *o
+		}
+	}
+	return result
+}
+
 func RecentLocationsToValues(locs []*RecentLocation) []RecentLocation {
 	if locs == nil {
 		return nil

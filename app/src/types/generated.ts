@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteMessage, MuteOwnerMessage, MutePRMessage, MuteRepoMessage, OwnerState, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryMessage, QueryOwnersMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -59,13 +59,16 @@
 //   const markFileViewedResultMessage = Convert.toMarkFileViewedResultMessage(json);
 //   const mergePRMessage = Convert.toMergePRMessage(json);
 //   const muteMessage = Convert.toMuteMessage(json);
+//   const muteOwnerMessage = Convert.toMuteOwnerMessage(json);
 //   const mutePRMessage = Convert.toMutePRMessage(json);
 //   const muteRepoMessage = Convert.toMuteRepoMessage(json);
+//   const ownerState = Convert.toOwnerState(json);
 //   const pR = Convert.toPR(json);
 //   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
 //   const pRRole = Convert.toPRRole(json);
 //   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
 //   const queryMessage = Convert.toQueryMessage(json);
+//   const queryOwnersMessage = Convert.toQueryOwnersMessage(json);
 //   const queryPRsMessage = Convert.toQueryPRsMessage(json);
 //   const queryReposMessage = Convert.toQueryReposMessage(json);
 //   const rateLimitedMessage = Convert.toRateLimitedMessage(json);
@@ -875,6 +878,16 @@ export enum MuteMessageCmd {
     Mute = "mute",
 }
 
+export interface MuteOwnerMessage {
+    cmd:   MuteOwnerMessageCmd;
+    owner: string;
+    [property: string]: any;
+}
+
+export enum MuteOwnerMessageCmd {
+    MuteOwner = "mute_owner",
+}
+
 export interface MutePRMessage {
     cmd: MutePRMessageCmd;
     id:  string;
@@ -893,6 +906,12 @@ export interface MuteRepoMessage {
 
 export enum MuteRepoMessageCmd {
     MuteRepo = "mute_repo",
+}
+
+export interface OwnerState {
+    muted: boolean;
+    owner: string;
+    [property: string]: any;
 }
 
 export interface PR {
@@ -955,6 +974,16 @@ export interface QueryMessage {
 
 export enum QueryMessageCmd {
     Query = "query",
+}
+
+export interface QueryOwnersMessage {
+    cmd:     QueryOwnersMessageCmd;
+    filter?: string;
+    [property: string]: any;
+}
+
+export enum QueryOwnersMessageCmd {
+    QueryOwners = "query_owners",
 }
 
 export interface QueryPRsMessage {
@@ -1092,9 +1121,16 @@ export enum ResolveCommentResultMessageEvent {
 export interface Response {
     error?:    string;
     ok:        boolean;
+    owners?:   OwnerElement[];
     prs?:      PRElement[];
     repos?:    RepoElement[];
     sessions?: SessionElement[];
+    [property: string]: any;
+}
+
+export interface OwnerElement {
+    muted: boolean;
+    owner: string;
     [property: string]: any;
 }
 
@@ -1402,6 +1438,7 @@ export interface WebSocketEvent {
     error?:               string;
     event:                string;
     found?:               boolean;
+    owners?:              OwnerElement[];
     protocol_version?:    string;
     prs?:                 PRElement[];
     rate_limit_reset_at?: string;
@@ -1918,6 +1955,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("MuteMessage")), null, 2);
     }
 
+    public static toMuteOwnerMessage(json: string): MuteOwnerMessage {
+        return cast(JSON.parse(json), r("MuteOwnerMessage"));
+    }
+
+    public static muteOwnerMessageToJson(value: MuteOwnerMessage): string {
+        return JSON.stringify(uncast(value, r("MuteOwnerMessage")), null, 2);
+    }
+
     public static toMutePRMessage(json: string): MutePRMessage {
         return cast(JSON.parse(json), r("MutePRMessage"));
     }
@@ -1932,6 +1977,14 @@ export class Convert {
 
     public static muteRepoMessageToJson(value: MuteRepoMessage): string {
         return JSON.stringify(uncast(value, r("MuteRepoMessage")), null, 2);
+    }
+
+    public static toOwnerState(json: string): OwnerState {
+        return cast(JSON.parse(json), r("OwnerState"));
+    }
+
+    public static ownerStateToJson(value: OwnerState): string {
+        return JSON.stringify(uncast(value, r("OwnerState")), null, 2);
     }
 
     public static toPR(json: string): PR {
@@ -1972,6 +2025,14 @@ export class Convert {
 
     public static queryMessageToJson(value: QueryMessage): string {
         return JSON.stringify(uncast(value, r("QueryMessage")), null, 2);
+    }
+
+    public static toQueryOwnersMessage(json: string): QueryOwnersMessage {
+        return cast(JSON.parse(json), r("QueryOwnersMessage"));
+    }
+
+    public static queryOwnersMessageToJson(value: QueryOwnersMessage): string {
+        return JSON.stringify(uncast(value, r("QueryOwnersMessage")), null, 2);
     }
 
     public static toQueryPRsMessage(json: string): QueryPRsMessage {
@@ -2882,6 +2943,10 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("MuteMessageCmd") },
         { json: "id", js: "id", typ: "" },
     ], "any"),
+    "MuteOwnerMessage": o([
+        { json: "cmd", js: "cmd", typ: r("MuteOwnerMessageCmd") },
+        { json: "owner", js: "owner", typ: "" },
+    ], "any"),
     "MutePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("MutePRMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -2889,6 +2954,10 @@ const typeMap: any = {
     "MuteRepoMessage": o([
         { json: "cmd", js: "cmd", typ: r("MuteRepoMessageCmd") },
         { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "OwnerState": o([
+        { json: "muted", js: "muted", typ: true },
+        { json: "owner", js: "owner", typ: "" },
     ], "any"),
     "PR": o([
         { json: "approved_by_me", js: "approved_by_me", typ: true },
@@ -2930,6 +2999,10 @@ const typeMap: any = {
     ], "any"),
     "QueryMessage": o([
         { json: "cmd", js: "cmd", typ: r("QueryMessageCmd") },
+        { json: "filter", js: "filter", typ: u(undefined, "") },
+    ], "any"),
+    "QueryOwnersMessage": o([
+        { json: "cmd", js: "cmd", typ: r("QueryOwnersMessageCmd") },
         { json: "filter", js: "filter", typ: u(undefined, "") },
     ], "any"),
     "QueryPRsMessage": o([
@@ -3005,9 +3078,14 @@ const typeMap: any = {
     "Response": o([
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "ok", js: "ok", typ: true },
+        { json: "owners", js: "owners", typ: u(undefined, a(r("OwnerElement"))) },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+    ], "any"),
+    "OwnerElement": o([
+        { json: "muted", js: "muted", typ: true },
+        { json: "owner", js: "owner", typ: "" },
     ], "any"),
     "RepoElement": o([
         { json: "collapsed", js: "collapsed", typ: true },
@@ -3175,6 +3253,7 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: "" },
         { json: "found", js: "found", typ: u(undefined, true) },
+        { json: "owners", js: "owners", typ: u(undefined, a(r("OwnerElement"))) },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "rate_limit_reset_at", js: "rate_limit_reset_at", typ: u(undefined, "") },
@@ -3383,6 +3462,9 @@ const typeMap: any = {
     "MuteMessageCmd": [
         "mute",
     ],
+    "MuteOwnerMessageCmd": [
+        "mute_owner",
+    ],
     "MutePRMessageCmd": [
         "mute_pr",
     ],
@@ -3397,6 +3479,9 @@ const typeMap: any = {
     ],
     "QueryMessageCmd": [
         "query",
+    ],
+    "QueryOwnersMessageCmd": [
+        "query_owners",
     ],
     "QueryPRsMessageCmd": [
         "query_prs",

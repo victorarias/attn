@@ -209,6 +209,28 @@ func (c *Client) QueryRepos() ([]protocol.RepoState, error) {
 	return resp.Repos, nil
 }
 
+// ToggleMuteOwner toggles an owner's muted state
+func (c *Client) ToggleMuteOwner(owner string) error {
+	msg := map[string]string{
+		"cmd":   protocol.CmdMuteOwner,
+		"owner": owner,
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// QueryOwners returns all owner states
+func (c *Client) QueryOwners() ([]protocol.OwnerState, error) {
+	msg := map[string]string{
+		"cmd": protocol.CmdQueryOwners,
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Owners, nil
+}
+
 // FetchPRDetails requests the daemon to fetch PR details for a repo
 func (c *Client) FetchPRDetails(repo string) ([]protocol.PR, error) {
 	msg := protocol.FetchPRDetailsMessage{

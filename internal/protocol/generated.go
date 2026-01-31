@@ -693,6 +693,14 @@ type MuteMessage struct {
 	ID string `json:"id"`
 }
 
+type MuteOwnerMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Owner corresponds to the JSON schema field "owner".
+	Owner string `json:"owner"`
+}
+
 type MutePRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -707,6 +715,14 @@ type MuteRepoMessage struct {
 
 	// Repo corresponds to the JSON schema field "repo".
 	Repo string `json:"repo"`
+}
+
+type OwnerState struct {
+	// Muted corresponds to the JSON schema field "muted".
+	Muted bool `json:"muted"`
+
+	// Owner corresponds to the JSON schema field "owner".
+	Owner string `json:"owner"`
 }
 
 type PR struct {
@@ -825,6 +841,14 @@ type QueryMessage struct {
 	Filter *string `json:"filter,omitempty"`
 }
 
+type QueryOwnersMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Filter corresponds to the JSON schema field "filter".
+	Filter *string `json:"filter,omitempty"`
+}
+
 type QueryPRsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -879,6 +903,8 @@ type RecentLocationsResultMessage struct {
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
 }
+
+type RecordString map[string]interface{}
 
 type RefreshPRsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
@@ -975,6 +1001,9 @@ type Response struct {
 
 	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
+
+	// Owners corresponds to the JSON schema field "owners".
+	Owners []OwnerState `json:"owners,omitempty"`
 
 	// Prs corresponds to the JSON schema field "prs".
 	Prs []PR `json:"prs,omitempty"`
@@ -1352,6 +1381,9 @@ type WebSocketEvent struct {
 	// Found corresponds to the JSON schema field "found".
 	Found *bool `json:"found,omitempty"`
 
+	// Owners corresponds to the JSON schema field "owners".
+	Owners []OwnerState `json:"owners,omitempty"`
+
 	// ProtocolVersion corresponds to the JSON schema field "protocol_version".
 	ProtocolVersion *string `json:"protocol_version,omitempty"`
 
@@ -1377,7 +1409,7 @@ type WebSocketEvent struct {
 	Sessions []Session `json:"sessions,omitempty"`
 
 	// Settings corresponds to the JSON schema field "settings".
-	Settings map[string]interface{} `json:"settings,omitempty"`
+	Settings RecordString `json:"settings,omitempty"`
 
 	// StashRef corresponds to the JSON schema field "stash_ref".
 	StashRef *string `json:"stash_ref,omitempty"`
