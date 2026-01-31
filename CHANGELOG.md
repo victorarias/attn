@@ -6,6 +6,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-01-31]
+
+### Added
+- **Mute by Author**: Hide all PRs from specific authors (e.g., dependabot, renovate)
+  - 👤 button on PR rows to mute author
+  - Muted Authors section in Settings to view and unmute
+  - Undo toast supports author mutes
+
+---
+
 ## [2026-01-19]
 
 ### Added

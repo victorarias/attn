@@ -209,16 +209,6 @@ func (c *Client) QueryRepos() ([]protocol.RepoState, error) {
 	return resp.Repos, nil
 }
 
-// ToggleMuteAuthor toggles a PR author's muted state
-func (c *Client) ToggleMuteAuthor(author string) error {
-	msg := map[string]string{
-		"cmd":    protocol.CmdMuteAuthor,
-		"author": author,
-	}
-	_, err := c.send(msg)
-	return err
-}
-
 // FetchPRDetails requests the daemon to fetch PR details for a repo
 func (c *Client) FetchPRDetails(repo string) ([]protocol.PR, error) {
 	msg := protocol.FetchPRDetailsMessage{

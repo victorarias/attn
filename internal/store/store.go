@@ -809,29 +809,6 @@ func (s *Store) ListRepoStates() []*protocol.RepoState {
 	return result
 }
 
-// GetAuthorState returns the state for a PR author, or nil if not set
-func (s *Store) GetAuthorState(author string) *protocol.AuthorState {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.db == nil {
-		return nil
-	}
-
-	var state protocol.AuthorState
-	var muted int
-
-	err := s.db.QueryRow("SELECT author, muted FROM authors WHERE author = ?", author).Scan(
-		&state.Author, &muted,
-	)
-	if err != nil {
-		return nil
-	}
-
-	state.Muted = muted == 1
-	return &state
-}
-
 // ToggleMuteAuthor toggles a PR author's muted state
 func (s *Store) ToggleMuteAuthor(author string) {
 	s.mu.Lock()

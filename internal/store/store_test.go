@@ -378,26 +378,26 @@ func TestStore_ListRepoStates(t *testing.T) {
 func TestStore_AuthorState(t *testing.T) {
 	s := New()
 
-	// Initially no author state
-	state := s.GetAuthorState("dependabot")
-	if state != nil {
-		t.Error("expected nil for unknown author")
+	// Initially no author states
+	states := s.ListAuthorStates()
+	if len(states) != 0 {
+		t.Errorf("expected 0 author states, got %d", len(states))
 	}
 
 	// Toggle mute creates state
 	s.ToggleMuteAuthor("dependabot")
-	state = s.GetAuthorState("dependabot")
-	if state == nil {
-		t.Fatal("expected author state after toggle")
+	states = s.ListAuthorStates()
+	if len(states) != 1 {
+		t.Fatalf("expected 1 author state, got %d", len(states))
 	}
-	if !state.Muted {
+	if !states[0].Muted {
 		t.Error("author should be muted")
 	}
 
 	// Toggle again unmutes
 	s.ToggleMuteAuthor("dependabot")
-	state = s.GetAuthorState("dependabot")
-	if state.Muted {
+	states = s.ListAuthorStates()
+	if states[0].Muted {
 		t.Error("author should be unmuted")
 	}
 }
