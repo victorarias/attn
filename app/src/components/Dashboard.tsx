@@ -400,7 +400,6 @@ export function Dashboard({
                               )}
                             </div>
                             <PRActions
-                              repo={pr.repo}
                               number={pr.number}
                               prId={pr.id}
                               author={pr.author}

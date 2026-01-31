@@ -11,7 +11,6 @@ interface ActionState {
 }
 
 interface PRActionsProps {
-  repo: string;
   number: number;
   prId: string;
   author?: string;
@@ -21,7 +20,7 @@ interface PRActionsProps {
   onOpen?: () => void;
 }
 
-export function PRActions({ repo, number, prId, author, compact = false, onMuted, onActionComplete, onOpen }: PRActionsProps) {
+export function PRActions({ number, prId, author, compact = false, onMuted, onActionComplete, onOpen }: PRActionsProps) {
   const { sendPRAction, sendMutePR, sendMuteAuthor } = useDaemonContext();
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
   const [approveState, setApproveState] = useState<ActionState>({ loading: false, success: false, error: null });

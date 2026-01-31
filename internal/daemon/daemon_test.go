@@ -287,6 +287,9 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient error: %v", err)
 	}
+	t.Setenv("ATTN_MOCK_GH_URL", mockGH.URL)
+	t.Setenv("ATTN_MOCK_GH_TOKEN", "test-token")
+	t.Setenv("ATTN_MOCK_GH_HOST", ghClient.Host())
 
 	// Create daemon with GitHub client
 	// Use /tmp directly to avoid long socket paths, with unique suffix to prevent parallel test conflicts

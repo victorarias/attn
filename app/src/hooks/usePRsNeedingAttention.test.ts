@@ -15,6 +15,7 @@ import { useDaemonStore } from '../store/daemonSessions';
 function createPR(overrides: Partial<DaemonPR> = {}): DaemonPR {
   return {
     id: 'pr-1',
+    host: 'github.com',
     repo: 'org/repo',
     number: 1,
     title: 'Test PR',
