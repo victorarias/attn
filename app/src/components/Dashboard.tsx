@@ -352,7 +352,9 @@ export function Dashboard({
                               }}
                             >
                               <span className={`pr-role ${pr.role}`}>
-                                {pr.role === 'reviewer' ? '👀' : '✏️'}
+                                {pr.role === 'reviewer'
+                                  ? (pr.author?.toLowerCase().includes('bot') ? '🤖' : '👀')
+                                  : '✏️'}
                               </span>
                               <span className="pr-number">#{pr.number}</span>
                               <span className="pr-title">{pr.title}</span>
