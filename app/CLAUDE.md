@@ -12,7 +12,7 @@ pnpm run dev    # Starts tauri dev with hot reload
 
 ### Key Components
 
-- **App.tsx**: Main layout, state orchestration (split into `App` + `AppContent` for provider wrapping - when adding daemon socket functions, update both components' props)
+- **App.tsx**: Main layout, state orchestration (see "App.tsx two-component pattern" in Gotchas)
 - **Sidebar.tsx**: Session/PR list with state indicators
 - **Dashboard.tsx**: Terminal tabs and main content area
 - **Terminal.tsx**: xterm.js integration with PTY bridge
@@ -175,10 +175,20 @@ pnpm run e2e:headed -- e2e/component-harness.spec.ts  # Debug visually
 
 ## Known Gotchas
 
-1. **Worktree action key collision**: `sendCreateWorktree()` and `sendCreateWorktreeFromBranch()` use the same pending action key. Don't call both simultaneously.
+1. **App.tsx two-component pattern**: App.tsx has two components: `App` (outer) and `AppContent` (inner). This split exists because `AppContent` needs to be wrapped in providers (like `DaemonProvider`) that require functions from `useDaemonSocket()`.
 
-2. **Timeout vs completion race**: Async operations timeout after 30s. If daemon responds after timeout, the operation completed but UI shows error.
+   **When adding a new daemon socket function**, update these 4 places in order:
+   1. Destructure from `useDaemonSocket()` return in `App` (~line 141)
+   2. Pass as prop to `<AppContent ... />` (~line 216)
+   3. Add to `AppContentProps` interface (~line 263)
+   4. Destructure in `AppContent` function parameters (~line 333)
 
-3. **Git status subscription**: Only 1 subscription per client. New subscription replaces old one.
+   Missing any step causes the function to be undefined where you try to use it.
 
-4. **Circuit breaker auto-reset**: Opens after failed reconnects, auto-resets after 30s even without user action.
+2. **Worktree action key collision**: `sendCreateWorktree()` and `sendCreateWorktreeFromBranch()` use the same pending action key. Don't call both simultaneously.
+
+3. **Timeout vs completion race**: Async operations timeout after 30s. If daemon responds after timeout, the operation completed but UI shows error.
+
+4. **Git status subscription**: Only 1 subscription per client. New subscription replaces old one.
+
+5. **Circuit breaker auto-reset**: Opens after failed reconnects, auto-resets after 30s even without user action.
