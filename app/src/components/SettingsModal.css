@@ -70,13 +70,13 @@
   margin: 0;
 }
 
-.muted-repos-list {
+.muted-items-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.muted-repo-item {
+.muted-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -85,11 +85,11 @@
   margin-bottom: 4px;
 }
 
-.muted-repo-item:hover {
+.muted-item:hover {
   background: #1a1a1d;
 }
 
-.muted-repo-name {
+.muted-item-name {
   font-size: 13px;
   color: #e8e8e8;
   font-family: 'JetBrains Mono', monospace;

@@ -189,11 +189,6 @@ model MuteAuthorMessage {
   author: string;
 }
 
-model QueryAuthorsMessage {
-  cmd: "query_authors";
-  filter?: string;
-}
-
 model CollapseRepoMessage {
   cmd: "collapse_repo";
   repo: string;

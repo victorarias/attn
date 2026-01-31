@@ -28,7 +28,6 @@ const (
 	CmdMuteAuthor               = "mute_author"
 	CmdCollapseRepo             = "collapse_repo"
 	CmdQueryRepos               = "query_repos"
-	CmdQueryAuthors             = "query_authors"
 	CmdFetchPRDetails           = "fetch_pr_details"
 	CmdRefreshPRs               = "refresh_prs"
 	CmdClearSessions            = "clear_sessions"
@@ -287,13 +286,6 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdQueryRepos:
 		var msg QueryReposMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdQueryAuthors:
-		var msg QueryAuthorsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

@@ -246,10 +246,10 @@ export function SettingsModal({
             {mutedRepos.length === 0 ? (
               <p className="settings-empty">No muted repositories</p>
             ) : (
-              <ul className="muted-repos-list">
+              <ul className="muted-items-list">
                 {mutedRepos.map(repo => (
-                  <li key={repo} className="muted-repo-item">
-                    <span className="muted-repo-name">{repo}</span>
+                  <li key={repo} className="muted-item">
+                    <span className="muted-item-name">{repo}</span>
                     <button
                       className="unmute-btn"
                       onClick={() => onUnmuteRepo(repo)}
@@ -267,10 +267,10 @@ export function SettingsModal({
             {mutedAuthors.length === 0 ? (
               <p className="settings-empty">No muted authors</p>
             ) : (
-              <ul className="muted-repos-list">
+              <ul className="muted-items-list">
                 {mutedAuthors.map(author => (
-                  <li key={author} className="muted-repo-item">
-                    <span className="muted-repo-name">👤 {author}</span>
+                  <li key={author} className="muted-item">
+                    <span className="muted-item-name">👤 {author}</span>
                     <button
                       className="unmute-btn"
                       onClick={() => onUnmuteAuthor(author)}
