@@ -47,7 +47,7 @@ func (r *ClientRegistry) FetchAllPRs() ([]*protocol.PR, error)  // aggregates al
 - API URL: `github.com` → `https://api.github.com`, others → `https://<host>/api/v3`
 - Token: `gh auth token -h <host>`
 
-**API URL assumption**: The `gh` CLI does not expose API URLs programmatically. We assume the standard GHES pattern `https://<host>/api/v3`. Custom ports or non-standard schemes are **not supported** - users with non-standard setups can use `GITHUB_API_URL` env var as fallback.
+**API URL assumption**: The `gh` CLI does not expose API URLs programmatically. We assume the standard GHES pattern `https://<host>/api/v3`. Custom ports or non-standard schemes are **not supported**.
 
 **New client factory**: Create `NewClientForHost(host, token string)` that bypasses env var logic to avoid token cross-contamination between hosts.
 
@@ -189,9 +189,9 @@ func (d *Daemon) handleApprovePR(id string) error {
 - Actions use PR ID which now routes correctly
 
 **Optional UI enhancements**:
-- Show host badge/icon for non-github.com PRs
-- Group PRs by host in the list
-- Settings page showing connected hosts
+- Show host badge/icon when the same repo appears on multiple hosts
+- Group PRs by host in the list (optional)
+- Settings page showing connected hosts (derived from PRs if no explicit host list is available)
 
 ### 9. Error Handling
 
@@ -228,9 +228,3 @@ Please upgrade: brew upgrade gh
 ## Configuration
 
 **None required** - discovery is automatic via `gh` CLI.
-
-**Optional environment variables** (for backward compatibility):
-- `GITHUB_API_URL` - if set, adds this as an additional host
-- `GITHUB_TOKEN` - token for the above URL
-
-These are secondary to `gh auth status` discovery but preserved for users who prefer explicit config.

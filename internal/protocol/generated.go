@@ -40,11 +40,8 @@ type ApprovePRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
-	// Number corresponds to the JSON schema field "number".
-	Number int `json:"number"`
-
-	// Repo corresponds to the JSON schema field "repo".
-	Repo string `json:"repo"`
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
 }
 
 type AuthorState struct {
@@ -359,8 +356,8 @@ type FetchPRDetailsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
-	// Repo corresponds to the JSON schema field "repo".
-	Repo string `json:"repo"`
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
 }
 
 type FetchRemotesMessage struct {
@@ -683,14 +680,11 @@ type MergePRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
 	// Method corresponds to the JSON schema field "method".
 	Method string `json:"method"`
-
-	// Number corresponds to the JSON schema field "number".
-	Number int `json:"number"`
-
-	// Repo corresponds to the JSON schema field "repo".
-	Repo string `json:"repo"`
 }
 
 type MuteAuthorMessage struct {
@@ -756,6 +750,9 @@ type PR struct {
 	// HeatState corresponds to the JSON schema field "heat_state".
 	HeatState *HeatState `json:"heat_state,omitempty"`
 
+	// Host corresponds to the JSON schema field "host".
+	Host string `json:"host"`
+
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 
@@ -813,11 +810,8 @@ type PRActionResultMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
-	// Number corresponds to the JSON schema field "number".
-	Number int `json:"number"`
-
-	// Repo corresponds to the JSON schema field "repo".
-	Repo string `json:"repo"`
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`

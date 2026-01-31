@@ -10,7 +10,7 @@ Breaking down the SPEC.md into implementable tasks. Tasks are ordered by depende
 
 These tasks add infrastructure without changing existing behavior.
 
-### Task 1.1: Add gh CLI Version Check
+### [x] Task 1.1: Add gh CLI Version Check
 
 **Files**: `internal/github/version.go` (new)
 
@@ -25,7 +25,7 @@ These tasks add infrastructure without changing existing behavior.
 
 ---
 
-### Task 1.2: Add Host Discovery
+### [x] Task 1.2: Add Host Discovery
 
 **Files**: `internal/github/discovery.go` (new)
 
@@ -51,7 +51,7 @@ type HostInfo struct {
 
 ---
 
-### Task 1.3: Create Client Registry
+### [x] Task 1.3: Create Client Registry
 
 **Files**: `internal/github/registry.go` (new), `internal/github/interface.go` (update)
 
@@ -60,7 +60,7 @@ type HostInfo struct {
 - Add methods: `Get(host)`, `Hosts()`, `Register(host, client)`, `Remove(host)`
 - Add `NewClientRegistry() *ClientRegistry`
 - Add `NewClientForHost(host, apiURL, token string) (*Client, error)` factory function
-  - **Important**: This bypasses `GITHUB_TOKEN` env var to avoid token cross-contamination between hosts
+  - **Important**: Uses explicit tokens to avoid cross-contamination between hosts
 
 **Tests**: Registry CRUD operations
 
@@ -68,7 +68,7 @@ type HostInfo struct {
 
 ---
 
-### Task 1.4: Integrate Registry into Daemon (Behind Flag)
+### [x] Task 1.4: Integrate Registry into Daemon (Behind Flag)
 
 **Files**: `internal/daemon/daemon.go`
 
@@ -76,7 +76,7 @@ type HostInfo struct {
 - Add `ghRegistry *github.ClientRegistry` field alongside existing `ghClient`
 - On startup, call `DiscoverHosts()`, create client for each, register
 - Keep existing `ghClient` for backward compatibility (set to github.com client)
-- Add `ATTN_MULTI_HOST=1` env var to enable new behavior (default: off)
+- Multi-host is the default behavior (no flag)
 
 **Tests**: Daemon startup with mock discovery
 
@@ -88,7 +88,7 @@ type HostInfo struct {
 
 These tasks change the PR data model to support multiple hosts.
 
-### Task 2.1: Update Protocol Schema
+### [x] Task 2.1: Update Protocol Schema
 
 **Files**: `internal/protocol/schema/main.tsp`
 
@@ -107,7 +107,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ---
 
-### Task 2.2: Database Migration
+### [x] Task 2.2: Database Migration
 
 **Files**: `internal/store/migrations.go` (new or extend), `internal/store/sqlite.go`
 
@@ -126,7 +126,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ---
 
-### Task 2.3: PR ID Parsing Helpers
+### [x] Task 2.3: PR ID Parsing Helpers
 
 **Files**: `internal/protocol/helpers.go` (extend)
 
@@ -142,7 +142,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ---
 
-### Task 2.4: Update GitHub Client to Tag PRs with Host
+### [x] Task 2.4: Update GitHub Client to Tag PRs with Host
 
 **Files**: `internal/github/client.go`
 
@@ -160,7 +160,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ## Phase 3: Multi-Host Polling
 
-### Task 3.1: Aggregate PR Fetching
+### [x] Task 3.1: Aggregate PR Fetching
 
 **Files**: `internal/github/registry.go`
 
@@ -176,7 +176,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ---
 
-### Task 3.2: Per-Host Rate Limiting
+### [x] Task 3.2: Per-Host Rate Limiting
 
 **Files**: `internal/github/client.go`, `internal/github/registry.go`
 
@@ -191,12 +191,12 @@ These tasks change the PR data model to support multiple hosts.
 
 ---
 
-### Task 3.3: Update Daemon PR Polling
+### [x] Task 3.3: Update Daemon PR Polling
 
 **Files**: `internal/daemon/daemon.go`
 
 **Work**:
-- When `ATTN_MULTI_HOST=1`, use `ghRegistry.FetchAllPRs()` instead of `ghClient.FetchAll()`
+- Use `ghRegistry.FetchAllPRs()` instead of `ghClient.FetchAll()`
 - Broadcast rate limit events per-host (or aggregate)
 - Update detail refresh to route to correct client per PR
 
@@ -208,7 +208,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ## Phase 4: Action Routing
 
-### Task 4.1: Route Approve/Merge to Correct Host
+### [x] Task 4.1: Route Approve/Merge to Correct Host
 
 **Files**: `internal/daemon/websocket.go`
 
@@ -224,7 +224,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ---
 
-### Task 4.2: Update PR Details Fetch
+### [x] Task 4.2: Update PR Details Fetch
 
 **Files**: `internal/daemon/daemon.go`
 
@@ -243,7 +243,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ## Phase 5: Protocol Version & Cleanup
 
-### Task 5.1: Bump Protocol Version
+### [x] Task 5.1: Bump Protocol Version
 
 **Files**: `internal/protocol/constants.go`
 
@@ -255,12 +255,12 @@ These tasks change the PR data model to support multiple hosts.
 
 ---
 
-### Task 5.2: Remove Feature Flag
+### [x] Task 5.2: Remove Feature Flag
 
 **Files**: `internal/daemon/daemon.go`
 
 **Work**:
-- Remove `ATTN_MULTI_HOST` env var check
+- Remove feature flag gating
 - Make multi-host the default behavior
 - Remove old single-client code path
 
@@ -268,7 +268,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ---
 
-### Task 5.3: Update Documentation
+### [x] Task 5.3: Update Documentation
 
 **Files**: `docs/CONFIGURATION.md`, `CLAUDE.md`, `README.md`
 
@@ -276,7 +276,8 @@ These tasks change the PR data model to support multiple hosts.
 - Document gh CLI version requirement (2.81.0+)
 - Document multi-host support
 - Update troubleshooting for GHE issues
-- Remove references to `GITHUB_API_URL` as primary config (now auto-discovered)
+- Remove references to `GITHUB_API_URL`/`GITHUB_TOKEN` (gh discovery only)
+- Document test-only mock GitHub env vars for E2E (`ATTN_MOCK_GH_*`)
 
 **Acceptance**: Docs reflect new behavior
 
@@ -284,7 +285,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ## Phase 6: Frontend Polish (Optional)
 
-### Task 6.1: Host Badge in PR List
+### [x] Task 6.1: Host Badge in PR List
 
 **Files**: `app/src/components/PRList.tsx` (or similar)
 
@@ -296,7 +297,7 @@ These tasks change the PR data model to support multiple hosts.
 
 ---
 
-### Task 6.2: Connected Hosts Display
+### [x] Task 6.2: Connected Hosts Display
 
 **Files**: `app/src/components/Settings.tsx` (or new)
 

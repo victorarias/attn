@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -428,7 +429,7 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 
 	// Get existing PRs to preserve muted state and details
 	existing := make(map[string]*protocol.PR)
-	rows, err := s.db.Query(`SELECT id, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs`)
+	rows, err := s.db.Query(`SELECT id, host, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs`)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -439,7 +440,7 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 			var mergeable sql.NullInt64
 			var commentCount int
 
-			if err := rows.Scan(&pr.ID, &muted, &detailsFetched, &detailsFetchedAt, &mergeable, &mergeableState, &ciStatus, &reviewStatus, &headSHA, &headBranch, &commentCount, &approvedByMe, &heatState, &lastHeatActivityAt); err != nil {
+			if err := rows.Scan(&pr.ID, &pr.Host, &muted, &detailsFetched, &detailsFetchedAt, &mergeable, &mergeableState, &ciStatus, &reviewStatus, &headSHA, &headBranch, &commentCount, &approvedByMe, &heatState, &lastHeatActivityAt); err != nil {
 				log.Printf("[store] SetPRs: failed to scan existing PR: %v", err)
 				continue
 			}
@@ -478,6 +479,7 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 			if lastHeatActivityAt.Valid {
 				pr.LastHeatActivityAt = protocol.Ptr(lastHeatActivityAt.String)
 			}
+			normalizePRIdentity(&pr)
 			existing[pr.ID] = &pr
 		}
 	}
@@ -515,10 +517,14 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 	s.execLog("DELETE FROM prs")
 
 	for _, pr := range prs {
+		normalizePRIdentity(pr)
 		// Preserve state from existing
 		if ex, ok := existing[pr.ID]; ok {
 			pr.Muted = ex.Muted
 			pr.ApprovedByMe = ex.ApprovedByMe // Always preserve approval state
+			if pr.Host == "" {
+				pr.Host = ex.Host
+			}
 			if ex.DetailsFetched {
 				// Always preserve fetched details - they're more accurate than the basic list response
 				// The details will be re-fetched when the PR becomes "hot" again
@@ -574,9 +580,9 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 		heatState := protocol.DerefOr(pr.HeatState, protocol.HeatStateCold)
 
 		s.execLog(`
-			INSERT INTO prs (id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Author, string(pr.Role), pr.State, pr.Reason,
+			INSERT INTO prs (id, host, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			pr.ID, pr.Host, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Author, string(pr.Role), pr.State, pr.Reason,
 			pr.LastUpdated, pr.LastPolled,
 			boolToInt(pr.Muted), boolToInt(pr.DetailsFetched), nullPtrString(pr.DetailsFetchedAt),
 			mergeableVal, nullPtrString(pr.MergeableState), nullPtrString(pr.CIStatus), nullPtrString(pr.ReviewStatus),
@@ -604,10 +610,12 @@ func (s *Store) AddPR(pr *protocol.PR) {
 	// Ensure heat_state has a default value (NOT NULL column)
 	heatState := protocol.DerefOr(pr.HeatState, protocol.HeatStateCold)
 
+	normalizePRIdentity(pr)
+
 	s.execLog(`
-		INSERT OR REPLACE INTO prs (id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Author, string(pr.Role), pr.State, pr.Reason,
+		INSERT OR REPLACE INTO prs (id, host, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		pr.ID, pr.Host, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Author, string(pr.Role), pr.State, pr.Reason,
 		pr.LastUpdated, pr.LastPolled,
 		boolToInt(pr.Muted), boolToInt(pr.DetailsFetched), nullPtrString(pr.DetailsFetchedAt),
 		mergeableVal, nullPtrString(pr.MergeableState), nullPtrString(pr.CIStatus), nullPtrString(pr.ReviewStatus),
@@ -629,9 +637,9 @@ func (s *Store) ListPRs(stateFilter string) []*protocol.PR {
 	var err error
 
 	if stateFilter == "" {
-		rows, err = s.db.Query(`SELECT id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs`)
+		rows, err = s.db.Query(`SELECT id, host, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs`)
 	} else {
-		rows, err = s.db.Query(`SELECT id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE state = ?`, stateFilter)
+		rows, err = s.db.Query(`SELECT id, host, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE state = ?`, stateFilter)
 	}
 	if err != nil {
 		return nil
@@ -677,7 +685,7 @@ func (s *Store) GetPR(id string) *protocol.PR {
 		return nil
 	}
 
-	row := s.db.QueryRow(`SELECT id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, host, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE id = ?`, id)
 	return scanPRRow(row)
 }
 
@@ -710,7 +718,32 @@ func (s *Store) ListPRsByRepo(repo string) []*protocol.PR {
 		return nil
 	}
 
-	rows, err := s.db.Query(`SELECT id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE repo = ?`, repo)
+	rows, err := s.db.Query(`SELECT id, host, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE repo = ?`, repo)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var result []*protocol.PR
+	for rows.Next() {
+		pr := scanPR(rows)
+		if pr != nil {
+			result = append(result, pr)
+		}
+	}
+	return result
+}
+
+// ListPRsByRepoHost returns all PRs for a specific repo on a specific host.
+func (s *Store) ListPRsByRepoHost(repo, host string) []*protocol.PR {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil
+	}
+
+	rows, err := s.db.Query(`SELECT id, host, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE repo = ? AND host = ?`, repo, host)
 	if err != nil {
 		return nil
 	}
@@ -987,7 +1020,7 @@ func (s *Store) GetPRsNeedingDetailRefresh() []*protocol.PR {
 	var result []*protocol.PR
 
 	rows, err := s.db.Query(`
-		SELECT id, repo, number, title, url, author, role, state, reason, last_updated, last_polled,
+		SELECT id, host, repo, number, title, url, author, role, state, reason, last_updated, last_polled,
 		       muted, details_fetched, details_fetched_at, mergeable, mergeable_state,
 		       ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me,
 		       heat_state, last_heat_activity_at
@@ -1229,6 +1262,36 @@ func nullPtrString(s *string) interface{} {
 	return *s
 }
 
+func normalizePRIdentity(pr *protocol.PR) {
+	if pr == nil {
+		return
+	}
+
+	if pr.Host == "" || !strings.Contains(pr.ID, ":") {
+		if host, repo, number, err := protocol.ParsePRID(pr.ID); err == nil {
+			if pr.Host == "" {
+				pr.Host = host
+			}
+			if pr.Repo == "" {
+				pr.Repo = repo
+			}
+			if pr.Number == 0 {
+				pr.Number = number
+			}
+			if !strings.Contains(pr.ID, ":") {
+				pr.ID = protocol.FormatPRID(pr.Host, pr.Repo, pr.Number)
+			}
+		}
+	}
+
+	if pr.Host == "" {
+		pr.Host = "github.com"
+	}
+	if pr.ID == "" && pr.Repo != "" && pr.Number != 0 {
+		pr.ID = protocol.FormatPRID(pr.Host, pr.Repo, pr.Number)
+	}
+}
+
 func scanPR(rows *sql.Rows) *protocol.PR {
 	var pr protocol.PR
 	var muted, detailsFetched, approvedByMe int
@@ -1239,7 +1302,7 @@ func scanPR(rows *sql.Rows) *protocol.PR {
 	var commentCount int
 
 	err := rows.Scan(
-		&pr.ID, &pr.Repo, &pr.Number, &pr.Title, &pr.URL, &pr.Author, &pr.Role, &pr.State, &pr.Reason,
+		&pr.ID, &pr.Host, &pr.Repo, &pr.Number, &pr.Title, &pr.URL, &pr.Author, &pr.Role, &pr.State, &pr.Reason,
 		&lastUpdated, &lastPolled, &muted, &detailsFetched, &detailsFetchedAt,
 		&mergeable, &mergeableState, &ciStatus, &reviewStatus,
 		&headSHA, &headBranch, &commentCount, &approvedByMe,
@@ -1287,6 +1350,7 @@ func scanPR(rows *sql.Rows) *protocol.PR {
 		pr.LastHeatActivityAt = protocol.Ptr(lastHeatActivityAt.String)
 	}
 
+	normalizePRIdentity(&pr)
 	return &pr
 }
 
@@ -1300,7 +1364,7 @@ func scanPRRow(row *sql.Row) *protocol.PR {
 	var commentCount int
 
 	err := row.Scan(
-		&pr.ID, &pr.Repo, &pr.Number, &pr.Title, &pr.URL, &pr.Author, &pr.Role, &pr.State, &pr.Reason,
+		&pr.ID, &pr.Host, &pr.Repo, &pr.Number, &pr.Title, &pr.URL, &pr.Author, &pr.Role, &pr.State, &pr.Reason,
 		&lastUpdated, &lastPolled, &muted, &detailsFetched, &detailsFetchedAt,
 		&mergeable, &mergeableState, &ciStatus, &reviewStatus,
 		&headSHA, &headBranch, &commentCount, &approvedByMe,
@@ -1348,5 +1412,6 @@ func scanPRRow(row *sql.Row) *protocol.PR {
 		pr.LastHeatActivityAt = protocol.Ptr(lastHeatActivityAt.String)
 	}
 
+	normalizePRIdentity(&pr)
 	return &pr
 }

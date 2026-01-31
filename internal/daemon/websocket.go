@@ -311,26 +311,27 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	switch cmd {
 	case protocol.CmdApprovePR:
 		appMsg := msg.(*protocol.ApprovePRMessage)
-		d.logf("Processing approve for %s#%d", appMsg.Repo, appMsg.Number)
+		d.logf("Processing approve for %s", appMsg.ID)
 		go func() {
-			err := d.ghClient.ApprovePR(appMsg.Repo, appMsg.Number)
+			ghClient, repo, number, _, err := d.clientForPRID(appMsg.ID)
+			if err == nil {
+				err = ghClient.ApprovePR(repo, number)
+			}
 			result := protocol.PRActionResultMessage{
 				Event:   protocol.EventPRActionResult,
 				Action:  "approve",
-				Repo:    appMsg.Repo,
-				Number:  appMsg.Number,
+				ID:      appMsg.ID,
 				Success: err == nil,
 			}
 			if err != nil {
 				result.Error = protocol.Ptr(err.Error())
-				d.logf("Approve failed for %s#%d: %v", appMsg.Repo, appMsg.Number, err)
+				d.logf("Approve failed for %s: %v", appMsg.ID, err)
 			} else {
-				d.logf("Approve succeeded for %s#%d", appMsg.Repo, appMsg.Number)
+				d.logf("Approve succeeded for %s", appMsg.ID)
 				// Track approval interaction
-				prID := fmt.Sprintf("%s#%d", appMsg.Repo, appMsg.Number)
-				d.store.MarkPRApproved(prID)
-				d.store.SetPRHot(prID)
-				go d.fetchPRDetailsImmediate(prID)
+				d.store.MarkPRApproved(appMsg.ID)
+				d.store.SetPRHot(appMsg.ID)
+				go d.fetchPRDetailsImmediate(appMsg.ID)
 			}
 			d.sendToClient(client, result)
 			d.logf("Sent approve result to client")
@@ -341,12 +342,14 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdMergePR:
 		mergeMsg := msg.(*protocol.MergePRMessage)
 		go func() {
-			err := d.ghClient.MergePR(mergeMsg.Repo, mergeMsg.Number, mergeMsg.Method)
+			ghClient, repo, number, _, err := d.clientForPRID(mergeMsg.ID)
+			if err == nil {
+				err = ghClient.MergePR(repo, number, mergeMsg.Method)
+			}
 			result := protocol.PRActionResultMessage{
 				Event:   protocol.EventPRActionResult,
 				Action:  "merge",
-				Repo:    mergeMsg.Repo,
-				Number:  mergeMsg.Number,
+				ID:      mergeMsg.ID,
 				Success: err == nil,
 			}
 			if err != nil {
@@ -417,10 +420,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		}()
 
 	case protocol.CmdFetchPRDetails:
-		d.logf("Fetching PR details for repo")
+		d.logf("Fetching PR details")
 		fetchMsg := msg.(*protocol.FetchPRDetailsMessage)
 		go func() {
-			updatedPRs, err := d.fetchPRDetailsForRepo(fetchMsg.Repo)
+			updatedPRs, err := d.fetchPRDetailsForID(fetchMsg.ID)
 			result := protocol.WebSocketEvent{
 				Event:   protocol.EventFetchPRDetailsResult,
 				Success: protocol.Ptr(err == nil),
@@ -450,9 +453,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.logf("Marking PR %s as visited", visitedMsg.ID)
 		d.store.MarkPRVisited(visitedMsg.ID)
 		// Make all PRs from the same repo HOT so user sees fresh status
-		// PR ID format: "owner/repo#number" → extract repo as "owner/repo"
-		if idx := strings.LastIndex(visitedMsg.ID, "#"); idx > 0 {
-			repo := visitedMsg.ID[:idx]
+		if _, repo, _, err := protocol.ParsePRID(visitedMsg.ID); err == nil {
 			for _, pr := range d.store.ListPRs("") {
 				if pr.Repo == repo {
 					d.store.SetPRHot(pr.ID)

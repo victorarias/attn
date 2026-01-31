@@ -101,6 +101,7 @@ class MockGitHubServer {
 
 // Test port - different from production (9849) to avoid conflicts
 const TEST_DAEMON_PORT = '19849';
+const MOCK_GH_HOST = 'mock.github.local';
 
 // Daemon launcher - creates isolated temp directory for DB and socket
 async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketPath: string; tempDir: string; stop: () => void }> {
@@ -133,8 +134,9 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
       ATTN_SOCKET_PATH: socketPath, // Test isolation: separate socket
       ATTN_DB_PATH: dbPath, // Test isolation: separate database
       ATTN_MOCK_REVIEWER: '1', // Use mock reviewer for predictable E2E tests
-      GITHUB_API_URL: ghUrl,
-      GITHUB_TOKEN: 'test-token',
+      ATTN_MOCK_GH_URL: ghUrl,
+      ATTN_MOCK_GH_TOKEN: 'test-token',
+      ATTN_MOCK_GH_HOST: MOCK_GH_HOST,
     },
     stdio: 'pipe',
   });

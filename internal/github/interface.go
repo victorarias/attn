@@ -8,6 +8,7 @@ import (
 
 // GitHubClient defines the interface for all GitHub operations
 type GitHubClient interface {
+	Host() string
 	IsAvailable() bool
 	FetchAll() ([]*protocol.PR, error)
 	FetchPRDetails(repo string, number int) (*PRDetails, error)

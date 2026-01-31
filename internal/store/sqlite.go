@@ -154,6 +154,12 @@ var migrations = []migration{
 		muted INTEGER NOT NULL DEFAULT 0
 	)`},
 	{19, "add author to prs", "ALTER TABLE prs ADD COLUMN author TEXT NOT NULL DEFAULT ''"},
+	{20, "add host to prs and migrate ids", `
+		ALTER TABLE prs ADD COLUMN host TEXT NOT NULL DEFAULT 'github.com';
+		UPDATE prs SET id = 'github.com:' || id WHERE id NOT LIKE '%:%';
+		UPDATE pr_interactions SET pr_id = 'github.com:' || pr_id WHERE pr_id NOT LIKE '%:%';
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_prs_host_repo_number ON prs(host, repo, number);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

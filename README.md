@@ -24,7 +24,7 @@ need you. attn is the polite, slightly relentless friend who taps you on the sho
 - **Git diffs** - View changes and send diff snippets as context
 - **Session forking** - Fork a Claude session to explore alternatives (Cmd+Shift+F)
 - **Quick Find** - Extract URLs, paths, and hashes from terminal output (Cmd+F)
-- **GitHub PR integration** - Track PRs that need review, have CI failures, or merge conflicts
+- **GitHub PR integration** - Track PRs that need review, have CI failures, or merge conflicts across github.com + GHES
 - **tmux status bar** - See session status from your terminal
 
 Session tracking uses Claude hooks plus a lightweight classifier to detect when the agent is waiting
@@ -58,7 +58,7 @@ Launch **attn** from Applications and click **+** to start a session.
 - Go 1.25+ (matches `go.mod`)
 - Rust (stable) + Tauri prerequisites
 - Node.js 20+ and pnpm
-- Git + GitHub CLI (`gh`) authenticated
+- Git + GitHub CLI (`gh`) v2.81.0+ authenticated (multi-host support)
 - Claude Code and/or Codex installed
 
 ### Build + install
@@ -160,14 +160,14 @@ set -g status-right '#(attn status)'
 1. `attn` wraps the agent CLI (Claude or Codex) and installs hooks (Claude) to report state changes
 2. A background daemon tracks session state via a local socket
 3. The desktop app connects via WebSocket for real-time updates
-4. GitHub integration uses the `gh` CLI to query PRs
+4. GitHub integration uses the `gh` CLI to query PRs (multi-host via `gh auth status`)
 
 ## Configuration
 
 You can configure defaults from **Settings** in the app, including:
 
 - Projects directory for repo discovery
-- GitHub CLI authentication and rate limit info
+- GitHub CLI authentication, connected hosts, and rate limit info
 - Agent executable overrides (if you want custom paths)
 
 ## Development
@@ -201,6 +201,7 @@ make test-all       # Run Go + frontend tests
 - **No sessions showing**: make sure the daemon is running (`attn status`).
 - **Resume doesn't open a picker**: verify your agent CLI is installed and on PATH.
 - **GitHub PRs empty**: run `gh auth status` and sign in if needed.
+- **GH CLI too old**: upgrade to `gh` v2.81.0+ (e.g., `brew upgrade gh`).
 - **Worktree creation fails**: ensure your repo has a clean git state.
 
 ## FAQ

@@ -10,6 +10,17 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
+func newRegistryFromClient(client github.GitHubClient) *github.ClientRegistry {
+	registry := github.NewClientRegistry()
+	if client == nil {
+		return registry
+	}
+	if ghClient, ok := client.(*github.Client); ok {
+		registry.Register(ghClient.Host(), ghClient)
+	}
+	return registry
+}
+
 // Classifier is an interface for classifying session state
 type Classifier interface {
 	Classify(text string, timeout time.Duration) (string, error)
@@ -236,7 +247,7 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 		wsHub:           hub,
 		done:            make(chan struct{}),
 		logger:          nil,
-		ghClient:        b.ghClient,
+		ghRegistry:      newRegistryFromClient(b.ghClient),
 		classifier:      classifier,
 		reviewerFactory: b.reviewerFactory,
 	}

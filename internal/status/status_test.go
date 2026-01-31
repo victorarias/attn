@@ -116,7 +116,7 @@ func TestFormat_AllMuted(t *testing.T) {
 func TestFormat_WithPRs(t *testing.T) {
 	sessions := []protocol.Session{}
 	prs := []protocol.PR{
-		{ID: "owner/repo#123", State: protocol.PRStateWaiting, Reason: protocol.PRReasonReadyToMerge, Repo: "owner/repo", Number: 123, Muted: false},
+		{ID: "github.com:owner/repo#123", State: protocol.PRStateWaiting, Reason: protocol.PRReasonReadyToMerge, Repo: "owner/repo", Number: 123, Muted: false},
 	}
 
 	result := FormatWithPRs(sessions, prs)
@@ -130,7 +130,7 @@ func TestFormat_SessionsAndPRs(t *testing.T) {
 		{Label: "foo", State: protocol.SessionStateWaitingInput, Muted: false},
 	}
 	prs := []protocol.PR{
-		{ID: "owner/repo#123", State: protocol.PRStateWaiting, Repo: "owner/repo", Number: 123, Muted: false},
+		{ID: "github.com:owner/repo#123", State: protocol.PRStateWaiting, Repo: "owner/repo", Number: 123, Muted: false},
 	}
 
 	result := FormatWithPRs(sessions, prs)

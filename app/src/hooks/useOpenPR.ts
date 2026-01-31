@@ -23,7 +23,7 @@ export type OpenPRResult =
 
 export interface UseOpenPRDeps {
   settings: DaemonSettings;
-  sendFetchPRDetails: (repo: string) => Promise<{ success: boolean; prs?: DaemonPR[]; error?: string }>;
+  sendFetchPRDetails: (id: string) => Promise<{ success: boolean; prs?: DaemonPR[]; error?: string }>;
   sendFetchRemotes: (repoPath: string) => Promise<{ success: boolean; error?: string }>;
   sendCreateWorktreeFromBranch: (
     repoPath: string,
@@ -49,7 +49,7 @@ export function useOpenPR({
     if (!prWithBranch.head_branch) {
       let detailsResult: { success: boolean; prs?: DaemonPR[]; error?: string };
       try {
-        detailsResult = await sendFetchPRDetails(pr.repo);
+        detailsResult = await sendFetchPRDetails(pr.id);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return { success: false, error: { kind: 'fetch_pr_details_failed', message } };
@@ -63,7 +63,7 @@ export function useOpenPR({
 
       if (detailsResult.prs && detailsResult.prs.length > 0) {
         const updated = detailsResult.prs.find(
-          (candidate) => candidate.repo === pr.repo && candidate.number === pr.number
+          (candidate) => candidate.id === pr.id
         );
         if (updated) {
           prWithBranch = updated;

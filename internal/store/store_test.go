@@ -164,8 +164,8 @@ func TestStore_SetAndListPRs(t *testing.T) {
 	s := New()
 
 	prs := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.PRStateWaiting, Muted: false},
-		{ID: "owner/repo#2", State: protocol.StateWorking, Muted: false},
+		{ID: "github.com:owner/repo#1", State: protocol.PRStateWaiting, Muted: false},
+		{ID: "github.com:owner/repo#2", State: protocol.StateWorking, Muted: false},
 	}
 
 	s.SetPRs(prs)
@@ -186,16 +186,16 @@ func TestStore_SetPRs_PreservesMuted(t *testing.T) {
 
 	// Initial PRs
 	prs := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.PRStateWaiting, Muted: false},
+		{ID: "github.com:owner/repo#1", State: protocol.PRStateWaiting, Muted: false},
 	}
 	s.SetPRs(prs)
 
 	// Mute it
-	s.ToggleMutePR("owner/repo#1")
+	s.ToggleMutePR("github.com:owner/repo#1")
 
 	// Set PRs again (simulating poll)
 	prs2 := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.StateWorking, Muted: false},
+		{ID: "github.com:owner/repo#1", State: protocol.StateWorking, Muted: false},
 	}
 	s.SetPRs(prs2)
 
@@ -211,27 +211,27 @@ func TestStore_SetPRs_PreservesApprovedByMe(t *testing.T) {
 
 	// Initial PR
 	prs := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.PRStateWaiting},
+		{ID: "github.com:owner/repo#1", State: protocol.PRStateWaiting},
 	}
 	s.SetPRs(prs)
 
 	// Mark as approved
-	s.MarkPRApproved("owner/repo#1")
+	s.MarkPRApproved("github.com:owner/repo#1")
 
 	// Verify it's approved
-	pr := s.GetPR("owner/repo#1")
+	pr := s.GetPR("github.com:owner/repo#1")
 	if !pr.ApprovedByMe {
 		t.Fatal("PR should be marked as approved")
 	}
 
 	// Set PRs again (simulating poll after approval action)
 	prs2 := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.PRStateWaiting}, // ApprovedByMe not set in incoming data
+		{ID: "github.com:owner/repo#1", State: protocol.PRStateWaiting}, // ApprovedByMe not set in incoming data
 	}
 	s.SetPRs(prs2)
 
 	// Should still be approved
-	pr = s.GetPR("owner/repo#1")
+	pr = s.GetPR("github.com:owner/repo#1")
 	if !pr.ApprovedByMe {
 		t.Error("PR should still be approved after SetPRs")
 	}
@@ -242,16 +242,16 @@ func TestStore_SetPRs_PreservesDetailFields(t *testing.T) {
 
 	// Initial PR
 	prs := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.PRStateWaiting},
+		{ID: "github.com:owner/repo#1", State: protocol.PRStateWaiting},
 	}
 	s.SetPRs(prs)
 
 	// Set detail fields (simulating fetchPRDetails)
 	mergeable := true
-	s.UpdatePRDetails("owner/repo#1", &mergeable, "clean", "success", "approved", "abc123", "feature-branch")
+	s.UpdatePRDetails("github.com:owner/repo#1", &mergeable, "clean", "success", "approved", "abc123", "feature-branch")
 
 	// Verify details are set
-	pr := s.GetPR("owner/repo#1")
+	pr := s.GetPR("github.com:owner/repo#1")
 	if protocol.Deref(pr.CIStatus) != "success" {
 		t.Fatalf("CIStatus should be 'success', got '%s'", protocol.Deref(pr.CIStatus))
 	}
@@ -260,12 +260,12 @@ func TestStore_SetPRs_PreservesDetailFields(t *testing.T) {
 	// The incoming PR has a NEWER LastUpdated than DetailsFetchedAt
 	// This is what happens in real scenario - GitHub returns updated timestamp
 	prs2 := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.StateWorking, LastUpdated: protocol.NewTimestamp(time.Now().Add(time.Hour)).String()}, // No detail fields, but newer timestamp
+		{ID: "github.com:owner/repo#1", State: protocol.StateWorking, LastUpdated: protocol.NewTimestamp(time.Now().Add(time.Hour)).String()}, // No detail fields, but newer timestamp
 	}
 	s.SetPRs(prs2)
 
 	// Details should be preserved
-	pr = s.GetPR("owner/repo#1")
+	pr = s.GetPR("github.com:owner/repo#1")
 	if protocol.Deref(pr.CIStatus) != "success" {
 		t.Errorf("CIStatus should still be 'success' after SetPRs, got '%s'", protocol.Deref(pr.CIStatus))
 	}
@@ -284,11 +284,11 @@ func TestStore_ToggleMutePR(t *testing.T) {
 	s := New()
 
 	prs := []*protocol.PR{
-		{ID: "owner/repo#1", State: protocol.PRStateWaiting, Muted: false},
+		{ID: "github.com:owner/repo#1", State: protocol.PRStateWaiting, Muted: false},
 	}
 	s.SetPRs(prs)
 
-	s.ToggleMutePR("owner/repo#1")
+	s.ToggleMutePR("github.com:owner/repo#1")
 
 	all := s.ListPRs("")
 	if !all[0].Muted {

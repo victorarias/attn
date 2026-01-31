@@ -62,7 +62,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '21';
+const PROTOCOL_VERSION = '22';
 
 interface PRActionResult {
   success: boolean;
@@ -456,8 +456,8 @@ export function useDaemonSocket({
             break;
 
           case 'pr_action_result':
-            if (data.action && data.repo && data.number !== undefined) {
-              const key = `${data.repo}#${data.number}:${data.action}`;
+            if (data.action && data.id) {
+              const key = `${data.id}:${data.action}`;
               const pending = pendingActionsRef.current.get(key);
               if (pending) {
                 pendingActionsRef.current.delete(key);
@@ -1042,8 +1042,7 @@ export function useDaemonSocket({
 
   const sendPRAction = useCallback((
     action: 'approve' | 'merge',
-    repo: string,
-    number: number,
+    id: string,
     method?: string
   ): Promise<PRActionResult> => {
     return new Promise((resolve, reject) => {
@@ -1053,13 +1052,12 @@ export function useDaemonSocket({
         return;
       }
 
-      const key = `${repo}#${number}:${action}`;
+      const key = `${id}:${action}`;
       pendingActionsRef.current.set(key, { resolve, reject });
 
       const msg = {
         cmd: `${action}_pr`,
-        repo,
-        number,
+        id,
         ...(method && { method }),
       };
       console.log('[Daemon] Sending PR action:', msg);
@@ -1159,7 +1157,7 @@ export function useDaemonSocket({
   }, []);
 
   // Fetch PR details (branch, status) for a repo
-  const sendFetchPRDetails = useCallback((repo: string): Promise<FetchPRDetailsResult> => {
+  const sendFetchPRDetails = useCallback((id: string): Promise<FetchPRDetailsResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1170,7 +1168,7 @@ export function useDaemonSocket({
       const key = 'fetch_pr_details';
       pendingActionsRef.current.set(key, { resolve, reject });
 
-      ws.send(JSON.stringify({ cmd: 'fetch_pr_details', repo }));
+      ws.send(JSON.stringify({ cmd: 'fetch_pr_details', id }));
 
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {

@@ -134,6 +134,28 @@
   line-height: 1.4;
 }
 
+.host-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.host-pill {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #d0d0d0;
+  background: #1a1a1d;
+  border: 1px solid #2a2a2d;
+  padding: 4px 8px;
+  border-radius: 12px;
+}
+
+.settings-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #666;
+}
+
 /* Projects directory input */
 .projects-dir-input {
   display: flex;

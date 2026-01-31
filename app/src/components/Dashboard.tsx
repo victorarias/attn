@@ -80,6 +80,16 @@ export function Dashboard({
   // Use centralized PR filtering hook
   const { activePRs, needsAttention } = usePRsNeedingAttention(prs, hiddenPRs);
 
+  const connectedHosts = useMemo(() => {
+    const set = new Set<string>();
+    for (const pr of prs) {
+      if (pr.host) {
+        set.add(pr.host);
+      }
+    }
+    return Array.from(set).sort();
+  }, [prs]);
+
   // Handle PR action completion (approve/merge success)
   // Only fade out on merge - approved PRs stay visible (dimmed)
   const handleActionComplete = useCallback((prId: string, action: 'approve' | 'merge') => {
@@ -93,6 +103,18 @@ export function Dashboard({
     }
     // For approve, the PR stays visible but will be dimmed via approved_by_me flag
   }, []);
+
+  // Track hosts per repo (for host badges)
+  const repoHosts = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const pr of activePRs) {
+      if (!pr.host) continue;
+      const existing = map.get(pr.repo) || new Set<string>();
+      existing.add(pr.host);
+      map.set(pr.repo, existing);
+    }
+    return map;
+  }, [activePRs]);
 
   // Group active PRs by repo
   const prsByRepo = useMemo(() => {
@@ -303,6 +325,7 @@ export function Dashboard({
                 const isCollapsed = collapsedRepos.has(repo);
                 const reviewCount = repoPRs.filter((p) => p.role === 'reviewer').length;
                 const authorCount = repoPRs.filter((p) => p.role === 'author').length;
+                const showHost = (repoHosts.get(repo)?.size || 0) > 1;
 
                 return (
                   <div key={repo} className="pr-repo-group">
@@ -357,6 +380,9 @@ export function Dashboard({
                                   : '✏️'}
                               </span>
                               <span className="pr-number">#{pr.number}</span>
+                              {showHost && pr.host && (
+                                <span className="pr-host" title={pr.host}>{pr.host}</span>
+                              )}
                               <span className="pr-title">{pr.title}</span>
                               {pr.role === 'author' && (
                                 <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
@@ -403,6 +429,7 @@ export function Dashboard({
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         mutedRepos={mutedRepos}
+        connectedHosts={connectedHosts}
         onUnmuteRepo={sendMuteRepo}
         mutedAuthors={mutedAuthors}
         onUnmuteAuthor={sendMuteAuthor}

@@ -9,6 +9,7 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   mutedRepos: string[];
+  connectedHosts: string[];
   onUnmuteRepo: (repo: string) => void;
   mutedAuthors: string[];
   onUnmuteAuthor: (author: string) => void;
@@ -20,6 +21,7 @@ export function SettingsModal({
   isOpen,
   onClose,
   mutedRepos,
+  connectedHosts,
   onUnmuteRepo,
   mutedAuthors,
   onUnmuteAuthor,
@@ -168,6 +170,23 @@ export function SettingsModal({
                 Browse
               </button>
             </div>
+          </div>
+
+          <div className="settings-section">
+            <h3>GitHub Hosts</h3>
+            <p className="settings-description">
+              Hosts currently detected from authenticated PRs.
+            </p>
+            {connectedHosts.length === 0 ? (
+              <p className="settings-empty">No authenticated hosts detected.</p>
+            ) : (
+              <div className="host-list">
+                {connectedHosts.map((host) => (
+                  <span key={host} className="host-pill">{host}</span>
+                ))}
+              </div>
+            )}
+            <div className="settings-hint">Add hosts with `gh auth login --hostname &lt;host&gt;`.</div>
           </div>
 
           <div className="settings-section">

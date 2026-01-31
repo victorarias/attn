@@ -47,7 +47,9 @@ model Session {
 
 model PR {
   // Core identity - always present
+  // ID format: "host:owner/repo#number" (e.g. github.com:acme/widget#42)
   id: string;
+  host: string;
   repo: string;
   number: int32;
   title: string;
@@ -206,7 +208,7 @@ model QueryAuthorsMessage {
 
 model FetchPRDetailsMessage {
   cmd: "fetch_pr_details";
-  repo: string;
+  id: string;
 }
 
 model RefreshPRsMessage {
@@ -252,14 +254,12 @@ model SetSettingMessage {
 
 model ApprovePRMessage {
   cmd: "approve_pr";
-  repo: string;
-  number: int32;
+  id: string;
 }
 
 model MergePRMessage {
   cmd: "merge_pr";
-  repo: string;
-  number: int32;
+  id: string;
   method: string; // "squash", "merge", "rebase"
 }
 
@@ -460,8 +460,7 @@ model CancelReviewMessage {
 model PRActionResultMessage {
   event: "pr_action_result";
   action: string; // "approve" or "merge"
-  repo: string;
-  number: int32;
+  id: string;
   success: boolean;
   error?: string;
 }

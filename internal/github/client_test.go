@@ -4,15 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
+
+	"github.com/victorarias/attn/internal/protocol"
 )
 
-func TestNewClient_UsesEnvToken(t *testing.T) {
-	os.Setenv("GITHUB_TOKEN", "test-token-from-env")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, err := NewClient("")
+func TestNewClient_UsesProvidedToken(t *testing.T) {
+	client, err := NewClient("http://example.com", "test-token-from-env")
 	if err != nil {
 		t.Fatalf("NewClient error: %v", err)
 	}
@@ -23,24 +21,9 @@ func TestNewClient_UsesEnvToken(t *testing.T) {
 }
 
 func TestNewClient_DefaultsToGitHubAPI(t *testing.T) {
-	// Save and restore GITHUB_API_URL to ensure test isolation
-	origAPIURL := os.Getenv("GITHUB_API_URL")
-	defer func() {
-		if origAPIURL != "" {
-			os.Setenv("GITHUB_API_URL", origAPIURL)
-		} else {
-			os.Unsetenv("GITHUB_API_URL")
-		}
-	}()
-
 	// Use a real-looking token (not "test-token") since test-token is blocked
 	// when targeting real GitHub API
-	os.Setenv("GITHUB_TOKEN", "ghp_xxxxxxxxxxxx")
-	os.Unsetenv("GITHUB_API_URL")
-	os.Unsetenv("GITHUB_BASE_URL")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, err := NewClient("")
+	client, err := NewClient("", "ghp_xxxxxxxxxxxx")
 	if err != nil {
 		t.Fatalf("NewClient error: %v", err)
 	}
@@ -51,23 +34,8 @@ func TestNewClient_DefaultsToGitHubAPI(t *testing.T) {
 }
 
 func TestNewClient_BlocksTestTokenWithRealAPI(t *testing.T) {
-	// Save and restore GITHUB_API_URL to ensure test isolation
-	origAPIURL := os.Getenv("GITHUB_API_URL")
-	defer func() {
-		if origAPIURL != "" {
-			os.Setenv("GITHUB_API_URL", origAPIURL)
-		} else {
-			os.Unsetenv("GITHUB_API_URL")
-		}
-	}()
-
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	os.Unsetenv("GITHUB_API_URL")
-	os.Unsetenv("GITHUB_BASE_URL")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
 	// Should fail because test-token + real API is blocked
-	_, err := NewClient("")
+	_, err := NewClient("", "test-token")
 	if err == nil {
 		t.Fatal("NewClient should fail when test-token is used with real GitHub API")
 	}
@@ -78,32 +46,13 @@ func TestNewClient_BlocksTestTokenWithRealAPI(t *testing.T) {
 }
 
 func TestNewClient_CustomBaseURL(t *testing.T) {
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, err := NewClient("http://localhost:9999")
+	client, err := NewClient("http://localhost:9999", "test-token")
 	if err != nil {
 		t.Fatalf("NewClient error: %v", err)
 	}
 
 	if client.baseURL != "http://localhost:9999" {
 		t.Errorf("baseURL = %q, want %q", client.baseURL, "http://localhost:9999")
-	}
-}
-
-func TestNewClient_UsesEnvBaseURL(t *testing.T) {
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	os.Setenv("GITHUB_API_URL", "http://mock:8080")
-	defer os.Unsetenv("GITHUB_TOKEN")
-	defer os.Unsetenv("GITHUB_API_URL")
-
-	client, err := NewClient("")
-	if err != nil {
-		t.Fatalf("NewClient error: %v", err)
-	}
-
-	if client.baseURL != "http://mock:8080" {
-		t.Errorf("baseURL = %q, want %q", client.baseURL, "http://mock:8080")
 	}
 }
 
@@ -117,10 +66,7 @@ func TestClient_doRequest_SetsHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("GITHUB_TOKEN", "test-token-123")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, _ := NewClient(server.URL)
+	client, _ := NewClient(server.URL, "test-token-123")
 	client.doRequest("GET", "/test", nil)
 
 	if capturedHeaders.Get("Authorization") != "Bearer test-token-123" {
@@ -170,10 +116,7 @@ func TestClient_SearchAuthoredPRs(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, _ := NewClient(server.URL)
+	client, _ := NewClient(server.URL, "test-token")
 	prs, err := client.SearchAuthoredPRs()
 	if err != nil {
 		t.Fatalf("SearchAuthoredPRs error: %v", err)
@@ -189,6 +132,14 @@ func TestClient_SearchAuthoredPRs(t *testing.T) {
 	}
 	if prs[0].Repo != "owner/repo" {
 		t.Errorf("PR repo = %q, want owner/repo", prs[0].Repo)
+	}
+	expectedHost := hostFromAPIURL(server.URL)
+	if prs[0].Host != expectedHost {
+		t.Errorf("PR host = %q, want %q", prs[0].Host, expectedHost)
+	}
+	expectedID := protocol.FormatPRID(expectedHost, "owner/repo", 123)
+	if prs[0].ID != expectedID {
+		t.Errorf("PR id = %q, want %q", prs[0].ID, expectedID)
 	}
 }
 
@@ -239,10 +190,7 @@ func TestClient_SearchReviewRequestedPRs(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, _ := NewClient(server.URL)
+	client, _ := NewClient(server.URL, "test-token")
 	prs, err := client.SearchReviewRequestedPRs()
 	if err != nil {
 		t.Fatalf("SearchReviewRequestedPRs error: %v", err)
@@ -301,10 +249,7 @@ func TestClient_FetchAll(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, _ := NewClient(server.URL)
+	client, _ := NewClient(server.URL, "test-token")
 	prs, err := client.FetchAll()
 	if err != nil {
 		t.Fatalf("FetchAll error: %v", err)
@@ -346,10 +291,7 @@ func TestClient_FetchPRDetails(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, _ := NewClient(server.URL)
+	client, _ := NewClient(server.URL, "test-token")
 	details, err := client.FetchPRDetails("owner/repo", 42)
 	if err != nil {
 		t.Fatalf("FetchPRDetails error: %v", err)
@@ -389,10 +331,7 @@ func TestClient_ApprovePR(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, _ := NewClient(server.URL)
+	client, _ := NewClient(server.URL, "test-token")
 	err := client.ApprovePR("owner/repo", 42)
 	if err != nil {
 		t.Fatalf("ApprovePR error: %v", err)
@@ -423,10 +362,7 @@ func TestClient_ApprovePR_Error(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, _ := NewClient(server.URL)
+	client, _ := NewClient(server.URL, "test-token")
 	err := client.ApprovePR("owner/repo", 42)
 	if err == nil {
 		t.Fatal("ApprovePR should return error on 403 response")
@@ -459,10 +395,7 @@ func TestClient_MergePR(t *testing.T) {
 	}))
 	defer server.Close()
 
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, _ := NewClient(server.URL)
+	client, _ := NewClient(server.URL, "test-token")
 	err := client.MergePR("owner/repo", 42, "squash")
 	if err != nil {
 		t.Fatalf("MergePR error: %v", err)
@@ -486,11 +419,8 @@ func TestClient_MergePR(t *testing.T) {
 }
 
 func TestClient_MergePR_InvalidMethod(t *testing.T) {
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
 	// Use a mock URL so we can create the client (test-token + real API is blocked)
-	client, _ := NewClient("http://localhost:9999")
+	client, _ := NewClient("http://localhost:9999", "test-token")
 	err := client.MergePR("owner/repo", 42, "invalid")
 	if err == nil {
 		t.Fatal("MergePR should return error for invalid merge method")

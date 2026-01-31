@@ -162,9 +162,8 @@ export enum AddCommentResultMessageEvent {
 }
 
 export interface ApprovePRMessage {
-    cmd:    ApprovePRMessageCmd;
-    number: number;
-    repo:   string;
+    cmd: ApprovePRMessageCmd;
+    id:  string;
     [property: string]: any;
 }
 
@@ -465,8 +464,8 @@ export enum DeleteWorktreeResultMessageEvent {
 }
 
 export interface FetchPRDetailsMessage {
-    cmd:  FetchPRDetailsMessageCmd;
-    repo: string;
+    cmd: FetchPRDetailsMessageCmd;
+    id:  string;
     [property: string]: any;
 }
 
@@ -734,6 +733,7 @@ export interface PRElement {
     head_branch?:           string;
     head_sha?:              string;
     heat_state?:            HeatState;
+    host:                   string;
     id:                     string;
     last_heat_activity_at?: string;
     last_polled:            string;
@@ -865,9 +865,8 @@ export enum MarkFileViewedResultMessageEvent {
 
 export interface MergePRMessage {
     cmd:    MergePRMessageCmd;
+    id:     string;
     method: string;
-    number: number;
-    repo:   string;
     [property: string]: any;
 }
 
@@ -926,6 +925,7 @@ export interface PR {
     head_branch?:           string;
     head_sha?:              string;
     heat_state?:            HeatState;
+    host:                   string;
     id:                     string;
     last_heat_activity_at?: string;
     last_polled:            string;
@@ -948,8 +948,7 @@ export interface PRActionResultMessage {
     action:  string;
     error?:  string;
     event:   PRActionResultMessageEvent;
-    number:  number;
-    repo:    string;
+    id:      string;
     success: boolean;
     [property: string]: any;
 }
@@ -2574,8 +2573,7 @@ const typeMap: any = {
     ], "any"),
     "ApprovePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
-        { json: "number", js: "number", typ: 0 },
-        { json: "repo", js: "repo", typ: "" },
+        { json: "id", js: "id", typ: "" },
     ], "any"),
     "AuthorState": o([
         { json: "author", js: "author", typ: "" },
@@ -2729,7 +2727,7 @@ const typeMap: any = {
     ], "any"),
     "FetchPRDetailsMessage": o([
         { json: "cmd", js: "cmd", typ: r("FetchPRDetailsMessageCmd") },
-        { json: "repo", js: "repo", typ: "" },
+        { json: "id", js: "id", typ: "" },
     ], "any"),
     "FetchRemotesMessage": o([
         { json: "cmd", js: "cmd", typ: r("FetchRemotesMessageCmd") },
@@ -2873,6 +2871,7 @@ const typeMap: any = {
         { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
         { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
         { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
+        { json: "host", js: "host", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
         { json: "last_polled", js: "last_polled", typ: "" },
@@ -2941,9 +2940,8 @@ const typeMap: any = {
     ], "any"),
     "MergePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("MergePRMessageCmd") },
+        { json: "id", js: "id", typ: "" },
         { json: "method", js: "method", typ: "" },
-        { json: "number", js: "number", typ: 0 },
-        { json: "repo", js: "repo", typ: "" },
     ], "any"),
     "MuteAuthorMessage": o([
         { json: "author", js: "author", typ: "" },
@@ -2972,6 +2970,7 @@ const typeMap: any = {
         { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
         { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
         { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
+        { json: "host", js: "host", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
         { json: "last_polled", js: "last_polled", typ: "" },
@@ -2992,8 +2991,7 @@ const typeMap: any = {
         { json: "action", js: "action", typ: "" },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("PRActionResultMessageEvent") },
-        { json: "number", js: "number", typ: 0 },
-        { json: "repo", js: "repo", typ: "" },
+        { json: "id", js: "id", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "PRVisitedMessage": o([

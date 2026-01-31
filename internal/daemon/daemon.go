@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -90,7 +91,7 @@ type Daemon struct {
 	wsHub           *wsHub
 	done            chan struct{}
 	logger          *logging.Logger
-	ghClient        github.GitHubClient
+	ghRegistry      *github.ClientRegistry
 	classifier      Classifier      // Optional, uses package-level classifier.Classify if nil
 	reviewerFactory ReviewerFactory // Optional, creates real reviewer if nil
 	repoCaches      map[string]*repoCache
@@ -109,14 +110,6 @@ func New(socketPath string) *Daemon {
 	classifier.SetLogger(func(format string, args ...interface{}) {
 		logger.Infof(format, args...)
 	})
-
-	var ghClient github.GitHubClient
-	client, err := github.NewClient("")
-	if err != nil {
-		logger.Infof("GitHub client not available: %v", err)
-	} else {
-		ghClient = client
-	}
 
 	// Create SQLite-backed store
 	sessionStore, err := store.NewWithDB(config.DBPath())
@@ -142,7 +135,7 @@ func New(socketPath string) *Daemon {
 		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
 		logger:     logger,
-		ghClient:   ghClient,
+		ghRegistry: github.NewClientRegistry(),
 		repoCaches: make(map[string]*repoCache),
 	}
 }
@@ -157,7 +150,7 @@ func NewForTesting(socketPath string) *Daemon {
 		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
 		logger:     nil, // No logging in tests
-		ghClient:   nil,
+		ghRegistry: github.NewClientRegistry(),
 		repoCaches: make(map[string]*repoCache),
 	}
 }
@@ -165,6 +158,10 @@ func NewForTesting(socketPath string) *Daemon {
 // NewWithGitHubClient creates a daemon with a custom GitHub client for testing
 func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemon {
 	pidPath := filepath.Join(filepath.Dir(socketPath), "attn.pid")
+	registry := github.NewClientRegistry()
+	if client, ok := ghClient.(*github.Client); ok {
+		registry.Register(client.Host(), client)
+	}
 	return &Daemon{
 		socketPath: socketPath,
 		pidPath:    pidPath,
@@ -172,7 +169,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		wsHub:      newWSHub(),
 		done:       make(chan struct{}),
 		logger:     nil,
-		ghClient:   ghClient,
+		ghRegistry: registry,
 		repoCaches: make(map[string]*repoCache),
 	}
 }
@@ -203,6 +200,12 @@ func (d *Daemon) Start() error {
 	go d.runHTTPServer()
 
 	// Note: No background persistence needed - SQLite persists immediately
+
+	// Discover GitHub hosts and refresh periodically
+	if err := d.refreshGitHubHosts(); err != nil {
+		return err
+	}
+	go d.refreshGitHubHostsLoop()
 
 	// Start PR polling
 	go d.pollPRs()
@@ -287,6 +290,138 @@ func (d *Daemon) logf(format string, args ...interface{}) {
 	if d.logger != nil {
 		d.logger.Infof(format, args...)
 	}
+}
+
+func (d *Daemon) refreshGitHubHostsLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.done:
+			return
+		case <-ticker.C:
+			if err := d.refreshGitHubHosts(); err != nil {
+				d.logf("GitHub host refresh failed: %v", err)
+			}
+		}
+	}
+}
+
+func (d *Daemon) refreshGitHubHosts() error {
+	if d.ghRegistry == nil {
+		d.ghRegistry = github.NewClientRegistry()
+	}
+
+	mockURL := strings.TrimSpace(os.Getenv("ATTN_MOCK_GH_URL"))
+	if mockURL != "" {
+		if err := d.registerMockClient(mockURL); err != nil {
+			d.logf("Mock GitHub client not available: %v", err)
+		}
+		return nil
+	}
+
+	if err := github.RequireGHVersion("2.81.0"); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			d.logf("gh CLI not available: %v", err)
+			return nil
+		}
+		return err
+	}
+
+	hosts, err := github.DiscoverHosts()
+	if err != nil {
+		d.logf("GitHub host discovery failed: %v", err)
+		return nil
+	}
+
+	discovered := make(map[string]bool)
+	for _, hostInfo := range hosts {
+		if hostInfo.Host == "" {
+			continue
+		}
+		token, err := github.GetTokenForHost(hostInfo.Host)
+		if err != nil {
+			d.logf("GitHub token fetch failed for %s: %v", hostInfo.Host, err)
+			continue
+		}
+		client, err := github.NewClientForHost(hostInfo.Host, hostInfo.APIURL, token)
+		if err != nil {
+			d.logf("GitHub client create failed for %s: %v", hostInfo.Host, err)
+			continue
+		}
+		d.ghRegistry.Register(hostInfo.Host, client)
+		discovered[hostInfo.Host] = true
+	}
+
+	allowed := make(map[string]bool)
+	for host := range discovered {
+		allowed[host] = true
+	}
+	for _, host := range d.ghRegistry.Hosts() {
+		if !allowed[host] {
+			d.ghRegistry.Remove(host)
+		}
+	}
+
+	return nil
+}
+
+func (d *Daemon) registerMockClient(mockURL string) error {
+	token := strings.TrimSpace(os.Getenv("ATTN_MOCK_GH_TOKEN"))
+	if token == "" {
+		return fmt.Errorf("ATTN_MOCK_GH_TOKEN not set")
+	}
+
+	host := strings.TrimSpace(os.Getenv("ATTN_MOCK_GH_HOST"))
+	if host == "" {
+		host = hostFromURL(mockURL)
+	}
+	if host == "" {
+		host = "mock.github.local"
+	}
+
+	client, err := github.NewClientForHost(host, mockURL, token)
+	if err != nil {
+		return err
+	}
+
+	for _, existing := range d.ghRegistry.Hosts() {
+		d.ghRegistry.Remove(existing)
+	}
+	d.ghRegistry.Register(host, client)
+	d.logf("Mock GitHub client registered for %s (%s)", host, mockURL)
+	return nil
+}
+
+func hostFromURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
+func (d *Daemon) githubAvailable() bool {
+	if d.ghRegistry == nil {
+		return false
+	}
+	return len(d.ghRegistry.Hosts()) > 0
+}
+
+func (d *Daemon) clientForPRID(id string) (*github.Client, string, int, string, error) {
+	host, repo, number, err := protocol.ParsePRID(id)
+	if err != nil {
+		return nil, "", 0, "", err
+	}
+	if d.ghRegistry == nil {
+		return nil, "", 0, "", fmt.Errorf("GitHub client not available")
+	}
+	client, ok := d.ghRegistry.Get(host)
+	if !ok {
+		return nil, "", 0, "", fmt.Errorf("no client for host %s", host)
+	}
+	return client, repo, number, host, nil
 }
 
 // acquirePIDLock ensures only one daemon instance runs at a time using flock.
@@ -744,18 +879,28 @@ func (d *Daemon) handleQueryAuthors(conn net.Conn, msg *protocol.QueryAuthorsMes
 	json.NewEncoder(conn).Encode(resp)
 }
 
-func (d *Daemon) fetchPRDetailsForRepo(repo string) ([]*protocol.PR, error) {
-	if d.ghClient == nil || !d.ghClient.IsAvailable() {
+func (d *Daemon) fetchPRDetailsForID(id string) ([]*protocol.PR, error) {
+	if !d.githubAvailable() {
 		return nil, fmt.Errorf("GitHub client not available")
 	}
 
-	// Get all PRs for this repo
-	prs := d.store.ListPRsByRepo(repo)
+	host, repo, _, err := protocol.ParsePRID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	client, ok := d.ghRegistry.Get(host)
+	if !ok {
+		return nil, fmt.Errorf("no client for host %s", host)
+	}
+
+	// Get all PRs for this repo + host
+	prs := d.store.ListPRsByRepoHost(repo, host)
 
 	// Fetch details for each PR that needs refresh
 	for _, pr := range prs {
 		if pr.NeedsDetailRefresh() {
-			details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
+			details, err := client.FetchPRDetails(pr.Repo, pr.Number)
 			if err != nil {
 				d.logf("Failed to fetch details for %s: %v", pr.ID, err)
 				continue
@@ -765,12 +910,12 @@ func (d *Daemon) fetchPRDetailsForRepo(repo string) ([]*protocol.PR, error) {
 	}
 
 	// Return updated PRs
-	updatedPRs := d.store.ListPRsByRepo(repo)
+	updatedPRs := d.store.ListPRsByRepoHost(repo, host)
 	return updatedPRs, nil
 }
 
 func (d *Daemon) handleFetchPRDetails(conn net.Conn, msg *protocol.FetchPRDetailsMessage) {
-	updatedPRs, err := d.fetchPRDetailsForRepo(msg.Repo)
+	updatedPRs, err := d.fetchPRDetailsForID(msg.ID)
 	if err != nil {
 		d.sendError(conn, err.Error())
 		return
@@ -794,7 +939,7 @@ func (d *Daemon) sendError(conn net.Conn, errMsg string) {
 }
 
 func (d *Daemon) pollPRs() {
-	if d.ghClient == nil || !d.ghClient.IsAvailable() {
+	if !d.githubAvailable() {
 		d.log("GitHub client not available, PR polling disabled")
 		return
 	}
@@ -818,50 +963,96 @@ func (d *Daemon) pollPRs() {
 }
 
 func (d *Daemon) doPRPoll() {
-	// Check if rate limited before polling
-	if limited, resetAt := d.ghClient.IsRateLimited("search"); limited {
-		d.logf("PR poll skipped: search API rate limited until %s", resetAt.Format(time.RFC3339))
-		d.broadcastRateLimited("search", resetAt)
+	if !d.githubAvailable() {
 		return
 	}
 
-	prs, err := d.ghClient.FetchAll()
-	if err != nil {
-		// Check if it's a rate limit error (GitHub or self-imposed)
-		if errors.Is(err, github.ErrRateLimited) {
-			// Get reset time from client state
-			if info := d.ghClient.GetRateLimit("search"); info != nil {
-				d.logf("PR poll rate limited until %s", info.ResetAt.Format(time.RFC3339))
-				d.broadcastRateLimited("search", info.ResetAt)
-			} else {
-				d.logf("PR poll rate limited (unknown reset time)")
-				d.broadcastRateLimited("search", time.Now().Add(60*time.Second))
-			}
-		} else if errors.Is(err, github.ErrSelfRateLimited) {
-			d.logf("PR poll: self-rate-limited, skipping")
-		} else {
-			d.logf("PR poll error: %v", err)
+	var allPRs []*protocol.PR
+	skippedHosts := make(map[string]bool)
+	var earliestReset time.Time
+
+	for _, host := range d.ghRegistry.Hosts() {
+		client, ok := d.ghRegistry.Get(host)
+		if !ok {
+			continue
 		}
-		return
+
+		if limited, resetAt := client.IsRateLimited("search"); limited {
+			d.logf("PR poll skipped for %s: search API rate limited until %s", host, resetAt.Format(time.RFC3339))
+			skippedHosts[host] = true
+			if earliestReset.IsZero() || resetAt.Before(earliestReset) {
+				earliestReset = resetAt
+			}
+			continue
+		}
+
+		prs, err := client.FetchAll()
+		if err != nil {
+			if errors.Is(err, github.ErrRateLimited) {
+				if info := client.GetRateLimit("search"); info != nil {
+					d.logf("PR poll rate limited for %s until %s", host, info.ResetAt.Format(time.RFC3339))
+					if earliestReset.IsZero() || info.ResetAt.Before(earliestReset) {
+						earliestReset = info.ResetAt
+					}
+				} else {
+					d.logf("PR poll rate limited for %s (unknown reset time)", host)
+					resetAt := time.Now().Add(60 * time.Second)
+					if earliestReset.IsZero() || resetAt.Before(earliestReset) {
+						earliestReset = resetAt
+					}
+				}
+				skippedHosts[host] = true
+				continue
+			}
+			if errors.Is(err, github.ErrSelfRateLimited) {
+				d.logf("PR poll: self-rate-limited for %s, skipping", host)
+				skippedHosts[host] = true
+				continue
+			}
+			d.logf("PR poll error for %s: %v", host, err)
+			skippedHosts[host] = true
+			continue
+		}
+
+		allPRs = append(allPRs, prs...)
 	}
 
-	d.store.SetPRs(prs)
+	if !earliestReset.IsZero() {
+		d.broadcastRateLimited("search", earliestReset)
+	}
+
+	if len(skippedHosts) > 0 {
+		existing := d.store.ListPRs("")
+		for _, pr := range existing {
+			host := pr.Host
+			if host == "" {
+				if parsedHost, _, _, err := protocol.ParsePRID(pr.ID); err == nil {
+					host = parsedHost
+				}
+			}
+			if host != "" && skippedHosts[host] {
+				allPRs = append(allPRs, pr)
+			}
+		}
+	}
+
+	d.store.SetPRs(allPRs)
 
 	// Broadcast to WebSocket clients
-	allPRs := d.store.ListPRs("")
+	currentPRs := d.store.ListPRs("")
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventPRsUpdated,
-		Prs:   protocol.PRsToValues(allPRs),
+		Prs:   protocol.PRsToValues(currentPRs),
 	})
 
 	// Count waiting (non-muted) PRs for logging
 	waiting := 0
-	for _, pr := range allPRs {
+	for _, pr := range currentPRs {
 		if pr.State == protocol.PRStateWaiting && !pr.Muted {
 			waiting++
 		}
 	}
-	d.logf("PR poll: %d PRs (%d waiting)", len(prs), waiting)
+	d.logf("PR poll: %d PRs (%d waiting)", len(currentPRs), waiting)
 
 	// Run detail refresh after list poll
 	d.doDetailRefresh()
@@ -869,13 +1060,7 @@ func (d *Daemon) doPRPoll() {
 
 // doDetailRefresh fetches details for PRs that need refresh based on heat state
 func (d *Daemon) doDetailRefresh() {
-	if d.ghClient == nil || !d.ghClient.IsAvailable() {
-		return
-	}
-
-	// Check if already rate limited before starting
-	if limited, resetAt := d.ghClient.IsRateLimited("core"); limited {
-		d.logf("Detail refresh: skipping, rate limited until %v", resetAt)
+	if !d.githubAvailable() {
 		return
 	}
 
@@ -891,20 +1076,47 @@ func (d *Daemon) doDetailRefresh() {
 	d.logf("Detail refresh: %d PRs need refresh", len(prs))
 
 	refreshedCount := 0
+	limitedHosts := make(map[string]time.Time)
 	for _, pr := range prs {
-		details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
+		host := pr.Host
+		if host == "" {
+			if parsedHost, _, _, err := protocol.ParsePRID(pr.ID); err == nil {
+				host = parsedHost
+			}
+		}
+		if host == "" {
+			continue
+		}
+		if _, limited := limitedHosts[host]; limited {
+			continue
+		}
+
+		client, ok := d.ghRegistry.Get(host)
+		if !ok {
+			d.logf("Detail refresh: no client for host %s", host)
+			continue
+		}
+
+		if limited, resetAt := client.IsRateLimited("core"); limited {
+			d.logf("Detail refresh: %s rate limited until %v", host, resetAt)
+			limitedHosts[host] = resetAt
+			continue
+		}
+
+		details, err := client.FetchPRDetails(pr.Repo, pr.Number)
 		if err != nil {
-			// If rate limited (GitHub or self-imposed), stop the loop
+			// If rate limited (GitHub or self-imposed), stop for this host
 			if errors.Is(err, github.ErrRateLimited) {
-				d.logf("Detail refresh: rate limited, stopping refresh loop")
-				if _, resetAt := d.ghClient.IsRateLimited("core"); !resetAt.IsZero() {
-					d.broadcastRateLimited("core", resetAt)
+				if info := client.GetRateLimit("core"); info != nil {
+					d.logf("Detail refresh: %s rate limited, stopping host refresh", host)
+					limitedHosts[host] = info.ResetAt
 				}
-				break
+				continue
 			}
 			if errors.Is(err, github.ErrSelfRateLimited) {
-				d.logf("Detail refresh: self-rate-limited, stopping refresh loop")
-				break
+				d.logf("Detail refresh: %s self-rate-limited, stopping host refresh", host)
+				limitedHosts[host] = time.Now().Add(60 * time.Second)
+				continue
 			}
 			d.logf("Failed to fetch details for %s: %v", pr.ID, err)
 			continue
@@ -920,6 +1132,21 @@ func (d *Daemon) doDetailRefresh() {
 		refreshedCount++
 	}
 
+	if len(limitedHosts) > 0 {
+		var earliest time.Time
+		for _, resetAt := range limitedHosts {
+			if resetAt.IsZero() {
+				continue
+			}
+			if earliest.IsZero() || resetAt.Before(earliest) {
+				earliest = resetAt
+			}
+		}
+		if !earliest.IsZero() {
+			d.broadcastRateLimited("core", earliest)
+		}
+	}
+
 	if refreshedCount > 0 {
 		d.logf("Detail refresh: updated %d PRs", refreshedCount)
 		// Broadcast updated PRs
@@ -929,14 +1156,7 @@ func (d *Daemon) doDetailRefresh() {
 
 // fetchAllPRDetails fetches details for all visible PRs (called on app launch)
 func (d *Daemon) fetchAllPRDetails() {
-	if d.ghClient == nil || !d.ghClient.IsAvailable() {
-		return
-	}
-
-	// Check if already rate limited before starting
-	if limited, resetAt := d.ghClient.IsRateLimited("core"); limited {
-		d.logf("App launch: skipping detail fetch, rate limited until %v", resetAt)
-		d.broadcastRateLimited("core", resetAt)
+	if !d.githubAvailable() {
 		return
 	}
 
@@ -949,6 +1169,7 @@ func (d *Daemon) fetchAllPRDetails() {
 	d.logf("App launch: fetching details for %d PRs", len(allPRs))
 
 	refreshedCount := 0
+	limitedHosts := make(map[string]time.Time)
 	for _, pr := range allPRs {
 		// Skip muted PRs and PRs from muted repos
 		if pr.Muted {
@@ -959,19 +1180,45 @@ func (d *Daemon) fetchAllPRDetails() {
 			continue
 		}
 
-		details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
+		host := pr.Host
+		if host == "" {
+			if parsedHost, _, _, err := protocol.ParsePRID(pr.ID); err == nil {
+				host = parsedHost
+			}
+		}
+		if host == "" {
+			continue
+		}
+		if _, limited := limitedHosts[host]; limited {
+			continue
+		}
+
+		client, ok := d.ghRegistry.Get(host)
+		if !ok {
+			d.logf("App launch: no client for host %s", host)
+			continue
+		}
+
+		if limited, resetAt := client.IsRateLimited("core"); limited {
+			d.logf("App launch: %s rate limited until %v", host, resetAt)
+			limitedHosts[host] = resetAt
+			continue
+		}
+
+		details, err := client.FetchPRDetails(pr.Repo, pr.Number)
 		if err != nil {
-			// If rate limited (GitHub or self-imposed), stop the loop
+			// If rate limited (GitHub or self-imposed), stop the loop for this host
 			if errors.Is(err, github.ErrRateLimited) {
-				d.logf("App launch: rate limited, stopping detail fetch loop")
-				if _, resetAt := d.ghClient.IsRateLimited("core"); !resetAt.IsZero() {
-					d.broadcastRateLimited("core", resetAt)
+				if info := client.GetRateLimit("core"); info != nil {
+					d.logf("App launch: %s rate limited, stopping host fetch loop", host)
+					limitedHosts[host] = info.ResetAt
 				}
-				break
+				continue
 			}
 			if errors.Is(err, github.ErrSelfRateLimited) {
-				d.logf("App launch: self-rate-limited, stopping detail fetch loop")
-				break
+				d.logf("App launch: %s self-rate-limited, stopping host fetch loop", host)
+				limitedHosts[host] = time.Now().Add(60 * time.Second)
+				continue
 			}
 			d.logf("Failed to fetch details for %s: %v", pr.ID, err)
 			continue
@@ -979,6 +1226,21 @@ func (d *Daemon) fetchAllPRDetails() {
 
 		d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA, details.HeadBranch)
 		refreshedCount++
+	}
+
+	if len(limitedHosts) > 0 {
+		var earliest time.Time
+		for _, resetAt := range limitedHosts {
+			if resetAt.IsZero() {
+				continue
+			}
+			if earliest.IsZero() || resetAt.Before(earliest) {
+				earliest = resetAt
+			}
+		}
+		if !earliest.IsZero() {
+			d.broadcastRateLimited("core", earliest)
+		}
 	}
 
 	if refreshedCount > 0 {
@@ -1024,7 +1286,7 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 
 // RefreshPRs triggers an immediate PR refresh
 func (d *Daemon) RefreshPRs() {
-	if d.ghClient == nil || !d.ghClient.IsAvailable() {
+	if !d.githubAvailable() {
 		return
 	}
 	d.doPRPoll()
@@ -1032,37 +1294,67 @@ func (d *Daemon) RefreshPRs() {
 
 // doRefreshPRsWithResult triggers PR refresh and returns any error
 func (d *Daemon) doRefreshPRsWithResult() error {
-	if d.ghClient == nil || !d.ghClient.IsAvailable() {
+	if !d.githubAvailable() {
 		return fmt.Errorf("GitHub client not available")
 	}
 
-	prs, err := d.ghClient.FetchAll()
-	if err != nil {
-		return fmt.Errorf("failed to fetch PRs: %w", err)
+	var allPRs []*protocol.PR
+	skippedHosts := make(map[string]bool)
+	var firstErr error
+	successCount := 0
+
+	for _, host := range d.ghRegistry.Hosts() {
+		client, ok := d.ghRegistry.Get(host)
+		if !ok {
+			continue
+		}
+		prs, err := client.FetchAll()
+		if err != nil {
+			d.logf("PR refresh error for %s: %v", host, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			skippedHosts[host] = true
+			continue
+		}
+		successCount++
+		allPRs = append(allPRs, prs...)
 	}
 
-	d.store.SetPRs(prs)
+	if len(skippedHosts) > 0 {
+		existing := d.store.ListPRs("")
+		for _, pr := range existing {
+			host := pr.Host
+			if host == "" {
+				if parsedHost, _, _, err := protocol.ParsePRID(pr.ID); err == nil {
+					host = parsedHost
+				}
+			}
+			if host != "" && skippedHosts[host] {
+				allPRs = append(allPRs, pr)
+			}
+		}
+	}
+
+	d.store.SetPRs(allPRs)
 
 	// Broadcast to WebSocket clients
-	allPRs := d.store.ListPRs("")
+	currentPRs := d.store.ListPRs("")
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventPRsUpdated,
-		Prs:   protocol.PRsToValues(allPRs),
+		Prs:   protocol.PRsToValues(currentPRs),
 	})
 
-	d.logf("PR refresh: %d PRs fetched", len(prs))
+	d.logf("PR refresh: %d PRs fetched", len(currentPRs))
+	if successCount == 0 && firstErr != nil {
+		return fmt.Errorf("failed to fetch PRs: %w", firstErr)
+	}
 	return nil
 }
 
 // fetchPRDetailsImmediate fetches details for a single PR immediately and sets it hot
 func (d *Daemon) fetchPRDetailsImmediate(prID string) {
-	if d.ghClient == nil || !d.ghClient.IsAvailable() {
-		return
-	}
-
-	// Check if already rate limited before making request
-	if limited, resetAt := d.ghClient.IsRateLimited("core"); limited {
-		d.logf("Immediate fetch skipped for %s: rate limited until %v", prID, resetAt)
+	if !d.githubAvailable() {
 		return
 	}
 
@@ -1081,15 +1373,37 @@ func (d *Daemon) fetchPRDetailsImmediate(prID string) {
 		return
 	}
 
+	host := pr.Host
+	if host == "" {
+		if parsedHost, _, _, err := protocol.ParsePRID(pr.ID); err == nil {
+			host = parsedHost
+		}
+	}
+	if host == "" {
+		return
+	}
+
+	client, ok := d.ghRegistry.Get(host)
+	if !ok {
+		d.logf("Immediate fetch: no client for host %s", host)
+		return
+	}
+
+	// Check if already rate limited before making request
+	if limited, resetAt := client.IsRateLimited("core"); limited {
+		d.logf("Immediate fetch skipped for %s: rate limited until %v", prID, resetAt)
+		return
+	}
+
 	d.store.SetPRHot(prID)
 
-	details, err := d.ghClient.FetchPRDetails(pr.Repo, pr.Number)
+	details, err := client.FetchPRDetails(pr.Repo, pr.Number)
 	if err != nil {
 		// If rate limited (GitHub or self-imposed), skip
 		if errors.Is(err, github.ErrRateLimited) {
 			d.logf("Immediate fetch for %s: rate limited", prID)
-			if _, resetAt := d.ghClient.IsRateLimited("core"); !resetAt.IsZero() {
-				d.broadcastRateLimited("core", resetAt)
+			if info := client.GetRateLimit("core"); info != nil {
+				d.broadcastRateLimited("core", info.ResetAt)
 			}
 			return
 		}
@@ -1163,7 +1477,7 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"sessions":         len(sessions),
 		"prs":              len(prs),
 		"ws_clients":       d.wsHub.ClientCount(),
-		"github_available": d.ghClient != nil && d.ghClient.IsAvailable(),
+		"github_available": d.githubAvailable(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
