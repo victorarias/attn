@@ -270,7 +270,7 @@ export function SettingsModal({
               <ul className="muted-items-list">
                 {mutedAuthors.map(author => (
                   <li key={author} className="muted-item">
-                    <span className="muted-item-name">👤 {author}</span>
+                    <span className="muted-item-name">{author.toLowerCase().includes('bot') ? '🤖' : '👤'} {author}</span>
                     <button
                       className="unmute-btn"
                       onClick={() => onUnmuteAuthor(author)}

@@ -160,7 +160,7 @@ export function PRActions({ repo, number, prId, author, compact = false, onMuted
             }}
             title={`Mute all PRs by ${author}`}
           >
-            👤 {author}
+            {author.toLowerCase().includes('bot') ? '🤖' : '👤'} {author}
           </button>
         )}
       </div>
