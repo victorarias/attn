@@ -145,4 +145,86 @@ test.describe('Settings', () => {
     // PR should reappear
     await expect(prCard).toBeVisible({ timeout: 5000 });
   });
+
+  test('mute author hides PR and shows in settings', async ({ page, mockGitHub, startDaemonWithPRs }) => {
+    // Add a PR with a specific author
+    mockGitHub.addPR({
+      repo: 'test/author-repo',
+      number: 200,
+      title: 'Dependabot PR',
+      role: 'reviewer',
+      author: 'dependabot',
+    });
+
+    await startDaemonWithPRs();
+    await page.goto('/');
+
+    // Wait for PR to appear
+    const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Dependabot PR' });
+    await expect(prCard).toBeVisible({ timeout: 15000 });
+
+    // Hover over PR row to reveal the mute author button
+    const prRow = page.locator('.pr-row').filter({ hasText: 'Dependabot PR' });
+    await prRow.hover();
+
+    // Click the mute author button
+    const muteAuthorBtn = prRow.locator('[data-testid="mute-author-button"]');
+    await expect(muteAuthorBtn).toBeVisible();
+    await muteAuthorBtn.click();
+
+    // PR should disappear
+    await expect(prCard).not.toBeVisible({ timeout: 5000 });
+
+    // Open settings
+    await page.locator('.settings-btn').click();
+    const modal = page.locator('.settings-modal');
+    await expect(modal).toBeVisible({ timeout: 2000 });
+
+    // Verify Muted Authors section exists
+    await expect(modal.locator('h3', { hasText: 'Muted Authors' })).toBeVisible();
+
+    // Muted author should appear in list
+    const mutedAuthorItem = modal.locator('.muted-item').filter({ hasText: 'dependabot' });
+    await expect(mutedAuthorItem).toBeVisible();
+  });
+
+  test('unmute author from settings restores PRs', async ({ page, mockGitHub, startDaemonWithPRs }) => {
+    // Add a PR with a specific author
+    mockGitHub.addPR({
+      repo: 'test/author-repo',
+      number: 201,
+      title: 'Renovate PR',
+      role: 'reviewer',
+      author: 'renovate',
+    });
+
+    await startDaemonWithPRs();
+    await page.goto('/');
+
+    // Wait for PR to appear
+    const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Renovate PR' });
+    await expect(prCard).toBeVisible({ timeout: 15000 });
+
+    // Mute the author
+    const prRow = page.locator('.pr-row').filter({ hasText: 'Renovate PR' });
+    await prRow.hover();
+    await prRow.locator('[data-testid="mute-author-button"]').click();
+    await expect(prCard).not.toBeVisible({ timeout: 5000 });
+
+    // Open settings
+    await page.locator('.settings-btn').click();
+    const modal = page.locator('.settings-modal');
+    await expect(modal).toBeVisible({ timeout: 2000 });
+
+    // Click unmute button for the author
+    const mutedAuthorItem = modal.locator('.muted-item').filter({ hasText: 'renovate' });
+    await mutedAuthorItem.locator('.unmute-btn').click();
+
+    // Close modal
+    await modal.locator('.settings-close').click();
+    await expect(modal).not.toBeVisible();
+
+    // PR should reappear
+    await expect(prCard).toBeVisible({ timeout: 5000 });
+  });
 });

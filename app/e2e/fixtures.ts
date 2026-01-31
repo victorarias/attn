@@ -11,7 +11,7 @@ class MockGitHubServer {
   private server: http.Server;
   private requests: Array<{ method: string; path: string; body: any }> = [];
   public url = '';
-  private prs: Array<{ repo: string; number: number; title: string; role: string; draft: boolean }> = [];
+  private prs: Array<{ repo: string; number: number; title: string; role: string; draft: boolean; author?: string }> = [];
 
   constructor() {
     this.server = http.createServer((req, res) => {
@@ -38,6 +38,7 @@ class MockGitHubServer {
               html_url: `https://github.com/${pr.repo}/pull/${pr.number}`,
               draft: pr.draft,
               repository_url: `https://api.github.com/repos/${pr.repo}`,
+              user: { login: pr.author || 'test-user' },
             }));
 
           console.log(`[MockGH] Returning ${items.length} PRs for query: ${q}`);
@@ -74,7 +75,7 @@ class MockGitHubServer {
     });
   }
 
-  addPR(pr: { repo: string; number: number; title: string; role: 'author' | 'reviewer'; draft?: boolean }) {
+  addPR(pr: { repo: string; number: number; title: string; role: 'author' | 'reviewer'; draft?: boolean; author?: string }) {
     this.prs.push({ ...pr, draft: pr.draft ?? false });
   }
 
