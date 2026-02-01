@@ -6,6 +6,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-01]
+
+### Changed
+- **Location Picker Search**: Directory search now uses "contains" matching instead of "starts with", so typing "proxy" matches "metadata-proxy"
+- **Location Picker Sort Order**: Directories starting with the search term appear first, followed by directories that contain it elsewhere
+- **Location Picker Navigation**: Arrow key navigation now scrolls the selected item into view
+
+---
+
 ## [2026-01-31]
 
 ### Added
