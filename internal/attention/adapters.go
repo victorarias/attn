@@ -44,8 +44,9 @@ func (s SessionAdapter) AttentionMuted() bool {
 
 // PRAdapter wraps a protocol.PR to implement Source.
 type PRAdapter struct {
-	PR        *protocol.PR
-	RepoMuted bool // Whether the PR's repo is muted
+	PR          *protocol.PR
+	RepoMuted   bool // Whether the PR's repo is muted
+	AuthorMuted bool // Whether the PR's author is muted
 }
 
 func (p PRAdapter) AttentionID() string {
@@ -61,7 +62,7 @@ func (p PRAdapter) AttentionLabel() string {
 }
 
 func (p PRAdapter) NeedsAttention() bool {
-	return p.PR.State == protocol.PRStateWaiting && !p.PR.Muted && !p.RepoMuted
+	return p.PR.State == protocol.PRStateWaiting && !p.PR.Muted && !p.RepoMuted && !p.AuthorMuted
 }
 
 func (p PRAdapter) AttentionReason() string {
@@ -76,5 +77,5 @@ func (p PRAdapter) AttentionSince() time.Time {
 }
 
 func (p PRAdapter) AttentionMuted() bool {
-	return p.PR.Muted || p.RepoMuted
+	return p.PR.Muted || p.RepoMuted || p.AuthorMuted
 }

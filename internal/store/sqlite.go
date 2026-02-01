@@ -149,6 +149,11 @@ var migrations = []migration{
 		ALTER TABLE review_comments ADD COLUMN wont_fix_by TEXT NOT NULL DEFAULT '';
 		ALTER TABLE review_comments ADD COLUMN wont_fix_at TEXT NOT NULL DEFAULT '';
 	`},
+	{18, "create authors table", `CREATE TABLE IF NOT EXISTS authors (
+		author TEXT PRIMARY KEY,
+		muted INTEGER NOT NULL DEFAULT 0
+	)`},
+	{19, "add author to prs", "ALTER TABLE prs ADD COLUMN author TEXT NOT NULL DEFAULT ''"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

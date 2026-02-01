@@ -8,7 +8,7 @@ interface PRActionResult {
 
 // Track the last muted item for undo functionality
 interface LastMuted {
-  type: 'pr' | 'repo';
+  type: 'pr' | 'repo' | 'author';
   id: string;
   timestamp: number;
 }
@@ -22,6 +22,7 @@ interface DaemonContextType {
   ) => Promise<PRActionResult>;
   sendMutePR: (prId: string) => void;
   sendMuteRepo: (repo: string) => void;
+  sendMuteAuthor: (author: string) => void;
   sendPRVisited: (prId: string) => void;
   lastMuted: LastMuted | null;
   clearLastMuted: () => void;
@@ -34,12 +35,14 @@ export function DaemonProvider({
   sendPRAction,
   sendMutePR: sendMutePRProp,
   sendMuteRepo: sendMuteRepoProp,
+  sendMuteAuthor: sendMuteAuthorProp,
   sendPRVisited,
 }: {
   children: ReactNode;
   sendPRAction: DaemonContextType['sendPRAction'];
   sendMutePR: (prId: string) => void;
   sendMuteRepo: (repo: string) => void;
+  sendMuteAuthor: (author: string) => void;
   sendPRVisited: (prId: string) => void;
 }) {
   const [lastMuted, setLastMuted] = useState<LastMuted | null>(null);
@@ -55,12 +58,17 @@ export function DaemonProvider({
     setLastMuted({ type: 'repo', id: repo, timestamp: Date.now() });
   }, [sendMuteRepoProp]);
 
+  const sendMuteAuthor = useCallback((author: string) => {
+    sendMuteAuthorProp(author);
+    setLastMuted({ type: 'author', id: author, timestamp: Date.now() });
+  }, [sendMuteAuthorProp]);
+
   const clearLastMuted = useCallback(() => {
     setLastMuted(null);
   }, []);
 
   return (
-    <DaemonContext.Provider value={{ sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, lastMuted, clearLastMuted }}>
+    <DaemonContext.Provider value={{ sendPRAction, sendMutePR, sendMuteRepo, sendMuteAuthor, sendPRVisited, lastMuted, clearLastMuted }}>
       {children}
     </DaemonContext.Provider>
   );

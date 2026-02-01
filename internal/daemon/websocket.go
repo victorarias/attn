@@ -209,6 +209,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Sessions:        protocol.SessionsToValues(d.store.List("")),
 		Prs:             protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:           protocol.RepoStatesToValues(d.store.ListRepoStates()),
+		Authors:         protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
 		Settings:        settings,
 	}
 	data, err := json.Marshal(event)
@@ -392,6 +393,11 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			}
 		}
 		d.broadcastRepoStates()
+
+	case protocol.CmdMuteAuthor:
+		muteMsg := msg.(*protocol.MuteAuthorMessage)
+		d.store.ToggleMuteAuthor(muteMsg.Author)
+		d.broadcastAuthorStates()
 
 	case protocol.CmdRefreshPRs:
 		d.logf("Refreshing PRs on request")
@@ -666,6 +672,14 @@ func (d *Daemon) broadcastRepoStates() {
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventReposUpdated,
 		Repos: protocol.RepoStatesToValues(d.store.ListRepoStates()),
+	})
+}
+
+// broadcastAuthorStates sends updated author states to all WebSocket clients
+func (d *Daemon) broadcastAuthorStates() {
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:   protocol.EventAuthorsUpdated,
+		Authors: protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
 	})
 }
 

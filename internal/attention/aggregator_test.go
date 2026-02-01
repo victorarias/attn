@@ -70,7 +70,7 @@ func TestAggregator_Aggregate(t *testing.T) {
 		{Repo: "owner/muted-repo", Muted: true},
 	}
 
-	agg := NewAggregator(repos)
+	agg := NewAggregator(repos, nil)
 	result := agg.Aggregate(sessions, prs)
 
 	// Should have 2 items needing attention: sess-2 and owner/repo#1
@@ -102,7 +102,7 @@ func TestAggregator_Aggregate(t *testing.T) {
 }
 
 func TestAggregator_EmptyInput(t *testing.T) {
-	agg := NewAggregator(nil)
+	agg := NewAggregator(nil, nil)
 	result := agg.Aggregate(nil, nil)
 
 	if result.TotalCount != 0 {
@@ -136,7 +136,7 @@ func TestAggregator_AllMuted(t *testing.T) {
 		},
 	}
 
-	agg := NewAggregator(nil)
+	agg := NewAggregator(nil, nil)
 	result := agg.Aggregate(sessions, prs)
 
 	if result.TotalCount != 0 {

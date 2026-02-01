@@ -59,6 +59,7 @@ function App() {
     prs,
     setPRs,
     setRepoStates,
+    setAuthorStates,
   } = useDaemonStore();
 
   // Hide loading screen on mount
@@ -137,10 +138,55 @@ function App() {
   }), []);
 
   // Connect to daemon WebSocket
-  const { sendPRAction, sendMutePR, sendMuteRepo, sendPRVisited, sendRefreshPRs, sendClearSessions, sendUnregisterSession, sendSetSetting, sendCreateWorktree, sendDeleteWorktree, sendDeleteBranch, sendGetRecentLocations, sendListBranches, sendSwitchBranch, sendCreateWorktreeFromBranch, sendCheckDirty, sendStash, sendStashPop, sendCheckAttnStash, sendCommitWIP, sendGetDefaultBranch, sendFetchRemotes, sendFetchPRDetails, sendListRemoteBranches, sendSubscribeGitStatus, sendUnsubscribeGitStatus, sendGetFileDiff, sendGetBranchDiffFiles, getRepoInfo, getReviewState, markFileViewed, sendAddComment, sendUpdateComment, sendResolveComment, sendWontFixComment, sendDeleteComment, sendGetComments, sendStartReview, sendCancelReview, connectionError, hasReceivedInitialState, rateLimit } = useDaemonSocket({
+  const {
+    sendPRAction,
+    sendMutePR,
+    sendMuteRepo,
+    sendMuteAuthor,
+    sendPRVisited,
+    sendRefreshPRs,
+    sendClearSessions,
+    sendUnregisterSession,
+    sendSetSetting,
+    sendCreateWorktree,
+    sendDeleteWorktree,
+    sendDeleteBranch,
+    sendGetRecentLocations,
+    sendListBranches,
+    sendSwitchBranch,
+    sendCreateWorktreeFromBranch,
+    sendCheckDirty,
+    sendStash,
+    sendStashPop,
+    sendCheckAttnStash,
+    sendCommitWIP,
+    sendGetDefaultBranch,
+    sendFetchRemotes,
+    sendFetchPRDetails,
+    sendListRemoteBranches,
+    sendSubscribeGitStatus,
+    sendUnsubscribeGitStatus,
+    sendGetFileDiff,
+    sendGetBranchDiffFiles,
+    getRepoInfo,
+    getReviewState,
+    markFileViewed,
+    sendAddComment,
+    sendUpdateComment,
+    sendResolveComment,
+    sendWontFixComment,
+    sendDeleteComment,
+    sendGetComments,
+    sendStartReview,
+    sendCancelReview,
+    connectionError,
+    hasReceivedInitialState,
+    rateLimit,
+  } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
+    onAuthorsUpdate: setAuthorStates,
     onSettingsUpdate: setSettings,
     onWorktreesUpdate: setWorktrees,
     onGitStatusUpdate: setGitStatus,
@@ -170,6 +216,7 @@ function App() {
         sendPRAction={sendPRAction}
         sendMutePR={sendMutePR}
         sendMuteRepo={sendMuteRepo}
+        sendMuteAuthor={sendMuteAuthor}
         sendPRVisited={sendPRVisited}
         sendRefreshPRs={sendRefreshPRs}
         sendClearSessions={sendClearSessions}
@@ -230,6 +277,7 @@ interface AppContentProps {
   sendPRAction: ReturnType<typeof useDaemonSocket>['sendPRAction'];
   sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
   sendMuteRepo: ReturnType<typeof useDaemonSocket>['sendMuteRepo'];
+  sendMuteAuthor: ReturnType<typeof useDaemonSocket>['sendMuteAuthor'];
   sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
   sendClearSessions: ReturnType<typeof useDaemonSocket>['sendClearSessions'];
@@ -285,6 +333,7 @@ function AppContent({
   sendPRAction,
   sendMutePR,
   sendMuteRepo,
+  sendMuteAuthor,
   sendPRVisited,
   sendRefreshPRs,
   sendClearSessions,
@@ -1119,7 +1168,7 @@ function AppContent({
   });
 
   return (
-    <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo} sendPRVisited={sendPRVisited}>
+    <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo} sendMuteAuthor={sendMuteAuthor} sendPRVisited={sendPRVisited}>
     <div className="app">
       {/* Error banner for version mismatch */}
       {connectionError && (

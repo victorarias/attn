@@ -209,6 +209,18 @@ func (c *Client) QueryRepos() ([]protocol.RepoState, error) {
 	return resp.Repos, nil
 }
 
+// QueryAuthors returns all author states
+func (c *Client) QueryAuthors() ([]protocol.AuthorState, error) {
+	msg := map[string]string{
+		"cmd": protocol.CmdQueryAuthors,
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Authors, nil
+}
+
 // FetchPRDetails requests the daemon to fetch PR details for a repo
 func (c *Client) FetchPRDetails(repo string) ([]protocol.PR, error) {
 	msg := protocol.FetchPRDetailsMessage{

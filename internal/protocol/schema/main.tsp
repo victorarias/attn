@@ -52,6 +52,7 @@ model PR {
   number: int32;
   title: string;
   url: string;
+  author: string;               // GitHub username of PR author
   role: PRRole;
   state: string;
   reason: string;               // Why it needs attention
@@ -90,6 +91,11 @@ model RepoState {
   repo: string;
   muted: boolean;
   collapsed: boolean;
+}
+
+model AuthorState {
+  author: string;                // GitHub username
+  muted: boolean;
 }
 
 model RecentLocation {
@@ -178,6 +184,11 @@ model MuteRepoMessage {
   repo: string;
 }
 
+model MuteAuthorMessage {
+  cmd: "mute_author";
+  author: string;
+}
+
 model CollapseRepoMessage {
   cmd: "collapse_repo";
   repo: string;
@@ -187,6 +198,10 @@ model CollapseRepoMessage {
 model QueryReposMessage {
   cmd: "query_repos";
   filter?: string;
+}
+
+model QueryAuthorsMessage {
+  cmd: "query_authors";
 }
 
 model FetchPRDetailsMessage {
@@ -745,6 +760,7 @@ model Response {
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
+  authors?: AuthorState[];
 }
 
 model WebSocketEvent {
@@ -754,6 +770,7 @@ model WebSocketEvent {
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
+  authors?: AuthorState[];
   worktrees?: Worktree[];
   branches?: Branch[];
   recent_locations?: RecentLocation[];

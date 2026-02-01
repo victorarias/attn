@@ -469,6 +469,36 @@
   outline-offset: 1px;
 }
 
+/* Author mute button (per-PR) - hidden until row hover */
+.pr-row .author-mute-btn {
+  background: #252528;
+  border: 1px solid #3a3a3d;
+  border-radius: 4px;
+  color: #888;
+  font-size: var(--font-size-xs);
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: opacity 150ms ease-out;
+  margin-left: auto;
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.pr-row:hover .author-mute-btn,
+.pr-row:focus-within .author-mute-btn {
+  opacity: 1;
+}
+
+.author-mute-btn:hover {
+  background: rgba(85, 85, 85, 0.3);
+  color: #bbb;
+}
+
+.author-mute-btn:focus {
+  outline: 2px solid #ff6b35;
+  outline-offset: 1px;
+}
+
 /* Fade out animation for PRs after approve/merge */
 .pr-row.fading-out {
   opacity: 0;

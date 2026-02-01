@@ -10,6 +10,8 @@ interface SettingsModalProps {
   onClose: () => void;
   mutedRepos: string[];
   onUnmuteRepo: (repo: string) => void;
+  mutedAuthors: string[];
+  onUnmuteAuthor: (author: string) => void;
   settings: DaemonSettings;
   onSetSetting: (key: string, value: string) => void;
 }
@@ -19,6 +21,8 @@ export function SettingsModal({
   onClose,
   mutedRepos,
   onUnmuteRepo,
+  mutedAuthors,
+  onUnmuteAuthor,
   settings,
   onSetSetting,
 }: SettingsModalProps) {
@@ -242,13 +246,34 @@ export function SettingsModal({
             {mutedRepos.length === 0 ? (
               <p className="settings-empty">No muted repositories</p>
             ) : (
-              <ul className="muted-repos-list">
+              <ul className="muted-items-list">
                 {mutedRepos.map(repo => (
-                  <li key={repo} className="muted-repo-item">
-                    <span className="muted-repo-name">{repo}</span>
+                  <li key={repo} className="muted-item">
+                    <span className="muted-item-name">{repo}</span>
                     <button
                       className="unmute-btn"
                       onClick={() => onUnmuteRepo(repo)}
+                    >
+                      Unmute
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="settings-section">
+            <h3>Muted Authors</h3>
+            {mutedAuthors.length === 0 ? (
+              <p className="settings-empty">No muted authors</p>
+            ) : (
+              <ul className="muted-items-list">
+                {mutedAuthors.map(author => (
+                  <li key={author} className="muted-item">
+                    <span className="muted-item-name">{author.toLowerCase().includes('bot') ? '🤖' : '👤'} {author}</span>
+                    <button
+                      className="unmute-btn"
+                      onClick={() => onUnmuteAuthor(author)}
                     >
                       Unmute
                     </button>

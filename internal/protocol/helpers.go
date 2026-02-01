@@ -111,6 +111,19 @@ func RepoStatesToValues(repos []*RepoState) []RepoState {
 	return result
 }
 
+func AuthorStatesToValues(authors []*AuthorState) []AuthorState {
+	if authors == nil {
+		return nil
+	}
+	result := make([]AuthorState, len(authors))
+	for i, a := range authors {
+		if a != nil {
+			result[i] = *a
+		}
+	}
+	return result
+}
+
 func RecentLocationsToValues(locs []*RecentLocation) []RecentLocation {
 	if locs == nil {
 		return nil

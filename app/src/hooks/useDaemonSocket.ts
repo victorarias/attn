@@ -5,6 +5,7 @@ import type {
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
   RepoState as GeneratedRepoState,
+  AuthorState as GeneratedAuthorState,
   WebSocketEvent as GeneratedWebSocketEvent,
   RecentLocation as GeneratedRecentLocation,
   BranchElement as GeneratedBranch,
@@ -21,6 +22,7 @@ export type DaemonSession = GeneratedSession;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
 export type RepoState = GeneratedRepoState;
+export type AuthorState = GeneratedAuthorState;
 export type RecentLocation = GeneratedRecentLocation;
 export type Branch = GeneratedBranch;
 export type ReviewFinding = GeneratedReviewFinding;
@@ -60,7 +62,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '20';
+const PROTOCOL_VERSION = '21';
 
 interface PRActionResult {
   success: boolean;
@@ -254,6 +256,7 @@ interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
+  onAuthorsUpdate: (authors: AuthorState[]) => void;
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
   onSettingsUpdate?: (settings: DaemonSettings) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
@@ -280,6 +283,7 @@ const DEFAULT_WS_URL = `ws://127.0.0.1:${import.meta.env.VITE_DAEMON_PORT || '98
 // 2. OPTIMISTIC FIRE-AND-FORGET (for toggles that rarely fail):
 //    - sendMutePR: Toggle mute state
 //    - sendMuteRepo: Toggle repo mute state
+//    - sendMuteAuthor: Toggle author mute state
 //    - sendPRVisited: Clear notification flag
 //    - sendSetSetting: Update user preference
 //    - sendClearSessions: Dev/admin action
@@ -302,6 +306,7 @@ export function useDaemonSocket({
   onSessionsUpdate,
   onPRsUpdate,
   onReposUpdate,
+  onAuthorsUpdate,
   onWorktreesUpdate,
   onSettingsUpdate,
   onGitStatusUpdate,
@@ -312,6 +317,7 @@ export function useDaemonSocket({
   const sessionsRef = useRef<DaemonSession[]>([]);
   const prsRef = useRef<DaemonPR[]>([]);
   const reposRef = useRef<RepoState[]>([]);
+  const authorsRef = useRef<AuthorState[]>([]);
   const settingsRef = useRef<DaemonSettings>({});
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
@@ -377,6 +383,10 @@ export function useDaemonSocket({
               reposRef.current = data.repos;
               onReposUpdate(data.repos);
             }
+            if (data.authors) {
+              authorsRef.current = data.authors;
+              onAuthorsUpdate(data.authors);
+            }
             if (data.settings) {
               settingsRef.current = data.settings;
               onSettingsUpdate?.(data.settings);
@@ -428,6 +438,13 @@ export function useDaemonSocket({
             if (data.repos) {
               reposRef.current = data.repos;
               onReposUpdate(data.repos);
+            }
+            break;
+
+          case 'authors_updated':
+            if (data.authors) {
+              authorsRef.current = data.authors;
+              onAuthorsUpdate(data.authors);
             }
             break;
 
@@ -992,7 +1009,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate]);
 
   useEffect(() => {
     connect();
@@ -1094,6 +1111,28 @@ export function useDaemonSocket({
 
     ws.send(JSON.stringify({ cmd: 'mute_repo', repo }));
   }, [onReposUpdate]);
+
+  // Mute a PR author with optimistic update
+  const sendMuteAuthor = useCallback((author: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Optimistic update - toggle author muted state immediately
+    const existingAuthor = authorsRef.current.find(a => a.author === author);
+    let updatedAuthors: AuthorState[];
+    if (existingAuthor) {
+      updatedAuthors = authorsRef.current.map(a =>
+        a.author === author ? { ...a, muted: !a.muted } : a
+      );
+    } else {
+      // Author doesn't exist in state yet, add it as muted
+      updatedAuthors = [...authorsRef.current, { author, muted: true }];
+    }
+    authorsRef.current = updatedAuthors;
+    onAuthorsUpdate(updatedAuthors);
+
+    ws.send(JSON.stringify({ cmd: 'mute_author', author }));
+  }, [onAuthorsUpdate]);
 
   // Request daemon to refresh PRs from GitHub
   const sendRefreshPRs = useCallback((): Promise<PRActionResult> => {
@@ -1939,6 +1978,7 @@ export function useDaemonSocket({
     sendPRAction,
     sendMutePR,
     sendMuteRepo,
+    sendMuteAuthor,
     sendRefreshPRs,
     sendFetchPRDetails,
     sendClearSessions,

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "20"
+const ProtocolVersion = "21"
 
 // Commands
 const (
@@ -25,8 +25,10 @@ const (
 	CmdQueryPRs                 = "query_prs"
 	CmdMutePR                   = "mute_pr"
 	CmdMuteRepo                 = "mute_repo"
+	CmdMuteAuthor               = "mute_author"
 	CmdCollapseRepo             = "collapse_repo"
 	CmdQueryRepos               = "query_repos"
+	CmdQueryAuthors             = "query_authors"
 	CmdFetchPRDetails           = "fetch_pr_details"
 	CmdRefreshPRs               = "refresh_prs"
 	CmdClearSessions            = "clear_sessions"
@@ -80,6 +82,7 @@ const (
 	EventSessionsUpdated          = "sessions_updated"
 	EventPRsUpdated               = "prs_updated"
 	EventReposUpdated             = "repos_updated"
+	EventAuthorsUpdated           = "authors_updated"
 	EventInitialState             = "initial_state"
 	EventPRActionResult           = "pr_action_result"
 	EventRefreshPRsResult         = "refresh_prs_result"
@@ -268,6 +271,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
+	case CmdMuteAuthor:
+		var msg MuteAuthorMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
 	case CmdCollapseRepo:
 		var msg CollapseRepoMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -277,6 +287,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdQueryRepos:
 		var msg QueryReposMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdQueryAuthors:
+		var msg QueryAuthorsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

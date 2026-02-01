@@ -574,9 +574,9 @@ func (s *Store) SetPRs(prs []*protocol.PR) {
 		heatState := protocol.DerefOr(pr.HeatState, protocol.HeatStateCold)
 
 		s.execLog(`
-			INSERT INTO prs (id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, string(pr.Role), pr.State, pr.Reason,
+			INSERT INTO prs (id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Author, string(pr.Role), pr.State, pr.Reason,
 			pr.LastUpdated, pr.LastPolled,
 			boolToInt(pr.Muted), boolToInt(pr.DetailsFetched), nullPtrString(pr.DetailsFetchedAt),
 			mergeableVal, nullPtrString(pr.MergeableState), nullPtrString(pr.CIStatus), nullPtrString(pr.ReviewStatus),
@@ -605,9 +605,9 @@ func (s *Store) AddPR(pr *protocol.PR) {
 	heatState := protocol.DerefOr(pr.HeatState, protocol.HeatStateCold)
 
 	s.execLog(`
-		INSERT OR REPLACE INTO prs (id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, string(pr.Role), pr.State, pr.Reason,
+		INSERT OR REPLACE INTO prs (id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		pr.ID, pr.Repo, pr.Number, pr.Title, pr.URL, pr.Author, string(pr.Role), pr.State, pr.Reason,
 		pr.LastUpdated, pr.LastPolled,
 		boolToInt(pr.Muted), boolToInt(pr.DetailsFetched), nullPtrString(pr.DetailsFetchedAt),
 		mergeableVal, nullPtrString(pr.MergeableState), nullPtrString(pr.CIStatus), nullPtrString(pr.ReviewStatus),
@@ -629,9 +629,9 @@ func (s *Store) ListPRs(stateFilter string) []*protocol.PR {
 	var err error
 
 	if stateFilter == "" {
-		rows, err = s.db.Query(`SELECT id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs`)
+		rows, err = s.db.Query(`SELECT id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs`)
 	} else {
-		rows, err = s.db.Query(`SELECT id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE state = ?`, stateFilter)
+		rows, err = s.db.Query(`SELECT id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE state = ?`, stateFilter)
 	}
 	if err != nil {
 		return nil
@@ -677,7 +677,7 @@ func (s *Store) GetPR(id string) *protocol.PR {
 		return nil
 	}
 
-	row := s.db.QueryRow(`SELECT id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE id = ?`, id)
 	return scanPRRow(row)
 }
 
@@ -710,7 +710,7 @@ func (s *Store) ListPRsByRepo(repo string) []*protocol.PR {
 		return nil
 	}
 
-	rows, err := s.db.Query(`SELECT id, repo, number, title, url, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE repo = ?`, repo)
+	rows, err := s.db.Query(`SELECT id, repo, number, title, url, author, role, state, reason, last_updated, last_polled, muted, details_fetched, details_fetched_at, mergeable, mergeable_state, ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me, heat_state, last_heat_activity_at FROM prs WHERE repo = ?`, repo)
 	if err != nil {
 		return nil
 	}
@@ -804,6 +804,51 @@ func (s *Store) ListRepoStates() []*protocol.RepoState {
 
 		state.Muted = muted == 1
 		state.Collapsed = collapsed == 1
+		result = append(result, &state)
+	}
+	return result
+}
+
+// ToggleMuteAuthor toggles a PR author's muted state
+func (s *Store) ToggleMuteAuthor(author string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	// Insert if not exists, then toggle
+	s.execLog("INSERT OR IGNORE INTO authors (author, muted) VALUES (?, 0)", author)
+	s.execLog("UPDATE authors SET muted = NOT muted WHERE author = ?", author)
+}
+
+// ListAuthorStates returns all author states
+func (s *Store) ListAuthorStates() []*protocol.AuthorState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil
+	}
+
+	rows, err := s.db.Query("SELECT author, muted FROM authors")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var result []*protocol.AuthorState
+	for rows.Next() {
+		var state protocol.AuthorState
+		var muted int
+
+		err := rows.Scan(&state.Author, &muted)
+		if err != nil {
+			continue
+		}
+
+		state.Muted = muted == 1
 		result = append(result, &state)
 	}
 	return result
@@ -942,9 +987,9 @@ func (s *Store) GetPRsNeedingDetailRefresh() []*protocol.PR {
 	var result []*protocol.PR
 
 	rows, err := s.db.Query(`
-		SELECT id, repo, number, title, url, role, state, reason, last_updated, last_polled,
+		SELECT id, repo, number, title, url, author, role, state, reason, last_updated, last_polled,
 		       muted, details_fetched, details_fetched_at, mergeable, mergeable_state,
-		       ci_status, review_status, head_sha, comment_count, approved_by_me,
+		       ci_status, review_status, head_sha, head_branch, comment_count, approved_by_me,
 		       heat_state, last_heat_activity_at
 		FROM prs
 		WHERE muted = 0`)
@@ -1194,7 +1239,7 @@ func scanPR(rows *sql.Rows) *protocol.PR {
 	var commentCount int
 
 	err := rows.Scan(
-		&pr.ID, &pr.Repo, &pr.Number, &pr.Title, &pr.URL, &pr.Role, &pr.State, &pr.Reason,
+		&pr.ID, &pr.Repo, &pr.Number, &pr.Title, &pr.URL, &pr.Author, &pr.Role, &pr.State, &pr.Reason,
 		&lastUpdated, &lastPolled, &muted, &detailsFetched, &detailsFetchedAt,
 		&mergeable, &mergeableState, &ciStatus, &reviewStatus,
 		&headSHA, &headBranch, &commentCount, &approvedByMe,
@@ -1255,7 +1300,7 @@ func scanPRRow(row *sql.Row) *protocol.PR {
 	var commentCount int
 
 	err := row.Scan(
-		&pr.ID, &pr.Repo, &pr.Number, &pr.Title, &pr.URL, &pr.Role, &pr.State, &pr.Reason,
+		&pr.ID, &pr.Repo, &pr.Number, &pr.Title, &pr.URL, &pr.Author, &pr.Role, &pr.State, &pr.Reason,
 		&lastUpdated, &lastPolled, &muted, &detailsFetched, &detailsFetchedAt,
 		&mergeable, &mergeableState, &ciStatus, &reviewStatus,
 		&headSHA, &headBranch, &commentCount, &approvedByMe,

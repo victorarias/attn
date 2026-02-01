@@ -374,3 +374,42 @@ func TestStore_ListRepoStates(t *testing.T) {
 		t.Errorf("expected 2 repo states, got %d", len(states))
 	}
 }
+
+func TestStore_AuthorState(t *testing.T) {
+	s := New()
+
+	// Initially no author states
+	states := s.ListAuthorStates()
+	if len(states) != 0 {
+		t.Errorf("expected 0 author states, got %d", len(states))
+	}
+
+	// Toggle mute creates state
+	s.ToggleMuteAuthor("dependabot")
+	states = s.ListAuthorStates()
+	if len(states) != 1 {
+		t.Fatalf("expected 1 author state, got %d", len(states))
+	}
+	if !states[0].Muted {
+		t.Error("author should be muted")
+	}
+
+	// Toggle again unmutes
+	s.ToggleMuteAuthor("dependabot")
+	states = s.ListAuthorStates()
+	if states[0].Muted {
+		t.Error("author should be unmuted")
+	}
+}
+
+func TestStore_ListAuthorStates(t *testing.T) {
+	s := New()
+
+	s.ToggleMuteAuthor("dependabot")
+	s.ToggleMuteAuthor("renovate")
+
+	states := s.ListAuthorStates()
+	if len(states) != 2 {
+		t.Errorf("expected 2 author states, got %d", len(states))
+	}
+}

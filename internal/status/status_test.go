@@ -216,7 +216,7 @@ func TestFormatWithPRs_RepoGrouping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FormatWithPRsAndRepos(tt.sessions, tt.prs, tt.repos)
+			got := FormatWithPRsAndRepos(tt.sessions, tt.prs, tt.repos, nil)
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}

@@ -59,13 +59,19 @@ export function Dashboard({
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
   const [fadingPRs, setFadingPRs] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { sendMuteRepo, sendPRVisited } = useDaemonContext();
-  const { repoStates } = useDaemonStore();
+  const { sendMuteRepo, sendMuteAuthor, sendPRVisited } = useDaemonContext();
+  const { repoStates, authorStates } = useDaemonStore();
 
   // Get list of muted repos for settings modal
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates]
+  );
+
+  // Get list of muted authors for settings modal
+  const mutedAuthors = useMemo(() =>
+    authorStates.filter(a => a.muted).map(a => a.author),
+    [authorStates]
   );
 
   // PRs that are fully hidden (after fade animation)
@@ -346,7 +352,9 @@ export function Dashboard({
                               }}
                             >
                               <span className={`pr-role ${pr.role}`}>
-                                {pr.role === 'reviewer' ? '👀' : '✏️'}
+                                {pr.role === 'reviewer'
+                                  ? (pr.author?.toLowerCase().includes('bot') ? '🤖' : '👀')
+                                  : '✏️'}
                               </span>
                               <span className="pr-number">#{pr.number}</span>
                               <span className="pr-title">{pr.title}</span>
@@ -369,6 +377,7 @@ export function Dashboard({
                               repo={pr.repo}
                               number={pr.number}
                               prId={pr.id}
+                              author={pr.author}
                               onActionComplete={handleActionComplete}
                               onOpen={onOpenPR ? () => onOpenPR(pr) : undefined}
                             />
@@ -395,6 +404,8 @@ export function Dashboard({
         onClose={() => setSettingsOpen(false)}
         mutedRepos={mutedRepos}
         onUnmuteRepo={sendMuteRepo}
+        mutedAuthors={mutedAuthors}
+        onUnmuteAuthor={sendMuteAuthor}
         settings={settings}
         onSetSetting={onSetSetting}
       />

@@ -4,7 +4,7 @@ import { DaemonPR } from './useDaemonSocket';
 import { useDaemonStore } from '../store/daemonSessions';
 
 interface FilteredPRs {
-  // All non-muted PRs (repo and individual mute state)
+  // All non-muted PRs (repo, author, and individual mute state)
   activePRs: DaemonPR[];
   // PRs that need attention (excludes approved without new changes)
   needsAttention: DaemonPR[];
@@ -25,14 +25,17 @@ export function usePRsNeedingAttention(
   prs: DaemonPR[],
   hiddenPRs?: Set<string>
 ): FilteredPRs {
-  // Subscribe to both isRepoMuted function AND repoStates array
-  // The function reference is stable, so we need repoStates to trigger recalculation
-  const { isRepoMuted, repoStates } = useDaemonStore();
+  // Subscribe to both isRepoMuted/isAuthorMuted functions AND state arrays
+  // The function references are stable, so we need the state arrays to trigger recalculation
+  const { isRepoMuted, isAuthorMuted, repoStates, authorStates } = useDaemonStore();
 
   return useMemo(() => {
-    // Base filter: not individually muted, not repo muted, not hidden
+    // Base filter: not individually muted, not repo muted, not author muted, not hidden
     const activePRs = prs.filter(
-      (p) => !p.muted && !isRepoMuted(p.repo) && (!hiddenPRs || !hiddenPRs.has(p.id))
+      (p) => !p.muted &&
+             !isRepoMuted(p.repo) &&
+             !isAuthorMuted(p.author) &&
+             (!hiddenPRs || !hiddenPRs.has(p.id))
     );
 
     // PRs needing attention: active PRs that aren't approved (or have new changes since approval)
@@ -45,5 +48,5 @@ export function usePRsNeedingAttention(
     const yourPRs = needsAttention.filter((p) => p.role === 'author');
 
     return { activePRs, needsAttention, reviewRequested, yourPRs };
-  }, [prs, isRepoMuted, repoStates, hiddenPRs]);
+  }, [prs, isRepoMuted, isAuthorMuted, repoStates, authorStates, hiddenPRs]);
 }
