@@ -817,7 +817,7 @@ func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
 		os.Remove(sockPath)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	// Register session via unix socket
 	c := client.New(sockPath)
@@ -899,7 +899,7 @@ func TestDaemon_StateTransitions_AllStates(t *testing.T) {
 		os.Remove(sockPath)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 	err := c.Register("test-session", "Test", "/tmp/test")
@@ -979,7 +979,7 @@ func TestDaemon_InjectTestSession_BroadcastsToWebSocket(t *testing.T) {
 		os.Remove(sockPath)
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	// Connect to WebSocket first
 	ctx := context.Background()
