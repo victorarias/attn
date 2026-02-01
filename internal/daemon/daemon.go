@@ -96,6 +96,36 @@ type Daemon struct {
 	reviewerFactory ReviewerFactory // Optional, creates real reviewer if nil
 	repoCaches      map[string]*repoCache
 	repoCacheMu     sync.RWMutex
+	warnings        []protocol.DaemonWarning
+	warningsMu      sync.RWMutex
+}
+
+// addWarning adds a warning to be surfaced to the UI
+func (d *Daemon) addWarning(code, message string) {
+	d.warningsMu.Lock()
+	defer d.warningsMu.Unlock()
+	// Avoid duplicates
+	for _, w := range d.warnings {
+		if w.Code == code {
+			return
+		}
+	}
+	d.warnings = append(d.warnings, protocol.DaemonWarning{
+		Code:    code,
+		Message: message,
+	})
+}
+
+// getWarnings returns a copy of the warnings slice
+func (d *Daemon) getWarnings() []protocol.DaemonWarning {
+	d.warningsMu.RLock()
+	defer d.warningsMu.RUnlock()
+	if len(d.warnings) == 0 {
+		return nil
+	}
+	result := make([]protocol.DaemonWarning, len(d.warnings))
+	copy(result, d.warnings)
+	return result
 }
 
 // New creates a new daemon
@@ -324,9 +354,12 @@ func (d *Daemon) refreshGitHubHosts() error {
 	if err := github.RequireGHVersion("2.81.0"); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			d.logf("gh CLI not available: %v", err)
-			return nil
+			d.addWarning("gh_not_installed", "GitHub CLI not installed. PR monitoring disabled. Run: brew install gh")
+		} else {
+			d.logf("gh CLI version too old (need 2.81.0+): %v", err)
+			d.addWarning("gh_version_too_old", "GitHub CLI needs upgrade to v2.81.0+ for PR monitoring. Run: brew upgrade gh")
 		}
-		return err
+		return nil
 	}
 
 	hosts, err := github.DiscoverHosts()

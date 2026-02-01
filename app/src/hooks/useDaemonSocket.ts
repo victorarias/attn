@@ -11,6 +11,7 @@ import type {
   BranchElement as GeneratedBranch,
   Comment as GeneratedComment,
   ReviewFinding as GeneratedReviewFinding,
+  WarningElement as GeneratedWarning,
   SessionState,
   PRRole,
   HeatState,
@@ -27,6 +28,7 @@ export type RecentLocation = GeneratedRecentLocation;
 export type Branch = GeneratedBranch;
 export type ReviewFinding = GeneratedReviewFinding;
 export type DaemonSettings = Record<string, string>;
+export type DaemonWarning = GeneratedWarning;
 
 // Re-export enums and useful types
 export { SessionState, PRRole, HeatState };
@@ -325,6 +327,7 @@ export function useDaemonSocket({
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
+  const [warnings, setWarnings] = useState<DaemonWarning[]>([]);
 
   // Circuit breaker state for daemon restart
   const reconnectAttemptsRef = useRef(0);
@@ -390,6 +393,9 @@ export function useDaemonSocket({
             if (data.settings) {
               settingsRef.current = data.settings;
               onSettingsUpdate?.(data.settings);
+            }
+            if (data.warnings && data.warnings.length > 0) {
+              setWarnings(data.warnings);
             }
             setHasReceivedInitialState(true);
             break;
@@ -1966,12 +1972,18 @@ export function useDaemonSocket({
     }));
   }, []);
 
+  const clearWarnings = useCallback(() => {
+    setWarnings([]);
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
     hasReceivedInitialState,
     settings: settingsRef.current,
     rateLimit,
+    warnings,
+    clearWarnings,
     retryConnection,
     sendPRAction,
     sendMutePR,

@@ -762,6 +762,12 @@ model Response {
   authors?: AuthorState[];
 }
 
+// Warning for non-critical issues (e.g., gh version too old)
+model DaemonWarning {
+  code: string;    // e.g., "gh_version_too_old"
+  message: string; // Human-readable message
+}
+
 model WebSocketEvent {
   event: string;
   protocol_version?: string;
@@ -774,6 +780,7 @@ model WebSocketEvent {
   branches?: Branch[];
   recent_locations?: RecentLocation[];
   settings?: Record<string>;
+  warnings?: DaemonWarning[]; // Non-critical warnings to display in UI
   // Rate limiting
   rate_limit_resource?: string;
   rate_limit_reset_at?: string; // ISO timestamp

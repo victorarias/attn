@@ -283,6 +283,14 @@ type CreateWorktreeResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type DaemonWarning struct {
+	// Code corresponds to the JSON schema field "code".
+	Code string `json:"code"`
+
+	// Message corresponds to the JSON schema field "message".
+	Message string `json:"message"`
+}
+
 type DeleteBranchMessage struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch string `json:"branch"`
@@ -1410,6 +1418,9 @@ type WebSocketEvent struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success *bool `json:"success,omitempty"`
+
+	// Warnings corresponds to the JSON schema field "warnings".
+	Warnings []DaemonWarning `json:"warnings,omitempty"`
 
 	// Worktrees corresponds to the JSON schema field "worktrees".
 	Worktrees []Worktree `json:"worktrees,omitempty"`

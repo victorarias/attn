@@ -211,6 +211,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Repos:           protocol.RepoStatesToValues(d.store.ListRepoStates()),
 		Authors:         protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
 		Settings:        settings,
+		Warnings:        d.getWarnings(),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {

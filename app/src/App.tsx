@@ -21,7 +21,7 @@ import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore } from './store/sessions';
 import { ptyWrite } from './pty/bridge';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse, BranchDiffFile } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse, BranchDiffFile, DaemonWarning } from './hooks/useDaemonSocket';
 import { normalizeSessionState } from './types/sessionState';
 import type { SessionAgent } from './types/sessionAgent';
 import { useDaemonStore } from './store/daemonSessions';
@@ -182,6 +182,8 @@ function App() {
     connectionError,
     hasReceivedInitialState,
     rateLimit,
+    warnings,
+    clearWarnings,
   } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
     onPRsUpdate: setPRs,
@@ -212,6 +214,8 @@ function App() {
         connectionError={connectionError}
         hasReceivedInitialState={hasReceivedInitialState}
         rateLimit={rateLimit}
+        warnings={warnings}
+        clearWarnings={clearWarnings}
         // Daemon socket functions
         sendPRAction={sendPRAction}
         sendMutePR={sendMutePR}
@@ -273,6 +277,8 @@ interface AppContentProps {
   connectionError: string | null;
   hasReceivedInitialState: boolean;
   rateLimit: import('./hooks/useDaemonSocket').RateLimitState | null;
+  warnings: DaemonWarning[];
+  clearWarnings: () => void;
   // All the daemon socket functions
   sendPRAction: ReturnType<typeof useDaemonSocket>['sendPRAction'];
   sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
@@ -330,6 +336,8 @@ function AppContent({
   connectionError,
   hasReceivedInitialState,
   rateLimit,
+  warnings,
+  clearWarnings,
   sendPRAction,
   sendMutePR,
   sendMuteRepo,
@@ -1174,6 +1182,13 @@ function AppContent({
       {connectionError && (
         <div className="connection-error-banner">
           {connectionError}
+        </div>
+      )}
+      {/* Warning banner for non-critical issues */}
+      {warnings.length > 0 && (
+        <div className="warning-banner">
+          <span>{warnings.map(w => w.message).join(' ')}</span>
+          <button className="warning-dismiss" onClick={clearWarnings} title="Dismiss">×</button>
         </div>
       )}
       {/* Dashboard - always rendered, shown/hidden via z-index */}
