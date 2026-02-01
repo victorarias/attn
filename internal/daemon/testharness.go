@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net"
 	"sync"
 	"time"
 
@@ -167,6 +168,7 @@ type TestHarness struct {
 	Classifier *FakeClassifier
 	Recorder   *BroadcastRecorder
 	Store      *store.Store
+	SockPath   string
 }
 
 // TestHarnessBuilder builds test harnesses with various configurations
@@ -244,14 +246,23 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 		Classifier: classifier,
 		Recorder:   recorder,
 		Store:      sessionStore,
+		SockPath:   b.socketPath,
 	}
 }
 
-// Start starts the daemon
+// Start starts the daemon and waits for the socket to be ready
 func (h *TestHarness) Start() {
 	go h.Daemon.Start()
-	// Give daemon time to start accepting connections
-	time.Sleep(100 * time.Millisecond)
+	// Poll for socket readiness instead of fixed sleep
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("unix", h.SockPath, 10*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // Stop stops the daemon
