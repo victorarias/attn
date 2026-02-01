@@ -95,9 +95,9 @@ async fn list_directory(path: String, prefix: Option<String>) -> Result<Vec<Stri
             let metadata = entry.metadata().ok()?;
             if metadata.is_dir() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                // Filter by prefix if provided
+                // Filter by search term (contains match)
                 if let Some(ref p) = prefix_lower {
-                    if !name.to_lowercase().starts_with(p) {
+                    if !name.to_lowercase().contains(p) {
                         return None;
                     }
                 }
@@ -108,7 +108,22 @@ async fn list_directory(path: String, prefix: Option<String>) -> Result<Vec<Stri
         })
         .collect();
 
-    directories.sort();
+    // Sort: starts_with matches first, then contains-only, alphabetically within each group
+    if let Some(ref p) = prefix_lower {
+        directories.sort_by(|a, b| {
+            let a_lower = a.to_lowercase();
+            let b_lower = b.to_lowercase();
+            let a_starts = a_lower.starts_with(p);
+            let b_starts = b_lower.starts_with(p);
+            match (a_starts, b_starts) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.cmp(b),
+            }
+        });
+    } else {
+        directories.sort();
+    }
     directories.truncate(50); // Limit to 50 results
 
     Ok(directories)

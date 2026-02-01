@@ -195,6 +195,14 @@ export function LocationPicker({
     setState(prev => ({ ...prev, selectedIndex: -1 }));
   }, [state.inputValue]);
 
+  // Scroll selected item into view
+  useEffect(() => {
+    if (state.selectedIndex >= 0) {
+      const el = document.querySelector(`[data-index="${state.selectedIndex}"]`);
+      el?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [state.selectedIndex]);
+
   const handleSelect = useCallback(
     async (rawPath: string) => {
       // Expand ~ to home path and remove trailing slash

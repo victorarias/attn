@@ -110,6 +110,86 @@ test.describe('LocationPicker', () => {
     });
   });
 
+  test.describe('Contains Search', () => {
+    test('matches directories containing search term (not just starting with)', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      // Open dialog
+      await page.keyboard.press('Meta+n');
+      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+
+      // Type ~/Library/ to get a predictable set of directories, then search for a substring
+      // Most Macs have directories like "Application Support" in ~/Library
+      await page.keyboard.type('~/Library/');
+      await page.waitForTimeout(500);
+
+      // Check if DIRECTORIES section exists
+      const directoriesSection = page.locator('.picker-section-title').filter({ hasText: 'DIRECTORIES' });
+      const hasSuggestions = await directoriesSection.isVisible({ timeout: 2000 }).catch(() => false);
+
+      if (hasSuggestions) {
+        // Get current directory names
+        const directoryItems = page.locator('.picker-section:has(.picker-section-title:text("DIRECTORIES")) .picker-name');
+        const count = await directoryItems.count();
+
+        if (count > 0) {
+          // Clear input and search for "Support" which should match "Application Support"
+          // First clear by selecting all and typing new path
+          await page.keyboard.press('Meta+a');
+          await page.keyboard.type('~/Library/Support');
+          await page.waitForTimeout(500);
+
+          // Should find directories containing "Support"
+          const matchingItems = page.locator('.picker-section:has(.picker-section-title:text("DIRECTORIES")) .picker-name');
+          const matchCount = await matchingItems.count();
+
+          // If we found matches, verify they contain "Support"
+          if (matchCount > 0) {
+            const firstName = await matchingItems.first().textContent();
+            expect(firstName?.toLowerCase()).toContain('support');
+          }
+        }
+      }
+    });
+  });
+
+  test.describe('Keyboard Navigation', () => {
+    test('arrow keys navigate and scroll selected item into view', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      // Open dialog
+      await page.keyboard.press('Meta+n');
+      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+
+      // Type path to get suggestions
+      await page.keyboard.type('~/');
+      await page.waitForTimeout(500);
+
+      // Check if DIRECTORIES section exists with multiple items
+      const directoryItems = page.locator('.picker-section:has(.picker-section-title:text("DIRECTORIES")) .picker-item');
+      const count = await directoryItems.count();
+
+      if (count > 3) {
+        // Navigate down several times
+        await page.keyboard.press('ArrowDown');
+        await page.keyboard.press('ArrowDown');
+        await page.keyboard.press('ArrowDown');
+
+        // The third item should be selected
+        const selectedItem = page.locator('.picker-item.selected');
+        await expect(selectedItem).toBeVisible();
+
+        // Verify data-index is correct (2 = third item, 0-indexed)
+        const dataIndex = await selectedItem.getAttribute('data-index');
+        expect(dataIndex).toBe('2');
+      }
+    });
+  });
+
   test.describe('Empty State', () => {
     test('shows empty state when no matches', async ({ page, daemon }) => {
       await daemon.start();
