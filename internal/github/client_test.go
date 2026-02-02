@@ -23,6 +23,16 @@ func TestNewClient_UsesEnvToken(t *testing.T) {
 }
 
 func TestNewClient_DefaultsToGitHubAPI(t *testing.T) {
+	// Save and restore GITHUB_API_URL to ensure test isolation
+	origAPIURL := os.Getenv("GITHUB_API_URL")
+	defer func() {
+		if origAPIURL != "" {
+			os.Setenv("GITHUB_API_URL", origAPIURL)
+		} else {
+			os.Unsetenv("GITHUB_API_URL")
+		}
+	}()
+
 	// Use a real-looking token (not "test-token") since test-token is blocked
 	// when targeting real GitHub API
 	os.Setenv("GITHUB_TOKEN", "ghp_xxxxxxxxxxxx")
@@ -41,6 +51,16 @@ func TestNewClient_DefaultsToGitHubAPI(t *testing.T) {
 }
 
 func TestNewClient_BlocksTestTokenWithRealAPI(t *testing.T) {
+	// Save and restore GITHUB_API_URL to ensure test isolation
+	origAPIURL := os.Getenv("GITHUB_API_URL")
+	defer func() {
+		if origAPIURL != "" {
+			os.Setenv("GITHUB_API_URL", origAPIURL)
+		} else {
+			os.Unsetenv("GITHUB_API_URL")
+		}
+	}()
+
 	os.Setenv("GITHUB_TOKEN", "test-token")
 	os.Unsetenv("GITHUB_API_URL")
 	os.Unsetenv("GITHUB_BASE_URL")

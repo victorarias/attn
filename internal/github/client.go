@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,13 +61,8 @@ func NewClient(baseURL string) (*Client, error) {
 
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
-		// Try gh auth token
+		// Try gh auth token (daemon ensures PATH is set at startup)
 		output, err := ghAuthToken()
-		if err != nil && runtime.GOOS == "darwin" && errors.Is(err, exec.ErrNotFound) {
-			if updatePathFromHelper() == nil {
-				output, err = ghAuthToken()
-			}
-		}
 		if err != nil {
 			return nil, fmt.Errorf("no GITHUB_TOKEN and gh auth token failed: %w", err)
 		}
@@ -102,37 +96,6 @@ func NewClient(baseURL string) (*Client, error) {
 func ghAuthToken() ([]byte, error) {
 	cmd := exec.Command("gh", "auth", "token")
 	return cmd.Output()
-}
-
-// On macOS GUI app launches, PATH can be missing common locations.
-// Rebuild PATH using the system path_helper and update env.
-func updatePathFromHelper() error {
-	cmd := exec.Command("/usr/libexec/path_helper", "-s")
-	output, err := cmd.Output()
-	if err != nil {
-		return err
-	}
-
-	path := extractPathFromShellOutput(string(output))
-	if path == "" {
-		return fmt.Errorf("path_helper output missing PATH")
-	}
-	return os.Setenv("PATH", path)
-}
-
-func extractPathFromShellOutput(output string) string {
-	// path_helper -s outputs: PATH="..."; export PATH;
-	const prefix = "PATH=\""
-	start := strings.Index(output, prefix)
-	if start == -1 {
-		return ""
-	}
-	start += len(prefix)
-	end := strings.Index(output[start:], "\"")
-	if end == -1 {
-		return ""
-	}
-	return output[start : start+end]
 }
 
 // IsAvailable returns true if the client has a valid token
