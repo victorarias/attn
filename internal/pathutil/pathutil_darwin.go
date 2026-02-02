@@ -27,7 +27,7 @@ func EnsureGUIPath() error {
 
 	// Add common paths that exist on disk
 	commonPaths := []string{
-		"/opt/homebrew/bin",  // Homebrew on Apple Silicon
+		"/opt/homebrew/bin", // Homebrew on Apple Silicon
 		"/opt/homebrew/sbin",
 		"/usr/local/bin", // Homebrew on Intel Mac
 		"/usr/local/sbin",
