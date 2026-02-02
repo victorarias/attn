@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-02]
+
+### Added
+- **PATH Recovery for GUI App Launches**: New `pathutil` package ensures external tools like `gh` can be found when app is launched from Finder/Dock (macOS only)
+
+---
+
 ## [2026-02-01]
 
 ### Changed

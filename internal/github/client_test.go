@@ -30,6 +30,15 @@ func TestNewClient_DefaultsToGitHubAPI(t *testing.T) {
 	os.Unsetenv("GITHUB_BASE_URL")
 	defer os.Unsetenv("GITHUB_TOKEN")
 
+	// Clear GITHUB_API_URL to test the default behavior
+	origAPIURL := os.Getenv("GITHUB_API_URL")
+	os.Unsetenv("GITHUB_API_URL")
+	defer func() {
+		if origAPIURL != "" {
+			os.Setenv("GITHUB_API_URL", origAPIURL)
+		}
+	}()
+
 	client, err := NewClient("")
 	if err != nil {
 		t.Fatalf("NewClient error: %v", err)
@@ -45,6 +54,15 @@ func TestNewClient_BlocksTestTokenWithRealAPI(t *testing.T) {
 	os.Unsetenv("GITHUB_API_URL")
 	os.Unsetenv("GITHUB_BASE_URL")
 	defer os.Unsetenv("GITHUB_TOKEN")
+
+	// Clear GITHUB_API_URL so we actually target the real API
+	origAPIURL := os.Getenv("GITHUB_API_URL")
+	os.Unsetenv("GITHUB_API_URL")
+	defer func() {
+		if origAPIURL != "" {
+			os.Setenv("GITHUB_API_URL", origAPIURL)
+		}
+	}()
 
 	// Should fail because test-token + real API is blocked
 	_, err := NewClient("")
