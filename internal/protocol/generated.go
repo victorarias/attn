@@ -360,6 +360,17 @@ type DeleteWorktreeResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type EnsureRepoMessage struct {
+	// CloneURL corresponds to the JSON schema field "clone_url".
+	CloneURL string `json:"clone_url"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// TargetPath corresponds to the JSON schema field "target_path".
+	TargetPath string `json:"target_path"`
+}
+
 type FetchPRDetailsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1371,6 +1382,9 @@ type WebSocketEvent struct {
 	// Branches corresponds to the JSON schema field "branches".
 	Branches []Branch `json:"branches,omitempty"`
 
+	// Cloned corresponds to the JSON schema field "cloned".
+	Cloned *bool `json:"cloned,omitempty"`
+
 	// Conflict corresponds to the JSON schema field "conflict".
 	Conflict *bool `json:"conflict,omitempty"`
 
@@ -1418,6 +1432,9 @@ type WebSocketEvent struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success *bool `json:"success,omitempty"`
+
+	// TargetPath corresponds to the JSON schema field "target_path".
+	TargetPath *string `json:"target_path,omitempty"`
 
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty"`

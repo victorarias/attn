@@ -64,7 +64,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '22';
+const PROTOCOL_VERSION = '23';
 
 interface PRActionResult {
   success: boolean;
@@ -134,6 +134,12 @@ interface DefaultBranchResult {
 interface RemoteBranchesResult {
   success: boolean;
   branches: Branch[];
+  error?: string;
+}
+
+interface EnsureRepoResult {
+  success: boolean;
+  cloned?: boolean;
   error?: string;
 }
 
@@ -715,6 +721,19 @@ export function useDaemonSocket({
                 pending.resolve({ success: true, branches: data.branches || [] });
               } else {
                 pending.reject(new Error(data.error || 'Failed to list remote branches'));
+              }
+            }
+            break;
+          }
+
+          case 'ensure_repo_result': {
+            const pending = pendingActionsRef.current.get('ensure_repo');
+            if (pending) {
+              pendingActionsRef.current.delete('ensure_repo');
+              if (data.success) {
+                pending.resolve({ success: true, cloned: data.cloned });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to ensure repo'));
               }
             }
             break;
@@ -1617,6 +1636,34 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Ensure repo exists (clone if needed) and fetch remotes
+  const sendEnsureRepo = useCallback((targetPath: string, cloneUrl: string): Promise<EnsureRepoResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'ensure_repo';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({
+        cmd: 'ensure_repo',
+        target_path: targetPath,
+        clone_url: cloneUrl,
+      }));
+
+      // Longer timeout for clone operations (2 minutes)
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Ensure repo timed out'));
+        }
+      }, 120000);
+    });
+  }, []);
+
   // Subscribe to git status updates for a directory
   const sendSubscribeGitStatus = useCallback((directory: string) => {
     const ws = wsRef.current;
@@ -2012,6 +2059,7 @@ export function useDaemonSocket({
     sendGetDefaultBranch,
     sendFetchRemotes,
     sendListRemoteBranches,
+    sendEnsureRepo,
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendGetFileDiff,

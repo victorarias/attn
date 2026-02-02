@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "22"
+const ProtocolVersion = "23"
 
 // Commands
 const (
@@ -56,6 +56,7 @@ const (
 	CmdGetDefaultBranch         = "get_default_branch"
 	CmdFetchRemotes             = "fetch_remotes"
 	CmdListRemoteBranches       = "list_remote_branches"
+	CmdEnsureRepo               = "ensure_repo"
 	CmdSubscribeGitStatus       = "subscribe_git_status"
 	CmdUnsubscribeGitStatus     = "unsubscribe_git_status"
 	CmdGetFileDiff              = "get_file_diff"
@@ -108,6 +109,7 @@ const (
 	EventGetDefaultBranchResult   = "get_default_branch_result"
 	EventFetchRemotesResult       = "fetch_remotes_result"
 	EventListRemoteBranchesResult = "list_remote_branches_result"
+	EventEnsureRepoResult         = "ensure_repo_result"
 	EventGitStatusUpdate          = "git_status_update"
 	EventFileDiffResult           = "file_diff_result"
 	EventBranchDiffFilesResult    = "branch_diff_files_result"
@@ -483,6 +485,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdListRemoteBranches:
 		var msg ListRemoteBranchesMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdEnsureRepo:
+		var msg EnsureRepoMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
