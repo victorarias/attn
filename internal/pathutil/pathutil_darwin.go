@@ -5,6 +5,7 @@ package pathutil
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -21,17 +22,29 @@ func EnsureGUIPath() error {
 
 	// Try path_helper first - it reads /etc/paths and /etc/paths.d/*
 	if helperPath := runPathHelper(); helperPath != "" {
-		currentPath = MergePaths(currentPath, helperPath)
+		currentPath = mergePaths(currentPath, helperPath)
 	}
 
 	// Add common paths that exist on disk
-	currentPath = AddExistingPaths(currentPath, CommonPaths())
+	commonPaths := []string{
+		"/opt/homebrew/bin",  // Homebrew on Apple Silicon
+		"/opt/homebrew/sbin",
+		"/usr/local/bin", // Homebrew on Intel Mac
+		"/usr/local/sbin",
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		commonPaths = append(commonPaths, filepath.Join(home, ".local", "bin"))
+	}
+
+	for _, p := range commonPaths {
+		if _, err := os.Stat(p); err == nil {
+			currentPath = mergePaths(currentPath, p)
+		}
+	}
 
 	return os.Setenv("PATH", currentPath)
 }
 
-// runPathHelper executes /usr/libexec/path_helper and extracts the PATH value.
-// Returns empty string on any error.
 func runPathHelper() string {
 	cmd := exec.Command("/usr/libexec/path_helper", "-s")
 	output, err := cmd.Output()

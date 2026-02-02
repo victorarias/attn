@@ -11,13 +11,11 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
 	"golang.org/x/time/rate"
 )
@@ -63,14 +61,8 @@ func NewClient(baseURL string) (*Client, error) {
 
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
-		// Try gh auth token
+		// Try gh auth token (daemon ensures PATH is set at startup)
 		output, err := ghAuthToken()
-		if err != nil && runtime.GOOS == "darwin" && errors.Is(err, exec.ErrNotFound) {
-			// On macOS, GUI apps start with minimal PATH. Try path recovery.
-			if pathutil.EnsureGUIPath() == nil {
-				output, err = ghAuthToken()
-			}
-		}
 		if err != nil {
 			return nil, fmt.Errorf("no GITHUB_TOKEN and gh auth token failed: %w", err)
 		}
