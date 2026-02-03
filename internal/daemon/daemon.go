@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -231,14 +232,16 @@ func (d *Daemon) Start() error {
 
 	// Note: No background persistence needed - SQLite persists immediately
 
-	// Discover GitHub hosts and refresh periodically
-	if err := d.refreshGitHubHosts(); err != nil {
-		return err
-	}
-	go d.refreshGitHubHostsLoop()
-
-	// Start PR polling
-	go d.pollPRs()
+	// Discover GitHub hosts and refresh periodically (async to not block accept loop)
+	go func() {
+		if err := d.refreshGitHubHosts(); err != nil {
+			d.logf("Initial GitHub host discovery failed: %v", err)
+		}
+		// Start PR polling after initial host discovery
+		go d.pollPRs()
+		// Start periodic host refresh
+		go d.refreshGitHubHostsLoop()
+	}()
 
 	// Start branch monitoring
 	go d.monitorBranches()

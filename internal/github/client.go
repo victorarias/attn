@@ -8,11 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 

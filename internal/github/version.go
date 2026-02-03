@@ -1,11 +1,9 @@
 package github
 
 import (
-	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -13,13 +11,9 @@ import (
 var ghVersionRe = regexp.MustCompile(`(?m)^gh version ([0-9]+\.[0-9]+\.[0-9]+)`)
 
 // CheckGHVersion runs `gh --version` and returns the parsed version string.
+// Note: Daemon ensures PATH is set at startup via pathutil.EnsureGUIPath()
 func CheckGHVersion() (string, error) {
 	output, err := exec.Command("gh", "--version").Output()
-	if err != nil && runtime.GOOS == "darwin" && errors.Is(err, exec.ErrNotFound) {
-		if updatePathFromHelper() == nil {
-			output, err = exec.Command("gh", "--version").Output()
-		}
-	}
 	if err != nil {
 		return "", fmt.Errorf("gh --version failed: %w", err)
 	}

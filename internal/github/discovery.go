@@ -2,10 +2,8 @@ package github
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os/exec"
-	"runtime"
 	"strings"
 )
 
@@ -27,14 +25,10 @@ func DiscoverHosts() ([]HostInfo, error) {
 }
 
 // GetTokenForHost fetches a token for the given host using `gh auth token -h`.
+// Note: Daemon ensures PATH is set at startup via pathutil.EnsureGUIPath()
 func GetTokenForHost(host string) (string, error) {
 	cmd := exec.Command("gh", "auth", "token", "-h", host)
 	output, err := cmd.Output()
-	if err != nil && runtime.GOOS == "darwin" && errors.Is(err, exec.ErrNotFound) {
-		if updatePathFromHelper() == nil {
-			output, err = exec.Command("gh", "auth", "token", "-h", host).Output()
-		}
-	}
 	if err != nil {
 		return "", fmt.Errorf("gh auth token -h %s failed: %w", host, err)
 	}
@@ -44,11 +38,6 @@ func GetTokenForHost(host string) (string, error) {
 func ghAuthStatusHosts() ([]byte, error) {
 	cmd := exec.Command("gh", "auth", "status", "--json", "hosts")
 	output, err := cmd.Output()
-	if err != nil && runtime.GOOS == "darwin" && errors.Is(err, exec.ErrNotFound) {
-		if updatePathFromHelper() == nil {
-			output, err = exec.Command("gh", "auth", "status", "--json", "hosts").Output()
-		}
-	}
 	if err != nil {
 		return nil, fmt.Errorf("gh auth status --json hosts failed: %w", err)
 	}
