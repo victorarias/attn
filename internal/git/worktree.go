@@ -185,3 +185,20 @@ func GenerateWorktreePath(mainRepo, branch string) string {
 	safeBranch := strings.ReplaceAll(branch, "/", "-")
 	return filepath.Join(filepath.Dir(mainRepo), repoName+"--"+safeBranch)
 }
+
+// ResolveMainRepoPath returns the canonical main repository path for a repo path.
+// If repoPath points to a worktree, it returns that worktree's main repo path.
+// Otherwise it resolves/normalizes the repo path when possible.
+func ResolveMainRepoPath(repoPath string) string {
+	expanded := ExpandPath(repoPath)
+	if mainRepo := GetMainRepoFromWorktree(expanded); mainRepo != "" {
+		return filepath.Clean(mainRepo)
+	}
+
+	resolved, err := ResolveRepoDir(expanded)
+	if err == nil {
+		return resolved
+	}
+
+	return filepath.Clean(expanded)
+}

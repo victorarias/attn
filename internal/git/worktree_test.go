@@ -116,3 +116,39 @@ func TestGenerateWorktreePath(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveMainRepoPath_WithMainRepo(t *testing.T) {
+	mainDir := t.TempDir()
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
+
+	got := ResolveMainRepoPath(mainDir)
+	if canonicalPath(got) != canonicalPath(mainDir) {
+		t.Errorf("ResolveMainRepoPath(main repo) = %q, want %q", got, mainDir)
+	}
+}
+
+func TestResolveMainRepoPath_WithWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainDir := filepath.Join(tmpDir, "hurdy-gurdy")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
+		t.Fatalf("Failed to create main dir: %v", err)
+	}
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
+
+	worktreeDir := filepath.Join(tmpDir, "hurdy-gurdy--feat-auto-bump-yt-dlp--fork-hurdy-gurdy")
+	runGit(t, mainDir, "worktree", "add", "-b", "feat/auto-bump-yt-dlp", worktreeDir)
+
+	got := ResolveMainRepoPath(worktreeDir)
+	if canonicalPath(got) != canonicalPath(mainDir) {
+		t.Errorf("ResolveMainRepoPath(worktree) = %q, want %q", got, mainDir)
+	}
+}
+
+func canonicalPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return filepath.Clean(path)
+}
