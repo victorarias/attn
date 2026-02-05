@@ -635,6 +635,8 @@ export function ReviewPanel({
   // If the file disappears, select the first available review file.
   useEffect(() => {
     if (!isOpen || !selectedFilePath) return;
+    // Avoid selection ping-pong while branch diff is still empty/loading.
+    if (allFiles.length === 0) return;
     if (allFiles.some((f) => f.path === selectedFilePath)) return;
 
     if (needsReviewFiles.length > 0) {

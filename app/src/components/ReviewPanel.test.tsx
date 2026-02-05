@@ -38,9 +38,11 @@ describe('ReviewPanel', () => {
   function renderPanel(overrides?: {
     gitStatus?: ReturnType<typeof createGitStatus>;
     isOpen?: boolean;
+    initialSelectedFile?: string;
   }) {
     const gitStatus = overrides?.gitStatus ?? createGitStatus(['src/App.tsx']);
     const isOpen = overrides?.isOpen ?? true;
+    const initialSelectedFile = overrides?.initialSelectedFile;
 
     return render(
       <ReviewPanel
@@ -48,6 +50,7 @@ describe('ReviewPanel', () => {
         gitStatus={gitStatus}
         repoPath="/test/repo"
         branch="main"
+        initialSelectedFile={initialSelectedFile}
         onClose={onClose}
         fetchDiff={mockDaemon.createFetchDiff()}
         sendGetBranchDiffFiles={mockDaemon.createGetBranchDiffFiles()}
@@ -214,6 +217,30 @@ describe('ReviewPanel', () => {
       await waitFor(() => {
         expect(getFileInList('src/b.ts')).toHaveClass('selected');
       });
+    });
+
+    it('does not oscillate selection when initialSelectedFile is missing and file list is empty', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        mockDaemon.setResponse('getBranchDiffFiles', () => createBranchDiffFilesResult([]));
+
+        renderPanel({ initialSelectedFile: 'src/missing.ts' });
+
+        await waitFor(() => {
+          expect(mockDaemon.getCalls('getBranchDiffFiles').length).toBeGreaterThanOrEqual(1);
+        });
+        await sleep(100);
+
+        const hasMaxDepthError = consoleErrorSpy.mock.calls.some((call) =>
+          call.some(
+            (arg) =>
+              typeof arg === 'string' && arg.includes('Maximum update depth exceeded')
+          )
+        );
+        expect(hasMaxDepthError).toBe(false);
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
     });
 
     it('does not let stale local diff overwrite refreshed remote diff', async () => {
