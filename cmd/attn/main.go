@@ -19,6 +19,7 @@ import (
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
+	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/status"
 	"github.com/victorarias/attn/internal/wrapper"
 )
@@ -351,6 +352,9 @@ func findCodexTranscript(cwd string, startedAt time.Time) string {
 
 // runClaudeDirectly runs claude with hooks (used when inside the app)
 func runClaudeDirectly() {
+	// Ensure PATH includes common tool locations (GUI apps start with minimal PATH)
+	pathutil.EnsureGUIPath()
+
 	// Parse flags
 	fs := flag.NewFlagSet("attn", flag.ContinueOnError)
 	labelFlag := fs.String("s", "", "session label")
@@ -502,6 +506,9 @@ func runClaudeDirectly() {
 
 // runCodexDirectly runs codex (used when inside the app)
 func runCodexDirectly() {
+	// Ensure PATH includes common tool locations (GUI apps start with minimal PATH)
+	pathutil.EnsureGUIPath()
+
 	// Parse flags
 	fs := flag.NewFlagSet("attn", flag.ContinueOnError)
 	labelFlag := fs.String("s", "", "session label")
