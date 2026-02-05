@@ -392,8 +392,11 @@ export function ReviewPanel({
   // Branch diff state - PR-like comparison against origin/main
   const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
   const [baseRef, setBaseRef] = useState<string>('');
-  const [_isLoadingBranchDiff, setIsLoadingBranchDiff] = useState(false);
-  // TODO: Use _isLoadingBranchDiff to show loading indicator in file list
+  const [isLoadingBranchDiff, setIsLoadingBranchDiff] = useState(false);
+  const [isSyncingRemotes, setIsSyncingRemotes] = useState(false);
+  const [remotesSyncWarning, setRemotesSyncWarning] = useState<string | null>(null);
+  const branchDiffRequestIdRef = useRef(0);
+  const branchDiffCacheRef = useRef<Map<string, { files: BranchDiffFile[]; baseRef: string }>>(new Map());
   const [reviewerPanelCollapsed, setReviewerPanelCollapsed] = useState(false);
   const reviewerResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const reviewerOutputRef = useRef<HTMLDivElement>(null);
@@ -451,26 +454,124 @@ export function ReviewPanel({
   const previousSelectedPathRef = useRef<string | null>(null);
 
   // Fetch branch diff files when panel opens (PR-like comparison vs origin/main)
+  // Load local refs immediately, then refresh in background after fetching remotes.
   useEffect(() => {
-    if (isOpen && repoPath) {
-      setIsLoadingBranchDiff(true);
-      // Fetch remotes first to ensure we have latest origin state
-      sendFetchRemotes(repoPath)
-        .then(() => sendGetBranchDiffFiles(repoPath))
+    if (!isOpen || !repoPath) return;
+
+    let cancelled = false;
+    const requestId = ++branchDiffRequestIdRef.current;
+    const isCurrentRequest = () => !cancelled && requestId === branchDiffRequestIdRef.current;
+    const cacheKey = `${repoPath}::${branch}`;
+    let localRequestStarted = false;
+    let localApplied = false;
+    let remoteApplied = false;
+    let localTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const applyBranchDiff = (result: BranchDiffFilesResult) => {
+      setBranchDiffFiles(result.files);
+      setBaseRef(result.base_ref);
+      branchDiffCacheRef.current.set(cacheKey, {
+        files: result.files,
+        baseRef: result.base_ref,
+      });
+    };
+
+    const runLocalDiff = () => {
+      if (!isCurrentRequest() || localRequestStarted || remoteApplied) return;
+      localRequestStarted = true;
+
+      sendGetBranchDiffFiles(repoPath)
         .then((result) => {
+          // Do not let stale local results overwrite fresher remote results.
+          if (!isCurrentRequest() || remoteApplied) return;
           if (result.success) {
-            setBranchDiffFiles(result.files);
-            setBaseRef(result.base_ref);
+            applyBranchDiff(result);
+            localApplied = true;
           }
         })
         .catch((err) => {
-          console.error('[ReviewPanel] Failed to fetch branch diff:', err);
+          if (!isCurrentRequest() || remoteApplied) return;
+          console.error('[ReviewPanel] Failed to fetch local branch diff:', err);
         })
         .finally(() => {
-          setIsLoadingBranchDiff(false);
+          if (isCurrentRequest() && !remoteApplied) {
+            setIsLoadingBranchDiff(false);
+          }
         });
+    };
+
+    setRemotesSyncWarning(null);
+    const cached = branchDiffCacheRef.current.get(cacheKey);
+    if (cached) {
+      setBranchDiffFiles(cached.files);
+      setBaseRef(cached.baseRef);
+      localApplied = true;
+      setIsLoadingBranchDiff(false);
+    } else {
+      setIsLoadingBranchDiff(true);
+      // Small delay avoids guaranteed duplicate heavy diff calls when remote sync is fast.
+      localTimer = setTimeout(() => {
+        runLocalDiff();
+      }, 150);
     }
-  }, [isOpen, repoPath, sendFetchRemotes, sendGetBranchDiffFiles]);
+
+    // 2) Freshness path: refresh remotes in background and update in place
+    setIsSyncingRemotes(true);
+    sendFetchRemotes(repoPath)
+      .then((fetchResult) => {
+        if (fetchResult.success === false) {
+          throw new Error(fetchResult.error || 'Failed to fetch remotes');
+        }
+        if (localTimer) {
+          clearTimeout(localTimer);
+          localTimer = null;
+        }
+        if (!localApplied) {
+          setIsLoadingBranchDiff(true);
+        }
+        return sendGetBranchDiffFiles(repoPath);
+      })
+      .then((result) => {
+        if (!isCurrentRequest()) return;
+        if (result.success) {
+          remoteApplied = true;
+          applyBranchDiff(result);
+          setRemotesSyncWarning(null);
+          setIsLoadingBranchDiff(false);
+          return;
+        }
+        setRemotesSyncWarning('Could not refresh remotes; showing local refs');
+        if (!localApplied && !localRequestStarted) {
+          runLocalDiff();
+          return;
+        }
+        setIsLoadingBranchDiff(false);
+      })
+      .catch((err) => {
+        if (!isCurrentRequest()) return;
+        console.error('[ReviewPanel] Failed to refresh remotes:', err);
+        setRemotesSyncWarning('Could not refresh remotes; showing local refs');
+        if (!localApplied && !localRequestStarted) {
+          runLocalDiff();
+          return;
+        }
+        if (!remoteApplied) {
+          setIsLoadingBranchDiff(false);
+        }
+      })
+      .finally(() => {
+        if (isCurrentRequest()) {
+          setIsSyncingRemotes(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (localTimer) {
+        clearTimeout(localTimer);
+      }
+    };
+  }, [isOpen, repoPath, branch, sendFetchRemotes, sendGetBranchDiffFiles]);
 
   // Build file list from branch diff (PR-like: all changes vs origin/main)
   const { needsReviewFiles, autoSkipFiles } = useMemo(() => {
@@ -529,6 +630,25 @@ export function ReviewPanel({
       }
     }
   }, [isOpen, needsReviewFiles, selectedFilePath, initialSelectedFile]);
+
+  // Keep current selection on branch diff refresh when possible.
+  // If the file disappears, select the first available review file.
+  useEffect(() => {
+    if (!isOpen || !selectedFilePath) return;
+    // Avoid selection ping-pong while branch diff is still empty/loading.
+    if (allFiles.length === 0) return;
+    if (allFiles.some((f) => f.path === selectedFilePath)) return;
+
+    if (needsReviewFiles.length > 0) {
+      setSelectedFilePath(needsReviewFiles[0].path);
+      return;
+    }
+    if (allFiles.length > 0) {
+      setSelectedFilePath(allFiles[0].path);
+      return;
+    }
+    setSelectedFilePath(null);
+  }, [isOpen, selectedFilePath, needsReviewFiles, allFiles]);
 
   // Load all comments for the review
   useEffect(() => {
@@ -602,6 +722,9 @@ export function ReviewPanel({
       setError(null);
       setExpandedContext(0);
       setScrollToLine(undefined);
+      setIsLoadingBranchDiff(false);
+      setIsSyncingRemotes(false);
+      setRemotesSyncWarning(null);
       // Clear change detection state
       viewedDiffHashesRef.current.clear();
       setChangedSinceViewed(new Set());
@@ -619,6 +742,9 @@ export function ReviewPanel({
       setLoading(false);
       setExpandedContext(0);
       setScrollToLine(undefined);
+      setBranchDiffFiles([]);
+      setBaseRef('');
+      setRemotesSyncWarning(null);
       viewedDiffHashesRef.current.clear();
       setChangedSinceViewed(new Set());
       setViewedFiles(new Set());
@@ -1088,6 +1214,15 @@ export function ReviewPanel({
           <span className="review-file-count">
             {currentFileIndex + 1}/{allFiles.length} files
           </span>
+          {isLoadingBranchDiff && allFiles.length === 0 && (
+            <span className="review-sync-status">Loading changes...</span>
+          )}
+          {isSyncingRemotes && (
+            <span className="review-sync-status syncing">Syncing with origin...</span>
+          )}
+          {remotesSyncWarning && (
+            <span className="review-sync-status warning">{remotesSyncWarning}</span>
+          )}
           <div className="review-header-actions">
             {sendStartReview && reviewId && (
               <button

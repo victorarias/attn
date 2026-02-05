@@ -4,7 +4,7 @@
  * Renders ReviewPanel with mocked daemon props for Playwright testing.
  * Exposes window.__HARNESS__ API for test control.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ReviewPanel } from '../../src/components/ReviewPanel';
 import type { BranchDiffFilesResult, GitStatusUpdate, FileDiffResult, ReviewState } from '../../src/hooks/useDaemonSocket';
 import type { ReviewComment } from '../../src/types/generated';
@@ -77,21 +77,37 @@ const REVIEW_STATE: ReviewState = {
   viewed_files: [],
 };
 
-const BRANCH_DIFF_FILES: BranchDiffFilesResult = {
-  success: true,
-  base_ref: 'origin/main',
-  files: [
-    {
-      path: 'src/example.ts',
+function parseFilesParam(raw: string | null, fallback: string[]): string[] {
+  if (!raw) return fallback;
+  const files = raw
+    .split(',')
+    .map((f) => f.trim())
+    .filter(Boolean);
+  return files.length > 0 ? files : fallback;
+}
+
+function toBranchDiffResult(files: string[]): BranchDiffFilesResult {
+  return {
+    success: true,
+    base_ref: 'origin/main',
+    files: files.map((path) => ({
+      path,
       status: 'modified',
       additions: 2,
       deletions: 3,
       has_uncommitted: false,
-    },
-  ],
-};
+    })),
+  };
+}
 
 export function ReviewPanelHarness({ onReady, setTriggerRerender }: HarnessProps) {
+  const params = new URLSearchParams(window.location.search);
+  const fetchDelayMs = Number(params.get('fetchDelayMs') || '0');
+  const fetchFail = params.get('fetchFail') === '1';
+  const localFiles = parseFilesParam(params.get('localFiles'), ['src/example.ts']);
+  const refreshedFiles = parseFilesParam(params.get('refreshedFiles'), localFiles);
+  const remotesFetchedRef = useRef(false);
+
   const [savedComments, setSavedComments] = useState<ReviewComment[]>([]);
   // Force re-renders by changing props that trigger the editor effect
   // We use a state that gets passed to ReviewPanel and causes effect re-run
@@ -110,8 +126,8 @@ export function ReviewPanelHarness({ onReady, setTriggerRerender }: HarnessProps
   }, [setTriggerRerender]);
 
   // Mock fetchDiff - returns diff with deleted lines
-  const fetchDiff = useCallback(async (_path: string, _staged: boolean): Promise<FileDiffResult> => {
-    window.__HARNESS__.recordCall('fetchDiff', [_path, _staged]);
+  const fetchDiff = useCallback(async (_path: string, _options?: { staged?: boolean; baseRef?: string }): Promise<FileDiffResult> => {
+    window.__HARNESS__.recordCall('fetchDiff', [_path, _options]);
     return DIFF_WITH_DELETIONS;
   }, []);
 
@@ -126,15 +142,23 @@ export function ReviewPanelHarness({ onReady, setTriggerRerender }: HarnessProps
 
   const sendFetchRemotes = useCallback(async (_repoPath: string): Promise<{ success: boolean; error?: string }> => {
     window.__HARNESS__.recordCall('sendFetchRemotes', [_repoPath]);
+    remotesFetchedRef.current = false;
+    if (fetchDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, fetchDelayMs));
+    }
+    if (fetchFail) {
+      return { success: false, error: 'mock fetch failed' };
+    }
+    remotesFetchedRef.current = true;
     return { success: true };
-  }, []);
+  }, [fetchDelayMs, fetchFail]);
 
   const sendGetBranchDiffFiles = useCallback(
     async (_repoPath: string): Promise<BranchDiffFilesResult> => {
       window.__HARNESS__.recordCall('sendGetBranchDiffFiles', [_repoPath]);
-      return BRANCH_DIFF_FILES;
+      return toBranchDiffResult(remotesFetchedRef.current ? refreshedFiles : localFiles);
     },
-    []
+    [localFiles, refreshedFiles]
   );
 
   // Mock markFileViewed
