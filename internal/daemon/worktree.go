@@ -94,17 +94,19 @@ func (d *Daemon) doListWorktrees(mainRepo string) []protocol.Worktree {
 // doCreateWorktree creates a git worktree and registers it in the store.
 // Returns the created worktree path and any error.
 func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, error) {
+	mainRepo := git.ResolveMainRepoPath(msg.MainRepo)
+
 	path := protocol.Deref(msg.Path)
 	if path == "" {
-		path = git.GenerateWorktreePath(msg.MainRepo, msg.Branch)
+		path = git.GenerateWorktreePath(mainRepo, msg.Branch)
 	}
 
 	startingFrom := protocol.Deref(msg.StartingFrom)
 	var err error
 	if startingFrom != "" {
-		err = git.CreateWorktreeFromPoint(msg.MainRepo, msg.Branch, path, startingFrom)
+		err = git.CreateWorktreeFromPoint(mainRepo, msg.Branch, path, startingFrom)
 	} else {
-		err = git.CreateWorktree(msg.MainRepo, msg.Branch, path)
+		err = git.CreateWorktree(mainRepo, msg.Branch, path)
 	}
 	if err != nil {
 		return "", err
@@ -113,7 +115,7 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 	wt := &store.Worktree{
 		Path:      path,
 		Branch:    msg.Branch,
-		MainRepo:  msg.MainRepo,
+		MainRepo:  mainRepo,
 		CreatedAt: time.Now(),
 	}
 	d.store.AddWorktree(wt)

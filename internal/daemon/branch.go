@@ -73,7 +73,7 @@ func (d *Daemon) doCreateBranch(mainRepo, branch string) error {
 
 // doCreateWorktreeFromBranch creates a worktree from an existing branch
 func (d *Daemon) doCreateWorktreeFromBranch(msg *protocol.CreateWorktreeFromBranchMessage) (string, error) {
-	mainRepo := git.ExpandPath(msg.MainRepo)
+	mainRepo := git.ResolveMainRepoPath(msg.MainRepo)
 	branch := msg.Branch
 
 	// For remote branches (origin/xxx), extract local name for path and tracking
@@ -86,7 +86,7 @@ func (d *Daemon) doCreateWorktreeFromBranch(msg *protocol.CreateWorktreeFromBran
 	path := protocol.Deref(msg.Path)
 	if path == "" {
 		// Use local branch name for cleaner worktree path
-		path = git.GenerateWorktreePath(msg.MainRepo, localBranch)
+		path = git.GenerateWorktreePath(mainRepo, localBranch)
 	}
 	path = git.ExpandPath(path)
 
