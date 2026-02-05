@@ -121,7 +121,7 @@ describe('ReviewPanel', () => {
 
       // Should fetch branch diff files
       await waitFor(() => {
-        expect(mockDaemon.getCalls('getBranchDiffFiles')).toHaveLength(1);
+        expect(mockDaemon.getCalls('getBranchDiffFiles').length).toBeGreaterThanOrEqual(1);
       });
 
       // Should pass the repo path
@@ -134,18 +134,121 @@ describe('ReviewPanel', () => {
       });
     });
 
-    it('fetches remotes before getting branch diff', async () => {
+    it('loads local branch diff immediately and refreshes after remotes sync', async () => {
+      let callCount = 0;
+      mockDaemon.setResponse('getBranchDiffFiles', () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return createBranchDiffFilesResult(['src/local-only.ts']);
+        }
+        return createBranchDiffFilesResult(['src/local-only.ts', 'src/remote-added.ts']);
+      });
+      mockDaemon.setDelay('fetchRemotes', 200);
+
       renderPanel();
 
-      // Should fetch remotes first
+      // Local diff should load before remotes fetch completes
       await waitFor(() => {
-        expect(mockDaemon.getCalls('fetchRemotes')).toHaveLength(1);
+        expect(getFileInList('src/local-only.ts')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Syncing with origin...')).toBeInTheDocument();
+
+      // Background sync should refresh branch diff when done
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('getBranchDiffFiles').length).toBeGreaterThanOrEqual(2);
+      });
+      await waitFor(() => {
+        expect(getFileInList('src/remote-added.ts')).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.queryByText('Syncing with origin...')).not.toBeInTheDocument();
+      });
+    });
+
+    it('shows non-blocking warning when remotes sync fails', async () => {
+      mockDaemon.setResponse('getBranchDiffFiles', () =>
+        createBranchDiffFilesResult(['src/local-only.ts'])
+      );
+      mockDaemon.setResponse('fetchRemotes', () => ({ success: false, error: 'fetch failed' }));
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(getFileInList('src/local-only.ts')).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(screen.getByText('Could not refresh remotes; showing local refs')).toBeInTheDocument();
+      });
+    });
+
+    it('preserves selected file when branch diff refreshes', async () => {
+      let callCount = 0;
+      mockDaemon.setResponse('getBranchDiffFiles', () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return createBranchDiffFilesResult(['src/a.ts', 'src/b.ts']);
+        }
+        return createBranchDiffFilesResult(['src/b.ts', 'src/c.ts']);
+      });
+      mockDaemon.setDelay('fetchRemotes', 300);
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(getFileInList('src/a.ts')).toBeInTheDocument();
+        expect(getFileInList('src/b.ts')).toBeInTheDocument();
       });
 
-      // Then get branch diff files
+      const selectedBeforeRefresh = getFileInList('src/b.ts');
+      selectedBeforeRefresh.click();
       await waitFor(() => {
-        expect(mockDaemon.getCalls('getBranchDiffFiles')).toHaveLength(1);
+        expect(getFileInList('src/b.ts')).toHaveClass('selected');
       });
+
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('getBranchDiffFiles').length).toBeGreaterThanOrEqual(2);
+      });
+      await waitFor(() => {
+        expect(getFileInList('src/c.ts')).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(getFileInList('src/b.ts')).toHaveClass('selected');
+      });
+    });
+
+    it('does not let stale local diff overwrite refreshed remote diff', async () => {
+      type BranchDiffResult = ReturnType<typeof createBranchDiffFilesResult>;
+      let resolveLocal: ((value: BranchDiffResult) => void) | undefined;
+      let callCount = 0;
+      mockDaemon.setResponse('getBranchDiffFiles', () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return new Promise<BranchDiffResult>((resolve) => {
+            resolveLocal = resolve;
+          });
+        }
+        return createBranchDiffFilesResult(['src/remote.ts']);
+      });
+      mockDaemon.setDelay('fetchRemotes', 250);
+
+      renderPanel();
+
+      // Wait for remote refresh call and application
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('getBranchDiffFiles').length).toBeGreaterThanOrEqual(2);
+      });
+      await waitFor(() => {
+        expect(getFileInList('src/remote.ts')).toBeInTheDocument();
+      });
+
+      // Resolve stale local response after remote has already applied
+      expect(resolveLocal).toBeDefined();
+      resolveLocal!(createBranchDiffFilesResult(['src/stale-local.ts']));
+      await sleep(100);
+
+      const fileList = document.querySelector('.review-file-list');
+      expect(fileList?.querySelector('.file-name[title="src/stale-local.ts"]')).not.toBeInTheDocument();
+      expect(getFileInList('src/remote.ts')).toBeInTheDocument();
     });
 
     it('uses baseRef from branch diff result for file diffs', async () => {

@@ -36,6 +36,20 @@
   margin-left: auto;
 }
 
+.review-sync-status {
+  font-size: 11px;
+  color: #8ea3ba;
+  white-space: nowrap;
+}
+
+.review-sync-status.syncing {
+  color: #93c5fd;
+}
+
+.review-sync-status.warning {
+  color: #fbbf24;
+}
+
 .review-close {
   background: #2d2d30;
   border: 1px solid #3c3c3c;
