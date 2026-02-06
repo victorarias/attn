@@ -10,6 +10,8 @@ import (
 // Clone clones a repository to the specified path.
 // Returns error if path already exists or clone fails.
 func Clone(cloneURL, targetPath string) error {
+	targetPath = ExpandPath(targetPath)
+
 	// Check if target already exists
 	if _, err := os.Stat(targetPath); err == nil {
 		return fmt.Errorf("target path already exists: %s", targetPath)
@@ -34,6 +36,8 @@ func Clone(cloneURL, targetPath string) error {
 // If it doesn't exist, clones from cloneURL.
 // Returns (cloned bool, error).
 func EnsureRepo(cloneURL, targetPath string) (bool, error) {
+	targetPath = ExpandPath(targetPath)
+
 	// Check if repo already exists
 	if isGitRepo(targetPath) {
 		return false, nil
