@@ -224,12 +224,12 @@ export function DashboardPRsHarness({ onReady, setTriggerRerender }: HarnessProp
     window.__HARNESS__.recordCall('sendPRVisited', [prId]);
   }, []);
 
-  const sendFetchRemotes = useCallback(async (repoPath: string) => {
-    window.__HARNESS__.recordCall('sendFetchRemotes', [repoPath]);
-    if (scenario === 'fetch-remotes-failed' && repoPath.includes('fetchremotes')) {
-      return { success: false, error: 'not a git repository' };
+  const sendEnsureRepo = useCallback(async (targetPath: string, cloneUrl: string) => {
+    window.__HARNESS__.recordCall('sendEnsureRepo', [targetPath, cloneUrl]);
+    if (scenario === 'fetch-remotes-failed' && targetPath.includes('fetchremotes')) {
+      return { success: false, cloned: false, error: 'not a git repository' };
     }
-    return { success: true };
+    return { success: true, cloned: false };
   }, [scenario]);
 
   const sendCreateWorktreeFromBranch = useCallback(async (repoPath: string, branch: string) => {
@@ -272,7 +272,7 @@ export function DashboardPRsHarness({ onReady, setTriggerRerender }: HarnessProp
   const openPR = useOpenPR({
     settings,
     sendFetchPRDetails,
-    sendFetchRemotes,
+    sendEnsureRepo,
     sendCreateWorktreeFromBranch,
     createSession,
   });

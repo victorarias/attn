@@ -18,6 +18,9 @@ test.describe('Dashboard PRs Harness', () => {
     const detailCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendFetchPRDetails'));
     expect(detailCalls.length).toBe(1);
 
+    const ensureRepoCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendEnsureRepo'));
+    expect(ensureRepoCalls.length).toBe(1);
+
     const worktreeCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendCreateWorktreeFromBranch'));
     expect(worktreeCalls.length).toBe(1);
     expect(worktreeCalls[0][1]).toContain('origin/feature/missing-head');
@@ -40,8 +43,8 @@ test.describe('Dashboard PRs Harness', () => {
     expect(detailCalls.length).toBe(1);
     expect(detailCalls[0][0]).toBe('github.com:test/missing#202');
 
-    const fetchRemotesCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendFetchRemotes'));
-    expect(fetchRemotesCalls.length).toBe(0);
+    const ensureRepoCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendEnsureRepo'));
+    expect(ensureRepoCalls.length).toBe(0);
 
     const worktreeCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendCreateWorktreeFromBranch'));
     expect(worktreeCalls.length).toBe(0);
@@ -66,8 +69,8 @@ test.describe('Dashboard PRs Harness', () => {
     expect(detailCalls.length).toBe(1);
     expect(detailCalls[0][0]).toBe('github.com:test/fetchfail#303');
 
-    const fetchRemotesCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendFetchRemotes'));
-    expect(fetchRemotesCalls.length).toBe(0);
+    const ensureRepoCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendEnsureRepo'));
+    expect(ensureRepoCalls.length).toBe(0);
   });
 
   test('surfaces missing projects directory', async ({ page }) => {
@@ -89,7 +92,7 @@ test.describe('Dashboard PRs Harness', () => {
     expect(detailCalls.length).toBe(0);
   });
 
-  test('surfaces fetch remotes failure', async ({ page }) => {
+  test('surfaces ensure repo failure', async ({ page }) => {
     await page.goto('/test-harness/?component=DashboardPRs&scenario=fetch-remotes-failed');
     await page.waitForFunction(() => window.__HARNESS__?.ready === true);
 
@@ -102,10 +105,10 @@ test.describe('Dashboard PRs Harness', () => {
     await prCard.locator('[data-testid="open-button"]').click();
 
     await expect(page.locator('[data-testid="open-status"]')).toHaveText('error');
-    await expect(page.locator('[data-testid="open-error"]')).toHaveText('fetch_remotes_failed');
+    await expect(page.locator('[data-testid="open-error"]')).toHaveText('ensure_repo_failed');
 
-    const fetchRemotesCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendFetchRemotes'));
-    expect(fetchRemotesCalls.length).toBe(1);
+    const ensureRepoCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendEnsureRepo'));
+    expect(ensureRepoCalls.length).toBe(1);
 
     const worktreeCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendCreateWorktreeFromBranch'));
     expect(worktreeCalls.length).toBe(0);
