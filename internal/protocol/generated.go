@@ -906,6 +906,8 @@ type RecentLocationsResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type RecordString map[string]interface{}
+
 type RefreshPRsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1409,7 +1411,7 @@ type WebSocketEvent struct {
 	Sessions []Session `json:"sessions,omitempty"`
 
 	// Settings corresponds to the JSON schema field "settings".
-	Settings map[string]interface{} `json:"settings,omitempty"`
+	Settings RecordString `json:"settings,omitempty"`
 
 	// StashRef corresponds to the JSON schema field "stash_ref".
 	StashRef *string `json:"stash_ref,omitempty"`
