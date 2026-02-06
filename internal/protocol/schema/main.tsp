@@ -351,6 +351,12 @@ model ListRemoteBranchesMessage {
   repo: string;
 }
 
+model EnsureRepoMessage {
+  cmd: "ensure_repo";
+  target_path: string;   // Where to clone (e.g., /Users/victor/projects/dashboards-go)
+  clone_url: string;     // Git clone URL (e.g., https://github.com/owner/repo.git)
+}
+
 model SubscribeGitStatusMessage {
   cmd: "subscribe_git_status";
   directory: string;
@@ -794,4 +800,7 @@ model WebSocketEvent {
   conflict?: boolean;
   found?: boolean;
   stash_ref?: string;
+  // Ensure repo operations
+  target_path?: string;
+  cloned?: boolean;
 }

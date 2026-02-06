@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AuthorState, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AuthorState, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, EnsureRepoMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -31,6 +31,7 @@
 //   const deleteCommentResultMessage = Convert.toDeleteCommentResultMessage(json);
 //   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
+//   const ensureRepoMessage = Convert.toEnsureRepoMessage(json);
 //   const fetchPRDetailsMessage = Convert.toFetchPRDetailsMessage(json);
 //   const fetchRemotesMessage = Convert.toFetchRemotesMessage(json);
 //   const fetchRemotesResultMessage = Convert.toFetchRemotesResultMessage(json);
@@ -468,6 +469,17 @@ export interface DeleteWorktreeResultMessage {
 
 export enum DeleteWorktreeResultMessageEvent {
     DeleteWorktreeResult = "delete_worktree_result",
+}
+
+export interface EnsureRepoMessage {
+    clone_url:   string;
+    cmd:         EnsureRepoMessageCmd;
+    target_path: string;
+    [property: string]: any;
+}
+
+export enum EnsureRepoMessageCmd {
+    EnsureRepo = "ensure_repo",
 }
 
 export interface FetchPRDetailsMessage {
@@ -1441,6 +1453,7 @@ export interface WebSocketEvent {
     authors?:             AuthorElement[];
     branch?:              string;
     branches?:            BranchElement[];
+    cloned?:              boolean;
     conflict?:            boolean;
     dirty?:               boolean;
     error?:               string;
@@ -1457,6 +1470,7 @@ export interface WebSocketEvent {
     settings?:            { [key: string]: any };
     stash_ref?:           string;
     success?:             boolean;
+    target_path?:         string;
     warnings?:            WarningElement[];
     worktrees?:           WorktreeElement[];
     [property: string]: any;
@@ -1743,6 +1757,14 @@ export class Convert {
 
     public static deleteWorktreeResultMessageToJson(value: DeleteWorktreeResultMessage): string {
         return JSON.stringify(uncast(value, r("DeleteWorktreeResultMessage")), null, 2);
+    }
+
+    public static toEnsureRepoMessage(json: string): EnsureRepoMessage {
+        return cast(JSON.parse(json), r("EnsureRepoMessage"));
+    }
+
+    public static ensureRepoMessageToJson(value: EnsureRepoMessage): string {
+        return JSON.stringify(uncast(value, r("EnsureRepoMessage")), null, 2);
     }
 
     public static toFetchPRDetailsMessage(json: string): FetchPRDetailsMessage {
@@ -2751,6 +2773,11 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "EnsureRepoMessage": o([
+        { json: "clone_url", js: "clone_url", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("EnsureRepoMessageCmd") },
+        { json: "target_path", js: "target_path", typ: "" },
+    ], "any"),
     "FetchPRDetailsMessage": o([
         { json: "cmd", js: "cmd", typ: r("FetchPRDetailsMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -3275,6 +3302,7 @@ const typeMap: any = {
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "branches", js: "branches", typ: u(undefined, a(r("BranchElement"))) },
+        { json: "cloned", js: "cloned", typ: u(undefined, true) },
         { json: "conflict", js: "conflict", typ: u(undefined, true) },
         { json: "dirty", js: "dirty", typ: u(undefined, true) },
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -3291,6 +3319,7 @@ const typeMap: any = {
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
         { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
         { json: "success", js: "success", typ: u(undefined, true) },
+        { json: "target_path", js: "target_path", typ: u(undefined, "") },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
     ], "any"),
@@ -3394,6 +3423,9 @@ const typeMap: any = {
     ],
     "DeleteWorktreeResultMessageEvent": [
         "delete_worktree_result",
+    ],
+    "EnsureRepoMessageCmd": [
+        "ensure_repo",
     ],
     "FetchPRDetailsMessageCmd": [
         "fetch_pr_details",

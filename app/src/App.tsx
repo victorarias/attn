@@ -29,7 +29,6 @@ import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useUIScale } from './hooks/useUIScale';
 import { useOpenPR } from './hooks/useOpenPR';
-import { getRepoName } from './utils/repo';
 import './App.css';
 
 function App() {
@@ -164,6 +163,7 @@ function App() {
     sendFetchRemotes,
     sendFetchPRDetails,
     sendListRemoteBranches,
+    sendEnsureRepo,
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendGetFileDiff,
@@ -242,6 +242,7 @@ function App() {
         sendFetchRemotes={sendFetchRemotes}
         sendFetchPRDetails={sendFetchPRDetails}
         sendListRemoteBranches={sendListRemoteBranches}
+        sendEnsureRepo={sendEnsureRepo}
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
         sendGetFileDiff={sendGetFileDiff}
@@ -305,6 +306,7 @@ interface AppContentProps {
   sendFetchRemotes: ReturnType<typeof useDaemonSocket>['sendFetchRemotes'];
   sendFetchPRDetails: ReturnType<typeof useDaemonSocket>['sendFetchPRDetails'];
   sendListRemoteBranches: ReturnType<typeof useDaemonSocket>['sendListRemoteBranches'];
+  sendEnsureRepo: ReturnType<typeof useDaemonSocket>['sendEnsureRepo'];
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
@@ -363,6 +365,7 @@ function AppContent({
   sendFetchRemotes,
   sendFetchPRDetails,
   sendListRemoteBranches,
+  sendEnsureRepo,
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
   sendGetFileDiff,
@@ -812,7 +815,7 @@ function AppContent({
   const openPR = useOpenPR({
     settings,
     sendFetchPRDetails,
-    sendFetchRemotes,
+    sendEnsureRepo,
     sendCreateWorktreeFromBranch,
     createSession,
   });
@@ -846,21 +849,12 @@ function AppContent({
         case 'fetch_pr_details_failed':
           alert(`Failed to fetch PR details.\n\n${errorMsg || 'Try refreshing PRs (⌘R) and try again.'}`);
           break;
-        case 'fetch_remotes_failed':
+        case 'ensure_repo_failed':
         case 'create_worktree_failed':
         case 'create_session_failed':
         case 'unknown': {
-          const projectsDir = settings.projects_directory;
-          const normalizedProjectsDir = projectsDir ? projectsDir.replace(/\/+$/, '') : '';
-          const localRepoPath = normalizedProjectsDir
-            ? `${normalizedProjectsDir}/${getRepoName(pr.repo)}`
-            : '';
-          if (errorMsg.includes('not a git repository') || errorMsg.includes('does not exist')) {
-            if (localRepoPath) {
-              alert(`Could not find local repository at:\n${localRepoPath}\n\nMake sure the repository is cloned in your Projects Directory.`);
-            } else {
-              alert(`Could not find local repository for ${pr.repo}.\n\nMake sure the repository is cloned in your Projects Directory.`);
-            }
+          if (errorMsg.includes('clone failed')) {
+            alert(`Failed to clone repository ${pr.repo}.\n\nError: ${errorMsg}\n\nCheck your network connection and GitHub access.`);
           } else if (errorMsg.includes('already exists')) {
             alert(`A worktree for this branch may already exist.\n\nError: ${errorMsg}`);
           } else {

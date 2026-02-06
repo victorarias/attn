@@ -149,3 +149,42 @@ func (d *Daemon) handleListRemoteBranchesWS(client *wsClient, msg *protocol.List
 		d.sendToClient(client, result)
 	}()
 }
+
+func (d *Daemon) handleEnsureRepoWS(client *wsClient, msg *protocol.EnsureRepoMessage) {
+	go func() {
+		result := &protocol.WebSocketEvent{
+			Event:      protocol.EventEnsureRepoResult,
+			TargetPath: protocol.Ptr(msg.TargetPath),
+		}
+
+		// Ensure the repo exists (clone if needed)
+		cloned, err := git.EnsureRepo(msg.CloneURL, msg.TargetPath)
+		if err != nil {
+			result.Success = protocol.Ptr(false)
+			result.Error = protocol.Ptr(err.Error())
+			result.Cloned = protocol.Ptr(false)
+			d.logf("EnsureRepo failed for %s: %v", msg.TargetPath, err)
+			d.sendToClient(client, result)
+			return
+		}
+
+		// Fetch remotes (whether repo was cloned or already existed)
+		if err := git.FetchRemotes(msg.TargetPath); err != nil {
+			result.Success = protocol.Ptr(false)
+			result.Error = protocol.Ptr("repo exists but fetch failed: " + err.Error())
+			result.Cloned = protocol.Ptr(cloned)
+			d.logf("FetchRemotes failed for %s after ensure: %v", msg.TargetPath, err)
+			d.sendToClient(client, result)
+			return
+		}
+
+		result.Success = protocol.Ptr(true)
+		result.Cloned = protocol.Ptr(cloned)
+		if cloned {
+			d.logf("EnsureRepo cloned %s to %s", msg.CloneURL, msg.TargetPath)
+		} else {
+			d.logf("EnsureRepo found existing repo at %s, fetched remotes", msg.TargetPath)
+		}
+		d.sendToClient(client, result)
+	}()
+}

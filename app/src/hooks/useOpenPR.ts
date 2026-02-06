@@ -7,7 +7,7 @@ export type OpenPRErrorKind =
   | 'missing_projects_directory'
   | 'missing_head_branch'
   | 'fetch_pr_details_failed'
-  | 'fetch_remotes_failed'
+  | 'ensure_repo_failed'
   | 'create_worktree_failed'
   | 'create_session_failed'
   | 'unknown';
@@ -24,7 +24,7 @@ export type OpenPRResult =
 export interface UseOpenPRDeps {
   settings: DaemonSettings;
   sendFetchPRDetails: (id: string) => Promise<{ success: boolean; prs?: DaemonPR[]; error?: string }>;
-  sendFetchRemotes: (repoPath: string) => Promise<{ success: boolean; error?: string }>;
+  sendEnsureRepo: (targetPath: string, cloneUrl: string) => Promise<{ success: boolean; cloned?: boolean; error?: string }>;
   sendCreateWorktreeFromBranch: (
     repoPath: string,
     branch: string
@@ -35,7 +35,7 @@ export interface UseOpenPRDeps {
 export function useOpenPR({
   settings,
   sendFetchPRDetails,
-  sendFetchRemotes,
+  sendEnsureRepo,
   sendCreateWorktreeFromBranch,
   createSession,
 }: UseOpenPRDeps) {
@@ -79,17 +79,21 @@ export function useOpenPR({
     const normalizedProjectsDir = projectsDir.replace(/\/+$/, '');
     const localRepoPath = `${normalizedProjectsDir}/${repoName}`;
 
-    let fetchResult: { success: boolean; error?: string };
+    // Construct clone URL from PR data
+    const cloneUrl = `https://${pr.host}/${pr.repo}.git`;
+
+    // Ensure repo exists (clone if needed) and fetch remotes
+    let ensureResult: { success: boolean; cloned?: boolean; error?: string };
     try {
-      fetchResult = await sendFetchRemotes(localRepoPath);
+      ensureResult = await sendEnsureRepo(localRepoPath, cloneUrl);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { success: false, error: { kind: 'fetch_remotes_failed', message } };
+      return { success: false, error: { kind: 'ensure_repo_failed', message } };
     }
-    if (!fetchResult.success) {
+    if (!ensureResult.success) {
       return {
         success: false,
-        error: { kind: 'fetch_remotes_failed', message: fetchResult.error },
+        error: { kind: 'ensure_repo_failed', message: ensureResult.error },
       };
     }
 
@@ -123,5 +127,5 @@ export function useOpenPR({
       worktreePath: worktreeResult.path,
       pr: prWithBranch,
     };
-  }, [settings, sendFetchPRDetails, sendFetchRemotes, sendCreateWorktreeFromBranch, createSession]);
+  }, [settings, sendFetchPRDetails, sendEnsureRepo, sendCreateWorktreeFromBranch, createSession]);
 }

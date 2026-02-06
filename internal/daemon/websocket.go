@@ -585,6 +585,11 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.logf("Listing remote branches for %s", msg.(*protocol.ListRemoteBranchesMessage).Repo)
 		d.handleListRemoteBranchesWS(client, msg.(*protocol.ListRemoteBranchesMessage))
 
+	case protocol.CmdEnsureRepo:
+		ensureMsg := msg.(*protocol.EnsureRepoMessage)
+		d.logf("Ensuring repo at %s from %s", ensureMsg.TargetPath, ensureMsg.CloneURL)
+		d.handleEnsureRepoWS(client, ensureMsg)
+
 	case protocol.CmdSubscribeGitStatus:
 		subMsg := msg.(*protocol.SubscribeGitStatusMessage)
 		d.logf("Subscribing to git status for %s", subMsg.Directory)
