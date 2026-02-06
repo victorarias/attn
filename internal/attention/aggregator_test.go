@@ -38,7 +38,7 @@ func TestAggregator_Aggregate(t *testing.T) {
 
 	prs := []protocol.PR{
 		{
-			ID:          "owner/repo#1",
+			ID:          "github.com:owner/repo#1",
 			Title:       "Active PR",
 			State:       protocol.PRStateWaiting,
 			Reason:      protocol.PRReasonReviewNeeded,
@@ -47,7 +47,7 @@ func TestAggregator_Aggregate(t *testing.T) {
 			Muted:       false,
 		},
 		{
-			ID:          "owner/repo#2",
+			ID:          "github.com:owner/repo#2",
 			Title:       "Muted PR",
 			State:       protocol.PRStateWaiting,
 			Reason:      protocol.PRReasonCIFailed,
@@ -56,7 +56,7 @@ func TestAggregator_Aggregate(t *testing.T) {
 			Muted:       true,
 		},
 		{
-			ID:          "owner/muted-repo#3",
+			ID:          "github.com:owner/muted-repo#3",
 			Title:       "PR in muted repo",
 			State:       protocol.PRStateWaiting,
 			Reason:      protocol.PRReasonReadyToMerge,
@@ -73,7 +73,7 @@ func TestAggregator_Aggregate(t *testing.T) {
 	agg := NewAggregator(repos, nil)
 	result := agg.Aggregate(sessions, prs)
 
-	// Should have 2 items needing attention: sess-2 and owner/repo#1
+	// Should have 2 items needing attention: sess-2 and github.com:owner/repo#1
 	if result.TotalCount != 2 {
 		t.Errorf("TotalCount = %d, want 2", result.TotalCount)
 	}
@@ -127,7 +127,7 @@ func TestAggregator_AllMuted(t *testing.T) {
 
 	prs := []protocol.PR{
 		{
-			ID:          "owner/repo#1",
+			ID:          "github.com:owner/repo#1",
 			Title:       "muted",
 			State:       protocol.PRStateWaiting,
 			Repo:        "owner/repo",
@@ -204,7 +204,7 @@ func TestSessionAdapter(t *testing.T) {
 
 func TestPRAdapter(t *testing.T) {
 	pr := &protocol.PR{
-		ID:          "owner/repo#123",
+		ID:          "github.com:owner/repo#123",
 		Title:       "Test PR",
 		State:       protocol.PRStateWaiting,
 		Reason:      protocol.PRReasonReviewNeeded,
@@ -215,8 +215,8 @@ func TestPRAdapter(t *testing.T) {
 
 	adapter := PRAdapter{PR: pr, RepoMuted: false}
 
-	if adapter.AttentionID() != "owner/repo#123" {
-		t.Errorf("AttentionID() = %q, want %q", adapter.AttentionID(), "owner/repo#123")
+	if adapter.AttentionID() != "github.com:owner/repo#123" {
+		t.Errorf("AttentionID() = %q, want %q", adapter.AttentionID(), "github.com:owner/repo#123")
 	}
 
 	if adapter.AttentionKind() != "pr" {

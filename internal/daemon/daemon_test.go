@@ -277,20 +277,19 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 		Role:   "reviewer",
 	})
 
-	// Set up environment
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
 	// Use unique port to avoid conflicts
 	wsPort := "19849"
 	os.Setenv("ATTN_WS_PORT", wsPort)
 	defer os.Unsetenv("ATTN_WS_PORT")
 
 	// Create GitHub client pointing to mock server
-	ghClient, err := github.NewClient(mockGH.URL)
+	ghClient, err := github.NewClient(mockGH.URL, "test-token")
 	if err != nil {
 		t.Fatalf("NewClient error: %v", err)
 	}
+	t.Setenv("ATTN_MOCK_GH_URL", mockGH.URL)
+	t.Setenv("ATTN_MOCK_GH_TOKEN", "test-token")
+	t.Setenv("ATTN_MOCK_GH_HOST", ghClient.Host())
 
 	// Create daemon with GitHub client
 	// Use /tmp directly to avoid long socket paths, with unique suffix to prevent parallel test conflicts
@@ -339,10 +338,10 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 	t.Logf("Initial state: %s", string(initialData))
 
 	// Send approve command
+	prID := protocol.FormatPRID(ghClient.Host(), "test/repo", 42)
 	approveCmd := map[string]interface{}{
-		"cmd":    "approve_pr",
-		"repo":   "test/repo",
-		"number": 42,
+		"cmd": "approve_pr",
+		"id":  prID,
 	}
 	approveJSON, _ := json.Marshal(approveCmd)
 	err = conn.Write(ctx, websocket.MessageText, approveJSON)
@@ -381,11 +380,8 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 	if response.Action != "approve" {
 		t.Errorf("Expected action=approve, got action=%s", response.Action)
 	}
-	if response.Repo != "test/repo" {
-		t.Errorf("Expected repo=test/repo, got repo=%s", response.Repo)
-	}
-	if response.Number != 42 {
-		t.Errorf("Expected number=42, got number=%d", response.Number)
+	if response.ID != prID {
+		t.Errorf("Expected id=%s, got id=%s", prID, response.ID)
 	}
 
 	// Verify mock server received the approve request
@@ -411,7 +407,7 @@ func TestDaemon_InjectTestPR(t *testing.T) {
 
 	// Create test PR data
 	testPR := protocol.PR{
-		ID:          "owner/repo#123",
+		ID:          "github.com:owner/repo#123",
 		Repo:        "owner/repo",
 		Number:      123,
 		Title:       "Test PR for E2E",
@@ -463,8 +459,8 @@ func TestDaemon_InjectTestPR(t *testing.T) {
 		t.Fatalf("Expected 1 PR, got %d", len(prs))
 	}
 
-	if prs[0].ID != "owner/repo#123" {
-		t.Errorf("Expected ID=owner/repo#123, got ID=%s", prs[0].ID)
+	if prs[0].ID != "github.com:owner/repo#123" {
+		t.Errorf("Expected ID=github.com:owner/repo#123, got ID=%s", prs[0].ID)
 	}
 	if prs[0].Title != "Test PR for E2E" {
 		t.Errorf("Expected Title='Test PR for E2E', got Title=%s", prs[0].Title)
@@ -502,7 +498,7 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 
 	// Inject test PR via unix socket
 	testPR := protocol.PR{
-		ID:          "owner/repo#123",
+		ID:          "github.com:owner/repo#123",
 		Repo:        "owner/repo",
 		Number:      123,
 		Title:       "Test PR",
@@ -523,7 +519,16 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial error: %v", err)
 	}
-	conn.Write(msgJSON)
+	if _, err := conn.Write(msgJSON); err != nil {
+		t.Fatalf("Write inject PR error: %v", err)
+	}
+	var resp protocol.Response
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		t.Fatalf("Read inject PR response error: %v", err)
+	}
+	if !resp.Ok {
+		t.Fatalf("Inject PR failed: %s", protocol.Deref(resp.Error))
+	}
 	conn.Close()
 
 	// Connect to WebSocket
@@ -563,7 +568,7 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 	// Send mute_pr command
 	muteCmd := map[string]interface{}{
 		"cmd": "mute_pr",
-		"id":  "owner/repo#123",
+		"id":  "github.com:owner/repo#123",
 	}
 	muteJSON, _ := json.Marshal(muteCmd)
 	err = wsConn.Write(ctx, websocket.MessageText, muteJSON)

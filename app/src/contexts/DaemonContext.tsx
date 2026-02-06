@@ -16,8 +16,7 @@ interface LastMuted {
 interface DaemonContextType {
   sendPRAction: (
     action: 'approve' | 'merge',
-    repo: string,
-    number: number,
+    id: string,
     method?: string
   ) => Promise<PRActionResult>;
   sendMutePR: (prId: string) => void;

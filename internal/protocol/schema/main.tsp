@@ -47,7 +47,9 @@ model Session {
 
 model PR {
   // Core identity - always present
+  // ID format: "host:owner/repo#number" (e.g. github.com:acme/widget#42)
   id: string;
+  host: string;
   repo: string;
   number: int32;
   title: string;
@@ -206,7 +208,7 @@ model QueryAuthorsMessage {
 
 model FetchPRDetailsMessage {
   cmd: "fetch_pr_details";
-  repo: string;
+  id: string;
 }
 
 model RefreshPRsMessage {
@@ -252,14 +254,12 @@ model SetSettingMessage {
 
 model ApprovePRMessage {
   cmd: "approve_pr";
-  repo: string;
-  number: int32;
+  id: string;
 }
 
 model MergePRMessage {
   cmd: "merge_pr";
-  repo: string;
-  number: int32;
+  id: string;
   method: string; // "squash", "merge", "rebase"
 }
 
@@ -460,8 +460,7 @@ model CancelReviewMessage {
 model PRActionResultMessage {
   event: "pr_action_result";
   action: string; // "approve" or "merge"
-  repo: string;
-  number: int32;
+  id: string;
   success: boolean;
   error?: string;
 }
@@ -763,6 +762,12 @@ model Response {
   authors?: AuthorState[];
 }
 
+// Warning for non-critical issues (e.g., gh version too old)
+model DaemonWarning {
+  code: string;    // e.g., "gh_version_too_old"
+  message: string; // Human-readable message
+}
+
 model WebSocketEvent {
   event: string;
   protocol_version?: string;
@@ -775,6 +780,7 @@ model WebSocketEvent {
   branches?: Branch[];
   recent_locations?: RecentLocation[];
   settings?: Record<string>;
+  warnings?: DaemonWarning[]; // Non-critical warnings to display in UI
   // Rate limiting
   rate_limit_resource?: string;
   rate_limit_reset_at?: string; // ISO timestamp

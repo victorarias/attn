@@ -2,7 +2,6 @@
 package mockserver
 
 import (
-	"os"
 	"testing"
 
 	"github.com/victorarias/attn/internal/github"
@@ -21,10 +20,7 @@ func TestMockServer_SearchAndApprove(t *testing.T) {
 		Role:   "reviewer",
 	})
 
-	os.Setenv("GITHUB_TOKEN", "test-token")
-	defer os.Unsetenv("GITHUB_TOKEN")
-
-	client, err := github.NewClient(server.URL)
+	client, err := github.NewClient(server.URL, "test-token")
 	if err != nil {
 		t.Fatalf("NewClient error: %v", err)
 	}

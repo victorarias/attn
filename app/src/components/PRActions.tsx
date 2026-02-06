@@ -11,7 +11,6 @@ interface ActionState {
 }
 
 interface PRActionsProps {
-  repo: string;
   number: number;
   prId: string;
   author?: string;
@@ -21,7 +20,7 @@ interface PRActionsProps {
   onOpen?: () => void;
 }
 
-export function PRActions({ repo, number, prId, author, compact = false, onMuted, onActionComplete, onOpen }: PRActionsProps) {
+export function PRActions({ number, prId, author, compact = false, onMuted, onActionComplete, onOpen }: PRActionsProps) {
   const { sendPRAction, sendMutePR, sendMuteAuthor } = useDaemonContext();
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
   const [approveState, setApproveState] = useState<ActionState>({ loading: false, success: false, error: null });
@@ -32,7 +31,7 @@ export function PRActions({ repo, number, prId, author, compact = false, onMuted
     e.stopPropagation();
     setApproveState({ loading: true, success: false, error: null });
     try {
-      const result = await sendPRAction('approve', repo, number);
+      const result = await sendPRAction('approve', prId);
       if (result.success) {
         setApproveState({ loading: false, success: true, error: null });
         // After showing checkmark briefly, notify parent to fade out
@@ -59,7 +58,7 @@ export function PRActions({ repo, number, prId, author, compact = false, onMuted
     setShowMergeConfirm(false);
     setMergeState({ loading: true, success: false, error: null });
     try {
-      const result = await sendPRAction('merge', repo, number, 'squash');
+      const result = await sendPRAction('merge', prId, 'squash');
       if (result.success) {
         setMergeState({ loading: false, success: true, error: null });
         // After showing checkmark briefly, notify parent to fade out

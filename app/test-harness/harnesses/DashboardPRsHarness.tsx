@@ -16,6 +16,8 @@ import '../../src/components/Dashboard.css';
 const BASE_SETTINGS: DaemonSettings = {
   projects_directory: '/Users/test/projects',
 };
+const DEFAULT_HOST = 'github.com';
+const formatPRID = (repo: string, number: number) => `${DEFAULT_HOST}:${repo}#${number}`;
 
 type Scenario =
   | 'default'
@@ -45,7 +47,8 @@ function getInitialPRs(scenario: Scenario): DaemonPR[] {
     case 'fetch-details-failed':
       return [
         {
-          id: 'test/fetchfail#303',
+          id: formatPRID('test/fetchfail', 303),
+          host: DEFAULT_HOST,
           repo: 'test/fetchfail',
           number: 303,
           title: 'Fetch details failed',
@@ -64,7 +67,8 @@ function getInitialPRs(scenario: Scenario): DaemonPR[] {
     case 'missing-projects-directory':
       return [
         {
-          id: 'test/noprojects#404',
+          id: formatPRID('test/noprojects', 404),
+          host: DEFAULT_HOST,
           repo: 'test/noprojects',
           number: 404,
           title: 'Missing projects directory',
@@ -83,7 +87,8 @@ function getInitialPRs(scenario: Scenario): DaemonPR[] {
     case 'fetch-remotes-failed':
       return [
         {
-          id: 'test/fetchremotes#505',
+          id: formatPRID('test/fetchremotes', 505),
+          host: DEFAULT_HOST,
           repo: 'test/fetchremotes',
           number: 505,
           title: 'Fetch remotes failed',
@@ -103,7 +108,8 @@ function getInitialPRs(scenario: Scenario): DaemonPR[] {
     case 'worktree-failed':
       return [
         {
-          id: 'test/worktree#606',
+          id: formatPRID('test/worktree', 606),
+          host: DEFAULT_HOST,
           repo: 'test/worktree',
           number: 606,
           title: 'Worktree failed',
@@ -123,7 +129,8 @@ function getInitialPRs(scenario: Scenario): DaemonPR[] {
     case 'actions':
       return [
         {
-          id: 'test/actions#707',
+          id: formatPRID('test/actions', 707),
+          host: DEFAULT_HOST,
           repo: 'test/actions',
           number: 707,
           title: 'Action buttons',
@@ -144,7 +151,8 @@ function getInitialPRs(scenario: Scenario): DaemonPR[] {
     default:
       return [
         {
-          id: 'test/repo#101',
+          id: formatPRID('test/repo', 101),
+          host: DEFAULT_HOST,
           repo: 'test/repo',
           number: 101,
           title: 'Missing head branch',
@@ -160,7 +168,8 @@ function getInitialPRs(scenario: Scenario): DaemonPR[] {
           has_new_changes: true,
         },
         {
-          id: 'test/missing#202',
+          id: formatPRID('test/missing', 202),
+          host: DEFAULT_HOST,
           repo: 'test/missing',
           number: 202,
           title: 'Still missing head branch',
@@ -198,8 +207,8 @@ export function DashboardPRsHarness({ onReady, setTriggerRerender }: HarnessProp
     });
   }, [setTriggerRerender]);
 
-  const sendPRAction = useCallback(async (action: 'approve' | 'merge', repo: string, number: number) => {
-    window.__HARNESS__.recordCall('sendPRAction', [action, repo, number]);
+  const sendPRAction = useCallback(async (action: 'approve' | 'merge', id: string, method?: string) => {
+    window.__HARNESS__.recordCall('sendPRAction', [action, id, method]);
     return { success: true };
   }, []);
 
@@ -231,15 +240,15 @@ export function DashboardPRsHarness({ onReady, setTriggerRerender }: HarnessProp
     return { success: true, path: `${repoPath}/../test-repo-feature` };
   }, [scenario]);
 
-  const sendFetchPRDetails = useCallback(async (repo: string) => {
-    window.__HARNESS__.recordCall('sendFetchPRDetails', [repo]);
-    if (scenario === 'fetch-details-failed' && repo === 'test/fetchfail') {
+  const sendFetchPRDetails = useCallback(async (id: string) => {
+    window.__HARNESS__.recordCall('sendFetchPRDetails', [id]);
+    if (scenario === 'fetch-details-failed' && id === formatPRID('test/fetchfail', 303)) {
       return { success: false, error: 'boom' };
     }
     const updated = prsRef.current.map((pr) =>
-      pr.repo === repo && pr.number === 101
+      pr.id === id && pr.number === 101
         ? { ...pr, head_branch: 'feature/missing-head', details_fetched: true }
-        : pr.repo === repo
+        : pr.id === id
           ? { ...pr, details_fetched: true }
           : pr
     );

@@ -137,9 +137,11 @@ Implementation in `internal/git/` (branch.go, stash.go, worktree.go) and `intern
 
 ### GitHub PR Monitoring
 
-The daemon polls GitHub every 90 seconds for PRs that need attention (using `gh` CLI):
+The daemon polls GitHub every 90 seconds for PRs that need attention (using `gh` CLI v2.81.0+):
 - PRs where you're a requested reviewer
 - Your PRs with review comments, CI failures, or merge conflicts
+
+Multi-host is supported via `gh auth status --json hosts` and per-host clients.
 
 PR actions (approve, merge, mute) are handled via WebSocket commands with Promise-based responses.
 

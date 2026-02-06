@@ -1,6 +1,9 @@
 package protocol
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -148,4 +151,51 @@ func BranchesToValues(branches []*Branch) []Branch {
 		}
 	}
 	return result
+}
+
+// ParsePRID parses a PR id in either old or new format.
+// Old: "owner/repo#123" (defaults to github.com)
+// New: "host:owner/repo#123"
+func ParsePRID(id string) (host, repo string, number int, err error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", "", 0, fmt.Errorf("empty PR id")
+	}
+
+	hashIdx := strings.LastIndex(id, "#")
+	if hashIdx <= 0 || hashIdx == len(id)-1 {
+		return "", "", 0, fmt.Errorf("invalid PR id: %s", id)
+	}
+
+	left := id[:hashIdx]
+	numStr := id[hashIdx+1:]
+	parsedNum, err := strconv.Atoi(numStr)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("invalid PR number: %s", numStr)
+	}
+
+	host = "github.com"
+	repo = left
+	if colonIdx := strings.Index(left, ":"); colonIdx > 0 {
+		prefix := left[:colonIdx]
+		suffix := left[colonIdx+1:]
+		if strings.Contains(prefix, ".") || !strings.Contains(prefix, "/") {
+			host = prefix
+			repo = suffix
+		}
+	}
+
+	if repo == "" || !strings.Contains(repo, "/") {
+		return "", "", 0, fmt.Errorf("invalid PR repo: %s", repo)
+	}
+
+	return host, repo, parsedNum, nil
+}
+
+// FormatPRID formats a PR id in the new format.
+func FormatPRID(host, repo string, number int) string {
+	if host == "" {
+		host = "github.com"
+	}
+	return fmt.Sprintf("%s:%s#%d", host, repo, number)
 }

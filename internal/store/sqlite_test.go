@@ -142,6 +142,7 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		table  string
 		column string
 	}{
+		{"prs", "host"},
 		{"prs", "head_sha"},
 		{"prs", "head_branch"},
 		{"prs", "comment_count"},

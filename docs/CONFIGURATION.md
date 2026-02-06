@@ -14,7 +14,8 @@ attn stores most settings in the app. The sections below are the key knobs and h
   - Useful if you install from custom locations or use wrappers.
 
 - **GitHub / PRs**
-  - attn uses the `gh` CLI for PRs.
+  - attn uses the `gh` CLI for PRs (v2.81.0+ required).
+  - Multi-host discovery comes from `gh auth status --json hosts`.
   - Authenticate with `gh auth status` / `gh auth login`.
 
 - **UI Scale**
@@ -30,4 +31,8 @@ These are mainly used by the app wrapper when launching agents:
 - `ATTN_CLAUDE_EXECUTABLE=/path/to/claude` – overrides Claude CLI path.
 - `ATTN_CODEX_EXECUTABLE=/path/to/codex` – overrides Codex CLI path.
 
-You generally do not need to set these manually unless you are debugging or integrating.
+Test-only GitHub overrides (used by E2E harness):
+
+- `ATTN_MOCK_GH_URL` – mock GitHub API base URL (short-circuits `gh` discovery).
+- `ATTN_MOCK_GH_TOKEN` – token used for the mock API.
+- `ATTN_MOCK_GH_HOST` – optional host label for PR IDs (defaults to `mock.github.local`).

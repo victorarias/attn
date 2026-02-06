@@ -221,11 +221,11 @@ func (c *Client) QueryAuthors() ([]protocol.AuthorState, error) {
 	return resp.Authors, nil
 }
 
-// FetchPRDetails requests the daemon to fetch PR details for a repo
-func (c *Client) FetchPRDetails(repo string) ([]protocol.PR, error) {
+// FetchPRDetails requests the daemon to fetch PR details for a PR ID
+func (c *Client) FetchPRDetails(id string) ([]protocol.PR, error) {
 	msg := protocol.FetchPRDetailsMessage{
-		Cmd:  protocol.CmdFetchPRDetails,
-		Repo: repo,
+		Cmd: protocol.CmdFetchPRDetails,
+		ID:  id,
 	}
 	resp, err := c.send(msg)
 	if err != nil {

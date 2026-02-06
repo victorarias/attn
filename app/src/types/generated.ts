@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AuthorState, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AuthorState, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -24,6 +24,7 @@
 //   const createWorktreeFromBranchMessage = Convert.toCreateWorktreeFromBranchMessage(json);
 //   const createWorktreeMessage = Convert.toCreateWorktreeMessage(json);
 //   const createWorktreeResultMessage = Convert.toCreateWorktreeResultMessage(json);
+//   const daemonWarning = Convert.toDaemonWarning(json);
 //   const deleteBranchMessage = Convert.toDeleteBranchMessage(json);
 //   const deleteBranchResultMessage = Convert.toDeleteBranchResultMessage(json);
 //   const deleteCommentMessage = Convert.toDeleteCommentMessage(json);
@@ -162,9 +163,8 @@ export enum AddCommentResultMessageEvent {
 }
 
 export interface ApprovePRMessage {
-    cmd:    ApprovePRMessageCmd;
-    number: number;
-    repo:   string;
+    cmd: ApprovePRMessageCmd;
+    id:  string;
     [property: string]: any;
 }
 
@@ -397,6 +397,12 @@ export enum CreateWorktreeResultMessageEvent {
     CreateWorktreeResult = "create_worktree_result",
 }
 
+export interface DaemonWarning {
+    code:    string;
+    message: string;
+    [property: string]: any;
+}
+
 export interface DeleteBranchMessage {
     branch:    string;
     cmd:       DeleteBranchMessageCmd;
@@ -465,8 +471,8 @@ export enum DeleteWorktreeResultMessageEvent {
 }
 
 export interface FetchPRDetailsMessage {
-    cmd:  FetchPRDetailsMessageCmd;
-    repo: string;
+    cmd: FetchPRDetailsMessageCmd;
+    id:  string;
     [property: string]: any;
 }
 
@@ -734,6 +740,7 @@ export interface PRElement {
     head_branch?:           string;
     head_sha?:              string;
     heat_state?:            HeatState;
+    host:                   string;
     id:                     string;
     last_heat_activity_at?: string;
     last_polled:            string;
@@ -865,9 +872,8 @@ export enum MarkFileViewedResultMessageEvent {
 
 export interface MergePRMessage {
     cmd:    MergePRMessageCmd;
+    id:     string;
     method: string;
-    number: number;
-    repo:   string;
     [property: string]: any;
 }
 
@@ -926,6 +932,7 @@ export interface PR {
     head_branch?:           string;
     head_sha?:              string;
     heat_state?:            HeatState;
+    host:                   string;
     id:                     string;
     last_heat_activity_at?: string;
     last_polled:            string;
@@ -948,8 +955,7 @@ export interface PRActionResultMessage {
     action:  string;
     error?:  string;
     event:   PRActionResultMessageEvent;
-    number:  number;
-    repo:    string;
+    id:      string;
     success: boolean;
     [property: string]: any;
 }
@@ -1451,7 +1457,14 @@ export interface WebSocketEvent {
     settings?:            { [key: string]: any };
     stash_ref?:           string;
     success?:             boolean;
+    warnings?:            WarningElement[];
     worktrees?:           WorktreeElement[];
+    [property: string]: any;
+}
+
+export interface WarningElement {
+    code:    string;
+    message: string;
     [property: string]: any;
 }
 
@@ -1674,6 +1687,14 @@ export class Convert {
 
     public static createWorktreeResultMessageToJson(value: CreateWorktreeResultMessage): string {
         return JSON.stringify(uncast(value, r("CreateWorktreeResultMessage")), null, 2);
+    }
+
+    public static toDaemonWarning(json: string): DaemonWarning {
+        return cast(JSON.parse(json), r("DaemonWarning"));
+    }
+
+    public static daemonWarningToJson(value: DaemonWarning): string {
+        return JSON.stringify(uncast(value, r("DaemonWarning")), null, 2);
     }
 
     public static toDeleteBranchMessage(json: string): DeleteBranchMessage {
@@ -2574,8 +2595,7 @@ const typeMap: any = {
     ], "any"),
     "ApprovePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
-        { json: "number", js: "number", typ: 0 },
-        { json: "repo", js: "repo", typ: "" },
+        { json: "id", js: "id", typ: "" },
     ], "any"),
     "AuthorState": o([
         { json: "author", js: "author", typ: "" },
@@ -2696,6 +2716,10 @@ const typeMap: any = {
         { json: "path", js: "path", typ: u(undefined, "") },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "DaemonWarning": o([
+        { json: "code", js: "code", typ: "" },
+        { json: "message", js: "message", typ: "" },
+    ], "any"),
     "DeleteBranchMessage": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "cmd", js: "cmd", typ: r("DeleteBranchMessageCmd") },
@@ -2729,7 +2753,7 @@ const typeMap: any = {
     ], "any"),
     "FetchPRDetailsMessage": o([
         { json: "cmd", js: "cmd", typ: r("FetchPRDetailsMessageCmd") },
-        { json: "repo", js: "repo", typ: "" },
+        { json: "id", js: "id", typ: "" },
     ], "any"),
     "FetchRemotesMessage": o([
         { json: "cmd", js: "cmd", typ: r("FetchRemotesMessageCmd") },
@@ -2873,6 +2897,7 @@ const typeMap: any = {
         { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
         { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
         { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
+        { json: "host", js: "host", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
         { json: "last_polled", js: "last_polled", typ: "" },
@@ -2941,9 +2966,8 @@ const typeMap: any = {
     ], "any"),
     "MergePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("MergePRMessageCmd") },
+        { json: "id", js: "id", typ: "" },
         { json: "method", js: "method", typ: "" },
-        { json: "number", js: "number", typ: 0 },
-        { json: "repo", js: "repo", typ: "" },
     ], "any"),
     "MuteAuthorMessage": o([
         { json: "author", js: "author", typ: "" },
@@ -2972,6 +2996,7 @@ const typeMap: any = {
         { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
         { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
         { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
+        { json: "host", js: "host", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
         { json: "last_polled", js: "last_polled", typ: "" },
@@ -2992,8 +3017,7 @@ const typeMap: any = {
         { json: "action", js: "action", typ: "" },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("PRActionResultMessageEvent") },
-        { json: "number", js: "number", typ: 0 },
-        { json: "repo", js: "repo", typ: "" },
+        { json: "id", js: "id", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "PRVisitedMessage": o([
@@ -3267,7 +3291,12 @@ const typeMap: any = {
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
         { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
         { json: "success", js: "success", typ: u(undefined, true) },
+        { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
+    ], "any"),
+    "WarningElement": o([
+        { json: "code", js: "code", typ: "" },
+        { json: "message", js: "message", typ: "" },
     ], "any"),
     "WontFixCommentMessage": o([
         { json: "cmd", js: "cmd", typ: r("WontFixCommentMessageCmd") },

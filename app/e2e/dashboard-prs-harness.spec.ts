@@ -38,7 +38,7 @@ test.describe('Dashboard PRs Harness', () => {
 
     const detailCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendFetchPRDetails'));
     expect(detailCalls.length).toBe(1);
-    expect(detailCalls[0][0]).toBe('test/missing');
+    expect(detailCalls[0][0]).toBe('github.com:test/missing#202');
 
     const fetchRemotesCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendFetchRemotes'));
     expect(fetchRemotesCalls.length).toBe(0);
@@ -64,7 +64,7 @@ test.describe('Dashboard PRs Harness', () => {
 
     const detailCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendFetchPRDetails'));
     expect(detailCalls.length).toBe(1);
-    expect(detailCalls[0][0]).toBe('test/fetchfail');
+    expect(detailCalls[0][0]).toBe('github.com:test/fetchfail#303');
 
     const fetchRemotesCalls = await page.evaluate(() => window.__HARNESS__.getCalls('sendFetchRemotes'));
     expect(fetchRemotesCalls.length).toBe(0);

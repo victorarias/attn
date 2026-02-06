@@ -8,11 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +23,9 @@ var ErrRateLimited = errors.New("GitHub rate limit exceeded")
 // ErrSelfRateLimited is returned when our self-imposed rate limit is exceeded
 var ErrSelfRateLimited = errors.New("self-imposed rate limit exceeded")
 
+// ErrNoToken is returned when no GitHub token is available
+var ErrNoToken = errors.New("no GitHub token available")
+
 // RateLimitInfo contains rate limit state for a resource
 type RateLimitInfo struct {
 	Resource  string    // "core" or "search"
@@ -35,6 +35,7 @@ type RateLimitInfo struct {
 
 // Client is an HTTP client for the GitHub API
 type Client struct {
+	host       string
 	baseURL    string
 	token      string
 	httpClient *http.Client
@@ -48,38 +49,31 @@ type Client struct {
 	selfLimiter *rate.Limiter
 }
 
-// NewClient creates a new GitHub API client.
-// baseURL priority: parameter > GITHUB_API_URL env > https://api.github.com
-// Token priority: GITHUB_TOKEN env > gh auth token command
-func NewClient(baseURL string) (*Client, error) {
-	if baseURL == "" {
-		baseURL = os.Getenv("GITHUB_API_URL")
-	}
+// NewClient creates a new GitHub API client with an explicit base URL and token.
+func NewClient(baseURL, token string) (*Client, error) {
 	if baseURL == "" {
 		baseURL = "https://api.github.com"
 	}
-
-	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
-		// Try gh auth token (daemon ensures PATH is set at startup)
-		output, err := ghAuthToken()
-		if err != nil {
-			return nil, fmt.Errorf("no GITHUB_TOKEN and gh auth token failed: %w", err)
-		}
-		token = strings.TrimSpace(string(output))
+		return nil, ErrNoToken
 	}
 
-	if token == "" {
-		return nil, fmt.Errorf("no GitHub token available")
-	}
+	host := hostFromAPIURL(baseURL)
+	return newClientWithToken(host, baseURL, token)
+}
 
+func newClientWithToken(host, baseURL, token string) (*Client, error) {
+	if token == "" {
+		return nil, ErrNoToken
+	}
 	// SAFETY: Refuse to use real GitHub API with test token
 	// This prevents accidental real API calls in tests
 	if token == "test-token" && baseURL == "https://api.github.com" {
-		return nil, fmt.Errorf("refusing to use real GitHub API with test token - set GITHUB_API_URL to mock server")
+		return nil, fmt.Errorf("refusing to use real GitHub API with test token - use a mock server URL")
 	}
 
 	return &Client{
+		host:    host,
 		baseURL: baseURL,
 		token:   token,
 		httpClient: &http.Client{
@@ -93,9 +87,22 @@ func NewClient(baseURL string) (*Client, error) {
 	}, nil
 }
 
-func ghAuthToken() ([]byte, error) {
-	cmd := exec.Command("gh", "auth", "token")
-	return cmd.Output()
+func hostFromAPIURL(baseURL string) string {
+	if baseURL == "" {
+		return ""
+	}
+	if baseURL == "https://api.github.com" || baseURL == "http://api.github.com" {
+		return "github.com"
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	host := parsed.Hostname()
+	if host == "api.github.com" {
+		return "github.com"
+	}
+	return host
 }
 
 // IsAvailable returns true if the client has a valid token
@@ -290,7 +297,8 @@ func (c *Client) SearchAuthoredPRs() ([]*protocol.PR, error) {
 			author = item.User.Login
 		}
 		prs = append(prs, &protocol.PR{
-			ID:           fmt.Sprintf("%s#%d", repo, item.Number),
+			ID:           protocol.FormatPRID(c.host, repo, item.Number),
+			Host:         c.host,
 			Repo:         repo,
 			Number:       item.Number,
 			Title:        item.Title,
@@ -335,7 +343,8 @@ func (c *Client) SearchReviewRequestedPRs() ([]*protocol.PR, error) {
 			author = item.User.Login
 		}
 		prs = append(prs, &protocol.PR{
-			ID:           fmt.Sprintf("%s#%d", repo, item.Number),
+			ID:           protocol.FormatPRID(c.host, repo, item.Number),
+			Host:         c.host,
 			Repo:         repo,
 			Number:       item.Number,
 			Title:        item.Title,
@@ -381,7 +390,8 @@ func (c *Client) SearchReviewedByMePRs() ([]*protocol.PR, error) {
 			author = item.User.Login
 		}
 		prs = append(prs, &protocol.PR{
-			ID:           fmt.Sprintf("%s#%d", repo, item.Number),
+			ID:           protocol.FormatPRID(c.host, repo, item.Number),
+			Host:         c.host,
 			Repo:         repo,
 			Number:       item.Number,
 			Title:        item.Title,
@@ -598,4 +608,9 @@ func (c *Client) MergePR(repo string, number int, method string) error {
 	}
 
 	return nil
+}
+
+// Host returns the host associated with this client.
+func (c *Client) Host() string {
+	return c.host
 }

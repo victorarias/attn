@@ -39,10 +39,24 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-01-31]
 
 ### Added
+- **Multi-Host GitHub Support**: Discover authenticated gh hosts and poll PRs across github.com + GHES
+- **Host Badges + Connected Hosts**: Show host badges when a repo spans multiple hosts and list detected hosts in Settings
 - **Mute by Author**: Hide all PRs from specific authors (e.g., dependabot, renovate)
   - 👤 button on PR rows to mute author (🤖 for bot authors)
   - Muted Authors section in Settings to view and unmute
   - Undo toast supports author mutes
+
+### Changed
+- **PR ID Format**: IDs now include host prefixes (e.g., github.com:owner/repo#123) for correct routing
+- **PR Actions Routing**: Approve/merge/fetch details route by PR ID to the correct host
+- **GitHub CLI Requirement**: Requires gh v2.81.0+ for host discovery
+
+### Fixed
+- **Per-Host Rate Limits**: Rate limiting is isolated per host so one host doesn't block others
+- **PR Detail Refresh**: Detail refresh runs per host to avoid cross-host mixups
+
+### Removed
+- **GitHub Env Overrides**: `GITHUB_API_URL`/`GITHUB_TOKEN` configuration removed (gh discovery only)
 
 ---
 

@@ -90,7 +90,7 @@ export function AttentionDrawer({
                 </a>
                 <div className="pr-footer">
                   <span />
-                  <PRActions repo={pr.repo} number={pr.number} prId={pr.id} compact />
+                  <PRActions number={pr.number} prId={pr.id} compact />
                 </div>
               </div>
             ))}
@@ -121,7 +121,7 @@ export function AttentionDrawer({
                 </a>
                 <div className="pr-footer">
                   <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
-                  <PRActions repo={pr.repo} number={pr.number} prId={pr.id} compact />
+                  <PRActions number={pr.number} prId={pr.id} compact />
                 </div>
               </div>
             ))}
