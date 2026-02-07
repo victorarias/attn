@@ -11,6 +11,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Daemon PTY Manager**: PTY session lifecycle now lives in Go (`internal/pty`) with spawn, attach/detach, input, resize, kill, scrollback ring buffer, per-session sequence numbers, and UTF-8/ANSI-safe output chunking.
 - **Codex Live State Detection in Daemon**: Ported output-based codex prompt/approval heuristics into Go PTY reader path so codex sessions update `working` / `waiting_input` / `pending_approval` without Rust PTY code.
+- **Codex Visible-Frame Snapshot Restore**: Daemon now maintains a virtual terminal screen for codex sessions and includes a rendered screen snapshot in `attach_result`, so reconnect/reattach restores what was visible (including alternate-screen UIs) before live stream resumes.
 - **PTY WebSocket Protocol**: Added daemon commands/events for terminal transport:
   - Commands: `spawn_session`, `attach_session`, `detach_session`, `pty_input`, `pty_resize`, `kill_session`
   - Events: `spawn_result`, `attach_result`, `pty_output`, `session_exited`, `pty_desync`
@@ -32,9 +33,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **PTY Shell Startup**: PTY spawn now captures login-shell environment (`shell -l -c 'env -0'`) and reuses it for session commands, so daemon-spawned sessions better match the user's interactive shell environment.
 - **WebSocket Ordering**: `pty_input` now follows the same ordered command path as other WebSocket commands.
 - **Protocol Schema Coverage**: TypeSpec now explicitly models all daemon WebSocket events and reviewer streaming payloads used in runtime.
-- **Protocol Version**: Bumped daemon/app protocol version to `25`.
+- **Protocol Version**: Bumped daemon/app protocol version to `26`.
 
 ### Fixed
+- **Daemon Spawn Wrapper Path Resolution**: PTY-launched sessions now validate candidate `attn` executable paths before invoking them, preventing `fish: Unknown command` failures when a stale or missing binary path is discovered.
 - **Daemon Socket Detection (Tauri)**: Frontend daemon health/start checks now use `~/.attn/attn.sock` (and `ATTN_SOCKET_PATH` override), matching daemon defaults.
 - **Stale Daemon Socket Recovery**: App startup now verifies the daemon socket is connectable (not just present), removes stale socket files, and waits for a live socket before reporting daemon startup success.
 - **Persistence Degraded Visibility**: When SQLite open/migrations fail and daemon falls back to in-memory state, the app now receives a persistent warning banner that includes the DB path and points to daemon logs for recovery details.

@@ -69,6 +69,29 @@ type AttachResultMessage struct {
 	// Running corresponds to the JSON schema field "running".
 	Running *bool `json:"running,omitempty"`
 
+	// ScreenCols corresponds to the JSON schema field "screen_cols".
+	ScreenCols *int `json:"screen_cols,omitempty"`
+
+	// ScreenCursorVisible corresponds to the JSON schema field
+	// "screen_cursor_visible".
+	ScreenCursorVisible *bool `json:"screen_cursor_visible,omitempty"`
+
+	// ScreenCursorX corresponds to the JSON schema field "screen_cursor_x".
+	ScreenCursorX *int `json:"screen_cursor_x,omitempty"`
+
+	// ScreenCursorY corresponds to the JSON schema field "screen_cursor_y".
+	ScreenCursorY *int `json:"screen_cursor_y,omitempty"`
+
+	// ScreenRows corresponds to the JSON schema field "screen_rows".
+	ScreenRows *int `json:"screen_rows,omitempty"`
+
+	// ScreenSnapshot corresponds to the JSON schema field "screen_snapshot".
+	ScreenSnapshot *string `json:"screen_snapshot,omitempty"`
+
+	// ScreenSnapshotFresh corresponds to the JSON schema field
+	// "screen_snapshot_fresh".
+	ScreenSnapshotFresh *bool `json:"screen_snapshot_fresh,omitempty"`
+
 	// Scrollback corresponds to the JSON schema field "scrollback".
 	Scrollback *string `json:"scrollback,omitempty"`
 
@@ -239,6 +262,11 @@ type CheckDirtyResultMessage struct {
 }
 
 type ClearSessionsMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type ClearWarningsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 }
@@ -1865,6 +1893,29 @@ type WebSocketEvent struct {
 
 	// Running corresponds to the JSON schema field "running".
 	Running *bool `json:"running,omitempty"`
+
+	// ScreenCols corresponds to the JSON schema field "screen_cols".
+	ScreenCols *int `json:"screen_cols,omitempty"`
+
+	// ScreenCursorVisible corresponds to the JSON schema field
+	// "screen_cursor_visible".
+	ScreenCursorVisible *bool `json:"screen_cursor_visible,omitempty"`
+
+	// ScreenCursorX corresponds to the JSON schema field "screen_cursor_x".
+	ScreenCursorX *int `json:"screen_cursor_x,omitempty"`
+
+	// ScreenCursorY corresponds to the JSON schema field "screen_cursor_y".
+	ScreenCursorY *int `json:"screen_cursor_y,omitempty"`
+
+	// ScreenRows corresponds to the JSON schema field "screen_rows".
+	ScreenRows *int `json:"screen_rows,omitempty"`
+
+	// ScreenSnapshot corresponds to the JSON schema field "screen_snapshot".
+	ScreenSnapshot *string `json:"screen_snapshot,omitempty"`
+
+	// ScreenSnapshotFresh corresponds to the JSON schema field
+	// "screen_snapshot_fresh".
+	ScreenSnapshotFresh *bool `json:"screen_snapshot_fresh,omitempty"`
 
 	// Scrollback corresponds to the JSON schema field "scrollback".
 	Scrollback *string `json:"scrollback,omitempty"`

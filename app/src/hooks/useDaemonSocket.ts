@@ -42,6 +42,13 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   seq?: number;
   scrollback?: string;
   scrollback_truncated?: boolean;
+  screen_snapshot?: string;
+  screen_rows?: number;
+  screen_cols?: number;
+  screen_cursor_x?: number;
+  screen_cursor_y?: number;
+  screen_cursor_visible?: boolean;
+  screen_snapshot_fresh?: boolean;
   last_seq?: number;
   cols?: number;
   rows?: number;
@@ -79,7 +86,8 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '25';
+const PROTOCOL_VERSION = '26';
+const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
   success: boolean;
@@ -168,6 +176,13 @@ interface AttachResult {
   error?: string;
   scrollback?: string;
   scrollback_truncated?: boolean;
+  screen_snapshot?: string;
+  screen_rows?: number;
+  screen_cols?: number;
+  screen_cursor_x?: number;
+  screen_cursor_y?: number;
+  screen_cursor_visible?: boolean;
+  screen_snapshot_fresh?: boolean;
   last_seq?: number;
   cols?: number;
   rows?: number;
@@ -394,6 +409,7 @@ export function useDaemonSocket({
   const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
   const attachedPtySessionsRef = useRef<Set<string>>(new Set());
   const ptySeqRef = useRef<Map<string, number>>(new Map());
+  const pendingAttachOutputsRef = useRef<Map<string, Array<{ data: string; seq?: number }>>>(new Map());
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
@@ -546,8 +562,10 @@ export function useDaemonSocket({
             const nextSettings = data.settings || {};
             settingsRef.current = nextSettings;
             onSettingsUpdate?.(nextSettings);
-            if (data.warnings && data.warnings.length > 0) {
-              setWarnings(data.warnings);
+            const nextWarnings = data.warnings || [];
+            setWarnings(nextWarnings);
+            if (nextWarnings.length > 0 && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ cmd: 'clear_warnings' }));
             }
             setHasReceivedInitialState(true);
             break;
@@ -579,6 +597,13 @@ export function useDaemonSocket({
                     success: true,
                     scrollback: data.scrollback,
                     scrollback_truncated: data.scrollback_truncated,
+                    screen_snapshot: data.screen_snapshot,
+                    screen_rows: data.screen_rows,
+                    screen_cols: data.screen_cols,
+                    screen_cursor_x: data.screen_cursor_x,
+                    screen_cursor_y: data.screen_cursor_y,
+                    screen_cursor_visible: data.screen_cursor_visible,
+                    screen_snapshot_fresh: data.screen_snapshot_fresh,
                     last_seq: data.last_seq,
                     cols: data.cols,
                     rows: data.rows,
@@ -595,22 +620,46 @@ export function useDaemonSocket({
               } else {
                 attachedPtySessionsRef.current.delete(data.id);
                 ptySeqRef.current.delete(data.id);
+                pendingAttachOutputsRef.current.delete(data.id);
               }
 
               if (data.success) {
-                const shouldReset = ptySeqRef.current.has(data.id);
+                const hasScreenSnapshot = Boolean(
+                  data.screen_snapshot && data.screen_snapshot_fresh !== false
+                );
+                const shouldReset = hasScreenSnapshot || ptySeqRef.current.has(data.id);
                 if (shouldReset) {
-                  emitPtyEvent({ event: 'reset', id: data.id, reason: 'reattach' });
+                  emitPtyEvent({
+                    event: 'reset',
+                    id: data.id,
+                    reason: hasScreenSnapshot ? 'snapshot_restore' : 'reattach',
+                  });
                 }
                 if (typeof data.last_seq === 'number') {
                   ptySeqRef.current.set(data.id, data.last_seq);
                 } else {
                   ptySeqRef.current.set(data.id, 0);
                 }
-                if (data.scrollback) {
+                if (hasScreenSnapshot && data.screen_snapshot) {
+                  emitPtyEvent({ event: 'data', id: data.id, data: data.screen_snapshot });
+                } else if (data.scrollback) {
                   emitPtyEvent({ event: 'data', id: data.id, data: data.scrollback });
                 }
-                if (data.scrollback_truncated) {
+                const queued = pendingAttachOutputsRef.current.get(data.id);
+                if (queued && queued.length > 0) {
+                  pendingAttachOutputsRef.current.delete(data.id);
+                  for (const chunk of queued) {
+                    if (typeof chunk.seq === 'number') {
+                      const lastSeq = ptySeqRef.current.get(data.id);
+                      if (typeof lastSeq === 'number' && chunk.seq <= lastSeq) {
+                        continue;
+                      }
+                      ptySeqRef.current.set(data.id, chunk.seq);
+                    }
+                    emitPtyEvent({ event: 'data', id: data.id, data: chunk.data });
+                  }
+                }
+                if (!hasScreenSnapshot && data.scrollback_truncated) {
                   const session = sessionsRef.current.find((entry) => entry.id === data.id);
                   if (session?.agent === 'codex') {
                     emitPtyEvent({
@@ -627,7 +676,21 @@ export function useDaemonSocket({
 
           case 'pty_output': {
             if (data.id && data.data) {
+              const attachKey = `pty_attach_${data.id}`;
+              if (pendingActionsRef.current.has(attachKey)) {
+                const queued = pendingAttachOutputsRef.current.get(data.id) || [];
+                if (queued.length >= MAX_PENDING_ATTACH_OUTPUTS) {
+                  queued.shift();
+                }
+                queued.push({ data: data.data, seq: data.seq });
+                pendingAttachOutputsRef.current.set(data.id, queued);
+                break;
+              }
               if (typeof data.seq === 'number') {
+                const lastSeq = ptySeqRef.current.get(data.id);
+                if (typeof lastSeq === 'number' && data.seq <= lastSeq) {
+                  break;
+                }
                 ptySeqRef.current.set(data.id, data.seq);
               }
               emitPtyEvent({ event: 'data', id: data.id, data: data.data });
@@ -639,6 +702,7 @@ export function useDaemonSocket({
             if (data.id) {
               attachedPtySessionsRef.current.delete(data.id);
               ptySeqRef.current.delete(data.id);
+              pendingAttachOutputsRef.current.delete(data.id);
               emitPtyEvent({
                 event: 'exit',
                 id: data.id,
@@ -1334,6 +1398,7 @@ export function useDaemonSocket({
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
+          pendingAttachOutputsRef.current.delete(id);
           reject(new Error('Attach session timed out'));
         }
       }, 15000);
@@ -1345,6 +1410,7 @@ export function useDaemonSocket({
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     attachedPtySessionsRef.current.delete(id);
     ptySeqRef.current.delete(id);
+    pendingAttachOutputsRef.current.delete(id);
     ws.send(JSON.stringify({ cmd: 'detach_session', id }));
   }, []);
 
@@ -1370,6 +1436,13 @@ export function useDaemonSocket({
     setPtyBackend({
       spawn: async (args: PtySpawnArgs) => {
         const sessionKnownToDaemon = sessionsRef.current.some((session) => session.id === args.id);
+
+        // For new spawns, prime PTY size before attach.
+        // For existing daemon sessions, avoid transient bootstrap resizes
+        // (hidden terminals can report placeholder dimensions briefly).
+        if (!sessionKnownToDaemon) {
+          sendPtyResize(args.id, args.cols, args.rows);
+        }
 
         try {
           await sendAttachSession(args.id);
@@ -2375,6 +2448,11 @@ export function useDaemonSocket({
 
   const clearWarnings = useCallback(() => {
     setWarnings([]);
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    ws.send(JSON.stringify({ cmd: 'clear_warnings' }));
   }, []);
 
   return {

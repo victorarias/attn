@@ -2,6 +2,8 @@ package pty
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -80,5 +82,40 @@ func TestShouldSetpgidForPTY(t *testing.T) {
 	}
 	if runtime.GOOS != "darwin" && !got {
 		t.Fatal("expected shouldSetpgidForPTY=true outside darwin")
+	}
+}
+
+func TestFirstExecutablePath_PicksFirstValidExecutable(t *testing.T) {
+	tmpDir := t.TempDir()
+	missing := filepath.Join(tmpDir, "missing-attn")
+	notExec := filepath.Join(tmpDir, "not-exec-attn")
+	execPath := filepath.Join(tmpDir, "exec-attn")
+
+	if err := os.WriteFile(notExec, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatalf("write notExec: %v", err)
+	}
+	if err := os.WriteFile(execPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write execPath: %v", err)
+	}
+
+	got, ok := firstExecutablePath([]string{missing, notExec, execPath})
+	if !ok {
+		t.Fatal("expected executable candidate to be found")
+	}
+	if got != execPath {
+		t.Fatalf("firstExecutablePath = %q, want %q", got, execPath)
+	}
+}
+
+func TestFirstExecutablePath_ReturnsFalseWhenNoneValid(t *testing.T) {
+	tmpDir := t.TempDir()
+	notExec := filepath.Join(tmpDir, "not-exec-attn")
+	if err := os.WriteFile(notExec, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatalf("write notExec: %v", err)
+	}
+
+	got, ok := firstExecutablePath([]string{"", "   ", filepath.Join(tmpDir, "missing"), notExec})
+	if ok {
+		t.Fatalf("expected no executable candidate, got %q", got)
 	}
 }

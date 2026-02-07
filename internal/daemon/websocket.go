@@ -529,6 +529,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			Sessions: protocol.SessionsToValues(d.store.List("")),
 		})
 
+	case protocol.CmdClearWarnings:
+		d.logf("Clearing daemon warnings")
+		d.clearWarnings()
+
 	case protocol.CmdPRVisited:
 		visitedMsg := msg.(*protocol.PRVisitedMessage)
 		d.logf("Marking PR %s as visited", visitedMsg.ID)
@@ -949,6 +953,19 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		})
 		return
 	}
+	d.logf(
+		"PTY attach result: id=%s running=%v last_seq=%d scrollback_bytes=%d snapshot_bytes=%d snapshot_fresh=%v size=%dx%d screen=%dx%d",
+		msg.ID,
+		info.Running,
+		info.LastSeq,
+		len(info.Scrollback),
+		len(info.ScreenSnapshot),
+		info.ScreenSnapshotFresh,
+		info.Cols,
+		info.Rows,
+		info.ScreenCols,
+		info.ScreenRows,
+	)
 
 	client.attachMu.Lock()
 	client.attachedSessions[msg.ID] = subID
@@ -969,6 +986,16 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		encoded := base64.StdEncoding.EncodeToString(info.Scrollback)
 		result.Scrollback = protocol.Ptr(encoded)
 	}
+	if len(info.ScreenSnapshot) > 0 {
+		encoded := base64.StdEncoding.EncodeToString(info.ScreenSnapshot)
+		result.ScreenSnapshot = protocol.Ptr(encoded)
+		result.ScreenRows = protocol.Ptr(int(info.ScreenRows))
+		result.ScreenCols = protocol.Ptr(int(info.ScreenCols))
+		result.ScreenCursorX = protocol.Ptr(int(info.ScreenCursorX))
+		result.ScreenCursorY = protocol.Ptr(int(info.ScreenCursorY))
+		result.ScreenCursorVisible = protocol.Ptr(info.ScreenCursorVisible)
+		result.ScreenSnapshotFresh = protocol.Ptr(info.ScreenSnapshotFresh)
+	}
 	d.sendToClient(client, result)
 }
 
@@ -976,6 +1003,7 @@ func (d *Daemon) handlePtyResize(_ *wsClient, msg *protocol.PtyResizeMessage) {
 	if msg.Cols <= 0 || msg.Rows <= 0 {
 		return
 	}
+	d.logf("pty_resize: id=%s cols=%d rows=%d", msg.ID, msg.Cols, msg.Rows)
 	if err := d.ptyManager.Resize(msg.ID, uint16(msg.Cols), uint16(msg.Rows)); err != nil {
 		if shouldLogPtyCommandError(err) {
 			d.logf("pty_resize failed for %s: %v", msg.ID, err)
@@ -1010,7 +1038,7 @@ func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMe
 
 func shouldLogWSCommand(cmd string) bool {
 	switch cmd {
-	case protocol.CmdPtyInput, protocol.CmdPtyResize, protocol.CmdAttachSession, protocol.CmdDetachSession:
+	case protocol.CmdPtyInput:
 		return false
 	default:
 		return true

@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCommentResolvedMessage, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, ReviewToolUse, ReviewToolUseMessage, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionsUpdatedMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCommentResolvedMessage, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, ReviewToolUse, ReviewToolUseMessage, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionsUpdatedMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -20,6 +20,7 @@
 //   const checkDirtyMessage = Convert.toCheckDirtyMessage(json);
 //   const checkDirtyResultMessage = Convert.toCheckDirtyResultMessage(json);
 //   const clearSessionsMessage = Convert.toClearSessionsMessage(json);
+//   const clearWarningsMessage = Convert.toClearWarningsMessage(json);
 //   const collapseRepoMessage = Convert.toCollapseRepoMessage(json);
 //   const commandErrorMessage = Convert.toCommandErrorMessage(json);
 //   const commitWIPMessage = Convert.toCommitWIPMessage(json);
@@ -205,17 +206,24 @@ export enum ApprovePRMessageCmd {
 }
 
 export interface AttachResultMessage {
-    cols?:                 number;
-    error?:                string;
-    event:                 AttachResultMessageEvent;
-    id:                    string;
-    last_seq?:             number;
-    pid?:                  number;
-    rows?:                 number;
-    running?:              boolean;
-    scrollback?:           string;
-    scrollback_truncated?: boolean;
-    success:               boolean;
+    cols?:                  number;
+    error?:                 string;
+    event:                  AttachResultMessageEvent;
+    id:                     string;
+    last_seq?:              number;
+    pid?:                   number;
+    rows?:                  number;
+    running?:               boolean;
+    screen_cols?:           number;
+    screen_cursor_visible?: boolean;
+    screen_cursor_x?:       number;
+    screen_cursor_y?:       number;
+    screen_rows?:           number;
+    screen_snapshot?:       string;
+    screen_snapshot_fresh?: boolean;
+    scrollback?:            string;
+    scrollback_truncated?:  boolean;
+    success:                boolean;
     [property: string]: any;
 }
 
@@ -419,6 +427,15 @@ export interface ClearSessionsMessage {
 
 export enum ClearSessionsMessageCmd {
     ClearSessions = "clear_sessions",
+}
+
+export interface ClearWarningsMessage {
+    cmd: ClearWarningsMessageCmd;
+    [property: string]: any;
+}
+
+export enum ClearWarningsMessageCmd {
+    ClearWarnings = "clear_warnings",
 }
 
 export interface CollapseRepoMessage {
@@ -1828,59 +1845,66 @@ export enum UpdateCommentResultMessageEvent {
 }
 
 export interface WebSocketEvent {
-    action?:               string;
-    authors?:              AuthorElement[];
-    base_ref?:             string;
-    branch?:               string;
-    branches?:             BranchElement[];
-    cloned?:               boolean;
-    cmd?:                  string;
-    cols?:                 number;
-    comment?:              Comment;
-    comment_id?:           string;
-    conflict?:             boolean;
-    content?:              string;
-    data?:                 string;
-    directory?:            string;
-    dirty?:                boolean;
-    error?:                string;
-    event:                 string;
-    exit_code?:            number;
-    files?:                FileElement[];
-    finding?:              Finding;
-    found?:                boolean;
-    id?:                   string;
-    last_seq?:             number;
-    modified?:             string;
-    original?:             string;
-    path?:                 string;
-    pid?:                  number;
-    protocol_version?:     string;
-    prs?:                  PRElement[];
-    rate_limit_reset_at?:  string;
-    rate_limit_resource?:  string;
-    reason?:               string;
-    recent_locations?:     RecentLocationElement[];
-    repos?:                RepoElement[];
-    review_id?:            string;
-    rows?:                 number;
-    running?:              boolean;
-    scrollback?:           string;
-    scrollback_truncated?: boolean;
-    seq?:                  number;
-    session?:              SessionElement;
-    sessions?:             SessionElement[];
-    settings?:             { [key: string]: any };
-    signal?:               string;
-    staged?:               StagedElement[];
-    stash_ref?:            string;
-    success?:              boolean;
-    target_path?:          string;
-    tool_use?:             ToolUse;
-    unstaged?:             StagedElement[];
-    untracked?:            StagedElement[];
-    warnings?:             WarningElement[];
-    worktrees?:            WorktreeElement[];
+    action?:                string;
+    authors?:               AuthorElement[];
+    base_ref?:              string;
+    branch?:                string;
+    branches?:              BranchElement[];
+    cloned?:                boolean;
+    cmd?:                   string;
+    cols?:                  number;
+    comment?:               Comment;
+    comment_id?:            string;
+    conflict?:              boolean;
+    content?:               string;
+    data?:                  string;
+    directory?:             string;
+    dirty?:                 boolean;
+    error?:                 string;
+    event:                  string;
+    exit_code?:             number;
+    files?:                 FileElement[];
+    finding?:               Finding;
+    found?:                 boolean;
+    id?:                    string;
+    last_seq?:              number;
+    modified?:              string;
+    original?:              string;
+    path?:                  string;
+    pid?:                   number;
+    protocol_version?:      string;
+    prs?:                   PRElement[];
+    rate_limit_reset_at?:   string;
+    rate_limit_resource?:   string;
+    reason?:                string;
+    recent_locations?:      RecentLocationElement[];
+    repos?:                 RepoElement[];
+    review_id?:             string;
+    rows?:                  number;
+    running?:               boolean;
+    screen_cols?:           number;
+    screen_cursor_visible?: boolean;
+    screen_cursor_x?:       number;
+    screen_cursor_y?:       number;
+    screen_rows?:           number;
+    screen_snapshot?:       string;
+    screen_snapshot_fresh?: boolean;
+    scrollback?:            string;
+    scrollback_truncated?:  boolean;
+    seq?:                   number;
+    session?:               SessionElement;
+    sessions?:              SessionElement[];
+    settings?:              { [key: string]: any };
+    signal?:                string;
+    staged?:                StagedElement[];
+    stash_ref?:             string;
+    success?:               boolean;
+    target_path?:           string;
+    tool_use?:              ToolUse;
+    unstaged?:              StagedElement[];
+    untracked?:             StagedElement[];
+    warnings?:              WarningElement[];
+    worktrees?:             WorktreeElement[];
     [property: string]: any;
 }
 
@@ -2089,6 +2113,14 @@ export class Convert {
 
     public static clearSessionsMessageToJson(value: ClearSessionsMessage): string {
         return JSON.stringify(uncast(value, r("ClearSessionsMessage")), null, 2);
+    }
+
+    public static toClearWarningsMessage(json: string): ClearWarningsMessage {
+        return cast(JSON.parse(json), r("ClearWarningsMessage"));
+    }
+
+    public static clearWarningsMessageToJson(value: ClearWarningsMessage): string {
+        return JSON.stringify(uncast(value, r("ClearWarningsMessage")), null, 2);
     }
 
     public static toCollapseRepoMessage(json: string): CollapseRepoMessage {
@@ -3296,6 +3328,13 @@ const typeMap: any = {
         { json: "pid", js: "pid", typ: u(undefined, 0) },
         { json: "rows", js: "rows", typ: u(undefined, 0) },
         { json: "running", js: "running", typ: u(undefined, true) },
+        { json: "screen_cols", js: "screen_cols", typ: u(undefined, 0) },
+        { json: "screen_cursor_visible", js: "screen_cursor_visible", typ: u(undefined, true) },
+        { json: "screen_cursor_x", js: "screen_cursor_x", typ: u(undefined, 0) },
+        { json: "screen_cursor_y", js: "screen_cursor_y", typ: u(undefined, 0) },
+        { json: "screen_rows", js: "screen_rows", typ: u(undefined, 0) },
+        { json: "screen_snapshot", js: "screen_snapshot", typ: u(undefined, "") },
+        { json: "screen_snapshot_fresh", js: "screen_snapshot_fresh", typ: u(undefined, true) },
         { json: "scrollback", js: "scrollback", typ: u(undefined, "") },
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: u(undefined, true) },
         { json: "success", js: "success", typ: true },
@@ -3405,6 +3444,9 @@ const typeMap: any = {
     ], "any"),
     "ClearSessionsMessage": o([
         { json: "cmd", js: "cmd", typ: r("ClearSessionsMessageCmd") },
+    ], "any"),
+    "ClearWarningsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ClearWarningsMessageCmd") },
     ], "any"),
     "CollapseRepoMessage": o([
         { json: "cmd", js: "cmd", typ: r("CollapseRepoMessageCmd") },
@@ -4177,6 +4219,13 @@ const typeMap: any = {
         { json: "review_id", js: "review_id", typ: u(undefined, "") },
         { json: "rows", js: "rows", typ: u(undefined, 0) },
         { json: "running", js: "running", typ: u(undefined, true) },
+        { json: "screen_cols", js: "screen_cols", typ: u(undefined, 0) },
+        { json: "screen_cursor_visible", js: "screen_cursor_visible", typ: u(undefined, true) },
+        { json: "screen_cursor_x", js: "screen_cursor_x", typ: u(undefined, 0) },
+        { json: "screen_cursor_y", js: "screen_cursor_y", typ: u(undefined, 0) },
+        { json: "screen_rows", js: "screen_rows", typ: u(undefined, 0) },
+        { json: "screen_snapshot", js: "screen_snapshot", typ: u(undefined, "") },
+        { json: "screen_snapshot_fresh", js: "screen_snapshot_fresh", typ: u(undefined, true) },
         { json: "scrollback", js: "scrollback", typ: u(undefined, "") },
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: u(undefined, true) },
         { json: "seq", js: "seq", typ: u(undefined, 0) },
@@ -4276,6 +4325,9 @@ const typeMap: any = {
     ],
     "ClearSessionsMessageCmd": [
         "clear_sessions",
+    ],
+    "ClearWarningsMessageCmd": [
+        "clear_warnings",
     ],
     "CollapseRepoMessageCmd": [
         "collapse_repo",

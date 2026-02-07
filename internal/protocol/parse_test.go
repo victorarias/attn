@@ -32,6 +32,11 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdUnregister,
 		},
 		{
+			name:    "clear warnings message",
+			input:   `{"cmd":"clear_warnings"}`,
+			wantCmd: CmdClearWarnings,
+		},
+		{
 			name:    "invalid json",
 			input:   `not json`,
 			wantErr: true,

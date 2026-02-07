@@ -32,6 +32,7 @@ type Session struct {
 	cmd  *exec.Cmd
 
 	scrollback *RingBuffer
+	screen     *virtualScreen
 	seqCounter atomic.Uint32
 
 	subMu       sync.RWMutex
@@ -128,6 +129,9 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				data := chunk[:boundary]
 				seq := s.seqCounter.Add(1)
 				s.scrollback.Write(data)
+				if s.screen != nil {
+					s.screen.Observe(data)
+				}
 				s.fanOut(data, seq)
 				if s.detector != nil && s.onState != nil {
 					if state, changed := s.detector.Observe(data); changed {
@@ -147,6 +151,9 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 	if len(carryover) > 0 {
 		seq := s.seqCounter.Add(1)
 		s.scrollback.Write(carryover)
+		if s.screen != nil {
+			s.screen.Observe(carryover)
+		}
 		s.fanOut(carryover, seq)
 	}
 
@@ -221,6 +228,26 @@ func (s *Session) info() AttachInfo {
 	}
 
 	scrollback, truncated := s.scrollback.Snapshot()
+	var (
+		screenSnapshot      []byte
+		screenCols          uint16
+		screenRows          uint16
+		screenCursorX       uint16
+		screenCursorY       uint16
+		screenCursorVisible bool
+		screenSnapshotFresh bool
+	)
+	if s.screen != nil {
+		if snapshot, ok := s.screen.Snapshot(); ok {
+			screenSnapshot = snapshot.payload
+			screenCols = snapshot.cols
+			screenRows = snapshot.rows
+			screenCursorX = snapshot.cursorX
+			screenCursorY = snapshot.cursorY
+			screenCursorVisible = snapshot.cursorVisible
+			screenSnapshotFresh = true
+		}
+	}
 
 	return AttachInfo{
 		Scrollback:          scrollback,
@@ -232,6 +259,13 @@ func (s *Session) info() AttachInfo {
 		Running:             running,
 		ExitCode:            exitCode,
 		ExitSignal:          exitSignal,
+		ScreenSnapshot:      screenSnapshot,
+		ScreenCols:          screenCols,
+		ScreenRows:          screenRows,
+		ScreenCursorX:       screenCursorX,
+		ScreenCursorY:       screenCursorY,
+		ScreenCursorVisible: screenCursorVisible,
+		ScreenSnapshotFresh: screenSnapshotFresh,
 	}
 }
 
@@ -255,6 +289,9 @@ func (s *Session) resize(cols, rows uint16) error {
 	s.cols = cols
 	s.rows = rows
 	s.metaMu.Unlock()
+	if s.screen != nil {
+		s.screen.Resize(cols, rows)
+	}
 
 	return creackpty.Setsize(s.ptmx, &creackpty.Winsize{Cols: cols, Rows: rows})
 }

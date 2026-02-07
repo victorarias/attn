@@ -895,9 +895,18 @@ function AppContent({
 
   const handleResize = useCallback(
     (sessionId: string) => (cols: number, rows: number) => {
+      // Ignore resize callbacks from hidden/non-active terminals.
+      // Hidden terminals can transiently report tiny dimensions (e.g. 9x5),
+      // which corrupt full-screen TUIs if forwarded to the PTY.
+      if (sessionId !== activeSessionId || view !== 'session') {
+        return;
+      }
+      if (cols < 20 || rows < 8) {
+        return;
+      }
       resizeSession(sessionId, cols, rows);
     },
-    [resizeSession]
+    [activeSessionId, resizeSession, view]
   );
 
   const setTerminalRef = useCallback(
