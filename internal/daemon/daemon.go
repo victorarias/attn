@@ -556,29 +556,6 @@ func (d *Daemon) acquirePIDLock() error {
 	return nil
 }
 
-// waitForPort waits for the WebSocket port to become available
-func (d *Daemon) waitForPort() error {
-	port := os.Getenv("ATTN_WS_PORT")
-	if port == "" {
-		port = "9849"
-	}
-	addr := "127.0.0.1:" + port
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
-		if err != nil {
-			// Port is not in use - good!
-			return nil
-		}
-		conn.Close()
-		// Port still in use, wait and retry
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	return fmt.Errorf("port %s still in use after 5s", port)
-}
-
 // releasePIDLock unlocks and removes the PID file
 func (d *Daemon) releasePIDLock() {
 	if d.pidFile != nil {
