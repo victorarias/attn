@@ -44,6 +44,50 @@ type ApprovePRMessage struct {
 	ID string `json:"id"`
 }
 
+type AttachResultMessage struct {
+	// Cols corresponds to the JSON schema field "cols".
+	Cols *int `json:"cols,omitempty"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// LastSeq corresponds to the JSON schema field "last_seq".
+	LastSeq *int `json:"last_seq,omitempty"`
+
+	// Pid corresponds to the JSON schema field "pid".
+	Pid *int `json:"pid,omitempty"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows *int `json:"rows,omitempty"`
+
+	// Running corresponds to the JSON schema field "running".
+	Running *bool `json:"running,omitempty"`
+
+	// Scrollback corresponds to the JSON schema field "scrollback".
+	Scrollback *string `json:"scrollback,omitempty"`
+
+	// ScrollbackTruncated corresponds to the JSON schema field
+	// "scrollback_truncated".
+	ScrollbackTruncated *bool `json:"scrollback_truncated,omitempty"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type AttachSessionMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
 type AuthorState struct {
 	// Author corresponds to the JSON schema field "author".
 	Author string `json:"author"`
@@ -192,6 +236,20 @@ type CollapseRepoMessage struct {
 
 	// Repo corresponds to the JSON schema field "repo".
 	Repo string `json:"repo"`
+}
+
+type CommandErrorMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd *string `json:"cmd,omitempty"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error string `json:"error"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type CommitWIPMessage struct {
@@ -358,6 +416,14 @@ type DeleteWorktreeResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+}
+
+type DetachSessionMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
 }
 
 type EnsureRepoMessage struct {
@@ -623,6 +689,17 @@ type InjectTestSessionMessage struct {
 	Session Session `json:"session"`
 }
 
+type KillSessionMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Signal corresponds to the JSON schema field "signal".
+	Signal *string `json:"signal,omitempty"`
+}
+
 type ListBranchesMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -847,6 +924,56 @@ type PRVisitedMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+}
+
+type PtyDesyncMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason string `json:"reason"`
+}
+
+type PtyInputMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Data corresponds to the JSON schema field "data".
+	Data string `json:"data"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
+type PtyOutputMessage struct {
+	// Data corresponds to the JSON schema field "data".
+	Data string `json:"data"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq int `json:"seq"`
+}
+
+type PtyResizeMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
 }
 
 type QueryAuthorsMessage struct {
@@ -1193,6 +1320,20 @@ type Session struct {
 	Todos []string `json:"todos,omitempty"`
 }
 
+type SessionExitedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ExitCode corresponds to the JSON schema field "exit_code".
+	ExitCode int `json:"exit_code"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Signal corresponds to the JSON schema field "signal".
+	Signal *string `json:"signal,omitempty"`
+}
+
 type SessionState string
 
 const SessionStateIdle SessionState = "idle"
@@ -1208,6 +1349,58 @@ type SetSettingMessage struct {
 
 	// Value corresponds to the JSON schema field "value".
 	Value string `json:"value"`
+}
+
+type SpawnResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type SpawnSessionMessage struct {
+	// Agent corresponds to the JSON schema field "agent".
+	Agent string `json:"agent"`
+
+	// ClaudeExecutable corresponds to the JSON schema field "claude_executable".
+	ClaudeExecutable *string `json:"claude_executable,omitempty"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// CodexExecutable corresponds to the JSON schema field "codex_executable".
+	CodexExecutable *string `json:"codex_executable,omitempty"`
+
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// Cwd corresponds to the JSON schema field "cwd".
+	Cwd string `json:"cwd"`
+
+	// ForkSession corresponds to the JSON schema field "fork_session".
+	ForkSession *bool `json:"fork_session,omitempty"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Label corresponds to the JSON schema field "label".
+	Label *string `json:"label,omitempty"`
+
+	// ResumePicker corresponds to the JSON schema field "resume_picker".
+	ResumePicker *bool `json:"resume_picker,omitempty"`
+
+	// ResumeSessionID corresponds to the JSON schema field "resume_session_id".
+	ResumeSessionID *string `json:"resume_session_id,omitempty"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
 }
 
 type StartReviewMessage struct {
@@ -1385,8 +1578,17 @@ type WebSocketEvent struct {
 	// Cloned corresponds to the JSON schema field "cloned".
 	Cloned *bool `json:"cloned,omitempty"`
 
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd *string `json:"cmd,omitempty"`
+
+	// Cols corresponds to the JSON schema field "cols".
+	Cols *int `json:"cols,omitempty"`
+
 	// Conflict corresponds to the JSON schema field "conflict".
 	Conflict *bool `json:"conflict,omitempty"`
+
+	// Data corresponds to the JSON schema field "data".
+	Data *string `json:"data,omitempty"`
 
 	// Dirty corresponds to the JSON schema field "dirty".
 	Dirty *bool `json:"dirty,omitempty"`
@@ -1397,8 +1599,20 @@ type WebSocketEvent struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
+	// ExitCode corresponds to the JSON schema field "exit_code".
+	ExitCode *int `json:"exit_code,omitempty"`
+
 	// Found corresponds to the JSON schema field "found".
 	Found *bool `json:"found,omitempty"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID *string `json:"id,omitempty"`
+
+	// LastSeq corresponds to the JSON schema field "last_seq".
+	LastSeq *int `json:"last_seq,omitempty"`
+
+	// Pid corresponds to the JSON schema field "pid".
+	Pid *int `json:"pid,omitempty"`
 
 	// ProtocolVersion corresponds to the JSON schema field "protocol_version".
 	ProtocolVersion *string `json:"protocol_version,omitempty"`
@@ -1412,11 +1626,30 @@ type WebSocketEvent struct {
 	// RateLimitResource corresponds to the JSON schema field "rate_limit_resource".
 	RateLimitResource *string `json:"rate_limit_resource,omitempty"`
 
+	// Reason corresponds to the JSON schema field "reason".
+	Reason *string `json:"reason,omitempty"`
+
 	// RecentLocations corresponds to the JSON schema field "recent_locations".
 	RecentLocations []RecentLocation `json:"recent_locations,omitempty"`
 
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows *int `json:"rows,omitempty"`
+
+	// Running corresponds to the JSON schema field "running".
+	Running *bool `json:"running,omitempty"`
+
+	// Scrollback corresponds to the JSON schema field "scrollback".
+	Scrollback *string `json:"scrollback,omitempty"`
+
+	// ScrollbackTruncated corresponds to the JSON schema field
+	// "scrollback_truncated".
+	ScrollbackTruncated *bool `json:"scrollback_truncated,omitempty"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq *int `json:"seq,omitempty"`
 
 	// Session corresponds to the JSON schema field "session".
 	Session *Session `json:"session,omitempty"`
@@ -1426,6 +1659,9 @@ type WebSocketEvent struct {
 
 	// Settings corresponds to the JSON schema field "settings".
 	Settings RecordString `json:"settings,omitempty"`
+
+	// Signal corresponds to the JSON schema field "signal".
+	Signal *string `json:"signal,omitempty"`
 
 	// StashRef corresponds to the JSON schema field "stash_ref".
 	StashRef *string `json:"stash_ref,omitempty"`

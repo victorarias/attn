@@ -1,10 +1,12 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AuthorState, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, EnsureRepoMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionState, SetSettingMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionExitedMessage, SessionState, SetSettingMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
+//   const attachResultMessage = Convert.toAttachResultMessage(json);
+//   const attachSessionMessage = Convert.toAttachSessionMessage(json);
 //   const authorState = Convert.toAuthorState(json);
 //   const branch = Convert.toBranch(json);
 //   const branchDiffFile = Convert.toBranchDiffFile(json);
@@ -17,6 +19,7 @@
 //   const checkDirtyResultMessage = Convert.toCheckDirtyResultMessage(json);
 //   const clearSessionsMessage = Convert.toClearSessionsMessage(json);
 //   const collapseRepoMessage = Convert.toCollapseRepoMessage(json);
+//   const commandErrorMessage = Convert.toCommandErrorMessage(json);
 //   const commitWIPMessage = Convert.toCommitWIPMessage(json);
 //   const commitWIPResultMessage = Convert.toCommitWIPResultMessage(json);
 //   const createBranchMessage = Convert.toCreateBranchMessage(json);
@@ -31,6 +34,7 @@
 //   const deleteCommentResultMessage = Convert.toDeleteCommentResultMessage(json);
 //   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
+//   const detachSessionMessage = Convert.toDetachSessionMessage(json);
 //   const ensureRepoMessage = Convert.toEnsureRepoMessage(json);
 //   const fetchPRDetailsMessage = Convert.toFetchPRDetailsMessage(json);
 //   const fetchRemotesMessage = Convert.toFetchRemotesMessage(json);
@@ -54,6 +58,7 @@
 //   const heatState = Convert.toHeatState(json);
 //   const injectTestPRMessage = Convert.toInjectTestPRMessage(json);
 //   const injectTestSessionMessage = Convert.toInjectTestSessionMessage(json);
+//   const killSessionMessage = Convert.toKillSessionMessage(json);
 //   const listBranchesMessage = Convert.toListBranchesMessage(json);
 //   const listRemoteBranchesMessage = Convert.toListRemoteBranchesMessage(json);
 //   const listRemoteBranchesResultMessage = Convert.toListRemoteBranchesResultMessage(json);
@@ -69,6 +74,10 @@
 //   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
 //   const pRRole = Convert.toPRRole(json);
 //   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
+//   const ptyDesyncMessage = Convert.toPtyDesyncMessage(json);
+//   const ptyInputMessage = Convert.toPtyInputMessage(json);
+//   const ptyOutputMessage = Convert.toPtyOutputMessage(json);
+//   const ptyResizeMessage = Convert.toPtyResizeMessage(json);
 //   const queryAuthorsMessage = Convert.toQueryAuthorsMessage(json);
 //   const queryMessage = Convert.toQueryMessage(json);
 //   const queryPRsMessage = Convert.toQueryPRsMessage(json);
@@ -93,8 +102,11 @@
 //   const reviewStartedMessage = Convert.toReviewStartedMessage(json);
 //   const reviewState = Convert.toReviewState(json);
 //   const session = Convert.toSession(json);
+//   const sessionExitedMessage = Convert.toSessionExitedMessage(json);
 //   const sessionState = Convert.toSessionState(json);
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
+//   const spawnResultMessage = Convert.toSpawnResultMessage(json);
+//   const spawnSessionMessage = Convert.toSpawnSessionMessage(json);
 //   const startReviewMessage = Convert.toStartReviewMessage(json);
 //   const stashMessage = Convert.toStashMessage(json);
 //   const stashPopMessage = Convert.toStashPopMessage(json);
@@ -171,6 +183,35 @@ export interface ApprovePRMessage {
 
 export enum ApprovePRMessageCmd {
     ApprovePR = "approve_pr",
+}
+
+export interface AttachResultMessage {
+    cols?:                 number;
+    error?:                string;
+    event:                 AttachResultMessageEvent;
+    id:                    string;
+    last_seq?:             number;
+    pid?:                  number;
+    rows?:                 number;
+    running?:              boolean;
+    scrollback?:           string;
+    scrollback_truncated?: boolean;
+    success:               boolean;
+    [property: string]: any;
+}
+
+export enum AttachResultMessageEvent {
+    AttachResult = "attach_result",
+}
+
+export interface AttachSessionMessage {
+    cmd: AttachSessionMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum AttachSessionMessageCmd {
+    AttachSession = "attach_session",
 }
 
 export interface AuthorState {
@@ -315,6 +356,18 @@ export interface CollapseRepoMessage {
 
 export enum CollapseRepoMessageCmd {
     CollapseRepo = "collapse_repo",
+}
+
+export interface CommandErrorMessage {
+    cmd?:    string;
+    error:   string;
+    event:   CommandErrorMessageEvent;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum CommandErrorMessageEvent {
+    CommandError = "command_error",
 }
 
 export interface CommitWIPMessage {
@@ -469,6 +522,16 @@ export interface DeleteWorktreeResultMessage {
 
 export enum DeleteWorktreeResultMessageEvent {
     DeleteWorktreeResult = "delete_worktree_result",
+}
+
+export interface DetachSessionMessage {
+    cmd: DetachSessionMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum DetachSessionMessageCmd {
+    DetachSession = "detach_session",
 }
 
 export interface EnsureRepoMessage {
@@ -814,6 +877,17 @@ export enum SessionState {
     Working = "working",
 }
 
+export interface KillSessionMessage {
+    cmd:     KillSessionMessageCmd;
+    id:      string;
+    signal?: string;
+    [property: string]: any;
+}
+
+export enum KillSessionMessageCmd {
+    KillSession = "kill_session",
+}
+
 export interface ListBranchesMessage {
     cmd:       ListBranchesMessageCmd;
     main_repo: string;
@@ -984,6 +1058,52 @@ export interface PRVisitedMessage {
 
 export enum PRVisitedMessageCmd {
     PRVisited = "pr_visited",
+}
+
+export interface PtyDesyncMessage {
+    event:  PtyDesyncMessageEvent;
+    id:     string;
+    reason: string;
+    [property: string]: any;
+}
+
+export enum PtyDesyncMessageEvent {
+    PtyDesync = "pty_desync",
+}
+
+export interface PtyInputMessage {
+    cmd:  PtyInputMessageCmd;
+    data: string;
+    id:   string;
+    [property: string]: any;
+}
+
+export enum PtyInputMessageCmd {
+    PtyInput = "pty_input",
+}
+
+export interface PtyOutputMessage {
+    data:  string;
+    event: PtyOutputMessageEvent;
+    id:    string;
+    seq:   number;
+    [property: string]: any;
+}
+
+export enum PtyOutputMessageEvent {
+    PtyOutput = "pty_output",
+}
+
+export interface PtyResizeMessage {
+    cmd:  PtyResizeMessageCmd;
+    cols: number;
+    id:   string;
+    rows: number;
+    [property: string]: any;
+}
+
+export enum PtyResizeMessageCmd {
+    PtyResize = "pty_resize",
 }
 
 export interface QueryAuthorsMessage {
@@ -1274,6 +1394,18 @@ export interface Session {
     [property: string]: any;
 }
 
+export interface SessionExitedMessage {
+    event:     SessionExitedMessageEvent;
+    exit_code: number;
+    id:        string;
+    signal?:   string;
+    [property: string]: any;
+}
+
+export enum SessionExitedMessageEvent {
+    SessionExited = "session_exited",
+}
+
 export interface SetSettingMessage {
     cmd:   SetSettingMessageCmd;
     key:   string;
@@ -1283,6 +1415,38 @@ export interface SetSettingMessage {
 
 export enum SetSettingMessageCmd {
     SetSetting = "set_setting",
+}
+
+export interface SpawnResultMessage {
+    error?:  string;
+    event:   SpawnResultMessageEvent;
+    id:      string;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum SpawnResultMessageEvent {
+    SpawnResult = "spawn_result",
+}
+
+export interface SpawnSessionMessage {
+    agent:              string;
+    claude_executable?: string;
+    cmd:                SpawnSessionMessageCmd;
+    codex_executable?:  string;
+    cols:               number;
+    cwd:                string;
+    fork_session?:      boolean;
+    id:                 string;
+    label?:             string;
+    resume_picker?:     boolean;
+    resume_session_id?: string;
+    rows:               number;
+    [property: string]: any;
+}
+
+export enum SpawnSessionMessageCmd {
+    SpawnSession = "spawn_session",
 }
 
 export interface StartReviewMessage {
@@ -1450,29 +1614,43 @@ export enum UpdateCommentResultMessageEvent {
 }
 
 export interface WebSocketEvent {
-    authors?:             AuthorElement[];
-    branch?:              string;
-    branches?:            BranchElement[];
-    cloned?:              boolean;
-    conflict?:            boolean;
-    dirty?:               boolean;
-    error?:               string;
-    event:                string;
-    found?:               boolean;
-    protocol_version?:    string;
-    prs?:                 PRElement[];
-    rate_limit_reset_at?: string;
-    rate_limit_resource?: string;
-    recent_locations?:    LocationElement[];
-    repos?:               RepoElement[];
-    session?:             SessionElement;
-    sessions?:            SessionElement[];
-    settings?:            { [key: string]: any };
-    stash_ref?:           string;
-    success?:             boolean;
-    target_path?:         string;
-    warnings?:            WarningElement[];
-    worktrees?:           WorktreeElement[];
+    authors?:              AuthorElement[];
+    branch?:               string;
+    branches?:             BranchElement[];
+    cloned?:               boolean;
+    cmd?:                  string;
+    cols?:                 number;
+    conflict?:             boolean;
+    data?:                 string;
+    dirty?:                boolean;
+    error?:                string;
+    event:                 string;
+    exit_code?:            number;
+    found?:                boolean;
+    id?:                   string;
+    last_seq?:             number;
+    pid?:                  number;
+    protocol_version?:     string;
+    prs?:                  PRElement[];
+    rate_limit_reset_at?:  string;
+    rate_limit_resource?:  string;
+    reason?:               string;
+    recent_locations?:     LocationElement[];
+    repos?:                RepoElement[];
+    rows?:                 number;
+    running?:              boolean;
+    scrollback?:           string;
+    scrollback_truncated?: boolean;
+    seq?:                  number;
+    session?:              SessionElement;
+    sessions?:             SessionElement[];
+    settings?:             { [key: string]: any };
+    signal?:               string;
+    stash_ref?:            string;
+    success?:              boolean;
+    target_path?:          string;
+    warnings?:             WarningElement[];
+    worktrees?:            WorktreeElement[];
     [property: string]: any;
 }
 
@@ -1549,6 +1727,22 @@ export class Convert {
 
     public static approvePRMessageToJson(value: ApprovePRMessage): string {
         return JSON.stringify(uncast(value, r("ApprovePRMessage")), null, 2);
+    }
+
+    public static toAttachResultMessage(json: string): AttachResultMessage {
+        return cast(JSON.parse(json), r("AttachResultMessage"));
+    }
+
+    public static attachResultMessageToJson(value: AttachResultMessage): string {
+        return JSON.stringify(uncast(value, r("AttachResultMessage")), null, 2);
+    }
+
+    public static toAttachSessionMessage(json: string): AttachSessionMessage {
+        return cast(JSON.parse(json), r("AttachSessionMessage"));
+    }
+
+    public static attachSessionMessageToJson(value: AttachSessionMessage): string {
+        return JSON.stringify(uncast(value, r("AttachSessionMessage")), null, 2);
     }
 
     public static toAuthorState(json: string): AuthorState {
@@ -1645,6 +1839,14 @@ export class Convert {
 
     public static collapseRepoMessageToJson(value: CollapseRepoMessage): string {
         return JSON.stringify(uncast(value, r("CollapseRepoMessage")), null, 2);
+    }
+
+    public static toCommandErrorMessage(json: string): CommandErrorMessage {
+        return cast(JSON.parse(json), r("CommandErrorMessage"));
+    }
+
+    public static commandErrorMessageToJson(value: CommandErrorMessage): string {
+        return JSON.stringify(uncast(value, r("CommandErrorMessage")), null, 2);
     }
 
     public static toCommitWIPMessage(json: string): CommitWIPMessage {
@@ -1757,6 +1959,14 @@ export class Convert {
 
     public static deleteWorktreeResultMessageToJson(value: DeleteWorktreeResultMessage): string {
         return JSON.stringify(uncast(value, r("DeleteWorktreeResultMessage")), null, 2);
+    }
+
+    public static toDetachSessionMessage(json: string): DetachSessionMessage {
+        return cast(JSON.parse(json), r("DetachSessionMessage"));
+    }
+
+    public static detachSessionMessageToJson(value: DetachSessionMessage): string {
+        return JSON.stringify(uncast(value, r("DetachSessionMessage")), null, 2);
     }
 
     public static toEnsureRepoMessage(json: string): EnsureRepoMessage {
@@ -1943,6 +2153,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("InjectTestSessionMessage")), null, 2);
     }
 
+    public static toKillSessionMessage(json: string): KillSessionMessage {
+        return cast(JSON.parse(json), r("KillSessionMessage"));
+    }
+
+    public static killSessionMessageToJson(value: KillSessionMessage): string {
+        return JSON.stringify(uncast(value, r("KillSessionMessage")), null, 2);
+    }
+
     public static toListBranchesMessage(json: string): ListBranchesMessage {
         return cast(JSON.parse(json), r("ListBranchesMessage"));
     }
@@ -2061,6 +2279,38 @@ export class Convert {
 
     public static pRVisitedMessageToJson(value: PRVisitedMessage): string {
         return JSON.stringify(uncast(value, r("PRVisitedMessage")), null, 2);
+    }
+
+    public static toPtyDesyncMessage(json: string): PtyDesyncMessage {
+        return cast(JSON.parse(json), r("PtyDesyncMessage"));
+    }
+
+    public static ptyDesyncMessageToJson(value: PtyDesyncMessage): string {
+        return JSON.stringify(uncast(value, r("PtyDesyncMessage")), null, 2);
+    }
+
+    public static toPtyInputMessage(json: string): PtyInputMessage {
+        return cast(JSON.parse(json), r("PtyInputMessage"));
+    }
+
+    public static ptyInputMessageToJson(value: PtyInputMessage): string {
+        return JSON.stringify(uncast(value, r("PtyInputMessage")), null, 2);
+    }
+
+    public static toPtyOutputMessage(json: string): PtyOutputMessage {
+        return cast(JSON.parse(json), r("PtyOutputMessage"));
+    }
+
+    public static ptyOutputMessageToJson(value: PtyOutputMessage): string {
+        return JSON.stringify(uncast(value, r("PtyOutputMessage")), null, 2);
+    }
+
+    public static toPtyResizeMessage(json: string): PtyResizeMessage {
+        return cast(JSON.parse(json), r("PtyResizeMessage"));
+    }
+
+    public static ptyResizeMessageToJson(value: PtyResizeMessage): string {
+        return JSON.stringify(uncast(value, r("PtyResizeMessage")), null, 2);
     }
 
     public static toQueryAuthorsMessage(json: string): QueryAuthorsMessage {
@@ -2255,6 +2505,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("Session")), null, 2);
     }
 
+    public static toSessionExitedMessage(json: string): SessionExitedMessage {
+        return cast(JSON.parse(json), r("SessionExitedMessage"));
+    }
+
+    public static sessionExitedMessageToJson(value: SessionExitedMessage): string {
+        return JSON.stringify(uncast(value, r("SessionExitedMessage")), null, 2);
+    }
+
     public static toSessionState(json: string): SessionState {
         return cast(JSON.parse(json), r("SessionState"));
     }
@@ -2269,6 +2527,22 @@ export class Convert {
 
     public static setSettingMessageToJson(value: SetSettingMessage): string {
         return JSON.stringify(uncast(value, r("SetSettingMessage")), null, 2);
+    }
+
+    public static toSpawnResultMessage(json: string): SpawnResultMessage {
+        return cast(JSON.parse(json), r("SpawnResultMessage"));
+    }
+
+    public static spawnResultMessageToJson(value: SpawnResultMessage): string {
+        return JSON.stringify(uncast(value, r("SpawnResultMessage")), null, 2);
+    }
+
+    public static toSpawnSessionMessage(json: string): SpawnSessionMessage {
+        return cast(JSON.parse(json), r("SpawnSessionMessage"));
+    }
+
+    public static spawnSessionMessageToJson(value: SpawnSessionMessage): string {
+        return JSON.stringify(uncast(value, r("SpawnSessionMessage")), null, 2);
     }
 
     public static toStartReviewMessage(json: string): StartReviewMessage {
@@ -2619,6 +2893,23 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
         { json: "id", js: "id", typ: "" },
     ], "any"),
+    "AttachResultMessage": o([
+        { json: "cols", js: "cols", typ: u(undefined, 0) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("AttachResultMessageEvent") },
+        { json: "id", js: "id", typ: "" },
+        { json: "last_seq", js: "last_seq", typ: u(undefined, 0) },
+        { json: "pid", js: "pid", typ: u(undefined, 0) },
+        { json: "rows", js: "rows", typ: u(undefined, 0) },
+        { json: "running", js: "running", typ: u(undefined, true) },
+        { json: "scrollback", js: "scrollback", typ: u(undefined, "") },
+        { json: "scrollback_truncated", js: "scrollback_truncated", typ: u(undefined, true) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "AttachSessionMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AttachSessionMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
     "AuthorState": o([
         { json: "author", js: "author", typ: "" },
         { json: "muted", js: "muted", typ: true },
@@ -2699,6 +2990,12 @@ const typeMap: any = {
         { json: "collapsed", js: "collapsed", typ: true },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
+    "CommandErrorMessage": o([
+        { json: "cmd", js: "cmd", typ: u(undefined, "") },
+        { json: "error", js: "error", typ: "" },
+        { json: "event", js: "event", typ: r("CommandErrorMessageEvent") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "CommitWIPMessage": o([
         { json: "cmd", js: "cmd", typ: r("CommitWIPMessageCmd") },
         { json: "repo", js: "repo", typ: "" },
@@ -2772,6 +3069,10 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("DeleteWorktreeResultMessageEvent") },
         { json: "path", js: "path", typ: "" },
         { json: "success", js: "success", typ: true },
+    ], "any"),
+    "DetachSessionMessage": o([
+        { json: "cmd", js: "cmd", typ: r("DetachSessionMessageCmd") },
+        { json: "id", js: "id", typ: "" },
     ], "any"),
     "EnsureRepoMessage": o([
         { json: "clone_url", js: "clone_url", typ: "" },
@@ -2959,6 +3260,11 @@ const typeMap: any = {
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
     ], "any"),
+    "KillSessionMessage": o([
+        { json: "cmd", js: "cmd", typ: r("KillSessionMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+        { json: "signal", js: "signal", typ: u(undefined, "") },
+    ], "any"),
     "ListBranchesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListBranchesMessageCmd") },
         { json: "main_repo", js: "main_repo", typ: "" },
@@ -3050,6 +3356,28 @@ const typeMap: any = {
     "PRVisitedMessage": o([
         { json: "cmd", js: "cmd", typ: r("PRVisitedMessageCmd") },
         { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "PtyDesyncMessage": o([
+        { json: "event", js: "event", typ: r("PtyDesyncMessageEvent") },
+        { json: "id", js: "id", typ: "" },
+        { json: "reason", js: "reason", typ: "" },
+    ], "any"),
+    "PtyInputMessage": o([
+        { json: "cmd", js: "cmd", typ: r("PtyInputMessageCmd") },
+        { json: "data", js: "data", typ: "" },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "PtyOutputMessage": o([
+        { json: "data", js: "data", typ: "" },
+        { json: "event", js: "event", typ: r("PtyOutputMessageEvent") },
+        { json: "id", js: "id", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
+    ], "any"),
+    "PtyResizeMessage": o([
+        { json: "cmd", js: "cmd", typ: r("PtyResizeMessageCmd") },
+        { json: "cols", js: "cols", typ: 0 },
+        { json: "id", js: "id", typ: "" },
+        { json: "rows", js: "rows", typ: 0 },
     ], "any"),
     "QueryAuthorsMessage": o([
         { json: "cmd", js: "cmd", typ: r("QueryAuthorsMessageCmd") },
@@ -3219,10 +3547,36 @@ const typeMap: any = {
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
     ], "any"),
+    "SessionExitedMessage": o([
+        { json: "event", js: "event", typ: r("SessionExitedMessageEvent") },
+        { json: "exit_code", js: "exit_code", typ: 0 },
+        { json: "id", js: "id", typ: "" },
+        { json: "signal", js: "signal", typ: u(undefined, "") },
+    ], "any"),
     "SetSettingMessage": o([
         { json: "cmd", js: "cmd", typ: r("SetSettingMessageCmd") },
         { json: "key", js: "key", typ: "" },
         { json: "value", js: "value", typ: "" },
+    ], "any"),
+    "SpawnResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("SpawnResultMessageEvent") },
+        { json: "id", js: "id", typ: "" },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "SpawnSessionMessage": o([
+        { json: "agent", js: "agent", typ: "" },
+        { json: "claude_executable", js: "claude_executable", typ: u(undefined, "") },
+        { json: "cmd", js: "cmd", typ: r("SpawnSessionMessageCmd") },
+        { json: "codex_executable", js: "codex_executable", typ: u(undefined, "") },
+        { json: "cols", js: "cols", typ: 0 },
+        { json: "cwd", js: "cwd", typ: "" },
+        { json: "fork_session", js: "fork_session", typ: u(undefined, true) },
+        { json: "id", js: "id", typ: "" },
+        { json: "label", js: "label", typ: u(undefined, "") },
+        { json: "resume_picker", js: "resume_picker", typ: u(undefined, true) },
+        { json: "resume_session_id", js: "resume_session_id", typ: u(undefined, "") },
+        { json: "rows", js: "rows", typ: 0 },
     ], "any"),
     "StartReviewMessage": o([
         { json: "base_branch", js: "base_branch", typ: "" },
@@ -3303,20 +3657,34 @@ const typeMap: any = {
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "branches", js: "branches", typ: u(undefined, a(r("BranchElement"))) },
         { json: "cloned", js: "cloned", typ: u(undefined, true) },
+        { json: "cmd", js: "cmd", typ: u(undefined, "") },
+        { json: "cols", js: "cols", typ: u(undefined, 0) },
         { json: "conflict", js: "conflict", typ: u(undefined, true) },
+        { json: "data", js: "data", typ: u(undefined, "") },
         { json: "dirty", js: "dirty", typ: u(undefined, true) },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: "" },
+        { json: "exit_code", js: "exit_code", typ: u(undefined, 0) },
         { json: "found", js: "found", typ: u(undefined, true) },
+        { json: "id", js: "id", typ: u(undefined, "") },
+        { json: "last_seq", js: "last_seq", typ: u(undefined, 0) },
+        { json: "pid", js: "pid", typ: u(undefined, 0) },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "rate_limit_reset_at", js: "rate_limit_reset_at", typ: u(undefined, "") },
         { json: "rate_limit_resource", js: "rate_limit_resource", typ: u(undefined, "") },
+        { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "recent_locations", js: "recent_locations", typ: u(undefined, a(r("LocationElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
+        { json: "rows", js: "rows", typ: u(undefined, 0) },
+        { json: "running", js: "running", typ: u(undefined, true) },
+        { json: "scrollback", js: "scrollback", typ: u(undefined, "") },
+        { json: "scrollback_truncated", js: "scrollback_truncated", typ: u(undefined, true) },
+        { json: "seq", js: "seq", typ: u(undefined, 0) },
         { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "signal", js: "signal", typ: u(undefined, "") },
         { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
         { json: "success", js: "success", typ: u(undefined, true) },
         { json: "target_path", js: "target_path", typ: u(undefined, "") },
@@ -3358,6 +3726,12 @@ const typeMap: any = {
     "ApprovePRMessageCmd": [
         "approve_pr",
     ],
+    "AttachResultMessageEvent": [
+        "attach_result",
+    ],
+    "AttachSessionMessageCmd": [
+        "attach_session",
+    ],
     "BranchDiffFilesResultMessageEvent": [
         "branch_diff_files_result",
     ],
@@ -3384,6 +3758,9 @@ const typeMap: any = {
     ],
     "CollapseRepoMessageCmd": [
         "collapse_repo",
+    ],
+    "CommandErrorMessageEvent": [
+        "command_error",
     ],
     "CommitWIPMessageCmd": [
         "commit_wip",
@@ -3423,6 +3800,9 @@ const typeMap: any = {
     ],
     "DeleteWorktreeResultMessageEvent": [
         "delete_worktree_result",
+    ],
+    "DetachSessionMessageCmd": [
+        "detach_session",
     ],
     "EnsureRepoMessageCmd": [
         "ensure_repo",
@@ -3501,6 +3881,9 @@ const typeMap: any = {
         "waiting_input",
         "working",
     ],
+    "KillSessionMessageCmd": [
+        "kill_session",
+    ],
     "ListBranchesMessageCmd": [
         "list_branches",
     ],
@@ -3539,6 +3922,18 @@ const typeMap: any = {
     ],
     "PRVisitedMessageCmd": [
         "pr_visited",
+    ],
+    "PtyDesyncMessageEvent": [
+        "pty_desync",
+    ],
+    "PtyInputMessageCmd": [
+        "pty_input",
+    ],
+    "PtyOutputMessageEvent": [
+        "pty_output",
+    ],
+    "PtyResizeMessageCmd": [
+        "pty_resize",
     ],
     "QueryAuthorsMessageCmd": [
         "query_authors",
@@ -3588,8 +3983,17 @@ const typeMap: any = {
     "ReviewStartedMessageEvent": [
         "review_started",
     ],
+    "SessionExitedMessageEvent": [
+        "session_exited",
+    ],
     "SetSettingMessageCmd": [
         "set_setting",
+    ],
+    "SpawnResultMessageEvent": [
+        "spawn_result",
+    ],
+    "SpawnSessionMessageCmd": [
+        "spawn_session",
     ],
     "StartReviewMessageCmd": [
         "start_review",

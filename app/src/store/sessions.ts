@@ -135,6 +135,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             session.terminal.write(data);
             break;
           }
+          case 'reset': {
+            session.terminal.reset();
+            break;
+          }
           case 'exit': {
             session.terminal.write(`\r\n[Process exited with code ${msg.code}]\r\n`);
             break;
@@ -233,6 +237,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         args: {
           id,
           cwd: session.cwd,
+          label: session.label,
           cols,
           rows,
           shell: false,

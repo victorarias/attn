@@ -58,6 +58,10 @@ export function UtilityTerminalPanel({
           xterm.write(data);
           break;
         }
+        case 'reset': {
+          xterm.reset();
+          break;
+        }
         case 'exit': {
           xterm.write(`\r\n[Process exited with code ${msg.code}]\r\n`);
           break;

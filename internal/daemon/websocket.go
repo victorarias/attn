@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,12 +12,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"nhooyr.io/websocket"
 
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -33,9 +36,13 @@ const (
 // wsClient represents a connected WebSocket client
 type wsClient struct {
 	conn      *websocket.Conn
-	send      chan []byte
+	send      chan outboundMessage
 	recv      chan []byte // incoming messages for ordered processing
 	slowCount int         // tracks consecutive failed sends
+
+	// PTY subscriptions keyed by session ID
+	attachedSessions map[string]string // session -> subscriber id
+	attachMu         sync.Mutex
 
 	// Git status subscription state
 	gitStatusDir    string
@@ -65,10 +72,21 @@ func (c *wsClient) stopGitStatusPoll() {
 // BroadcastListener is called for each broadcast event (for testing)
 type BroadcastListener func(event *protocol.WebSocketEvent)
 
+type messageKind int
+
+const (
+	messageKindText messageKind = iota
+)
+
+type outboundMessage struct {
+	kind    messageKind
+	payload []byte
+}
+
 // wsHub manages all WebSocket connections
 type wsHub struct {
 	clients           map[*wsClient]bool
-	broadcast         chan []byte
+	broadcast         chan outboundMessage
 	register          chan *wsClient
 	unregister        chan *wsClient
 	mu                sync.RWMutex
@@ -81,7 +99,7 @@ const maxSlowCount = 3 // disconnect after this many consecutive failed sends
 func newWSHub() *wsHub {
 	return &wsHub{
 		clients:    make(map[*wsClient]bool),
-		broadcast:  make(chan []byte, 256),
+		broadcast:  make(chan outboundMessage, 256),
 		register:   make(chan *wsClient),
 		unregister: make(chan *wsClient),
 		logf:       func(format string, args ...interface{}) {}, // no-op by default
@@ -146,8 +164,9 @@ func (h *wsHub) Broadcast(event *protocol.WebSocketEvent) {
 		h.logf("WebSocket broadcast marshal error: %v", err)
 		return
 	}
+	message := outboundMessage{kind: messageKindText, payload: data}
 	select {
-	case h.broadcast <- data:
+	case h.broadcast <- message:
 		// Message queued for broadcast
 	default:
 		// Broadcast channel full - this indicates the hub is overwhelmed
@@ -162,10 +181,45 @@ func (h *wsHub) ClientCount() int {
 	return len(h.clients)
 }
 
+func isAllowedWSOrigin(origin string) bool {
+	if origin == "" {
+		// Non-browser clients/tests may omit Origin.
+		return true
+	}
+	allowedPrefixes := []string{
+		"tauri://localhost",
+		"http://tauri.localhost",
+		"http://localhost",
+		"http://127.0.0.1",
+		"https://localhost",
+		"https://127.0.0.1",
+	}
+	for _, prefix := range allowedPrefixes {
+		if strings.HasPrefix(origin, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // handleWS handles WebSocket connections
 func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if !isAllowedWSOrigin(origin) {
+		d.logf("WebSocket rejected origin: %s", origin)
+		http.Error(w, "forbidden origin", http.StatusForbidden)
+		return
+	}
+
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"}, // Allow all origins for local app
+		OriginPatterns: []string{
+			"tauri://localhost",
+			"http://tauri.localhost",
+			"http://localhost:*",
+			"http://127.0.0.1:*",
+			"https://localhost:*",
+			"https://127.0.0.1:*",
+		},
 	})
 	if err != nil {
 		d.logf("WebSocket accept error: %v", err)
@@ -173,9 +227,10 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &wsClient{
-		conn: conn,
-		send: make(chan []byte, 256),
-		recv: make(chan []byte, 256), // buffer for incoming messages
+		conn:             conn,
+		send:             make(chan outboundMessage, 256),
+		recv:             make(chan []byte, 256), // buffer for incoming messages
+		attachedSessions: make(map[string]string),
 	}
 
 	d.wsHub.register <- client
@@ -217,10 +272,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 	if err != nil {
 		return
 	}
-	select {
-	case client.send <- data:
-	default:
-	}
+	_ = d.sendOutbound(client, outboundMessage{kind: messageKindText, payload: data})
 
 	// Fetch details for all PRs in background (app launch)
 	go d.fetchAllPRDetails()
@@ -233,11 +285,24 @@ func (d *Daemon) wsWritePump(client *wsClient) {
 
 	for message := range client.send {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err := client.conn.Write(ctx, websocket.MessageText, message)
+		wsType := websocket.MessageText
+		if message.kind != messageKindText {
+			wsType = websocket.MessageBinary
+		}
+		err := client.conn.Write(ctx, wsType, message.payload)
 		cancel()
 		if err != nil {
 			return
 		}
+	}
+}
+
+func (d *Daemon) sendOutbound(client *wsClient, message outboundMessage) bool {
+	select {
+	case client.send <- message:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -274,6 +339,7 @@ func (d *Daemon) wsPingLoop(client *wsClient, done <-chan struct{}) {
 
 func (d *Daemon) wsReadPump(client *wsClient) {
 	defer func() {
+		d.detachAllSessions(client)
 		close(client.recv) // signal wsMsgPump to exit
 		d.wsHub.unregister <- client
 		client.conn.Close(websocket.StatusNormalClosure, "")
@@ -289,7 +355,25 @@ func (d *Daemon) wsReadPump(client *wsClient) {
 			d.logf("WebSocket read error: %v", err)
 			return
 		}
-		d.logf("WebSocket raw data received: %s", string(data))
+		var peek struct {
+			Cmd string `json:"cmd"`
+		}
+		if err := json.Unmarshal(data, &peek); err != nil {
+			d.logf("WebSocket read parse error: %v", err)
+			continue
+		}
+		if peek.Cmd == protocol.CmdPtyInput {
+			cmd, msg, err := protocol.ParseMessage(data)
+			if err != nil {
+				d.logf("WebSocket pty_input parse error: %v", err)
+				continue
+			}
+			if cmd == protocol.CmdPtyInput {
+				d.handlePtyInputFast(client, msg.(*protocol.PtyInputMessage))
+				continue
+			}
+		}
+		d.logf("WebSocket cmd received: %s", peek.Cmd)
 
 		// Enqueue for ordered processing (non-blocking with buffer)
 		select {
@@ -301,10 +385,14 @@ func (d *Daemon) wsReadPump(client *wsClient) {
 }
 
 func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
-	d.logf("WebSocket received: %s", string(data))
 	cmd, msg, err := protocol.ParseMessage(data)
 	if err != nil {
-		d.logf("WebSocket parse error: %v", err)
+		var peek struct {
+			Cmd string `json:"cmd"`
+		}
+		_ = json.Unmarshal(data, &peek)
+		d.logf("WebSocket parse error for cmd=%s: %v", peek.Cmd, err)
+		d.sendCommandError(client, peek.Cmd, err.Error())
 		return
 	}
 	d.logf("WebSocket parsed cmd: %s", cmd)
@@ -515,6 +603,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		unregMsg := msg.(*protocol.UnregisterMessage)
 		d.logf("Unregistering session %s via WebSocket", unregMsg.ID)
 		d.store.Remove(unregMsg.ID)
+		if d.ptyManager != nil {
+			d.ptyManager.Remove(unregMsg.ID)
+		}
 		// Broadcast updated sessions list
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:    protocol.EventSessionsUpdated,
@@ -663,6 +754,262 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		cancelMsg := msg.(*protocol.CancelReviewMessage)
 		d.logf("Cancelling review %s", cancelMsg.ReviewID)
 		d.handleCancelReview(client, cancelMsg)
+
+	case protocol.CmdSpawnSession:
+		spawnMsg := msg.(*protocol.SpawnSessionMessage)
+		d.handleSpawnSession(client, spawnMsg)
+
+	case protocol.CmdAttachSession:
+		attachMsg := msg.(*protocol.AttachSessionMessage)
+		d.handleAttachSession(client, attachMsg)
+
+	case protocol.CmdDetachSession:
+		detachMsg := msg.(*protocol.DetachSessionMessage)
+		d.detachSession(client, detachMsg.ID)
+
+	case protocol.CmdPtyResize:
+		resizeMsg := msg.(*protocol.PtyResizeMessage)
+		d.handlePtyResize(client, resizeMsg)
+
+	case protocol.CmdKillSession:
+		killMsg := msg.(*protocol.KillSessionMessage)
+		d.handleKillSession(client, killMsg)
+
+	default:
+		d.sendCommandError(client, cmd, "unsupported command")
+	}
+}
+
+func (d *Daemon) sendCommandError(client *wsClient, cmd, errMsg string) {
+	event := &protocol.WebSocketEvent{
+		Event:   protocol.EventCommandError,
+		Cmd:     protocol.Ptr(cmd),
+		Success: protocol.Ptr(false),
+		Error:   protocol.Ptr(errMsg),
+	}
+	d.sendToClient(client, event)
+}
+
+func wsSubscriberID(client *wsClient, sessionID string) string {
+	return fmt.Sprintf("%p:%s", client, sessionID)
+}
+
+func (d *Daemon) detachSession(client *wsClient, sessionID string) {
+	client.attachMu.Lock()
+	subID, ok := client.attachedSessions[sessionID]
+	if ok {
+		delete(client.attachedSessions, sessionID)
+	}
+	client.attachMu.Unlock()
+	if ok {
+		d.ptyManager.Detach(sessionID, subID)
+	}
+}
+
+func (d *Daemon) detachAllSessions(client *wsClient) {
+	client.attachMu.Lock()
+	attached := make(map[string]string, len(client.attachedSessions))
+	for sessionID, subID := range client.attachedSessions {
+		attached[sessionID] = subID
+	}
+	client.attachedSessions = make(map[string]string)
+	client.attachMu.Unlock()
+
+	for sessionID, subID := range attached {
+		d.ptyManager.Detach(sessionID, subID)
+	}
+}
+
+func (d *Daemon) handlePtyInputFast(_ *wsClient, msg *protocol.PtyInputMessage) {
+	if msg == nil {
+		return
+	}
+	if err := d.ptyManager.Input(msg.ID, []byte(msg.Data)); err != nil {
+		d.logf("pty_input failed for %s: %v", msg.ID, err)
+	}
+}
+
+func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
+	agent := strings.TrimSpace(strings.ToLower(msg.Agent))
+	if agent == "" {
+		agent = "codex"
+	}
+	isShell := agent == "shell"
+	label := protocol.Deref(msg.Label)
+	if label == "" {
+		label = filepath.Base(msg.Cwd)
+	}
+
+	if !isShell {
+		branchInfo, _ := git.GetBranchInfo(msg.Cwd)
+		nowStr := string(protocol.TimestampNow())
+		session := &protocol.Session{
+			ID:             msg.ID,
+			Label:          label,
+			Directory:      msg.Cwd,
+			State:          protocol.SessionStateWorking,
+			StateSince:     nowStr,
+			StateUpdatedAt: nowStr,
+			LastSeen:       nowStr,
+		}
+		if branchInfo != nil {
+			if branchInfo.Branch != "" {
+				session.Branch = protocol.Ptr(branchInfo.Branch)
+			}
+			if branchInfo.IsWorktree {
+				session.IsWorktree = protocol.Ptr(true)
+			}
+			if branchInfo.MainRepo != "" {
+				session.MainRepo = protocol.Ptr(branchInfo.MainRepo)
+			}
+		}
+
+		d.store.Add(session)
+		d.store.UpsertRecentLocation(msg.Cwd, label)
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:   protocol.EventSessionRegistered,
+			Session: session,
+		})
+	}
+
+	spawnOpts := pty.SpawnOptions{
+		ID:               msg.ID,
+		CWD:              msg.Cwd,
+		Agent:            agent,
+		Label:            label,
+		Cols:             uint16(msg.Cols),
+		Rows:             uint16(msg.Rows),
+		ResumeSessionID:  protocol.Deref(msg.ResumeSessionID),
+		ResumePicker:     protocol.Deref(msg.ResumePicker),
+		ForkSession:      protocol.Deref(msg.ForkSession),
+		ClaudeExecutable: protocol.Deref(msg.ClaudeExecutable),
+		CodexExecutable:  protocol.Deref(msg.CodexExecutable),
+	}
+
+	if err := d.ptyManager.Spawn(spawnOpts); err != nil {
+		if !isShell {
+			d.store.Remove(msg.ID)
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event:    protocol.EventSessionsUpdated,
+				Sessions: protocol.SessionsToValues(d.store.List("")),
+			})
+		}
+		d.sendToClient(client, protocol.SpawnResultMessage{
+			Event:   protocol.EventSpawnResult,
+			ID:      msg.ID,
+			Success: false,
+			Error:   protocol.Ptr(err.Error()),
+		})
+		return
+	}
+
+	d.sendToClient(client, protocol.SpawnResultMessage{
+		Event:   protocol.EventSpawnResult,
+		ID:      msg.ID,
+		Success: true,
+	})
+}
+
+func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessionMessage) {
+	subID := wsSubscriberID(client, msg.ID)
+
+	info, err := d.ptyManager.Attach(
+		msg.ID,
+		subID,
+		func(data []byte, seq uint32) bool {
+			encoded := base64.StdEncoding.EncodeToString(data)
+			event := &protocol.WebSocketEvent{
+				Event: protocol.EventPtyOutput,
+				ID:    protocol.Ptr(msg.ID),
+				Data:  protocol.Ptr(encoded),
+				Seq:   protocol.Ptr(int(seq)),
+			}
+			payload, marshalErr := json.Marshal(event)
+			if marshalErr != nil {
+				return true
+			}
+			return d.sendOutbound(client, outboundMessage{
+				kind:    messageKindText,
+				payload: payload,
+			})
+		},
+		func(reason string) {
+			event := &protocol.WebSocketEvent{
+				Event:  protocol.EventPtyDesync,
+				ID:     protocol.Ptr(msg.ID),
+				Reason: protocol.Ptr(reason),
+			}
+			payload, marshalErr := json.Marshal(event)
+			if marshalErr != nil {
+				return
+			}
+			_ = d.sendOutbound(client, outboundMessage{
+				kind:    messageKindText,
+				payload: payload,
+			})
+		},
+	)
+	if err != nil {
+		d.sendToClient(client, protocol.AttachResultMessage{
+			Event:   protocol.EventAttachResult,
+			ID:      msg.ID,
+			Success: false,
+			Error:   protocol.Ptr(err.Error()),
+		})
+		return
+	}
+
+	client.attachMu.Lock()
+	client.attachedSessions[msg.ID] = subID
+	client.attachMu.Unlock()
+
+	result := protocol.AttachResultMessage{
+		Event:               protocol.EventAttachResult,
+		ID:                  msg.ID,
+		Success:             true,
+		ScrollbackTruncated: protocol.Ptr(info.ScrollbackTruncated),
+		LastSeq:             protocol.Ptr(int(info.LastSeq)),
+		Cols:                protocol.Ptr(int(info.Cols)),
+		Rows:                protocol.Ptr(int(info.Rows)),
+		Pid:                 protocol.Ptr(info.PID),
+		Running:             protocol.Ptr(info.Running),
+	}
+	if len(info.Scrollback) > 0 {
+		encoded := base64.StdEncoding.EncodeToString(info.Scrollback)
+		result.Scrollback = protocol.Ptr(encoded)
+	}
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handlePtyResize(_ *wsClient, msg *protocol.PtyResizeMessage) {
+	if msg.Cols <= 0 || msg.Rows <= 0 {
+		return
+	}
+	if err := d.ptyManager.Resize(msg.ID, uint16(msg.Cols), uint16(msg.Rows)); err != nil {
+		d.logf("pty_resize failed for %s: %v", msg.ID, err)
+	}
+}
+
+func parseSignal(name string) syscall.Signal {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "", "SIGTERM", "TERM":
+		return syscall.SIGTERM
+	case "SIGINT", "INT":
+		return syscall.SIGINT
+	case "SIGHUP", "HUP":
+		return syscall.SIGHUP
+	case "SIGKILL", "KILL":
+		return syscall.SIGKILL
+	default:
+		return syscall.SIGTERM
+	}
+}
+
+func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMessage) {
+	d.detachSession(client, msg.ID)
+	sig := parseSignal(protocol.Deref(msg.Signal))
+	if err := d.ptyManager.Kill(msg.ID, sig); err != nil {
+		d.logf("kill_session failed for %s: %v", msg.ID, err)
 	}
 }
 
@@ -707,11 +1054,10 @@ func (d *Daemon) sendToClient(client *wsClient, message interface{}) {
 	if err != nil {
 		return
 	}
-	select {
-	case client.send <- data:
-	default:
-		// Client buffer full, skip
-	}
+	_ = d.sendOutbound(client, outboundMessage{
+		kind:    messageKindText,
+		payload: data,
+	})
 }
 
 // validateSetting validates a setting key and value before storing

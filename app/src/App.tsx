@@ -144,7 +144,6 @@ function App() {
     sendMuteAuthor,
     sendPRVisited,
     sendRefreshPRs,
-    sendClearSessions,
     sendUnregisterSession,
     sendSetSetting,
     sendCreateWorktree,
@@ -223,7 +222,6 @@ function App() {
         sendMuteAuthor={sendMuteAuthor}
         sendPRVisited={sendPRVisited}
         sendRefreshPRs={sendRefreshPRs}
-        sendClearSessions={sendClearSessions}
         sendUnregisterSession={sendUnregisterSession}
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
@@ -287,7 +285,6 @@ interface AppContentProps {
   sendMuteAuthor: ReturnType<typeof useDaemonSocket>['sendMuteAuthor'];
   sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
-  sendClearSessions: ReturnType<typeof useDaemonSocket>['sendClearSessions'];
   sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
@@ -346,7 +343,6 @@ function AppContent({
   sendMuteAuthor,
   sendPRVisited,
   sendRefreshPRs,
-  sendClearSessions,
   sendUnregisterSession,
   sendSetSetting,
   sendCreateWorktree,
@@ -424,15 +420,6 @@ function AppContent({
   // Review panel state
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
   const [initialReviewFile, setInitialReviewFile] = useState<string | null>(null);
-
-  // Clear stale daemon sessions on app start
-  const hasClearedSessions = useRef(false);
-  useEffect(() => {
-    if (hasReceivedInitialState && !hasClearedSessions.current) {
-      hasClearedSessions.current = true;
-      sendClearSessions();
-    }
-  }, [hasReceivedInitialState, sendClearSessions]);
 
   useEffect(() => {
     setLauncherConfig({

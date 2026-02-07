@@ -459,6 +459,50 @@ model CancelReviewMessage {
   review_id: string;
 }
 
+model SpawnSessionMessage {
+  cmd: "spawn_session";
+  id: string;
+  cwd: string;
+  agent: string;            // "claude", "codex", "shell"
+  cols: int32;
+  rows: int32;
+  label?: string;
+  resume_session_id?: string;
+  resume_picker?: boolean;
+  fork_session?: boolean;
+  claude_executable?: string;
+  codex_executable?: string;
+}
+
+model AttachSessionMessage {
+  cmd: "attach_session";
+  id: string;
+}
+
+model DetachSessionMessage {
+  cmd: "detach_session";
+  id: string;
+}
+
+model PtyInputMessage {
+  cmd: "pty_input";
+  id: string;
+  data: string;
+}
+
+model PtyResizeMessage {
+  cmd: "pty_resize";
+  id: string;
+  cols: int32;
+  rows: int32;
+}
+
+model KillSessionMessage {
+  cmd: "kill_session";
+  id: string;
+  signal?: string; // "SIGTERM", "SIGINT", ...
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -755,6 +799,54 @@ model ReviewCancelledMessage {
   review_id: string;
 }
 
+model SpawnResultMessage {
+  event: "spawn_result";
+  id: string;
+  success: boolean;
+  error?: string;
+}
+
+model AttachResultMessage {
+  event: "attach_result";
+  id: string;
+  success: boolean;
+  scrollback?: string;           // base64 bytes
+  scrollback_truncated?: boolean;
+  last_seq?: int32;
+  cols?: int32;
+  rows?: int32;
+  pid?: int32;
+  running?: boolean;
+  error?: string;
+}
+
+model PtyOutputMessage {
+  event: "pty_output";
+  id: string;
+  data: string; // base64 bytes
+  seq: int32;
+}
+
+model SessionExitedMessage {
+  event: "session_exited";
+  id: string;
+  exit_code: int32;
+  signal?: string;
+}
+
+model PtyDesyncMessage {
+  event: "pty_desync";
+  id: string;
+  reason: string;
+}
+
+model CommandErrorMessage {
+  event: "command_error";
+  cmd?: string;
+  success: boolean;
+  error: string;
+}
+
 // ============================================================================
 // Response Types
 // ============================================================================
@@ -776,7 +868,9 @@ model DaemonWarning {
 
 model WebSocketEvent {
   event: string;
+  cmd?: string;
   protocol_version?: string;
+  id?: string;
   session?: Session;
   sessions?: Session[];
   prs?: PR[];
@@ -803,4 +897,17 @@ model WebSocketEvent {
   // Ensure repo operations
   target_path?: string;
   cloned?: boolean;
+  // PTY lifecycle
+  data?: string;
+  seq?: int32;
+  scrollback?: string;
+  scrollback_truncated?: boolean;
+  last_seq?: int32;
+  cols?: int32;
+  rows?: int32;
+  pid?: int32;
+  running?: boolean;
+  exit_code?: int32;
+  reason?: string;
+  signal?: string;
 }

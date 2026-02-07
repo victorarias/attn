@@ -1,7 +1,5 @@
-mod pty_manager;
 mod thumbs;
 
-use pty_manager::PtyState;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -216,13 +214,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![
             greet,
-            pty_manager::pty_spawn,
-            pty_manager::pty_write,
-            pty_manager::pty_resize,
-            pty_manager::pty_kill,
             list_directory,
             is_daemon_running,
             start_daemon,
