@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/victorarias/attn/internal/client"
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/github/mockserver"
 	"github.com/victorarias/attn/internal/protocol"
@@ -231,6 +233,53 @@ func TestDaemon_PrunesSessionsWithoutLivePTYOnStart(t *testing.T) {
 	}
 	if warnings[0].Code != "stale_sessions_pruned" {
 		t.Fatalf("warning code = %q, want stale_sessions_pruned", warnings[0].Code)
+	}
+}
+
+func TestDaemon_NewAddsWarningWhenPersistenceFallsBackToMemory(t *testing.T) {
+	t.Setenv("ATTN_DB_PATH", filepath.Join("/dev/null", "attn.db"))
+
+	d := New(filepath.Join(t.TempDir(), "test.sock"))
+	defer d.store.Close()
+
+	warnings := d.getWarnings()
+	if len(warnings) == 0 {
+		t.Fatal("expected warning when DB open fails and daemon falls back to in-memory")
+	}
+
+	found := false
+	for _, warning := range warnings {
+		if warning.Code != "persistence_degraded" {
+			continue
+		}
+		found = true
+		if !strings.Contains(warning.Message, "Running in-memory only") {
+			t.Fatalf("warning message missing in-memory note: %q", warning.Message)
+		}
+		if !strings.Contains(warning.Message, "See daemon log in "+config.LogPath()) {
+			t.Fatalf("warning message missing daemon log path: %q", warning.Message)
+		}
+		if !strings.Contains(warning.Message, "/dev/null/attn.db") {
+			t.Fatalf("warning message missing DB path: %q", warning.Message)
+		}
+	}
+	if !found {
+		t.Fatalf("expected persistence_degraded warning, got: %+v", warnings)
+	}
+
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "fallback-store-session",
+		Label:          "fallback-store-session",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	if got := d.store.Get("fallback-store-session"); got == nil {
+		t.Fatal("expected in-memory fallback store to remain usable")
 	}
 }
 

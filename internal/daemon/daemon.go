@@ -145,10 +145,20 @@ func New(socketPath string) *Daemon {
 	})
 
 	// Create SQLite-backed store
-	sessionStore, err := store.NewWithDB(config.DBPath())
+	dbPath := config.DBPath()
+	sessionStore, err := store.NewWithDB(dbPath)
+	var startupWarnings []protocol.DaemonWarning
 	if err != nil {
-		logger.Infof("Failed to open DB at %s: %v (using in-memory)", config.DBPath(), err)
+		logger.Infof("Failed to open DB at %s: %v (using in-memory)", dbPath, err)
 		sessionStore = store.New() // Fallback to in-memory
+		startupWarnings = append(startupWarnings, protocol.DaemonWarning{
+			Code: "persistence_degraded",
+			Message: fmt.Sprintf(
+				"Persistence degraded: unable to open durable state at %s. Running in-memory only; session state will not survive daemon restarts. See daemon log in %s for details.",
+				dbPath,
+				config.LogPath(),
+			),
+		})
 	}
 
 	// Clean up legacy JSON state file if it exists
@@ -170,6 +180,7 @@ func New(socketPath string) *Daemon {
 		logger:     logger,
 		ghRegistry: github.NewClientRegistry(),
 		repoCaches: make(map[string]*repoCache),
+		warnings:   startupWarnings,
 		ptyManager: pty.NewManager(pty.DefaultScrollbackSize, logger.Infof),
 	}
 }
