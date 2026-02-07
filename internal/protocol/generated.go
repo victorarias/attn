@@ -96,6 +96,14 @@ type AuthorState struct {
 	Muted bool `json:"muted"`
 }
 
+type AuthorsUpdatedMessage struct {
+	// Authors corresponds to the JSON schema field "authors".
+	Authors []AuthorState `json:"authors,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+}
+
 type Branch struct {
 	// CommitHash corresponds to the JSON schema field "commit_hash".
 	CommitHash *string `json:"commit_hash,omitempty"`
@@ -108,6 +116,14 @@ type Branch struct {
 
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
+}
+
+type BranchChangedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Session corresponds to the JSON schema field "session".
+	Session *Session `json:"session,omitempty"`
 }
 
 type BranchDiffFile struct {
@@ -437,12 +453,43 @@ type EnsureRepoMessage struct {
 	TargetPath string `json:"target_path"`
 }
 
+type EnsureRepoResultMessage struct {
+	// Cloned corresponds to the JSON schema field "cloned".
+	Cloned *bool `json:"cloned,omitempty"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success *bool `json:"success,omitempty"`
+
+	// TargetPath corresponds to the JSON schema field "target_path".
+	TargetPath *string `json:"target_path,omitempty"`
+}
+
 type FetchPRDetailsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+}
+
+type FetchPRDetailsResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Prs corresponds to the JSON schema field "prs".
+	Prs []PR `json:"prs,omitempty"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type FetchRemotesMessage struct {
@@ -672,6 +719,32 @@ type HeatState string
 const HeatStateCold HeatState = "cold"
 const HeatStateHot HeatState = "hot"
 const HeatStateWarm HeatState = "warm"
+
+type InitialStateMessage struct {
+	// Authors corresponds to the JSON schema field "authors".
+	Authors []AuthorState `json:"authors,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ProtocolVersion corresponds to the JSON schema field "protocol_version".
+	ProtocolVersion *string `json:"protocol_version,omitempty"`
+
+	// Prs corresponds to the JSON schema field "prs".
+	Prs []PR `json:"prs,omitempty"`
+
+	// Repos corresponds to the JSON schema field "repos".
+	Repos []RepoState `json:"repos,omitempty"`
+
+	// Sessions corresponds to the JSON schema field "sessions".
+	Sessions []Session `json:"sessions,omitempty"`
+
+	// Settings corresponds to the JSON schema field "settings".
+	Settings RecordString `json:"settings,omitempty"`
+
+	// Warnings corresponds to the JSON schema field "warnings".
+	Warnings []DaemonWarning `json:"warnings,omitempty"`
+}
 
 type InjectTestPRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
@@ -926,6 +999,14 @@ type PRVisitedMessage struct {
 	ID string `json:"id"`
 }
 
+type PRsUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Prs corresponds to the JSON schema field "prs".
+	Prs []PR `json:"prs,omitempty"`
+}
+
 type PtyDesyncMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -1009,11 +1090,11 @@ type RateLimitedMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
-	// ResetAt corresponds to the JSON schema field "reset_at".
-	ResetAt string `json:"reset_at"`
+	// RateLimitResetAt corresponds to the JSON schema field "rate_limit_reset_at".
+	RateLimitResetAt string `json:"rate_limit_reset_at"`
 
-	// Resource corresponds to the JSON schema field "resource".
-	Resource string `json:"resource"`
+	// RateLimitResource corresponds to the JSON schema field "rate_limit_resource".
+	RateLimitResource string `json:"rate_limit_resource"`
 }
 
 type RecentLocation struct {
@@ -1037,8 +1118,8 @@ type RecentLocationsResultMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
-	// Locations corresponds to the JSON schema field "locations".
-	Locations []RecentLocation `json:"locations"`
+	// RecentLocations corresponds to the JSON schema field "recent_locations".
+	RecentLocations []RecentLocation `json:"recent_locations"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
@@ -1111,6 +1192,14 @@ type RepoState struct {
 
 	// Repo corresponds to the JSON schema field "repo".
 	Repo string `json:"repo"`
+}
+
+type ReposUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Repos corresponds to the JSON schema field "repos".
+	Repos []RepoState `json:"repos,omitempty"`
 }
 
 type ResolveCommentMessage struct {
@@ -1218,6 +1307,17 @@ type ReviewComment struct {
 	WontFixBy *string `json:"wont_fix_by,omitempty"`
 }
 
+type ReviewCommentResolvedMessage struct {
+	// CommentID corresponds to the JSON schema field "comment_id".
+	CommentID string `json:"comment_id"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ReviewID corresponds to the JSON schema field "review_id".
+	ReviewID string `json:"review_id"`
+}
+
 type ReviewCompleteMessage struct {
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
@@ -1250,6 +1350,9 @@ type ReviewFinding struct {
 }
 
 type ReviewFindingMessage struct {
+	// Comment corresponds to the JSON schema field "comment".
+	Comment *ReviewComment `json:"comment,omitempty"`
+
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
@@ -1280,6 +1383,28 @@ type ReviewState struct {
 
 	// ViewedFiles corresponds to the JSON schema field "viewed_files".
 	ViewedFiles []string `json:"viewed_files"`
+}
+
+type ReviewToolUse struct {
+	// Input corresponds to the JSON schema field "input".
+	Input RecordString `json:"input"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Output corresponds to the JSON schema field "output".
+	Output string `json:"output"`
+}
+
+type ReviewToolUseMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ReviewID corresponds to the JSON schema field "review_id".
+	ReviewID string `json:"review_id"`
+
+	// ToolUse corresponds to the JSON schema field "tool_use".
+	ToolUse ReviewToolUse `json:"tool_use"`
 }
 
 type Session struct {
@@ -1334,11 +1459,52 @@ type SessionExitedMessage struct {
 	Signal *string `json:"signal,omitempty"`
 }
 
+type SessionRegisteredMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Session corresponds to the JSON schema field "session".
+	Session Session `json:"session"`
+}
+
 type SessionState string
 
+type SessionStateChangedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Session corresponds to the JSON schema field "session".
+	Session Session `json:"session"`
+}
+
 const SessionStateIdle SessionState = "idle"
+const SessionStatePendingApproval SessionState = "pending_approval"
 const SessionStateWaitingInput SessionState = "waiting_input"
 const SessionStateWorking SessionState = "working"
+
+type SessionTodosUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Session corresponds to the JSON schema field "session".
+	Session Session `json:"session"`
+}
+
+type SessionUnregisteredMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Session corresponds to the JSON schema field "session".
+	Session Session `json:"session"`
+}
+
+type SessionsUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Sessions corresponds to the JSON schema field "sessions".
+	Sessions []Session `json:"sessions,omitempty"`
+}
 
 type SetSettingMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
@@ -1349,6 +1515,20 @@ type SetSettingMessage struct {
 
 	// Value corresponds to the JSON schema field "value".
 	Value string `json:"value"`
+}
+
+type SettingsUpdatedMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Settings corresponds to the JSON schema field "settings".
+	Settings RecordString `json:"settings,omitempty"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success *bool `json:"success,omitempty"`
 }
 
 type SpawnResultMessage struct {
@@ -1566,8 +1746,14 @@ type UpdateCommentResultMessage struct {
 }
 
 type WebSocketEvent struct {
+	// Action corresponds to the JSON schema field "action".
+	Action *string `json:"action,omitempty"`
+
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty"`
+
+	// BaseRef corresponds to the JSON schema field "base_ref".
+	BaseRef *string `json:"base_ref,omitempty"`
 
 	// Branch corresponds to the JSON schema field "branch".
 	Branch *string `json:"branch,omitempty"`
@@ -1584,11 +1770,23 @@ type WebSocketEvent struct {
 	// Cols corresponds to the JSON schema field "cols".
 	Cols *int `json:"cols,omitempty"`
 
+	// Comment corresponds to the JSON schema field "comment".
+	Comment *ReviewComment `json:"comment,omitempty"`
+
+	// CommentID corresponds to the JSON schema field "comment_id".
+	CommentID *string `json:"comment_id,omitempty"`
+
 	// Conflict corresponds to the JSON schema field "conflict".
 	Conflict *bool `json:"conflict,omitempty"`
 
+	// Content corresponds to the JSON schema field "content".
+	Content *string `json:"content,omitempty"`
+
 	// Data corresponds to the JSON schema field "data".
 	Data *string `json:"data,omitempty"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory *string `json:"directory,omitempty"`
 
 	// Dirty corresponds to the JSON schema field "dirty".
 	Dirty *bool `json:"dirty,omitempty"`
@@ -1602,6 +1800,12 @@ type WebSocketEvent struct {
 	// ExitCode corresponds to the JSON schema field "exit_code".
 	ExitCode *int `json:"exit_code,omitempty"`
 
+	// Files corresponds to the JSON schema field "files".
+	Files []BranchDiffFile `json:"files,omitempty"`
+
+	// Finding corresponds to the JSON schema field "finding".
+	Finding *ReviewFinding `json:"finding,omitempty"`
+
 	// Found corresponds to the JSON schema field "found".
 	Found *bool `json:"found,omitempty"`
 
@@ -1610,6 +1814,15 @@ type WebSocketEvent struct {
 
 	// LastSeq corresponds to the JSON schema field "last_seq".
 	LastSeq *int `json:"last_seq,omitempty"`
+
+	// Modified corresponds to the JSON schema field "modified".
+	Modified *string `json:"modified,omitempty"`
+
+	// Original corresponds to the JSON schema field "original".
+	Original *string `json:"original,omitempty"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path *string `json:"path,omitempty"`
 
 	// Pid corresponds to the JSON schema field "pid".
 	Pid *int `json:"pid,omitempty"`
@@ -1634,6 +1847,9 @@ type WebSocketEvent struct {
 
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty"`
+
+	// ReviewID corresponds to the JSON schema field "review_id".
+	ReviewID *string `json:"review_id,omitempty"`
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows *int `json:"rows,omitempty"`
@@ -1663,6 +1879,9 @@ type WebSocketEvent struct {
 	// Signal corresponds to the JSON schema field "signal".
 	Signal *string `json:"signal,omitempty"`
 
+	// Staged corresponds to the JSON schema field "staged".
+	Staged []GitFileChange `json:"staged,omitempty"`
+
 	// StashRef corresponds to the JSON schema field "stash_ref".
 	StashRef *string `json:"stash_ref,omitempty"`
 
@@ -1671,6 +1890,15 @@ type WebSocketEvent struct {
 
 	// TargetPath corresponds to the JSON schema field "target_path".
 	TargetPath *string `json:"target_path,omitempty"`
+
+	// ToolUse corresponds to the JSON schema field "tool_use".
+	ToolUse *ReviewToolUse `json:"tool_use,omitempty"`
+
+	// Unstaged corresponds to the JSON schema field "unstaged".
+	Unstaged []GitFileChange `json:"unstaged,omitempty"`
+
+	// Untracked corresponds to the JSON schema field "untracked".
+	Untracked []GitFileChange `json:"untracked,omitempty"`
 
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty"`
@@ -1716,15 +1944,25 @@ type Worktree struct {
 }
 
 type WorktreeCreatedEvent struct {
-	// Branch corresponds to the JSON schema field "branch".
-	Branch string `json:"branch"`
-
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
-	// MainRepo corresponds to the JSON schema field "main_repo".
-	MainRepo string `json:"main_repo"`
+	// Worktrees corresponds to the JSON schema field "worktrees".
+	Worktrees []Worktree `json:"worktrees"`
+}
 
-	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+type WorktreeDeletedEvent struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Worktrees corresponds to the JSON schema field "worktrees".
+	Worktrees []Worktree `json:"worktrees"`
+}
+
+type WorktreesUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Worktrees corresponds to the JSON schema field "worktrees".
+	Worktrees []Worktree `json:"worktrees,omitempty"`
 }

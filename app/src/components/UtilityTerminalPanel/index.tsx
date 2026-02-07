@@ -6,7 +6,7 @@ import { TabBar } from './TabBar';
 import { ResizeHandle } from './ResizeHandle';
 import { useShortcut } from '../../shortcuts';
 import type { TerminalPanelState } from '../../store/sessions';
-import { listenPtyEvents, ptyKill, ptyResize, ptySpawn, ptyWrite } from '../../pty/bridge';
+import { listenPtyEvents, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEventPayload } from '../../pty/bridge';
 import './UtilityTerminalPanel.css';
 
 interface UtilityTerminalPanelProps {
@@ -39,6 +39,52 @@ export function UtilityTerminalPanel({
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
   const xtermRefs = useRef<Map<string, XTerm>>(new Map());
   const ptyIdToTerminalId = useRef<Map<string, string>>(new Map());
+  const pendingTerminalEvents = useRef<Map<string, PtyEventPayload[]>>(new Map());
+
+  const decodePtyData = useCallback((payload: string) => {
+    const binaryStr = atob(payload);
+    const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
+    return new TextDecoder('utf-8').decode(bytes);
+  }, []);
+
+  const writeToTerminal = useCallback((xterm: XTerm, msg: PtyEventPayload) => {
+    switch (msg.event) {
+      case 'data':
+        xterm.write(decodePtyData(msg.data));
+        break;
+      case 'reset':
+        xterm.reset();
+        break;
+      case 'exit':
+        xterm.write(`\r\n[Process exited with code ${msg.code}]\r\n`);
+        break;
+      case 'error':
+        xterm.write(`\r\n[Error: ${msg.error}]\r\n`);
+        break;
+      default:
+        break;
+    }
+  }, [decodePtyData]);
+
+  const queueTerminalEvent = useCallback((terminalId: string, msg: PtyEventPayload) => {
+    const events = pendingTerminalEvents.current.get(terminalId) || [];
+    if (events.length >= 256) {
+      events.shift();
+    }
+    events.push(msg);
+    pendingTerminalEvents.current.set(terminalId, events);
+  }, []);
+
+  const flushPendingEvents = useCallback((terminalId: string, xterm: XTerm) => {
+    const events = pendingTerminalEvents.current.get(terminalId);
+    if (!events || events.length === 0) {
+      return;
+    }
+    for (const event of events) {
+      writeToTerminal(xterm, event);
+    }
+    pendingTerminalEvents.current.delete(terminalId);
+  }, [writeToTerminal]);
 
   // Listen for PTY events for utility terminals
   useEffect(() => {
@@ -48,38 +94,23 @@ export function UtilityTerminalPanel({
       if (!terminalId) return;
 
       const xterm = xtermRefs.current.get(terminalId);
-      if (!xterm) return;
-
-      switch (msg.event) {
-        case 'data': {
-          const binaryStr = atob(msg.data);
-          const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
-          const data = new TextDecoder('utf-8').decode(bytes);
-          xterm.write(data);
-          break;
-        }
-        case 'reset': {
-          xterm.reset();
-          break;
-        }
-        case 'exit': {
-          xterm.write(`\r\n[Process exited with code ${msg.code}]\r\n`);
-          break;
-        }
-        case 'error': {
-          xterm.write(`\r\n[Error: ${msg.error}]\r\n`);
-          break;
-        }
+      if (!xterm) {
+        queueTerminalEvent(terminalId, msg);
+        return;
       }
+      flushPendingEvents(terminalId, xterm);
+      writeToTerminal(xterm, msg);
     });
 
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [flushPendingEvents, queueTerminalEvent, writeToTerminal]);
 
   const spawnTerminal = useCallback(async () => {
     const ptyId = `util-pty-${Date.now()}`;
+    const terminalId = onAddTerminal(ptyId);
+    ptyIdToTerminalId.current.set(ptyId, terminalId);
 
     try {
       await ptySpawn({
@@ -92,15 +123,15 @@ export function UtilityTerminalPanel({
         },
       });
 
-      const terminalId = onAddTerminal(ptyId);
-      ptyIdToTerminalId.current.set(ptyId, terminalId);
-
       return terminalId;
     } catch (e) {
       console.error('[UtilityTerminal] Spawn failed:', e);
+      ptyIdToTerminalId.current.delete(ptyId);
+      pendingTerminalEvents.current.delete(terminalId);
+      onRemoveTerminal(terminalId);
       return null;
     }
-  }, [cwd, onAddTerminal]);
+  }, [cwd, onAddTerminal, onRemoveTerminal]);
 
   const handleNewTab = useCallback(async () => {
     const terminalId = await spawnTerminal();
@@ -118,6 +149,7 @@ export function UtilityTerminalPanel({
       if (terminal) {
         ptyKill({ id: terminal.ptyId }).catch(console.error);
         ptyIdToTerminalId.current.delete(terminal.ptyId);
+        pendingTerminalEvents.current.delete(terminalId);
         xtermRefs.current.delete(terminalId);
         terminalRefs.current.delete(terminalId);
       }
@@ -151,13 +183,14 @@ export function UtilityTerminalPanel({
   const handleTerminalReady = useCallback(
     (terminalId: string, ptyId: string) => (xterm: XTerm) => {
       xtermRefs.current.set(terminalId, xterm);
+      flushPendingEvents(terminalId, xterm);
 
       // Terminal input -> PTY
       xterm.onData((data: string) => {
         ptyWrite({ id: ptyId, data }).catch(console.error);
       });
     },
-    []
+    [flushPendingEvents]
   );
 
   const handleTerminalResize = useCallback(
@@ -224,7 +257,12 @@ export function UtilityTerminalPanel({
           >
             <Terminal
               ref={(ref) => {
-                if (ref) terminalRefs.current.set(terminal.id, ref);
+                if (ref) {
+                  terminalRefs.current.set(terminal.id, ref);
+                  return;
+                }
+                terminalRefs.current.delete(terminal.id);
+                xtermRefs.current.delete(terminal.id);
               }}
               fontSize={fontSize}
               onReady={handleTerminalReady(terminal.id, terminal.ptyId)}

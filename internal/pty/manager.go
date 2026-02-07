@@ -21,6 +21,8 @@ const (
 	defaultKillTimeout    = 10 * time.Second
 )
 
+var ErrSessionNotFound = errors.New("session not found")
+
 type LogFunc func(format string, args ...interface{})
 
 type SpawnOptions struct {
@@ -257,12 +259,23 @@ func (m *Manager) Shutdown() {
 	}
 }
 
+func (m *Manager) SessionIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ids := make([]string, 0, len(m.sessions))
+	for id := range m.sessions {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (m *Manager) getSession(id string) (*Session, error) {
 	m.mu.RLock()
 	session, ok := m.sessions[id]
 	m.mu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("session %s not found", id)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, id)
 	}
 	return session, nil
 }

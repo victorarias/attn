@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { Terminal } from '@xterm/xterm';
 import type { UISessionState } from '../types/sessionState';
 import type { SessionAgent } from '../types/sessionAgent';
-import { listenPtyEvents, ptyKill, ptyResize, ptySpawn, ptyWrite } from '../pty/bridge';
+import { listenPtyEvents, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEventPayload } from '../pty/bridge';
 
 export interface UtilityTerminal {
   id: string;
@@ -77,6 +77,53 @@ interface SessionStore {
 
 const pendingConnections = new Set<string>();
 const pendingForkParams = new Map<string, { resumeSessionId?: string; forkSession?: boolean; resumePicker?: boolean }>();
+const pendingTerminalEvents = new Map<string, PtyEventPayload[]>();
+const MAX_PENDING_TERMINAL_EVENTS = 256;
+
+function decodePtyData(payload: string): string {
+  const binaryStr = atob(payload);
+  const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function writePtyEventToTerminal(terminal: Terminal, msg: PtyEventPayload) {
+  switch (msg.event) {
+    case 'data':
+      terminal.write(decodePtyData(msg.data));
+      break;
+    case 'reset':
+      terminal.reset();
+      break;
+    case 'exit':
+      terminal.write(`\r\n[Process exited with code ${msg.code}]\r\n`);
+      break;
+    case 'error':
+      terminal.write(`\r\n[Error: ${msg.error}]\r\n`);
+      break;
+    default:
+      break;
+  }
+}
+
+function queuePendingTerminalEvent(id: string, msg: PtyEventPayload) {
+  const events = pendingTerminalEvents.get(id) || [];
+  if (events.length >= MAX_PENDING_TERMINAL_EVENTS) {
+    events.shift();
+  }
+  events.push(msg);
+  pendingTerminalEvents.set(id, events);
+}
+
+function flushPendingTerminalEvents(id: string, terminal: Terminal) {
+  const events = pendingTerminalEvents.get(id);
+  if (!events || events.length === 0) {
+    return;
+  }
+  for (const event of events) {
+    writePtyEventToTerminal(terminal, event);
+  }
+  pendingTerminalEvents.delete(id);
+}
 
 // Test helper for E2E - allows injecting sessions without PTY
 interface TestSession {
@@ -123,31 +170,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           return;
         }
 
-        if (!session?.terminal) return;
-
-        switch (msg.event) {
-          case 'data': {
-            // Decode base64 data to UTF-8
-            // atob() returns Latin-1, need to decode as UTF-8
-            const binaryStr = atob(msg.data);
-            const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
-            const data = new TextDecoder('utf-8').decode(bytes);
-            session.terminal.write(data);
-            break;
-          }
-          case 'reset': {
-            session.terminal.reset();
-            break;
-          }
-          case 'exit': {
-            session.terminal.write(`\r\n[Process exited with code ${msg.code}]\r\n`);
-            break;
-          }
-          case 'error': {
-            session.terminal.write(`\r\n[Error: ${msg.error}]\r\n`);
-            break;
-          }
+        if (!session) {
+          return;
         }
+        if (!session.terminal) {
+          queuePendingTerminalEvent(session.id, msg);
+          return;
+        }
+        flushPendingTerminalEvents(session.id, session.terminal);
+        writePtyEventToTerminal(session.terminal, msg);
       });
 
       set({ connected: true });
@@ -187,10 +218,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       // Kill main session PTY
       ptyKill({ id }).catch(console.error);
       session.terminal?.dispose();
+      pendingTerminalEvents.delete(id);
 
       // Kill all utility terminal PTYs
       for (const utilTerminal of session.terminalPanel.terminals) {
         ptyKill({ id: utilTerminal.ptyId }).catch(console.error);
+        pendingTerminalEvents.delete(utilTerminal.ptyId);
       }
     }
 
@@ -224,6 +257,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (!connected) {
       await get().connect();
     }
+
+    // Set terminal ref before spawn/attach to avoid dropping early output.
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === id ? { ...s, terminal } : s
+      ),
+    }));
 
     const cols = terminal.cols > 0 ? terminal.cols : 80;
     const rows = terminal.rows > 0 ? terminal.rows : 24;
@@ -273,12 +313,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         return true;
       });
 
-      // Update session with terminal ref
-      set((state) => ({
-        sessions: state.sessions.map((s) =>
-          s.id === id ? { ...s, terminal } : s
-        ),
-      }));
+      flushPendingTerminalEvents(id, terminal);
 
       pendingConnections.delete(id);
     } catch (e) {

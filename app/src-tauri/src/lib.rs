@@ -4,20 +4,25 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+fn daemon_socket_path() -> Option<PathBuf> {
+    if let Ok(path) = env::var("ATTN_SOCKET_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+
+    let home = dirs::home_dir()?;
+    Some(home.join(".attn").join("attn.sock"))
 }
 
 /// Check if the daemon is running by checking for the socket file
 #[tauri::command]
 fn is_daemon_running() -> bool {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
+    let socket_path = match daemon_socket_path() {
+        Some(path) => path,
         None => return false,
     };
-    let socket_path = home.join(".attn.sock");
     socket_path.exists()
 }
 
@@ -25,7 +30,6 @@ fn is_daemon_running() -> bool {
 /// Checks local dev path first (~/.local/bin/attn), then falls back to bundled binary
 #[tauri::command]
 fn start_daemon(_app: tauri::AppHandle) -> Result<(), String> {
-    use std::process::Command;
     use std::thread;
     use std::time::Duration;
 
@@ -58,7 +62,7 @@ fn start_daemon(_app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to start daemon: {}", e))?;
 
     // Wait for socket to appear (up to 2 seconds)
-    let socket_path = home.join(".attn.sock");
+    let socket_path = daemon_socket_path().ok_or("Cannot resolve daemon socket path")?;
     for _ in 0..20 {
         if socket_path.exists() {
             return Ok(());
@@ -215,7 +219,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
-            greet,
             list_directory,
             is_daemon_running,
             start_daemon,

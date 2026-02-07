@@ -23,11 +23,22 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Daemon Startup Safety**: Daemon now refuses to replace an already-running daemon instance instead of SIGTERM/SIGKILL takeover.
 - **Connection Recovery**: Frontend removed daemon auto-restart on WebSocket failure; it now reconnects and surfaces a manual-retry path if daemon stays offline.
 - **Upgrade Messaging**: Version-mismatch banner now includes active-session impact guidance for manual daemon restart timing.
+- **Unregister Semantics**: `unregister` is now a hard-stop path (terminate process/session resources, then remove session metadata); `detach_session` remains the keep-running path.
+- **Spawn Consistency**: Session registration now happens only after PTY spawn succeeds, avoiding temporary/stale session entries on spawn failures.
+- **WebSocket Ordering**: `pty_input` now follows the same ordered command path as other WebSocket commands.
+- **Protocol Schema Coverage**: TypeSpec now explicitly models all daemon WebSocket events and reviewer streaming payloads used in runtime.
 - **Protocol Version**: Bumped daemon/app protocol version to `24`.
+
+### Fixed
+- **Daemon Socket Detection (Tauri)**: Frontend daemon health/start checks now use `~/.attn/attn.sock` (and `ATTN_SOCKET_PATH` override), matching daemon defaults.
+- **Terminal Output Races**: Buffered PTY output until terminals are ready to prevent dropped initial prompt/scrollback in main and utility terminals.
+- **Reconnect Attach Hygiene**: Exited/unregistered sessions are removed from frontend reattach tracking to avoid repeated failed `attach_session` attempts.
+- **Exited PTY Cleanup**: Daemon now removes exited PTY sessions from the manager to prevent stale in-memory session accumulation.
 
 ### Removed
 - **Rust PTY Manager**: Removed `app/src-tauri/src/pty_manager.rs` and PTY Tauri command registrations (`pty_spawn`, `pty_write`, `pty_resize`, `pty_kill`).
 - **Rust PTY-Only Dependencies**: Removed `portable-pty`, `base64`, and `nix` from Tauri dependencies.
+- **Unused Tauri Greeting Command**: Removed unused Rust `greet` command wiring.
 
 ---
 
@@ -130,6 +141,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Session Agent Picker**: Choose Codex or Claude when starting a new session
   - Codex is the default selection
   - Keyboard shortcuts for quick switching
+- **PTY State Detection**: Infer session states from PTY output for non-hook agents (e.g. Codex)
 
 ### Changed
 - **PR-like Branch Diff**: Review Panel now shows all changes vs origin/main instead of just uncommitted changes
@@ -139,6 +151,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   - Files with uncommitted changes marked with indicator
   - Auto-fetches remotes before computing diff
 - **New Session Agent**: The Codex/Claude selection now persists across app restarts
+- Default to Codex for in-app sessions while testing
 
 ### Fixed
 - **Font Size Shortcuts**: Cmd+/- no longer loses collapsed regions or comments
@@ -182,18 +195,6 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   - Walking skeleton with daemon integration
   - Mock transport for testing without real Claude API
   - Resolution tracking via MCP tools
-
----
-
-## [2026-01-06]
-
-### Added
-- **PTY State Detection**: Infer session states from PTY output for non-hook agents (e.g. Codex)
-
-### Changed
-- Default to Codex for in-app sessions while testing
-
----
 
 ## [2026-01-03]
 

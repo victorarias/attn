@@ -355,25 +355,6 @@ func (d *Daemon) wsReadPump(client *wsClient) {
 			d.logf("WebSocket read error: %v", err)
 			return
 		}
-		var peek struct {
-			Cmd string `json:"cmd"`
-		}
-		if err := json.Unmarshal(data, &peek); err != nil {
-			d.logf("WebSocket read parse error: %v", err)
-			continue
-		}
-		if peek.Cmd == protocol.CmdPtyInput {
-			cmd, msg, err := protocol.ParseMessage(data)
-			if err != nil {
-				d.logf("WebSocket pty_input parse error: %v", err)
-				continue
-			}
-			if cmd == protocol.CmdPtyInput {
-				d.handlePtyInputFast(client, msg.(*protocol.PtyInputMessage))
-				continue
-			}
-		}
-		d.logf("WebSocket cmd received: %s", peek.Cmd)
 
 		// Enqueue for ordered processing (non-blocking with buffer)
 		select {
@@ -531,6 +512,11 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdClearSessions:
 		d.logf("Clearing all sessions")
 		d.store.ClearSessions()
+		if d.ptyManager != nil {
+			for _, sessionID := range d.ptyManager.SessionIDs() {
+				d.terminateSession(sessionID, syscall.SIGTERM)
+			}
+		}
 		// Broadcast empty sessions list to all clients
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:    protocol.EventSessionsUpdated,
@@ -602,11 +588,16 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdUnregister:
 		unregMsg := msg.(*protocol.UnregisterMessage)
 		d.logf("Unregistering session %s via WebSocket", unregMsg.ID)
+		d.detachSession(client, unregMsg.ID)
+		session := d.store.Get(unregMsg.ID)
+		d.terminateSession(unregMsg.ID, syscall.SIGTERM)
 		d.store.Remove(unregMsg.ID)
-		if d.ptyManager != nil {
-			d.ptyManager.Remove(unregMsg.ID)
+		if session != nil {
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event:   protocol.EventSessionUnregistered,
+				Session: session,
+			})
 		}
-		// Broadcast updated sessions list
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:    protocol.EventSessionsUpdated,
 			Sessions: protocol.SessionsToValues(d.store.List("")),
@@ -767,6 +758,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		detachMsg := msg.(*protocol.DetachSessionMessage)
 		d.detachSession(client, detachMsg.ID)
 
+	case protocol.CmdPtyInput:
+		inputMsg := msg.(*protocol.PtyInputMessage)
+		if err := d.ptyManager.Input(inputMsg.ID, []byte(inputMsg.Data)); err != nil {
+			d.logf("pty_input failed for %s: %v", inputMsg.ID, err)
+		}
+
 	case protocol.CmdPtyResize:
 		resizeMsg := msg.(*protocol.PtyResizeMessage)
 		d.handlePtyResize(client, resizeMsg)
@@ -820,15 +817,6 @@ func (d *Daemon) detachAllSessions(client *wsClient) {
 	}
 }
 
-func (d *Daemon) handlePtyInputFast(_ *wsClient, msg *protocol.PtyInputMessage) {
-	if msg == nil {
-		return
-	}
-	if err := d.ptyManager.Input(msg.ID, []byte(msg.Data)); err != nil {
-		d.logf("pty_input failed for %s: %v", msg.ID, err)
-	}
-}
-
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
 	agent := strings.TrimSpace(strings.ToLower(msg.Agent))
 	if agent == "" {
@@ -838,6 +826,30 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	label := protocol.Deref(msg.Label)
 	if label == "" {
 		label = filepath.Base(msg.Cwd)
+	}
+
+	spawnOpts := pty.SpawnOptions{
+		ID:               msg.ID,
+		CWD:              msg.Cwd,
+		Agent:            agent,
+		Label:            label,
+		Cols:             uint16(msg.Cols),
+		Rows:             uint16(msg.Rows),
+		ResumeSessionID:  protocol.Deref(msg.ResumeSessionID),
+		ResumePicker:     protocol.Deref(msg.ResumePicker),
+		ForkSession:      protocol.Deref(msg.ForkSession),
+		ClaudeExecutable: protocol.Deref(msg.ClaudeExecutable),
+		CodexExecutable:  protocol.Deref(msg.CodexExecutable),
+	}
+
+	if err := d.ptyManager.Spawn(spawnOpts); err != nil {
+		d.sendToClient(client, protocol.SpawnResultMessage{
+			Event:   protocol.EventSpawnResult,
+			ID:      msg.ID,
+			Success: false,
+			Error:   protocol.Ptr(err.Error()),
+		})
+		return
 	}
 
 	if !isShell {
@@ -863,44 +875,12 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 				session.MainRepo = protocol.Ptr(branchInfo.MainRepo)
 			}
 		}
-
 		d.store.Add(session)
 		d.store.UpsertRecentLocation(msg.Cwd, label)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:   protocol.EventSessionRegistered,
 			Session: session,
 		})
-	}
-
-	spawnOpts := pty.SpawnOptions{
-		ID:               msg.ID,
-		CWD:              msg.Cwd,
-		Agent:            agent,
-		Label:            label,
-		Cols:             uint16(msg.Cols),
-		Rows:             uint16(msg.Rows),
-		ResumeSessionID:  protocol.Deref(msg.ResumeSessionID),
-		ResumePicker:     protocol.Deref(msg.ResumePicker),
-		ForkSession:      protocol.Deref(msg.ForkSession),
-		ClaudeExecutable: protocol.Deref(msg.ClaudeExecutable),
-		CodexExecutable:  protocol.Deref(msg.CodexExecutable),
-	}
-
-	if err := d.ptyManager.Spawn(spawnOpts); err != nil {
-		if !isShell {
-			d.store.Remove(msg.ID)
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:    protocol.EventSessionsUpdated,
-				Sessions: protocol.SessionsToValues(d.store.List("")),
-			})
-		}
-		d.sendToClient(client, protocol.SpawnResultMessage{
-			Event:   protocol.EventSpawnResult,
-			ID:      msg.ID,
-			Success: false,
-			Error:   protocol.Ptr(err.Error()),
-		})
-		return
 	}
 
 	d.sendToClient(client, protocol.SpawnResultMessage{

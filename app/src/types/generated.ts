@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, Branch, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, FetchPRDetailsMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, Session, SessionExitedMessage, SessionState, SetSettingMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCommentResolvedMessage, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, ReviewToolUse, ReviewToolUseMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionsUpdatedMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -8,7 +8,9 @@
 //   const attachResultMessage = Convert.toAttachResultMessage(json);
 //   const attachSessionMessage = Convert.toAttachSessionMessage(json);
 //   const authorState = Convert.toAuthorState(json);
+//   const authorsUpdatedMessage = Convert.toAuthorsUpdatedMessage(json);
 //   const branch = Convert.toBranch(json);
+//   const branchChangedMessage = Convert.toBranchChangedMessage(json);
 //   const branchDiffFile = Convert.toBranchDiffFile(json);
 //   const branchDiffFilesResultMessage = Convert.toBranchDiffFilesResultMessage(json);
 //   const branchesResultMessage = Convert.toBranchesResultMessage(json);
@@ -36,7 +38,9 @@
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
 //   const detachSessionMessage = Convert.toDetachSessionMessage(json);
 //   const ensureRepoMessage = Convert.toEnsureRepoMessage(json);
+//   const ensureRepoResultMessage = Convert.toEnsureRepoResultMessage(json);
 //   const fetchPRDetailsMessage = Convert.toFetchPRDetailsMessage(json);
+//   const fetchPRDetailsResultMessage = Convert.toFetchPRDetailsResultMessage(json);
 //   const fetchRemotesMessage = Convert.toFetchRemotesMessage(json);
 //   const fetchRemotesResultMessage = Convert.toFetchRemotesResultMessage(json);
 //   const fileDiffResultMessage = Convert.toFileDiffResultMessage(json);
@@ -56,6 +60,7 @@
 //   const gitStatusUpdateMessage = Convert.toGitStatusUpdateMessage(json);
 //   const heartbeatMessage = Convert.toHeartbeatMessage(json);
 //   const heatState = Convert.toHeatState(json);
+//   const initialStateMessage = Convert.toInitialStateMessage(json);
 //   const injectTestPRMessage = Convert.toInjectTestPRMessage(json);
 //   const injectTestSessionMessage = Convert.toInjectTestSessionMessage(json);
 //   const killSessionMessage = Convert.toKillSessionMessage(json);
@@ -74,6 +79,7 @@
 //   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
 //   const pRRole = Convert.toPRRole(json);
 //   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
+//   const pRsUpdatedMessage = Convert.toPRsUpdatedMessage(json);
 //   const ptyDesyncMessage = Convert.toPtyDesyncMessage(json);
 //   const ptyInputMessage = Convert.toPtyInputMessage(json);
 //   const ptyOutputMessage = Convert.toPtyOutputMessage(json);
@@ -90,21 +96,31 @@
 //   const registerMessage = Convert.toRegisterMessage(json);
 //   const repoInfo = Convert.toRepoInfo(json);
 //   const repoState = Convert.toRepoState(json);
+//   const reposUpdatedMessage = Convert.toReposUpdatedMessage(json);
 //   const resolveCommentMessage = Convert.toResolveCommentMessage(json);
 //   const resolveCommentResultMessage = Convert.toResolveCommentResultMessage(json);
 //   const response = Convert.toResponse(json);
 //   const reviewCancelledMessage = Convert.toReviewCancelledMessage(json);
 //   const reviewChunkMessage = Convert.toReviewChunkMessage(json);
 //   const reviewComment = Convert.toReviewComment(json);
+//   const reviewCommentResolvedMessage = Convert.toReviewCommentResolvedMessage(json);
 //   const reviewCompleteMessage = Convert.toReviewCompleteMessage(json);
 //   const reviewFinding = Convert.toReviewFinding(json);
 //   const reviewFindingMessage = Convert.toReviewFindingMessage(json);
 //   const reviewStartedMessage = Convert.toReviewStartedMessage(json);
 //   const reviewState = Convert.toReviewState(json);
+//   const reviewToolUse = Convert.toReviewToolUse(json);
+//   const reviewToolUseMessage = Convert.toReviewToolUseMessage(json);
 //   const session = Convert.toSession(json);
 //   const sessionExitedMessage = Convert.toSessionExitedMessage(json);
+//   const sessionRegisteredMessage = Convert.toSessionRegisteredMessage(json);
 //   const sessionState = Convert.toSessionState(json);
+//   const sessionStateChangedMessage = Convert.toSessionStateChangedMessage(json);
+//   const sessionTodosUpdatedMessage = Convert.toSessionTodosUpdatedMessage(json);
+//   const sessionUnregisteredMessage = Convert.toSessionUnregisteredMessage(json);
+//   const sessionsUpdatedMessage = Convert.toSessionsUpdatedMessage(json);
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
+//   const settingsUpdatedMessage = Convert.toSettingsUpdatedMessage(json);
 //   const spawnResultMessage = Convert.toSpawnResultMessage(json);
 //   const spawnSessionMessage = Convert.toSpawnSessionMessage(json);
 //   const startReviewMessage = Convert.toStartReviewMessage(json);
@@ -127,6 +143,8 @@
 //   const wontFixCommentResultMessage = Convert.toWontFixCommentResultMessage(json);
 //   const worktree = Convert.toWorktree(json);
 //   const worktreeCreatedEvent = Convert.toWorktreeCreatedEvent(json);
+//   const worktreeDeletedEvent = Convert.toWorktreeDeletedEvent(json);
+//   const worktreesUpdatedMessage = Convert.toWorktreesUpdatedMessage(json);
 //
 // These functions will throw an error if the JSON doesn't
 // match the expected interface, even if the JSON is valid.
@@ -220,12 +238,61 @@ export interface AuthorState {
     [property: string]: any;
 }
 
+export interface AuthorsUpdatedMessage {
+    authors?: AuthorElement[];
+    event:    AuthorsUpdatedMessageEvent;
+    [property: string]: any;
+}
+
+export interface AuthorElement {
+    author: string;
+    muted:  boolean;
+    [property: string]: any;
+}
+
+export enum AuthorsUpdatedMessageEvent {
+    AuthorsUpdated = "authors_updated",
+}
+
 export interface Branch {
     commit_hash?: string;
     commit_time?: string;
     is_current?:  boolean;
     name:         string;
     [property: string]: any;
+}
+
+export interface BranchChangedMessage {
+    event:    BranchChangedMessageEvent;
+    session?: SessionElement;
+    [property: string]: any;
+}
+
+export enum BranchChangedMessageEvent {
+    BranchChanged = "branch_changed",
+}
+
+export interface SessionElement {
+    branch?:          string;
+    directory:        string;
+    id:               string;
+    is_worktree?:     boolean;
+    label:            string;
+    last_seen:        string;
+    main_repo?:       string;
+    muted:            boolean;
+    state:            SessionState;
+    state_since:      string;
+    state_updated_at: string;
+    todos?:           string[];
+    [property: string]: any;
+}
+
+export enum SessionState {
+    Idle = "idle",
+    PendingApproval = "pending_approval",
+    WaitingInput = "waiting_input",
+    Working = "working",
 }
 
 export interface BranchDiffFile {
@@ -545,6 +612,19 @@ export enum EnsureRepoMessageCmd {
     EnsureRepo = "ensure_repo",
 }
 
+export interface EnsureRepoResultMessage {
+    cloned?:      boolean;
+    error?:       string;
+    event:        EnsureRepoResultMessageEvent;
+    success?:     boolean;
+    target_path?: string;
+    [property: string]: any;
+}
+
+export enum EnsureRepoResultMessageEvent {
+    EnsureRepoResult = "ensure_repo_result",
+}
+
 export interface FetchPRDetailsMessage {
     cmd: FetchPRDetailsMessageCmd;
     id:  string;
@@ -553,6 +633,59 @@ export interface FetchPRDetailsMessage {
 
 export enum FetchPRDetailsMessageCmd {
     FetchPRDetails = "fetch_pr_details",
+}
+
+export interface FetchPRDetailsResultMessage {
+    error?:  string;
+    event:   FetchPRDetailsResultMessageEvent;
+    prs?:    PRElement[];
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum FetchPRDetailsResultMessageEvent {
+    FetchPRDetailsResult = "fetch_pr_details_result",
+}
+
+export interface PRElement {
+    approved_by_me:         boolean;
+    author:                 string;
+    ci_status?:             string;
+    comment_count?:         number;
+    details_fetched:        boolean;
+    details_fetched_at?:    string;
+    has_new_changes:        boolean;
+    head_branch?:           string;
+    head_sha?:              string;
+    heat_state?:            HeatState;
+    host:                   string;
+    id:                     string;
+    last_heat_activity_at?: string;
+    last_polled:            string;
+    last_updated:           string;
+    mergeable?:             boolean;
+    mergeable_state?:       string;
+    muted:                  boolean;
+    number:                 number;
+    reason:                 string;
+    repo:                   string;
+    review_status?:         string;
+    role:                   PRRole;
+    state:                  string;
+    title:                  string;
+    url:                    string;
+    [property: string]: any;
+}
+
+export enum HeatState {
+    Cold = "cold",
+    Hot = "hot",
+    Warm = "warm",
+}
+
+export enum PRRole {
+    Author = "author",
+    Reviewer = "reviewer",
 }
 
 export interface FetchRemotesMessage {
@@ -794,6 +927,35 @@ export enum HeartbeatMessageCmd {
     Heartbeat = "heartbeat",
 }
 
+export interface InitialStateMessage {
+    authors?:          AuthorElement[];
+    event:             InitialStateMessageEvent;
+    protocol_version?: string;
+    prs?:              PRElement[];
+    repos?:            RepoElement[];
+    sessions?:         SessionElement[];
+    settings?:         { [key: string]: any };
+    warnings?:         WarningElement[];
+    [property: string]: any;
+}
+
+export enum InitialStateMessageEvent {
+    InitialState = "initial_state",
+}
+
+export interface RepoElement {
+    collapsed: boolean;
+    muted:     boolean;
+    repo:      string;
+    [property: string]: any;
+}
+
+export interface WarningElement {
+    code:    string;
+    message: string;
+    [property: string]: any;
+}
+
 export interface InjectTestPRMessage {
     cmd: InjectTestPRMessageCmd;
     pr:  PRElement;
@@ -804,47 +966,6 @@ export enum InjectTestPRMessageCmd {
     InjectTestPR = "inject_test_pr",
 }
 
-export interface PRElement {
-    approved_by_me:         boolean;
-    author:                 string;
-    ci_status?:             string;
-    comment_count?:         number;
-    details_fetched:        boolean;
-    details_fetched_at?:    string;
-    has_new_changes:        boolean;
-    head_branch?:           string;
-    head_sha?:              string;
-    heat_state?:            HeatState;
-    host:                   string;
-    id:                     string;
-    last_heat_activity_at?: string;
-    last_polled:            string;
-    last_updated:           string;
-    mergeable?:             boolean;
-    mergeable_state?:       string;
-    muted:                  boolean;
-    number:                 number;
-    reason:                 string;
-    repo:                   string;
-    review_status?:         string;
-    role:                   PRRole;
-    state:                  string;
-    title:                  string;
-    url:                    string;
-    [property: string]: any;
-}
-
-export enum HeatState {
-    Cold = "cold",
-    Hot = "hot",
-    Warm = "warm",
-}
-
-export enum PRRole {
-    Author = "author",
-    Reviewer = "reviewer",
-}
-
 export interface InjectTestSessionMessage {
     cmd:     InjectTestSessionMessageCmd;
     session: SessionElement;
@@ -853,28 +974,6 @@ export interface InjectTestSessionMessage {
 
 export enum InjectTestSessionMessageCmd {
     InjectTestSession = "inject_test_session",
-}
-
-export interface SessionElement {
-    branch?:          string;
-    directory:        string;
-    id:               string;
-    is_worktree?:     boolean;
-    label:            string;
-    last_seen:        string;
-    main_repo?:       string;
-    muted:            boolean;
-    state:            SessionState;
-    state_since:      string;
-    state_updated_at: string;
-    todos?:           string[];
-    [property: string]: any;
-}
-
-export enum SessionState {
-    Idle = "idle",
-    WaitingInput = "waiting_input",
-    Working = "working",
 }
 
 export interface KillSessionMessage {
@@ -1060,6 +1159,16 @@ export enum PRVisitedMessageCmd {
     PRVisited = "pr_visited",
 }
 
+export interface PRsUpdatedMessage {
+    event: PRsUpdatedMessageEvent;
+    prs?:  PRElement[];
+    [property: string]: any;
+}
+
+export enum PRsUpdatedMessageEvent {
+    PrsUpdated = "prs_updated",
+}
+
 export interface PtyDesyncMessage {
     event:  PtyDesyncMessageEvent;
     id:     string;
@@ -1146,9 +1255,9 @@ export enum QueryReposMessageCmd {
 }
 
 export interface RateLimitedMessage {
-    event:    RateLimitedMessageEvent;
-    reset_at: string;
-    resource: string;
+    event:               RateLimitedMessageEvent;
+    rate_limit_reset_at: string;
+    rate_limit_resource: string;
     [property: string]: any;
 }
 
@@ -1165,10 +1274,10 @@ export interface RecentLocation {
 }
 
 export interface RecentLocationsResultMessage {
-    error?:    string;
-    event:     RecentLocationsResultMessageEvent;
-    locations: LocationElement[];
-    success:   boolean;
+    error?:           string;
+    event:            RecentLocationsResultMessageEvent;
+    recent_locations: RecentLocationElement[];
+    success:          boolean;
     [property: string]: any;
 }
 
@@ -1176,7 +1285,7 @@ export enum RecentLocationsResultMessageEvent {
     RecentLocationsResult = "recent_locations_result",
 }
 
-export interface LocationElement {
+export interface RecentLocationElement {
     label:     string;
     last_seen: string;
     path:      string;
@@ -1235,6 +1344,16 @@ export interface RepoState {
     [property: string]: any;
 }
 
+export interface ReposUpdatedMessage {
+    event:  ReposUpdatedMessageEvent;
+    repos?: RepoElement[];
+    [property: string]: any;
+}
+
+export enum ReposUpdatedMessageEvent {
+    ReposUpdated = "repos_updated",
+}
+
 export interface ResolveCommentMessage {
     cmd:        ResolveCommentMessageCmd;
     comment_id: string;
@@ -1264,19 +1383,6 @@ export interface Response {
     prs?:      PRElement[];
     repos?:    RepoElement[];
     sessions?: SessionElement[];
-    [property: string]: any;
-}
-
-export interface AuthorElement {
-    author: string;
-    muted:  boolean;
-    [property: string]: any;
-}
-
-export interface RepoElement {
-    collapsed: boolean;
-    muted:     boolean;
-    repo:      string;
     [property: string]: any;
 }
 
@@ -1319,6 +1425,17 @@ export interface ReviewComment {
     [property: string]: any;
 }
 
+export interface ReviewCommentResolvedMessage {
+    comment_id: string;
+    event:      ReviewCommentResolvedMessageEvent;
+    review_id:  string;
+    [property: string]: any;
+}
+
+export enum ReviewCommentResolvedMessageEvent {
+    ReviewCommentResolved = "review_comment_resolved",
+}
+
 export interface ReviewCompleteMessage {
     error?:    string;
     event:     ReviewCompleteMessageEvent;
@@ -1341,6 +1458,7 @@ export interface ReviewFinding {
 }
 
 export interface ReviewFindingMessage {
+    comment?:  Comment;
     event:     ReviewFindingMessageEvent;
     finding:   Finding;
     review_id: string;
@@ -1378,6 +1496,31 @@ export interface ReviewState {
     [property: string]: any;
 }
 
+export interface ReviewToolUse {
+    input:  { [key: string]: any };
+    name:   string;
+    output: string;
+    [property: string]: any;
+}
+
+export interface ReviewToolUseMessage {
+    event:     ReviewToolUseMessageEvent;
+    review_id: string;
+    tool_use:  ToolUse;
+    [property: string]: any;
+}
+
+export enum ReviewToolUseMessageEvent {
+    ReviewToolUse = "review_tool_use",
+}
+
+export interface ToolUse {
+    input:  { [key: string]: any };
+    name:   string;
+    output: string;
+    [property: string]: any;
+}
+
 export interface Session {
     branch?:          string;
     directory:        string;
@@ -1406,6 +1549,56 @@ export enum SessionExitedMessageEvent {
     SessionExited = "session_exited",
 }
 
+export interface SessionRegisteredMessage {
+    event:   SessionRegisteredMessageEvent;
+    session: SessionElement;
+    [property: string]: any;
+}
+
+export enum SessionRegisteredMessageEvent {
+    SessionRegistered = "session_registered",
+}
+
+export interface SessionStateChangedMessage {
+    event:   SessionStateChangedMessageEvent;
+    session: SessionElement;
+    [property: string]: any;
+}
+
+export enum SessionStateChangedMessageEvent {
+    SessionStateChanged = "session_state_changed",
+}
+
+export interface SessionTodosUpdatedMessage {
+    event:   SessionTodosUpdatedMessageEvent;
+    session: SessionElement;
+    [property: string]: any;
+}
+
+export enum SessionTodosUpdatedMessageEvent {
+    SessionTodosUpdated = "session_todos_updated",
+}
+
+export interface SessionUnregisteredMessage {
+    event:   SessionUnregisteredMessageEvent;
+    session: SessionElement;
+    [property: string]: any;
+}
+
+export enum SessionUnregisteredMessageEvent {
+    SessionUnregistered = "session_unregistered",
+}
+
+export interface SessionsUpdatedMessage {
+    event:     SessionsUpdatedMessageEvent;
+    sessions?: SessionElement[];
+    [property: string]: any;
+}
+
+export enum SessionsUpdatedMessageEvent {
+    SessionsUpdated = "sessions_updated",
+}
+
 export interface SetSettingMessage {
     cmd:   SetSettingMessageCmd;
     key:   string;
@@ -1415,6 +1608,18 @@ export interface SetSettingMessage {
 
 export enum SetSettingMessageCmd {
     SetSetting = "set_setting",
+}
+
+export interface SettingsUpdatedMessage {
+    error?:    string;
+    event:     SettingsUpdatedMessageEvent;
+    settings?: { [key: string]: any };
+    success?:  boolean;
+    [property: string]: any;
+}
+
+export enum SettingsUpdatedMessageEvent {
+    SettingsUpdated = "settings_updated",
 }
 
 export interface SpawnResultMessage {
@@ -1614,29 +1819,41 @@ export enum UpdateCommentResultMessageEvent {
 }
 
 export interface WebSocketEvent {
+    action?:               string;
     authors?:              AuthorElement[];
+    base_ref?:             string;
     branch?:               string;
     branches?:             BranchElement[];
     cloned?:               boolean;
     cmd?:                  string;
     cols?:                 number;
+    comment?:              Comment;
+    comment_id?:           string;
     conflict?:             boolean;
+    content?:              string;
     data?:                 string;
+    directory?:            string;
     dirty?:                boolean;
     error?:                string;
     event:                 string;
     exit_code?:            number;
+    files?:                FileElement[];
+    finding?:              Finding;
     found?:                boolean;
     id?:                   string;
     last_seq?:             number;
+    modified?:             string;
+    original?:             string;
+    path?:                 string;
     pid?:                  number;
     protocol_version?:     string;
     prs?:                  PRElement[];
     rate_limit_reset_at?:  string;
     rate_limit_resource?:  string;
     reason?:               string;
-    recent_locations?:     LocationElement[];
+    recent_locations?:     RecentLocationElement[];
     repos?:                RepoElement[];
+    review_id?:            string;
     rows?:                 number;
     running?:              boolean;
     scrollback?:           string;
@@ -1646,17 +1863,15 @@ export interface WebSocketEvent {
     sessions?:             SessionElement[];
     settings?:             { [key: string]: any };
     signal?:               string;
+    staged?:               StagedElement[];
     stash_ref?:            string;
     success?:              boolean;
     target_path?:          string;
+    tool_use?:             ToolUse;
+    unstaged?:             StagedElement[];
+    untracked?:            StagedElement[];
     warnings?:             WarningElement[];
     worktrees?:            WorktreeElement[];
-    [property: string]: any;
-}
-
-export interface WarningElement {
-    code:    string;
-    message: string;
     [property: string]: any;
 }
 
@@ -1691,15 +1906,33 @@ export interface Worktree {
 }
 
 export interface WorktreeCreatedEvent {
-    branch:    string;
     event:     WorktreeCreatedEventEvent;
-    main_repo: string;
-    path:      string;
+    worktrees: WorktreeElement[];
     [property: string]: any;
 }
 
 export enum WorktreeCreatedEventEvent {
     WorktreeCreated = "worktree_created",
+}
+
+export interface WorktreeDeletedEvent {
+    event:     WorktreeDeletedEventEvent;
+    worktrees: WorktreeElement[];
+    [property: string]: any;
+}
+
+export enum WorktreeDeletedEventEvent {
+    WorktreeDeleted = "worktree_deleted",
+}
+
+export interface WorktreesUpdatedMessage {
+    event:      WorktreesUpdatedMessageEvent;
+    worktrees?: WorktreeElement[];
+    [property: string]: any;
+}
+
+export enum WorktreesUpdatedMessageEvent {
+    WorktreesUpdated = "worktrees_updated",
 }
 
 // Converts JSON strings to/from your types
@@ -1753,12 +1986,28 @@ export class Convert {
         return JSON.stringify(uncast(value, r("AuthorState")), null, 2);
     }
 
+    public static toAuthorsUpdatedMessage(json: string): AuthorsUpdatedMessage {
+        return cast(JSON.parse(json), r("AuthorsUpdatedMessage"));
+    }
+
+    public static authorsUpdatedMessageToJson(value: AuthorsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("AuthorsUpdatedMessage")), null, 2);
+    }
+
     public static toBranch(json: string): Branch {
         return cast(JSON.parse(json), r("Branch"));
     }
 
     public static branchToJson(value: Branch): string {
         return JSON.stringify(uncast(value, r("Branch")), null, 2);
+    }
+
+    public static toBranchChangedMessage(json: string): BranchChangedMessage {
+        return cast(JSON.parse(json), r("BranchChangedMessage"));
+    }
+
+    public static branchChangedMessageToJson(value: BranchChangedMessage): string {
+        return JSON.stringify(uncast(value, r("BranchChangedMessage")), null, 2);
     }
 
     public static toBranchDiffFile(json: string): BranchDiffFile {
@@ -1977,12 +2226,28 @@ export class Convert {
         return JSON.stringify(uncast(value, r("EnsureRepoMessage")), null, 2);
     }
 
+    public static toEnsureRepoResultMessage(json: string): EnsureRepoResultMessage {
+        return cast(JSON.parse(json), r("EnsureRepoResultMessage"));
+    }
+
+    public static ensureRepoResultMessageToJson(value: EnsureRepoResultMessage): string {
+        return JSON.stringify(uncast(value, r("EnsureRepoResultMessage")), null, 2);
+    }
+
     public static toFetchPRDetailsMessage(json: string): FetchPRDetailsMessage {
         return cast(JSON.parse(json), r("FetchPRDetailsMessage"));
     }
 
     public static fetchPRDetailsMessageToJson(value: FetchPRDetailsMessage): string {
         return JSON.stringify(uncast(value, r("FetchPRDetailsMessage")), null, 2);
+    }
+
+    public static toFetchPRDetailsResultMessage(json: string): FetchPRDetailsResultMessage {
+        return cast(JSON.parse(json), r("FetchPRDetailsResultMessage"));
+    }
+
+    public static fetchPRDetailsResultMessageToJson(value: FetchPRDetailsResultMessage): string {
+        return JSON.stringify(uncast(value, r("FetchPRDetailsResultMessage")), null, 2);
     }
 
     public static toFetchRemotesMessage(json: string): FetchRemotesMessage {
@@ -2137,6 +2402,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("HeatState")), null, 2);
     }
 
+    public static toInitialStateMessage(json: string): InitialStateMessage {
+        return cast(JSON.parse(json), r("InitialStateMessage"));
+    }
+
+    public static initialStateMessageToJson(value: InitialStateMessage): string {
+        return JSON.stringify(uncast(value, r("InitialStateMessage")), null, 2);
+    }
+
     public static toInjectTestPRMessage(json: string): InjectTestPRMessage {
         return cast(JSON.parse(json), r("InjectTestPRMessage"));
     }
@@ -2281,6 +2554,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("PRVisitedMessage")), null, 2);
     }
 
+    public static toPRsUpdatedMessage(json: string): PRsUpdatedMessage {
+        return cast(JSON.parse(json), r("PRsUpdatedMessage"));
+    }
+
+    public static pRsUpdatedMessageToJson(value: PRsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("PRsUpdatedMessage")), null, 2);
+    }
+
     public static toPtyDesyncMessage(json: string): PtyDesyncMessage {
         return cast(JSON.parse(json), r("PtyDesyncMessage"));
     }
@@ -2409,6 +2690,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("RepoState")), null, 2);
     }
 
+    public static toReposUpdatedMessage(json: string): ReposUpdatedMessage {
+        return cast(JSON.parse(json), r("ReposUpdatedMessage"));
+    }
+
+    public static reposUpdatedMessageToJson(value: ReposUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("ReposUpdatedMessage")), null, 2);
+    }
+
     public static toResolveCommentMessage(json: string): ResolveCommentMessage {
         return cast(JSON.parse(json), r("ResolveCommentMessage"));
     }
@@ -2457,6 +2746,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ReviewComment")), null, 2);
     }
 
+    public static toReviewCommentResolvedMessage(json: string): ReviewCommentResolvedMessage {
+        return cast(JSON.parse(json), r("ReviewCommentResolvedMessage"));
+    }
+
+    public static reviewCommentResolvedMessageToJson(value: ReviewCommentResolvedMessage): string {
+        return JSON.stringify(uncast(value, r("ReviewCommentResolvedMessage")), null, 2);
+    }
+
     public static toReviewCompleteMessage(json: string): ReviewCompleteMessage {
         return cast(JSON.parse(json), r("ReviewCompleteMessage"));
     }
@@ -2497,6 +2794,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ReviewState")), null, 2);
     }
 
+    public static toReviewToolUse(json: string): ReviewToolUse {
+        return cast(JSON.parse(json), r("ReviewToolUse"));
+    }
+
+    public static reviewToolUseToJson(value: ReviewToolUse): string {
+        return JSON.stringify(uncast(value, r("ReviewToolUse")), null, 2);
+    }
+
+    public static toReviewToolUseMessage(json: string): ReviewToolUseMessage {
+        return cast(JSON.parse(json), r("ReviewToolUseMessage"));
+    }
+
+    public static reviewToolUseMessageToJson(value: ReviewToolUseMessage): string {
+        return JSON.stringify(uncast(value, r("ReviewToolUseMessage")), null, 2);
+    }
+
     public static toSession(json: string): Session {
         return cast(JSON.parse(json), r("Session"));
     }
@@ -2513,6 +2826,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SessionExitedMessage")), null, 2);
     }
 
+    public static toSessionRegisteredMessage(json: string): SessionRegisteredMessage {
+        return cast(JSON.parse(json), r("SessionRegisteredMessage"));
+    }
+
+    public static sessionRegisteredMessageToJson(value: SessionRegisteredMessage): string {
+        return JSON.stringify(uncast(value, r("SessionRegisteredMessage")), null, 2);
+    }
+
     public static toSessionState(json: string): SessionState {
         return cast(JSON.parse(json), r("SessionState"));
     }
@@ -2521,12 +2842,52 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SessionState")), null, 2);
     }
 
+    public static toSessionStateChangedMessage(json: string): SessionStateChangedMessage {
+        return cast(JSON.parse(json), r("SessionStateChangedMessage"));
+    }
+
+    public static sessionStateChangedMessageToJson(value: SessionStateChangedMessage): string {
+        return JSON.stringify(uncast(value, r("SessionStateChangedMessage")), null, 2);
+    }
+
+    public static toSessionTodosUpdatedMessage(json: string): SessionTodosUpdatedMessage {
+        return cast(JSON.parse(json), r("SessionTodosUpdatedMessage"));
+    }
+
+    public static sessionTodosUpdatedMessageToJson(value: SessionTodosUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("SessionTodosUpdatedMessage")), null, 2);
+    }
+
+    public static toSessionUnregisteredMessage(json: string): SessionUnregisteredMessage {
+        return cast(JSON.parse(json), r("SessionUnregisteredMessage"));
+    }
+
+    public static sessionUnregisteredMessageToJson(value: SessionUnregisteredMessage): string {
+        return JSON.stringify(uncast(value, r("SessionUnregisteredMessage")), null, 2);
+    }
+
+    public static toSessionsUpdatedMessage(json: string): SessionsUpdatedMessage {
+        return cast(JSON.parse(json), r("SessionsUpdatedMessage"));
+    }
+
+    public static sessionsUpdatedMessageToJson(value: SessionsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("SessionsUpdatedMessage")), null, 2);
+    }
+
     public static toSetSettingMessage(json: string): SetSettingMessage {
         return cast(JSON.parse(json), r("SetSettingMessage"));
     }
 
     public static setSettingMessageToJson(value: SetSettingMessage): string {
         return JSON.stringify(uncast(value, r("SetSettingMessage")), null, 2);
+    }
+
+    public static toSettingsUpdatedMessage(json: string): SettingsUpdatedMessage {
+        return cast(JSON.parse(json), r("SettingsUpdatedMessage"));
+    }
+
+    public static settingsUpdatedMessageToJson(value: SettingsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("SettingsUpdatedMessage")), null, 2);
     }
 
     public static toSpawnResultMessage(json: string): SpawnResultMessage {
@@ -2703,6 +3064,22 @@ export class Convert {
 
     public static worktreeCreatedEventToJson(value: WorktreeCreatedEvent): string {
         return JSON.stringify(uncast(value, r("WorktreeCreatedEvent")), null, 2);
+    }
+
+    public static toWorktreeDeletedEvent(json: string): WorktreeDeletedEvent {
+        return cast(JSON.parse(json), r("WorktreeDeletedEvent"));
+    }
+
+    public static worktreeDeletedEventToJson(value: WorktreeDeletedEvent): string {
+        return JSON.stringify(uncast(value, r("WorktreeDeletedEvent")), null, 2);
+    }
+
+    public static toWorktreesUpdatedMessage(json: string): WorktreesUpdatedMessage {
+        return cast(JSON.parse(json), r("WorktreesUpdatedMessage"));
+    }
+
+    public static worktreesUpdatedMessageToJson(value: WorktreesUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("WorktreesUpdatedMessage")), null, 2);
     }
 }
 
@@ -2914,11 +3291,37 @@ const typeMap: any = {
         { json: "author", js: "author", typ: "" },
         { json: "muted", js: "muted", typ: true },
     ], "any"),
+    "AuthorsUpdatedMessage": o([
+        { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
+        { json: "event", js: "event", typ: r("AuthorsUpdatedMessageEvent") },
+    ], "any"),
+    "AuthorElement": o([
+        { json: "author", js: "author", typ: "" },
+        { json: "muted", js: "muted", typ: true },
+    ], "any"),
     "Branch": o([
         { json: "commit_hash", js: "commit_hash", typ: u(undefined, "") },
         { json: "commit_time", js: "commit_time", typ: u(undefined, "") },
         { json: "is_current", js: "is_current", typ: u(undefined, true) },
         { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "BranchChangedMessage": o([
+        { json: "event", js: "event", typ: r("BranchChangedMessageEvent") },
+        { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
+    ], "any"),
+    "SessionElement": o([
+        { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "directory", js: "directory", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
+        { json: "label", js: "label", typ: "" },
+        { json: "last_seen", js: "last_seen", typ: "" },
+        { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
+        { json: "muted", js: "muted", typ: true },
+        { json: "state", js: "state", typ: r("SessionState") },
+        { json: "state_since", js: "state_since", typ: "" },
+        { json: "state_updated_at", js: "state_updated_at", typ: "" },
+        { json: "todos", js: "todos", typ: u(undefined, a("")) },
     ], "any"),
     "BranchDiffFile": o([
         { json: "additions", js: "additions", typ: u(undefined, 0) },
@@ -3079,9 +3482,50 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("EnsureRepoMessageCmd") },
         { json: "target_path", js: "target_path", typ: "" },
     ], "any"),
+    "EnsureRepoResultMessage": o([
+        { json: "cloned", js: "cloned", typ: u(undefined, true) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("EnsureRepoResultMessageEvent") },
+        { json: "success", js: "success", typ: u(undefined, true) },
+        { json: "target_path", js: "target_path", typ: u(undefined, "") },
+    ], "any"),
     "FetchPRDetailsMessage": o([
         { json: "cmd", js: "cmd", typ: r("FetchPRDetailsMessageCmd") },
         { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "FetchPRDetailsResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("FetchPRDetailsResultMessageEvent") },
+        { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "PRElement": o([
+        { json: "approved_by_me", js: "approved_by_me", typ: true },
+        { json: "author", js: "author", typ: "" },
+        { json: "ci_status", js: "ci_status", typ: u(undefined, "") },
+        { json: "comment_count", js: "comment_count", typ: u(undefined, 0) },
+        { json: "details_fetched", js: "details_fetched", typ: true },
+        { json: "details_fetched_at", js: "details_fetched_at", typ: u(undefined, "") },
+        { json: "has_new_changes", js: "has_new_changes", typ: true },
+        { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
+        { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
+        { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
+        { json: "host", js: "host", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
+        { json: "last_polled", js: "last_polled", typ: "" },
+        { json: "last_updated", js: "last_updated", typ: "" },
+        { json: "mergeable", js: "mergeable", typ: u(undefined, true) },
+        { json: "mergeable_state", js: "mergeable_state", typ: u(undefined, "") },
+        { json: "muted", js: "muted", typ: true },
+        { json: "number", js: "number", typ: 0 },
+        { json: "reason", js: "reason", typ: "" },
+        { json: "repo", js: "repo", typ: "" },
+        { json: "review_status", js: "review_status", typ: u(undefined, "") },
+        { json: "role", js: "role", typ: r("PRRole") },
+        { json: "state", js: "state", typ: "" },
+        { json: "title", js: "title", typ: "" },
+        { json: "url", js: "url", typ: "" },
     ], "any"),
     "FetchRemotesMessage": o([
         { json: "cmd", js: "cmd", typ: r("FetchRemotesMessageCmd") },
@@ -3210,55 +3654,32 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("HeartbeatMessageCmd") },
         { json: "id", js: "id", typ: "" },
     ], "any"),
+    "InitialStateMessage": o([
+        { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
+        { json: "event", js: "event", typ: r("InitialStateMessageEvent") },
+        { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
+        { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
+        { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
+        { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+        { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
+    ], "any"),
+    "RepoElement": o([
+        { json: "collapsed", js: "collapsed", typ: true },
+        { json: "muted", js: "muted", typ: true },
+        { json: "repo", js: "repo", typ: "" },
+    ], "any"),
+    "WarningElement": o([
+        { json: "code", js: "code", typ: "" },
+        { json: "message", js: "message", typ: "" },
+    ], "any"),
     "InjectTestPRMessage": o([
         { json: "cmd", js: "cmd", typ: r("InjectTestPRMessageCmd") },
         { json: "pr", js: "pr", typ: r("PRElement") },
     ], "any"),
-    "PRElement": o([
-        { json: "approved_by_me", js: "approved_by_me", typ: true },
-        { json: "author", js: "author", typ: "" },
-        { json: "ci_status", js: "ci_status", typ: u(undefined, "") },
-        { json: "comment_count", js: "comment_count", typ: u(undefined, 0) },
-        { json: "details_fetched", js: "details_fetched", typ: true },
-        { json: "details_fetched_at", js: "details_fetched_at", typ: u(undefined, "") },
-        { json: "has_new_changes", js: "has_new_changes", typ: true },
-        { json: "head_branch", js: "head_branch", typ: u(undefined, "") },
-        { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
-        { json: "heat_state", js: "heat_state", typ: u(undefined, r("HeatState")) },
-        { json: "host", js: "host", typ: "" },
-        { json: "id", js: "id", typ: "" },
-        { json: "last_heat_activity_at", js: "last_heat_activity_at", typ: u(undefined, "") },
-        { json: "last_polled", js: "last_polled", typ: "" },
-        { json: "last_updated", js: "last_updated", typ: "" },
-        { json: "mergeable", js: "mergeable", typ: u(undefined, true) },
-        { json: "mergeable_state", js: "mergeable_state", typ: u(undefined, "") },
-        { json: "muted", js: "muted", typ: true },
-        { json: "number", js: "number", typ: 0 },
-        { json: "reason", js: "reason", typ: "" },
-        { json: "repo", js: "repo", typ: "" },
-        { json: "review_status", js: "review_status", typ: u(undefined, "") },
-        { json: "role", js: "role", typ: r("PRRole") },
-        { json: "state", js: "state", typ: "" },
-        { json: "title", js: "title", typ: "" },
-        { json: "url", js: "url", typ: "" },
-    ], "any"),
     "InjectTestSessionMessage": o([
         { json: "cmd", js: "cmd", typ: r("InjectTestSessionMessageCmd") },
         { json: "session", js: "session", typ: r("SessionElement") },
-    ], "any"),
-    "SessionElement": o([
-        { json: "branch", js: "branch", typ: u(undefined, "") },
-        { json: "directory", js: "directory", typ: "" },
-        { json: "id", js: "id", typ: "" },
-        { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
-        { json: "label", js: "label", typ: "" },
-        { json: "last_seen", js: "last_seen", typ: "" },
-        { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
-        { json: "muted", js: "muted", typ: true },
-        { json: "state", js: "state", typ: r("SessionState") },
-        { json: "state_since", js: "state_since", typ: "" },
-        { json: "state_updated_at", js: "state_updated_at", typ: "" },
-        { json: "todos", js: "todos", typ: u(undefined, a("")) },
     ], "any"),
     "KillSessionMessage": o([
         { json: "cmd", js: "cmd", typ: r("KillSessionMessageCmd") },
@@ -3357,6 +3778,10 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("PRVisitedMessageCmd") },
         { json: "id", js: "id", typ: "" },
     ], "any"),
+    "PRsUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("PRsUpdatedMessageEvent") },
+        { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
+    ], "any"),
     "PtyDesyncMessage": o([
         { json: "event", js: "event", typ: r("PtyDesyncMessageEvent") },
         { json: "id", js: "id", typ: "" },
@@ -3396,8 +3821,8 @@ const typeMap: any = {
     ], "any"),
     "RateLimitedMessage": o([
         { json: "event", js: "event", typ: r("RateLimitedMessageEvent") },
-        { json: "reset_at", js: "reset_at", typ: "" },
-        { json: "resource", js: "resource", typ: "" },
+        { json: "rate_limit_reset_at", js: "rate_limit_reset_at", typ: "" },
+        { json: "rate_limit_resource", js: "rate_limit_resource", typ: "" },
     ], "any"),
     "RecentLocation": o([
         { json: "label", js: "label", typ: "" },
@@ -3408,10 +3833,10 @@ const typeMap: any = {
     "RecentLocationsResultMessage": o([
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("RecentLocationsResultMessageEvent") },
-        { json: "locations", js: "locations", typ: a(r("LocationElement")) },
+        { json: "recent_locations", js: "recent_locations", typ: a(r("RecentLocationElement")) },
         { json: "success", js: "success", typ: true },
     ], "any"),
-    "LocationElement": o([
+    "RecentLocationElement": o([
         { json: "label", js: "label", typ: "" },
         { json: "last_seen", js: "last_seen", typ: "" },
         { json: "path", js: "path", typ: "" },
@@ -3446,6 +3871,10 @@ const typeMap: any = {
         { json: "muted", js: "muted", typ: true },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
+    "ReposUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("ReposUpdatedMessageEvent") },
+        { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
+    ], "any"),
     "ResolveCommentMessage": o([
         { json: "cmd", js: "cmd", typ: r("ResolveCommentMessageCmd") },
         { json: "comment_id", js: "comment_id", typ: "" },
@@ -3463,15 +3892,6 @@ const typeMap: any = {
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
-    ], "any"),
-    "AuthorElement": o([
-        { json: "author", js: "author", typ: "" },
-        { json: "muted", js: "muted", typ: true },
-    ], "any"),
-    "RepoElement": o([
-        { json: "collapsed", js: "collapsed", typ: true },
-        { json: "muted", js: "muted", typ: true },
-        { json: "repo", js: "repo", typ: "" },
     ], "any"),
     "ReviewCancelledMessage": o([
         { json: "event", js: "event", typ: r("ReviewCancelledMessageEvent") },
@@ -3498,6 +3918,11 @@ const typeMap: any = {
         { json: "wont_fix_at", js: "wont_fix_at", typ: u(undefined, "") },
         { json: "wont_fix_by", js: "wont_fix_by", typ: u(undefined, "") },
     ], "any"),
+    "ReviewCommentResolvedMessage": o([
+        { json: "comment_id", js: "comment_id", typ: "" },
+        { json: "event", js: "event", typ: r("ReviewCommentResolvedMessageEvent") },
+        { json: "review_id", js: "review_id", typ: "" },
+    ], "any"),
     "ReviewCompleteMessage": o([
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("ReviewCompleteMessageEvent") },
@@ -3512,6 +3937,7 @@ const typeMap: any = {
         { json: "severity", js: "severity", typ: u(undefined, "") },
     ], "any"),
     "ReviewFindingMessage": o([
+        { json: "comment", js: "comment", typ: u(undefined, r("Comment")) },
         { json: "event", js: "event", typ: r("ReviewFindingMessageEvent") },
         { json: "finding", js: "finding", typ: r("Finding") },
         { json: "review_id", js: "review_id", typ: "" },
@@ -3533,6 +3959,21 @@ const typeMap: any = {
         { json: "review_id", js: "review_id", typ: "" },
         { json: "viewed_files", js: "viewed_files", typ: a("") },
     ], "any"),
+    "ReviewToolUse": o([
+        { json: "input", js: "input", typ: m("any") },
+        { json: "name", js: "name", typ: "" },
+        { json: "output", js: "output", typ: "" },
+    ], "any"),
+    "ReviewToolUseMessage": o([
+        { json: "event", js: "event", typ: r("ReviewToolUseMessageEvent") },
+        { json: "review_id", js: "review_id", typ: "" },
+        { json: "tool_use", js: "tool_use", typ: r("ToolUse") },
+    ], "any"),
+    "ToolUse": o([
+        { json: "input", js: "input", typ: m("any") },
+        { json: "name", js: "name", typ: "" },
+        { json: "output", js: "output", typ: "" },
+    ], "any"),
     "Session": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: "" },
@@ -3553,10 +3994,36 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "signal", js: "signal", typ: u(undefined, "") },
     ], "any"),
+    "SessionRegisteredMessage": o([
+        { json: "event", js: "event", typ: r("SessionRegisteredMessageEvent") },
+        { json: "session", js: "session", typ: r("SessionElement") },
+    ], "any"),
+    "SessionStateChangedMessage": o([
+        { json: "event", js: "event", typ: r("SessionStateChangedMessageEvent") },
+        { json: "session", js: "session", typ: r("SessionElement") },
+    ], "any"),
+    "SessionTodosUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("SessionTodosUpdatedMessageEvent") },
+        { json: "session", js: "session", typ: r("SessionElement") },
+    ], "any"),
+    "SessionUnregisteredMessage": o([
+        { json: "event", js: "event", typ: r("SessionUnregisteredMessageEvent") },
+        { json: "session", js: "session", typ: r("SessionElement") },
+    ], "any"),
+    "SessionsUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("SessionsUpdatedMessageEvent") },
+        { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+    ], "any"),
     "SetSettingMessage": o([
         { json: "cmd", js: "cmd", typ: r("SetSettingMessageCmd") },
         { json: "key", js: "key", typ: "" },
         { json: "value", js: "value", typ: "" },
+    ], "any"),
+    "SettingsUpdatedMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("SettingsUpdatedMessageEvent") },
+        { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "success", js: "success", typ: u(undefined, true) },
     ], "any"),
     "SpawnResultMessage": o([
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -3653,29 +4120,41 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "WebSocketEvent": o([
+        { json: "action", js: "action", typ: u(undefined, "") },
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
+        { json: "base_ref", js: "base_ref", typ: u(undefined, "") },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "branches", js: "branches", typ: u(undefined, a(r("BranchElement"))) },
         { json: "cloned", js: "cloned", typ: u(undefined, true) },
         { json: "cmd", js: "cmd", typ: u(undefined, "") },
         { json: "cols", js: "cols", typ: u(undefined, 0) },
+        { json: "comment", js: "comment", typ: u(undefined, r("Comment")) },
+        { json: "comment_id", js: "comment_id", typ: u(undefined, "") },
         { json: "conflict", js: "conflict", typ: u(undefined, true) },
+        { json: "content", js: "content", typ: u(undefined, "") },
         { json: "data", js: "data", typ: u(undefined, "") },
+        { json: "directory", js: "directory", typ: u(undefined, "") },
         { json: "dirty", js: "dirty", typ: u(undefined, true) },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: "" },
         { json: "exit_code", js: "exit_code", typ: u(undefined, 0) },
+        { json: "files", js: "files", typ: u(undefined, a(r("FileElement"))) },
+        { json: "finding", js: "finding", typ: u(undefined, r("Finding")) },
         { json: "found", js: "found", typ: u(undefined, true) },
         { json: "id", js: "id", typ: u(undefined, "") },
         { json: "last_seq", js: "last_seq", typ: u(undefined, 0) },
+        { json: "modified", js: "modified", typ: u(undefined, "") },
+        { json: "original", js: "original", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: u(undefined, "") },
         { json: "pid", js: "pid", typ: u(undefined, 0) },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "rate_limit_reset_at", js: "rate_limit_reset_at", typ: u(undefined, "") },
         { json: "rate_limit_resource", js: "rate_limit_resource", typ: u(undefined, "") },
         { json: "reason", js: "reason", typ: u(undefined, "") },
-        { json: "recent_locations", js: "recent_locations", typ: u(undefined, a(r("LocationElement"))) },
+        { json: "recent_locations", js: "recent_locations", typ: u(undefined, a(r("RecentLocationElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
+        { json: "review_id", js: "review_id", typ: u(undefined, "") },
         { json: "rows", js: "rows", typ: u(undefined, 0) },
         { json: "running", js: "running", typ: u(undefined, true) },
         { json: "scrollback", js: "scrollback", typ: u(undefined, "") },
@@ -3685,15 +4164,15 @@ const typeMap: any = {
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
         { json: "signal", js: "signal", typ: u(undefined, "") },
+        { json: "staged", js: "staged", typ: u(undefined, a(r("StagedElement"))) },
         { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
         { json: "success", js: "success", typ: u(undefined, true) },
         { json: "target_path", js: "target_path", typ: u(undefined, "") },
+        { json: "tool_use", js: "tool_use", typ: u(undefined, r("ToolUse")) },
+        { json: "unstaged", js: "unstaged", typ: u(undefined, a(r("StagedElement"))) },
+        { json: "untracked", js: "untracked", typ: u(undefined, a(r("StagedElement"))) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
-    ], "any"),
-    "WarningElement": o([
-        { json: "code", js: "code", typ: "" },
-        { json: "message", js: "message", typ: "" },
     ], "any"),
     "WontFixCommentMessage": o([
         { json: "cmd", js: "cmd", typ: r("WontFixCommentMessageCmd") },
@@ -3712,10 +4191,16 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
     ], "any"),
     "WorktreeCreatedEvent": o([
-        { json: "branch", js: "branch", typ: "" },
         { json: "event", js: "event", typ: r("WorktreeCreatedEventEvent") },
-        { json: "main_repo", js: "main_repo", typ: "" },
-        { json: "path", js: "path", typ: "" },
+        { json: "worktrees", js: "worktrees", typ: a(r("WorktreeElement")) },
+    ], "any"),
+    "WorktreeDeletedEvent": o([
+        { json: "event", js: "event", typ: r("WorktreeDeletedEventEvent") },
+        { json: "worktrees", js: "worktrees", typ: a(r("WorktreeElement")) },
+    ], "any"),
+    "WorktreesUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("WorktreesUpdatedMessageEvent") },
+        { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
     ], "any"),
     "AddCommentMessageCmd": [
         "add_comment",
@@ -3731,6 +4216,18 @@ const typeMap: any = {
     ],
     "AttachSessionMessageCmd": [
         "attach_session",
+    ],
+    "AuthorsUpdatedMessageEvent": [
+        "authors_updated",
+    ],
+    "BranchChangedMessageEvent": [
+        "branch_changed",
+    ],
+    "SessionState": [
+        "idle",
+        "pending_approval",
+        "waiting_input",
+        "working",
     ],
     "BranchDiffFilesResultMessageEvent": [
         "branch_diff_files_result",
@@ -3807,8 +4304,23 @@ const typeMap: any = {
     "EnsureRepoMessageCmd": [
         "ensure_repo",
     ],
+    "EnsureRepoResultMessageEvent": [
+        "ensure_repo_result",
+    ],
     "FetchPRDetailsMessageCmd": [
         "fetch_pr_details",
+    ],
+    "FetchPRDetailsResultMessageEvent": [
+        "fetch_pr_details_result",
+    ],
+    "HeatState": [
+        "cold",
+        "hot",
+        "warm",
+    ],
+    "PRRole": [
+        "author",
+        "reviewer",
     ],
     "FetchRemotesMessageCmd": [
         "fetch_remotes",
@@ -3861,25 +4373,14 @@ const typeMap: any = {
     "HeartbeatMessageCmd": [
         "heartbeat",
     ],
+    "InitialStateMessageEvent": [
+        "initial_state",
+    ],
     "InjectTestPRMessageCmd": [
         "inject_test_pr",
     ],
-    "HeatState": [
-        "cold",
-        "hot",
-        "warm",
-    ],
-    "PRRole": [
-        "author",
-        "reviewer",
-    ],
     "InjectTestSessionMessageCmd": [
         "inject_test_session",
-    ],
-    "SessionState": [
-        "idle",
-        "waiting_input",
-        "working",
     ],
     "KillSessionMessageCmd": [
         "kill_session",
@@ -3923,6 +4424,9 @@ const typeMap: any = {
     "PRVisitedMessageCmd": [
         "pr_visited",
     ],
+    "PRsUpdatedMessageEvent": [
+        "prs_updated",
+    ],
     "PtyDesyncMessageEvent": [
         "pty_desync",
     ],
@@ -3962,6 +4466,9 @@ const typeMap: any = {
     "RegisterMessageCmd": [
         "register",
     ],
+    "ReposUpdatedMessageEvent": [
+        "repos_updated",
+    ],
     "ResolveCommentMessageCmd": [
         "resolve_comment",
     ],
@@ -3974,6 +4481,9 @@ const typeMap: any = {
     "ReviewChunkMessageEvent": [
         "review_chunk",
     ],
+    "ReviewCommentResolvedMessageEvent": [
+        "review_comment_resolved",
+    ],
     "ReviewCompleteMessageEvent": [
         "review_complete",
     ],
@@ -3983,11 +4493,32 @@ const typeMap: any = {
     "ReviewStartedMessageEvent": [
         "review_started",
     ],
+    "ReviewToolUseMessageEvent": [
+        "review_tool_use",
+    ],
     "SessionExitedMessageEvent": [
         "session_exited",
     ],
+    "SessionRegisteredMessageEvent": [
+        "session_registered",
+    ],
+    "SessionStateChangedMessageEvent": [
+        "session_state_changed",
+    ],
+    "SessionTodosUpdatedMessageEvent": [
+        "session_todos_updated",
+    ],
+    "SessionUnregisteredMessageEvent": [
+        "session_unregistered",
+    ],
+    "SessionsUpdatedMessageEvent": [
+        "sessions_updated",
+    ],
     "SetSettingMessageCmd": [
         "set_setting",
+    ],
+    "SettingsUpdatedMessageEvent": [
+        "settings_updated",
     ],
     "SpawnResultMessageEvent": [
         "spawn_result",
@@ -4048,5 +4579,11 @@ const typeMap: any = {
     ],
     "WorktreeCreatedEventEvent": [
         "worktree_created",
+    ],
+    "WorktreeDeletedEventEvent": [
+        "worktree_deleted",
+    ],
+    "WorktreesUpdatedMessageEvent": [
+        "worktrees_updated",
     ],
 };

@@ -34,6 +34,11 @@ Move agent process management into the Go daemon. The daemon spawns PTYs, manage
 - [~] Daemon upgrade notification flow (version-mismatch message now includes manual restart guidance + active session count)
 - [x] Ported codex output-based state detection heuristics into Go PTY path
 - [x] Drafted Phase 8 shim-based restart-survival plan (implementation pending)
+- [x] Made `unregister` a hard-stop lifecycle operation; `detach_session` remains detach-only
+- [x] Moved `pty_input` onto the ordered WebSocket command path (removed bypass fast-path)
+- [x] Added frontend PTY output buffering to prevent dropped prompt/scrollback before terminal readiness
+- [x] Enforced stricter TypeSpec event coverage for daemon/reviewer WebSocket payloads and regenerated generated types
+- [x] Fixed Tauri daemon socket detection path to match daemon default (`~/.attn/attn.sock`)
 
 ### Design constraint: remote-ready
 
@@ -436,7 +441,7 @@ This is a hard protocol contract. Partial output (with corrupted ANSI state) is 
 
 ### Message Routing for `pty_input`
 
-`pty_input` is handled directly in the message receive loop, bypassing the ordered processing channel. It's a trivial write to a file descriptor — no locking beyond a PTY session lookup (RLock). Direct routing adds <1μs vs going through the channel.
+`pty_input` now goes through the same ordered WebSocket command path as `attach_session`, `pty_resize`, and `kill_session`. This avoids edge-case command reordering (for example, an input arriving after a kill/resize sent earlier by the client).
 
 ---
 
@@ -502,7 +507,7 @@ The daemon becomes the source of truth for session lifecycle:
 |--------|--------|-------|
 | Create session | Client creates in Zustand, then spawns PTY, then registers with daemon | Client sends `spawn_session` to daemon, daemon creates everything |
 | View session | Client has PTY handle + xterm instance | Client sends `attach_session`, daemon streams output |
-| Close session | Client calls `pty_kill`, sends `unregister` | Client sends `kill_session`, daemon handles cleanup |
+| Close session | Client calls `pty_kill`, sends `unregister` | Client sends `unregister` (hard-stop) and daemon terminates PTY/process + removes session |
 | App restart | Sessions die | Client reconnects, re-attaches to running sessions |
 | Session exit | PTY exit event via Tauri IPC | `session_exited` event via WebSocket |
 
@@ -513,24 +518,22 @@ The daemon becomes the source of truth for session lifecycle:
                          │
                          ▼
                     ┌──────────┐
-           ┌───────│  running  │◄──────────────────┐
-           │       └──────────┘                     │
-           │            │                           │
-      attach_session    │ process exits        attach_session
-           │            ▼                      (with scrollback)
-           │       ┌──────────┐                     │
-           │       │  exited  │─────────────────────┘
+           │       │  running  │
            │       └──────────┘
-           ▼            │
-     streaming          │ kill_session or
-     pty_output         │ client cleanup
+           │            │
+      attach_session    │ process exits / kill_session / unregister
            │            ▼
-           │       ┌──────────┐
-           └──────→│ cleaned  │ (resources freed, scrollback discarded)
-                   └──────────┘
+           ▼       ┌──────────┐
+     streaming     │  exited  │
+     pty_output    └──────────┘
+           │            │
+           └────────────▼
+                 ┌──────────┐
+                 │ cleaned  │ (resources freed)
+                 └──────────┘
 ```
 
-After exit, the session stays in `exited` state with scrollback preserved. The client can still attach to view the final output. Only explicit cleanup removes it.
+After exit, the daemon emits `session_exited` and then removes the PTY session from the manager to avoid unbounded accumulation of exited PTY state in long-running daemon lifetimes.
 
 ### Hooks Integration
 
@@ -682,7 +685,7 @@ Test with standalone harness using a test helper binary (not real claude). Test 
 
 1. Wire `pty.Manager` into `Daemon` struct
 2. Add WebSocket handlers for new commands (`spawn_session`, `attach_session`, etc.)
-3. Route `pty_input` directly in receive loop (bypass ordered channel)
+3. Route `pty_input` through ordered WebSocket command handling (no bypass path)
 4. Implement coalescing in subscriber output path
 5. Handle client disconnect → subscriber cleanup
 6. Handle daemon shutdown → SIGTERM all managed processes (process group kill), wait, then SIGKILL
@@ -913,3 +916,10 @@ This plan was reviewed by Codex (gpt-5.3-codex) across three rounds. Key improve
 - 2026-02-07 12:30 UTC — Added `command_error` WebSocket event for unknown/invalid commands and improved mismatch upgrade messaging with active-session warning.
 - 2026-02-07 12:35 UTC — Added deferred “Potential Next Steps” section for post-usage upgrade/restart UX decisions.
 - 2026-02-07 12:37 UTC — Added detailed Phase 8 shim-based restart-survival implementation plan (IPC, discovery, lifecycle, rollout, and testing).
+- 2026-02-07 13:09 UTC — Marked `unregister` hard-stop implementation as complete and documented `detach_session` as the detach-only path.
+- 2026-02-07 13:09 UTC — Updated PTY input routing notes to reflect ordered WebSocket processing (fast-path bypass removed).
+- 2026-02-07 13:09 UTC — Documented frontend PTY output buffering and readiness race fixes for main and utility terminals.
+- 2026-02-07 13:09 UTC — Recorded strict protocol schema coverage expansion and regenerated Go/TypeScript types.
+- 2026-02-07 13:09 UTC — Recorded Tauri daemon socket path fix (`~/.attn/attn.sock`) to match daemon defaults.
+- 2026-02-07 13:10 UTC — Updated lifecycle table to reflect current close-session behavior (`unregister` as hard-stop).
+- 2026-02-07 13:10 UTC — Updated session lifecycle diagram to match current exit cleanup semantics (no post-exit reattach).

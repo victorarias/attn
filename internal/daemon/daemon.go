@@ -304,6 +304,10 @@ func (d *Daemon) Stop() {
 }
 
 func (d *Daemon) handlePTYExit(info pty.ExitInfo) {
+	if d.ptyManager != nil {
+		d.ptyManager.Remove(info.ID)
+	}
+
 	if session := d.store.Get(info.ID); session != nil {
 		d.store.Touch(info.ID)
 		d.store.UpdateState(info.ID, protocol.StateIdle)
@@ -325,6 +329,16 @@ func (d *Daemon) handlePTYExit(info pty.ExitInfo) {
 		event.Signal = protocol.Ptr(info.Signal)
 	}
 	d.wsHub.Broadcast(event)
+}
+
+func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
+	if d.ptyManager == nil {
+		return
+	}
+	if err := d.ptyManager.Kill(sessionID, sig); err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
+		d.logf("terminate session failed for %s: %v", sessionID, err)
+	}
+	d.ptyManager.Remove(sessionID)
 }
 
 func (d *Daemon) handlePTYState(sessionID, state string) {
@@ -683,10 +697,8 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 		}
 	}
 
+	d.terminateSession(msg.ID, syscall.SIGTERM)
 	d.store.Remove(msg.ID)
-	if d.ptyManager != nil {
-		d.ptyManager.Remove(msg.ID)
-	}
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients

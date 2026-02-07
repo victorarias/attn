@@ -375,6 +375,55 @@ export function useDaemonSocket({
   const MAX_RECONNECTS_BEFORE_PAUSE = 8;
   const CIRCUIT_RESET_MS = 30000;
 
+  const rejectPendingByPredicate = useCallback((predicate: (key: string) => boolean, error: Error) => {
+    for (const [key, pending] of pendingActionsRef.current.entries()) {
+      if (!predicate(key)) {
+        continue;
+      }
+      pendingActionsRef.current.delete(key);
+      pending.reject(error);
+    }
+  }, []);
+
+  const rejectPendingForCommand = useCallback((cmd: string | undefined, errorMessage: string) => {
+    const error = new Error(errorMessage);
+    if (!cmd) {
+      return;
+    }
+
+    switch (cmd) {
+      case 'spawn_session':
+        rejectPendingByPredicate((key) => key.startsWith('pty_spawn_'), error);
+        return;
+      case 'attach_session':
+        rejectPendingByPredicate((key) => key.startsWith('pty_attach_'), error);
+        return;
+      case 'approve_pr':
+        rejectPendingByPredicate((key) => key.endsWith(':approve'), error);
+        return;
+      case 'merge_pr':
+        rejectPendingByPredicate((key) => key.endsWith(':merge'), error);
+        return;
+      case 'get_file_diff':
+        rejectPendingByPredicate((key) => key.startsWith('get_file_diff_'), error);
+        return;
+      case 'get_branch_diff_files':
+        rejectPendingByPredicate((key) => key.startsWith('get_branch_diff_files_'), error);
+        return;
+      case 'get_repo_info':
+        rejectPendingByPredicate((key) => key.startsWith('repo_info_'), error);
+        return;
+      case 'create_worktree':
+        rejectPendingByPredicate((key) => key === 'worktree_create_worktree_result', error);
+        return;
+      case 'delete_worktree':
+        rejectPendingByPredicate((key) => key === 'worktree_delete_worktree_result', error);
+        return;
+      default:
+        rejectPendingByPredicate((key) => key === cmd, error);
+    }
+  }, [rejectPendingByPredicate]);
+
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
@@ -391,7 +440,7 @@ export function useDaemonSocket({
         circuitResetTimeoutRef.current = null;
       }
 
-       // Re-attach terminal streams after reconnect.
+      // Re-attach terminal streams after reconnect.
       for (const sessionId of attachedPtySessionsRef.current) {
         ws.send(JSON.stringify({ cmd: 'attach_session', id: sessionId }));
       }
@@ -425,6 +474,14 @@ export function useDaemonSocket({
             if (data.sessions) {
               sessionsRef.current = data.sessions;
               onSessionsUpdate(data.sessions);
+              const activeIDs = new Set(data.sessions.map((session) => session.id));
+              for (const sessionId of attachedPtySessionsRef.current) {
+                if (activeIDs.has(sessionId)) {
+                  continue;
+                }
+                attachedPtySessionsRef.current.delete(sessionId);
+                ptySeqRef.current.delete(sessionId);
+              }
             }
             if (data.prs) {
               prsRef.current = data.prs;
@@ -486,17 +543,26 @@ export function useDaemonSocket({
                 }
               }
 
-              const shouldReset = ptySeqRef.current.has(data.id);
-              if (shouldReset) {
-                emitPtyEvent({ event: 'reset', id: data.id, reason: 'reattach' });
-              }
-              if (typeof data.last_seq === 'number') {
-                ptySeqRef.current.set(data.id, data.last_seq);
+              if (data.success) {
+                attachedPtySessionsRef.current.add(data.id);
               } else {
-                ptySeqRef.current.set(data.id, 0);
+                attachedPtySessionsRef.current.delete(data.id);
+                ptySeqRef.current.delete(data.id);
               }
-              if (data.scrollback) {
-                emitPtyEvent({ event: 'data', id: data.id, data: data.scrollback });
+
+              if (data.success) {
+                const shouldReset = ptySeqRef.current.has(data.id);
+                if (shouldReset) {
+                  emitPtyEvent({ event: 'reset', id: data.id, reason: 'reattach' });
+                }
+                if (typeof data.last_seq === 'number') {
+                  ptySeqRef.current.set(data.id, data.last_seq);
+                } else {
+                  ptySeqRef.current.set(data.id, 0);
+                }
+                if (data.scrollback) {
+                  emitPtyEvent({ event: 'data', id: data.id, data: data.scrollback });
+                }
               }
             }
             break;
@@ -514,6 +580,8 @@ export function useDaemonSocket({
 
           case 'session_exited':
             if (data.id) {
+              attachedPtySessionsRef.current.delete(data.id);
+              ptySeqRef.current.delete(data.id);
               emitPtyEvent({
                 event: 'exit',
                 id: data.id,
@@ -540,6 +608,8 @@ export function useDaemonSocket({
 
           case 'session_unregistered':
             if (data.session) {
+              attachedPtySessionsRef.current.delete(data.session.id);
+              ptySeqRef.current.delete(data.session.id);
               sessionsRef.current = sessionsRef.current.filter(
                 (s) => s.id !== data.session!.id
               );
@@ -561,6 +631,14 @@ export function useDaemonSocket({
             if (data.sessions) {
               sessionsRef.current = data.sessions;
               onSessionsUpdate(data.sessions);
+              const activeIDs = new Set(data.sessions.map((session) => session.id));
+              for (const sessionId of attachedPtySessionsRef.current) {
+                if (activeIDs.has(sessionId)) {
+                  continue;
+                }
+                attachedPtySessionsRef.current.delete(sessionId);
+                ptySeqRef.current.delete(sessionId);
+              }
             }
             break;
 
@@ -1078,6 +1156,7 @@ export function useDaemonSocket({
 
           case 'command_error':
             console.error('[Daemon] Command error:', data.cmd, data.error);
+            rejectPendingForCommand(data.cmd, data.error || `Command ${data.cmd || ''} failed`);
             break;
         }
       } catch (err) {
@@ -1122,7 +1201,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate, rejectPendingForCommand]);
 
   useEffect(() => {
     connect();
@@ -1211,6 +1290,8 @@ export function useDaemonSocket({
   const sendDetachSession = useCallback((id: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    attachedPtySessionsRef.current.delete(id);
+    ptySeqRef.current.delete(id);
     ws.send(JSON.stringify({ cmd: 'detach_session', id }));
   }, []);
 
@@ -1236,7 +1317,6 @@ export function useDaemonSocket({
     setPtyBackend({
       spawn: async (args: PtySpawnArgs) => {
         await sendSpawnSession(args);
-        attachedPtySessionsRef.current.add(args.id);
         await sendAttachSession(args.id);
       },
       write: async (id: string, data: string) => {
@@ -1410,6 +1490,8 @@ export function useDaemonSocket({
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
+    attachedPtySessionsRef.current.delete(sessionId);
+    ptySeqRef.current.delete(sessionId);
     ws.send(JSON.stringify({ cmd: 'unregister', id: sessionId }));
   }, []);
 
