@@ -619,6 +619,7 @@ function AppContent({
     agent: SessionAgent;
   } | null>(null);
   const [forkError, setForkError] = useState<string | null>(null);
+  const [utilityFocusRequestToken, setUtilityFocusRequestToken] = useState(0);
 
   // No auto-creation - user clicks "+" to start a session
 
@@ -797,15 +798,27 @@ function AppContent({
 
   const handleSelectSession = useCallback(
     (id: string) => {
+      const nextSession = sessions.find((session) => session.id === id);
+      const utilityOpen =
+        nextSession?.terminalPanel.isOpen === true &&
+        nextSession.terminalPanel.terminals.length > 0 &&
+        nextSession.terminalPanel.activeTabId !== null;
+
       setActiveSession(id);
+      if (utilityOpen) {
+        setUtilityFocusRequestToken((token) => token + 1);
+      }
       // Fit and focus the terminal after a short delay (allows CSS to apply)
       setTimeout(() => {
         const handle = terminalRefs.current.get(id);
         handle?.fit();
-        handle?.focus();
+        // Keep utility terminal focus when an existing utility tab is open.
+        if (!utilityOpen) {
+          handle?.focus();
+        }
       }, 50);
     },
-    [setActiveSession]
+    [sessions, setActiveSession]
   );
 
   const openPR = useOpenPR({
@@ -895,9 +908,18 @@ function AppContent({
 
   const handleResize = useCallback(
     (sessionId: string) => (cols: number, rows: number) => {
+      // Ignore resize callbacks from hidden/non-active terminals.
+      // Hidden terminals can transiently report invalid dimensions while unmounted.
+      if (sessionId !== activeSessionId || view !== 'session') {
+        return;
+      }
+      // Allow legitimately small visible terminals (narrow windows / large fonts).
+      if (cols <= 0 || rows <= 0) {
+        return;
+      }
       resizeSession(sessionId, cols, rows);
     },
-    [resizeSession]
+    [activeSessionId, resizeSession, view]
   );
 
   const setTerminalRef = useCallback(
@@ -1248,6 +1270,7 @@ function AppContent({
                 onRemoveTerminal={handleRemoveUtilityTerminal}
                 onSetActiveTerminal={handleSetActiveUtilityTerminal}
                 onRenameTerminal={handleRenameUtilityTerminal}
+                focusRequestToken={utilityFocusRequestToken}
                 enabled={!locationPickerOpen && !branchPickerOpen}
               />
             );

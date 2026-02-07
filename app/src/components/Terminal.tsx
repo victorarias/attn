@@ -51,6 +51,7 @@ export interface TerminalHandle {
 
 interface TerminalProps {
   fontSize?: number;
+  onInit?: (terminal: XTerm) => void;
   onReady?: (terminal: XTerm) => void;
   onResize?: (cols: number, rows: number) => void;
 }
@@ -120,18 +121,20 @@ function getScaledDimensions(
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
-  function Terminal({ fontSize = DEFAULT_FONT_SIZE, onReady, onResize }, ref) {
+  function Terminal({ fontSize = DEFAULT_FONT_SIZE, onInit, onReady, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
     const webglAddonRef = useRef<WebglAddon | null>(null);
 
     // Store callbacks and values in refs to avoid re-running effect when they change
     const onReadyRef = useRef(onReady);
+    const onInitRef = useRef(onInit);
     const onResizeRef = useRef(onResize);
     const fontSizeRef = useRef(fontSize);
 
     useEffect(() => {
       onReadyRef.current = onReady;
+      onInitRef.current = onInit;
       onResizeRef.current = onResize;
       fontSizeRef.current = fontSize;
     });
@@ -260,6 +263,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
       // Store ref immediately
       xtermRef.current = term;
+      onInitRef.current?.(term);
 
       // Resize strategy from VS Code's TerminalResizeDebouncer:
       // - Y-axis (rows): immediate (cheap operation)

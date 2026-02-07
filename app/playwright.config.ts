@@ -22,7 +22,8 @@ export default defineConfig({
     timeout: 30000,
     env: {
       VITE_DAEMON_PORT: TEST_DAEMON_PORT,
-      VITE_MOCK_PTY: '1',
+      VITE_MOCK_PTY: process.env.VITE_MOCK_PTY ?? '1',
+      VITE_FORCE_REAL_PTY: process.env.VITE_FORCE_REAL_PTY ?? '0',
     },
   },
 });

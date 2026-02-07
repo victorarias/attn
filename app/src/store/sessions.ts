@@ -92,6 +92,8 @@ const pendingConnections = new Set<string>();
 const pendingForkParams = new Map<string, { resumeSessionId?: string; forkSession?: boolean; resumePicker?: boolean }>();
 const pendingTerminalEvents = new Map<string, PtyEventPayload[]>();
 const MAX_PENDING_TERMINAL_EVENTS = 256;
+const MIN_STABLE_COLS = 20;
+const MIN_STABLE_ROWS = 8;
 
 function decodePtyBytes(payload: string): Uint8Array {
   const binaryStr = atob(payload);
@@ -286,8 +288,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       ),
     }));
 
-    const cols = terminal.cols > 0 ? terminal.cols : 80;
-    const rows = terminal.rows > 0 ? terminal.rows : 24;
+    let cols = terminal.cols > 0 ? terminal.cols : 80;
+    let rows = terminal.rows > 0 ? terminal.rows : 24;
+    // Hidden terminals can report very small bootstrap sizes (e.g. 9x5).
+    // Use sane defaults until a stable onResize arrives.
+    if (cols < MIN_STABLE_COLS || rows < MIN_STABLE_ROWS) {
+      cols = 80;
+      rows = 24;
+    }
 
     try {
       // Check for pending fork params
@@ -522,6 +530,7 @@ declare global {
     __TEST_SET_ACTIVE_TERMINAL?: (sessionId: string, terminalId: string) => void;
     __TEST_REMOVE_TERMINAL?: (sessionId: string, terminalId: string) => void;
     __TEST_RENAME_TERMINAL?: (sessionId: string, terminalId: string, title: string) => void;
+    __TEST_GET_ACTIVE_UTILITY_PTY?: (sessionId: string) => string | null;
   }
 }
 
@@ -586,5 +595,14 @@ if (import.meta.env.DEV) {
 
   window.__TEST_RENAME_TERMINAL = (sessionId: string, terminalId: string, title: string) => {
     useSessionStore.getState().renameUtilityTerminal(sessionId, terminalId, title);
+  };
+
+  window.__TEST_GET_ACTIVE_UTILITY_PTY = (sessionId: string) => {
+    const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
+    if (!session || !session.terminalPanel.activeTabId) {
+      return null;
+    }
+    const active = session.terminalPanel.terminals.find((terminal) => terminal.id === session.terminalPanel.activeTabId);
+    return active?.ptyId ?? null;
   };
 }

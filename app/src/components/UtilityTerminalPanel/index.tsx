@@ -9,6 +9,12 @@ import type { TerminalPanelState } from '../../store/sessions';
 import { listenPtyEvents, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEventPayload } from '../../pty/bridge';
 import './UtilityTerminalPanel.css';
 
+declare global {
+  interface Window {
+    __TEST_GET_ACTIVE_UTILITY_TEXT?: () => string;
+  }
+}
+
 interface UtilityTerminalPanelProps {
   cwd: string;
   panel: TerminalPanelState;
@@ -20,6 +26,7 @@ interface UtilityTerminalPanelProps {
   onRemoveTerminal: (terminalId: string) => void;
   onSetActiveTerminal: (terminalId: string) => void;
   onRenameTerminal: (terminalId: string, title: string) => void;
+  focusRequestToken?: number;
   enabled: boolean;
 }
 
@@ -34,12 +41,72 @@ export function UtilityTerminalPanel({
   onRemoveTerminal,
   onSetActiveTerminal,
   onRenameTerminal,
+  focusRequestToken,
   enabled,
 }: UtilityTerminalPanelProps) {
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
   const xtermRefs = useRef<Map<string, XTerm>>(new Map());
+  const inputSubscriptions = useRef<Map<string, { dispose: () => void }>>(new Map());
   const ptyIdToTerminalId = useRef<Map<string, string>>(new Map());
   const pendingTerminalEvents = useRef<Map<string, PtyEventPayload[]>>(new Map());
+  const restoreOnReady = useRef<Set<string>>(new Set(panel.terminals.map((terminal) => terminal.id)));
+
+  const focusTerminalWithRetry = useCallback((terminalId: string, retries = 20) => {
+    const tryFocus = (remaining: number) => {
+      const xterm = xtermRefs.current.get(terminalId);
+      if (xterm) {
+        xterm.focus();
+        return;
+      }
+      const handle = terminalRefs.current.get(terminalId);
+      if (handle?.terminal) {
+        handle.focus();
+        return;
+      }
+      if (remaining <= 0) {
+        return;
+      }
+      window.setTimeout(() => tryFocus(remaining - 1), 50);
+    };
+    tryFocus(retries);
+  }, []);
+
+  useEffect(() => {
+    const activeTerminalIds = new Set(panel.terminals.map((terminal) => terminal.id));
+
+    for (const [terminalId, sub] of inputSubscriptions.current.entries()) {
+      if (!activeTerminalIds.has(terminalId)) {
+        sub.dispose();
+        inputSubscriptions.current.delete(terminalId);
+      }
+    }
+
+    for (const terminalId of Array.from(xtermRefs.current.keys())) {
+      if (!activeTerminalIds.has(terminalId)) {
+        xtermRefs.current.delete(terminalId);
+      }
+    }
+
+    for (const terminalId of Array.from(terminalRefs.current.keys())) {
+      if (!activeTerminalIds.has(terminalId)) {
+        terminalRefs.current.delete(terminalId);
+      }
+    }
+
+    for (const terminalId of Array.from(pendingTerminalEvents.current.keys())) {
+      if (!activeTerminalIds.has(terminalId)) {
+        pendingTerminalEvents.current.delete(terminalId);
+      }
+    }
+
+    for (const terminalId of Array.from(restoreOnReady.current.keys())) {
+      if (!activeTerminalIds.has(terminalId)) {
+        restoreOnReady.current.delete(terminalId);
+      }
+    }
+
+    ptyIdToTerminalId.current = new Map(panel.terminals.map((terminal) => [terminal.ptyId, terminal.id]));
+  }, [panel.terminals]);
 
   const decodePtyData = useCallback((payload: string) => {
     const binaryStr = atob(payload);
@@ -85,6 +152,42 @@ export function UtilityTerminalPanel({
     }
     pendingTerminalEvents.current.delete(terminalId);
   }, [writeToTerminal]);
+
+  const getTerminalText = useCallback((xterm: XTerm) => {
+    const buffer = xterm.buffer.active;
+    if (!buffer) {
+      return '';
+    }
+    const lines: string[] = [];
+    for (let i = 0; i < buffer.length; i += 1) {
+      const line = buffer.getLine(i);
+      if (line) {
+        lines.push(line.translateToString(true));
+      }
+    }
+    return lines.join('\n');
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+
+    window.__TEST_GET_ACTIVE_UTILITY_TEXT = () => {
+      if (!panel.activeTabId) {
+        return '';
+      }
+      const xterm = xtermRefs.current.get(panel.activeTabId);
+      if (!xterm) {
+        return '';
+      }
+      return getTerminalText(xterm);
+    };
+
+    return () => {
+      delete window.__TEST_GET_ACTIVE_UTILITY_TEXT;
+    };
+  }, [getTerminalText, panel.activeTabId]);
 
   // Listen for PTY events for utility terminals
   useEffect(() => {
@@ -136,17 +239,16 @@ export function UtilityTerminalPanel({
   const handleNewTab = useCallback(async () => {
     const terminalId = await spawnTerminal();
     if (terminalId) {
-      // Focus after terminal renders
-      setTimeout(() => {
-        terminalRefs.current.get(terminalId)?.focus();
-      }, 50);
+      focusTerminalWithRetry(terminalId);
     }
-  }, [spawnTerminal]);
+  }, [focusTerminalWithRetry, spawnTerminal]);
 
   const handleCloseTab = useCallback(
     (terminalId: string) => {
       const terminal = panel.terminals.find((t) => t.id === terminalId);
       if (terminal) {
+        inputSubscriptions.current.get(terminalId)?.dispose();
+        inputSubscriptions.current.delete(terminalId);
         ptyKill({ id: terminal.ptyId }).catch(console.error);
         ptyIdToTerminalId.current.delete(terminal.ptyId);
         pendingTerminalEvents.current.delete(terminalId);
@@ -164,14 +266,12 @@ export function UtilityTerminalPanel({
       if (panel.terminals.length === 0) {
         await handleNewTab();
       } else if (panel.activeTabId) {
-        setTimeout(() => {
-          terminalRefs.current.get(panel.activeTabId!)?.focus();
-        }, 50);
+        focusTerminalWithRetry(panel.activeTabId);
       }
     } else if (panel.activeTabId) {
-      terminalRefs.current.get(panel.activeTabId)?.focus();
+      focusTerminalWithRetry(panel.activeTabId, 2);
     }
-  }, [panel.isOpen, panel.terminals.length, panel.activeTabId, onOpen, handleNewTab]);
+  }, [focusTerminalWithRetry, panel.isOpen, panel.terminals.length, panel.activeTabId, onOpen, handleNewTab]);
 
   const handleNewTabOrOpen = useCallback(async () => {
     if (!panel.isOpen) {
@@ -180,17 +280,85 @@ export function UtilityTerminalPanel({
     await handleNewTab();
   }, [panel.isOpen, onOpen, handleNewTab]);
 
-  const handleTerminalReady = useCallback(
-    (terminalId: string, ptyId: string) => (xterm: XTerm) => {
+  useEffect(() => {
+    if (!panel.isOpen || !panel.activeTabId) {
+      return;
+    }
+    focusTerminalWithRetry(panel.activeTabId, 30);
+  }, [focusTerminalWithRetry, panel.activeTabId, panel.isOpen]);
+
+  useEffect(() => {
+    if (!panel.isOpen || !panel.activeTabId) {
+      return;
+    }
+    focusTerminalWithRetry(panel.activeTabId, 60);
+  }, [focusRequestToken, focusTerminalWithRetry, panel.activeTabId, panel.isOpen]);
+
+  const wireTerminal = useCallback(
+    (terminalId: string, ptyId: string, xterm: XTerm) => {
       xtermRefs.current.set(terminalId, xterm);
-      flushPendingEvents(terminalId, xterm);
+      ptyIdToTerminalId.current.set(ptyId, terminalId);
 
       // Terminal input -> PTY
-      xterm.onData((data: string) => {
+      inputSubscriptions.current.get(terminalId)?.dispose();
+      const sub = xterm.onData((data: string) => {
         ptyWrite({ id: ptyId, data }).catch(console.error);
       });
+      inputSubscriptions.current.set(terminalId, sub);
+
+      // Flush buffered PTY output after input wiring so terminal query
+      // responses emitted during replay are not dropped.
+      flushPendingEvents(terminalId, xterm);
     },
     [flushPendingEvents]
+  );
+
+  const restoreTerminalOutput = useCallback(
+    async (ptyId: string, xterm: XTerm) => {
+      const cols = xterm.cols > 0 ? xterm.cols : 80;
+      const rows = xterm.rows > 0 ? xterm.rows : 24;
+
+      try {
+        // Reattach to restore scrollback after panel unmount/remount
+        // (for example dashboard/home roundtrip).
+        await ptySpawn({
+          args: {
+            id: ptyId,
+            cwd,
+            cols,
+            rows,
+            shell: true,
+          },
+        });
+      } catch (e) {
+        console.error('[UtilityTerminal] Restore attach failed:', e);
+      }
+    },
+    [cwd]
+  );
+
+  const handleTerminalInit = useCallback(
+    (terminalId: string, ptyId: string) => (xterm: XTerm) => {
+      wireTerminal(terminalId, ptyId, xterm);
+      if (panel.isOpen && panel.activeTabId === terminalId) {
+        xterm.focus();
+      }
+    },
+    [panel.activeTabId, panel.isOpen, wireTerminal]
+  );
+
+  const handleTerminalReady = useCallback(
+    (terminalId: string, ptyId: string) => (xterm: XTerm) => {
+      wireTerminal(terminalId, ptyId, xterm);
+      if (restoreOnReady.current.has(terminalId)) {
+        restoreOnReady.current.delete(terminalId);
+        void restoreTerminalOutput(ptyId, xterm);
+      }
+      if (panel.isOpen && panel.activeTabId === terminalId) {
+        xterm.focus();
+      }
+    },
+    [panel.activeTabId, panel.isOpen, restoreTerminalOutput, wireTerminal]
   );
 
   const handleTerminalResize = useCallback(
@@ -261,10 +429,10 @@ export function UtilityTerminalPanel({
                   terminalRefs.current.set(terminal.id, ref);
                   return;
                 }
-                terminalRefs.current.delete(terminal.id);
-                xtermRefs.current.delete(terminal.id);
+                // No-op: cleanup is handled by terminal list reconciliation.
               }}
               fontSize={fontSize}
+              onInit={handleTerminalInit(terminal.id, terminal.ptyId)}
               onReady={handleTerminalReady(terminal.id, terminal.ptyId)}
               onResize={handleTerminalResize(terminal.ptyId)}
             />

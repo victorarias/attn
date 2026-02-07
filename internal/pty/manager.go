@@ -56,6 +56,13 @@ type AttachInfo struct {
 	Running             bool
 	ExitCode            *int
 	ExitSignal          *string
+	ScreenSnapshot      []byte
+	ScreenCols          uint16
+	ScreenRows          uint16
+	ScreenCursorX       uint16
+	ScreenCursorY       uint16
+	ScreenCursorVisible bool
+	ScreenSnapshotFresh bool
 }
 
 type ExitInfo struct {
@@ -171,6 +178,9 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
+	}
+	if agent == "codex" {
+		session.screen = newVirtualScreen(opts.Cols, opts.Rows)
 	}
 
 	m.mu.Lock()
@@ -453,16 +463,39 @@ func shouldSetpgidForPTY() bool {
 }
 
 func resolveAttnPath() string {
+	candidates := make([]string, 0, 3)
 	if exe, err := os.Executable(); err == nil && exe != "" {
-		return exe
+		candidates = append(candidates, exe)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		local := filepath.Join(home, ".local", "bin", "attn")
-		if _, statErr := os.Stat(local); statErr == nil {
-			return local
-		}
+		candidates = append(candidates, filepath.Join(home, ".local", "bin", "attn"))
+	}
+	if path, err := exec.LookPath("attn"); err == nil && path != "" {
+		candidates = append(candidates, path)
+	}
+	if resolved, ok := firstExecutablePath(candidates); ok {
+		return resolved
 	}
 	return "attn"
+}
+
+func firstExecutablePath(candidates []string) (string, bool) {
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		// On unix, require execute bits. Windows doesn't expose unix mode bits.
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		return candidate, true
+	}
+	return "", false
 }
 
 func shellJoin(args []string) string {

@@ -283,6 +283,60 @@ func TestDaemon_NewAddsWarningWhenPersistenceFallsBackToMemory(t *testing.T) {
 	}
 }
 
+func TestDaemon_HandleClientMessage_ClearWarnings(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.addWarning("one", "first warning")
+	d.addWarning("two", "second warning")
+	if got := len(d.getWarnings()); got != 2 {
+		t.Fatalf("warnings before clear = %d, want 2", got)
+	}
+
+	client := &wsClient{}
+	d.handleClientMessage(client, []byte(`{"cmd":"clear_warnings"}`))
+
+	if got := len(d.getWarnings()); got != 0 {
+		t.Fatalf("warnings after clear = %d, want 0", got)
+	}
+}
+
+func TestDaemon_ClearWarningsNotReplayedInInitialState(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.addWarning("stale_sessions_pruned", "Removed 1 stale sessions from a previous daemon run because no live PTY was found.")
+
+	client := &wsClient{
+		send:             make(chan outboundMessage, 4),
+		attachedSessions: make(map[string]string),
+	}
+
+	d.sendInitialState(client)
+	first := <-client.send
+	var firstEvent protocol.WebSocketEvent
+	if err := json.Unmarshal(first.payload, &firstEvent); err != nil {
+		t.Fatalf("decode first initial_state: %v", err)
+	}
+	if firstEvent.Event != protocol.EventInitialState {
+		t.Fatalf("first event = %q, want %q", firstEvent.Event, protocol.EventInitialState)
+	}
+	if got := len(firstEvent.Warnings); got != 1 {
+		t.Fatalf("first initial_state warnings = %d, want 1", got)
+	}
+
+	d.handleClientMessage(client, []byte(`{"cmd":"clear_warnings"}`))
+
+	d.sendInitialState(client)
+	second := <-client.send
+	var secondEvent protocol.WebSocketEvent
+	if err := json.Unmarshal(second.payload, &secondEvent); err != nil {
+		t.Fatalf("decode second initial_state: %v", err)
+	}
+	if secondEvent.Event != protocol.EventInitialState {
+		t.Fatalf("second event = %q, want %q", secondEvent.Event, protocol.EventInitialState)
+	}
+	if got := len(secondEvent.Warnings); got != 0 {
+		t.Fatalf("second initial_state warnings = %d, want 0", got)
+	}
+}
+
 func TestDaemon_HealthEndpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")

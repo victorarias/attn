@@ -131,6 +131,12 @@ func (d *Daemon) getWarnings() []protocol.DaemonWarning {
 	return result
 }
 
+func (d *Daemon) clearWarnings() {
+	d.warningsMu.Lock()
+	defer d.warningsMu.Unlock()
+	d.warnings = nil
+}
+
 // New creates a new daemon
 func New(socketPath string) *Daemon {
 	logger, _ := logging.New(logging.DefaultLogPath())
