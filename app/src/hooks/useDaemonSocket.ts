@@ -651,7 +651,9 @@ export function useDaemonSocket({
                   for (const chunk of queued) {
                     if (typeof chunk.seq === 'number') {
                       const lastSeq = ptySeqRef.current.get(data.id);
-                      if (typeof lastSeq === 'number' && chunk.seq <= lastSeq) {
+                      // Keep seq==lastSeq during attach replay: Session.info().last_seq can race
+                      // ahead of the replay payload, and that first live chunk may be missing otherwise.
+                      if (typeof lastSeq === 'number' && chunk.seq < lastSeq) {
                         continue;
                       }
                       ptySeqRef.current.set(data.id, chunk.seq);

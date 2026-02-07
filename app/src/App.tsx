@@ -909,12 +909,12 @@ function AppContent({
   const handleResize = useCallback(
     (sessionId: string) => (cols: number, rows: number) => {
       // Ignore resize callbacks from hidden/non-active terminals.
-      // Hidden terminals can transiently report tiny dimensions (e.g. 9x5),
-      // which corrupt full-screen TUIs if forwarded to the PTY.
+      // Hidden terminals can transiently report invalid dimensions while unmounted.
       if (sessionId !== activeSessionId || view !== 'session') {
         return;
       }
-      if (cols < 20 || rows < 8) {
+      // Allow legitimately small visible terminals (narrow windows / large fonts).
+      if (cols <= 0 || rows <= 0) {
         return;
       }
       resizeSession(sessionId, cols, rows);
