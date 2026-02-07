@@ -16,14 +16,38 @@ fn daemon_socket_path() -> Option<PathBuf> {
     Some(home.join(".attn").join("attn.sock"))
 }
 
-/// Check if the daemon is running by checking for the socket file
+#[cfg(unix)]
+fn socket_is_live(path: &Path) -> bool {
+    use std::os::unix::net::UnixStream;
+    UnixStream::connect(path).is_ok()
+}
+
+#[cfg(not(unix))]
+fn socket_is_live(path: &Path) -> bool {
+    path.exists()
+}
+
+fn daemon_is_running_at(socket_path: &Path) -> bool {
+    if !socket_path.exists() {
+        return false;
+    }
+    socket_is_live(socket_path)
+}
+
+/// Check if the daemon is running by validating the socket is live.
 #[tauri::command]
 fn is_daemon_running() -> bool {
     let socket_path = match daemon_socket_path() {
         Some(path) => path,
         None => return false,
     };
-    socket_path.exists()
+    if daemon_is_running_at(&socket_path) {
+        return true;
+    }
+
+    // Clean up stale socket files so startup can recover.
+    let _ = std::fs::remove_file(&socket_path);
+    false
 }
 
 /// Start the daemon process
@@ -56,21 +80,27 @@ fn start_daemon(_app: tauri::AppHandle) -> Result<(), String> {
         return Err("No daemon binary found.".into());
     };
 
+    let socket_path = daemon_socket_path().ok_or("Cannot resolve daemon socket path")?;
+    if !daemon_is_running_at(&socket_path) {
+        let _ = std::fs::remove_file(&socket_path);
+    } else {
+        return Ok(());
+    }
+
     Command::new(&bin_path)
         .arg("daemon")
         .spawn()
         .map_err(|e| format!("Failed to start daemon: {}", e))?;
 
-    // Wait for socket to appear (up to 2 seconds)
-    let socket_path = daemon_socket_path().ok_or("Cannot resolve daemon socket path")?;
-    for _ in 0..20 {
-        if socket_path.exists() {
+    // Wait for live socket (up to 3 seconds)
+    for _ in 0..30 {
+        if daemon_is_running_at(&socket_path) {
             return Ok(());
         }
         thread::sleep(Duration::from_millis(100));
     }
 
-    Err("Daemon did not start within 2 seconds".to_string())
+    Err("Daemon did not start within 3 seconds".to_string())
 }
 
 #[tauri::command]

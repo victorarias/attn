@@ -72,6 +72,58 @@ func DerefOr[T any](p *T, def T) T {
 	return *p
 }
 
+func normalizeSessionAgentValue(agent string) SessionAgent {
+	switch strings.ToLower(strings.TrimSpace(agent)) {
+	case string(SessionAgentClaude):
+		return SessionAgentClaude
+	case string(SessionAgentCodex):
+		return SessionAgentCodex
+	default:
+		return ""
+	}
+}
+
+// NormalizeSessionAgent returns a valid stored session agent.
+// Invalid/empty values fall back to fallback (or codex if fallback is invalid).
+func NormalizeSessionAgent(agent, fallback SessionAgent) SessionAgent {
+	if normalized := normalizeSessionAgentValue(string(agent)); normalized != "" {
+		return normalized
+	}
+	if normalizedFallback := normalizeSessionAgentValue(string(fallback)); normalizedFallback != "" {
+		return normalizedFallback
+	}
+	return SessionAgentCodex
+}
+
+// NormalizeSessionAgentString normalizes string input to a valid session agent.
+func NormalizeSessionAgentString(agent, fallback string) SessionAgent {
+	return NormalizeSessionAgent(SessionAgent(agent), SessionAgent(fallback))
+}
+
+// NormalizeSpawnAgent returns a valid spawn agent value.
+// Accepts "shell" in addition to session agents.
+func NormalizeSpawnAgent(agent, fallback string) string {
+	switch strings.ToLower(strings.TrimSpace(agent)) {
+	case string(SessionAgentClaude):
+		return string(SessionAgentClaude)
+	case string(SessionAgentCodex):
+		return string(SessionAgentCodex)
+	case AgentShellValue:
+		return AgentShellValue
+	}
+
+	switch strings.ToLower(strings.TrimSpace(fallback)) {
+	case string(SessionAgentClaude):
+		return string(SessionAgentClaude)
+	case string(SessionAgentCodex):
+		return string(SessionAgentCodex)
+	case AgentShellValue:
+		return AgentShellValue
+	}
+
+	return string(SessionAgentCodex)
+}
+
 // Slice conversion helpers for Response types.
 // Store returns pointer slices, but generated Response expects value slices.
 

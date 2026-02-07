@@ -216,6 +216,15 @@ func (d *Daemon) Start() error {
 		d.ptyManager = pty.NewManager(pty.DefaultScrollbackSize, d.logf)
 	}
 
+	removedSessions := d.pruneSessionsWithoutPTY()
+	if removedSessions > 0 {
+		d.logf("pruned %d stale sessions without live PTY on startup", removedSessions)
+		d.addWarning(
+			"stale_sessions_pruned",
+			fmt.Sprintf("Removed %d stale sessions from a previous daemon run because no live PTY was found.", removedSessions),
+		)
+	}
+
 	// Acquire PID lock (kills any existing daemon)
 	if err := d.acquirePIDLock(); err != nil {
 		return fmt.Errorf("acquire PID lock: %w", err)
@@ -279,6 +288,30 @@ func (d *Daemon) Start() error {
 
 		go d.handleConnection(conn)
 	}
+}
+
+func (d *Daemon) pruneSessionsWithoutPTY() int {
+	if d.store == nil {
+		return 0
+	}
+
+	liveIDs := make(map[string]struct{})
+	if d.ptyManager != nil {
+		for _, id := range d.ptyManager.SessionIDs() {
+			liveIDs[id] = struct{}{}
+		}
+	}
+
+	sessions := d.store.List("")
+	removed := 0
+	for _, session := range sessions {
+		if _, ok := liveIDs[session.ID]; ok {
+			continue
+		}
+		d.store.Remove(session.ID)
+		removed++
+	}
+	return removed
 }
 
 // Stop stops the daemon
@@ -646,14 +679,17 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	d.logf("session registered: id=%s label=%s dir=%s", msg.ID, protocol.Deref(msg.Label), msg.Dir)
+	existing := d.store.Get(msg.ID)
 
 	// Get branch info
 	branchInfo, _ := git.GetBranchInfo(msg.Dir)
 
 	nowStr := string(protocol.TimestampNow())
+	agent := protocol.NormalizeSessionAgent(protocol.Deref(msg.Agent), protocol.SessionAgentClaude)
 	session := &protocol.Session{
 		ID:             msg.ID,
 		Label:          protocol.Deref(msg.Label),
+		Agent:          agent,
 		Directory:      msg.Dir,
 		State:          protocol.SessionStateWaitingInput,
 		StateSince:     nowStr,
@@ -679,9 +715,13 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 
 	d.sendOK(conn)
 
-	// Broadcast to WebSocket clients
+	// Broadcast session registration or update to WebSocket clients.
+	eventType := protocol.EventSessionRegistered
+	if existing != nil {
+		eventType = protocol.EventSessionStateChanged
+	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:   protocol.EventSessionRegistered,
+		Event:   eventType,
 		Session: session,
 	})
 }
@@ -1321,6 +1361,8 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 		d.sendError(conn, "Session ID cannot be empty")
 		return
 	}
+
+	msg.Session.Agent = protocol.NormalizeSessionAgent(msg.Session.Agent, protocol.SessionAgentCodex)
 
 	// Add session directly to store
 	d.store.Add(&msg.Session)

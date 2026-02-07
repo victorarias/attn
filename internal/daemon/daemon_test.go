@@ -183,6 +183,57 @@ func TestDaemon_SocketCleanup(t *testing.T) {
 	}
 }
 
+func TestDaemon_PrunesSessionsWithoutLivePTYOnStart(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19924")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-prune-%d.sock", time.Now().UnixNano()))
+
+	d := NewForTesting(sockPath)
+
+	nowStr := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "stale-session",
+		Label:          "stale",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/stale",
+		State:          protocol.SessionStateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- d.Start()
+	}()
+	defer d.Stop()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("daemon start error: %v", err)
+		}
+		t.Fatal("daemon exited unexpectedly during startup")
+	case <-time.After(75 * time.Millisecond):
+	}
+	waitForSocket(t, sockPath, 3*time.Second)
+
+	c := client.New(sockPath)
+	sessions, err := c.Query("")
+	if err != nil {
+		t.Fatalf("Query error: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("expected stale sessions to be pruned on start, got %d", len(sessions))
+	}
+
+	warnings := d.getWarnings()
+	if len(warnings) == 0 {
+		t.Fatal("expected daemon warning for startup stale-session prune")
+	}
+	if warnings[0].Code != "stale_sessions_pruned" {
+		t.Fatalf("warning code = %q, want stale_sessions_pruned", warnings[0].Code)
+	}
+}
+
 func TestDaemon_HealthEndpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")

@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCommentResolvedMessage, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, ReviewToolUse, ReviewToolUseMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionsUpdatedMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCommentResolvedMessage, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, ReviewToolUse, ReviewToolUseMessage, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionsUpdatedMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -112,6 +112,7 @@
 //   const reviewToolUse = Convert.toReviewToolUse(json);
 //   const reviewToolUseMessage = Convert.toReviewToolUseMessage(json);
 //   const session = Convert.toSession(json);
+//   const sessionAgent = Convert.toSessionAgent(json);
 //   const sessionExitedMessage = Convert.toSessionExitedMessage(json);
 //   const sessionRegisteredMessage = Convert.toSessionRegisteredMessage(json);
 //   const sessionState = Convert.toSessionState(json);
@@ -273,6 +274,7 @@ export enum BranchChangedMessageEvent {
 }
 
 export interface SessionElement {
+    agent:            SessionAgent;
     branch?:          string;
     directory:        string;
     id:               string;
@@ -286,6 +288,11 @@ export interface SessionElement {
     state_updated_at: string;
     todos?:           string[];
     [property: string]: any;
+}
+
+export enum SessionAgent {
+    Claude = "claude",
+    Codex = "codex",
 }
 
 export enum SessionState {
@@ -1314,6 +1321,7 @@ export enum RefreshPRsResultMessageEvent {
 }
 
 export interface RegisterMessage {
+    agent?: SessionAgent;
     cmd:    RegisterMessageCmd;
     dir:    string;
     id:     string;
@@ -1522,6 +1530,7 @@ export interface ToolUse {
 }
 
 export interface Session {
+    agent:            SessionAgent;
     branch?:          string;
     directory:        string;
     id:               string;
@@ -2818,6 +2827,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("Session")), null, 2);
     }
 
+    public static toSessionAgent(json: string): SessionAgent {
+        return cast(JSON.parse(json), r("SessionAgent"));
+    }
+
+    public static sessionAgentToJson(value: SessionAgent): string {
+        return JSON.stringify(uncast(value, r("SessionAgent")), null, 2);
+    }
+
     public static toSessionExitedMessage(json: string): SessionExitedMessage {
         return cast(JSON.parse(json), r("SessionExitedMessage"));
     }
@@ -3310,6 +3327,7 @@ const typeMap: any = {
         { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
     ], "any"),
     "SessionElement": o([
+        { json: "agent", js: "agent", typ: r("SessionAgent") },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -3851,6 +3869,7 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "RegisterMessage": o([
+        { json: "agent", js: "agent", typ: u(undefined, r("SessionAgent")) },
         { json: "cmd", js: "cmd", typ: r("RegisterMessageCmd") },
         { json: "dir", js: "dir", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -3975,6 +3994,7 @@ const typeMap: any = {
         { json: "output", js: "output", typ: "" },
     ], "any"),
     "Session": o([
+        { json: "agent", js: "agent", typ: r("SessionAgent") },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -4222,6 +4242,10 @@ const typeMap: any = {
     ],
     "BranchChangedMessageEvent": [
         "branch_changed",
+    ],
+    "SessionAgent": [
+        "claude",
+        "codex",
     ],
     "SessionState": [
         "idle",

@@ -9,6 +9,7 @@ import './Terminal.css';
 // Terminal font configuration (matches xterm options)
 const FONT_FAMILY = 'Iosevka, Menlo, Monaco, "Courier New", monospace';
 const DEFAULT_FONT_SIZE = 14;
+const TERMINAL_SCROLLBACK_LINES = 50000;
 
 // VS Code limits canvas width to prevent performance issues with very wide terminals
 // Source: Constants.MaxCanvasWidth in terminalInstance.ts (line 103)
@@ -200,7 +201,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         cursorBlink: true,
         fontSize: initialFontSize,
         fontFamily: FONT_FAMILY,
-        scrollback: 10000,
+        scrollback: TERMINAL_SCROLLBACK_LINES,
         // VS Code options
         fastScrollModifier: 'alt',
         windowOptions: {

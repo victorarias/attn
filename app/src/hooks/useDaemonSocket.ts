@@ -1,4 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { isTauri } from '@tauri-apps/api/core';
 import type {
   Session as GeneratedSession,
   PR as GeneratedPR,
@@ -77,7 +79,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '24';
+const PROTOCOL_VERSION = '25';
 
 interface PRActionResult {
   success: boolean;
@@ -305,6 +307,36 @@ interface UseDaemonSocketOptions {
 // Default WebSocket port, can be overridden via VITE_DAEMON_PORT env var
 const DEFAULT_WS_URL = `ws://127.0.0.1:${import.meta.env.VITE_DAEMON_PORT || '9849'}/ws`;
 
+function dedupeSessionsByID(sessions: DaemonSession[]): DaemonSession[] {
+  const deduped: DaemonSession[] = [];
+  const indexByID = new Map<string, number>();
+  for (const session of sessions) {
+    const existingIndex = indexByID.get(session.id);
+    if (existingIndex === undefined) {
+      indexByID.set(session.id, deduped.length);
+      deduped.push(session);
+      continue;
+    }
+    deduped[existingIndex] = session;
+  }
+  return deduped;
+}
+
+function upsertSessionByID(sessions: DaemonSession[], session: DaemonSession): DaemonSession[] {
+  const index = sessions.findIndex((entry) => entry.id === session.id);
+  if (index === -1) {
+    return [...sessions, session];
+  }
+  const updated = [...sessions];
+  updated[index] = session;
+  return updated;
+}
+
+function isSessionNotFoundError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes('session not found');
+}
+
 // ============================================================================
 // Async Pattern Guide
 // ============================================================================
@@ -373,7 +405,7 @@ export function useDaemonSocket({
   const circuitResetTimeoutRef = useRef<number | null>(null);
 
   const MAX_RECONNECTS_BEFORE_PAUSE = 8;
-  const CIRCUIT_RESET_MS = 30000;
+  const MAX_RECONNECT_DELAY_MS = 5000;
 
   const rejectPendingByPredicate = useCallback((predicate: (key: string) => boolean, error: Error) => {
     for (const [key, pending] of pendingActionsRef.current.entries()) {
@@ -424,8 +456,25 @@ export function useDaemonSocket({
     }
   }, [rejectPendingByPredicate]);
 
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+  const ensureDaemonRunning = useCallback(async () => {
+    if (!isTauri()) {
+      return;
+    }
+    try {
+      const isRunning = await invoke<boolean>('is_daemon_running');
+      if (!isRunning) {
+        console.log('[Daemon] Not running during reconnect, starting daemon...');
+        await invoke('start_daemon');
+      }
+    } catch (err) {
+      console.error('[Daemon] Failed to ensure daemon is running:', err);
+    }
+  }, []);
+
+  const connect = useCallback(async () => {
+    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
+
+    await ensureDaemonRunning();
 
     const ws = new WebSocket(wsUrl);
 
@@ -471,34 +520,32 @@ export function useDaemonSocket({
               ws.close();
               return;
             }
-            if (data.sessions) {
-              sessionsRef.current = data.sessions;
-              onSessionsUpdate(data.sessions);
-              const activeIDs = new Set(data.sessions.map((session) => session.id));
-              for (const sessionId of attachedPtySessionsRef.current) {
-                if (activeIDs.has(sessionId)) {
-                  continue;
-                }
-                attachedPtySessionsRef.current.delete(sessionId);
-                ptySeqRef.current.delete(sessionId);
+            const nextSessions = dedupeSessionsByID(data.sessions || []);
+            sessionsRef.current = nextSessions;
+            onSessionsUpdate(nextSessions);
+            const activeIDs = new Set(nextSessions.map((session) => session.id));
+            for (const sessionId of attachedPtySessionsRef.current) {
+              if (activeIDs.has(sessionId)) {
+                continue;
               }
+              attachedPtySessionsRef.current.delete(sessionId);
+              ptySeqRef.current.delete(sessionId);
             }
-            if (data.prs) {
-              prsRef.current = data.prs;
-              onPRsUpdate(data.prs);
-            }
-            if (data.repos) {
-              reposRef.current = data.repos;
-              onReposUpdate(data.repos);
-            }
-            if (data.authors) {
-              authorsRef.current = data.authors;
-              onAuthorsUpdate(data.authors);
-            }
-            if (data.settings) {
-              settingsRef.current = data.settings;
-              onSettingsUpdate?.(data.settings);
-            }
+            const nextPRs = data.prs || [];
+            prsRef.current = nextPRs;
+            onPRsUpdate(nextPRs);
+
+            const nextRepos = data.repos || [];
+            reposRef.current = nextRepos;
+            onReposUpdate(nextRepos);
+
+            const nextAuthors = data.authors || [];
+            authorsRef.current = nextAuthors;
+            onAuthorsUpdate(nextAuthors);
+
+            const nextSettings = data.settings || {};
+            settingsRef.current = nextSettings;
+            onSettingsUpdate?.(nextSettings);
             if (data.warnings && data.warnings.length > 0) {
               setWarnings(data.warnings);
             }
@@ -563,6 +610,16 @@ export function useDaemonSocket({
                 if (data.scrollback) {
                   emitPtyEvent({ event: 'data', id: data.id, data: data.scrollback });
                 }
+                if (data.scrollback_truncated) {
+                  const session = sessionsRef.current.find((entry) => entry.id === data.id);
+                  if (session?.agent === 'codex') {
+                    emitPtyEvent({
+                      event: 'error',
+                      id: data.id,
+                      error: 'Restore scrollback was truncated; Codex full-screen output may be incomplete.',
+                    });
+                  }
+                }
               }
             }
             break;
@@ -601,7 +658,7 @@ export function useDaemonSocket({
 
           case 'session_registered':
             if (data.session) {
-              sessionsRef.current = [...sessionsRef.current, data.session];
+              sessionsRef.current = upsertSessionByID(sessionsRef.current, data.session);
               onSessionsUpdate(sessionsRef.current);
             }
             break;
@@ -620,18 +677,17 @@ export function useDaemonSocket({
           case 'session_state_changed':
           case 'session_todos_updated':
             if (data.session) {
-              sessionsRef.current = sessionsRef.current.map((s) =>
-                s.id === data.session!.id ? data.session! : s
-              );
+              sessionsRef.current = upsertSessionByID(sessionsRef.current, data.session);
               onSessionsUpdate(sessionsRef.current);
             }
             break;
 
           case 'sessions_updated':
-            if (data.sessions) {
-              sessionsRef.current = data.sessions;
-              onSessionsUpdate(data.sessions);
-              const activeIDs = new Set(data.sessions.map((session) => session.id));
+            {
+              const dedupedSessions = dedupeSessionsByID(data.sessions || []);
+              sessionsRef.current = dedupedSessions;
+              onSessionsUpdate(dedupedSessions);
+              const activeIDs = new Set(dedupedSessions.map((session) => session.id));
               for (const sessionId of attachedPtySessionsRef.current) {
                 if (activeIDs.has(sessionId)) {
                   continue;
@@ -1174,25 +1230,22 @@ export function useDaemonSocket({
       }
 
       reconnectAttemptsRef.current++;
-      const delay = reconnectDelayRef.current;
+      let delay = reconnectDelayRef.current;
       if (reconnectAttemptsRef.current > MAX_RECONNECTS_BEFORE_PAUSE) {
-        circuitOpenRef.current = true;
-        setConnectionError('Daemon disconnected. Start daemon manually, then click to retry.');
-        console.error('[Daemon] Circuit breaker open - daemon appears offline');
-        circuitResetTimeoutRef.current = window.setTimeout(() => {
-          console.log('[Daemon] Circuit breaker auto-reset');
-          circuitOpenRef.current = false;
-          reconnectAttemptsRef.current = 0;
-          reconnectDelayRef.current = 1000;
-          connect();
-        }, CIRCUIT_RESET_MS);
-        return;
+        // Keep retrying in the background instead of pausing indefinitely.
+        delay = MAX_RECONNECT_DELAY_MS;
+        reconnectDelayRef.current = MAX_RECONNECT_DELAY_MS;
+        setConnectionError('Daemon disconnected. Reconnecting...');
+        console.error('[Daemon] High reconnect attempts; continuing retries in background');
+      } else {
+        reconnectDelayRef.current = Math.min(delay * 1.5, MAX_RECONNECT_DELAY_MS);
       }
 
       // Normal reconnect with backoff
       console.log(`[Daemon] WebSocket disconnected, reconnecting in ${delay}ms... (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECTS_BEFORE_PAUSE})`);
-      reconnectTimeoutRef.current = window.setTimeout(connect, delay);
-      reconnectDelayRef.current = Math.min(delay * 1.5, 5000);
+      reconnectTimeoutRef.current = window.setTimeout(() => {
+        void connect();
+      }, delay);
     };
 
     ws.onerror = (err) => {
@@ -1201,10 +1254,10 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate, rejectPendingForCommand]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning]);
 
   useEffect(() => {
-    connect();
+    void connect();
 
     return () => {
       if (reconnectTimeoutRef.current) {
@@ -1228,7 +1281,7 @@ export function useDaemonSocket({
     reconnectAttemptsRef.current = 0;
     reconnectDelayRef.current = 1000;
     setConnectionError(null);
-    connect();
+    void connect();
   }, [connect]);
 
   const sendSpawnSession = useCallback((args: PtySpawnArgs): Promise<SpawnResult> => {
@@ -1316,7 +1369,33 @@ export function useDaemonSocket({
   useEffect(() => {
     setPtyBackend({
       spawn: async (args: PtySpawnArgs) => {
-        await sendSpawnSession(args);
+        const sessionKnownToDaemon = sessionsRef.current.some((session) => session.id === args.id);
+
+        try {
+          await sendAttachSession(args.id);
+          return;
+        } catch (attachErr) {
+          // If daemon already knows this session but PTY is gone, don't silently create
+          // a brand-new process with the same ID. This causes confusing "restores"
+          // and duplicate session rows.
+          if (sessionKnownToDaemon) {
+            throw new Error(
+              'No live PTY found for this session. It likely ended when the daemon restarted. Close it and start a new session.'
+            );
+          }
+          if (!isSessionNotFoundError(attachErr)) {
+            throw attachErr;
+          }
+        }
+
+        try {
+          await sendSpawnSession(args);
+        } catch (err) {
+          const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+          if (!message.includes('already exists')) {
+            throw err;
+          }
+        }
         await sendAttachSession(args.id);
       },
       write: async (id: string, data: string) => {

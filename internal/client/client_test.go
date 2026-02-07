@@ -58,6 +58,46 @@ func TestClient_Register(t *testing.T) {
 	}
 }
 
+func TestClient_RegisterWithAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+
+		cmd, msg, err := protocol.ParseMessage(buf[:n])
+		if err != nil || cmd != protocol.CmdRegister {
+			return
+		}
+		reg := msg.(*protocol.RegisterMessage)
+		if protocol.Deref(reg.Agent) != "claude" {
+			return
+		}
+
+		resp := protocol.Response{Ok: true}
+		json.NewEncoder(conn).Encode(resp)
+	}()
+
+	c := New(sockPath)
+	err = c.RegisterWithAgent("sess-123", "test-session", "/tmp", "claude")
+	if err != nil {
+		t.Fatalf("RegisterWithAgent error: %v", err)
+	}
+}
+
 func TestClient_UpdateState(t *testing.T) {
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "24"
+const ProtocolVersion = "25"
 
 // Commands
 const (
@@ -149,6 +149,11 @@ const (
 	StateWaitingInput    = "waiting_input"
 	StateIdle            = "idle"
 	StatePendingApproval = "pending_approval"
+)
+
+// Agent values
+const (
+	AgentShellValue = "shell"
 )
 
 // PR states (values for PR.State field, distinct from session states)

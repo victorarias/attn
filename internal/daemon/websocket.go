@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -379,7 +380,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.sendCommandError(client, peek.Cmd, err.Error())
 		return
 	}
-	d.logf("WebSocket parsed cmd: %s", cmd)
+	if shouldLogWSCommand(cmd) {
+		d.logf("WebSocket parsed cmd: %s", cmd)
+	}
 
 	switch cmd {
 	case protocol.CmdApprovePR:
@@ -764,7 +767,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdPtyInput:
 		inputMsg := msg.(*protocol.PtyInputMessage)
 		if err := d.ptyManager.Input(inputMsg.ID, []byte(inputMsg.Data)); err != nil {
-			d.logf("pty_input failed for %s: %v", inputMsg.ID, err)
+			if shouldLogPtyCommandError(err) {
+				d.logf("pty_input failed for %s: %v", inputMsg.ID, err)
+			}
 		}
 
 	case protocol.CmdPtyResize:
@@ -821,11 +826,8 @@ func (d *Daemon) detachAllSessions(client *wsClient) {
 }
 
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
-	agent := strings.TrimSpace(strings.ToLower(msg.Agent))
-	if agent == "" {
-		agent = "codex"
-	}
-	isShell := agent == "shell"
+	agent := protocol.NormalizeSpawnAgent(msg.Agent, string(protocol.SessionAgentCodex))
+	isShell := agent == protocol.AgentShellValue
 	label := protocol.Deref(msg.Label)
 	if label == "" {
 		label = filepath.Base(msg.Cwd)
@@ -856,11 +858,13 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	}
 
 	if !isShell {
+		existing := d.store.Get(msg.ID)
 		branchInfo, _ := git.GetBranchInfo(msg.Cwd)
 		nowStr := string(protocol.TimestampNow())
 		session := &protocol.Session{
 			ID:             msg.ID,
 			Label:          label,
+			Agent:          protocol.SessionAgent(agent),
 			Directory:      msg.Cwd,
 			State:          protocol.SessionStateWorking,
 			StateSince:     nowStr,
@@ -880,8 +884,12 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 		d.store.Add(session)
 		d.store.UpsertRecentLocation(msg.Cwd, label)
+		eventType := protocol.EventSessionRegistered
+		if existing != nil {
+			eventType = protocol.EventSessionStateChanged
+		}
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:   protocol.EventSessionRegistered,
+			Event:   eventType,
 			Session: session,
 		})
 	}
@@ -969,7 +977,9 @@ func (d *Daemon) handlePtyResize(_ *wsClient, msg *protocol.PtyResizeMessage) {
 		return
 	}
 	if err := d.ptyManager.Resize(msg.ID, uint16(msg.Cols), uint16(msg.Rows)); err != nil {
-		d.logf("pty_resize failed for %s: %v", msg.ID, err)
+		if shouldLogPtyCommandError(err) {
+			d.logf("pty_resize failed for %s: %v", msg.ID, err)
+		}
 	}
 }
 
@@ -992,8 +1002,24 @@ func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMe
 	d.detachSession(client, msg.ID)
 	sig := parseSignal(protocol.Deref(msg.Signal))
 	if err := d.ptyManager.Kill(msg.ID, sig); err != nil {
-		d.logf("kill_session failed for %s: %v", msg.ID, err)
+		if shouldLogPtyCommandError(err) {
+			d.logf("kill_session failed for %s: %v", msg.ID, err)
+		}
 	}
+}
+
+func shouldLogWSCommand(cmd string) bool {
+	switch cmd {
+	case protocol.CmdPtyInput, protocol.CmdPtyResize, protocol.CmdAttachSession, protocol.CmdDetachSession:
+		return false
+	default:
+		return true
+	}
+}
+
+func shouldLogPtyCommandError(err error) bool {
+	// Session-not-found can happen during normal UI race windows (resize/input before spawn/attach).
+	return !errors.Is(err, pty.ErrSessionNotFound)
 }
 
 // broadcastPRs sends updated PR list to all WebSocket clients

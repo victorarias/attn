@@ -21,6 +21,11 @@ enum PRRole {
   reviewer,
 }
 
+enum SessionAgent {
+  claude,
+  codex,
+}
+
 enum HeatState {
   cold,
   warm,
@@ -34,6 +39,7 @@ enum HeatState {
 model Session {
   id: string;
   label: string;
+  agent: SessionAgent;
   directory: string;
   branch?: string;              // Optional: might not be in git repo
   is_worktree?: boolean;        // Optional: false if not worktree
@@ -131,6 +137,7 @@ model RegisterMessage {
   cmd: "register";
   id: string;
   label?: string;
+  agent?: SessionAgent;         // Optional for legacy wrappers
   dir: string;
 }
 

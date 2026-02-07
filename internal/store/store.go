@@ -83,12 +83,14 @@ func (s *Store) Add(session *protocol.Session) {
 	if err != nil {
 		log.Printf("[store] Add: failed to marshal todos for session %s: %v", session.ID, err)
 	}
+	session.Agent = protocol.NormalizeSessionAgent(session.Agent, protocol.SessionAgentCodex)
 	_, err = s.db.Exec(`
 		INSERT OR REPLACE INTO sessions
-		(id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Label,
+		session.Agent,
 		session.Directory,
 		protocol.Deref(session.Branch),
 		boolToInt(protocol.Deref(session.IsWorktree)),
@@ -121,10 +123,11 @@ func (s *Store) Get(id string) *protocol.Session {
 	var branch, mainRepo sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
+		SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
+		&session.Agent,
 		&session.Directory,
 		&branch,
 		&isWorktree,
@@ -206,11 +209,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
+			SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
 			FROM sessions ORDER BY label`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
+			SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
 			FROM sessions WHERE state = ? ORDER BY label`, stateFilter)
 	}
 	if err != nil {
@@ -229,6 +232,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		err := rows.Scan(
 			&session.ID,
 			&session.Label,
+			&session.Agent,
 			&session.Directory,
 			&branch,
 			&isWorktree,

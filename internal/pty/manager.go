@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,8 +18,11 @@ import (
 )
 
 const (
-	DefaultScrollbackSize = 1024 * 1024
+	// Keep a deeper PTY history so session restore/re-attach can replay
+	// substantially more terminal output.
+	DefaultScrollbackSize = 8 * 1024 * 1024
 	defaultKillTimeout    = 10 * time.Second
+	shellEnvTimeout       = 2 * time.Second
 )
 
 var ErrSessionNotFound = errors.New("session not found")
@@ -118,35 +122,41 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	}
 	m.mu.Unlock()
 
-	cmd, err := buildSpawnCommand(opts, agent)
-	if err != nil {
-		return err
-	}
+	loginShell := getUserLoginShell()
+	shellCandidates := preferredShellCandidates(loginShell)
+	cmdEnv := buildSpawnEnv(loginShell, opts, agent, m.logf)
 
-	cmd.Dir = opts.CWD
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-	if agent != "shell" {
-		cmd.Env = append(cmd.Env,
-			"ATTN_INSIDE_APP=1",
-			"ATTN_DAEMON_MANAGED=1",
-			"ATTN_SESSION_ID="+opts.ID,
-			"ATTN_AGENT="+agent,
-		)
-		if opts.ClaudeExecutable != "" {
-			cmd.Env = append(cmd.Env, "ATTN_CLAUDE_EXECUTABLE="+opts.ClaudeExecutable)
+	var (
+		cmd       *exec.Cmd
+		ptmx      *os.File
+		lastErr   error
+		usedShell string
+	)
+	for i, shellPath := range shellCandidates {
+		cmd = buildSpawnCommand(opts, agent, shellPath)
+		cmd.Dir = opts.CWD
+		if shouldSetpgidForPTY() {
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		}
-		if opts.CodexExecutable != "" {
-			cmd.Env = append(cmd.Env, "ATTN_CODEX_EXECUTABLE="+opts.CodexExecutable)
-		}
-	}
+		cmd.Env = cmdEnv
 
-	ptmx, err := creackpty.StartWithSize(cmd, &creackpty.Winsize{
-		Cols: opts.Cols,
-		Rows: opts.Rows,
-	})
-	if err != nil {
-		return fmt.Errorf("spawn session %s: %w", opts.ID, err)
+		ptmx, lastErr = creackpty.StartWithSize(cmd, &creackpty.Winsize{
+			Cols: opts.Cols,
+			Rows: opts.Rows,
+		})
+		if lastErr == nil {
+			usedShell = shellPath
+			break
+		}
+
+		if i < len(shellCandidates)-1 && shouldFallbackShell(lastErr) {
+			m.logf("pty spawn: failed with shell=%s id=%s err=%v; trying fallback shell", shellPath, opts.ID, lastErr)
+			continue
+		}
+		return fmt.Errorf("spawn session %s: %w", opts.ID, lastErr)
+	}
+	if usedShell != "" && usedShell != loginShell {
+		m.logf("pty spawn: using fallback shell=%s (preferred=%s) id=%s", usedShell, loginShell, opts.ID)
 	}
 
 	session := &Session{
@@ -294,10 +304,9 @@ func normalizeAgent(agent string) string {
 	}
 }
 
-func buildSpawnCommand(opts SpawnOptions, agent string) (*exec.Cmd, error) {
-	shellPath := getUserLoginShell()
+func buildSpawnCommand(opts SpawnOptions, agent, shellPath string) *exec.Cmd {
 	if agent == "shell" {
-		return exec.Command(shellPath, "-l"), nil
+		return exec.Command(shellPath, "-l")
 	}
 
 	attnPath := resolveAttnPath()
@@ -315,7 +324,132 @@ func buildSpawnCommand(opts SpawnOptions, agent string) (*exec.Cmd, error) {
 	}
 
 	cmdline := "exec " + shellJoin(args)
-	return exec.Command(shellPath, "-l", "-c", cmdline), nil
+	return exec.Command(shellPath, "-l", "-c", cmdline)
+}
+
+func buildSpawnEnv(loginShell string, opts SpawnOptions, agent string, logf LogFunc) []string {
+	env := os.Environ()
+
+	if loginShell != "" {
+		if shellEnv, err := readLoginShellEnv(loginShell); err == nil {
+			env = mergeEnvironment(env, shellEnv)
+		} else if logf != nil {
+			logf("pty spawn: failed to capture login shell env from %s: %v", loginShell, err)
+		}
+	}
+
+	env = mergeEnvironment(env, []string{"TERM=xterm-256color"})
+	if agent != "shell" {
+		env = mergeEnvironment(env, []string{
+			"ATTN_INSIDE_APP=1",
+			"ATTN_DAEMON_MANAGED=1",
+			"ATTN_SESSION_ID=" + opts.ID,
+			"ATTN_AGENT=" + agent,
+		})
+		if opts.ClaudeExecutable != "" {
+			env = mergeEnvironment(env, []string{"ATTN_CLAUDE_EXECUTABLE=" + opts.ClaudeExecutable})
+		}
+		if opts.CodexExecutable != "" {
+			env = mergeEnvironment(env, []string{"ATTN_CODEX_EXECUTABLE=" + opts.CodexExecutable})
+		}
+	}
+	return env
+}
+
+func readLoginShellEnv(shellPath string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), shellEnvTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, shellPath, "-l", "-c", "env -0")
+	output, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("timeout after %s", shellEnvTimeout)
+		}
+		return nil, err
+	}
+	return parseNullSeparatedEnv(output), nil
+}
+
+func parseNullSeparatedEnv(output []byte) []string {
+	if len(output) == 0 {
+		return nil
+	}
+	parts := strings.Split(string(output), "\x00")
+	env := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" || !strings.Contains(part, "=") {
+			continue
+		}
+		env = append(env, part)
+	}
+	return env
+}
+
+func mergeEnvironment(base, overlay []string) []string {
+	if len(overlay) == 0 {
+		return append([]string(nil), base...)
+	}
+	merged := make([]string, 0, len(base)+len(overlay))
+	index := make(map[string]int, len(base)+len(overlay))
+	add := func(entry string) {
+		key := entry
+		if idx := strings.Index(entry, "="); idx >= 0 {
+			key = entry[:idx]
+		}
+		if pos, ok := index[key]; ok {
+			merged[pos] = entry
+			return
+		}
+		index[key] = len(merged)
+		merged = append(merged, entry)
+	}
+	for _, entry := range base {
+		add(entry)
+	}
+	for _, entry := range overlay {
+		add(entry)
+	}
+	return merged
+}
+
+func preferredShellCandidates(primary string) []string {
+	candidates := make([]string, 0, 4)
+	seen := map[string]struct{}{}
+	add := func(shell string) {
+		shell = strings.TrimSpace(shell)
+		if shell == "" {
+			return
+		}
+		if _, ok := seen[shell]; ok {
+			return
+		}
+		seen[shell] = struct{}{}
+		candidates = append(candidates, shell)
+	}
+
+	add(primary)
+	if runtime.GOOS == "darwin" {
+		add("/bin/zsh")
+		add("/bin/bash")
+	} else {
+		add("/bin/bash")
+	}
+	add("/bin/sh")
+	return candidates
+}
+
+func shouldFallbackShell(err error) bool {
+	return errors.Is(err, syscall.EPERM) ||
+		errors.Is(err, syscall.EACCES) ||
+		errors.Is(err, syscall.ENOENT) ||
+		errors.Is(err, exec.ErrNotFound)
+}
+
+func shouldSetpgidForPTY() bool {
+	// On macOS, creack/pty (forkpty) already creates a new session/process group.
+	// Requesting Setpgid via os/exec conflicts and fails with EPERM.
+	return runtime.GOOS != "darwin"
 }
 
 func resolveAttnPath() string {

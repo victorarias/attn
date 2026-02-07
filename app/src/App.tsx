@@ -397,6 +397,7 @@ function AppContent({
     setForkParams,
     setResumePicker,
     setLauncherConfig,
+    syncFromDaemonSessions,
   } = useSessionStore();
 
   // UI scale for font sizing (Cmd+/Cmd-) - now uses SettingsContext
@@ -427,6 +428,14 @@ function AppContent({
       codexExecutable: settings.codex_executable || '',
     });
   }, [settings, setLauncherConfig]);
+
+  // Keep local UI sessions in sync with daemon's canonical session list.
+  useEffect(() => {
+    if (!hasReceivedInitialState) {
+      return;
+    }
+    syncFromDaemonSessions(daemonSessions);
+  }, [daemonSessions, hasReceivedInitialState, syncFromDaemonSessions]);
 
   // Refresh PRs with proper async handling
   const handleRefreshPRs = useCallback(async () => {

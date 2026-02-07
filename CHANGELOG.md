@@ -16,24 +16,42 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   - Events: `spawn_result`, `attach_result`, `pty_output`, `session_exited`, `pty_desync`
 - **WebSocket Command Error Event**: Unknown/invalid WebSocket commands now return a structured `command_error` event instead of failing silently.
 - **Managed Wrapper Mode**: `ATTN_DAEMON_MANAGED=1` support in the wrapper to skip daemon auto-start and register/unregister side effects when sessions are daemon-spawned.
+- **Session Recovery Test Harness**: Added Playwright daemon lifecycle controls (`start/stop/restart`) plus a dedicated session restore/reconnect spec to guard app restart + daemon restart behavior.
 
 ### Changed
 - **Terminal Transport Path**: Frontend terminal I/O now routes through daemon WebSocket PTY commands/events instead of Tauri PTY IPC.
 - **Session Persistence Behavior**: App no longer clears daemon sessions on startup; existing daemon-managed sessions can survive UI restart and be reattached.
+- **Session Agent Typing**: Protocol schema now models session agent as a strict `claude|codex` enum, with shared normalization helpers for register/spawn/store paths.
+- **Restore Scrollback Depth**: Increased daemon PTY replay buffer to `8 MiB` per session and frontend terminal scrollback to `50,000` lines so restored sessions recover much deeper history.
+- **PTY Restore Semantics**: Frontend now attempts `attach_session` first and only spawns when the daemon does not already know the session ID, avoiding accidental respawn of missing PTYs after daemon restarts.
 - **Daemon Startup Safety**: Daemon now refuses to replace an already-running daemon instance instead of SIGTERM/SIGKILL takeover.
 - **Connection Recovery**: Frontend removed daemon auto-restart on WebSocket failure; it now reconnects and surfaces a manual-retry path if daemon stays offline.
 - **Upgrade Messaging**: Version-mismatch banner now includes active-session impact guidance for manual daemon restart timing.
 - **Unregister Semantics**: `unregister` is now a hard-stop path (terminate process/session resources, then remove session metadata); `detach_session` remains the keep-running path.
 - **Spawn Consistency**: Session registration now happens only after PTY spawn succeeds, avoiding temporary/stale session entries on spawn failures.
+- **PTY Shell Startup**: PTY spawn now captures login-shell environment (`shell -l -c 'env -0'`) and reuses it for session commands, so daemon-spawned sessions better match the user's interactive shell environment.
 - **WebSocket Ordering**: `pty_input` now follows the same ordered command path as other WebSocket commands.
 - **Protocol Schema Coverage**: TypeSpec now explicitly models all daemon WebSocket events and reviewer streaming payloads used in runtime.
-- **Protocol Version**: Bumped daemon/app protocol version to `24`.
+- **Protocol Version**: Bumped daemon/app protocol version to `25`.
 
 ### Fixed
 - **Daemon Socket Detection (Tauri)**: Frontend daemon health/start checks now use `~/.attn/attn.sock` (and `ATTN_SOCKET_PATH` override), matching daemon defaults.
+- **Stale Daemon Socket Recovery**: App startup now verifies the daemon socket is connectable (not just present), removes stale socket files, and waits for a live socket before reporting daemon startup success.
 - **Terminal Output Races**: Buffered PTY output until terminals are ready to prevent dropped initial prompt/scrollback in main and utility terminals.
 - **Reconnect Attach Hygiene**: Exited/unregistered sessions are removed from frontend reattach tracking to avoid repeated failed `attach_session` attempts.
 - **Exited PTY Cleanup**: Daemon now removes exited PTY sessions from the manager to prevent stale in-memory session accumulation.
+- **Login Shell Exec Failures**: PTY spawn now retries with safe fallback shells (`/bin/zsh`, `/bin/bash`, `/bin/sh`) when the preferred login shell cannot be executed (e.g. macOS `operation not permitted`).
+- **macOS PTY Launch EPERM**: PTY spawn no longer requests `Setpgid` on Darwin with `forkpty`, fixing `fork/exec ... operation not permitted` for all shells.
+- **Daemon PTY Log Noise**: WebSocket command logging now skips high-frequency PTY traffic (`pty_input`, `pty_resize`, `attach_session`, `detach_session`), and expected PTY `session not found` races are no longer logged as errors.
+- **SQLite Migration Resilience**: Migration 20 (`prs.host`) is now idempotent when the column already exists, preventing DB-open failure and in-memory fallback that caused session/PR state loss after daemon restarts.
+- **Session Restore on App Reopen**: UI session store now hydrates from daemon sessions after initial state, so tracked sessions reappear after closing/reopening the app.
+- **Reattach Existing PTYs**: Frontend PTY spawn path now treats `session already exists` as attachable, preventing restore sessions from failing when terminal views reconnect.
+- **Session Agent Persistence**: Sessions now persist and restore `agent` (`claude`/`codex`) across daemon/app restarts, including wrapper-registered sessions and daemon-spawned sessions.
+- **Session Duplication on Reconnect**: Session lists are now upserted/deduplicated by ID, and daemon re-register/spawn updates emit `session_state_changed` for existing IDs instead of duplicate `session_registered` events.
+- **Stale PTY Auto-Respawn**: Restored sessions with missing PTYs no longer auto-create fresh agents with the same ID, preventing confusing "blank restored terminal" behavior and inconsistent close flows.
+- **Codex Replay Robustness**: Terminal write path now uses `writeUtf8` when available and surfaces a warning when Codex replay is truncated.
+- **Ghost Sessions After Daemon Restart**: Daemon startup now prunes persisted sessions that have no live PTY and surfaces a warning, preventing stale sessions from reappearing after daemon restarts.
+- **Empty State Sync on Reconnect**: Frontend now treats missing `sessions/prs/repos/authors/settings` in `initial_state` as empty values, preventing stale UI data when daemon responses omit empty arrays/maps.
 
 ### Removed
 - **Rust PTY Manager**: Removed `app/src-tauri/src/pty_manager.rs` and PTY Tauri command registrations (`pty_spawn`, `pty_write`, `pty_resize`, `pty_kill`).

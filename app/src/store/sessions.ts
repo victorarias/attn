@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import { Terminal } from '@xterm/xterm';
 import type { UISessionState } from '../types/sessionState';
+import { normalizeSessionState } from '../types/sessionState';
 import type { SessionAgent } from '../types/sessionAgent';
+import { normalizeSessionAgent } from '../types/sessionAgent';
 import { listenPtyEvents, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEventPayload } from '../pty/bridge';
 
 export interface UtilityTerminal {
@@ -43,6 +45,16 @@ export interface Session {
   terminalPanel: TerminalPanelState;
 }
 
+export interface DaemonSessionSnapshot {
+  id: string;
+  label: string;
+  agent?: string;
+  directory: string;
+  state: string;
+  branch?: string;
+  is_worktree?: boolean;
+}
+
 interface LauncherConfig {
   claudeExecutable: string;
   codexExecutable: string;
@@ -64,6 +76,7 @@ interface SessionStore {
   setForkParams: (sessionId: string, resumeSessionId: string) => void;
   setResumePicker: (sessionId: string) => void;
   setLauncherConfig: (config: LauncherConfig) => void;
+  syncFromDaemonSessions: (daemonSessions: DaemonSessionSnapshot[]) => void;
 
   // Terminal panel actions
   openTerminalPanel: (sessionId: string) => void;
@@ -80,17 +93,23 @@ const pendingForkParams = new Map<string, { resumeSessionId?: string; forkSessio
 const pendingTerminalEvents = new Map<string, PtyEventPayload[]>();
 const MAX_PENDING_TERMINAL_EVENTS = 256;
 
-function decodePtyData(payload: string): string {
+function decodePtyBytes(payload: string): Uint8Array {
   const binaryStr = atob(payload);
-  const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
-  return new TextDecoder('utf-8').decode(bytes);
+  return Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
 }
 
 function writePtyEventToTerminal(terminal: Terminal, msg: PtyEventPayload) {
   switch (msg.event) {
-    case 'data':
-      terminal.write(decodePtyData(msg.data));
+    case 'data': {
+      const bytes = decodePtyBytes(msg.data);
+      const termWithUtf8 = terminal as Terminal & { writeUtf8?: (data: Uint8Array) => void };
+      if (typeof termWithUtf8.writeUtf8 === 'function') {
+        termWithUtf8.writeUtf8(bytes);
+      } else {
+        terminal.write(new TextDecoder('utf-8').decode(bytes));
+      }
       break;
+    }
     case 'reset':
       terminal.reset();
       break;
@@ -338,6 +357,55 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   setLauncherConfig: (config: LauncherConfig) => {
     set({ launcherConfig: config });
+  },
+
+  syncFromDaemonSessions: (daemonSessions: DaemonSessionSnapshot[]) => {
+    set((state) => {
+      const existingByID = new Map(state.sessions.map((session) => [session.id, session]));
+
+      const syncedSessions = daemonSessions.map((daemonSession) => {
+        const existing = existingByID.get(daemonSession.id);
+        const normalizedState = normalizeSessionState(daemonSession.state);
+        const nextAgent: SessionAgent = normalizeSessionAgent(daemonSession.agent, existing?.agent ?? 'codex');
+        const nextBranch = daemonSession.branch ?? existing?.branch;
+        const nextIsWorktree = daemonSession.is_worktree ?? existing?.isWorktree;
+
+        if (
+          existing &&
+          existing.label === daemonSession.label &&
+          existing.agent === nextAgent &&
+          existing.cwd === daemonSession.directory &&
+          existing.state === normalizedState &&
+          existing.branch === nextBranch &&
+          existing.isWorktree === nextIsWorktree
+        ) {
+          return existing;
+        }
+
+        return {
+          id: daemonSession.id,
+          label: daemonSession.label,
+          state: normalizedState,
+          terminal: existing?.terminal ?? null,
+          cwd: daemonSession.directory,
+          agent: nextAgent,
+          transcriptMatched: existing?.transcriptMatched ?? nextAgent !== 'codex',
+          branch: nextBranch,
+          isWorktree: nextIsWorktree,
+          terminalPanel: existing?.terminalPanel ?? createDefaultPanelState(),
+        } satisfies Session;
+      });
+
+      let nextActiveSessionID = state.activeSessionId;
+      if (nextActiveSessionID && !syncedSessions.some((session) => session.id === nextActiveSessionID)) {
+        nextActiveSessionID = null;
+      }
+
+      return {
+        sessions: syncedSessions,
+        activeSessionId: nextActiveSessionID,
+      };
+    });
   },
 
   openTerminalPanel: (sessionId: string) => {

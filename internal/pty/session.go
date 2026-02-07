@@ -275,6 +275,9 @@ func (s *Session) kill(sig syscall.Signal, waitTimeout time.Duration) error {
 	if pgid <= 0 {
 		return errors.New("invalid process id")
 	}
+	if actualPGID, err := syscall.Getpgid(s.cmd.Process.Pid); err == nil && actualPGID > 0 {
+		pgid = actualPGID
+	}
 
 	if err := syscall.Kill(-pgid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return err

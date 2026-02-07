@@ -420,7 +420,7 @@ func runClaudeDirectly() {
 		sessionID = wrapper.GenerateSessionID()
 	}
 	if !managedMode {
-		if err := c.Register(sessionID, label, cwd); err != nil {
+		if err := c.RegisterWithAgent(sessionID, label, cwd, "claude"); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
 		}
 	}
@@ -580,7 +580,7 @@ func runCodexDirectly() {
 		sessionID = wrapper.GenerateSessionID()
 	}
 	if !managedMode {
-		if err := c.Register(sessionID, label, cwd); err != nil {
+		if err := c.RegisterWithAgent(sessionID, label, cwd, "codex"); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
 		}
 	}
