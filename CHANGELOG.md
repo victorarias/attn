@@ -37,6 +37,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Daemon Spawn Wrapper Path Resolution**: PTY-launched sessions now validate candidate `attn` executable paths before invoking them, preventing `fish: Unknown command` failures when a stale or missing binary path is discovered.
+- **Utility Terminal Shell Bootstrap**: `Cmd+T` utility terminals now wire xterm input before replaying buffered PTY output, so early terminal capability queries receive responses and interactive login shells (like fish) initialize their prompt correctly.
 - **Daemon Socket Detection (Tauri)**: Frontend daemon health/start checks now use `~/.attn/attn.sock` (and `ATTN_SOCKET_PATH` override), matching daemon defaults.
 - **Stale Daemon Socket Recovery**: App startup now verifies the daemon socket is connectable (not just present), removes stale socket files, and waits for a live socket before reporting daemon startup success.
 - **Persistence Degraded Visibility**: When SQLite open/migrations fail and daemon falls back to in-memory state, the app now receives a persistent warning banner that includes the DB path and points to daemon logs for recovery details.

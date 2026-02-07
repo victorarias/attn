@@ -183,12 +183,15 @@ export function UtilityTerminalPanel({
   const handleTerminalReady = useCallback(
     (terminalId: string, ptyId: string) => (xterm: XTerm) => {
       xtermRefs.current.set(terminalId, xterm);
-      flushPendingEvents(terminalId, xterm);
 
       // Terminal input -> PTY
       xterm.onData((data: string) => {
         ptyWrite({ id: ptyId, data }).catch(console.error);
       });
+
+      // Flush buffered PTY output after input wiring so terminal query
+      // responses emitted during replay are not dropped.
+      flushPendingEvents(terminalId, xterm);
     },
     [flushPendingEvents]
   );
