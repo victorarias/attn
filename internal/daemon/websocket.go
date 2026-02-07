@@ -193,6 +193,9 @@ func isAllowedWSOrigin(origin string) bool {
 		"http://127.0.0.1",
 		"https://localhost",
 		"https://127.0.0.1",
+		"localhost:",
+		"127.0.0.1:",
+		"tauri.localhost",
 	}
 	for _, prefix := range allowedPrefixes {
 		if strings.HasPrefix(origin, prefix) {
@@ -213,12 +216,12 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: []string{
-			"tauri://localhost",
-			"http://tauri.localhost",
-			"http://localhost:*",
-			"http://127.0.0.1:*",
-			"https://localhost:*",
-			"https://127.0.0.1:*",
+			"localhost",
+			"localhost:*",
+			"127.0.0.1",
+			"127.0.0.1:*",
+			"tauri.localhost",
+			"tauri.localhost:*",
 		},
 	})
 	if err != nil {

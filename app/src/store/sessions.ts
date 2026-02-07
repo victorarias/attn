@@ -132,6 +132,8 @@ interface TestSession {
   state: UISessionState;
   cwd: string;
   agent?: SessionAgent;
+  branch?: string;
+  isWorktree?: boolean;
 }
 
 declare global {

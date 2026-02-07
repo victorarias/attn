@@ -923,3 +923,6 @@ This plan was reviewed by Codex (gpt-5.3-codex) across three rounds. Key improve
 - 2026-02-07 13:09 UTC — Recorded Tauri daemon socket path fix (`~/.attn/attn.sock`) to match daemon defaults.
 - 2026-02-07 13:10 UTC — Updated lifecycle table to reflect current close-session behavior (`unregister` as hard-stop).
 - 2026-02-07 13:10 UTC — Updated session lifecycle diagram to match current exit cleanup semantics (no post-exit reattach).
+- 2026-02-07 13:44 UTC — Hardened E2E daemon binary selection (`ATTN_E2E_BIN` + repo-local fallback) and updated CI to run E2E against the just-built `/tmp/attn`.
+- 2026-02-07 13:44 UTC — Fixed WebSocket origin handling in daemon to accept Playwright localhost origin format and host-pattern authorization.
+- 2026-02-07 13:44 UTC — Fixed worktree-close prompt regression by preserving local `isWorktree`/`branch` metadata during session enrichment.

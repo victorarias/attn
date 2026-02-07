@@ -79,6 +79,8 @@ jobs:
         run: pnpm exec playwright install --with-deps
 
       - name: E2E
+        env:
+          ATTN_E2E_BIN: /tmp/attn
         run: pnpm run e2e
 
   rust:

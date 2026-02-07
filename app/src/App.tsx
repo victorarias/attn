@@ -512,8 +512,8 @@ function AppContent({
     return {
       ...s,
       state: normalizeSessionState(rawState),
-      branch: daemonSession?.branch,
-      isWorktree: daemonSession?.is_worktree,
+      branch: daemonSession?.branch ?? s.branch,
+      isWorktree: daemonSession?.is_worktree ?? s.isWorktree,
     };
   });
 

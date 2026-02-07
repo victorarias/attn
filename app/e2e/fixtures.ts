@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
+import { fileURLToPath } from 'url';
 
 // Mock GitHub Server
 class MockGitHubServer {
@@ -102,6 +103,26 @@ class MockGitHubServer {
 // Test port - different from production (9849) to avoid conflicts
 const TEST_DAEMON_PORT = '19849';
 const MOCK_GH_HOST = 'mock.github.local';
+const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+function resolveAttnBinaryPath(): string {
+  const candidates = [
+    process.env.ATTN_E2E_BIN,
+    path.resolve(E2E_DIR, '../../attn'),
+    path.join(os.homedir(), '.local', 'bin', 'attn'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `attn binary not found. Tried: ${candidates.join(', ')}. ` +
+      `Set ATTN_E2E_BIN or build binary with 'go build -o ./attn ./cmd/attn'.`
+  );
+}
 
 // Daemon launcher - creates isolated temp directory for DB and socket
 async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketPath: string; tempDir: string; stop: () => void }> {
@@ -109,14 +130,10 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-e2e-'));
   const socketPath = path.join(tempDir, 'attn.sock');
   const dbPath = path.join(tempDir, 'attn.db');
-  const attnPath = path.join(os.homedir(), '.local', 'bin', 'attn');
+  const attnPath = resolveAttnBinaryPath();
 
   console.log(`[E2E] Test isolation: tempDir=${tempDir}, socket=${socketPath}, db=${dbPath}`);
-
-  // Verify attn binary exists
-  if (!fs.existsSync(attnPath)) {
-    throw new Error(`attn binary not found at ${attnPath}. Run 'make install' first.`);
-  }
+  console.log(`[E2E] Using daemon binary: ${attnPath}`);
 
   // Clean up any existing socket (shouldn't exist in temp dir, but just in case)
   if (fs.existsSync(socketPath)) {
