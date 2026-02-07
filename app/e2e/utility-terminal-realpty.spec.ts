@@ -1,5 +1,7 @@
 import { test, expect } from './fixtures';
 
+const realPtyEnabled = process.env.VITE_FORCE_REAL_PTY === '1';
+
 async function injectLocalSession(
   page: import('@playwright/test').Page,
   session: { id: string; label: string; state: string; cwd?: string }
@@ -107,7 +109,7 @@ async function readUtilityScrollback(wsUrl: string, ptyID: string): Promise<stri
 
 test.describe('Utility Terminal Real PTY', () => {
   test('cmd+t terminal accepts keyboard input and reaches shell', async ({ page, daemon }) => {
-    test.skip(process.env.VITE_MOCK_PTY === '1', 'Requires real PTY (VITE_MOCK_PTY=0)');
+    test.skip(!realPtyEnabled, 'Requires real PTY (VITE_FORCE_REAL_PTY=1)');
 
     const { wsUrl } = await daemon.start();
     await page.goto('/');
@@ -180,7 +182,7 @@ test.describe('Utility Terminal Real PTY', () => {
   });
 
   test('utility terminal keeps keyboard interactivity after switching sessions', async ({ page, daemon }) => {
-    test.skip(process.env.VITE_MOCK_PTY === '1', 'Requires real PTY (VITE_MOCK_PTY=0)');
+    test.skip(!realPtyEnabled, 'Requires real PTY (VITE_FORCE_REAL_PTY=1)');
 
     const { wsUrl } = await daemon.start();
     await page.goto('/');
@@ -269,7 +271,7 @@ test.describe('Utility Terminal Real PTY', () => {
   });
 
   test('utility terminal keeps keyboard interactivity after dashboard roundtrip', async ({ page, daemon }) => {
-    test.skip(process.env.VITE_MOCK_PTY === '1', 'Requires real PTY (VITE_MOCK_PTY=0)');
+    test.skip(!realPtyEnabled, 'Requires real PTY (VITE_FORCE_REAL_PTY=1)');
 
     const { wsUrl } = await daemon.start();
     await page.goto('/');
