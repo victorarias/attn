@@ -37,6 +37,7 @@ const mockSessions = new Set<string>();
 let backend: PtyBackend | null = null;
 
 const mockEnabled = (): boolean => {
+  if (import.meta.env.VITE_FORCE_REAL_PTY === '1') return false;
   if (import.meta.env.VITE_MOCK_PTY === '1') return true;
   if (typeof window === 'undefined') return true;
   return !isTauri();

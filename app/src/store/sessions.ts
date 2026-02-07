@@ -530,6 +530,7 @@ declare global {
     __TEST_SET_ACTIVE_TERMINAL?: (sessionId: string, terminalId: string) => void;
     __TEST_REMOVE_TERMINAL?: (sessionId: string, terminalId: string) => void;
     __TEST_RENAME_TERMINAL?: (sessionId: string, terminalId: string, title: string) => void;
+    __TEST_GET_ACTIVE_UTILITY_PTY?: (sessionId: string) => string | null;
   }
 }
 
@@ -594,5 +595,14 @@ if (import.meta.env.DEV) {
 
   window.__TEST_RENAME_TERMINAL = (sessionId: string, terminalId: string, title: string) => {
     useSessionStore.getState().renameUtilityTerminal(sessionId, terminalId, title);
+  };
+
+  window.__TEST_GET_ACTIVE_UTILITY_PTY = (sessionId: string) => {
+    const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
+    if (!session || !session.terminalPanel.activeTabId) {
+      return null;
+    }
+    const active = session.terminalPanel.terminals.find((terminal) => terminal.id === session.terminalPanel.activeTabId);
+    return active?.ptyId ?? null;
   };
 }
