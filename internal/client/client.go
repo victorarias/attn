@@ -59,11 +59,21 @@ func (c *Client) send(msg interface{}) (*protocol.Response, error) {
 
 // Register registers a new session
 func (c *Client) Register(id, label, dir string) error {
+	return c.RegisterWithAgent(id, label, dir, "")
+}
+
+// RegisterWithAgent registers a new session with an explicit agent.
+// agent should be "claude" or "codex"; empty preserves daemon default behavior.
+func (c *Client) RegisterWithAgent(id, label, dir, agent string) error {
 	msg := protocol.RegisterMessage{
 		Cmd:   protocol.CmdRegister,
 		ID:    id,
 		Label: protocol.Ptr(label),
 		Dir:   dir,
+	}
+	if agent != "" {
+		normalized := protocol.NormalizeSessionAgentString(agent, string(protocol.SessionAgentCodex))
+		msg.Agent = protocol.Ptr(normalized)
 	}
 	_, err := c.send(msg)
 	return err

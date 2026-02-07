@@ -160,6 +160,7 @@ var migrations = []migration{
 		UPDATE pr_interactions SET pr_id = 'github.com:' || pr_id WHERE pr_id NOT LIKE '%:%';
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_prs_host_repo_number ON prs(host, repo, number);
 	`},
+	{21, "add agent to sessions", "ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'codex'"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -223,9 +224,21 @@ func migrateDB(db *sql.DB) error {
 			return fmt.Errorf("starting transaction for migration %d: %w", m.version, err)
 		}
 
-		if _, err := tx.Exec(m.sql); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+		if m.version == 20 {
+			if err := applyMigration20(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 21 {
+			if err := applyMigration21(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else {
+			if _, err := tx.Exec(m.sql); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		}
 
 		// Record migration
@@ -243,6 +256,69 @@ func migrateDB(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+func applyMigration20(tx *sql.Tx) error {
+	hasHost, err := columnExists(tx, "prs", "host")
+	if err != nil {
+		return err
+	}
+	if !hasHost {
+		if _, err := tx.Exec("ALTER TABLE prs ADD COLUMN host TEXT NOT NULL DEFAULT 'github.com'"); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE prs SET id = 'github.com:' || id WHERE id NOT LIKE '%:%'"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE pr_interactions SET pr_id = 'github.com:' || pr_id WHERE pr_id NOT LIKE '%:%'"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_prs_host_repo_number ON prs(host, repo, number)"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyMigration21(tx *sql.Tx) error {
+	hasAgent, err := columnExists(tx, "sessions", "agent")
+	if err != nil {
+		return err
+	}
+	if hasAgent {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'codex'"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func columnExists(tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			colType   string
+			notNull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // seedLegacyDB detects databases created before the migration system existed

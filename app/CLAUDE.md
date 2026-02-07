@@ -27,7 +27,7 @@ pnpm run dev    # Starts tauri dev with hot reload
 
 - **store/daemonSessions.ts**: Zustand store for session/PR state from daemon
 - **store/sessions.ts**: Local terminal session management
-- **hooks/useDaemonSocket.ts**: WebSocket connection with circuit breaker (3 reconnects → 2 daemon restarts → circuit opens 30s)
+- **hooks/useDaemonSocket.ts**: WebSocket connection with reconnect + circuit breaker (manual daemon recovery, no auto-restart)
 
 ### Terminal Component (xterm.js)
 
@@ -40,10 +40,10 @@ When modifying `src/components/Terminal.tsx`:
 
 ### PTY Architecture
 
-Native Rust PTY handling via `portable-pty` (`src-tauri/src/pty_manager.rs`):
-- Direct PTY management in Rust, no separate process
-- Event-driven streaming to frontend via Tauri events
-- Handles UTF-8 boundary splits for proper terminal rendering
+Daemon-managed PTY handling (`internal/pty` in Go):
+- Daemon spawns/manages Claude/Codex/shell PTYs
+- Frontend streams terminal I/O over WebSocket (`spawn_session`, `attach_session`, `pty_input`, `pty_output`, etc.)
+- Reattach/replay path restores terminal state from daemon scrollback after reconnect
 
 ## Testing
 

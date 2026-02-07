@@ -404,9 +404,11 @@ func runClaudeDirectly() {
 		os.Exit(1)
 	}
 
-	// Ensure daemon is running
 	c := client.New("")
-	if !c.IsRunning() {
+	managedMode := os.Getenv("ATTN_DAEMON_MANAGED") == "1"
+
+	// Ensure daemon is running for unmanaged sessions only.
+	if !managedMode && !c.IsRunning() {
 		if err := startDaemonBackground(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not start daemon: %v\n", err)
 		}
@@ -417,8 +419,10 @@ func runClaudeDirectly() {
 	if sessionID == "" {
 		sessionID = wrapper.GenerateSessionID()
 	}
-	if err := c.Register(sessionID, label, cwd); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
+	if !managedMode {
+		if err := c.RegisterWithAgent(sessionID, label, cwd, "claude"); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
+		}
 	}
 
 	// Write hooks config
@@ -432,7 +436,9 @@ func runClaudeDirectly() {
 	// Setup cleanup
 	cleanup := func() {
 		wrapper.CleanupHooksConfig(hooksPath)
-		c.Unregister(sessionID)
+		if !managedMode {
+			c.Unregister(sessionID)
+		}
 	}
 
 	// Build claude command
@@ -558,9 +564,11 @@ func runCodexDirectly() {
 		os.Exit(1)
 	}
 
-	// Ensure daemon is running
 	c := client.New("")
-	if !c.IsRunning() {
+	managedMode := os.Getenv("ATTN_DAEMON_MANAGED") == "1"
+
+	// Ensure daemon is running for unmanaged sessions only.
+	if !managedMode && !c.IsRunning() {
 		if err := startDaemonBackground(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not start daemon: %v\n", err)
 		}
@@ -571,8 +579,10 @@ func runCodexDirectly() {
 	if sessionID == "" {
 		sessionID = wrapper.GenerateSessionID()
 	}
-	if err := c.Register(sessionID, label, cwd); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
+	if !managedMode {
+		if err := c.RegisterWithAgent(sessionID, label, cwd, "codex"); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
+		}
 	}
 
 	if *forkFlag {
@@ -607,7 +617,9 @@ func runCodexDirectly() {
 
 	// Start codex (non-blocking so we can set up signal forwarding)
 	if err = cmd.Start(); err != nil {
-		c.Unregister(sessionID)
+		if !managedMode {
+			c.Unregister(sessionID)
+		}
 		fmt.Fprintf(os.Stderr, "error starting codex: %v\n", err)
 		os.Exit(1)
 	}
@@ -631,7 +643,9 @@ func runCodexDirectly() {
 		fmt.Fprintf(os.Stderr, "warning: could not send stop: %v\n", sendErr)
 	}
 
-	c.Unregister(sessionID)
+	if !managedMode {
+		c.Unregister(sessionID)
+	}
 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

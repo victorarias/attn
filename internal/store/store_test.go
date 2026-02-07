@@ -28,6 +28,33 @@ func TestStore_AddAndGet(t *testing.T) {
 	if got.Label != "drumstick" {
 		t.Errorf("Label = %q, want %q", got.Label, "drumstick")
 	}
+	if got.Agent != "codex" {
+		t.Errorf("Agent = %q, want %q", got.Agent, "codex")
+	}
+}
+
+func TestStore_AddAndGet_PreservesAgent(t *testing.T) {
+	s := New()
+
+	session := &protocol.Session{
+		ID:         "agent123",
+		Label:      "session-with-agent",
+		Agent:      "claude",
+		Directory:  "/home/user/project",
+		State:      protocol.SessionStateWorking,
+		StateSince: protocol.TimestampNow().String(),
+		LastSeen:   protocol.TimestampNow().String(),
+	}
+
+	s.Add(session)
+
+	got := s.Get("agent123")
+	if got == nil {
+		t.Fatal("expected session, got nil")
+	}
+	if got.Agent != "claude" {
+		t.Errorf("Agent = %q, want %q", got.Agent, "claude")
+	}
 }
 
 func TestStore_Remove(t *testing.T) {

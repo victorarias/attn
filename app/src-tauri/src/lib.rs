@@ -1,33 +1,59 @@
-mod pty_manager;
 mod thumbs;
 
-use pty_manager::PtyState;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+fn daemon_socket_path() -> Option<PathBuf> {
+    if let Ok(path) = env::var("ATTN_SOCKET_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+
+    let home = dirs::home_dir()?;
+    Some(home.join(".attn").join("attn.sock"))
 }
 
-/// Check if the daemon is running by checking for the socket file
+#[cfg(unix)]
+fn socket_is_live(path: &Path) -> bool {
+    use std::os::unix::net::UnixStream;
+    UnixStream::connect(path).is_ok()
+}
+
+#[cfg(not(unix))]
+fn socket_is_live(path: &Path) -> bool {
+    path.exists()
+}
+
+fn daemon_is_running_at(socket_path: &Path) -> bool {
+    if !socket_path.exists() {
+        return false;
+    }
+    socket_is_live(socket_path)
+}
+
+/// Check if the daemon is running by validating the socket is live.
 #[tauri::command]
 fn is_daemon_running() -> bool {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
+    let socket_path = match daemon_socket_path() {
+        Some(path) => path,
         None => return false,
     };
-    let socket_path = home.join(".attn.sock");
-    socket_path.exists()
+    if daemon_is_running_at(&socket_path) {
+        return true;
+    }
+
+    // Clean up stale socket files so startup can recover.
+    let _ = std::fs::remove_file(&socket_path);
+    false
 }
 
 /// Start the daemon process
 /// Checks local dev path first (~/.local/bin/attn), then falls back to bundled binary
 #[tauri::command]
 fn start_daemon(_app: tauri::AppHandle) -> Result<(), String> {
-    use std::process::Command;
     use std::thread;
     use std::time::Duration;
 
@@ -54,21 +80,27 @@ fn start_daemon(_app: tauri::AppHandle) -> Result<(), String> {
         return Err("No daemon binary found.".into());
     };
 
+    let socket_path = daemon_socket_path().ok_or("Cannot resolve daemon socket path")?;
+    if !daemon_is_running_at(&socket_path) {
+        let _ = std::fs::remove_file(&socket_path);
+    } else {
+        return Ok(());
+    }
+
     Command::new(&bin_path)
         .arg("daemon")
         .spawn()
         .map_err(|e| format!("Failed to start daemon: {}", e))?;
 
-    // Wait for socket to appear (up to 2 seconds)
-    let socket_path = home.join(".attn.sock");
-    for _ in 0..20 {
-        if socket_path.exists() {
+    // Wait for live socket (up to 3 seconds)
+    for _ in 0..30 {
+        if daemon_is_running_at(&socket_path) {
             return Ok(());
         }
         thread::sleep(Duration::from_millis(100));
     }
 
-    Err("Daemon did not start within 2 seconds".to_string())
+    Err("Daemon did not start within 3 seconds".to_string())
 }
 
 #[tauri::command]
@@ -216,13 +248,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![
-            greet,
-            pty_manager::pty_spawn,
-            pty_manager::pty_write,
-            pty_manager::pty_resize,
-            pty_manager::pty_kill,
             list_directory,
             is_daemon_running,
             start_daemon,

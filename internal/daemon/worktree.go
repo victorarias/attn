@@ -4,6 +4,7 @@ package daemon
 import (
 	"net"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/victorarias/attn/internal/git"
@@ -172,8 +173,18 @@ func (d *Daemon) discoverWorktree(path string) *store.Worktree {
 // doDeleteWorktree removes a worktree from git and the store.
 // Also cleans up any sessions in that directory.
 func (d *Daemon) doDeleteWorktree(path string) error {
-	// Remove any sessions in this directory (they're stale if we're deleting the worktree)
-	d.store.RemoveSessionsInDirectory(path)
+	// Stop/remove sessions in this directory before deleting the worktree.
+	for _, session := range d.store.List("") {
+		if session.Directory != path {
+			continue
+		}
+		d.terminateSession(session.ID, syscall.SIGTERM)
+		d.store.Remove(session.ID)
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:   protocol.EventSessionUnregistered,
+			Session: session,
+		})
+	}
 
 	wt := d.store.GetWorktree(path)
 	if wt == nil {

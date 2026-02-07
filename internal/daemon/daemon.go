@@ -25,6 +25,7 @@ import (
 	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/transcript"
 )
@@ -99,6 +100,7 @@ type Daemon struct {
 	repoCacheMu     sync.RWMutex
 	warnings        []protocol.DaemonWarning
 	warningsMu      sync.RWMutex
+	ptyManager      *pty.Manager
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -168,6 +170,7 @@ func New(socketPath string) *Daemon {
 		logger:     logger,
 		ghRegistry: github.NewClientRegistry(),
 		repoCaches: make(map[string]*repoCache),
+		ptyManager: pty.NewManager(pty.DefaultScrollbackSize, logger.Infof),
 	}
 }
 
@@ -183,6 +186,7 @@ func NewForTesting(socketPath string) *Daemon {
 		logger:     nil, // No logging in tests
 		ghRegistry: github.NewClientRegistry(),
 		repoCaches: make(map[string]*repoCache),
+		ptyManager: pty.NewManager(pty.DefaultScrollbackSize, nil),
 	}
 }
 
@@ -202,11 +206,25 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		logger:     nil,
 		ghRegistry: registry,
 		repoCaches: make(map[string]*repoCache),
+		ptyManager: pty.NewManager(pty.DefaultScrollbackSize, nil),
 	}
 }
 
 // Start starts the daemon
 func (d *Daemon) Start() error {
+	if d.ptyManager == nil {
+		d.ptyManager = pty.NewManager(pty.DefaultScrollbackSize, d.logf)
+	}
+
+	removedSessions := d.pruneSessionsWithoutPTY()
+	if removedSessions > 0 {
+		d.logf("pruned %d stale sessions without live PTY on startup", removedSessions)
+		d.addWarning(
+			"stale_sessions_pruned",
+			fmt.Sprintf("Removed %d stale sessions from a previous daemon run because no live PTY was found.", removedSessions),
+		)
+	}
+
 	// Acquire PID lock (kills any existing daemon)
 	if err := d.acquirePIDLock(); err != nil {
 		return fmt.Errorf("acquire PID lock: %w", err)
@@ -225,6 +243,10 @@ func (d *Daemon) Start() error {
 	// Start WebSocket hub with daemon's logger
 	d.wsHub.logf = d.logf
 	go d.wsHub.run()
+
+	// PTY exit events are emitted asynchronously from read loops.
+	d.ptyManager.SetExitHandler(d.handlePTYExit)
+	d.ptyManager.SetStateHandler(d.handlePTYState)
 
 	// Create HTTP server for WebSocket (must be created synchronously to avoid race with Stop())
 	d.initHTTPServer()
@@ -268,10 +290,37 @@ func (d *Daemon) Start() error {
 	}
 }
 
+func (d *Daemon) pruneSessionsWithoutPTY() int {
+	if d.store == nil {
+		return 0
+	}
+
+	liveIDs := make(map[string]struct{})
+	if d.ptyManager != nil {
+		for _, id := range d.ptyManager.SessionIDs() {
+			liveIDs[id] = struct{}{}
+		}
+	}
+
+	sessions := d.store.List("")
+	removed := 0
+	for _, session := range sessions {
+		if _, ok := liveIDs[session.ID]; ok {
+			continue
+		}
+		d.store.Remove(session.ID)
+		removed++
+	}
+	return removed
+}
+
 // Stop stops the daemon
 func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
+	if d.ptyManager != nil {
+		d.ptyManager.Shutdown()
+	}
 	if d.httpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -285,6 +334,61 @@ func (d *Daemon) Stop() {
 	if d.logger != nil {
 		d.logger.Close()
 	}
+}
+
+func (d *Daemon) handlePTYExit(info pty.ExitInfo) {
+	if d.ptyManager != nil {
+		d.ptyManager.Remove(info.ID)
+	}
+
+	if session := d.store.Get(info.ID); session != nil {
+		d.store.Touch(info.ID)
+		d.store.UpdateState(info.ID, protocol.StateIdle)
+		updated := d.store.Get(info.ID)
+		if updated != nil {
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event:   protocol.EventSessionStateChanged,
+				Session: updated,
+			})
+		}
+	}
+
+	event := &protocol.WebSocketEvent{
+		Event:    protocol.EventSessionExited,
+		ID:       protocol.Ptr(info.ID),
+		ExitCode: protocol.Ptr(info.ExitCode),
+	}
+	if info.Signal != "" {
+		event.Signal = protocol.Ptr(info.Signal)
+	}
+	d.wsHub.Broadcast(event)
+}
+
+func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
+	if d.ptyManager == nil {
+		return
+	}
+	if err := d.ptyManager.Kill(sessionID, sig); err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
+		d.logf("terminate session failed for %s: %v", sessionID, err)
+	}
+	d.ptyManager.Remove(sessionID)
+}
+
+func (d *Daemon) handlePTYState(sessionID, state string) {
+	session := d.store.Get(sessionID)
+	if session == nil {
+		return
+	}
+	d.store.UpdateState(sessionID, state)
+	d.store.Touch(sessionID)
+	updated := d.store.Get(sessionID)
+	if updated == nil {
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:   protocol.EventSessionStateChanged,
+		Session: updated,
+	})
 }
 
 // initHTTPServer creates the HTTP server synchronously to avoid race with Stop().
@@ -461,7 +565,7 @@ func (d *Daemon) clientForPRID(id string) (*github.Client, string, int, string, 
 }
 
 // acquirePIDLock ensures only one daemon instance runs at a time using flock.
-// If another daemon is running, it sends SIGTERM and waits for it to exit.
+// If another daemon is running, startup fails and the existing daemon keeps running.
 func (d *Daemon) acquirePIDLock() error {
 	// Open or create the PID file
 	f, err := os.OpenFile(d.pidPath, os.O_RDWR|os.O_CREATE, 0644)
@@ -472,45 +576,14 @@ func (d *Daemon) acquirePIDLock() error {
 	// Try non-blocking exclusive lock first
 	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
-		// Another process holds the lock - read PID and try to kill it
-		data, readErr := os.ReadFile(d.pidPath)
-		if readErr == nil {
-			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
-			if parseErr == nil && pid > 0 {
-				process, findErr := os.FindProcess(pid)
-				if findErr == nil {
-					if signalErr := process.Signal(syscall.Signal(0)); signalErr == nil {
-						// Process is running, kill it
-						d.logf("Found existing daemon (PID %d), sending SIGTERM", pid)
-						process.Signal(syscall.SIGTERM)
-
-						// Wait up to 3 seconds for graceful shutdown
-						deadline := time.Now().Add(3 * time.Second)
-						for time.Now().Before(deadline) {
-							time.Sleep(100 * time.Millisecond)
-							if err := process.Signal(syscall.Signal(0)); err != nil {
-								d.logf("Previous daemon exited gracefully")
-								break
-							}
-						}
-
-						// Force kill if still running
-						if err := process.Signal(syscall.Signal(0)); err == nil {
-							d.logf("Previous daemon didn't exit, sending SIGKILL")
-							process.Signal(syscall.SIGKILL)
-							time.Sleep(200 * time.Millisecond)
-						}
-					}
-				}
+		existingPID := "unknown"
+		if data, readErr := os.ReadFile(d.pidPath); readErr == nil {
+			if pid := strings.TrimSpace(string(data)); pid != "" {
+				existingPID = pid
 			}
 		}
-
-		// Now try blocking lock (should succeed after killing old daemon)
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
-		if err != nil {
-			f.Close()
-			return fmt.Errorf("acquire flock after killing old daemon: %w", err)
-		}
+		f.Close()
+		return fmt.Errorf("daemon already running (pid %s)", existingPID)
 	}
 
 	// We have the lock - write our PID
@@ -527,35 +600,7 @@ func (d *Daemon) acquirePIDLock() error {
 	d.pidFile = f
 	d.logf("Acquired PID lock (PID %d, file %s)", pid, d.pidPath)
 
-	// Wait for WebSocket port to be available (old daemon may still be releasing it)
-	if err := d.waitForPort(); err != nil {
-		d.logf("Warning: port availability check failed: %v", err)
-	}
-
 	return nil
-}
-
-// waitForPort waits for the WebSocket port to become available
-func (d *Daemon) waitForPort() error {
-	port := os.Getenv("ATTN_WS_PORT")
-	if port == "" {
-		port = "9849"
-	}
-	addr := "127.0.0.1:" + port
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
-		if err != nil {
-			// Port is not in use - good!
-			return nil
-		}
-		conn.Close()
-		// Port still in use, wait and retry
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	return fmt.Errorf("port %s still in use after 5s", port)
 }
 
 // releasePIDLock unlocks and removes the PID file
@@ -634,14 +679,17 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	d.logf("session registered: id=%s label=%s dir=%s", msg.ID, protocol.Deref(msg.Label), msg.Dir)
+	existing := d.store.Get(msg.ID)
 
 	// Get branch info
 	branchInfo, _ := git.GetBranchInfo(msg.Dir)
 
 	nowStr := string(protocol.TimestampNow())
+	agent := protocol.NormalizeSessionAgent(protocol.Deref(msg.Agent), protocol.SessionAgentClaude)
 	session := &protocol.Session{
 		ID:             msg.ID,
 		Label:          protocol.Deref(msg.Label),
+		Agent:          agent,
 		Directory:      msg.Dir,
 		State:          protocol.SessionStateWaitingInput,
 		StateSince:     nowStr,
@@ -667,9 +715,13 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 
 	d.sendOK(conn)
 
-	// Broadcast to WebSocket clients
+	// Broadcast session registration or update to WebSocket clients.
+	eventType := protocol.EventSessionRegistered
+	if existing != nil {
+		eventType = protocol.EventSessionStateChanged
+	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:   protocol.EventSessionRegistered,
+		Event:   eventType,
 		Session: session,
 	})
 }
@@ -685,6 +737,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 		}
 	}
 
+	d.terminateSession(msg.ID, syscall.SIGTERM)
 	d.store.Remove(msg.ID)
 	d.sendOK(conn)
 
@@ -1308,6 +1361,8 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 		d.sendError(conn, "Session ID cannot be empty")
 		return
 	}
+
+	msg.Session.Agent = protocol.NormalizeSessionAgent(msg.Session.Agent, protocol.SessionAgentCodex)
 
 	// Add session directly to store
 	d.store.Add(&msg.Session)

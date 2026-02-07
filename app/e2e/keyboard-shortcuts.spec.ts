@@ -3,7 +3,7 @@ import { test, expect } from './fixtures';
 // Helper to inject a session into the local UI store
 async function injectLocalSession(
   page: import('@playwright/test').Page,
-  session: { id: string; label: string; state: string; cwd?: string }
+  session: { id: string; label: string; state: string; cwd?: string; isWorktree?: boolean; branch?: string }
 ) {
   await page.evaluate((s) => {
     window.__TEST_INJECT_SESSION?.({
@@ -11,6 +11,8 @@ async function injectLocalSession(
       label: s.label,
       state: s.state as 'working' | 'waiting_input' | 'idle',
       cwd: s.cwd || '/tmp/test',
+      ...(s.isWorktree !== undefined ? { isWorktree: s.isWorktree } : {}),
+      ...(s.branch ? { branch: s.branch } : {}),
     });
   }, session);
 }
@@ -40,7 +42,11 @@ async function createSession(
   }
 ) {
   const cwd = session.cwd || '/tmp/test';
-  await injectLocalSession(page, { ...session, cwd });
+  await injectLocalSession(page, {
+    ...session,
+    cwd,
+    ...(session.is_worktree !== undefined ? { isWorktree: session.is_worktree } : {}),
+  });
   await daemon.injectSession({
     id: session.id,
     label: session.label,

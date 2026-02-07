@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "23"
+const ProtocolVersion = "25"
 
 // Commands
 const (
@@ -72,6 +72,12 @@ const (
 	CmdGetComments              = "get_comments"
 	CmdStartReview              = "start_review"
 	CmdCancelReview             = "cancel_review"
+	CmdSpawnSession             = "spawn_session"
+	CmdAttachSession            = "attach_session"
+	CmdDetachSession            = "detach_session"
+	CmdPtyInput                 = "pty_input"
+	CmdPtyResize                = "pty_resize"
+	CmdKillSession              = "kill_session"
 )
 
 // WebSocket Events (daemon -> client)
@@ -129,6 +135,12 @@ const (
 	EventReviewToolUse            = "review_tool_use"
 	EventReviewComplete           = "review_complete"
 	EventReviewCancelled          = "review_cancelled"
+	EventPtyOutput                = "pty_output"
+	EventSpawnResult              = "spawn_result"
+	EventAttachResult             = "attach_result"
+	EventSessionExited            = "session_exited"
+	EventPtyDesync                = "pty_desync"
+	EventCommandError             = "command_error"
 )
 
 // Session states (values for SessionState enum)
@@ -137,6 +149,11 @@ const (
 	StateWaitingInput    = "waiting_input"
 	StateIdle            = "idle"
 	StatePendingApproval = "pending_approval"
+)
+
+// Agent values
+const (
+	AgentShellValue = "shell"
 )
 
 // PR states (values for PR.State field, distinct from session states)
@@ -599,6 +616,48 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg CancelReviewMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal cancel_review: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSpawnSession:
+		var msg SpawnSessionMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal spawn_session: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAttachSession:
+		var msg AttachSessionMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal attach_session: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDetachSession:
+		var msg DetachSessionMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal detach_session: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdPtyInput:
+		var msg PtyInputMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal pty_input: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdPtyResize:
+		var msg PtyResizeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal pty_resize: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdKillSession:
+		var msg KillSessionMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal kill_session: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

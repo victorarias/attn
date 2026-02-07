@@ -13,11 +13,17 @@ enum SessionState {
   working,
   waiting_input,
   idle,
+  pending_approval,
 }
 
 enum PRRole {
   author,
   reviewer,
+}
+
+enum SessionAgent {
+  claude,
+  codex,
 }
 
 enum HeatState {
@@ -33,6 +39,7 @@ enum HeatState {
 model Session {
   id: string;
   label: string;
+  agent: SessionAgent;
   directory: string;
   branch?: string;              // Optional: might not be in git repo
   is_worktree?: boolean;        // Optional: false if not worktree
@@ -130,6 +137,7 @@ model RegisterMessage {
   cmd: "register";
   id: string;
   label?: string;
+  agent?: SessionAgent;         // Optional for legacy wrappers
   dir: string;
 }
 
@@ -459,9 +467,109 @@ model CancelReviewMessage {
   review_id: string;
 }
 
+model SpawnSessionMessage {
+  cmd: "spawn_session";
+  id: string;
+  cwd: string;
+  agent: string;            // "claude", "codex", "shell"
+  cols: int32;
+  rows: int32;
+  label?: string;
+  resume_session_id?: string;
+  resume_picker?: boolean;
+  fork_session?: boolean;
+  claude_executable?: string;
+  codex_executable?: string;
+}
+
+model AttachSessionMessage {
+  cmd: "attach_session";
+  id: string;
+}
+
+model DetachSessionMessage {
+  cmd: "detach_session";
+  id: string;
+}
+
+model PtyInputMessage {
+  cmd: "pty_input";
+  id: string;
+  data: string;
+}
+
+model PtyResizeMessage {
+  cmd: "pty_resize";
+  id: string;
+  cols: int32;
+  rows: int32;
+}
+
+model KillSessionMessage {
+  cmd: "kill_session";
+  id: string;
+  signal?: string; // "SIGTERM", "SIGINT", ...
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
+
+model InitialStateMessage {
+  event: "initial_state";
+  protocol_version?: string;
+  sessions?: Session[];
+  prs?: PR[];
+  repos?: RepoState[];
+  authors?: AuthorState[];
+  settings?: Record<string>;
+  warnings?: DaemonWarning[];
+}
+
+model SessionRegisteredMessage {
+  event: "session_registered";
+  session: Session;
+}
+
+model SessionUnregisteredMessage {
+  event: "session_unregistered";
+  session: Session;
+}
+
+model SessionStateChangedMessage {
+  event: "session_state_changed";
+  session: Session;
+}
+
+model SessionTodosUpdatedMessage {
+  event: "session_todos_updated";
+  session: Session;
+}
+
+model SessionsUpdatedMessage {
+  event: "sessions_updated";
+  sessions?: Session[];
+}
+
+model PRsUpdatedMessage {
+  event: "prs_updated";
+  prs?: PR[];
+}
+
+model ReposUpdatedMessage {
+  event: "repos_updated";
+  repos?: RepoState[];
+}
+
+model AuthorsUpdatedMessage {
+  event: "authors_updated";
+  authors?: AuthorState[];
+}
+
+model BranchChangedMessage {
+  event: "branch_changed";
+  session?: Session;
+}
 
 model PRActionResultMessage {
   event: "pr_action_result";
@@ -477,17 +585,32 @@ model RefreshPRsResultMessage {
   error?: string;
 }
 
+model FetchPRDetailsResultMessage {
+  event: "fetch_pr_details_result";
+  prs?: PR[];
+  success: boolean;
+  error?: string;
+}
+
 model RateLimitedMessage {
   event: "rate_limited";
-  resource: string; // "core" or "search"
-  reset_at: string; // ISO timestamp
+  rate_limit_resource: string; // "core" or "search"
+  rate_limit_reset_at: string; // ISO timestamp
 }
 
 model WorktreeCreatedEvent {
   event: "worktree_created";
-  path: string;
-  branch: string;
-  main_repo: string;
+  worktrees: Worktree[];
+}
+
+model WorktreeDeletedEvent {
+  event: "worktree_deleted";
+  worktrees: Worktree[];
+}
+
+model WorktreesUpdatedMessage {
+  event: "worktrees_updated";
+  worktrees?: Worktree[];
 }
 
 model CreateWorktreeResultMessage {
@@ -504,9 +627,16 @@ model DeleteWorktreeResultMessage {
   error?: string;
 }
 
+model SettingsUpdatedMessage {
+  event: "settings_updated";
+  settings?: Record<string>;
+  success?: boolean;
+  error?: string;
+}
+
 model RecentLocationsResultMessage {
   event: "recent_locations_result";
-  locations: RecentLocation[];
+  recent_locations: RecentLocation[];
   success: boolean;
   error?: string;
 }
@@ -590,6 +720,14 @@ model ListRemoteBranchesResultMessage {
   event: "list_remote_branches_result";
   branches: Branch[];
   success: boolean;
+  error?: string;
+}
+
+model EnsureRepoResultMessage {
+  event: "ensure_repo_result";
+  target_path?: string;
+  cloned?: boolean;
+  success?: boolean;
   error?: string;
 }
 
@@ -741,6 +879,25 @@ model ReviewFindingMessage {
   event: "review_finding";
   review_id: string;
   finding: ReviewFinding;
+  comment?: ReviewComment;
+}
+
+model ReviewCommentResolvedMessage {
+  event: "review_comment_resolved";
+  review_id: string;
+  comment_id: string;
+}
+
+model ReviewToolUse {
+  name: string;
+  input: Record<string>;
+  output: string;
+}
+
+model ReviewToolUseMessage {
+  event: "review_tool_use";
+  review_id: string;
+  tool_use: ReviewToolUse;
 }
 
 model ReviewCompleteMessage {
@@ -753,6 +910,54 @@ model ReviewCompleteMessage {
 model ReviewCancelledMessage {
   event: "review_cancelled";
   review_id: string;
+}
+
+model SpawnResultMessage {
+  event: "spawn_result";
+  id: string;
+  success: boolean;
+  error?: string;
+}
+
+model AttachResultMessage {
+  event: "attach_result";
+  id: string;
+  success: boolean;
+  scrollback?: string;           // base64 bytes
+  scrollback_truncated?: boolean;
+  last_seq?: int32;
+  cols?: int32;
+  rows?: int32;
+  pid?: int32;
+  running?: boolean;
+  error?: string;
+}
+
+model PtyOutputMessage {
+  event: "pty_output";
+  id: string;
+  data: string; // base64 bytes
+  seq: int32;
+}
+
+model SessionExitedMessage {
+  event: "session_exited";
+  id: string;
+  exit_code: int32;
+  signal?: string;
+}
+
+model PtyDesyncMessage {
+  event: "pty_desync";
+  id: string;
+  reason: string;
+}
+
+model CommandErrorMessage {
+  event: "command_error";
+  cmd?: string;
+  success: boolean;
+  error: string;
 }
 
 // ============================================================================
@@ -776,7 +981,12 @@ model DaemonWarning {
 
 model WebSocketEvent {
   event: string;
+  // Generic metadata
+  cmd?: string;
   protocol_version?: string;
+
+  // Session/PR/repo state payloads
+  id?: string;
   session?: Session;
   sessions?: Session[];
   prs?: PR[];
@@ -786,21 +996,121 @@ model WebSocketEvent {
   branches?: Branch[];
   recent_locations?: RecentLocation[];
   settings?: Record<string>;
-  warnings?: DaemonWarning[]; // Non-critical warnings to display in UI
-  // Rate limiting
-  rate_limit_resource?: string;
-  rate_limit_reset_at?: string; // ISO timestamp
-  // Result feedback (for settings validation, etc.)
+  warnings?: DaemonWarning[];
+
+  // Common result fields
   success?: boolean;
   error?: string;
-  // Branch operations
+
+  // PR/worktree/branch operations
+  action?: string;
   branch?: string;
+  path?: string;
+
+  // Rate limiting
+  rate_limit_resource?: string;
+  rate_limit_reset_at?: string;
+
   // Stash operations
   dirty?: boolean;
   conflict?: boolean;
   found?: boolean;
   stash_ref?: string;
+
   // Ensure repo operations
   target_path?: string;
   cloned?: boolean;
+
+  // Diff/git payloads
+  directory?: string;
+  original?: string;
+  modified?: string;
+  files?: BranchDiffFile[];
+  base_ref?: string;
+  staged?: GitFileChange[];
+  unstaged?: GitFileChange[];
+  untracked?: GitFileChange[];
+
+  // PTY lifecycle
+  data?: string;
+  seq?: int32;
+  scrollback?: string;
+  scrollback_truncated?: boolean;
+  last_seq?: int32;
+  cols?: int32;
+  rows?: int32;
+  pid?: int32;
+  running?: boolean;
+  exit_code?: int32;
+  reason?: string;
+  signal?: string;
+
+  // Review streaming payloads
+  review_id?: string;
+  content?: string;
+  finding?: ReviewFinding;
+  comment?: ReviewComment;
+  comment_id?: string;
+  tool_use?: ReviewToolUse;
 }
+
+alias DaemonEvent =
+  InitialStateMessage
+  | SessionRegisteredMessage
+  | SessionUnregisteredMessage
+  | SessionStateChangedMessage
+  | SessionTodosUpdatedMessage
+  | SessionsUpdatedMessage
+  | PRsUpdatedMessage
+  | ReposUpdatedMessage
+  | AuthorsUpdatedMessage
+  | BranchChangedMessage
+  | PRActionResultMessage
+  | RefreshPRsResultMessage
+  | FetchPRDetailsResultMessage
+  | RateLimitedMessage
+  | WorktreeCreatedEvent
+  | WorktreeDeletedEvent
+  | WorktreesUpdatedMessage
+  | CreateWorktreeResultMessage
+  | DeleteWorktreeResultMessage
+  | SettingsUpdatedMessage
+  | RecentLocationsResultMessage
+  | BranchesResultMessage
+  | DeleteBranchResultMessage
+  | SwitchBranchResultMessage
+  | CreateBranchResultMessage
+  | CheckDirtyResultMessage
+  | StashResultMessage
+  | StashPopResultMessage
+  | CheckAttnStashResultMessage
+  | CommitWIPResultMessage
+  | GetDefaultBranchResultMessage
+  | FetchRemotesResultMessage
+  | ListRemoteBranchesResultMessage
+  | EnsureRepoResultMessage
+  | GitStatusUpdateMessage
+  | FileDiffResultMessage
+  | BranchDiffFilesResultMessage
+  | GetRepoInfoResultMessage
+  | GetReviewStateResultMessage
+  | MarkFileViewedResultMessage
+  | AddCommentResultMessage
+  | UpdateCommentResultMessage
+  | ResolveCommentResultMessage
+  | WontFixCommentResultMessage
+  | DeleteCommentResultMessage
+  | GetCommentsResultMessage
+  | ReviewStartedMessage
+  | ReviewChunkMessage
+  | ReviewFindingMessage
+  | ReviewCommentResolvedMessage
+  | ReviewToolUseMessage
+  | ReviewCompleteMessage
+  | ReviewCancelledMessage
+  | SpawnResultMessage
+  | AttachResultMessage
+  | PtyOutputMessage
+  | SessionExitedMessage
+  | PtyDesyncMessage
+  | CommandErrorMessage;

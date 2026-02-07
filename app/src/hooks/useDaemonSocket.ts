@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { isTauri } from '@tauri-apps/api/core';
 import type {
   Session as GeneratedSession,
   PR as GeneratedPR,
@@ -16,6 +17,7 @@ import type {
   PRRole,
   HeatState,
 } from '../types/generated';
+import { emitPtyEvent, setPtyBackend, type PtySpawnArgs } from '../pty/bridge';
 
 // Re-export types from generated for consumers
 // Use type aliases to maintain backward compatibility
@@ -35,6 +37,19 @@ export { SessionState, PRRole, HeatState };
 
 // Extended WebSocketEvent with action result fields (generated allows extra properties)
 type WebSocketEvent = GeneratedWebSocketEvent & {
+  id?: string;
+  data?: string;
+  seq?: number;
+  scrollback?: string;
+  scrollback_truncated?: boolean;
+  last_seq?: number;
+  cols?: number;
+  rows?: number;
+  pid?: number;
+  running?: boolean;
+  exit_code?: number;
+  signal?: string;
+  reason?: string;
   // PR action result fields
   action?: string;
   repo?: string;
@@ -64,7 +79,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '23';
+const PROTOCOL_VERSION = '25';
 
 interface PRActionResult {
   success: boolean;
@@ -141,6 +156,23 @@ interface EnsureRepoResult {
   success: boolean;
   cloned?: boolean;
   error?: string;
+}
+
+interface SpawnResult {
+  success: boolean;
+  error?: string;
+}
+
+interface AttachResult {
+  success: boolean;
+  error?: string;
+  scrollback?: string;
+  scrollback_truncated?: boolean;
+  last_seq?: number;
+  cols?: number;
+  rows?: number;
+  pid?: number;
+  running?: boolean;
 }
 
 interface RepoInfo {
@@ -275,6 +307,36 @@ interface UseDaemonSocketOptions {
 // Default WebSocket port, can be overridden via VITE_DAEMON_PORT env var
 const DEFAULT_WS_URL = `ws://127.0.0.1:${import.meta.env.VITE_DAEMON_PORT || '9849'}/ws`;
 
+function dedupeSessionsByID(sessions: DaemonSession[]): DaemonSession[] {
+  const deduped: DaemonSession[] = [];
+  const indexByID = new Map<string, number>();
+  for (const session of sessions) {
+    const existingIndex = indexByID.get(session.id);
+    if (existingIndex === undefined) {
+      indexByID.set(session.id, deduped.length);
+      deduped.push(session);
+      continue;
+    }
+    deduped[existingIndex] = session;
+  }
+  return deduped;
+}
+
+function upsertSessionByID(sessions: DaemonSession[], session: DaemonSession): DaemonSession[] {
+  const index = sessions.findIndex((entry) => entry.id === session.id);
+  if (index === -1) {
+    return [...sessions, session];
+  }
+  const updated = [...sessions];
+  updated[index] = session;
+  return updated;
+}
+
+function isSessionNotFoundError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes('session not found');
+}
+
 // ============================================================================
 // Async Pattern Guide
 // ============================================================================
@@ -330,23 +392,89 @@ export function useDaemonSocket({
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
   const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
+  const attachedPtySessionsRef = useRef<Set<string>>(new Set());
+  const ptySeqRef = useRef<Map<string, number>>(new Map());
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
   const [warnings, setWarnings] = useState<DaemonWarning[]>([]);
 
-  // Circuit breaker state for daemon restart
+  // Circuit breaker state for reconnect storms
   const reconnectAttemptsRef = useRef(0);
-  const restartAttemptsRef = useRef(0);
   const circuitOpenRef = useRef(false);
   const circuitResetTimeoutRef = useRef<number | null>(null);
 
-  const MAX_RECONNECTS_BEFORE_RESTART = 3;
-  const MAX_RESTART_ATTEMPTS = 2;
-  const CIRCUIT_RESET_MS = 30000;
+  const MAX_RECONNECTS_BEFORE_PAUSE = 8;
+  const MAX_RECONNECT_DELAY_MS = 5000;
 
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+  const rejectPendingByPredicate = useCallback((predicate: (key: string) => boolean, error: Error) => {
+    for (const [key, pending] of pendingActionsRef.current.entries()) {
+      if (!predicate(key)) {
+        continue;
+      }
+      pendingActionsRef.current.delete(key);
+      pending.reject(error);
+    }
+  }, []);
+
+  const rejectPendingForCommand = useCallback((cmd: string | undefined, errorMessage: string) => {
+    const error = new Error(errorMessage);
+    if (!cmd) {
+      return;
+    }
+
+    switch (cmd) {
+      case 'spawn_session':
+        rejectPendingByPredicate((key) => key.startsWith('pty_spawn_'), error);
+        return;
+      case 'attach_session':
+        rejectPendingByPredicate((key) => key.startsWith('pty_attach_'), error);
+        return;
+      case 'approve_pr':
+        rejectPendingByPredicate((key) => key.endsWith(':approve'), error);
+        return;
+      case 'merge_pr':
+        rejectPendingByPredicate((key) => key.endsWith(':merge'), error);
+        return;
+      case 'get_file_diff':
+        rejectPendingByPredicate((key) => key.startsWith('get_file_diff_'), error);
+        return;
+      case 'get_branch_diff_files':
+        rejectPendingByPredicate((key) => key.startsWith('get_branch_diff_files_'), error);
+        return;
+      case 'get_repo_info':
+        rejectPendingByPredicate((key) => key.startsWith('repo_info_'), error);
+        return;
+      case 'create_worktree':
+        rejectPendingByPredicate((key) => key === 'worktree_create_worktree_result', error);
+        return;
+      case 'delete_worktree':
+        rejectPendingByPredicate((key) => key === 'worktree_delete_worktree_result', error);
+        return;
+      default:
+        rejectPendingByPredicate((key) => key === cmd, error);
+    }
+  }, [rejectPendingByPredicate]);
+
+  const ensureDaemonRunning = useCallback(async () => {
+    if (!isTauri()) {
+      return;
+    }
+    try {
+      const isRunning = await invoke<boolean>('is_daemon_running');
+      if (!isRunning) {
+        console.log('[Daemon] Not running during reconnect, starting daemon...');
+        await invoke('start_daemon');
+      }
+    } catch (err) {
+      console.error('[Daemon] Failed to ensure daemon is running:', err);
+    }
+  }, []);
+
+  const connect = useCallback(async () => {
+    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
+
+    await ensureDaemonRunning();
 
     const ws = new WebSocket(wsUrl);
 
@@ -354,13 +482,16 @@ export function useDaemonSocket({
       console.log('[Daemon] WebSocket connected');
       setConnectionError(null);
       reconnectDelayRef.current = 1000; // Reset to 1s on successful connect
-      // Reset circuit breaker state on successful connect
       reconnectAttemptsRef.current = 0;
-      restartAttemptsRef.current = 0;
       circuitOpenRef.current = false;
       if (circuitResetTimeoutRef.current) {
         clearTimeout(circuitResetTimeoutRef.current);
         circuitResetTimeoutRef.current = null;
+      }
+
+      // Re-attach terminal streams after reconnect.
+      for (const sessionId of attachedPtySessionsRef.current) {
+        ws.send(JSON.stringify({ cmd: 'attach_session', id: sessionId }));
       }
     };
 
@@ -373,48 +504,169 @@ export function useDaemonSocket({
             // Check protocol version on initial connection
             if (data.protocol_version && data.protocol_version !== PROTOCOL_VERSION) {
               console.error(`[Daemon] Protocol version mismatch: daemon=${data.protocol_version}, client=${PROTOCOL_VERSION}`);
-              setConnectionError(`Version mismatch: Please run 'make install' (daemon v${data.protocol_version}, app v${PROTOCOL_VERSION})`);
+              const daemonVersion = Number(data.protocol_version);
+              const clientVersion = Number(PROTOCOL_VERSION);
+              const activeSessions = data.sessions?.length || 0;
+              if (!Number.isNaN(daemonVersion) && !Number.isNaN(clientVersion) && daemonVersion < clientVersion) {
+                setConnectionError(
+                  `New daemon version available. Restart when ready (${activeSessions} active sessions may be lost). daemon v${data.protocol_version}, app v${PROTOCOL_VERSION}`
+                );
+              } else {
+                setConnectionError(`Version mismatch: daemon v${data.protocol_version}, app v${PROTOCOL_VERSION}. Restart/reinstall required.`);
+              }
               // Open circuit immediately to prevent reconnection storm
               // Version mismatch won't fix itself - requires manual intervention
               circuitOpenRef.current = true;
               ws.close();
               return;
             }
-            if (data.sessions) {
-              sessionsRef.current = data.sessions;
-              onSessionsUpdate(data.sessions);
+            const nextSessions = dedupeSessionsByID(data.sessions || []);
+            sessionsRef.current = nextSessions;
+            onSessionsUpdate(nextSessions);
+            const activeIDs = new Set(nextSessions.map((session) => session.id));
+            for (const sessionId of attachedPtySessionsRef.current) {
+              if (activeIDs.has(sessionId)) {
+                continue;
+              }
+              attachedPtySessionsRef.current.delete(sessionId);
+              ptySeqRef.current.delete(sessionId);
             }
-            if (data.prs) {
-              prsRef.current = data.prs;
-              onPRsUpdate(data.prs);
-            }
-            if (data.repos) {
-              reposRef.current = data.repos;
-              onReposUpdate(data.repos);
-            }
-            if (data.authors) {
-              authorsRef.current = data.authors;
-              onAuthorsUpdate(data.authors);
-            }
-            if (data.settings) {
-              settingsRef.current = data.settings;
-              onSettingsUpdate?.(data.settings);
-            }
+            const nextPRs = data.prs || [];
+            prsRef.current = nextPRs;
+            onPRsUpdate(nextPRs);
+
+            const nextRepos = data.repos || [];
+            reposRef.current = nextRepos;
+            onReposUpdate(nextRepos);
+
+            const nextAuthors = data.authors || [];
+            authorsRef.current = nextAuthors;
+            onAuthorsUpdate(nextAuthors);
+
+            const nextSettings = data.settings || {};
+            settingsRef.current = nextSettings;
+            onSettingsUpdate?.(nextSettings);
             if (data.warnings && data.warnings.length > 0) {
               setWarnings(data.warnings);
             }
             setHasReceivedInitialState(true);
             break;
 
+          case 'spawn_result': {
+            if (data.id) {
+              const key = `pty_spawn_${data.id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve({ success: true });
+                } else {
+                  pending.reject(new Error(data.error || 'Failed to spawn session'));
+                }
+              }
+            }
+            break;
+          }
+
+          case 'attach_result': {
+            if (data.id) {
+              const key = `pty_attach_${data.id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve({
+                    success: true,
+                    scrollback: data.scrollback,
+                    scrollback_truncated: data.scrollback_truncated,
+                    last_seq: data.last_seq,
+                    cols: data.cols,
+                    rows: data.rows,
+                    pid: data.pid,
+                    running: data.running,
+                  });
+                } else {
+                  pending.reject(new Error(data.error || 'Failed to attach session'));
+                }
+              }
+
+              if (data.success) {
+                attachedPtySessionsRef.current.add(data.id);
+              } else {
+                attachedPtySessionsRef.current.delete(data.id);
+                ptySeqRef.current.delete(data.id);
+              }
+
+              if (data.success) {
+                const shouldReset = ptySeqRef.current.has(data.id);
+                if (shouldReset) {
+                  emitPtyEvent({ event: 'reset', id: data.id, reason: 'reattach' });
+                }
+                if (typeof data.last_seq === 'number') {
+                  ptySeqRef.current.set(data.id, data.last_seq);
+                } else {
+                  ptySeqRef.current.set(data.id, 0);
+                }
+                if (data.scrollback) {
+                  emitPtyEvent({ event: 'data', id: data.id, data: data.scrollback });
+                }
+                if (data.scrollback_truncated) {
+                  const session = sessionsRef.current.find((entry) => entry.id === data.id);
+                  if (session?.agent === 'codex') {
+                    emitPtyEvent({
+                      event: 'error',
+                      id: data.id,
+                      error: 'Restore scrollback was truncated; Codex full-screen output may be incomplete.',
+                    });
+                  }
+                }
+              }
+            }
+            break;
+          }
+
+          case 'pty_output': {
+            if (data.id && data.data) {
+              if (typeof data.seq === 'number') {
+                ptySeqRef.current.set(data.id, data.seq);
+              }
+              emitPtyEvent({ event: 'data', id: data.id, data: data.data });
+            }
+            break;
+          }
+
+          case 'session_exited':
+            if (data.id) {
+              attachedPtySessionsRef.current.delete(data.id);
+              ptySeqRef.current.delete(data.id);
+              emitPtyEvent({
+                event: 'exit',
+                id: data.id,
+                code: data.exit_code ?? 0,
+                signal: data.signal,
+              });
+            }
+            break;
+
+          case 'pty_desync':
+            if (data.id) {
+              emitPtyEvent({ event: 'reset', id: data.id, reason: data.reason || 'desync' });
+              ptySeqRef.current.delete(data.id);
+              ws.send(JSON.stringify({ cmd: 'attach_session', id: data.id }));
+            }
+            break;
+
           case 'session_registered':
             if (data.session) {
-              sessionsRef.current = [...sessionsRef.current, data.session];
+              sessionsRef.current = upsertSessionByID(sessionsRef.current, data.session);
               onSessionsUpdate(sessionsRef.current);
             }
             break;
 
           case 'session_unregistered':
             if (data.session) {
+              attachedPtySessionsRef.current.delete(data.session.id);
+              ptySeqRef.current.delete(data.session.id);
               sessionsRef.current = sessionsRef.current.filter(
                 (s) => s.id !== data.session!.id
               );
@@ -425,17 +677,24 @@ export function useDaemonSocket({
           case 'session_state_changed':
           case 'session_todos_updated':
             if (data.session) {
-              sessionsRef.current = sessionsRef.current.map((s) =>
-                s.id === data.session!.id ? data.session! : s
-              );
+              sessionsRef.current = upsertSessionByID(sessionsRef.current, data.session);
               onSessionsUpdate(sessionsRef.current);
             }
             break;
 
           case 'sessions_updated':
-            if (data.sessions) {
-              sessionsRef.current = data.sessions;
-              onSessionsUpdate(data.sessions);
+            {
+              const dedupedSessions = dedupeSessionsByID(data.sessions || []);
+              sessionsRef.current = dedupedSessions;
+              onSessionsUpdate(dedupedSessions);
+              const activeIDs = new Set(dedupedSessions.map((session) => session.id));
+              for (const sessionId of attachedPtySessionsRef.current) {
+                if (activeIDs.has(sessionId)) {
+                  continue;
+                }
+                attachedPtySessionsRef.current.delete(sessionId);
+                ptySeqRef.current.delete(sessionId);
+              }
             }
             break;
 
@@ -950,6 +1209,11 @@ export function useDaemonSocket({
               reviewer.onReviewCancelled(data.review_id);
             }
             break;
+
+          case 'command_error':
+            console.error('[Daemon] Command error:', data.cmd, data.error);
+            rejectPendingForCommand(data.cmd, data.error || `Command ${data.cmd || ''} failed`);
+            break;
         }
       } catch (err) {
         console.error('[Daemon] Parse error:', err);
@@ -966,66 +1230,22 @@ export function useDaemonSocket({
       }
 
       reconnectAttemptsRef.current++;
-      const delay = reconnectDelayRef.current;
-
-      if (reconnectAttemptsRef.current > MAX_RECONNECTS_BEFORE_RESTART) {
-        // Reconnects exhausted, try restarting daemon
-        if (restartAttemptsRef.current < MAX_RESTART_ATTEMPTS) {
-          restartAttemptsRef.current++;
-          console.log(`[Daemon] Attempting daemon restart (${restartAttemptsRef.current}/${MAX_RESTART_ATTEMPTS})`);
-
-          invoke('start_daemon')
-            .then(() => {
-              console.log('[Daemon] Daemon restarted successfully');
-              reconnectAttemptsRef.current = 0; // Reset reconnect counter
-              reconnectDelayRef.current = 1000; // Reset delay
-              reconnectTimeoutRef.current = window.setTimeout(connect, 1000);
-            })
-            .catch((err) => {
-              console.error('[Daemon] Failed to restart daemon:', err);
-              if (restartAttemptsRef.current >= MAX_RESTART_ATTEMPTS) {
-                circuitOpenRef.current = true;
-                setConnectionError('Daemon unreachable. Click to retry.');
-                console.error('[Daemon] Circuit breaker open - daemon unreachable');
-                // Auto-reset circuit after timeout
-                circuitResetTimeoutRef.current = window.setTimeout(() => {
-                  console.log('[Daemon] Circuit breaker auto-reset');
-                  circuitOpenRef.current = false;
-                  restartAttemptsRef.current = 0;
-                  reconnectAttemptsRef.current = 0;
-                  reconnectDelayRef.current = 1000;
-                  connect();
-                }, CIRCUIT_RESET_MS);
-              } else {
-                // Try restart again after delay
-                reconnectTimeoutRef.current = window.setTimeout(() => {
-                  wsRef.current = null; // Trigger onclose logic again
-                  connect();
-                }, delay);
-              }
-            });
-        } else {
-          // All restart attempts exhausted, open circuit
-          circuitOpenRef.current = true;
-          setConnectionError('Daemon unreachable. Click to retry.');
-          console.error('[Daemon] Circuit breaker open - all restart attempts exhausted');
-          // Auto-reset circuit after timeout
-          circuitResetTimeoutRef.current = window.setTimeout(() => {
-            console.log('[Daemon] Circuit breaker auto-reset');
-            circuitOpenRef.current = false;
-            restartAttemptsRef.current = 0;
-            reconnectAttemptsRef.current = 0;
-            reconnectDelayRef.current = 1000;
-            connect();
-          }, CIRCUIT_RESET_MS);
-        }
+      let delay = reconnectDelayRef.current;
+      if (reconnectAttemptsRef.current > MAX_RECONNECTS_BEFORE_PAUSE) {
+        // Keep retrying in the background instead of pausing indefinitely.
+        delay = MAX_RECONNECT_DELAY_MS;
+        reconnectDelayRef.current = MAX_RECONNECT_DELAY_MS;
+        setConnectionError('Daemon disconnected. Reconnecting...');
+        console.error('[Daemon] High reconnect attempts; continuing retries in background');
       } else {
-        // Normal reconnect with backoff
-        console.log(`[Daemon] WebSocket disconnected, reconnecting in ${delay}ms... (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECTS_BEFORE_RESTART})`);
-        reconnectTimeoutRef.current = window.setTimeout(connect, delay);
-        // Exponential backoff: 1s -> 1.5s -> 2.25s -> ... -> max 5s
-        reconnectDelayRef.current = Math.min(delay * 1.5, 5000);
+        reconnectDelayRef.current = Math.min(delay * 1.5, MAX_RECONNECT_DELAY_MS);
       }
+
+      // Normal reconnect with backoff
+      console.log(`[Daemon] WebSocket disconnected, reconnecting in ${delay}ms... (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECTS_BEFORE_PAUSE})`);
+      reconnectTimeoutRef.current = window.setTimeout(() => {
+        void connect();
+      }, delay);
     };
 
     ws.onerror = (err) => {
@@ -1034,10 +1254,10 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning]);
 
   useEffect(() => {
-    connect();
+    void connect();
 
     return () => {
       if (reconnectTimeoutRef.current) {
@@ -1058,12 +1278,144 @@ export function useDaemonSocket({
       circuitResetTimeoutRef.current = null;
     }
     circuitOpenRef.current = false;
-    restartAttemptsRef.current = 0;
     reconnectAttemptsRef.current = 0;
     reconnectDelayRef.current = 1000;
     setConnectionError(null);
-    connect();
+    void connect();
   }, [connect]);
+
+  const sendSpawnSession = useCallback((args: PtySpawnArgs): Promise<SpawnResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = `pty_spawn_${args.id}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({
+        cmd: 'spawn_session',
+        id: args.id,
+        cwd: args.cwd,
+        agent: args.shell ? 'shell' : (args.agent || 'codex'),
+        cols: args.cols,
+        rows: args.rows,
+        ...(args.label && { label: args.label }),
+        ...(args.resume_session_id && { resume_session_id: args.resume_session_id }),
+        ...(args.resume_picker && { resume_picker: args.resume_picker }),
+        ...(args.fork_session && { fork_session: args.fork_session }),
+        ...(args.claude_executable && { claude_executable: args.claude_executable }),
+        ...(args.codex_executable && { codex_executable: args.codex_executable }),
+      }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Spawn session timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  const sendAttachSession = useCallback((id: string): Promise<AttachResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = `pty_attach_${id}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'attach_session', id }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Attach session timed out'));
+        }
+      }, 15000);
+    });
+  }, []);
+
+  const sendDetachSession = useCallback((id: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    attachedPtySessionsRef.current.delete(id);
+    ptySeqRef.current.delete(id);
+    ws.send(JSON.stringify({ cmd: 'detach_session', id }));
+  }, []);
+
+  const sendPtyInput = useCallback((id: string, data: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'pty_input', id, data }));
+  }, []);
+
+  const sendPtyResize = useCallback((id: string, cols: number, rows: number) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'pty_resize', id, cols, rows }));
+  }, []);
+
+  const sendKillSession = useCallback((id: string, signal?: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'kill_session', id, ...(signal && { signal }) }));
+  }, []);
+
+  useEffect(() => {
+    setPtyBackend({
+      spawn: async (args: PtySpawnArgs) => {
+        const sessionKnownToDaemon = sessionsRef.current.some((session) => session.id === args.id);
+
+        try {
+          await sendAttachSession(args.id);
+          return;
+        } catch (attachErr) {
+          // If daemon already knows this session but PTY is gone, don't silently create
+          // a brand-new process with the same ID. This causes confusing "restores"
+          // and duplicate session rows.
+          if (sessionKnownToDaemon) {
+            throw new Error(
+              'No live PTY found for this session. It likely ended when the daemon restarted. Close it and start a new session.'
+            );
+          }
+          if (!isSessionNotFoundError(attachErr)) {
+            throw attachErr;
+          }
+        }
+
+        try {
+          await sendSpawnSession(args);
+        } catch (err) {
+          const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+          if (!message.includes('already exists')) {
+            throw err;
+          }
+        }
+        await sendAttachSession(args.id);
+      },
+      write: async (id: string, data: string) => {
+        sendPtyInput(id, data);
+      },
+      resize: async (id: string, cols: number, rows: number) => {
+        sendPtyResize(id, cols, rows);
+      },
+      kill: async (id: string) => {
+        attachedPtySessionsRef.current.delete(id);
+        ptySeqRef.current.delete(id);
+        sendDetachSession(id);
+        sendKillSession(id);
+      },
+    });
+
+    return () => {
+      setPtyBackend(null);
+    };
+  }, [sendAttachSession, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendSpawnSession]);
 
   const sendPRAction = useCallback((
     action: 'approve' | 'merge',
@@ -1217,6 +1569,8 @@ export function useDaemonSocket({
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
+    attachedPtySessionsRef.current.delete(sessionId);
+    ptySeqRef.current.delete(sessionId);
     ws.send(JSON.stringify({ cmd: 'unregister', id: sessionId }));
   }, []);
 

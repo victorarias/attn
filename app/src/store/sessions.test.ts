@@ -243,4 +243,148 @@ describe('sessions store - terminal panel', () => {
       expect(session2?.terminalPanel.terminals).toHaveLength(0);
     });
   });
+
+  describe('syncFromDaemonSessions', () => {
+    it('hydrates local sessions from daemon state', () => {
+      useSessionStore.getState().syncFromDaemonSessions([
+        {
+          id: 'd-1',
+          label: 'Daemon One',
+          agent: 'codex',
+          directory: '/tmp/daemon/one',
+          state: 'working',
+        },
+        {
+          id: 'd-2',
+          label: 'Daemon Two',
+          agent: 'claude',
+          directory: '/tmp/daemon/two',
+          state: 'waiting_input',
+        },
+      ]);
+
+      const sessions = useSessionStore.getState().sessions;
+      expect(sessions).toHaveLength(2);
+      expect(sessions[0]).toMatchObject({
+        id: 'd-1',
+        label: 'Daemon One',
+        agent: 'codex',
+        cwd: '/tmp/daemon/one',
+        state: 'working',
+      });
+      expect(sessions[1]).toMatchObject({
+        id: 'd-2',
+        label: 'Daemon Two',
+        agent: 'claude',
+        cwd: '/tmp/daemon/two',
+        state: 'waiting_input',
+      });
+      expect(useSessionStore.getState().activeSessionId).toBe(null);
+    });
+
+    it('preserves local runtime fields for existing session ids', () => {
+      const fakeTerminal = {} as any;
+      useSessionStore.setState({
+        sessions: [
+          {
+            id: 'd-1',
+            label: 'Old Label',
+            state: 'working',
+            terminal: fakeTerminal,
+            cwd: '/tmp/old',
+            agent: 'claude',
+            transcriptMatched: true,
+            branch: 'old-branch',
+            isWorktree: false,
+            terminalPanel: {
+              isOpen: true,
+              height: 350,
+              activeTabId: null,
+              terminals: [],
+              nextTerminalNumber: 3,
+            },
+          },
+        ],
+      });
+
+      useSessionStore.getState().syncFromDaemonSessions([
+        {
+          id: 'd-1',
+          label: 'New Label',
+          agent: 'claude',
+          directory: '/tmp/new',
+          state: 'idle',
+          branch: 'new-branch',
+          is_worktree: true,
+        },
+      ]);
+
+      const session = useSessionStore.getState().sessions[0];
+      expect(session).toMatchObject({
+        id: 'd-1',
+        label: 'New Label',
+        cwd: '/tmp/new',
+        state: 'idle',
+        agent: 'claude',
+        branch: 'new-branch',
+        isWorktree: true,
+      });
+      expect(session.terminal).toBe(fakeTerminal);
+      expect(session.terminalPanel.height).toBe(350);
+    });
+
+    it('drops local sessions not present in daemon and clears invalid active session', () => {
+      useSessionStore.setState({
+        sessions: [
+          {
+            id: 'local-only',
+            label: 'Local Only',
+            state: 'working',
+            terminal: null,
+            cwd: '/tmp/local',
+            agent: 'codex',
+            transcriptMatched: false,
+            terminalPanel: {
+              isOpen: false,
+              height: 200,
+              activeTabId: null,
+              terminals: [],
+              nextTerminalNumber: 1,
+            },
+          },
+        ],
+        activeSessionId: 'local-only',
+      });
+
+      useSessionStore.getState().syncFromDaemonSessions([]);
+
+      expect(useSessionStore.getState().sessions).toEqual([]);
+      expect(useSessionStore.getState().activeSessionId).toBe(null);
+    });
+
+    it('sets transcript matching default based on restored agent', () => {
+      useSessionStore.getState().syncFromDaemonSessions([
+        {
+          id: 'codex-session',
+          label: 'Codex Session',
+          agent: 'codex',
+          directory: '/tmp/codex',
+          state: 'working',
+        },
+        {
+          id: 'claude-session',
+          label: 'Claude Session',
+          agent: 'claude',
+          directory: '/tmp/claude',
+          state: 'working',
+        },
+      ]);
+
+      const sessions = useSessionStore.getState().sessions;
+      const codex = sessions.find((session) => session.id === 'codex-session');
+      const claude = sessions.find((session) => session.id === 'claude-session');
+      expect(codex?.transcriptMatched).toBe(false);
+      expect(claude?.transcriptMatched).toBe(true);
+    });
+  });
 });

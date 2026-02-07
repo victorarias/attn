@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
+import { fileURLToPath } from 'url';
 
 // Mock GitHub Server
 class MockGitHubServer {
@@ -102,6 +103,58 @@ class MockGitHubServer {
 // Test port - different from production (9849) to avoid conflicts
 const TEST_DAEMON_PORT = '19849';
 const MOCK_GH_HOST = 'mock.github.local';
+const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
+const TEST_DAEMON_WS_URL = `ws://127.0.0.1:${TEST_DAEMON_PORT}/ws`;
+
+function resolveAttnBinaryPath(): string {
+  const candidates = [
+    process.env.ATTN_E2E_BIN,
+    path.resolve(E2E_DIR, '../../attn'),
+    path.join(os.homedir(), '.local', 'bin', 'attn'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `attn binary not found. Tried: ${candidates.join(', ')}. ` +
+      `Set ATTN_E2E_BIN or build binary with 'go build -o ./attn ./cmd/attn'.`
+  );
+}
+
+async function killTestDaemons(): Promise<void> {
+  try {
+    await new Promise<void>((resolve) => {
+      spawn('pkill', ['-f', `ATTN_WS_PORT=${TEST_DAEMON_PORT}`], { stdio: 'ignore' }).on('close', () => resolve());
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  } catch {
+    // Ignore when no test daemons are running.
+  }
+}
+
+async function waitForSocket(
+  socketPath: string,
+  timeoutMs: number,
+  getDebugInfo?: () => string
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      const suffix = getDebugInfo ? ` ${getDebugInfo()}` : '';
+      reject(new Error(`Daemon timeout after ${timeoutMs}ms.${suffix}`));
+    }, timeoutMs);
+    const check = setInterval(() => {
+      if (fs.existsSync(socketPath)) {
+        clearInterval(check);
+        clearTimeout(timeout);
+        resolve();
+      }
+    }, 100);
+  });
+}
 
 // Daemon launcher - creates isolated temp directory for DB and socket
 async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketPath: string; tempDir: string; stop: () => void }> {
@@ -109,14 +162,10 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-e2e-'));
   const socketPath = path.join(tempDir, 'attn.sock');
   const dbPath = path.join(tempDir, 'attn.db');
-  const attnPath = path.join(os.homedir(), '.local', 'bin', 'attn');
+  const attnPath = resolveAttnBinaryPath();
 
   console.log(`[E2E] Test isolation: tempDir=${tempDir}, socket=${socketPath}, db=${dbPath}`);
-
-  // Verify attn binary exists
-  if (!fs.existsSync(attnPath)) {
-    throw new Error(`attn binary not found at ${attnPath}. Run 'make install' first.`);
-  }
+  console.log(`[E2E] Using daemon binary: ${attnPath}`);
 
   // Clean up any existing socket (shouldn't exist in temp dir, but just in case)
   if (fs.existsSync(socketPath)) {
@@ -156,23 +205,8 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
     console.log(`[Daemon] Process exited with code ${code}, signal ${signal}`);
   });
 
-  // Wait for socket to appear
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      const error = new Error(
-        `Daemon timeout after 5s. stdout: ${stdout}\nstderr: ${stderr}`
-      );
-      reject(error);
-    }, 5000);
-    const check = setInterval(() => {
-      if (fs.existsSync(socketPath)) {
-        clearInterval(check);
-        clearTimeout(timeout);
-        console.log(`Daemon started with socket at ${socketPath}`);
-        resolve();
-      }
-    }, 100);
-  });
+  await waitForSocket(socketPath, 5000, () => `stdout: ${stdout}\nstderr: ${stderr}`);
+  console.log(`Daemon started with socket at ${socketPath}`);
 
   return {
     proc,
@@ -192,12 +226,138 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
   };
 }
 
+interface ManagedDaemon {
+  socketPath: string;
+  dbPath: string;
+  tempDir: string;
+  start: () => Promise<void>;
+  stop: () => Promise<void>;
+  restart: () => Promise<void>;
+  cleanup: () => Promise<void>;
+}
+
+function createManagedDaemon(ghUrl: string): ManagedDaemon {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-e2e-managed-'));
+  const socketPath = path.join(tempDir, 'attn.sock');
+  const dbPath = path.join(tempDir, 'attn.db');
+  const attnPath = resolveAttnBinaryPath();
+  let proc: ChildProcess | null = null;
+  let stdout = '';
+  let stderr = '';
+
+  const start = async () => {
+    if (proc && proc.exitCode === null && proc.signalCode === null) {
+      return;
+    }
+
+    if (fs.existsSync(socketPath)) {
+      try {
+        fs.unlinkSync(socketPath);
+      } catch {
+        // best-effort cleanup
+      }
+    }
+
+    stdout = '';
+    stderr = '';
+    proc = spawn(attnPath, ['daemon'], {
+      env: {
+        ...process.env,
+        ATTN_WS_PORT: TEST_DAEMON_PORT,
+        ATTN_SOCKET_PATH: socketPath,
+        ATTN_DB_PATH: dbPath,
+        ATTN_MOCK_REVIEWER: '1',
+        ATTN_MOCK_GH_URL: ghUrl,
+        ATTN_MOCK_GH_TOKEN: 'test-token',
+        ATTN_MOCK_GH_HOST: MOCK_GH_HOST,
+      },
+      stdio: 'pipe',
+    });
+
+    proc.stdout?.on('data', (data) => {
+      const text = data.toString();
+      stdout += text;
+      console.log('[Managed daemon stdout]', text.trim());
+    });
+    proc.stderr?.on('data', (data) => {
+      const text = data.toString();
+      stderr += text;
+      console.error('[Managed daemon stderr]', text.trim());
+    });
+    proc.on('exit', (code, signal) => {
+      console.log(`[Managed daemon] exited with code ${code}, signal ${signal}`);
+      proc = null;
+    });
+
+    await waitForSocket(socketPath, 5000, () => `stdout: ${stdout}\nstderr: ${stderr}`);
+    console.log(`[Managed daemon] started with socket ${socketPath}`);
+  };
+
+  const stop = async () => {
+    if (!proc) {
+      return;
+    }
+    const runningProc = proc;
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      };
+      runningProc.once('exit', () => finish());
+      runningProc.kill('SIGTERM');
+      setTimeout(() => {
+        if (runningProc.exitCode === null && runningProc.signalCode === null) {
+          runningProc.kill('SIGKILL');
+        }
+      }, 1500);
+      setTimeout(() => finish(), 3000);
+    });
+    proc = null;
+    if (fs.existsSync(socketPath)) {
+      try {
+        fs.unlinkSync(socketPath);
+      } catch {
+        // best-effort cleanup
+      }
+    }
+  };
+
+  const restart = async () => {
+    await stop();
+    await start();
+  };
+
+  const cleanup = async () => {
+    await stop();
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      console.log(`[Managed daemon] cleaned up temp dir ${tempDir}`);
+    } catch (err) {
+      console.warn(`[Managed daemon] failed to cleanup temp dir: ${err}`);
+    }
+  };
+
+  return {
+    socketPath,
+    dbPath,
+    tempDir,
+    start,
+    stop,
+    restart,
+    cleanup,
+  };
+}
+
 // Session injection helper
 async function injectTestSession(
   socketPath: string,
   session: {
     id: string;
     label: string;
+    agent?: 'codex' | 'claude';
     state: string;
     directory?: string;
     is_worktree?: boolean;
@@ -212,6 +372,7 @@ async function injectTestSession(
         session: {
           id: session.id,
           label: session.label,
+          agent: session.agent || 'codex',
           directory: session.directory || '/tmp/test',
           state: session.state,
           state_since: new Date().toISOString(),
@@ -334,9 +495,12 @@ func doSomething() {
 // Export fixtures
 type DaemonFixture = {
   start: () => Promise<{ wsUrl: string; socketPath: string }>;
+  stop: () => Promise<void>;
+  restart: () => Promise<void>;
   injectSession: (s: {
     id: string;
     label: string;
+    agent?: 'codex' | 'claude';
     state: string;
     directory?: string;
     is_worktree?: boolean;
@@ -368,20 +532,11 @@ export const test = base.extend<Fixtures>({
     let daemon: { proc: ChildProcess; socketPath: string; tempDir: string; stop: () => void } | null = null;
 
     const startFn = async () => {
-      // Kill any existing TEST daemons (on test port) to avoid interference
-      // Note: We no longer kill all daemons since tests are now isolated with temp dirs
-      try {
-        await new Promise<void>((resolve) => {
-          spawn('pkill', ['-f', `ATTN_WS_PORT=${TEST_DAEMON_PORT}`], { stdio: 'ignore' }).on('close', () => resolve());
-        });
-        await new Promise(resolve => setTimeout(resolve, 300)); // Wait for cleanup
-      } catch (err) {
-        // Ignore errors if no daemons running
-      }
+      await killTestDaemons();
 
       daemon = await startDaemon(mockGitHub.url);
       return {
-        wsUrl: `ws://127.0.0.1:${TEST_DAEMON_PORT}/ws`,
+        wsUrl: TEST_DAEMON_WS_URL,
         socketPath: daemon.socketPath,
       };
     };
@@ -396,36 +551,40 @@ export const test = base.extend<Fixtures>({
 
   // Session testing fixture with injection helpers
   daemon: async ({ mockGitHub }, use) => {
-    let daemonInstance: { proc: ChildProcess; socketPath: string; tempDir: string; stop: () => void } | null = null;
-    let socketPath = '';
+    const managed = createManagedDaemon(mockGitHub.url);
+    let started = false;
 
     const fixture: DaemonFixture = {
       start: async () => {
-        // Kill any existing TEST daemons (on test port) to avoid interference
-        // Note: We no longer kill all daemons since tests are now isolated with temp dirs
-        try {
-          await new Promise<void>((resolve) => {
-            spawn('pkill', ['-f', `ATTN_WS_PORT=${TEST_DAEMON_PORT}`], { stdio: 'ignore' }).on('close', () => resolve());
-          });
-          await new Promise(resolve => setTimeout(resolve, 300));
-        } catch {
-          // Ignore
-        }
-
-        daemonInstance = await startDaemon(mockGitHub.url);
-        socketPath = daemonInstance.socketPath;
+        await killTestDaemons();
+        await managed.start();
+        started = true;
         return {
-          wsUrl: `ws://127.0.0.1:${TEST_DAEMON_PORT}/ws`,
-          socketPath,
+          wsUrl: TEST_DAEMON_WS_URL,
+          socketPath: managed.socketPath,
         };
       },
+      stop: async () => {
+        if (!started) {
+          return;
+        }
+        await managed.stop();
+        started = false;
+      },
+      restart: async () => {
+        if (!started) {
+          await fixture.start();
+          return;
+        }
+        await managed.restart();
+      },
       injectSession: async (s) => {
-        if (!socketPath) throw new Error('Daemon not started');
-        await injectTestSession(socketPath, s);
+        if (!started) throw new Error('Daemon not started');
+        await injectTestSession(managed.socketPath, s);
       },
       updateSessionState: async (id, state) => {
-        if (!socketPath) throw new Error('Daemon not started');
-        await updateSessionState(socketPath, id, state);
+        if (!started) throw new Error('Daemon not started');
+        await updateSessionState(managed.socketPath, id, state);
       },
       createTestRepo: async () => {
         return createTestGitRepo();
@@ -434,9 +593,7 @@ export const test = base.extend<Fixtures>({
 
     await use(fixture);
 
-    if (daemonInstance) {
-      daemonInstance.stop();
-    }
+    await managed.cleanup();
   },
 });
 
