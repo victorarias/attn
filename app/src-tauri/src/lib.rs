@@ -82,7 +82,9 @@ fn start_daemon(_app: tauri::AppHandle) -> Result<(), String> {
             if bp.exists() {
                 bp.clone()
             } else {
-                return Err("No daemon binary found. Run 'make install' or reinstall the app.".into());
+                return Err(
+                    "No daemon binary found. Run 'make install' or reinstall the app.".into(),
+                );
             }
         } else {
             return Err("No daemon binary found.".into());
@@ -94,7 +96,9 @@ fn start_daemon(_app: tauri::AppHandle) -> Result<(), String> {
             } else if local_path.exists() {
                 local_path
             } else {
-                return Err("No daemon binary found. Run 'make install' or reinstall the app.".into());
+                return Err(
+                    "No daemon binary found. Run 'make install' or reinstall the app.".into(),
+                );
             }
         } else if local_path.exists() {
             local_path
