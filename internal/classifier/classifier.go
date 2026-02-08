@@ -63,41 +63,6 @@ func ParseResponse(response string) string {
 	return "idle"
 }
 
-// LooksLikeWaitingInput returns true if plain-text heuristics strongly indicate
-// the assistant is asking for user input.
-func LooksLikeWaitingInput(text string) bool {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	if lower == "" {
-		return false
-	}
-	if strings.Contains(lower, "?") {
-		return true
-	}
-
-	phrases := []string{
-		"let me know",
-		"tell me",
-		"what would you like",
-		"what do you want",
-		"what should",
-		"how can i help",
-		"can you",
-		"could you",
-		"do you want",
-		"want me to",
-		"which one",
-		"choose",
-		"select",
-		"confirm",
-	}
-	for _, phrase := range phrases {
-		if strings.Contains(lower, phrase) {
-			return true
-		}
-	}
-	return false
-}
-
 // LogFunc is a function type for logging
 type LogFunc func(format string, args ...interface{})
 
@@ -122,13 +87,7 @@ func ClassifyWithClaude(text string, timeout time.Duration) (string, error) {
 		DefaultLogger("classifier: empty text, returning idle")
 		return "idle", nil
 	}
-
-	// Truncate text for logging (first 200 chars)
-	logText := text
-	if len(logText) > 200 {
-		logText = logText[:200] + "..."
-	}
-	DefaultLogger("classifier: input text (truncated): %s", logText)
+	DefaultLogger("classifier: input text (%d chars): %q", len(text), text)
 
 	prompt := BuildPrompt(text)
 
@@ -151,7 +110,7 @@ func ClassifyWithClaude(text string, timeout time.Duration) (string, error) {
 	for _, msg := range messages {
 		if m, ok := msg.(*types.AssistantMessage); ok {
 			response := m.Text()
-			DefaultLogger("classifier: claude SDK response: %s", strings.TrimSpace(response))
+			DefaultLogger("classifier: claude SDK response (%d chars): %q", len(response), response)
 
 			result := ParseResponse(response)
 			DefaultLogger("classifier: parsed result: %s", result)
@@ -172,13 +131,7 @@ func ClassifyWithCopilot(text string, timeout time.Duration) (string, error) {
 		DefaultLogger("classifier: empty text, returning idle")
 		return "idle", nil
 	}
-
-	// Truncate text for logging (first 200 chars)
-	logText := text
-	if len(logText) > 200 {
-		logText = logText[:200] + "..."
-	}
-	DefaultLogger("classifier: input text (truncated): %s", logText)
+	DefaultLogger("classifier: input text (%d chars): %q", len(text), text)
 
 	prompt := BuildPrompt(text)
 
@@ -237,7 +190,7 @@ func ClassifyWithCopilot(text string, timeout time.Duration) (string, error) {
 		return "waiting_input", nil
 	}
 
-	DefaultLogger("classifier: copilot CLI response: %s", outputText)
+	DefaultLogger("classifier: copilot CLI response (%d chars): %q", len(outputText), outputText)
 
 	result := ParseResponse(outputText)
 	DefaultLogger("classifier: parsed result: %s", result)

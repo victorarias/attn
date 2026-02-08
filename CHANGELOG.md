@@ -26,7 +26,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Copilot Classifier Safety Isolation**: Copilot classification now disables custom instructions and avoids tool auto-approval, and runs from an isolated temp cwd so classifier sessions do not contaminate cwd-based transcript matching.
 - **Copilot Transcript Selection Robustness**: Copilot transcript discovery now prefers session-state candidates whose `session.start` timestamp is closest to the launched session time, with safe modtime fallback.
 - **Session Indicator Reliability**: Remove stale Codex-only “unknown transcript” indicator fallback so Codex/Copilot sessions render normal color-based states in sidebar/drawer.
-- **Classifier False-Yellow Guard**: Classification now requires explicit `WAITING`/`DONE` verdict formatting and applies a lightweight text heuristic to avoid spurious `waiting_input` labels on clearly complete Claude replies.
+- **Classifier Audit Logging**: Classifier logs now include full input text and full model output text so classification decisions can be reviewed later in daemon logs.
 - **PTY Live-State Stability**: Prompt remnants in recent terminal output no longer force `idle` while new assistant output is still streaming, improving Codex/Copilot working-state transitions.
 
 ## [2026-02-07]

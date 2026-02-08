@@ -176,21 +176,3 @@ func TestClassify_EmptyText_ReturnsIdleImmediately(t *testing.T) {
 		t.Errorf("Classify empty text = %q, want 'idle'", result)
 	}
 }
-
-func TestLooksLikeWaitingInput(t *testing.T) {
-	tests := []struct {
-		text string
-		want bool
-	}{
-		{"What should I do next?", true},
-		{"Tell me what you want me to do next.", true},
-		{"I'm here whenever you need anything.", false},
-		{"Done. Created the file.", false},
-	}
-
-	for _, tt := range tests {
-		if got := LooksLikeWaitingInput(tt.text); got != tt.want {
-			t.Errorf("LooksLikeWaitingInput(%q) = %v, want %v", tt.text, got, tt.want)
-		}
-	}
-}
