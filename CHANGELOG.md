@@ -25,12 +25,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Copilot Stop Classification Path**: Add Copilot transcript discovery under `~/.copilot/session-state/*/events.jsonl` (matched by cwd + recent activity) so Copilot sessions classify on stop without hooks.
+- **Copilot Resume Transcript Matching**: When launching Copilot with `--resume <session-id>`, stop-time classification now first checks `~/.copilot/session-state/<session-id>/events.jsonl` before falling back to heuristic cwd/timing discovery.
 - **Copilot Classifier Safety Isolation**: Copilot classification now disables custom instructions and avoids tool auto-approval, and runs from an isolated temp cwd so classifier sessions do not contaminate cwd-based transcript matching.
 - **Copilot Transcript Selection Robustness**: Copilot transcript discovery now prefers session-state candidates whose `session.start` timestamp is closest to the launched session time, with safe modtime fallback.
 - **Session Indicator Reliability**: Remove stale Codex-only “unknown transcript” indicator fallback so Codex/Copilot sessions render normal color-based states in sidebar/drawer.
 - **Classifier Audit Logging**: Classifier logs now include full input text and full model output text so classification decisions can be reviewed later in daemon logs.
 - **PTY Live-State Stability**: Prompt remnants in recent terminal output no longer force `idle` while new assistant output is still streaming, improving Codex/Copilot working-state transitions.
 - **Codex/Copilot State Source-of-Truth**: PTY-derived `waiting_input`/`idle` transitions are now ignored for Codex/Copilot sessions so final idle/waiting colors come from transcript + classifier, reducing noisy false transitions.
+- **Session Restore E2E Coverage**: Session restore/reconnect Playwright assertions now validate actual sidebar session state/selection markers instead of removed `state unknown` indicators.
 
 ## [2026-02-07]
 

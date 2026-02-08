@@ -530,6 +530,34 @@ func findCopilotTranscript(cwd string, startedAt time.Time) string {
 	return bestPath
 }
 
+func findCopilotTranscriptForResume(resumeID string) string {
+	if resumeID == "" {
+		return ""
+	}
+
+	// Resume IDs are directory names under ~/.copilot/session-state.
+	if strings.Contains(resumeID, "/") || strings.Contains(resumeID, "\\") || strings.Contains(resumeID, "..") {
+		return ""
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	eventsPath := filepath.Join(homeDir, ".copilot", "session-state", resumeID, "events.jsonl")
+	if _, err := os.Stat(eventsPath); err != nil {
+		return ""
+	}
+	return eventsPath
+}
+
+func resolveCopilotTranscript(cwd, resumeID string, startedAt time.Time) string {
+	if transcript := findCopilotTranscriptForResume(resumeID); transcript != "" {
+		return transcript
+	}
+	return findCopilotTranscript(cwd, startedAt)
+}
+
 // runClaudeDirectly runs claude with hooks (used when inside the app)
 func runClaudeDirectly() {
 	// Ensure PATH includes common tool locations (GUI apps start with minimal PATH)
@@ -953,7 +981,7 @@ func runCopilotDirectly() {
 	err = cmd.Wait()
 
 	// Attempt stop/classification before unregistering
-	transcriptPath := findCopilotTranscript(cwd, startedAt)
+	transcriptPath := resolveCopilotTranscript(cwd, *resumeFlag, startedAt)
 	if sendErr := c.SendStop(sessionID, transcriptPath); sendErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not send stop: %v\n", sendErr)
 	}

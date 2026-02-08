@@ -125,3 +125,61 @@ func TestFindCopilotTranscript_FallsBackToNewestModTime(t *testing.T) {
 		t.Fatalf("findCopilotTranscript() = %q, want %q", got, expected)
 	}
 }
+
+func TestResolveCopilotTranscript_PrefersResumeSessionPath(t *testing.T) {
+	homeDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
+
+	startedAt := time.Date(2026, 2, 8, 15, 30, 0, 0, time.UTC)
+	resumeID := "resume-session-id"
+	expected := writeCopilotSessionState(
+		t,
+		homeDir,
+		resumeID,
+		"/repo/from-resume",
+		startedAt,
+		true,
+		true,
+		startedAt.Add(30*time.Second),
+	)
+
+	got := resolveCopilotTranscript("/repo/other", resumeID, startedAt)
+	if got != expected {
+		t.Fatalf("resolveCopilotTranscript() = %q, want %q", got, expected)
+	}
+}
+
+func TestResolveCopilotTranscript_FallsBackWhenResumePathMissing(t *testing.T) {
+	homeDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
+
+	cwd := "/repo/project"
+	startedAt := time.Date(2026, 2, 8, 15, 30, 0, 0, time.UTC)
+	expected := writeCopilotSessionState(
+		t,
+		homeDir,
+		"fallback-session",
+		cwd,
+		startedAt.Add(3*time.Second),
+		true,
+		true,
+		startedAt.Add(1*time.Minute),
+	)
+
+	got := resolveCopilotTranscript(cwd, "missing-resume-id", startedAt)
+	if got != expected {
+		t.Fatalf("resolveCopilotTranscript() = %q, want %q", got, expected)
+	}
+}
