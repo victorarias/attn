@@ -314,6 +314,7 @@ interface UseDaemonSocketOptions {
   onAuthorsUpdate: (authors: AuthorState[]) => void;
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
   onSettingsUpdate?: (settings: DaemonSettings) => void;
+  onSettingError?: (message: string) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
   reviewer?: ReviewerCallbacks;
   wsUrl?: string;
@@ -394,6 +395,7 @@ export function useDaemonSocket({
   onAuthorsUpdate,
   onWorktreesUpdate,
   onSettingsUpdate,
+  onSettingError,
   onGitStatusUpdate,
   reviewer,
   wsUrl = DEFAULT_WS_URL,
@@ -789,6 +791,9 @@ export function useDaemonSocket({
             if (data.settings) {
               settingsRef.current = data.settings;
               onSettingsUpdate?.(data.settings);
+            }
+            if (data.success === false && data.error) {
+              onSettingError?.(data.error);
             }
             break;
 
@@ -1320,7 +1325,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning]);
 
   useEffect(() => {
     void connect();

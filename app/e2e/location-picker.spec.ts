@@ -38,18 +38,26 @@ test.describe('LocationPicker', () => {
       await page.goto('/');
       await page.waitForSelector('.dashboard');
 
-      // Open dialog and switch agent to Claude
+      // Open dialog and switch to any available non-disabled agent
       await page.keyboard.press('Meta+n');
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
-      await page.locator('.agent-option', { hasText: 'Claude' }).click();
-      await expect(page.locator('.agent-option', { hasText: 'Claude' })).toHaveClass(/active/);
+      const enabledAgents = page.locator('.agent-option:not(:disabled)');
+      const enabledCount = await enabledAgents.count();
+      if (enabledCount === 0) {
+        await expect(page.locator('.picker-agent-warning')).toBeVisible();
+        return;
+      }
+      const targetAgent = enabledAgents.nth(Math.min(1, enabledCount - 1));
+      const agentName = ((await targetAgent.locator('.agent-option-name').textContent()) || '').trim();
+      await targetAgent.click();
+      await expect(page.locator('.agent-option', { hasText: agentName })).toHaveClass(/active/);
 
       // Close and reopen to verify persistence
       await page.keyboard.press('Escape');
       await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 2000 });
       await page.keyboard.press('Meta+n');
       await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
-      await expect(page.locator('.agent-option', { hasText: 'Claude' })).toHaveClass(/active/);
+      await expect(page.locator('.agent-option', { hasText: agentName })).toHaveClass(/active/);
     });
   });
 

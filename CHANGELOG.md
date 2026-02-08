@@ -19,6 +19,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Release Script**: Added `scripts/release.sh` and `make release VERSION_TAG=vX.Y.Z` to automate version bump, commit/tag/push, and Homebrew formula refresh.
 - **GitHub Release Checker**: App now periodically checks GitHub latest release and surfaces a non-automatic update notice in the UI.
 - **Release Docs**: Added `docs/RELEASE.md` with the maintainer release runbook.
+- **Agent Availability Detection**: Daemon now checks `claude`/`codex`/`copilot` availability in `PATH` (respecting executable overrides) and publishes `claude_available`, `codex_available`, and `copilot_available` in settings events.
 
 ### Changed
 - **Classifier Backend**: Add Copilot CLI classifier support (`copilot -p ... --model claude-haiku-4.5`) while keeping Claude SDK classification for Claude/Codex sessions.
@@ -31,6 +32,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **App Update UX**: Replaced one-click in-app auto-update install with a **View Release** banner that links to GitHub releases.
 - **Release Artifacts**: Release workflow now uploads a stable `attn_aarch64.dmg` alias so Homebrew cask can target a fixed latest-download path.
 - **Docs IA**: README now includes full install, update, and build-from-source guidance directly (self-sufficient setup instructions), while release procedure lives in `docs/RELEASE.md`.
+- **Agent Picker UX**: Location picker and settings default-agent controls now disable unavailable agents and show PATH availability status; PR-open fallback now selects an available agent when the configured default is unavailable.
+- **Agent Fallback Persistence**: Availability fallback now applies at runtime for session launch/open flows without silently rewriting the saved default agent setting.
 
 ### Fixed
 - **Copilot Stop Classification Path**: Add Copilot transcript discovery under `~/.copilot/session-state/*/events.jsonl` (matched by cwd + recent activity) so Copilot sessions classify on stop without hooks.
@@ -42,6 +45,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **PTY Live-State Stability**: Prompt remnants in recent terminal output no longer force `idle` while new assistant output is still streaming, improving Codex/Copilot working-state transitions.
 - **Codex/Copilot State Source-of-Truth**: PTY-derived `waiting_input`/`idle` transitions are now ignored for Codex/Copilot sessions so final idle/waiting colors come from transcript + classifier, reducing noisy false transitions.
 - **Session Restore E2E Coverage**: Session restore/reconnect Playwright assertions now validate actual sidebar session state/selection markers instead of removed `state unknown` indicators.
+- **Settings Validation Feedback**: Invalid executable settings now surface an explicit UI error toast, and the client re-syncs to daemon settings after validation failure instead of leaving stale optimistic values.
 
 ### Removed
 - **Tauri Updater Runtime Wiring**: Removed updater/process plugin wiring and updater signing requirements from the desktop app release path.

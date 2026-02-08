@@ -25,12 +25,13 @@ import { useSessionStore } from './store/sessions';
 import { ptyWrite } from './pty/bridge';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse, BranchDiffFile, DaemonWarning } from './hooks/useDaemonSocket';
 import { normalizeSessionState } from './types/sessionState';
-import type { SessionAgent } from './types/sessionAgent';
+import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useUIScale } from './hooks/useUIScale';
 import { useOpenPR } from './hooks/useOpenPR';
+import { getAgentAvailability, hasAnyAvailableAgents, resolvePreferredAgent } from './utils/agentAvailability';
 import './App.css';
 
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
@@ -63,6 +64,7 @@ function isNewerVersion(currentVersion: string, latestVersion: string): boolean 
 function App() {
   // Settings state (must be declared before useDaemonSocket to pass as callback)
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [settingError, setSettingError] = useState<string | null>(null);
 
   // Reviewer agent state (unified events for ordered rendering)
   const [reviewerEvents, setReviewerEvents] = useState<ReviewerEvent[]>([]);
@@ -283,6 +285,7 @@ function App() {
     onReposUpdate: setRepoStates,
     onAuthorsUpdate: setAuthorStates,
     onSettingsUpdate: setSettings,
+    onSettingError: setSettingError,
     onWorktreesUpdate: setWorktrees,
     onGitStatusUpdate: setGitStatus,
     reviewer: reviewerCallbacks,
@@ -311,6 +314,8 @@ function App() {
         clearWarnings={clearWarnings}
         updateAvailableVersion={updateAvailableVersion}
         onOpenLatestRelease={handleOpenLatestRelease}
+        settingError={settingError}
+        clearSettingError={() => setSettingError(null)}
         // Daemon socket functions
         sendPRAction={sendPRAction}
         sendMutePR={sendMutePR}
@@ -376,6 +381,8 @@ interface AppContentProps {
   clearWarnings: () => void;
   updateAvailableVersion: string | null;
   onOpenLatestRelease: () => Promise<void>;
+  settingError: string | null;
+  clearSettingError: () => void;
   // All the daemon socket functions
   sendPRAction: ReturnType<typeof useDaemonSocket>['sendPRAction'];
   sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
@@ -437,6 +444,8 @@ function AppContent({
   clearWarnings,
   updateAvailableVersion,
   onOpenLatestRelease,
+  settingError,
+  clearSettingError,
   sendPRAction,
   sendMutePR,
   sendMuteRepo,
@@ -521,6 +530,11 @@ function AppContent({
   // Review panel state
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
   const [initialReviewFile, setInitialReviewFile] = useState<string | null>(null);
+  const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
+  const hasAvailableAgents = useMemo(
+    () => hasAnyAvailableAgents(agentAvailability),
+    [agentAvailability],
+  );
 
   useEffect(() => {
     setLauncherConfig({
@@ -710,6 +724,14 @@ function AppContent({
   const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
   const { message: errorMessage, showError, clearError } = useErrorToast();
 
+  useEffect(() => {
+    if (!settingError) {
+      return;
+    }
+    showError(settingError);
+    clearSettingError();
+  }, [clearSettingError, settingError, showError]);
+
   // Fork dialog state
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
   const [forkTargetSession, setForkTargetSession] = useState<{
@@ -734,15 +756,20 @@ function AppContent({
 
   const handleLocationSelect = useCallback(
     async (path: string, agent: SessionAgent, resumeEnabled?: boolean) => {
+      if (!hasAvailableAgents) {
+        showError('No supported agent CLI found in PATH (codex, claude, copilot).');
+        return;
+      }
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
+      const selectedAgent = resolvePreferredAgent(agent, agentAvailability, 'codex');
       let sessionId: string;
       if (resumeEnabled) {
         sessionId = crypto.randomUUID();
         setResumePicker(sessionId);
-        await createSession(folderName, path, sessionId, agent);
+        await createSession(folderName, path, sessionId, selectedAgent);
       } else {
-        sessionId = await createSession(folderName, path, undefined, agent);
+        sessionId = await createSession(folderName, path, undefined, selectedAgent);
       }
       // Fit terminal after view becomes visible
       setTimeout(() => {
@@ -751,7 +778,7 @@ function AppContent({
         handle?.focus();
       }, 100);
     },
-    [createSession, setResumePicker]
+    [agentAvailability, createSession, hasAvailableAgents, setResumePicker, showError]
   );
 
   const closeLocationPicker = useCallback(() => {
@@ -935,7 +962,12 @@ function AppContent({
     async (pr: DaemonPR) => {
       console.log(`[App] Open PR requested: ${pr.repo}#${pr.number} - ${pr.title}`);
 
-      const defaultAgent = (settings.new_session_agent as SessionAgent) || 'claude';
+      if (!hasAvailableAgents) {
+        alert('No supported agent CLI found in PATH (codex, claude, copilot).');
+        return;
+      }
+      const configuredDefaultAgent = normalizeSessionAgent(settings.new_session_agent, 'claude');
+      const defaultAgent = resolvePreferredAgent(configuredDefaultAgent, agentAvailability, 'codex');
       const result = await openPR(pr, defaultAgent);
       if (result.success) {
         console.log(`[App] Worktree created at ${result.worktreePath}`);
@@ -974,7 +1006,7 @@ function AppContent({
         }
       }
     },
-    [openPR]
+    [agentAvailability, hasAvailableAgents, openPR, settings.new_session_agent]
   );
 
   // Worktree cleanup prompt handlers
@@ -1422,6 +1454,7 @@ function AppContent({
         onDeleteBranch={sendDeleteBranch}
         onError={showError}
         projectsDirectory={settings.projects_directory}
+        agentAvailability={agentAvailability}
       />
       <BranchPicker
         isOpen={branchPickerOpen}
