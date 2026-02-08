@@ -44,7 +44,7 @@ It's a desktop app that wraps your agent CLIs â€” Claude Code, Codex, Copilot â€
 
 ```bash
 brew tap victorarias/attn https://github.com/victorarias/attn
-brew install --cask victorarias/attn/attn
+brew install --cask --no-quarantine victorarias/attn/attn
 ```
 
 This installs `attn.app` (with bundled daemon/runtime binary). It does not add `attn` to your shell `PATH`.
