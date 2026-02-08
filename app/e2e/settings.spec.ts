@@ -59,8 +59,9 @@ test.describe('Settings', () => {
     await expect(modal).toBeVisible({ timeout: 2000 });
 
     // Type a projects directory
+    const projectsDir = '/tmp/attn-e2e-projects-manual';
     const input = modal.locator('.projects-dir-input .settings-input');
-    await input.fill('/Users/test/projects');
+    await input.fill(projectsDir);
     await input.blur();
 
     // Close and reopen to verify persistence
@@ -72,7 +73,7 @@ test.describe('Settings', () => {
     await expect(modal).toBeVisible({ timeout: 2000 });
 
     // Value should be preserved
-    await expect(input).toHaveValue('/Users/test/projects');
+    await expect(input).toHaveValue(projectsDir);
   });
 
   test('muted repos appear in settings modal', async ({ page, mockGitHub, startDaemonWithPRs }) => {

@@ -17,6 +17,7 @@ import (
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/github/mockserver"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 	"nhooyr.io/websocket"
 )
 
@@ -416,6 +417,45 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 				t.Errorf("validateSetting(%q, %q) error = %v, wantErr %v", tt.key, tt.value, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
+	t.Setenv("PATH", "")
+	d := &Daemon{store: store.New()}
+	d.store.SetSetting(SettingNewSessionAgent, "codex")
+
+	settings := d.settingsWithAgentAvailability()
+	if got := settings[SettingNewSessionAgent]; got != "codex" {
+		t.Fatalf("settings[%s] = %v, want codex", SettingNewSessionAgent, got)
+	}
+	if got := settings[SettingClaudeAvailable]; got != "false" {
+		t.Fatalf("settings[%s] = %v, want false", SettingClaudeAvailable, got)
+	}
+	if got := settings[SettingCodexAvailable]; got != "false" {
+		t.Fatalf("settings[%s] = %v, want false", SettingCodexAvailable, got)
+	}
+	if got := settings[SettingCopilotAvailable]; got != "false" {
+		t.Fatalf("settings[%s] = %v, want false", SettingCopilotAvailable, got)
+	}
+
+	tmp := t.TempDir()
+	custom := filepath.Join(tmp, "custom-codex")
+	if err := os.WriteFile(custom, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("write custom executable: %v", err)
+	}
+	t.Setenv("PATH", tmp)
+	d.store.SetSetting(SettingCodexExecutable, "custom-codex")
+
+	settings = d.settingsWithAgentAvailability()
+	if got := settings[SettingCodexAvailable]; got != "true" {
+		t.Fatalf("settings[%s] = %v, want true", SettingCodexAvailable, got)
+	}
+	if got := settings[SettingClaudeAvailable]; got != "false" {
+		t.Fatalf("settings[%s] = %v, want false", SettingClaudeAvailable, got)
+	}
+	if got := settings[SettingCopilotAvailable]; got != "false" {
+		t.Fatalf("settings[%s] = %v, want false", SettingCopilotAvailable, got)
 	}
 }
 

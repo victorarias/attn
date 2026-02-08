@@ -33,6 +33,9 @@ const (
 	SettingCopilotExecutable = "copilot_executable"
 	SettingEditorExecutable  = "editor_executable"
 	SettingNewSessionAgent   = "new_session_agent"
+	SettingClaudeAvailable   = "claude_available"
+	SettingCodexAvailable    = "codex_available"
+	SettingCopilotAvailable  = "copilot_available"
 )
 
 // wsClient represents a connected WebSocket client
@@ -258,11 +261,6 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) sendInitialState(client *wsClient) {
-	// Convert settings to interface{} map for generated type
-	settings := make(map[string]interface{})
-	for k, v := range d.store.GetAllSettings() {
-		settings[k] = v
-	}
 	event := &protocol.WebSocketEvent{
 		Event:           protocol.EventInitialState,
 		ProtocolVersion: protocol.Ptr(protocol.ProtocolVersion),
@@ -270,7 +268,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Prs:             protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:           protocol.RepoStatesToValues(d.store.ListRepoStates()),
 		Authors:         protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
-		Settings:        settings,
+		Settings:        d.settingsWithAgentAvailability(),
 		Warnings:        d.getWarnings(),
 	}
 	data, err := json.Marshal(event)
@@ -569,13 +567,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 
 	case protocol.CmdGetSettings:
 		d.logf("Getting settings")
-		settings := make(map[string]interface{})
-		for k, v := range d.store.GetAllSettings() {
-			settings[k] = v
-		}
 		d.sendToClient(client, &protocol.WebSocketEvent{
 			Event:    protocol.EventSettingsUpdated,
-			Settings: settings,
+			Settings: d.settingsWithAgentAvailability(),
 		})
 
 	case protocol.CmdSetSetting:
@@ -586,9 +580,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		if err := d.validateSetting(setMsg.Key, setMsg.Value); err != nil {
 			d.logf("Setting validation failed: %v", err)
 			d.sendToClient(client, &protocol.WebSocketEvent{
-				Event:   protocol.EventSettingsUpdated,
-				Error:   protocol.Ptr(err.Error()),
-				Success: protocol.Ptr(false),
+				Event:    protocol.EventSettingsUpdated,
+				Settings: d.settingsWithAgentAvailability(),
+				Error:    protocol.Ptr(err.Error()),
+				Success:  protocol.Ptr(false),
 			})
 			return
 		}
@@ -1080,14 +1075,31 @@ func (d *Daemon) broadcastAuthorStates() {
 
 // broadcastSettings sends updated settings to all WebSocket clients
 func (d *Daemon) broadcastSettings() {
-	settings := make(map[string]interface{})
-	for k, v := range d.store.GetAllSettings() {
-		settings[k] = v
-	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:    protocol.EventSettingsUpdated,
-		Settings: settings,
+		Settings: d.settingsWithAgentAvailability(),
 	})
+}
+
+func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
+	stored := d.store.GetAllSettings()
+	settings := make(map[string]interface{}, len(stored)+3)
+	for k, v := range stored {
+		settings[k] = v
+	}
+	settings[SettingClaudeAvailable] = strconv.FormatBool(isAgentExecutableAvailable(stored[SettingClaudeExecutable], "claude"))
+	settings[SettingCodexAvailable] = strconv.FormatBool(isAgentExecutableAvailable(stored[SettingCodexExecutable], "codex"))
+	settings[SettingCopilotAvailable] = strconv.FormatBool(isAgentExecutableAvailable(stored[SettingCopilotExecutable], "copilot"))
+	return settings
+}
+
+func isAgentExecutableAvailable(configuredExecutable, defaultExecutable string) bool {
+	executable := strings.TrimSpace(configuredExecutable)
+	if executable == "" {
+		executable = defaultExecutable
+	}
+	_, err := exec.LookPath(executable)
+	return err == nil
 }
 
 func (d *Daemon) sendToClient(client *wsClient, message interface{}) {

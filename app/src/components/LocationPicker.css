@@ -97,6 +97,17 @@
   color: #e8e8ec;
 }
 
+.agent-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  color: #676773;
+}
+
+.agent-option:disabled .agent-shortcut {
+  color: #5a5a66;
+  border-color: #232329;
+}
+
 .agent-option:focus-visible {
   outline: 2px solid rgba(255, 107, 53, 0.7);
   outline-offset: 2px;
@@ -121,6 +132,21 @@
   border-color: rgba(0, 0, 0, 0.2);
   color: #3a1a0e;
   background: rgba(255, 255, 255, 0.45);
+}
+
+.agent-option.active:disabled {
+  background: rgba(255, 255, 255, 0.08);
+  color: #9b9ba8;
+  box-shadow: none;
+}
+
+.picker-agent-warning {
+  padding: 8px 16px;
+  border-bottom: 1px solid #1a1a1e;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 10px;
+  color: #ff9f7a;
+  background: rgba(255, 107, 53, 0.06);
 }
 
 .resume-toggle {

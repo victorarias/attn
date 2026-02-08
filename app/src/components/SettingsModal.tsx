@@ -1,8 +1,14 @@
 // app/src/components/SettingsModal.tsx
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { DaemonSettings } from '../hooks/useDaemonSocket';
-import type { SessionAgent } from '../types/sessionAgent';
+import { normalizeSessionAgent, type SessionAgent } from '../types/sessionAgent';
+import {
+  getAgentAvailability,
+  hasAnyAvailableAgents,
+  isAgentAvailable,
+  resolvePreferredAgent,
+} from '../utils/agentAvailability';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -33,7 +39,12 @@ export function SettingsModal({
   const [codexExecutable, setCodexExecutable] = useState(settings.codex_executable || '');
   const [copilotExecutable, setCopilotExecutable] = useState(settings.copilot_executable || '');
   const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
-  const [defaultAgent, setDefaultAgent] = useState<SessionAgent>((settings.new_session_agent as SessionAgent) || 'claude');
+  const [defaultAgent, setDefaultAgent] = useState<SessionAgent>('claude');
+  const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
+  const hasAvailableAgents = useMemo(
+    () => hasAnyAvailableAgents(agentAvailability),
+    [agentAvailability],
+  );
 
   // Sync with settings when modal opens
   const actualProjectsDir = settings.projects_directory || '';
@@ -41,7 +52,8 @@ export function SettingsModal({
   const actualCodexExecutable = settings.codex_executable || '';
   const actualCopilotExecutable = settings.copilot_executable || '';
   const actualEditorExecutable = settings.editor_executable || '';
-  const actualDefaultAgent = (settings.new_session_agent as SessionAgent) || 'claude';
+  const actualDefaultAgent = normalizeSessionAgent(settings.new_session_agent, 'claude');
+  const resolvedDefaultAgent = resolvePreferredAgent(actualDefaultAgent, agentAvailability, 'codex');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -50,8 +62,8 @@ export function SettingsModal({
     setCodexExecutable(actualCodexExecutable);
     setCopilotExecutable(actualCopilotExecutable);
     setEditorExecutable(actualEditorExecutable);
-    setDefaultAgent(actualDefaultAgent);
-  }, [isOpen, actualProjectsDir, actualClaudeExecutable, actualCodexExecutable, actualCopilotExecutable, actualEditorExecutable, actualDefaultAgent]);
+    setDefaultAgent(resolvedDefaultAgent);
+  }, [isOpen, actualProjectsDir, actualClaudeExecutable, actualCodexExecutable, actualCopilotExecutable, actualEditorExecutable, resolvedDefaultAgent]);
 
   const handleBrowse = useCallback(async () => {
     const selected = await open({
@@ -156,11 +168,12 @@ export function SettingsModal({
   }, [copilotExecutable, actualCopilotExecutable, onSetSetting]);
 
   const handleDefaultAgentChange = useCallback((agent: SessionAgent) => {
+    if (!isAgentAvailable(agentAvailability, agent)) return;
     setDefaultAgent(agent);
     if (agent !== actualDefaultAgent) {
       onSetSetting('new_session_agent', agent);
     }
-  }, [actualDefaultAgent, onSetSetting]);
+  }, [actualDefaultAgent, agentAvailability, onSetSetting]);
 
   if (!isOpen) return null;
 
@@ -217,6 +230,9 @@ export function SettingsModal({
             </p>
             <div className="settings-field">
               <label className="settings-label" htmlFor="settings-claude-exec">Claude Code</label>
+              <span className={`settings-status ${agentAvailability.claude ? 'available' : 'missing'}`}>
+                {agentAvailability.claude ? 'Found in PATH' : 'Not found in PATH'}
+              </span>
               <input
                 id="settings-claude-exec"
                 type="text"
@@ -230,6 +246,9 @@ export function SettingsModal({
             </div>
             <div className="settings-field">
               <label className="settings-label" htmlFor="settings-codex-exec">Codex</label>
+              <span className={`settings-status ${agentAvailability.codex ? 'available' : 'missing'}`}>
+                {agentAvailability.codex ? 'Found in PATH' : 'Not found in PATH'}
+              </span>
               <input
                 id="settings-codex-exec"
                 type="text"
@@ -256,6 +275,9 @@ export function SettingsModal({
             </div>
             <div className="settings-field">
               <label className="settings-label" htmlFor="settings-copilot-exec">Copilot</label>
+              <span className={`settings-status ${agentAvailability.copilot ? 'available' : 'missing'}`}>
+                {agentAvailability.copilot ? 'Found in PATH' : 'Not found in PATH'}
+              </span>
               <input
                 id="settings-copilot-exec"
                 type="text"
@@ -274,12 +296,17 @@ export function SettingsModal({
             <p className="settings-description">
               Used for new sessions and when opening PRs. You can override per session in the new session dialog.
             </p>
+            {!hasAvailableAgents && (
+              <div className="settings-agent-warning">No supported agent CLIs found in PATH.</div>
+            )}
             <div className="settings-agent-toggle" role="radiogroup" aria-label="Default session agent">
               <button
                 type="button"
                 className={`agent-option ${defaultAgent === 'codex' ? 'active' : ''}`}
                 onClick={() => handleDefaultAgentChange('codex')}
                 aria-checked={defaultAgent === 'codex'}
+                disabled={!agentAvailability.codex}
+                title={!agentAvailability.codex ? 'Codex CLI not found in PATH' : undefined}
               >
                 Codex
               </button>
@@ -288,6 +315,8 @@ export function SettingsModal({
                 className={`agent-option ${defaultAgent === 'claude' ? 'active' : ''}`}
                 onClick={() => handleDefaultAgentChange('claude')}
                 aria-checked={defaultAgent === 'claude'}
+                disabled={!agentAvailability.claude}
+                title={!agentAvailability.claude ? 'Claude CLI not found in PATH' : undefined}
               >
                 Claude
               </button>
@@ -296,6 +325,8 @@ export function SettingsModal({
                 className={`agent-option ${defaultAgent === 'copilot' ? 'active' : ''}`}
                 onClick={() => handleDefaultAgentChange('copilot')}
                 aria-checked={defaultAgent === 'copilot'}
+                disabled={!agentAvailability.copilot}
+                title={!agentAvailability.copilot ? 'Copilot CLI not found in PATH' : undefined}
               >
                 Copilot
               </button>

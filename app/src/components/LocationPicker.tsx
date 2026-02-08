@@ -7,6 +7,12 @@ import { RepoOptions } from './NewSessionDialog/RepoOptions';
 import type { RecentLocation } from '../hooks/useDaemonSocket';
 import type { SessionAgent } from '../types/sessionAgent';
 import { useSettings } from '../contexts/SettingsContext';
+import {
+  type AgentAvailability,
+  hasAnyAvailableAgents,
+  isAgentAvailable,
+  resolvePreferredAgent,
+} from '../utils/agentAvailability';
 import './LocationPicker.css';
 
 interface RepoInfo {
@@ -31,10 +37,16 @@ interface LocationPickerProps {
   onDeleteBranch?: (mainRepo: string, branch: string, force?: boolean) => Promise<{ success: boolean; error?: string }>;
   onError?: (message: string) => void;
   projectsDirectory?: string;
+  agentAvailability?: AgentAvailability;
 }
 
 const MAX_RECENT_LOCATIONS = 10;
 const SESSION_AGENT_KEY = 'new_session_agent';
+const DEFAULT_AGENT_AVAILABILITY: AgentAvailability = {
+  codex: true,
+  claude: true,
+  copilot: true,
+};
 
 const normalizeAgent = (value?: string): SessionAgent | null => {
   if (!value) return null;
@@ -74,8 +86,11 @@ export function LocationPicker({
   onDeleteBranch,
   onError,
   projectsDirectory,
+  agentAvailability,
 }: LocationPickerProps) {
   const { settings, setSetting } = useSettings();
+  const effectiveAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
+  const hasAvailableAgents = hasAnyAvailableAgents(effectiveAgentAvailability);
   const [state, setState] = useState<State>({
     mode: 'path-input',
     inputValue: '',
@@ -148,8 +163,17 @@ export function LocationPicker({
   const savedAgent = normalizeAgent(settings[SESSION_AGENT_KEY]);
   useEffect(() => {
     if (!savedAgent) return;
-    setState(prev => (prev.agent === savedAgent ? prev : { ...prev, agent: savedAgent }));
-  }, [savedAgent]);
+    const resolvedSavedAgent = resolvePreferredAgent(savedAgent, effectiveAgentAvailability, 'codex');
+    setState(prev => (prev.agent === resolvedSavedAgent ? prev : { ...prev, agent: resolvedSavedAgent }));
+  }, [effectiveAgentAvailability, savedAgent]);
+
+  useEffect(() => {
+    const resolvedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
+    if (resolvedAgent === state.agent) {
+      return;
+    }
+    setState(prev => ({ ...prev, agent: resolvedAgent }));
+  }, [effectiveAgentAvailability, state.agent]);
 
   // Filter recent locations based on input
   // Expand ~ to home path so filtering works with stored full paths
@@ -205,11 +229,16 @@ export function LocationPicker({
 
   const handleSelect = useCallback(
     async (rawPath: string) => {
+      if (!hasAvailableAgents) {
+        onError?.('No supported agent CLI found in PATH (codex, claude, copilot).');
+        return;
+      }
       // Expand ~ to home path and remove trailing slash
       const path = (rawPath.startsWith('~')
         ? rawPath.replace('~', state.homePath)
         : rawPath
       ).replace(/\/$/, '');
+      const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
 
       console.log('[LocationPicker] handleSelect:', path);
 
@@ -232,7 +261,7 @@ export function LocationPicker({
             }));
           } else {
             // Failed to get repo info, just select the path
-            onSelect(path, state.agent, state.resumeEnabled);
+            onSelect(path, selectedAgent, state.resumeEnabled);
             onClose();
           }
           return;
@@ -243,16 +272,17 @@ export function LocationPicker({
       }
 
       // Not a git repo, just select it
-      onSelect(path, state.agent, state.resumeEnabled);
+      onSelect(path, selectedAgent, state.resumeEnabled);
       onClose();
     },
-    [onSelect, onClose, onGetRepoInfo, state.homePath, state.agent, state.resumeEnabled]
+    [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onGetRepoInfo, onSelect, state.agent, state.homePath, state.resumeEnabled]
   );
 
   const handleAgentChange = useCallback((agent: SessionAgent) => {
+    if (!isAgentAvailable(effectiveAgentAvailability, agent)) return;
     setState(prev => ({ ...prev, agent }));
     setSetting(SESSION_AGENT_KEY, agent);
-  }, [setSetting]);
+  }, [effectiveAgentAvailability, setSetting]);
 
   const handleResumeToggle = useCallback(() => {
     setState(prev => ({
@@ -278,37 +308,57 @@ export function LocationPicker({
 
   // RepoOptions callbacks
   const handleSelectMainRepo = useCallback(() => {
+    if (!hasAvailableAgents) {
+      onError?.('No supported agent CLI found in PATH (codex, claude, copilot).');
+      return;
+    }
     if (state.selectedRepo) {
-      onSelect(state.selectedRepo, state.agent, state.resumeEnabled);
+      const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
+      onSelect(state.selectedRepo, selectedAgent, state.resumeEnabled);
       onClose();
     }
-  }, [state.selectedRepo, state.agent, state.resumeEnabled, onSelect, onClose]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent, state.resumeEnabled, state.selectedRepo]);
 
   const handleSelectWorktree = useCallback((path: string) => {
-    onSelect(path, state.agent, state.resumeEnabled);
+    if (!hasAvailableAgents) {
+      onError?.('No supported agent CLI found in PATH (codex, claude, copilot).');
+      return;
+    }
+    const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
+    onSelect(path, selectedAgent, state.resumeEnabled);
     onClose();
-  }, [onSelect, onClose, state.agent, state.resumeEnabled]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent, state.resumeEnabled]);
 
   const handleSelectBranch = useCallback((_branch: string) => {
+    if (!hasAvailableAgents) {
+      onError?.('No supported agent CLI found in PATH (codex, claude, copilot).');
+      return;
+    }
     if (state.selectedRepo) {
-      onSelect(state.selectedRepo, state.agent, state.resumeEnabled);
+      const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
+      onSelect(state.selectedRepo, selectedAgent, state.resumeEnabled);
       onClose();
     }
-  }, [state.selectedRepo, state.agent, state.resumeEnabled, onSelect, onClose]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent, state.resumeEnabled, state.selectedRepo]);
 
   const handleCreateWorktree = useCallback(async (branchName: string, startingFrom: string) => {
+    if (!hasAvailableAgents) {
+      onError?.('No supported agent CLI found in PATH (codex, claude, copilot).');
+      return;
+    }
     if (!state.selectedRepo || !onCreateWorktree) return;
 
     try {
       const result = await onCreateWorktree(state.selectedRepo, branchName, undefined, startingFrom);
       if (result.success && result.path) {
-        onSelect(result.path, state.agent);
+        const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
+        onSelect(result.path, selectedAgent);
         onClose();
       }
     } catch (err) {
       console.error('[LocationPicker] Failed to create worktree:', err);
     }
-  }, [state.selectedRepo, onCreateWorktree, onSelect, onClose, state.agent]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onCreateWorktree, onError, onSelect, state.agent, state.selectedRepo]);
 
   const handleRefresh = useCallback(async () => {
     if (!state.selectedRepo || !onGetRepoInfo || state.refreshing) return;
@@ -346,16 +396,19 @@ export function LocationPicker({
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && !e.metaKey && !e.ctrlKey) {
         if (e.code === 'Digit1') {
+          if (!isAgentAvailable(effectiveAgentAvailability, 'codex')) return;
           e.preventDefault();
           handleAgentChange('codex');
           return;
         }
         if (e.code === 'Digit2') {
+          if (!isAgentAvailable(effectiveAgentAvailability, 'claude')) return;
           e.preventDefault();
           handleAgentChange('claude');
           return;
         }
         if (e.code === 'Digit3') {
+          if (!isAgentAvailable(effectiveAgentAvailability, 'copilot')) return;
           e.preventDefault();
           handleAgentChange('copilot');
           return;
@@ -405,7 +458,7 @@ export function LocationPicker({
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isOpen, state.mode, state.selectedIndex, handleBack, onClose, filteredRecent, fsSuggestions, handleAgentChange]);
+  }, [effectiveAgentAvailability, fsSuggestions, filteredRecent, handleAgentChange, handleBack, isOpen, onClose, state.mode, state.selectedIndex]);
 
   // Transform RepoInfo from snake_case to camelCase for RepoOptions
   const transformedRepoInfo = state.repoInfo ? {
@@ -434,6 +487,8 @@ export function LocationPicker({
                 onClick={() => handleAgentChange('codex')}
                 role="radio"
                 aria-checked={state.agent === 'codex'}
+                disabled={!effectiveAgentAvailability.codex}
+                title={!effectiveAgentAvailability.codex ? 'Codex CLI not found in PATH' : undefined}
               >
                 <span className="agent-option-name">Codex</span>
                 <kbd className="agent-shortcut">⌥1</kbd>
@@ -444,6 +499,8 @@ export function LocationPicker({
                 onClick={() => handleAgentChange('claude')}
                 role="radio"
                 aria-checked={state.agent === 'claude'}
+                disabled={!effectiveAgentAvailability.claude}
+                title={!effectiveAgentAvailability.claude ? 'Claude CLI not found in PATH' : undefined}
               >
                 <span className="agent-option-name">Claude</span>
                 <kbd className="agent-shortcut">⌥2</kbd>
@@ -454,6 +511,8 @@ export function LocationPicker({
                 onClick={() => handleAgentChange('copilot')}
                 role="radio"
                 aria-checked={state.agent === 'copilot'}
+                disabled={!effectiveAgentAvailability.copilot}
+                title={!effectiveAgentAvailability.copilot ? 'Copilot CLI not found in PATH' : undefined}
               >
                 <span className="agent-option-name">Copilot</span>
                 <kbd className="agent-shortcut">⌥3</kbd>
@@ -470,6 +529,9 @@ export function LocationPicker({
             </button>
           </div>
         </div>
+        {!hasAvailableAgents && (
+          <div className="picker-agent-warning">No supported agent CLIs found in PATH.</div>
+        )}
         {state.mode === 'path-input' ? (
           <>
             <div className="picker-header">
