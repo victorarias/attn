@@ -277,6 +277,16 @@ func hasPrompt(lines []string, h stateHeuristics) bool {
 	return false
 }
 
+func lastNonEmptyLine(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
 func hasNumberedList(lines []string) bool {
 	for _, line := range lines {
 		trimmed := strings.TrimLeft(line, " \t")
@@ -382,6 +392,7 @@ func classifyState(text string, h stateHeuristics) string {
 	cleaned := stripANSI(text)
 	lines := strings.Split(cleaned, "\n")
 	promptShown := hasPrompt(lines, h)
+	last := lastNonEmptyLine(lines)
 
 	if isPendingApproval(cleaned) {
 		return statePendingApproval
@@ -389,7 +400,7 @@ func classifyState(text string, h stateHeuristics) string {
 	if isWaitingInput(cleaned, h) {
 		return stateWaitingInput
 	}
-	if promptShown {
+	if promptShown && isPromptLine(last) {
 		return stateIdle
 	}
 	if strings.TrimSpace(cleaned) != "" {

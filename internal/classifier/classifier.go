@@ -41,11 +41,61 @@ func BuildPrompt(text string) string {
 
 // ParseResponse parses the LLM response into a state
 func ParseResponse(response string) string {
-	normalized := strings.TrimSpace(strings.ToUpper(response))
-	if strings.Contains(normalized, "WAITING") {
+	lastLine := ""
+	for _, line := range strings.Split(strings.TrimSpace(response), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			lastLine = trimmed
+		}
+	}
+	if lastLine == "" {
+		return "idle"
+	}
+
+	normalized := strings.ToUpper(lastLine)
+	if strings.HasPrefix(normalized, "WAITING") {
 		return "waiting_input"
 	}
+	if strings.HasPrefix(normalized, "DONE") {
+		return "idle"
+	}
+
 	return "idle"
+}
+
+// LooksLikeWaitingInput returns true if plain-text heuristics strongly indicate
+// the assistant is asking for user input.
+func LooksLikeWaitingInput(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	if strings.Contains(lower, "?") {
+		return true
+	}
+
+	phrases := []string{
+		"let me know",
+		"tell me",
+		"what would you like",
+		"what do you want",
+		"what should",
+		"how can i help",
+		"can you",
+		"could you",
+		"do you want",
+		"want me to",
+		"which one",
+		"choose",
+		"select",
+		"confirm",
+	}
+	for _, phrase := range phrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // LogFunc is a function type for logging

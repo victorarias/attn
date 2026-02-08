@@ -864,6 +864,10 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		// Default to waiting_input on error
 		state = protocol.StateWaitingInput
 	}
+	if state == protocol.StateWaitingInput && !classifier.LooksLikeWaitingInput(lastMessage) {
+		d.logf("classifySessionState: overriding waiting_input -> idle for session %s (text heuristic)", sessionID)
+		state = protocol.StateIdle
+	}
 
 	d.logf("classifySessionState: session %s classified as %s", sessionID, state)
 	d.updateAndBroadcastStateWithTimestamp(sessionID, state, classificationStartTime)
