@@ -42,7 +42,7 @@ func TestWriteHooksConfig(t *testing.T) {
 	sessionID := "test-session"
 	socketPath := "/tmp/test.sock"
 
-	configPath, err := WriteHooksConfig(tmpDir, sessionID, socketPath)
+	configPath, err := WriteHooksConfig(tmpDir, sessionID, socketPath, "/tmp/attn")
 	if err != nil {
 		t.Fatalf("WriteHooksConfig error: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestWriteHooksConfig(t *testing.T) {
 func TestCleanupHooksConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	configPath, _ := WriteHooksConfig(tmpDir, "test", "/tmp/test.sock")
+	configPath, _ := WriteHooksConfig(tmpDir, "test", "/tmp/test.sock", "/tmp/attn")
 
 	// Verify file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {

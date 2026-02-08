@@ -88,6 +88,7 @@ fn start_daemon(_app: tauri::AppHandle) -> Result<(), String> {
     }
 
     Command::new(&bin_path)
+        .env("ATTN_WRAPPER_PATH", &bin_path)
         .arg("daemon")
         .spawn()
         .map_err(|e| format!("Failed to start daemon: {}", e))?;

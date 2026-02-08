@@ -47,11 +47,15 @@ brew tap victorarias/attn https://github.com/victorarias/attn
 brew install --cask victorarias/attn/attn
 ```
 
+This installs `attn.app` (with bundled daemon/runtime binary). It does not add `attn` to your shell `PATH`.
+
 ### Homebrew formula (CLI + daemon only)
 
 ```bash
 brew install victorarias/attn/attn
 ```
+
+Install this if you want the `attn` command in terminal.
 
 ### Direct DMG
 

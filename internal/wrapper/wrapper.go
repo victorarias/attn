@@ -24,7 +24,7 @@ func DefaultLabel() string {
 
 // WriteHooksConfig writes a temporary hooks configuration file
 // Creates a subdirectory to isolate from other temp files (avoids fs.watch issues)
-func WriteHooksConfig(tmpDir, sessionID, socketPath string) (string, error) {
+func WriteHooksConfig(tmpDir, sessionID, socketPath, wrapperPath string) (string, error) {
 	// Create a subdirectory for this session's hooks
 	// This prevents Claude from trying to watch socket files in the parent temp dir
 	hooksDir := filepath.Join(tmpDir, "attn-hooks-"+sessionID)
@@ -34,7 +34,7 @@ func WriteHooksConfig(tmpDir, sessionID, socketPath string) (string, error) {
 
 	configPath := filepath.Join(hooksDir, "settings.json")
 
-	content := hooks.Generate(sessionID, socketPath)
+	content := hooks.Generate(sessionID, socketPath, wrapperPath)
 
 	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
 		return "", err

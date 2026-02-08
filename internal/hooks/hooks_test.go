@@ -10,7 +10,7 @@ func TestGenerateHooks(t *testing.T) {
 	sessionID := "abc123"
 	socketPath := "/home/user/.claude-manager.sock"
 
-	settings := Generate(sessionID, socketPath)
+	settings := Generate(sessionID, socketPath, "/tmp/attn")
 
 	// Verify it's valid JSON
 	var parsed map[string]interface{}
@@ -52,7 +52,7 @@ func TestGenerateHooks_ContainsSessionID(t *testing.T) {
 	sessionID := "unique-session-id-12345"
 	socketPath := "/tmp/test.sock"
 
-	hooks := Generate(sessionID, socketPath)
+	hooks := Generate(sessionID, socketPath, "/tmp/attn")
 
 	if !strings.Contains(hooks, sessionID) {
 		t.Error("generated hooks should contain session ID")
@@ -63,7 +63,7 @@ func TestGenerateHooks_ContainsSocketPath(t *testing.T) {
 	sessionID := "test"
 	socketPath := "/custom/path/to/socket.sock"
 
-	hooks := Generate(sessionID, socketPath)
+	hooks := Generate(sessionID, socketPath, "/tmp/attn")
 
 	if !strings.Contains(hooks, socketPath) {
 		t.Error("generated hooks should contain socket path")
@@ -71,7 +71,7 @@ func TestGenerateHooks_ContainsSocketPath(t *testing.T) {
 }
 
 func TestGenerateHooks_HasStopHook(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock")
+	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
 
 	if !strings.Contains(hooks, "Stop") {
 		t.Error("hooks should include Stop event for waiting state")
@@ -79,10 +79,26 @@ func TestGenerateHooks_HasStopHook(t *testing.T) {
 }
 
 func TestGenerateHooks_HasUserPromptSubmitHook(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock")
+	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
 
 	if !strings.Contains(hooks, "UserPromptSubmit") {
 		t.Error("hooks should include UserPromptSubmit event for working state")
+	}
+}
+
+func TestGenerateHooks_UsesWrapperPath(t *testing.T) {
+	hooks := Generate("test", "/tmp/test.sock", "/Applications/attn.app/Contents/MacOS/attn")
+
+	if !strings.Contains(hooks, "'/Applications/attn.app/Contents/MacOS/attn' _hook-stop") {
+		t.Error("hooks should include wrapper path in stop hook command")
+	}
+}
+
+func TestGenerateHooks_DefaultsWrapperToAttn(t *testing.T) {
+	hooks := Generate("test", "/tmp/test.sock", "")
+
+	if !strings.Contains(hooks, "'attn' _hook-stop") {
+		t.Error("hooks should default wrapper path to 'attn'")
 	}
 }
 

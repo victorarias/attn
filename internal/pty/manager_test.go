@@ -119,3 +119,37 @@ func TestFirstExecutablePath_ReturnsFalseWhenNoneValid(t *testing.T) {
 		t.Fatalf("expected no executable candidate, got %q", got)
 	}
 }
+
+func TestResolveAttnPath_PrefersEnvWrapperPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	wrapperPath := filepath.Join(tmpDir, "attn-wrapper")
+	if err := os.WriteFile(wrapperPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write wrapperPath: %v", err)
+	}
+
+	old := os.Getenv("ATTN_WRAPPER_PATH")
+	t.Setenv("ATTN_WRAPPER_PATH", wrapperPath)
+	t.Cleanup(func() {
+		_ = os.Setenv("ATTN_WRAPPER_PATH", old)
+	})
+
+	got := resolveAttnPath()
+	if got != wrapperPath {
+		t.Fatalf("resolveAttnPath() = %q, want %q", got, wrapperPath)
+	}
+}
+
+func TestBuildSpawnEnv_SetsWrapperPath(t *testing.T) {
+	env := buildSpawnEnv("", SpawnOptions{ID: "session-1"}, "codex", "/tmp/attn-wrapper", nil)
+
+	found := false
+	for _, entry := range env {
+		if entry == "ATTN_WRAPPER_PATH=/tmp/attn-wrapper" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected ATTN_WRAPPER_PATH in env, got %v", env)
+	}
+}

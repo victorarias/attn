@@ -122,6 +122,10 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	}
 
 	agent := normalizeAgent(opts.Agent)
+	attnPath := ""
+	if agent != "shell" {
+		attnPath = resolveAttnPath()
+	}
 
 	m.mu.Lock()
 	if _, exists := m.sessions[opts.ID]; exists {
@@ -132,7 +136,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 
 	loginShell := getUserLoginShell()
 	shellCandidates := preferredShellCandidates(loginShell)
-	cmdEnv := buildSpawnEnv(loginShell, opts, agent, m.logf)
+	cmdEnv := buildSpawnEnv(loginShell, opts, agent, attnPath, m.logf)
 
 	var (
 		cmd       *exec.Cmd
@@ -141,7 +145,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		usedShell string
 	)
 	for i, shellPath := range shellCandidates {
-		cmd = buildSpawnCommand(opts, agent, shellPath)
+		cmd = buildSpawnCommand(opts, agent, shellPath, attnPath)
 		cmd.Dir = opts.CWD
 		if shouldSetpgidForPTY() {
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -317,12 +321,11 @@ func normalizeAgent(agent string) string {
 	}
 }
 
-func buildSpawnCommand(opts SpawnOptions, agent, shellPath string) *exec.Cmd {
+func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string) *exec.Cmd {
 	if agent == "shell" {
 		return exec.Command(shellPath, "-l")
 	}
 
-	attnPath := resolveAttnPath()
 	args := []string{attnPath}
 	if opts.Label != "" {
 		args = append(args, "-s", opts.Label)
@@ -340,7 +343,7 @@ func buildSpawnCommand(opts SpawnOptions, agent, shellPath string) *exec.Cmd {
 	return exec.Command(shellPath, "-l", "-c", cmdline)
 }
 
-func buildSpawnEnv(loginShell string, opts SpawnOptions, agent string, logf LogFunc) []string {
+func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath string, logf LogFunc) []string {
 	env := os.Environ()
 
 	if loginShell != "" {
@@ -359,6 +362,9 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent string, logf LogF
 			"ATTN_SESSION_ID=" + opts.ID,
 			"ATTN_AGENT=" + agent,
 		})
+		if wrapperPath != "" {
+			env = mergeEnvironment(env, []string{"ATTN_WRAPPER_PATH=" + wrapperPath})
+		}
 		if opts.ClaudeExecutable != "" {
 			env = mergeEnvironment(env, []string{"ATTN_CLAUDE_EXECUTABLE=" + opts.ClaudeExecutable})
 		}
@@ -469,7 +475,10 @@ func shouldSetpgidForPTY() bool {
 }
 
 func resolveAttnPath() string {
-	candidates := make([]string, 0, 3)
+	candidates := make([]string, 0, 4)
+	if wrapperPath := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); wrapperPath != "" {
+		candidates = append(candidates, wrapperPath)
+	}
 	if exe, err := os.Executable(); err == nil && exe != "" {
 		candidates = append(candidates, exe)
 	}

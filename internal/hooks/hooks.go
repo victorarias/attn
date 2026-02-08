@@ -3,6 +3,7 @@ package hooks
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // HookEntry is a single hook configuration
@@ -23,7 +24,13 @@ type SettingsConfig struct {
 }
 
 // Generate generates settings configuration with hooks for a session
-func Generate(sessionID, socketPath string) string {
+func Generate(sessionID, socketPath, wrapperPath string) string {
+	wrapper := strings.TrimSpace(wrapperPath)
+	if wrapper == "" {
+		wrapper = "attn"
+	}
+	wrapperCmd := shellQuote(wrapper)
+
 	config := SettingsConfig{
 		Hooks: map[string][]HookEntry{
 			"Stop": {
@@ -32,7 +39,7 @@ func Generate(sessionID, socketPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`~/.local/bin/attn _hook-stop "%s"`, sessionID),
+							Command: fmt.Sprintf(`%s _hook-stop "%s"`, wrapperCmd, sessionID),
 						},
 					},
 				},
@@ -78,7 +85,7 @@ func Generate(sessionID, socketPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`~/.local/bin/attn _hook-todo "%s"`, sessionID),
+							Command: fmt.Sprintf(`%s _hook-todo "%s"`, wrapperCmd, sessionID),
 						},
 					},
 				},
@@ -108,6 +115,13 @@ func Generate(sessionID, socketPath string) string {
 
 	data, _ := json.MarshalIndent(config, "", "  ")
 	return string(data)
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 // GenerateUnregisterCommand generates the command to unregister a session
