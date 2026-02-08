@@ -36,6 +36,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Agent Fallback Persistence**: Availability fallback now applies at runtime for session launch/open flows without silently rewriting the saved default agent setting.
 
 ### Fixed
+- **Bundled Daemon Preference in App Runtime**: Desktop app startup now prefers the bundled `attn` daemon binary by default (with `ATTN_PREFER_LOCAL_DAEMON=1` opt-in for local dev), preventing stale `~/.local/bin/attn` installs from breaking cask-launched sessions.
 - **Cask Runtime Wrapper Resolution**: Daemon-managed session spawn and Claude hooks now use an explicit wrapper path (`ATTN_WRAPPER_PATH`) instead of relying on `attn` being in shell `PATH`, so Homebrew cask installs work without separately installing the formula.
 - **Release Artifact macOS Signature Integrity**: Release workflow now re-signs and verifies the built `attn.app`, rebuilds the DMG from the signed app, and replaces uploaded release assets from CI before publishing cask artifacts.
 - **Release CI Reliability**: Release workflow now installs `pnpm` before enabling pnpm cache in `setup-node`, and supports manual `workflow_dispatch` retries for existing tags so failed tagged runs can be rebuilt and published entirely from CI.
