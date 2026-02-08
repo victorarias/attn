@@ -30,8 +30,6 @@ It's a desktop app that wraps your agent CLIs — Claude Code, Codex, Copilot �
 
 **Quick Find** — Cmd+F to yank URLs, paths, and hashes out of terminal output.
 
-**tmux status bar** — `attn status` for the terminal purists.
-
 ## Supported agents
 
 | Agent | How attn reads state | Full support |
@@ -111,19 +109,9 @@ The app nudges you when a new release exists. No auto-install — you pick when.
 attn                 # Open app, start session
 attn -s myproject    # Session with a label
 attn --resume        # Resume via agent's native picker
-attn status          # One-liner for tmux
 attn list            # All sessions as JSON
 attn daemon          # Run daemon in foreground
 ```
-
-### tmux integration
-
-```tmux
-set -g status-interval 5
-set -g status-right '#(attn status)'
-```
-
-Quietly tracks the chaos from your status bar.
 
 ## How it works
 

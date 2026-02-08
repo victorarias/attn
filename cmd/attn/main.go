@@ -20,7 +20,6 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/pathutil"
-	"github.com/victorarias/attn/internal/status"
 	"github.com/victorarias/attn/internal/wrapper"
 )
 
@@ -48,8 +47,6 @@ func main() {
 	switch os.Args[1] {
 	case "daemon":
 		runDaemon()
-	case "status":
-		runStatus()
 	case "list":
 		runList()
 	case "_hook-stop":
@@ -73,19 +70,6 @@ func runDaemon() {
 		fmt.Fprintf(os.Stderr, "daemon error: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-func runStatus() {
-	c := client.New("")
-	sessions, err := c.Query("")
-	if err != nil {
-		fmt.Println("? daemon offline")
-		return
-	}
-	prs, _ := c.QueryPRs("")
-	repos, _ := c.QueryRepos()
-	authors, _ := c.QueryAuthors()
-	fmt.Println(status.FormatWithPRsAndRepos(sessions, prs, repos, authors))
 }
 
 func runList() {

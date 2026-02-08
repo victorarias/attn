@@ -13,6 +13,6 @@ class Attn < Formula
   end
 
   test do
-    assert_match "daemon offline", shell_output("#{bin}/attn status")
+    assert_match "unknown command", shell_output("#{bin}/attn version 2>&1", 1)
   end
 end
