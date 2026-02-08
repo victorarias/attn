@@ -131,9 +131,9 @@ export function PRActions({ number, prId, author, compact = false, onMuted, onAc
             data-testid="open-button"
             data-action="open"
             onClick={handleOpen}
-            title="Open in worktree"
+            title="New worktree session"
           >
-            {compact ? '↗' : 'Open'}
+            {compact ? '↗' : 'New'}
           </button>
         )}
         {renderButton('approve', approveState, handleApprove, 'Approve', '✓')}
