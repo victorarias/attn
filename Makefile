@@ -1,4 +1,4 @@
-.PHONY: build install test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app install-app install-all dist
+.PHONY: build install test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app install-app install-all dist release release-skip-tests
 
 BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
@@ -103,3 +103,9 @@ install-all: install install-app
 dist: build-app
 	cd app && pnpm tauri build --bundles dmg
 	@echo "DMG created at app/src-tauri/target/release/bundle/dmg/"
+
+release:
+	./scripts/release.sh $(VERSION_TAG)
+
+release-skip-tests:
+	./scripts/release.sh $(VERSION_TAG) --skip-tests

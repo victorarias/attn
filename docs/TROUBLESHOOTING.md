@@ -26,3 +26,19 @@
 
 - Run `make install-all` again to rebuild and reinstall the app.
 - If you are developing, run `pnpm install` and `pnpm run dev` in `app/`.
+
+## Homebrew upgrade does not update attn
+
+- Refresh indexes: `brew update`.
+- Check what is installed:
+  - CLI/formula: `brew list --formula | rg '^attn$|victorarias/attn/attn'`
+  - App/cask: `brew list --cask | rg '^attn$|victorarias/attn/attn'`
+- Upgrade explicitly:
+  - formula: `brew upgrade victorarias/attn/attn`
+  - cask: `brew upgrade --cask victorarias/attn/attn`
+
+## App says update available but you still run old version
+
+- If installed via cask, run: `brew upgrade --cask victorarias/attn/attn`.
+- If installed via DMG/manual, reinstall from:
+  - `https://github.com/victorarias/attn/releases/latest`
