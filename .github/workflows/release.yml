@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (for retry/fix), e.g. v0.2.0"
+        required: true
+        type: string
 
 jobs:
   tauri:
@@ -13,7 +19,29 @@ jobs:
     runs-on: macos-14
 
     steps:
+      - name: Resolve release tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RELEASE_TAG="${{ inputs.tag }}"
+          else
+            RELEASE_TAG="${{ github.ref_name }}"
+          fi
+
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $RELEASE_TAG"
+            exit 1
+          fi
+
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -26,11 +54,6 @@ jobs:
           node-version: "20"
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Install frontend dependencies
         working-directory: app
@@ -53,8 +76,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: app
-          tagName: ${{ github.ref_name }}
-          releaseName: attn ${{ github.ref_name }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: attn ${{ env.RELEASE_TAG }}
           releaseBody: See CHANGELOG.md for details.
           releaseDraft: false
           prerelease: false
@@ -70,4 +93,4 @@ jobs:
             exit 1
           fi
           cp "$DMG_PATH" /tmp/attn_aarch64.dmg
-          gh release upload "${GITHUB_REF_NAME}" /tmp/attn_aarch64.dmg --clobber
+          gh release upload "${RELEASE_TAG}" /tmp/attn_aarch64.dmg --clobber
