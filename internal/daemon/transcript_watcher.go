@@ -13,6 +13,7 @@ import (
 const (
 	transcriptPollInterval = 500 * time.Millisecond
 	transcriptQuietWindow  = 1500 * time.Millisecond
+	assistantDedupWindow   = 2 * time.Second
 )
 
 type transcriptWatcher struct {
@@ -22,6 +23,10 @@ type transcriptWatcher struct {
 	startedAt time.Time
 	stopCh    chan struct{}
 	doneCh    chan struct{}
+}
+
+func isDuplicateAssistantEvent(lastContent string, lastAt time.Time, content string, now time.Time) bool {
+	return content == lastContent && !lastAt.IsZero() && now.Sub(lastAt) <= assistantDedupWindow
 }
 
 func isTranscriptWatchedAgent(agent protocol.SessionAgent) bool {
@@ -93,6 +98,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 		partialLine    string
 
 		lastAssistantAt time.Time
+		lastAssistant   string
 		assistantSeq    int64
 		classifiedSeq   int64
 
@@ -183,8 +189,13 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				if content == "" {
 					continue
 				}
+				now := time.Now()
+				if isDuplicateAssistantEvent(lastAssistant, lastAssistantAt, content, now) {
+					continue
+				}
 				assistantSeq++
-				lastAssistantAt = time.Now()
+				lastAssistant = content
+				lastAssistantAt = now
 
 				logMsg := content
 				if len(logMsg) > 120 {
