@@ -98,3 +98,28 @@ Restore what was visibly on screen, not just raw output tail.
 - No duplicate session creation is triggered by restore logic.
 - Fallback behavior remains intact for non-snapshot sessions.
 - E2E coverage protects reconnect + restore regressions for full-screen rendering.
+
+## Decouple PTY lifecycle from daemon lifecycle (worker sidecars)
+
+- Status: `open`
+- Priority: `high`
+- Area: `daemon/pty`, `process lifecycle`, `recovery`
+
+### Problem
+
+Daemon currently owns PTY process lifecycle directly. If daemon restarts, PTY sessions are disrupted.
+
+### Direction
+
+Adopt per-session worker sidecars (`Option 2`): daemon is control plane, each session PTY runs in its own worker process.
+
+### Plan
+
+See `docs/plans/2026-02-08-pty-worker-sidecar-plan.md`.
+
+### Acceptance criteria (MVP)
+
+- Daemon restart does not kill active PTY sessions.
+- Daemon rehydrates sessions by discovering and reattaching to live workers.
+- Frontend protocol remains daemon-centric (no direct worker connections).
+- Architecture remains compatible with daemon running on remote host/VM.

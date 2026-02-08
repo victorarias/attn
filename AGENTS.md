@@ -307,7 +307,7 @@ Maintain `CHANGELOG.md` at the project root. Uses timestamps (not versions) sinc
 - Use present tense ("Add" not "Added")
 - Link to relevant docs/plans if helpful
 
-Use `bd ready` to see unblocked work.
+Use `TASKS.md` to see unblocked work.
 
 ## When Something Is Broken
 
@@ -316,4 +316,4 @@ Use `bd ready` to see unblocked work.
 3. **If refactoring**, list preserved behaviors and verify each one survives
 4. **Never remove user-requested functionality** without explicit approval
 
-Ask yourself: "Am I fixing the problem or avoiding it?". You have autonomy to make beads to fix the problem or act on it immediately.
+Ask yourself: "Am I fixing the problem or avoiding it?". You have autonomy to fix the problem or act on it immediately.
