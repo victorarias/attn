@@ -58,6 +58,7 @@ export interface DaemonSessionSnapshot {
 interface LauncherConfig {
   claudeExecutable: string;
   codexExecutable: string;
+  copilotExecutable: string;
 }
 
 interface SessionStore {
@@ -171,6 +172,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   launcherConfig: {
     claudeExecutable: '',
     codexExecutable: '',
+    copilotExecutable: '',
   },
 
   connect: async () => {
@@ -319,6 +321,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             : {}),
           ...(launcherConfig.codexExecutable
             ? { codex_executable: launcherConfig.codexExecutable }
+            : {}),
+          ...(launcherConfig.copilotExecutable
+            ? { copilot_executable: launcherConfig.copilotExecutable }
             : {}),
         },
       });

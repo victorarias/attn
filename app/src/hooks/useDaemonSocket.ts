@@ -86,7 +86,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '26';
+const PROTOCOL_VERSION = '27';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1374,6 +1374,7 @@ export function useDaemonSocket({
         ...(args.fork_session && { fork_session: args.fork_session }),
         ...(args.claude_executable && { claude_executable: args.claude_executable }),
         ...(args.codex_executable && { codex_executable: args.codex_executable }),
+        ...(args.copilot_executable && { copilot_executable: args.copilot_executable }),
       }));
 
       setTimeout(() => {

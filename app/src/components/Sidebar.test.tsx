@@ -13,7 +13,7 @@ const baseProps = {
 };
 
 describe('Sidebar', () => {
-  it('shows unknown indicator for codex session before transcript match', () => {
+  it('uses regular state indicator for codex sessions', () => {
     const { container } = render(
       <Sidebar
         {...baseProps}
@@ -22,14 +22,14 @@ describe('Sidebar', () => {
           label: 'codex',
           state: 'working',
           agent: 'codex',
-          transcriptMatched: false,
         }]}
       />
     );
-    expect(container.querySelector('.state-indicator--unknown')).toBeTruthy();
+    expect(container.querySelector('.state-indicator--working')).toBeTruthy();
+    expect(container.querySelector('.state-indicator--unknown')).toBeFalsy();
   });
 
-  it('shows unknown badge in collapsed sidebar', () => {
+  it('shows waiting badge in collapsed sidebar', () => {
     const { container } = render(
       <Sidebar
         {...baseProps}
@@ -37,13 +37,13 @@ describe('Sidebar', () => {
         sessions={[{
           id: 's1',
           label: 'codex',
-          state: 'working',
+          state: 'waiting_input',
           agent: 'codex',
-          transcriptMatched: false,
         }]}
       />
     );
-    expect(container.querySelector('.mini-badge.unknown')).toBeTruthy();
-    expect(screen.getByText('?')).toBeInTheDocument();
+    expect(container.querySelector('.mini-badge.unknown')).toBeFalsy();
+    expect(container.querySelector('.mini-badge')).toBeTruthy();
+    expect(screen.queryByText('?')).not.toBeInTheDocument();
   });
 });

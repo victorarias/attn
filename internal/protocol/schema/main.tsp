@@ -24,6 +24,7 @@ enum PRRole {
 enum SessionAgent {
   claude,
   codex,
+  copilot,
 }
 
 enum HeatState {
@@ -475,7 +476,7 @@ model SpawnSessionMessage {
   cmd: "spawn_session";
   id: string;
   cwd: string;
-  agent: string;            // "claude", "codex", "shell"
+  agent: string;            // "claude", "codex", "copilot", "shell"
   cols: int32;
   rows: int32;
   label?: string;
@@ -484,6 +485,7 @@ model SpawnSessionMessage {
   fork_session?: boolean;
   claude_executable?: string;
   codex_executable?: string;
+  copilot_executable?: string;
 }
 
 model AttachSessionMessage {

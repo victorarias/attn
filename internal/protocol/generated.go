@@ -1481,6 +1481,7 @@ type SessionAgent string
 
 const SessionAgentClaude SessionAgent = "claude"
 const SessionAgentCodex SessionAgent = "codex"
+const SessionAgentCopilot SessionAgent = "copilot"
 
 type SessionExitedMessage struct {
 	// Event corresponds to the JSON schema field "event".
@@ -1597,6 +1598,9 @@ type SpawnSessionMessage struct {
 
 	// Cols corresponds to the JSON schema field "cols".
 	Cols int `json:"cols"`
+
+	// CopilotExecutable corresponds to the JSON schema field "copilot_executable".
+	CopilotExecutable *string `json:"copilot_executable,omitempty"`
 
 	// Cwd corresponds to the JSON schema field "cwd".
 	Cwd string `json:"cwd"`

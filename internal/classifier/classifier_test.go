@@ -71,9 +71,10 @@ func TestParseResponse_SurroundingText(t *testing.T) {
 		response string
 		want     string
 	}{
-		{"WAITING in sentence", "The assistant is WAITING for user input", "waiting_input"},
-		{"DONE in sentence", "The task is DONE now", "idle"},
-		{"WAITING with explanation", "Based on the analysis, WAITING is the state", "waiting_input"},
+		{"WAITING line prefix", "WAITING - asks a follow-up", "waiting_input"},
+		{"DONE line prefix", "DONE (completed)", "idle"},
+		{"multi-line with final verdict", "analysis...\nDONE", "idle"},
+		{"sentence without explicit verdict prefix", "The assistant is waiting for user input", "idle"},
 	}
 
 	for _, tt := range tests {
@@ -86,13 +87,10 @@ func TestParseResponse_SurroundingText(t *testing.T) {
 	}
 }
 
-func TestParseResponse_WAITINGTakesPrecedence(t *testing.T) {
-	// When both WAITING and DONE appear, WAITING should take precedence
-	// because the implementation checks for WAITING first
-	response := "The task is DONE but I'm WAITING for confirmation"
-	got := ParseResponse(response)
-	if got != "waiting_input" {
-		t.Errorf("When both keywords present, got %q, want 'waiting_input' (WAITING takes precedence)", got)
+func TestParseResponse_NoStandaloneToken(t *testing.T) {
+	got := ParseResponse("This appears complete without further input.")
+	if got != "idle" {
+		t.Errorf("expected idle when no WAITING/DONE prefix, got %q", got)
 	}
 }
 

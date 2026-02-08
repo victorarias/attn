@@ -13,6 +13,7 @@ export interface PtySpawnArgs {
   label?: string;
   claude_executable?: string;
   codex_executable?: string;
+  copilot_executable?: string;
 }
 
 export type PtyEventPayload =

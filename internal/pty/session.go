@@ -40,7 +40,7 @@ type Session struct {
 
 	writeMu sync.Mutex
 
-	// Codex-only state detection based on PTY output.
+	// CLI state detection based on PTY output (currently Codex/Copilot).
 	detector *codexStateDetector
 	onState  func(state string)
 

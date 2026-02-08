@@ -36,8 +36,8 @@ test.describe('Session restore and reconnect harness', () => {
     await expect(page.locator('[data-testid="session-restore-s3"]')).toHaveCount(1);
 
     await page.locator('[data-testid="session-restore-s1"]').click();
-    await expect(page.locator('[data-testid="sidebar-session-restore-s1"] [aria-label="state unknown"]')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[data-testid="sidebar-session-restore-s2"] [aria-label="state unknown"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="sidebar-session-restore-s1"][data-state="working"]')).toHaveClass(/selected/, { timeout: 10000 });
+    await expect(page.locator('[data-testid="sidebar-session-restore-s2"][data-state="waiting_input"]')).not.toHaveClass(/selected/);
 
     await page.reload();
 
@@ -50,8 +50,8 @@ test.describe('Session restore and reconnect harness', () => {
     await expect(page.locator('[data-testid="session-restore-s3"]')).toHaveCount(1);
 
     await page.locator('[data-testid="session-restore-s1"]').click();
-    await expect(page.locator('[data-testid="sidebar-session-restore-s1"] [aria-label="state unknown"]')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[data-testid="sidebar-session-restore-s2"] [aria-label="state unknown"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="sidebar-session-restore-s1"][data-state="working"]')).toHaveClass(/selected/, { timeout: 10000 });
+    await expect(page.locator('[data-testid="sidebar-session-restore-s2"][data-state="waiting_input"]')).not.toHaveClass(/selected/);
   });
 
   test('reconnects after daemon restart and drops stale sessions without live PTY', async ({ page, daemon }) => {
@@ -70,7 +70,7 @@ test.describe('Session restore and reconnect harness', () => {
     await expect(page.locator('[data-testid="session-reconnect-s1"][data-state="working"]')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(1);
     await page.locator('[data-testid="session-reconnect-s1"]').click();
-    await expect(page.locator('[data-testid="sidebar-session-reconnect-s1"] [aria-label="state unknown"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="sidebar-session-reconnect-s1"][data-state="working"]')).toHaveClass(/selected/);
     await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(1);
 
     await daemon.restart();

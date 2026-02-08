@@ -301,6 +301,7 @@ export interface SessionElement {
 export enum SessionAgent {
     Claude = "claude",
     Codex = "codex",
+    Copilot = "copilot",
 }
 
 export enum SessionState {
@@ -1661,18 +1662,19 @@ export enum SpawnResultMessageEvent {
 }
 
 export interface SpawnSessionMessage {
-    agent:              string;
-    claude_executable?: string;
-    cmd:                SpawnSessionMessageCmd;
-    codex_executable?:  string;
-    cols:               number;
-    cwd:                string;
-    fork_session?:      boolean;
-    id:                 string;
-    label?:             string;
-    resume_picker?:     boolean;
-    resume_session_id?: string;
-    rows:               number;
+    agent:               string;
+    claude_executable?:  string;
+    cmd:                 SpawnSessionMessageCmd;
+    codex_executable?:   string;
+    cols:                number;
+    copilot_executable?: string;
+    cwd:                 string;
+    fork_session?:       boolean;
+    id:                  string;
+    label?:              string;
+    resume_picker?:      boolean;
+    resume_session_id?:  string;
+    rows:                number;
     [property: string]: any;
 }
 
@@ -4099,6 +4101,7 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("SpawnSessionMessageCmd") },
         { json: "codex_executable", js: "codex_executable", typ: u(undefined, "") },
         { json: "cols", js: "cols", typ: 0 },
+        { json: "copilot_executable", js: "copilot_executable", typ: u(undefined, "") },
         { json: "cwd", js: "cwd", typ: "" },
         { json: "fork_session", js: "fork_session", typ: u(undefined, true) },
         { json: "id", js: "id", typ: "" },
@@ -4295,6 +4298,7 @@ const typeMap: any = {
     "SessionAgent": [
         "claude",
         "codex",
+        "copilot",
     ],
     "SessionState": [
         "idle",

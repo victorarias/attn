@@ -104,7 +104,7 @@ func runList() {
 }
 
 func runWrapper() {
-	// If running inside the app, run claude directly
+	// If running inside the app, run the selected agent directly.
 	if os.Getenv("ATTN_INSIDE_APP") == "1" {
 		agent := os.Getenv("ATTN_AGENT")
 		if agent == "" {
@@ -115,6 +115,8 @@ func runWrapper() {
 			runCodexDirectly()
 		case "claude":
 			runClaudeDirectly()
+		case "copilot":
+			runCopilotDirectly()
 		default:
 			fmt.Fprintf(os.Stderr, "warning: unknown ATTN_AGENT %q, defaulting to codex\n", agent)
 			runCodexDirectly()
@@ -348,6 +350,212 @@ func findCodexTranscript(cwd string, startedAt time.Time) string {
 	})
 
 	return bestPath
+}
+
+func readCopilotWorkspaceCWD(workspacePath string) string {
+	data, err := os.ReadFile(workspacePath)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "cwd: ") {
+			continue
+		}
+		return filepath.Clean(strings.TrimSpace(strings.TrimPrefix(line, "cwd: ")))
+	}
+	return ""
+}
+
+type copilotEventEnvelope struct {
+	Type      string          `json:"type"`
+	Timestamp string          `json:"timestamp"`
+	Data      json.RawMessage `json:"data"`
+}
+
+type copilotSessionStartData struct {
+	StartTime string `json:"startTime"`
+}
+
+type copilotEventMeta struct {
+	StartTime           time.Time
+	HasStartTime        bool
+	HasAssistantMessage bool
+}
+
+func readCopilotEventMeta(eventsPath string) copilotEventMeta {
+	f, err := os.Open(eventsPath)
+	if err != nil {
+		return copilotEventMeta{}
+	}
+	defer f.Close()
+
+	meta := copilotEventMeta{}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+
+		var evt copilotEventEnvelope
+		if err := json.Unmarshal(line, &evt); err != nil {
+			continue
+		}
+
+		switch evt.Type {
+		case "session.start":
+			var data copilotSessionStartData
+			if err := json.Unmarshal(evt.Data, &data); err != nil {
+				continue
+			}
+			if data.StartTime == "" {
+				continue
+			}
+			ts, parseErr := time.Parse(time.RFC3339Nano, data.StartTime)
+			if parseErr != nil {
+				continue
+			}
+			meta.StartTime = ts
+			meta.HasStartTime = true
+		case "assistant.message":
+			meta.HasAssistantMessage = true
+		}
+	}
+
+	return meta
+}
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
+// findCopilotTranscript searches Copilot session-state for the most recently
+// active events stream matching cwd and launch timing.
+func findCopilotTranscript(cwd string, startedAt time.Time) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	sessionsDir := filepath.Join(homeDir, ".copilot", "session-state")
+	cwdClean := filepath.Clean(cwd)
+	cutoff := startedAt.Add(-5 * time.Minute)
+
+	var bestPath string
+	var bestModTime time.Time
+	bestRank := 10
+	bestDelta := time.Duration(1<<63 - 1)
+
+	filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if path == sessionsDir {
+			return nil
+		}
+
+		workspacePath := filepath.Join(path, "workspace.yaml")
+		eventsPath := filepath.Join(path, "events.jsonl")
+		if _, statErr := os.Stat(eventsPath); statErr != nil {
+			return filepath.SkipDir
+		}
+
+		matchedCWD := readCopilotWorkspaceCWD(workspacePath)
+		if matchedCWD == "" || matchedCWD != cwdClean {
+			return filepath.SkipDir
+		}
+
+		info, statErr := os.Stat(eventsPath)
+		if statErr != nil {
+			return filepath.SkipDir
+		}
+		modTime := info.ModTime()
+		if modTime.Before(cutoff) {
+			return filepath.SkipDir
+		}
+
+		meta := readCopilotEventMeta(eventsPath)
+		rank := 1
+		delta := time.Duration(1<<63 - 1)
+
+		if meta.HasStartTime {
+			startWindowMin := startedAt.Add(-10 * time.Minute)
+			startWindowMax := startedAt.Add(2 * time.Minute)
+			if !meta.StartTime.Before(startWindowMin) && !meta.StartTime.After(startWindowMax) {
+				rank = 0
+				delta = absDuration(meta.StartTime.Sub(startedAt))
+			}
+		}
+		if !meta.HasAssistantMessage {
+			rank++
+		}
+
+		if bestPath == "" {
+			bestPath = eventsPath
+			bestModTime = modTime
+			bestRank = rank
+			bestDelta = delta
+			return filepath.SkipDir
+		}
+		if rank < bestRank {
+			bestPath = eventsPath
+			bestModTime = modTime
+			bestRank = rank
+			bestDelta = delta
+			return filepath.SkipDir
+		}
+		if rank == bestRank {
+			if rank == 0 {
+				if delta < bestDelta || (delta == bestDelta && modTime.After(bestModTime)) {
+					bestPath = eventsPath
+					bestModTime = modTime
+					bestDelta = delta
+				}
+			} else if modTime.After(bestModTime) {
+				bestPath = eventsPath
+				bestModTime = modTime
+			}
+		}
+
+		return filepath.SkipDir
+	})
+
+	return bestPath
+}
+
+func findCopilotTranscriptForResume(resumeID string) string {
+	if resumeID == "" {
+		return ""
+	}
+
+	// Resume IDs are directory names under ~/.copilot/session-state.
+	if strings.Contains(resumeID, "/") || strings.Contains(resumeID, "\\") || strings.Contains(resumeID, "..") {
+		return ""
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	eventsPath := filepath.Join(homeDir, ".copilot", "session-state", resumeID, "events.jsonl")
+	if _, err := os.Stat(eventsPath); err != nil {
+		return ""
+	}
+	return eventsPath
+}
+
+func resolveCopilotTranscript(cwd, resumeID string, startedAt time.Time) string {
+	if transcript := findCopilotTranscriptForResume(resumeID); transcript != "" {
+		return transcript
+	}
+	return findCopilotTranscript(cwd, startedAt)
 }
 
 // runClaudeDirectly runs claude with hooks (used when inside the app)
@@ -639,6 +847,141 @@ func runCodexDirectly() {
 
 	// Attempt stop/classification before unregistering
 	transcriptPath := findCodexTranscript(cwd, startedAt)
+	if sendErr := c.SendStop(sessionID, transcriptPath); sendErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not send stop: %v\n", sendErr)
+	}
+
+	if !managedMode {
+		c.Unregister(sessionID)
+	}
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		os.Exit(1)
+	}
+}
+
+// runCopilotDirectly runs copilot (used when inside the app)
+func runCopilotDirectly() {
+	// Ensure PATH includes common tool locations (GUI apps start with minimal PATH)
+	pathutil.EnsureGUIPath()
+
+	// Parse flags
+	fs := flag.NewFlagSet("attn", flag.ContinueOnError)
+	labelFlag := fs.String("s", "", "session label")
+	resumeFlag := fs.String("resume", "", "session ID to resume from")
+	forkFlag := fs.Bool("fork-session", false, "fork the resumed session")
+	resumePicker := false
+
+	// Find where our flags end and copilot flags begin
+	var attnArgs []string
+	var copilotArgs []string
+
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-s" && i+1 < len(args) {
+			attnArgs = append(attnArgs, arg, args[i+1])
+			i++
+		} else if arg == "--resume" {
+			if i+1 < len(args) && args[i+1] != "--" {
+				attnArgs = append(attnArgs, arg, args[i+1])
+				i++
+			} else {
+				resumePicker = true
+			}
+		} else if arg == "--fork-session" {
+			attnArgs = append(attnArgs, arg)
+		} else if arg == "--" {
+			copilotArgs = append(copilotArgs, args[i+1:]...)
+			break
+		} else {
+			copilotArgs = append(copilotArgs, arg)
+		}
+	}
+
+	fs.Parse(attnArgs)
+
+	// Get label
+	label := *labelFlag
+	if label == "" {
+		label = wrapper.DefaultLabel()
+	}
+
+	// Get working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error getting cwd: %v\n", err)
+		os.Exit(1)
+	}
+
+	c := client.New("")
+	managedMode := os.Getenv("ATTN_DAEMON_MANAGED") == "1"
+
+	// Ensure daemon is running for unmanaged sessions only.
+	if !managedMode && !c.IsRunning() {
+		if err := startDaemonBackground(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not start daemon: %v\n", err)
+		}
+	}
+
+	// Use session ID from environment if provided (from frontend), otherwise generate
+	sessionID := os.Getenv("ATTN_SESSION_ID")
+	if sessionID == "" {
+		sessionID = wrapper.GenerateSessionID()
+	}
+	if !managedMode {
+		if err := c.RegisterWithAgent(sessionID, label, cwd, "copilot"); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
+		}
+	}
+
+	if *forkFlag {
+		fmt.Fprintf(os.Stderr, "warning: copilot fork not supported yet (ignoring --fork-session)\n")
+	}
+
+	// Build copilot command
+	if *resumeFlag != "" {
+		copilotArgs = append([]string{"--resume", *resumeFlag}, copilotArgs...)
+	} else if resumePicker {
+		copilotArgs = append([]string{"--resume"}, copilotArgs...)
+	}
+
+	copilotExecutable := resolveExecutable("ATTN_COPILOT_EXECUTABLE", "copilot")
+	cmd := exec.Command(copilotExecutable, copilotArgs...)
+	cmd.Dir = cwd
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	startedAt := time.Now()
+
+	// Start copilot (non-blocking so we can set up signal forwarding)
+	if err = cmd.Start(); err != nil {
+		if !managedMode {
+			c.Unregister(sessionID)
+		}
+		fmt.Fprintf(os.Stderr, "error starting copilot: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Handle signals - forward to copilot subprocess
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-sigChan
+		if cmd.Process != nil {
+			cmd.Process.Signal(syscall.SIGTERM)
+		}
+	}()
+
+	// Wait for copilot to exit
+	err = cmd.Wait()
+
+	// Attempt stop/classification before unregistering
+	transcriptPath := resolveCopilotTranscript(cwd, *resumeFlag, startedAt)
 	if sendErr := c.SendStop(sessionID, transcriptPath); sendErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not send stop: %v\n", sendErr)
 	}

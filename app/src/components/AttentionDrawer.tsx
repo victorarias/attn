@@ -13,8 +13,6 @@ interface AttentionDrawerProps {
     id: string;
     label: string;
     state: 'working' | 'waiting_input' | 'idle' | 'pending_approval';
-    agent?: string;
-    transcriptMatched?: boolean;
   }>;
   prs: DaemonPR[];
   onSelectSession: (id: string) => void;
@@ -48,7 +46,6 @@ export function AttentionDrawer({
               <span className="section-count">{waitingSessions.length}</span>
             </div>
             {waitingSessions.map((s) => {
-              const unknown = s.agent === 'codex' && s.transcriptMatched === false;
               return (
                 <div
                   key={s.id}
@@ -57,7 +54,7 @@ export function AttentionDrawer({
                   data-state={s.state}
                   onClick={() => onSelectSession(s.id)}
                 >
-                  <StateIndicator state={s.state} size="sm" kind="session" unknown={unknown} />
+                  <StateIndicator state={s.state} size="sm" kind="session" />
                   <span className="item-name">{s.label}</span>
                 </div>
               );

@@ -182,3 +182,23 @@ func TestExtractLastAssistantMessage_CodexResponseItemOutputText(t *testing.T) {
 		t.Errorf("got %q, want %q", result, expected)
 	}
 }
+
+func TestExtractLastAssistantMessage_CopilotEvents(t *testing.T) {
+	content := `{"type":"session.start","data":{"sessionId":"abc"}}
+{"type":"assistant.message","data":{"content":"Copilot reply one."}}
+{"type":"assistant.message","data":{"content":"Copilot final reply with question?"}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "events.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessage(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "Copilot final reply with question?"
+	if result != expected {
+		t.Errorf("got %q, want %q", result, expected)
+	}
+}
