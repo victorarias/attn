@@ -101,6 +101,8 @@ type Daemon struct {
 	warnings        []protocol.DaemonWarning
 	warningsMu      sync.RWMutex
 	ptyManager      *pty.Manager
+	watchersMu      sync.Mutex
+	transcriptWatch map[string]*transcriptWatcher
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -178,16 +180,17 @@ func New(socketPath string) *Daemon {
 	pidPath := filepath.Join(filepath.Dir(socketPath), "attn.pid")
 
 	return &Daemon{
-		socketPath: socketPath,
-		pidPath:    pidPath,
-		store:      sessionStore,
-		wsHub:      newWSHub(),
-		done:       make(chan struct{}),
-		logger:     logger,
-		ghRegistry: github.NewClientRegistry(),
-		repoCaches: make(map[string]*repoCache),
-		warnings:   startupWarnings,
-		ptyManager: pty.NewManager(pty.DefaultScrollbackSize, logger.Infof),
+		socketPath:      socketPath,
+		pidPath:         pidPath,
+		store:           sessionStore,
+		wsHub:           newWSHub(),
+		done:            make(chan struct{}),
+		logger:          logger,
+		ghRegistry:      github.NewClientRegistry(),
+		repoCaches:      make(map[string]*repoCache),
+		warnings:        startupWarnings,
+		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, logger.Infof),
+		transcriptWatch: make(map[string]*transcriptWatcher),
 	}
 }
 
@@ -195,15 +198,16 @@ func New(socketPath string) *Daemon {
 func NewForTesting(socketPath string) *Daemon {
 	pidPath := filepath.Join(filepath.Dir(socketPath), "attn.pid")
 	return &Daemon{
-		socketPath: socketPath,
-		pidPath:    pidPath,
-		store:      store.New(),
-		wsHub:      newWSHub(),
-		done:       make(chan struct{}),
-		logger:     nil, // No logging in tests
-		ghRegistry: github.NewClientRegistry(),
-		repoCaches: make(map[string]*repoCache),
-		ptyManager: pty.NewManager(pty.DefaultScrollbackSize, nil),
+		socketPath:      socketPath,
+		pidPath:         pidPath,
+		store:           store.New(),
+		wsHub:           newWSHub(),
+		done:            make(chan struct{}),
+		logger:          nil, // No logging in tests
+		ghRegistry:      github.NewClientRegistry(),
+		repoCaches:      make(map[string]*repoCache),
+		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, nil),
+		transcriptWatch: make(map[string]*transcriptWatcher),
 	}
 }
 
@@ -215,15 +219,16 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		registry.Register(client.Host(), client)
 	}
 	return &Daemon{
-		socketPath: socketPath,
-		pidPath:    pidPath,
-		store:      store.New(),
-		wsHub:      newWSHub(),
-		done:       make(chan struct{}),
-		logger:     nil,
-		ghRegistry: registry,
-		repoCaches: make(map[string]*repoCache),
-		ptyManager: pty.NewManager(pty.DefaultScrollbackSize, nil),
+		socketPath:      socketPath,
+		pidPath:         pidPath,
+		store:           store.New(),
+		wsHub:           newWSHub(),
+		done:            make(chan struct{}),
+		logger:          nil,
+		ghRegistry:      registry,
+		repoCaches:      make(map[string]*repoCache),
+		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, nil),
+		transcriptWatch: make(map[string]*transcriptWatcher),
 	}
 }
 
@@ -231,6 +236,9 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 func (d *Daemon) Start() error {
 	if d.ptyManager == nil {
 		d.ptyManager = pty.NewManager(pty.DefaultScrollbackSize, d.logf)
+	}
+	if d.transcriptWatch == nil {
+		d.transcriptWatch = make(map[string]*transcriptWatcher)
 	}
 
 	removedSessions := d.pruneSessionsWithoutPTY()
@@ -335,6 +343,7 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
+	d.stopAllTranscriptWatchers()
 	if d.ptyManager != nil {
 		d.ptyManager.Shutdown()
 	}
@@ -354,6 +363,8 @@ func (d *Daemon) Stop() {
 }
 
 func (d *Daemon) handlePTYExit(info pty.ExitInfo) {
+	d.stopTranscriptWatcher(info.ID)
+
 	if d.ptyManager != nil {
 		d.ptyManager.Remove(info.ID)
 	}
@@ -382,6 +393,8 @@ func (d *Daemon) handlePTYExit(info pty.ExitInfo) {
 }
 
 func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
+	d.stopTranscriptWatcher(sessionID)
+
 	if d.ptyManager == nil {
 		return
 	}
@@ -396,6 +409,14 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 	if session == nil {
 		return
 	}
+	agent := session.Agent
+	if (agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot) &&
+		state != protocol.StateWorking &&
+		state != protocol.StatePendingApproval {
+		return
+	}
+
+	d.logf("pty state update: session=%s agent=%s state=%s", sessionID, agent, state)
 	d.store.UpdateState(sessionID, state)
 	d.store.Touch(sessionID)
 	updated := d.store.Get(sessionID)

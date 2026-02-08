@@ -833,6 +833,7 @@ func (d *Daemon) detachAllSessions(client *wsClient) {
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
 	agent := protocol.NormalizeSpawnAgent(msg.Agent, string(protocol.SessionAgentCodex))
 	isShell := agent == protocol.AgentShellValue
+	spawnStartedAt := time.Now()
 	label := protocol.Deref(msg.Label)
 	if label == "" {
 		label = filepath.Base(msg.Cwd)
@@ -889,6 +890,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			}
 		}
 		d.store.Add(session)
+		d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
 		d.store.UpsertRecentLocation(msg.Cwd, label)
 		eventType := protocol.EventSessionRegistered
 		if existing != nil {

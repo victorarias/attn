@@ -43,7 +43,7 @@ func ExtractLastAssistantMessage(path string, maxChars int) (string, error) {
 			continue
 		}
 
-		if content := extractAssistantContent(line); content != "" {
+		if content := ExtractAssistantContent(line); content != "" {
 			lastAssistantContent = content
 		}
 	}
@@ -83,8 +83,8 @@ type copilotEventEntry struct {
 	} `json:"data"`
 }
 
-// extractAssistantContent extracts assistant content from Claude Code or Codex JSONL lines.
-func extractAssistantContent(line []byte) string {
+// ExtractAssistantContent extracts assistant content from Claude Code, Codex, or Copilot JSONL lines.
+func ExtractAssistantContent(line []byte) string {
 	var entry transcriptEntry
 	if err := json.Unmarshal(line, &entry); err == nil {
 		// Check if this is an assistant message (either by type or message.role)
