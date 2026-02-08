@@ -409,6 +409,8 @@ export function useDaemonSocket({
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
   const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
+  const gitStatusSubscriptionRef = useRef<string | null>(null);
+  const branchDiffInFlightRef = useRef<Map<string, Promise<BranchDiffFilesResult>>>(new Map());
   const attachedPtySessionsRef = useRef<Set<string>>(new Set());
   const ptySeqRef = useRef<Map<string, number>>(new Map());
   const pendingAttachOutputsRef = useRef<Map<string, Array<{ data: string; seq?: number }>>>(new Map());
@@ -510,6 +512,9 @@ export function useDaemonSocket({
       // Re-attach terminal streams after reconnect.
       for (const sessionId of attachedPtySessionsRef.current) {
         ws.send(JSON.stringify({ cmd: 'attach_session', id: sessionId }));
+      }
+      if (gitStatusSubscriptionRef.current) {
+        ws.send(JSON.stringify({ cmd: 'subscribe_git_status', directory: gitStatusSubscriptionRef.current }));
       }
     };
 
@@ -2101,14 +2106,25 @@ export function useDaemonSocket({
 
   // Subscribe to git status updates for a directory
   const sendSubscribeGitStatus = useCallback((directory: string) => {
+    const previousDirectory = gitStatusSubscriptionRef.current;
+    if (previousDirectory === directory) return;
+
+    gitStatusSubscriptionRef.current = directory;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
+    if (previousDirectory) {
+      ws.send(JSON.stringify({ cmd: 'unsubscribe_git_status' }));
+    }
     ws.send(JSON.stringify({ cmd: 'subscribe_git_status', directory }));
   }, []);
 
   // Unsubscribe from git status updates
   const sendUnsubscribeGitStatus = useCallback(() => {
+    const hadSubscription = gitStatusSubscriptionRef.current;
+    gitStatusSubscriptionRef.current = null;
+    if (!hadSubscription) return;
+
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -2155,15 +2171,28 @@ export function useDaemonSocket({
     directory: string,
     baseRef?: string
   ): Promise<BranchDiffFilesResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
+    const key = `get_branch_diff_files_${directory}`;
+    const inFlightRequest = branchDiffInFlightRef.current.get(key);
+    if (inFlightRequest) {
+      return inFlightRequest;
+    }
 
-      const key = `get_branch_diff_files_${directory}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('WebSocket not connected'));
+    }
+
+    const request = new Promise<BranchDiffFilesResult>((resolve, reject) => {
+      pendingActionsRef.current.set(key, {
+        resolve: (result) => {
+          branchDiffInFlightRef.current.delete(key);
+          resolve(result as BranchDiffFilesResult);
+        },
+        reject: (error) => {
+          branchDiffInFlightRef.current.delete(key);
+          reject(error);
+        },
+      });
 
       ws.send(JSON.stringify({
         cmd: 'get_branch_diff_files',
@@ -2174,10 +2203,14 @@ export function useDaemonSocket({
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
+          branchDiffInFlightRef.current.delete(key);
           reject(new Error('Get branch diff files timed out'));
         }
       }, 30000); // 30s timeout for potentially large diffs
     });
+
+    branchDiffInFlightRef.current.set(key, request);
+    return request;
   }, []);
 
   // Get repo info

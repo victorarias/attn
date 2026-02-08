@@ -35,6 +35,11 @@ type repoCache struct {
 	branches  []protocol.Branch
 }
 
+const (
+	claudeTranscriptRetryWindow   = 2 * time.Second
+	claudeTranscriptRetryInterval = 100 * time.Millisecond
+)
+
 // ReviewerFactory creates a reviewer for testing
 type ReviewerFactory func(*store.Store) Reviewer
 
@@ -843,9 +848,19 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		return
 	}
 
+	resolvedTranscriptPath := d.resolveTranscriptPathForSession(session, transcriptPath)
+	if resolvedTranscriptPath != transcriptPath {
+		d.logf(
+			"classifySessionState: session %s resolved transcript path %q -> %q",
+			sessionID,
+			transcriptPath,
+			resolvedTranscriptPath,
+		)
+	}
+
 	// Parse transcript for last assistant message
 	d.logf("classifySessionState: parsing transcript for session %s", sessionID)
-	lastMessage, err := transcript.ExtractLastAssistantMessage(transcriptPath, 500)
+	lastMessage, err := d.extractLastAssistantMessage(session, resolvedTranscriptPath, 500)
 	if err != nil {
 		d.logf("classifySessionState: transcript parse error for %s: %v", sessionID, err)
 		// Default to waiting_input on error (safer)
@@ -853,6 +868,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		return
 	}
 
+	lastMessage = strings.TrimSpace(lastMessage)
 	if lastMessage == "" {
 		d.logf("classifySessionState: empty last message for session %s, setting idle", sessionID)
 		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateIdle, classificationStartTime)
@@ -888,6 +904,44 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 
 	d.logf("classifySessionState: session %s classified as %s", sessionID, state)
 	d.updateAndBroadcastStateWithTimestamp(sessionID, state, classificationStartTime)
+}
+
+func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, transcriptPath string) string {
+	path := strings.TrimSpace(transcriptPath)
+	if session == nil || session.Agent != protocol.SessionAgentClaude {
+		return path
+	}
+
+	if path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	discovered := transcript.FindClaudeTranscript(session.ID)
+	if discovered != "" {
+		return discovered
+	}
+
+	return path
+}
+
+func (d *Daemon) extractLastAssistantMessage(session *protocol.Session, transcriptPath string, maxChars int) (string, error) {
+	if session == nil || session.Agent != protocol.SessionAgentClaude {
+		return transcript.ExtractLastAssistantMessage(transcriptPath, maxChars)
+	}
+
+	deadline := time.Now().Add(claudeTranscriptRetryWindow)
+	for {
+		lastMessage, err := transcript.ExtractLastAssistantMessage(transcriptPath, maxChars)
+		if err == nil && strings.TrimSpace(lastMessage) != "" {
+			return lastMessage, nil
+		}
+		if !time.Now().Before(deadline) {
+			return lastMessage, err
+		}
+		time.Sleep(claudeTranscriptRetryInterval)
+	}
 }
 
 func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
