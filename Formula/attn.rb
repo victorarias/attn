@@ -1,9 +1,9 @@
 class Attn < Formula
   desc "Desktop orchestrator and CLI wrapper for Claude Code and Codex sessions"
   homepage "https://github.com/victorarias/attn"
-  url "https://github.com/victorarias/attn/archive/refs/tags/v0.2.1.tar.gz"
-  sha256 "5854ed52ca05d1fe5e9b35febd2f9402241dfb6bf815b04d9c1af9e2e6484178"
-  version "0.2.1"
+  url "https://github.com/victorarias/attn/archive/refs/tags/v0.2.2.tar.gz"
+  sha256 "7562e90417e5fb98352de55b6aab980bd5884f78d2ac7a0e09a5e73451264341"
+  version "0.2.2"
   license "GPL-3.0-only"
 
   depends_on "go" => :build
