@@ -83,14 +83,42 @@ jobs:
           prerelease: false
           args: --target aarch64-apple-darwin
 
+      - name: Re-sign app and replace release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APP_PATH="$(find app/src-tauri/target -type d -name 'attn.app' | head -n1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No attn.app bundle found in build output"
+            exit 1
+          fi
+
+          VERSION="${RELEASE_TAG#v}"
+          WORK_DIR="$(mktemp -d)"
+          cp -R "$APP_PATH" "$WORK_DIR/attn.app"
+
+          # Ensure app bundle has a coherent signature before distributing via cask.
+          xattr -cr "$WORK_DIR/attn.app" || true
+          codesign --force --deep --sign - "$WORK_DIR/attn.app"
+          codesign --verify --deep --strict --verbose=2 "$WORK_DIR/attn.app"
+
+          DMG_REBUILT="$WORK_DIR/attn_${VERSION}_aarch64.dmg"
+          hdiutil create -volname "attn" -srcfolder "$WORK_DIR/attn.app" -format UDZO "$DMG_REBUILT"
+
+          (cd "$WORK_DIR" && tar -czf "attn_aarch64.app.tar.gz" attn.app)
+          APP_TAR="$WORK_DIR/attn_aarch64.app.tar.gz"
+
+          gh release upload "${RELEASE_TAG}" "$DMG_REBUILT" --clobber
+          gh release upload "${RELEASE_TAG}" "$APP_TAR" --clobber
+          echo "DMG_REBUILT=$DMG_REBUILT" >> "$GITHUB_ENV"
+
       - name: Upload stable DMG alias for Homebrew cask
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          DMG_PATH="$(find app/src-tauri/target -type f -name 'attn_*_aarch64.dmg' | head -n1)"
-          if [ -z "$DMG_PATH" ]; then
-            echo "No aarch64 DMG found"
+          if [ -z "${DMG_REBUILT:-}" ]; then
+            echo "Rebuilt DMG path not available"
             exit 1
           fi
-          cp "$DMG_PATH" /tmp/attn_aarch64.dmg
+          cp "$DMG_REBUILT" /tmp/attn_aarch64.dmg
           gh release upload "${RELEASE_TAG}" /tmp/attn_aarch64.dmg --clobber

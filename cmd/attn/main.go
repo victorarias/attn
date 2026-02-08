@@ -119,6 +119,16 @@ func resolveExecutable(envKey, fallback string) string {
 	return fallback
 }
 
+func resolveWrapperPath() string {
+	if value := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); value != "" {
+		return value
+	}
+	if exePath, err := os.Executable(); err == nil && strings.TrimSpace(exePath) != "" {
+		return exePath
+	}
+	return "attn"
+}
+
 // openAppWithDeepLink opens the Tauri app with a deep link to spawn a session
 func openAppWithDeepLink() {
 	cwd, err := os.Getwd()
@@ -619,7 +629,7 @@ func runClaudeDirectly() {
 
 	// Write hooks config
 	socketPath := config.SocketPath()
-	hooksPath, err := wrapper.WriteHooksConfig(os.TempDir(), sessionID, socketPath)
+	hooksPath, err := wrapper.WriteHooksConfig(os.TempDir(), sessionID, socketPath, resolveWrapperPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error writing hooks config: %v\n", err)
 		os.Exit(1)
