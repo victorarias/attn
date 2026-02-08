@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -66,6 +67,71 @@ func TestHarness_FakeClassifier(t *testing.T) {
 	if sessions[0].State != protocol.SessionStateWaitingInput {
 		t.Logf("State = %s (classifier calls: %d)", sessions[0].State, len(calls))
 	}
+}
+
+func TestHarness_ClaudeStop_RetriesTranscriptReadOnFirstTurn(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19912")
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-harness-claude-stop-retry-%d.sock", time.Now().UnixNano()))
+
+	harness := NewTestHarnessBuilder(sockPath).
+		WithDefaultClassifierState(protocol.StateIdle).
+		Build()
+
+	harness.Classifier.SetResponse("Need your input", protocol.StateWaitingInput)
+	harness.Start()
+	defer harness.Stop()
+
+	c := client.New(sockPath)
+	if err := c.Register("claude-session", "Claude", "/tmp/test-claude"); err != nil {
+		t.Fatalf("Register error: %v", err)
+	}
+	if err := c.UpdateState("claude-session", protocol.StateWorking); err != nil {
+		t.Fatalf("UpdateState error: %v", err)
+	}
+
+	transcriptPath := filepath.Join(t.TempDir(), "claude-transcript.jsonl")
+	if err := os.WriteFile(transcriptPath, []byte(""), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		line := `{"type":"assistant","message":{"role":"assistant","content":"Need your input on this next step."}}` + "\n"
+		_ = os.WriteFile(transcriptPath, []byte(line), 0o644)
+	}()
+
+	if err := c.SendStop("claude-session", transcriptPath); err != nil {
+		t.Fatalf("SendStop error: %v", err)
+	}
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		calls := harness.Classifier.Calls()
+		if len(calls) > 0 {
+			if calls[len(calls)-1].Text == "" {
+				t.Fatal("expected classifier call to include transcript text")
+			}
+			sessions, err := c.Query("")
+			if err != nil {
+				t.Fatalf("Query error: %v", err)
+			}
+			if len(sessions) != 1 {
+				t.Fatalf("Expected 1 session, got %d", len(sessions))
+			}
+			if sessions[0].State != protocol.SessionStateWaitingInput {
+				t.Fatalf("expected waiting_input after classification, got %s", sessions[0].State)
+			}
+			return
+		}
+
+		sessions, err := c.Query("")
+		if err != nil {
+			t.Fatalf("Query error: %v", err)
+		}
+		_ = sessions
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for classifier call")
 }
 
 func TestHarness_BroadcastRecorder(t *testing.T) {

@@ -134,3 +134,50 @@ func TestFindCopilotTranscript_FallsBackToNewestModTime(t *testing.T) {
 		t.Fatalf("FindCopilotTranscript() = %q, want %q", got, expected)
 	}
 }
+
+func TestFindClaudeTranscript_FindsSessionFile(t *testing.T) {
+	homeDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
+
+	sessionID := "claude-session-123"
+	projectDir := filepath.Join(homeDir, ".claude", "projects", "-Users-test-repo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+
+	expected := filepath.Join(projectDir, sessionID+".jsonl")
+	if err := os.WriteFile(expected, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	got := FindClaudeTranscript(sessionID)
+	if got != expected {
+		t.Fatalf("FindClaudeTranscript() = %q, want %q", got, expected)
+	}
+}
+
+func TestFindClaudeTranscript_ReturnsEmptyWhenMissing(t *testing.T) {
+	homeDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
+
+	projectDir := filepath.Join(homeDir, ".claude", "projects", "-Users-test-repo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+
+	if got := FindClaudeTranscript("missing-session"); got != "" {
+		t.Fatalf("FindClaudeTranscript() = %q, want empty", got)
+	}
+}

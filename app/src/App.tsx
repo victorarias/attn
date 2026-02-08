@@ -646,6 +646,7 @@ function AppContent({
   // View state management
   const [view, setView] = useState<'dashboard' | 'session' | 'review'>('dashboard');
   const previousViewRef = useRef<'dashboard' | 'session'>('session');
+  const gitStatusSubscribedDirRef = useRef<string | null>(null);
 
   // When activeSessionId changes, update view
   useEffect(() => {
@@ -657,19 +658,42 @@ function AppContent({
   // Subscribe to git status for active session
   useEffect(() => {
     const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
-    if (activeLocalSession?.cwd && view === 'session') {
-      const daemonSession = daemonSessions.find((ds: { id: string; directory: string }) => ds.id === activeLocalSession.id);
-      if (daemonSession) {
-        sendSubscribeGitStatus(daemonSession.directory);
-        return () => {
-          sendUnsubscribeGitStatus();
-          clearGitStatus();
-        };
+    const nextDirectory =
+      activeLocalSession?.cwd && view === 'session'
+        ? daemonSessions.find((ds: { id: string; directory: string }) => ds.id === activeLocalSession.id)?.directory || null
+        : null;
+    const currentDirectory = gitStatusSubscribedDirRef.current;
+
+    if (nextDirectory === currentDirectory) {
+      if (!nextDirectory) {
+        clearGitStatus();
       }
-    } else {
-      clearGitStatus();
+      return;
     }
+
+    if (currentDirectory) {
+      sendUnsubscribeGitStatus();
+      gitStatusSubscribedDirRef.current = null;
+    }
+
+    if (!nextDirectory) {
+      clearGitStatus();
+      return;
+    }
+
+    sendSubscribeGitStatus(nextDirectory);
+    gitStatusSubscribedDirRef.current = nextDirectory;
   }, [activeSessionId, sessions, daemonSessions, view, sendSubscribeGitStatus, sendUnsubscribeGitStatus, clearGitStatus]);
+
+  useEffect(() => {
+    return () => {
+      if (gitStatusSubscribedDirRef.current) {
+        sendUnsubscribeGitStatus();
+        gitStatusSubscribedDirRef.current = null;
+      }
+      clearGitStatus();
+    };
+  }, [sendUnsubscribeGitStatus, clearGitStatus]);
 
   // Function to go to dashboard
   const goToDashboard = useCallback(() => {

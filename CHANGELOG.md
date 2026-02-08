@@ -46,6 +46,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Codex/Copilot State Source-of-Truth**: PTY-derived `waiting_input`/`idle` transitions are now ignored for Codex/Copilot sessions so final idle/waiting colors come from transcript + classifier, reducing noisy false transitions.
 - **Session Restore E2E Coverage**: Session restore/reconnect Playwright assertions now validate actual sidebar session state/selection markers instead of removed `state unknown` indicators.
 - **Settings Validation Feedback**: Invalid executable settings now surface an explicit UI error toast, and the client re-syncs to daemon settings after validation failure instead of leaving stale optimistic values.
+- **Git Status/Review Command Chatter**: Frontend now avoids redundant git-status subscribe/unsubscribe cycles when the active session directory is unchanged, and de-duplicates in-flight branch-diff requests for the same repo directory.
+- **Claude First-Turn State Detection**: Stop-time classification now retries Claude transcript reads briefly and falls back to transcript discovery by session ID when the provided path is missing/stale, preventing first-turn empty-transcript misclassification.
 
 ### Removed
 - **Tauri Updater Runtime Wiring**: Removed updater/process plugin wiring and updater signing requirements from the desktop app release path.

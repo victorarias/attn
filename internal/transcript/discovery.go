@@ -289,3 +289,43 @@ func FindCopilotTranscript(cwd string, startedAt time.Time) string {
 
 	return bestPath
 }
+
+// FindClaudeTranscript searches Claude project directories for a transcript
+// file matching the session ID. Returns empty string if not found.
+func FindClaudeTranscript(sessionID string) string {
+	if strings.TrimSpace(sessionID) == "" {
+		return ""
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	projectsDir := filepath.Join(homeDir, ".claude", "projects")
+	transcriptName := sessionID + ".jsonl"
+	var found string
+
+	filepath.WalkDir(projectsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if path == projectsDir {
+			return nil
+		}
+
+		transcriptPath := filepath.Join(path, transcriptName)
+		if _, statErr := os.Stat(transcriptPath); statErr == nil {
+			found = transcriptPath
+			return filepath.SkipAll
+		}
+
+		// Claude stores transcript files directly under each project dir.
+		return filepath.SkipDir
+	})
+
+	return found
+}
