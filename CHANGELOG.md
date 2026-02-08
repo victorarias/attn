@@ -12,7 +12,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Copilot Session Agent**: Add first-class `copilot` session support across protocol, daemon PTY spawn, wrapper launch flow, and session picker/default-agent settings.
 - **Copilot Executable Override**: Add `copilot_executable` setting and plumb it through frontend spawn requests, daemon validation, and PTY environment (`ATTN_COPILOT_EXECUTABLE`).
 - **Copilot Transcript Parsing**: Add support for parsing Copilot `events.jsonl` (`assistant.message`) in transcript extraction.
-- **No-UI Real-Agent Harness**: Add `attn harness` command to spawn and attach real agent sessions over daemon WebSocket from the terminal, stream PTY output, and print live `session_state_changed` transitions without opening the app UI.
+- **No-UI Real-Agent Harness Test**: Add opt-in integration harness test that spawns and attaches real agent sessions over daemon WebSocket, streams PTY output, and prints live `session_state_changed` transitions without opening the app UI.
 
 ### Changed
 - **Classifier Backend**: Add Copilot CLI classifier support (`copilot -p ... --model claude-haiku-4.5`) while keeping Claude SDK classification for Claude/Codex sessions.

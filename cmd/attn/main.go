@@ -52,8 +52,6 @@ func main() {
 		runStatus()
 	case "list":
 		runList()
-	case "harness":
-		runHarness()
 	case "_hook-stop":
 		runHookStop()
 	case "_hook-todo":
