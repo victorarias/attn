@@ -17,7 +17,19 @@
 
 .header-left {
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-text {
+  display: flex;
   flex-direction: column;
+}
+
+.dashboard-icon {
+  width: calc(64px * var(--ui-scale));
+  height: calc(64px * var(--ui-scale));
 }
 
 .dashboard-header h1 {
