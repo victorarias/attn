@@ -39,7 +39,7 @@ const SESSION_AGENT_KEY = 'new_session_agent';
 const normalizeAgent = (value?: string): SessionAgent | null => {
   if (!value) return null;
   const lower = value.toLowerCase();
-  if (lower === 'codex' || lower === 'claude') {
+  if (lower === 'codex' || lower === 'claude' || lower === 'copilot') {
     return lower as SessionAgent;
   }
   return null;
@@ -357,6 +357,11 @@ export function LocationPicker({
         }
         if (e.code === 'Digit3') {
           e.preventDefault();
+          handleAgentChange('copilot');
+          return;
+        }
+        if (e.code === 'Digit4') {
+          e.preventDefault();
           setState(prev => ({
             ...prev,
             resumeEnabled: !prev.resumeEnabled,
@@ -443,6 +448,16 @@ export function LocationPicker({
                 <span className="agent-option-name">Claude</span>
                 <kbd className="agent-shortcut">⌥2</kbd>
               </button>
+              <button
+                type="button"
+                className={`agent-option ${state.agent === 'copilot' ? 'active' : ''}`}
+                onClick={() => handleAgentChange('copilot')}
+                role="radio"
+                aria-checked={state.agent === 'copilot'}
+              >
+                <span className="agent-option-name">Copilot</span>
+                <kbd className="agent-shortcut">⌥3</kbd>
+              </button>
             </div>
             <button
               type="button"
@@ -451,7 +466,7 @@ export function LocationPicker({
               aria-pressed={state.resumeEnabled}
             >
               <span className="resume-toggle-label">Resume</span>
-              <kbd className="agent-shortcut">⌥3</kbd>
+              <kbd className="agent-shortcut">⌥4</kbd>
             </button>
           </div>
         </div>

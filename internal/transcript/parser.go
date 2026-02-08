@@ -76,6 +76,13 @@ type codexResponseMessage struct {
 	Content json.RawMessage `json:"content"`
 }
 
+type copilotEventEntry struct {
+	Type string `json:"type"`
+	Data struct {
+		Content string `json:"content"`
+	} `json:"data"`
+}
+
 // extractAssistantContent extracts assistant content from Claude Code or Codex JSONL lines.
 func extractAssistantContent(line []byte) string {
 	var entry transcriptEntry
@@ -114,6 +121,13 @@ func extractAssistantContent(line []byte) string {
 			if content != "" {
 				return content
 			}
+		}
+	}
+
+	var copilot copilotEventEntry
+	if err := json.Unmarshal(line, &copilot); err == nil {
+		if copilot.Type == "assistant.message" && copilot.Data.Content != "" {
+			return copilot.Data.Content
 		}
 	}
 

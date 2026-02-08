@@ -31,6 +31,7 @@ export function SettingsModal({
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
   const [claudeExecutable, setClaudeExecutable] = useState(settings.claude_executable || '');
   const [codexExecutable, setCodexExecutable] = useState(settings.codex_executable || '');
+  const [copilotExecutable, setCopilotExecutable] = useState(settings.copilot_executable || '');
   const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
   const [defaultAgent, setDefaultAgent] = useState<SessionAgent>((settings.new_session_agent as SessionAgent) || 'claude');
 
@@ -38,6 +39,7 @@ export function SettingsModal({
   const actualProjectsDir = settings.projects_directory || '';
   const actualClaudeExecutable = settings.claude_executable || '';
   const actualCodexExecutable = settings.codex_executable || '';
+  const actualCopilotExecutable = settings.copilot_executable || '';
   const actualEditorExecutable = settings.editor_executable || '';
   const actualDefaultAgent = (settings.new_session_agent as SessionAgent) || 'claude';
 
@@ -46,9 +48,10 @@ export function SettingsModal({
     setProjectsDir(actualProjectsDir);
     setClaudeExecutable(actualClaudeExecutable);
     setCodexExecutable(actualCodexExecutable);
+    setCopilotExecutable(actualCopilotExecutable);
     setEditorExecutable(actualEditorExecutable);
     setDefaultAgent(actualDefaultAgent);
-  }, [isOpen, actualProjectsDir, actualClaudeExecutable, actualCodexExecutable, actualEditorExecutable, actualDefaultAgent]);
+  }, [isOpen, actualProjectsDir, actualClaudeExecutable, actualCodexExecutable, actualCopilotExecutable, actualEditorExecutable, actualDefaultAgent]);
 
   const handleBrowse = useCallback(async () => {
     const selected = await open({
@@ -92,6 +95,10 @@ export function SettingsModal({
     setEditorExecutable(e.target.value);
   }, []);
 
+  const handleCopilotChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setCopilotExecutable(e.target.value);
+  }, []);
+
   const handleClaudeBlur = useCallback(() => {
     if (claudeExecutable !== actualClaudeExecutable) {
       onSetSetting('claude_executable', claudeExecutable);
@@ -109,6 +116,12 @@ export function SettingsModal({
       onSetSetting('editor_executable', editorExecutable);
     }
   }, [editorExecutable, actualEditorExecutable, onSetSetting]);
+
+  const handleCopilotBlur = useCallback(() => {
+    if (copilotExecutable !== actualCopilotExecutable) {
+      onSetSetting('copilot_executable', copilotExecutable);
+    }
+  }, [copilotExecutable, actualCopilotExecutable, onSetSetting]);
 
   const handleClaudeKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -133,6 +146,14 @@ export function SettingsModal({
       }
     }
   }, [editorExecutable, actualEditorExecutable, onSetSetting]);
+
+  const handleCopilotKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      if (copilotExecutable !== actualCopilotExecutable) {
+        onSetSetting('copilot_executable', copilotExecutable);
+      }
+    }
+  }, [copilotExecutable, actualCopilotExecutable, onSetSetting]);
 
   const handleDefaultAgentChange = useCallback((agent: SessionAgent) => {
     setDefaultAgent(agent);
@@ -233,6 +254,19 @@ export function SettingsModal({
                 className="settings-input"
               />
             </div>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-copilot-exec">Copilot</label>
+              <input
+                id="settings-copilot-exec"
+                type="text"
+                value={copilotExecutable}
+                onChange={handleCopilotChange}
+                onBlur={handleCopilotBlur}
+                onKeyDown={handleCopilotKeyDown}
+                placeholder="copilot"
+                className="settings-input"
+              />
+            </div>
           </div>
 
           <div className="settings-section">
@@ -256,6 +290,14 @@ export function SettingsModal({
                 aria-checked={defaultAgent === 'claude'}
               >
                 Claude
+              </button>
+              <button
+                type="button"
+                className={`agent-option ${defaultAgent === 'copilot' ? 'active' : ''}`}
+                onClick={() => handleDefaultAgentChange('copilot')}
+                aria-checked={defaultAgent === 'copilot'}
+              >
+                Copilot
               </button>
             </div>
           </div>

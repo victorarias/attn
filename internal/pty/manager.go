@@ -42,8 +42,9 @@ type SpawnOptions struct {
 	ResumePicker    bool
 	ForkSession     bool
 
-	ClaudeExecutable string
-	CodexExecutable  string
+	ClaudeExecutable  string
+	CodexExecutable   string
+	CopilotExecutable string
 }
 
 type AttachInfo struct {
@@ -189,7 +190,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	onState := m.onState
 	m.mu.Unlock()
 
-	if agent == "codex" {
+	if agent == "codex" || agent == "copilot" {
 		session.detector = newCodexStateDetector()
 		if onState != nil {
 			session.onState = func(state string) {
@@ -307,6 +308,8 @@ func normalizeAgent(agent string) string {
 		return "codex"
 	case "claude":
 		return "claude"
+	case "copilot":
+		return "copilot"
 	case "shell":
 		return "shell"
 	default:
@@ -361,6 +364,9 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent string, logf LogF
 		}
 		if opts.CodexExecutable != "" {
 			env = mergeEnvironment(env, []string{"ATTN_CODEX_EXECUTABLE=" + opts.CodexExecutable})
+		}
+		if opts.CopilotExecutable != "" {
+			env = mergeEnvironment(env, []string{"ATTN_COPILOT_EXECUTABLE=" + opts.CopilotExecutable})
 		}
 	}
 	return env

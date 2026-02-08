@@ -63,7 +63,7 @@ func (c *Client) Register(id, label, dir string) error {
 }
 
 // RegisterWithAgent registers a new session with an explicit agent.
-// agent should be "claude" or "codex"; empty preserves daemon default behavior.
+// agent should be "claude", "codex", or "copilot"; empty preserves daemon default behavior.
 func (c *Client) RegisterWithAgent(id, label, dir, agent string) error {
 	msg := protocol.RegisterMessage{
 		Cmd:   protocol.CmdRegister,

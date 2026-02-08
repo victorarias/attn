@@ -851,7 +851,13 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	if d.classifier != nil {
 		state, err = d.classifier.Classify(lastMessage, 30*time.Second)
 	} else {
-		state, err = classifier.Classify(lastMessage, 30*time.Second)
+		switch session.Agent {
+		case protocol.SessionAgentCopilot:
+			state, err = classifier.ClassifyWithCopilot(lastMessage, 30*time.Second)
+		default:
+			// Use Claude SDK for Claude and Codex sessions.
+			state, err = classifier.ClassifyWithClaude(lastMessage, 30*time.Second)
+		}
 	}
 	if err != nil {
 		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)

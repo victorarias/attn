@@ -30,6 +30,7 @@ const (
 	SettingUIScale           = "uiScale"
 	SettingClaudeExecutable  = "claude_executable"
 	SettingCodexExecutable   = "codex_executable"
+	SettingCopilotExecutable = "copilot_executable"
 	SettingEditorExecutable  = "editor_executable"
 	SettingNewSessionAgent   = "new_session_agent"
 )
@@ -838,17 +839,18 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	}
 
 	spawnOpts := pty.SpawnOptions{
-		ID:               msg.ID,
-		CWD:              msg.Cwd,
-		Agent:            agent,
-		Label:            label,
-		Cols:             uint16(msg.Cols),
-		Rows:             uint16(msg.Rows),
-		ResumeSessionID:  protocol.Deref(msg.ResumeSessionID),
-		ResumePicker:     protocol.Deref(msg.ResumePicker),
-		ForkSession:      protocol.Deref(msg.ForkSession),
-		ClaudeExecutable: protocol.Deref(msg.ClaudeExecutable),
-		CodexExecutable:  protocol.Deref(msg.CodexExecutable),
+		ID:                msg.ID,
+		CWD:               msg.Cwd,
+		Agent:             agent,
+		Label:             label,
+		Cols:              uint16(msg.Cols),
+		Rows:              uint16(msg.Rows),
+		ResumeSessionID:   protocol.Deref(msg.ResumeSessionID),
+		ResumePicker:      protocol.Deref(msg.ResumePicker),
+		ForkSession:       protocol.Deref(msg.ForkSession),
+		ClaudeExecutable:  protocol.Deref(msg.ClaudeExecutable),
+		CodexExecutable:   protocol.Deref(msg.CodexExecutable),
+		CopilotExecutable: protocol.Deref(msg.CopilotExecutable),
 	}
 
 	if err := d.ptyManager.Spawn(spawnOpts); err != nil {
@@ -1104,7 +1106,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateProjectsDirectory(value)
 	case SettingUIScale:
 		return validateUIScale(value)
-	case SettingClaudeExecutable, SettingCodexExecutable:
+	case SettingClaudeExecutable, SettingCodexExecutable, SettingCopilotExecutable:
 		return validateExecutableSetting(value)
 	case SettingEditorExecutable:
 		return validateEditorSetting(value)
@@ -1220,7 +1222,7 @@ func validateNewSessionAgent(value string) error {
 		return nil
 	}
 	lower := strings.ToLower(agent)
-	if lower != "codex" && lower != "claude" {
+	if lower != "codex" && lower != "claude" && lower != "copilot" {
 		return fmt.Errorf("unknown agent: %s", value)
 	}
 	return nil

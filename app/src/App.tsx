@@ -426,6 +426,7 @@ function AppContent({
     setLauncherConfig({
       claudeExecutable: settings.claude_executable || '',
       codexExecutable: settings.codex_executable || '',
+      copilotExecutable: settings.copilot_executable || '',
     });
   }, [settings, setLauncherConfig]);
 
