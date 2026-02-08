@@ -9,6 +9,7 @@ import { useDaemonContext } from '../contexts/DaemonContext';
 import { useDaemonStore } from '../store/daemonSessions';
 import { getRepoName } from '../utils/repo';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import appIcon from '../assets/icon.png';
 import './Dashboard.css';
 
 interface DashboardProps {
@@ -170,8 +171,11 @@ export function Dashboard({
     <div className="dashboard">
       <header className="dashboard-header">
         <div className="header-left">
-          <h1>attn</h1>
-          <span className="dashboard-subtitle">attention hub</span>
+          <img src={appIcon} alt="" className="dashboard-icon" />
+          <div className="header-text">
+            <h1>attn</h1>
+            <span className="dashboard-subtitle">attention hub</span>
+          </div>
         </div>
         <button
           className="settings-btn"
