@@ -32,11 +32,11 @@ It's a desktop app that wraps your agent CLIs â€” Claude Code, Codex, Copilot â€
 
 ## Supported agents
 
-| Agent | How attn reads state | Full support |
+| Agent | State detection | Review & forking |
 |---|---|---|
-| [Claude Code](https://claude.ai/code) | Hooks + classifier | Review, forking, everything |
-| [Codex](https://developers.openai.com/codex) | PTY output heuristics | Sessions + state |
-| [Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) | PTY output heuristics | Sessions + state |
+| [Claude Code](https://claude.ai/code) | Hooks + classifier | Yes |
+| [Codex](https://developers.openai.com/codex) | PTY heuristics + transcript classifier | No |
+| [Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) | PTY heuristics + transcript classifier | No |
 
 ## Install
 
