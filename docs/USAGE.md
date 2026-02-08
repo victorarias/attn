@@ -57,7 +57,6 @@ Basic CLI usage:
 attn
 attn -s myproject
 attn --resume
-attn status
 attn list
 ```
 

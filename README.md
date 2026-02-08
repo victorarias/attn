@@ -1,236 +1,164 @@
+<p align="center">
+  <img src="docs/banner.png" alt="attn — attention hub" width="100%" />
+</p>
+
 # attn
 
-Keep multiple AI coding sessions under control without losing your mind. **attn** is a desktop app + CLI
-that wraps [Claude Code](https://claude.ai/code) and [Codex](https://developers.openai.com/codex) to help
-you orchestrate sessions: see state, jump to the right terminal, and manage worktrees, diffs, and PRs
-from one place.
+**attention hub** — because your head shouldn't feel like concrete by 3pm.
 
-![Demo](docs/demo.gif)
+I built this after noticing a pattern: I'd start the day sharp, spin up 4-5 AI agents across different repos, and by mid-afternoon my brain was soup. Not from the coding — from the *managing*. Which terminal has the agent that's stuck? Did that one finish? Wait, who asked me a question 20 minutes ago? Alt-tab, alt-tab, alt-tab, scroll, squint, repeat.
 
-## Why
+attn fixes the dumbest part of multi-agent workflows: knowing what needs you right now.
 
-You are running multiple Claude/Codex sessions across repos. One is waiting for approval, another
-hit an error, and a third has a question. You are focused on the fourth and have no idea the others
-need you. attn is the polite, slightly relentless friend who taps you on the shoulder.
+It's a desktop app that wraps your agent CLIs — Claude Code, Codex, Copilot — and puts them all in one window with color-coded status. Green means working. Yellow means "hey, I need you." Gray means done. No more tab-hunting. No more heavy head.
 
-## What attn does
+**There is no custom agent UI.** attn wraps each CLI directly. You get the real, native experience of every agent — just organized.
 
-**attn** tracks all your sessions in one place:
+<!-- ![Demo](docs/demo.gif) -->
 
-- **Real-time status** - Working, waiting, idle, approval required
-- **Built-in terminal** - Run Claude/Codex sessions without leaving the app; open utility shells too
-- **Resume sessions** - Use the agent's built-in picker (Option-3 in the new-session dialog)
-- **Git worktrees** - Create and manage worktrees for parallel work (Cmd+N)
-- **Git diffs** - View changes and send diff snippets as context
-- **Session forking** - Fork a Claude session to explore alternatives (Cmd+Shift+F)
-- **Quick Find** - Extract URLs, paths, and hashes from terminal output (Cmd+F)
-- **GitHub PR integration** - Track PRs that need review, have CI failures, or merge conflicts across github.com + GHES
-- **tmux status bar** - See session status from your terminal
+## What you get
 
-Session tracking uses Claude hooks plus a lightweight classifier to detect when the agent is waiting
-for input (even if it stops without explicit approval requests).
+**One sidebar to rule them all** — Every agent session, live state at a glance. The one that needs you glows. Click it. Done.
 
-## Quickstart
+**Embedded terminals** — No more "which terminal was that in?" Run agents inside the app. Open utility shells next to them. Resume sessions, fork them, never leave the window.
 
-```bash
-git clone https://github.com/victorarias/attn.git
-cd attn
-make install-all
-```
+**Code review** — Full diff viewer with inline comments and AI-assisted review. Claude reads your branch, leaves comments, you resolve them. All without opening a browser. *(Claude only)*
 
-Launch **attn** from Applications and click **+** to start a session.
+**PR dashboard** — Your PRs, your review requests, CI failures, merge conflicts — one place. Works across GitHub.com and GitHub Enterprise. Open a PR directly into a worktree.
 
-## Key flows (fast + fun)
+**Git worktrees & branches** — Parallel agents need parallel branches. Create, switch, and manage worktrees from the app. Stop stepping on your own feet.
 
-- **Start**: Cmd+N → pick agent → pick path → go.
-- **Resume**: Cmd+N → Option-3 → use the agent picker → back in business.
-- **Fork (Claude)**: Cmd+Shift+F → name it → optionally create a worktree → explore.
-- **Worktree**: Cmd+Shift+N → pick repo → choose branch → parallel universe unlocked.
-- **Review**: open a session on a branch that differs from origin/main → click **Review**.
+**Quick Find** — Cmd+F to yank URLs, paths, and hashes out of terminal output.
 
-## Installation
+## Supported agents
 
-> **Alpha**: No pre-built releases yet. You'll need to build from source.
+| Agent | How attn reads state | Full support |
+|---|---|---|
+| [Claude Code](https://claude.ai/code) | Hooks + classifier | Review, forking, everything |
+| [Codex](https://developers.openai.com/codex) | PTY output heuristics | Sessions + state |
+| [Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) | PTY output heuristics | Sessions + state |
 
-### Requirements
+## Install
 
-- macOS (Apple Silicon tested; other platforms unverified)
-- Go 1.25+ (matches `go.mod`)
-- Rust (stable) + Tauri prerequisites
-- Node.js 20+ and pnpm
-- Git + GitHub CLI (`gh`) v2.81.0+ authenticated (multi-host support)
-- Claude Code and/or Codex installed
-
-### Build + install
-
-Only tested on macOS (Apple Silicon).
+### Homebrew cask (desktop app)
 
 ```bash
-make install-all   # Installs daemon + desktop app
+brew tap victorarias/attn https://github.com/victorarias/attn
+brew install --cask victorarias/attn/attn
 ```
 
-## Usage
-
-### Desktop App
-
-Launch **attn** from Applications. The app lists all active sessions with their current state.
-
-**New session dialog**
-
-- **Agent toggle**: Option-1 (Codex) / Option-2 (Claude)
-- **Resume toggle**: Option-3 to open the agent's resume picker
-- **Location**: type a path or pick from recent locations
-
-**Session controls**
-
-- Cmd+N: New session
-- Cmd+Shift+N: New session (worktree)
-- Cmd+Shift+F: Fork Claude session
-- Cmd+F: Quick Find in terminal
-
-See `app/src/shortcuts/registry.ts` for the full list. Keyboard-first is the intended experience.
-
-### Review panel (review dialog)
-
-Open a session on a branch that differs from `origin/main`. The **Review** button appears in the
-header; click it to open the review panel. From there you can:
-
-- Browse changed files and diffs
-- Add inline comments
-- Mark files as viewed
-- Resolve or delete comments
-- Trigger a Claude Code review that leaves comments automatically
-- Send review comments to the main Claude session as a pre-written prompt
-
-It’s designed to keep review context in the same place as your sessions, so you can bounce between
-coding and reviewing without losing your flow.
-
-## Shortcut cheat sheet (most useful)
-
-- Cmd+N: new session
-- Cmd+Shift+N: new session (worktree)
-- Option-1 / Option-2 / Option-3: Codex / Claude / Resume
-- Cmd+Shift+F: fork Claude session
-- Cmd+F: Quick Find
-- Cmd+K: attention drawer (PRs + sessions needing input)
-- Cmd+` : toggle utility terminal panel
-- Cmd+ArrowUp / Cmd+ArrowDown: previous / next session
-- Cmd+R: refresh PRs
-
-### CLI
+### Homebrew formula (CLI + daemon only)
 
 ```bash
-attn                 # Open the app (or run inside the app wrapper)
-attn -s myproject    # Start a session with explicit label
-attn --resume        # Resume with agent picker (inside app)
-attn status          # Output for tmux status bar
-attn list            # List all sessions (JSON)
+brew install victorarias/attn/attn
 ```
 
-### Agents
+### Direct DMG
 
-- **Claude Code**: sessions are launched with hooks for state tracking.
-- **Codex**: sessions run via the Codex CLI.
+Grab the [latest release](https://github.com/victorarias/attn/releases/latest), open the DMG, drag to Applications.
 
-When you toggle **Resume**, attn invokes:
-
-- `claude -r` (interactive picker)
-- `codex resume` (interactive picker)
-
-### tmux Integration
-
-Add to `.tmux.conf`:
-
-```tmux
-set -g status-interval 5
-set -g status-right '#(attn status)'
-```
-
-## Session States
-
-| State | Indicator | Meaning |
-|-------|-----------|---------|
-| Working | Green | Claude is actively generating |
-| Waiting | Yellow | Claude needs your input |
-| Idle | Gray | Claude finished its task |
-| Waiting for approval | Flashing yellow | Claude is waiting for approval |
-
-## How It Works
-
-1. `attn` wraps the agent CLI (Claude or Codex) and installs hooks (Claude) to report state changes
-2. A background daemon tracks session state via a local socket
-3. The desktop app connects via WebSocket for real-time updates
-4. GitHub integration uses the `gh` CLI to query PRs (multi-host via `gh auth status`)
-
-## Configuration
-
-You can configure defaults from **Settings** in the app, including:
-
-- Projects directory for repo discovery
-- GitHub CLI authentication, connected hosts, and rate limit info
-- Agent executable overrides (if you want custom paths)
-
-## Development
+### Updating
 
 ```bash
-# Daemon only (fast iteration, ~2s)
-make install        # Build and install daemon
+# Formula
+brew update && brew upgrade victorarias/attn/attn
 
-# Desktop app (with hot reload)
-cd app && pnpm install && pnpm run dev
-
-# Full build
-make build-app      # Build daemon + Tauri app
-make install-app    # Install to /Applications
-make dist           # Create distributable DMG
-make install-all    # Install daemon + app
-
-# Testing
-make test-all       # Run Go + frontend tests
+# Cask
+brew update && brew upgrade --cask victorarias/attn/attn
 ```
+
+The app nudges you when a new release exists. No auto-install — you pick when.
+
+## Prerequisites
+
+- macOS (Apple Silicon)
+- At least one agent CLI installed
+- [GitHub CLI](https://cli.github.com/) (`gh`) v2.81.0+ for PR features
+
+## Quick start
+
+1. Launch **attn** from Applications (or just type `attn`).
+2. **Cmd+N** — pick an agent, pick a directory, go.
+3. Watch the sidebar. Colors tell you who needs you.
+
+## Session states
+
+| Color | What it means |
+|---|---|
+| 🟢 Green | Agent is working — leave it alone |
+| 🟡 Yellow | Agent has a question — go help |
+| 🟡 Flashing | Agent wants tool approval — go approve |
+| ⚫ Gray | Agent is done — move on |
+
+## Shortcuts
+
+| Shortcut | What it does |
+|---|---|
+| Cmd+N | New session |
+| Cmd+Shift+N | New session in a worktree |
+| Cmd+Shift+F | Fork session (Claude) |
+| Cmd+F | Quick Find |
+| Cmd+K | Attention drawer (who needs me?) |
+| Cmd+\` | Utility terminal |
+| Cmd+Up / Down | Jump between sessions |
+| Cmd+R | Refresh PRs |
+
+## CLI
+
+```bash
+attn                 # Open app, start session
+attn -s myproject    # Session with a label
+attn --resume        # Resume via agent's native picker
+attn list            # All sessions as JSON
+attn daemon          # Run daemon in foreground
+```
+
+## How it works
+
+1. `attn` wraps your agent CLI and installs hooks (Claude) or reads PTY output (Codex, Copilot) to detect state.
+2. A background daemon tracks sessions via unix socket (`~/.attn/attn.sock`).
+3. The desktop app connects over WebSocket for real-time updates.
+4. A lightweight classifier figures out if Claude stopped because it's done or because it's waiting for you.
+5. `gh` polls PRs across all your authenticated GitHub hosts.
+
+## Build from source
+
+Requires Go 1.25+, Rust (stable), Node.js 20+, pnpm, and [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
+
+```bash
+git clone https://github.com/victorarias/attn.git && cd attn
+```
+
+| Command | What it does |
+|---|---|
+| `make build` | Build Go daemon binary |
+| `make install` | Install daemon CLI (~2s iteration) |
+| `make build-app` | Build daemon + Tauri app |
+| `make install-app` | Install app to /Applications |
+| `make install-all` | Both |
+| `make dist` | Create DMG |
+| `make test` | Go tests |
+| `make test-frontend` | Frontend tests (vitest) |
+| `make test-harness` | Go + frontend + E2E |
 
 ## Docs
 
-- `docs/USAGE.md`
-- `docs/TROUBLESHOOTING.md`
-- `docs/CONFIGURATION.md`
-- `docs/CLI.md`
-
-## Troubleshooting
-
-- **No sessions showing**: make sure the daemon is running (`attn status`).
-- **Resume doesn't open a picker**: verify your agent CLI is installed and on PATH.
-- **GitHub PRs empty**: run `gh auth status` and sign in if needed.
-- **GH CLI too old**: upgrade to `gh` v2.81.0+ (e.g., `brew upgrade gh`).
-- **Worktree creation fails**: ensure your repo has a clean git state.
-
-## FAQ
-
-**Q: Does attn replace my agent?**  
-A: No. It orchestrates your sessions and shows state. You still interact with the agent directly.
-
-**Q: Can I run it without GitHub integration?**  
-A: Yes. PR features just won't show anything until `gh` is authenticated.
-
-**Q: Why is resume a picker instead of a dropdown?**  
-A: It uses the agent's native picker so you get consistent behavior and search.
+| | |
+|---|---|
+| [Usage](docs/USAGE.md) | App and CLI usage |
+| [CLI reference](docs/CLI.md) | Commands and flags |
+| [Configuration](docs/CONFIGURATION.md) | Settings |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | When things go sideways |
+| [Release](docs/RELEASE.md) | Maintainer runbook |
 
 ## Status
 
-**Alpha** - I use attn daily for my own work, but expect rough edges.
+Alpha — I use it every day. It's still evolving.
 
-## Built With
+## Built with
 
-- [Claude Code](https://claude.ai/code) - The AI coding assistant this tool wraps
-- [Tauri](https://tauri.app) - Desktop app framework
-- [React](https://react.dev) - UI framework
-- [Go](https://go.dev) - Daemon and CLI
-- [SQLite](https://sqlite.org) - Local storage
+[Tauri](https://tauri.app) / [React](https://react.dev) / [Go](https://go.dev) / [SQLite](https://sqlite.org)
 
 ## License
 
 [GPL-3.0](LICENSE)
-
-## Contributing
-
-Contributions welcome! Please open an issue first to discuss what you'd like to change.

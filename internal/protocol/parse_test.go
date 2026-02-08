@@ -13,7 +13,7 @@ func TestParseCommand(t *testing.T) {
 	}{
 		{
 			name:    "register message",
-			input:   `{"cmd":"register","id":"abc","label":"test","dir":"/tmp","tmux":"main:1.%0"}`,
+			input:   `{"cmd":"register","id":"abc","label":"test","dir":"/tmp"}`,
 			wantCmd: CmdRegister,
 		},
 		{
@@ -68,7 +68,7 @@ func TestParseCommand(t *testing.T) {
 }
 
 func TestParseRegister(t *testing.T) {
-	input := `{"cmd":"register","id":"abc123","label":"drumstick","dir":"/home/user/project","tmux":"main:1.%42"}`
+	input := `{"cmd":"register","id":"abc123","label":"drumstick","dir":"/home/user/project"}`
 	cmd, data, err := ParseMessage([]byte(input))
 	if err != nil {
 		t.Fatalf("parse error: %v", err)

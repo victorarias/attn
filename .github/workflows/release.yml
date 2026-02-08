@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  tauri:
+    name: Tauri Release
+    permissions:
+      contents: write
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build bundled daemon binary
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -o /tmp/attn ./cmd/attn
+          mkdir -p app/src-tauri/binaries
+          cp /tmp/attn "app/src-tauri/binaries/attn-aarch64-apple-darwin"
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: attn ${{ github.ref_name }}
+          releaseBody: See CHANGELOG.md for details.
+          releaseDraft: false
+          prerelease: false
+          args: --target aarch64-apple-darwin
+
+      - name: Upload stable DMG alias for Homebrew cask
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DMG_PATH="$(find app/src-tauri/target -type f -name 'attn_*_aarch64.dmg' | head -n1)"
+          if [ -z "$DMG_PATH" ]; then
+            echo "No aarch64 DMG found"
+            exit 1
+          fi
+          cp "$DMG_PATH" /tmp/attn_aarch64.dmg
+          gh release upload "${GITHUB_REF_NAME}" /tmp/attn_aarch64.dmg --clobber

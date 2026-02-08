@@ -20,11 +20,6 @@ attn --resume
 Opens the agent's resume picker (inside app wrapper).
 
 ```
-attn status
-```
-Compact status output (useful for tmux).
-
-```
 attn list
 ```
 Outputs all sessions as JSON.
@@ -34,7 +29,6 @@ Outputs all sessions as JSON.
 ```
 attn -s payments
 attn --resume
-attn status
 ```
 
 ## Notes

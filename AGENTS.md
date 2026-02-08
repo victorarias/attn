@@ -39,7 +39,6 @@ go test ./internal/store -run TestList  # Run single test
 attn                # Open app and create session (label = directory name)
 attn -s <label>     # Open app and create session with explicit label
 attn daemon         # Run daemon in foreground
-attn status         # Output for tmux status bar
 attn list           # List all sessions (JSON)
 ```
 

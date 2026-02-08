@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -31,6 +33,33 @@ import { useUIScale } from './hooks/useUIScale';
 import { useOpenPR } from './hooks/useOpenPR';
 import './App.css';
 
+const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
+const RELEASES_LATEST_WEB = 'https://github.com/victorarias/attn/releases/latest';
+const RELEASE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+interface GitHubReleaseResponse {
+  tag_name?: string;
+  html_url?: string;
+  prerelease?: boolean;
+  draft?: boolean;
+}
+
+function parseSemver(version: string): [number, number, number] | null {
+  const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function isNewerVersion(currentVersion: string, latestVersion: string): boolean {
+  const current = parseSemver(currentVersion);
+  const latest = parseSemver(latestVersion);
+  if (!current || !latest) return false;
+
+  if (latest[0] !== current[0]) return latest[0] > current[0];
+  if (latest[1] !== current[1]) return latest[1] > current[1];
+  return latest[2] > current[2];
+}
+
 function App() {
   // Settings state (must be declared before useDaemonSocket to pass as callback)
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -51,6 +80,8 @@ function App() {
 
   // Git status state
   const [gitStatus, setGitStatus] = useState<GitStatusUpdate | null>(null);
+  const [updateAvailableVersion, setUpdateAvailableVersion] = useState<string | null>(null);
+  const [updateReleaseUrl, setUpdateReleaseUrl] = useState<string>(RELEASES_LATEST_WEB);
 
   const {
     daemonSessions,
@@ -87,6 +118,69 @@ function App() {
     }
     ensureDaemon();
   }, []);
+
+  // Check latest GitHub release periodically and notify when newer than local app.
+  useEffect(() => {
+    if (!isTauri()) return;
+
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    const checkLatestRelease = async () => {
+      try {
+        const currentVersion = await getVersion();
+        const response = await fetch(RELEASES_LATEST_API, {
+          headers: {
+            Accept: 'application/vnd.github+json',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`GitHub API returned ${response.status}`);
+        }
+
+        const latest = await response.json() as GitHubReleaseResponse;
+        if (cancelled) return;
+
+        if (latest.draft || latest.prerelease || !latest.tag_name) {
+          setUpdateAvailableVersion(null);
+          setUpdateReleaseUrl(RELEASES_LATEST_WEB);
+          return;
+        }
+
+        const releaseUrl = latest.html_url || RELEASES_LATEST_WEB;
+        setUpdateReleaseUrl(releaseUrl);
+
+        if (isNewerVersion(currentVersion, latest.tag_name)) {
+          setUpdateAvailableVersion(latest.tag_name.replace(/^v/, ''));
+          return;
+        }
+
+        setUpdateAvailableVersion(null);
+      } catch (err) {
+        if (cancelled) return;
+        console.warn('[App] Failed to check latest release:', err);
+      }
+    };
+
+    void checkLatestRelease();
+    intervalId = setInterval(() => {
+      void checkLatestRelease();
+    }, RELEASE_CHECK_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, []);
+
+  const handleOpenLatestRelease = useCallback(async () => {
+    try {
+      await openUrl(updateReleaseUrl);
+    } catch (err) {
+      console.error('[App] Failed to open release URL:', err);
+    }
+  }, [updateReleaseUrl]);
 
   // Reviewer callbacks for streaming events
   const reviewerCallbacks = useMemo(() => ({
@@ -215,6 +309,8 @@ function App() {
         rateLimit={rateLimit}
         warnings={warnings}
         clearWarnings={clearWarnings}
+        updateAvailableVersion={updateAvailableVersion}
+        onOpenLatestRelease={handleOpenLatestRelease}
         // Daemon socket functions
         sendPRAction={sendPRAction}
         sendMutePR={sendMutePR}
@@ -278,6 +374,8 @@ interface AppContentProps {
   rateLimit: import('./hooks/useDaemonSocket').RateLimitState | null;
   warnings: DaemonWarning[];
   clearWarnings: () => void;
+  updateAvailableVersion: string | null;
+  onOpenLatestRelease: () => Promise<void>;
   // All the daemon socket functions
   sendPRAction: ReturnType<typeof useDaemonSocket>['sendPRAction'];
   sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
@@ -337,6 +435,8 @@ function AppContent({
   rateLimit,
   warnings,
   clearWarnings,
+  updateAvailableVersion,
+  onOpenLatestRelease,
   sendPRAction,
   sendMutePR,
   sendMuteRepo,
@@ -1199,9 +1299,23 @@ function AppContent({
       )}
       {/* Warning banner for non-critical issues */}
       {warnings.length > 0 && (
-        <div className="warning-banner">
+        <div className={`warning-banner ${connectionError ? 'with-connection-error' : ''}`}>
           <span>{warnings.map(w => w.message).join(' ')}</span>
           <button className="warning-dismiss" onClick={clearWarnings} title="Dismiss">×</button>
+        </div>
+      )}
+      {/* New release banner */}
+      {updateAvailableVersion && (
+        <div className={`update-banner ${connectionError ? 'with-connection-error' : ''} ${warnings.length > 0 ? 'with-warning' : ''}`}>
+          <span>
+            Version {updateAvailableVersion} is available on GitHub.
+          </span>
+          <button
+            className="update-install"
+            onClick={() => void onOpenLatestRelease()}
+          >
+            View Release
+          </button>
         </div>
       )}
       {/* Dashboard - always rendered, shown/hidden via z-index */}

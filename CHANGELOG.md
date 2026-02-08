@@ -13,6 +13,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Copilot Executable Override**: Add `copilot_executable` setting and plumb it through frontend spawn requests, daemon validation, and PTY environment (`ATTN_COPILOT_EXECUTABLE`).
 - **Copilot Transcript Parsing**: Add support for parsing Copilot `events.jsonl` (`assistant.message`) in transcript extraction.
 - **No-UI Real-Agent Harness Test**: Add opt-in integration harness test that spawns and attaches real agent sessions over daemon WebSocket, streams PTY output, and prints live `session_state_changed` transitions without opening the app UI.
+- **Homebrew Formula**: Added `Formula/attn.rb` so `attn` can be installed via Homebrew tap.
+- **Homebrew Cask**: Added `Casks/attn.rb` so `attn.app` can be installed via `brew install --cask`.
+- **Release Workflow**: Added `.github/workflows/release.yml` to build Apple Silicon macOS release artifacts on tags.
+- **Release Script**: Added `scripts/release.sh` and `make release VERSION_TAG=vX.Y.Z` to automate version bump, commit/tag/push, and Homebrew formula refresh.
+- **GitHub Release Checker**: App now periodically checks GitHub latest release and surfaces a non-automatic update notice in the UI.
+- **Release Docs**: Added `docs/RELEASE.md` with the maintainer release runbook.
 
 ### Changed
 - **Classifier Backend**: Add Copilot CLI classifier support (`copilot -p ... --model claude-haiku-4.5`) while keeping Claude SDK classification for Claude/Codex sessions.
@@ -22,17 +28,23 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **PTY Live State Detection**: Extend PTY output state heuristics to Copilot sessions (in addition to Codex) for color/state updates during active runs.
 - **Codex/Copilot Turn Completion Source**: Daemon-managed Codex/Copilot sessions now use transcript-tail quiet-window detection (instead of PTY prompt heuristics) to trigger stop-time classification during active sessions.
 - **Protocol Version**: Bump daemon/app protocol version to `27`.
+- **App Update UX**: Replaced one-click in-app auto-update install with a **View Release** banner that links to GitHub releases.
+- **Release Artifacts**: Release workflow now uploads a stable `attn_aarch64.dmg` alias so Homebrew cask can target a fixed latest-download path.
+- **Docs IA**: README now includes full install, update, and build-from-source guidance directly (self-sufficient setup instructions), while release procedure lives in `docs/RELEASE.md`.
 
 ### Fixed
 - **Copilot Stop Classification Path**: Add Copilot transcript discovery under `~/.copilot/session-state/*/events.jsonl` (matched by cwd + recent activity) so Copilot sessions classify on stop without hooks.
 - **Copilot Resume Transcript Matching**: When launching Copilot with `--resume <session-id>`, stop-time classification now first checks `~/.copilot/session-state/<session-id>/events.jsonl` before falling back to heuristic cwd/timing discovery.
 - **Copilot Classifier Safety Isolation**: Copilot classification now disables custom instructions and avoids tool auto-approval, and runs from an isolated temp cwd so classifier sessions do not contaminate cwd-based transcript matching.
 - **Copilot Transcript Selection Robustness**: Copilot transcript discovery now prefers session-state candidates whose `session.start` timestamp is closest to the launched session time, with safe modtime fallback.
-- **Session Indicator Reliability**: Remove stale Codex-only “unknown transcript” indicator fallback so Codex/Copilot sessions render normal color-based states in sidebar/drawer.
+- **Session Indicator Reliability**: Remove stale Codex-only "unknown transcript" indicator fallback so Codex/Copilot sessions render normal color-based states in sidebar/drawer.
 - **Classifier Audit Logging**: Classifier logs now include full input text and full model output text so classification decisions can be reviewed later in daemon logs.
 - **PTY Live-State Stability**: Prompt remnants in recent terminal output no longer force `idle` while new assistant output is still streaming, improving Codex/Copilot working-state transitions.
 - **Codex/Copilot State Source-of-Truth**: PTY-derived `waiting_input`/`idle` transitions are now ignored for Codex/Copilot sessions so final idle/waiting colors come from transcript + classifier, reducing noisy false transitions.
 - **Session Restore E2E Coverage**: Session restore/reconnect Playwright assertions now validate actual sidebar session state/selection markers instead of removed `state unknown` indicators.
+
+### Removed
+- **Tauri Updater Runtime Wiring**: Removed updater/process plugin wiring and updater signing requirements from the desktop app release path.
 
 ## [2026-02-07]
 

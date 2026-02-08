@@ -4,6 +4,11 @@ import { vi } from 'vitest';
 // Mock Tauri APIs that components might use
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
+  isTauri: vi.fn(() => false),
+}));
+
+vi.mock('@tauri-apps/api/app', () => ({
+  getVersion: vi.fn(async () => '0.0.0'),
 }));
 
 // Mock window.matchMedia for components that use it

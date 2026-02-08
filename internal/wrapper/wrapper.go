@@ -22,16 +22,6 @@ func DefaultLabel() string {
 	return filepath.Base(dir)
 }
 
-// GetTmuxTarget returns the current tmux pane location
-func GetTmuxTarget() string {
-	// This will be implemented to shell out to tmux
-	// For now return empty string if not in tmux
-	if os.Getenv("TMUX") == "" {
-		return ""
-	}
-	return "" // Will implement with actual tmux command
-}
-
 // WriteHooksConfig writes a temporary hooks configuration file
 // Creates a subdirectory to isolate from other temp files (avoids fs.watch issues)
 func WriteHooksConfig(tmpDir, sessionID, socketPath string) (string, error) {
