@@ -36,6 +36,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Agent Fallback Persistence**: Availability fallback now applies at runtime for session launch/open flows without silently rewriting the saved default agent setting.
 
 ### Fixed
+- **Release CI Reliability**: Release workflow now installs `pnpm` before enabling pnpm cache in `setup-node`, and supports manual `workflow_dispatch` retries for existing tags so failed tagged runs can be rebuilt and published entirely from CI.
 - **Copilot Stop Classification Path**: Add Copilot transcript discovery under `~/.copilot/session-state/*/events.jsonl` (matched by cwd + recent activity) so Copilot sessions classify on stop without hooks.
 - **Copilot Resume Transcript Matching**: When launching Copilot with `--resume <session-id>`, stop-time classification now first checks `~/.copilot/session-state/<session-id>/events.jsonl` before falling back to heuristic cwd/timing discovery.
 - **Copilot Classifier Safety Isolation**: Copilot classification now disables custom instructions and avoids tool auto-approval, and runs from an isolated temp cwd so classifier sessions do not contaminate cwd-based transcript matching.
