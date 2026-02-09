@@ -50,7 +50,7 @@ func TestDaemon_RegisterAndQuery(t *testing.T) {
 	c := client.New(sockPath)
 
 	// Register a session
-	err := c.Register("sess-1", "drumstick", "/home/user/project")
+	err := c.Register("sess-1", "drumstick", "/home/user/project", "", 0)
 	if err != nil {
 		t.Fatalf("Register error: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestDaemon_StateUpdate(t *testing.T) {
 	c := client.New(sockPath)
 
 	// Register
-	c.Register("sess-1", "test", "/tmp")
+	c.Register("sess-1", "test", "/tmp", "", 0)
 
 	// Update state
 	err := c.UpdateState("sess-1", protocol.StateWaitingInput)
@@ -115,7 +115,7 @@ func TestDaemon_Unregister(t *testing.T) {
 
 	c := client.New(sockPath)
 
-	c.Register("sess-1", "test", "/tmp")
+	c.Register("sess-1", "test", "/tmp", "", 0)
 	c.Unregister("sess-1")
 
 	sessions, _ := c.Query("")
@@ -139,9 +139,9 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 	c := client.New(sockPath)
 
 	// Register multiple sessions (all start as waiting_input)
-	c.Register("1", "one", "/tmp/1")
-	c.Register("2", "two", "/tmp/2")
-	c.Register("3", "three", "/tmp/3")
+	c.Register("1", "one", "/tmp/1", "", 0)
+	c.Register("2", "two", "/tmp/2", "", 0)
+	c.Register("3", "three", "/tmp/3", "", 0)
 
 	// Update one to working
 	c.UpdateState("2", protocol.StateWorking)
@@ -177,7 +177,7 @@ func TestDaemon_SocketCleanup(t *testing.T) {
 
 	// Should still work (stale socket removed)
 	c := client.New(sockPath)
-	err := c.Register("1", "test", "/tmp")
+	err := c.Register("1", "test", "/tmp", "", 0)
 	if err != nil {
 		t.Fatalf("Register error after stale socket cleanup: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 
 	// Register a session to verify it's counted
 	c := client.New(sockPath)
-	c.Register("test-1", "test", "/tmp")
+	c.Register("test-1", "test", "/tmp", "", 0)
 
 	// Hit the health endpoint
 	resp, err := http.Get("http://127.0.0.1:" + wsPort + "/health")
@@ -821,7 +821,7 @@ func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
 
 	// Register session via unix socket
 	c := client.New(sockPath)
-	err := c.Register("test-session", "Test Session", "/tmp/test")
+	err := c.Register("test-session", "Test Session", "/tmp/test", "", 0)
 	if err != nil {
 		t.Fatalf("Register error: %v", err)
 	}
@@ -902,7 +902,7 @@ func TestDaemon_StateTransitions_AllStates(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	c := client.New(sockPath)
-	err := c.Register("test-session", "Test", "/tmp/test")
+	err := c.Register("test-session", "Test", "/tmp/test", "", 0)
 	if err != nil {
 		t.Fatalf("Register error: %v", err)
 	}
@@ -1069,7 +1069,7 @@ func TestDaemon_StopCommand_PendingTodos_SetsWaitingInput(t *testing.T) {
 	c := client.New(sockPath)
 
 	// Register session
-	err := c.Register("test-session", "Test", "/tmp/test")
+	err := c.Register("test-session", "Test", "/tmp/test", "", 0)
 	if err != nil {
 		t.Fatalf("Register error: %v", err)
 	}
@@ -1153,7 +1153,7 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 	c := client.New(sockPath)
 
 	// Register session
-	err := c.Register("test-session", "Test", "/tmp/test")
+	err := c.Register("test-session", "Test", "/tmp/test", "", 0)
 	if err != nil {
 		t.Fatalf("Register error: %v", err)
 	}

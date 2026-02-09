@@ -210,6 +210,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Prs:             protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:           protocol.RepoStatesToValues(d.store.ListRepoStates()),
 		Settings:        settings,
+		Subscriptions:   d.getSubscriptionsForBroadcast(),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -650,6 +651,51 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		cancelMsg := msg.(*protocol.CancelReviewMessage)
 		d.logf("Cancelling review %s", cancelMsg.ReviewID)
 		d.handleCancelReview(client, cancelMsg)
+
+	case protocol.CmdSubscribeThread:
+		subMsg := msg.(*protocol.SubscribeThreadMessage)
+		d.logf("Subscribe thread via WS: platform=%s channel=%s thread=%s", subMsg.Platform, subMsg.ChannelID, subMsg.ThreadTS)
+		channelName := ""
+		if subMsg.ChannelName != nil {
+			channelName = *subMsg.ChannelName
+		}
+		if _, err := d.store.AddThreadSubscription(subMsg.Platform, subMsg.ChannelID, subMsg.ThreadTS, subMsg.SessionID, channelName); err != nil {
+			d.logf("Subscribe thread error: %v", err)
+		} else {
+			d.ensureSlackMonitor()
+			d.broadcastSubscriptions()
+		}
+
+	case protocol.CmdUnsubscribeThread:
+		unsubMsg := msg.(*protocol.UnsubscribeThreadMessage)
+		d.logf("Unsubscribe thread via WS: platform=%s channel=%s thread=%s", unsubMsg.Platform, unsubMsg.ChannelID, unsubMsg.ThreadTS)
+		if err := d.store.RemoveThreadSubscription(unsubMsg.Platform, unsubMsg.ChannelID, unsubMsg.ThreadTS, unsubMsg.SessionID); err != nil {
+			d.logf("Unsubscribe thread error: %v", err)
+		} else {
+			if !d.store.HasAnySubscriptions() {
+				d.stopSlackMonitor()
+			}
+			d.broadcastSubscriptions()
+		}
+
+	case protocol.CmdListSubscriptions:
+		listMsg := msg.(*protocol.ListSubscriptionsMessage)
+		d.logf("List subscriptions via WS")
+		var subs []protocol.ThreadSubscription
+		var err error
+		if listMsg.SessionID != nil && *listMsg.SessionID != "" {
+			subs, err = d.store.GetThreadSubscriptionsBySession(*listMsg.SessionID)
+		} else {
+			subs, err = d.store.GetThreadSubscriptions()
+		}
+		if err != nil {
+			d.logf("List subscriptions error: %v", err)
+			return
+		}
+		d.sendToClient(client, &protocol.WebSocketEvent{
+			Event:         protocol.EventSubscriptionsUpdated,
+			Subscriptions: subs,
+		})
 	}
 }
 
@@ -679,6 +725,27 @@ func (d *Daemon) broadcastSettings() {
 		Event:    protocol.EventSettingsUpdated,
 		Settings: settings,
 	})
+}
+
+// broadcastSubscriptions sends updated subscriptions to all WebSocket clients
+func (d *Daemon) broadcastSubscriptions() {
+	subs, err := d.store.GetThreadSubscriptions()
+	if err != nil {
+		d.logf("broadcastSubscriptions error: %v", err)
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:         protocol.EventSubscriptionsUpdated,
+		Subscriptions: subs,
+	})
+}
+
+func (d *Daemon) getSubscriptionsForBroadcast() []protocol.ThreadSubscription {
+	subs, err := d.store.GetThreadSubscriptions()
+	if err != nil {
+		return nil
+	}
+	return subs
 }
 
 func (d *Daemon) sendToClient(client *wsClient, message interface{}) {

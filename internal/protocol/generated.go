@@ -607,6 +607,11 @@ type ListBranchesMessage struct {
 	MainRepo string `json:"main_repo"`
 }
 
+type ListSubscriptionsMessage struct {
+	Cmd       string  `json:"cmd"`
+	SessionID *string `json:"session_id,omitempty"`
+}
+
 type ListRemoteBranchesMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -897,6 +902,9 @@ type RefreshPRsResultMessage struct {
 }
 
 type RegisterMessage struct {
+	// CgWindowID corresponds to the JSON schema field "cg_window_id".
+	CgWindowID *int `json:"cg_window_id,omitempty"`
+
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
@@ -908,6 +916,9 @@ type RegisterMessage struct {
 
 	// Label corresponds to the JSON schema field "label".
 	Label *string `json:"label,omitempty"`
+
+	// WindowID corresponds to the JSON schema field "window_id".
+	WindowID *string `json:"window_id,omitempty"`
 }
 
 type RepoInfo struct {
@@ -984,6 +995,9 @@ type Response struct {
 
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty"`
+
+	// Subscriptions corresponds to the JSON schema field "subscriptions".
+	Subscriptions []ThreadSubscription `json:"subscriptions,omitempty"`
 }
 
 type ReviewCancelledMessage struct {
@@ -1117,6 +1131,9 @@ type Session struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch *string `json:"branch,omitempty"`
 
+	// CgWindowID corresponds to the JSON schema field "cg_window_id".
+	CgWindowID *int `json:"cg_window_id,omitempty"`
+
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
 
@@ -1149,6 +1166,9 @@ type Session struct {
 
 	// Todos corresponds to the JSON schema field "todos".
 	Todos []string `json:"todos,omitempty"`
+
+	// WindowID corresponds to the JSON schema field "window_id".
+	WindowID *string `json:"window_id,omitempty"`
 }
 
 type SessionState string
@@ -1156,6 +1176,7 @@ type SessionState string
 const SessionStateIdle SessionState = "idle"
 const SessionStateWaitingInput SessionState = "waiting_input"
 const SessionStateWorking SessionState = "working"
+const SessionStateWrapped SessionState = "wrapped"
 
 type SetSettingMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
@@ -1229,6 +1250,15 @@ type StashResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type SubscribeThreadMessage struct {
+	Cmd         string  `json:"cmd"`
+	Platform    string  `json:"platform"`
+	ChannelID   string  `json:"channel_id"`
+	ThreadTS    string  `json:"thread_ts"`
+	SessionID   string  `json:"session_id"`
+	ChannelName *string `json:"channel_name,omitempty"`
+}
+
 type StateMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1249,6 +1279,16 @@ type StopMessage struct {
 
 	// TranscriptPath corresponds to the JSON schema field "transcript_path".
 	TranscriptPath string `json:"transcript_path"`
+}
+
+type ThreadSubscription struct {
+	ID          int     `json:"id"`
+	Platform    string  `json:"platform"`
+	ChannelID   string  `json:"channel_id"`
+	ThreadTS    string  `json:"thread_ts"`
+	SessionID   string  `json:"session_id"`
+	ChannelName *string `json:"channel_name,omitempty"`
+	CreatedAt   string  `json:"created_at"`
 }
 
 type SubscribeGitStatusMessage struct {
@@ -1301,6 +1341,14 @@ type UnregisterMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+}
+
+type UnsubscribeThreadMessage struct {
+	Cmd       string `json:"cmd"`
+	Platform  string `json:"platform"`
+	ChannelID string `json:"channel_id"`
+	ThreadTS  string `json:"thread_ts"`
+	SessionID string `json:"session_id"`
 }
 
 type UnsubscribeGitStatusMessage struct {
@@ -1387,6 +1435,9 @@ type WebSocketEvent struct {
 
 	// Worktrees corresponds to the JSON schema field "worktrees".
 	Worktrees []Worktree `json:"worktrees,omitempty"`
+
+	// Subscriptions corresponds to the JSON schema field "subscriptions".
+	Subscriptions []ThreadSubscription `json:"subscriptions,omitempty"`
 }
 
 type WontFixCommentMessage struct {

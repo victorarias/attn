@@ -765,6 +765,7 @@ export enum InjectTestSessionMessageCmd {
 
 export interface SessionElement {
     branch?:          string;
+    cg_window_id?:    number;
     directory:        string;
     id:               string;
     is_worktree?:     boolean;
@@ -776,6 +777,7 @@ export interface SessionElement {
     state_since:      string;
     state_updated_at: string;
     todos?:           string[];
+    window_id?:       string;
     [property: string]: any;
 }
 
@@ -783,6 +785,7 @@ export enum SessionState {
     Idle = "idle",
     WaitingInput = "waiting_input",
     Working = "working",
+    Wrapped = "wrapped",
 }
 
 export interface ListBranchesMessage {
@@ -1037,10 +1040,12 @@ export enum RefreshPRsResultMessageEvent {
 }
 
 export interface RegisterMessage {
-    cmd:    RegisterMessageCmd;
-    dir:    string;
-    id:     string;
-    label?: string;
+    cg_window_id?: number;
+    cmd:           RegisterMessageCmd;
+    dir:           string;
+    id:            string;
+    label?:        string;
+    window_id?:    string;
     [property: string]: any;
 }
 
@@ -1205,6 +1210,7 @@ export interface ReviewState {
 
 export interface Session {
     branch?:          string;
+    cg_window_id?:    number;
     directory:        string;
     id:               string;
     is_worktree?:     boolean;
@@ -1216,6 +1222,7 @@ export interface Session {
     state_since:      string;
     state_updated_at: string;
     todos?:           string[];
+    window_id?:       string;
     [property: string]: any;
 }
 
@@ -2828,6 +2835,7 @@ const typeMap: any = {
     ], "any"),
     "SessionElement": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "cg_window_id", js: "cg_window_id", typ: u(undefined, 0) },
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
@@ -2839,6 +2847,7 @@ const typeMap: any = {
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
+        { json: "window_id", js: "window_id", typ: u(undefined, "") },
     ], "any"),
     "ListBranchesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListBranchesMessageCmd") },
@@ -2972,10 +2981,12 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "RegisterMessage": o([
+        { json: "cg_window_id", js: "cg_window_id", typ: u(undefined, 0) },
         { json: "cmd", js: "cmd", typ: r("RegisterMessageCmd") },
         { json: "dir", js: "dir", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "label", js: "label", typ: u(undefined, "") },
+        { json: "window_id", js: "window_id", typ: u(undefined, "") },
     ], "any"),
     "RepoInfo": o([
         { json: "branches", js: "branches", typ: a(r("BranchElement")) },
@@ -3076,6 +3087,7 @@ const typeMap: any = {
     ], "any"),
     "Session": o([
         { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "cg_window_id", js: "cg_window_id", typ: u(undefined, 0) },
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
@@ -3087,6 +3099,7 @@ const typeMap: any = {
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
+        { json: "window_id", js: "window_id", typ: u(undefined, "") },
     ], "any"),
     "SetSettingMessage": o([
         { json: "cmd", js: "cmd", typ: r("SetSettingMessageCmd") },
@@ -3358,6 +3371,7 @@ const typeMap: any = {
         "idle",
         "waiting_input",
         "working",
+        "wrapped",
     ],
     "ListBranchesMessageCmd": [
         "list_branches",

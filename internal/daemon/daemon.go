@@ -96,6 +96,7 @@ type Daemon struct {
 	reviewerFactory ReviewerFactory // Optional, creates real reviewer if nil
 	repoCaches      map[string]*repoCache
 	repoCacheMu     sync.RWMutex
+	slackMon    *slackMonitor
 }
 
 // New creates a new daemon
@@ -270,6 +271,11 @@ func (d *Daemon) Start() error {
 	// Start branch monitoring
 	go d.monitorBranches()
 
+	// Start Slack monitor if there are existing subscriptions (daemon restart)
+	if d.store.HasAnySubscriptions() {
+		d.ensureSlackMonitor()
+	}
+
 	for {
 		select {
 		case <-d.done:
@@ -295,6 +301,7 @@ func (d *Daemon) Start() error {
 // Stop stops the daemon
 func (d *Daemon) Stop() {
 	d.log("daemon stopping")
+	d.stopSlackMonitor()
 	close(d.done)
 	if d.httpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -514,13 +521,19 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleCreateWorktree(conn, msg.(*protocol.CreateWorktreeMessage))
 	case protocol.CmdDeleteWorktree:
 		d.handleDeleteWorktree(conn, msg.(*protocol.DeleteWorktreeMessage))
+	case protocol.CmdSubscribeThread:
+		d.handleSubscribeThread(conn, msg.(*protocol.SubscribeThreadMessage))
+	case protocol.CmdUnsubscribeThread:
+		d.handleUnsubscribeThread(conn, msg.(*protocol.UnsubscribeThreadMessage))
+	case protocol.CmdListSubscriptions:
+		d.handleListSubscriptions(conn, msg.(*protocol.ListSubscriptionsMessage))
 	default:
 		d.sendError(conn, "unknown command")
 	}
 }
 
 func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
-	d.logf("session registered: id=%s label=%s dir=%s", msg.ID, protocol.Deref(msg.Label), msg.Dir)
+	d.logf("session registered: id=%s label=%s dir=%s windowID=%s cgWindowID=%v", msg.ID, protocol.Deref(msg.Label), msg.Dir, protocol.Deref(msg.WindowID), protocol.Deref(msg.CgWindowID))
 
 	// Get branch info
 	branchInfo, _ := git.GetBranchInfo(msg.Dir)
@@ -534,6 +547,8 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		StateSince:     nowStr,
 		StateUpdatedAt: nowStr,
 		LastSeen:       nowStr,
+		WindowID:       msg.WindowID,
+		CgWindowID:     msg.CgWindowID,
 	}
 	if branchInfo != nil {
 		if branchInfo.Branch != "" {
@@ -573,6 +588,16 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 	}
 
 	d.store.Remove(msg.ID)
+
+	// Clean up thread subscriptions for this session
+	if count, err := d.store.CleanupSessionSubscriptions(msg.ID); err == nil && count > 0 {
+		d.logf("cleaned up %d thread subscriptions for session %s", count, msg.ID)
+		if !d.store.HasAnySubscriptions() {
+			d.stopSlackMonitor()
+		}
+		d.broadcastSubscriptions()
+	}
+
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
@@ -582,6 +607,66 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 			Session: session,
 		})
 	}
+}
+
+func (d *Daemon) handleSubscribeThread(conn net.Conn, msg *protocol.SubscribeThreadMessage) {
+	channelName := ""
+	if msg.ChannelName != nil {
+		channelName = *msg.ChannelName
+	}
+
+	_, err := d.store.AddThreadSubscription(msg.Platform, msg.ChannelID, msg.ThreadTS, msg.SessionID, channelName)
+	if err != nil {
+		d.sendError(conn, err.Error())
+		return
+	}
+
+	d.logf("thread subscription added: platform=%s channel=%s thread=%s session=%s", msg.Platform, msg.ChannelID, msg.ThreadTS, msg.SessionID)
+	d.ensureSlackMonitor()
+	d.sendOK(conn)
+	d.broadcastSubscriptions()
+}
+
+func (d *Daemon) handleUnsubscribeThread(conn net.Conn, msg *protocol.UnsubscribeThreadMessage) {
+	err := d.store.RemoveThreadSubscription(msg.Platform, msg.ChannelID, msg.ThreadTS, msg.SessionID)
+	if err != nil {
+		d.sendError(conn, err.Error())
+		return
+	}
+
+	d.logf("thread subscription removed: platform=%s channel=%s thread=%s session=%s", msg.Platform, msg.ChannelID, msg.ThreadTS, msg.SessionID)
+
+	// Stop monitor if no subscriptions remain
+	if !d.store.HasAnySubscriptions() {
+		d.stopSlackMonitor()
+	}
+
+	d.sendOK(conn)
+	d.broadcastSubscriptions()
+}
+
+func (d *Daemon) handleListSubscriptions(conn net.Conn, msg *protocol.ListSubscriptionsMessage) {
+	var subs []protocol.ThreadSubscription
+	var err error
+
+	if msg.SessionID != nil && *msg.SessionID != "" {
+		subs, err = d.store.GetThreadSubscriptionsBySession(*msg.SessionID)
+	} else {
+		subs, err = d.store.GetThreadSubscriptions()
+	}
+
+	if err != nil {
+		d.sendError(conn, err.Error())
+		return
+	}
+
+	resp := protocol.Response{
+		Ok:            true,
+		Subscriptions: subs,
+	}
+
+	data, _ := json.Marshal(resp)
+	conn.Write(data)
 }
 
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {

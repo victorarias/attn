@@ -13,6 +13,7 @@ enum SessionState {
   working,
   waiting_input,
   idle,
+  wrapped,
 }
 
 enum PRRole {
@@ -43,6 +44,8 @@ model Session {
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
   muted: boolean;               // Always has value (defaults false)
+  window_id?: string;           // Optional: iTerm session ID for reference
+  cg_window_id?: int32;         // Optional: macOS CGWindowID for window activation
 }
 
 model PR {
@@ -123,6 +126,8 @@ model RegisterMessage {
   id: string;
   label?: string;
   dir: string;
+  window_id?: string;           // Optional: iTerm session ID for reference
+  cg_window_id?: int32;         // Optional: macOS CGWindowID for window activation
 }
 
 model UnregisterMessage {
@@ -736,6 +741,42 @@ model ReviewCancelledMessage {
 }
 
 // ============================================================================
+// Thread Subscription
+// ============================================================================
+
+model ThreadSubscription {
+  id: int32;
+  platform: string;              // "slack", "discord", "mattermost", etc.
+  channel_id: string;
+  thread_ts: string;
+  session_id: string;
+  channel_name?: string;
+  created_at: string;
+}
+
+model SubscribeThreadMessage {
+  cmd: "subscribe_thread";
+  platform: string;
+  channel_id: string;
+  thread_ts: string;
+  session_id: string;
+  channel_name?: string;
+}
+
+model UnsubscribeThreadMessage {
+  cmd: "unsubscribe_thread";
+  platform: string;
+  channel_id: string;
+  thread_ts: string;
+  session_id: string;
+}
+
+model ListSubscriptionsMessage {
+  cmd: "list_subscriptions";
+  session_id?: string;
+}
+
+// ============================================================================
 // Response Types
 // ============================================================================
 
@@ -745,6 +786,7 @@ model Response {
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
+  subscriptions?: ThreadSubscription[];
 }
 
 model WebSocketEvent {
@@ -771,4 +813,6 @@ model WebSocketEvent {
   conflict?: boolean;
   found?: boolean;
   stash_ref?: string;
+  // Thread subscriptions
+  subscriptions?: ThreadSubscription[];
 }

@@ -26,7 +26,7 @@ func TestHarness_FakeClassifier(t *testing.T) {
 	c := client.New(sockPath)
 
 	// Register and set up session
-	err := c.Register("test-session", "Test", "/tmp/test")
+	err := c.Register("test-session", "Test", "/tmp/test", "", 0)
 	if err != nil {
 		t.Fatalf("Register error: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestHarness_BroadcastRecorder(t *testing.T) {
 	harness.Recorder.Clear()
 
 	// Register session - should trigger broadcast
-	err := c.Register("test-session", "Test", "/tmp/test")
+	err := c.Register("test-session", "Test", "/tmp/test", "", 0)
 	if err != nil {
 		t.Fatalf("Register error: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestHarness_WaitForEvent(t *testing.T) {
 	// Register in background
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		c.Register("delayed-session", "Delayed", "/tmp/delayed")
+		c.Register("delayed-session", "Delayed", "/tmp/delayed", "", 0)
 	}()
 
 	// Wait for event
@@ -196,17 +196,17 @@ func TestHarness_ConcurrentOperations(t *testing.T) {
 	done := make(chan bool, 3)
 
 	go func() {
-		c.Register("session-1", "One", "/tmp/1")
+		c.Register("session-1", "One", "/tmp/1", "", 0)
 		done <- true
 	}()
 
 	go func() {
-		c.Register("session-2", "Two", "/tmp/2")
+		c.Register("session-2", "Two", "/tmp/2", "", 0)
 		done <- true
 	}()
 
 	go func() {
-		c.Register("session-3", "Three", "/tmp/3")
+		c.Register("session-3", "Three", "/tmp/3", "", 0)
 		done <- true
 	}()
 

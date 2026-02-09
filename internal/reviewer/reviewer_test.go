@@ -18,6 +18,7 @@ func createTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
+	gitEnv := append(os.Environ(), "GIT_TEMPLATE_DIR=")
 	cmds := [][]string{
 		{"git", "init"},
 		{"git", "config", "user.email", "test@test.com"},
@@ -26,6 +27,7 @@ func createTestRepo(t *testing.T) string {
 	for _, args := range cmds {
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
+		cmd.Env = gitEnv
 		if err := cmd.Run(); err != nil {
 			t.Fatalf("Failed to run %v: %v", args, err)
 		}
@@ -44,6 +46,7 @@ func createTestRepo(t *testing.T) string {
 	for _, args := range cmds {
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
+		cmd.Env = gitEnv
 		if err := cmd.Run(); err != nil {
 			t.Fatalf("Failed to run %v: %v", args, err)
 		}

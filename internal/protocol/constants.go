@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "20"
+const ProtocolVersion = "21"
 
 // Commands
 const (
@@ -69,6 +69,9 @@ const (
 	CmdGetComments              = "get_comments"
 	CmdStartReview              = "start_review"
 	CmdCancelReview             = "cancel_review"
+	CmdSubscribeThread          = "subscribe_thread"
+	CmdUnsubscribeThread        = "unsubscribe_thread"
+	CmdListSubscriptions        = "list_subscriptions"
 )
 
 // WebSocket Events (daemon -> client)
@@ -124,6 +127,7 @@ const (
 	EventReviewToolUse            = "review_tool_use"
 	EventReviewComplete           = "review_complete"
 	EventReviewCancelled          = "review_cancelled"
+	EventSubscriptionsUpdated     = "subscriptions_updated"
 )
 
 // Session states (values for SessionState enum)
@@ -132,6 +136,7 @@ const (
 	StateWaitingInput    = "waiting_input"
 	StateIdle            = "idle"
 	StatePendingApproval = "pending_approval"
+	StateWrapped         = "wrapped"
 )
 
 // PR states (values for PR.State field, distinct from session states)
@@ -573,6 +578,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg CancelReviewMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal cancel_review: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSubscribeThread:
+		var msg SubscribeThreadMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal subscribe_thread: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdUnsubscribeThread:
+		var msg UnsubscribeThreadMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal unsubscribe_thread: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdListSubscriptions:
+		var msg ListSubscriptionsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal list_subscriptions: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

@@ -51,6 +51,12 @@ func main() {
 		runStatus()
 	case "list":
 		runList()
+	case "subscribe":
+		runSubscribe()
+	case "unsubscribe":
+		runUnsubscribe()
+	case "subscriptions":
+		runSubscriptions()
 	case "_hook-stop":
 		runHookStop()
 	case "_hook-todo":
@@ -97,6 +103,96 @@ func runList() {
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(sessions); err != nil {
 		fmt.Fprintf(os.Stderr, "error encoding sessions: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runSubscribe() {
+	fs := flag.NewFlagSet("subscribe", flag.ExitOnError)
+	platform := fs.String("platform", "slack", "Chat platform (slack, discord, etc.)")
+	channelName := fs.String("name", "", "Channel display name (optional)")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: attn subscribe [options] <channel_id> <thread_ts>\n\n")
+		fmt.Fprintf(os.Stderr, "Subscribe current session to a chat thread.\n")
+		fmt.Fprintf(os.Stderr, "Requires ATTN_SESSION_ID to be set.\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(os.Args[2:])
+
+	args := fs.Args()
+	if len(args) < 2 {
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	sessionID := os.Getenv("ATTN_SESSION_ID")
+	if sessionID == "" {
+		fmt.Fprintln(os.Stderr, "error: ATTN_SESSION_ID not set")
+		os.Exit(1)
+	}
+
+	c := client.New("")
+	err := c.SubscribeThread(*platform, args[0], args[1], sessionID, *channelName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Subscribed to %s thread %s:%s\n", *platform, args[0], args[1])
+}
+
+func runUnsubscribe() {
+	fs := flag.NewFlagSet("unsubscribe", flag.ExitOnError)
+	platform := fs.String("platform", "slack", "Chat platform (slack, discord, etc.)")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: attn unsubscribe [options] <channel_id> <thread_ts>\n\n")
+		fmt.Fprintf(os.Stderr, "Unsubscribe current session from a chat thread.\n")
+		fmt.Fprintf(os.Stderr, "Requires ATTN_SESSION_ID to be set.\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(os.Args[2:])
+
+	args := fs.Args()
+	if len(args) < 2 {
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	sessionID := os.Getenv("ATTN_SESSION_ID")
+	if sessionID == "" {
+		fmt.Fprintln(os.Stderr, "error: ATTN_SESSION_ID not set")
+		os.Exit(1)
+	}
+
+	c := client.New("")
+	err := c.UnsubscribeThread(*platform, args[0], args[1], sessionID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Unsubscribed from %s thread %s:%s\n", *platform, args[0], args[1])
+}
+
+func runSubscriptions() {
+	fs := flag.NewFlagSet("subscriptions", flag.ExitOnError)
+	sessionFilter := fs.String("session", "", "Filter by session ID")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: attn subscriptions [options]\n\n")
+		fmt.Fprintf(os.Stderr, "List active thread subscriptions.\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(os.Args[2:])
+
+	c := client.New("")
+	subs, err := c.ListSubscriptions(*sessionFilter)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(subs); err != nil {
+		fmt.Fprintf(os.Stderr, "error encoding: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -412,7 +508,12 @@ func runClaudeDirectly() {
 	if sessionID == "" {
 		sessionID = wrapper.GenerateSessionID()
 	}
-	if err := c.Register(sessionID, label, cwd); err != nil {
+
+	// Get parent window ID for terminal activation
+	windowID := wrapper.GetParentWindowID()
+	cgWindowID := wrapper.GetCGWindowID()
+
+	if err := c.Register(sessionID, label, cwd, windowID, cgWindowID); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
 	}
 
@@ -465,6 +566,7 @@ func runClaudeDirectly() {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "ATTN_SESSION_ID="+sessionID)
 
 	// Start claude (non-blocking so we can set up signal forwarding)
 	if err = cmd.Start(); err != nil {
@@ -563,7 +665,12 @@ func runCodexDirectly() {
 	if sessionID == "" {
 		sessionID = wrapper.GenerateSessionID()
 	}
-	if err := c.Register(sessionID, label, cwd); err != nil {
+
+	// Get parent window ID for terminal activation
+	windowID := wrapper.GetParentWindowID()
+	cgWindowID := wrapper.GetCGWindowID()
+
+	if err := c.Register(sessionID, label, cwd, windowID, cgWindowID); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
 	}
 
@@ -651,6 +758,7 @@ func startDaemonBackground() error {
 
 	return cmd.Start()
 }
+
 
 func runHookStop() {
 	if len(os.Args) < 3 {

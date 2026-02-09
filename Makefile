@@ -48,6 +48,8 @@ UNAME_S := $(shell uname -s)
 
 install: build
 	@mkdir -p $(INSTALL_DIR)
+	@# Remove first (breaks symlinks that would cause cat to self-clobber)
+	@rm -f $(INSTALL_DIR)/$(BINARY_NAME)
 	@# Use cat to avoid copying extended attributes that trigger Gatekeeper
 	cat $(BINARY_NAME) > $(INSTALL_DIR)/$(BINARY_NAME)
 	chmod +x $(INSTALL_DIR)/$(BINARY_NAME)

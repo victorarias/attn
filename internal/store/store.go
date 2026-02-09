@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sort"
@@ -82,10 +83,14 @@ func (s *Store) Add(session *protocol.Session) {
 	if err != nil {
 		log.Printf("[store] Add: failed to marshal todos for session %s: %v", session.ID, err)
 	}
+	var cgWindowID interface{}
+	if session.CgWindowID != nil {
+		cgWindowID = *session.CgWindowID
+	}
 	_, err = s.db.Exec(`
 		INSERT OR REPLACE INTO sessions
-		(id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, window_id, cg_window_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Label,
 		session.Directory,
@@ -98,6 +103,8 @@ func (s *Store) Add(session *protocol.Session) {
 		string(todosJSON),
 		session.LastSeen,
 		boolToInt(session.Muted),
+		protocol.Deref(session.WindowID),
+		cgWindowID,
 	)
 	if err != nil {
 		log.Printf("[store] Add: failed to insert session %s: %v", session.ID, err)
@@ -117,10 +124,11 @@ func (s *Store) Get(id string) *protocol.Session {
 	var todosJSON string
 	var stateSince, stateUpdatedAt, lastSeen string
 	var muted, isWorktree int
-	var branch, mainRepo sql.NullString
+	var branch, mainRepo, windowID sql.NullString
+	var cgWindowID sql.NullInt64
 
 	err := s.db.QueryRow(`
-		SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
+		SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, window_id, cg_window_id
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
@@ -134,6 +142,8 @@ func (s *Store) Get(id string) *protocol.Session {
 		&todosJSON,
 		&lastSeen,
 		&muted,
+		&windowID,
+		&cgWindowID,
 	)
 	if err != nil {
 		return nil
@@ -147,6 +157,12 @@ func (s *Store) Get(id string) *protocol.Session {
 	}
 	if mainRepo.Valid && mainRepo.String != "" {
 		session.MainRepo = protocol.Ptr(mainRepo.String)
+	}
+	if windowID.Valid && windowID.String != "" {
+		session.WindowID = protocol.Ptr(windowID.String)
+	}
+	if cgWindowID.Valid {
+		session.CgWindowID = protocol.Ptr(int(cgWindowID.Int64))
 	}
 	session.StateSince = stateSince
 	session.StateUpdatedAt = stateUpdatedAt
@@ -205,11 +221,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
+			SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, window_id, cg_window_id
 			FROM sessions ORDER BY label`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
+			SELECT id, label, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, window_id, cg_window_id
 			FROM sessions WHERE state = ? ORDER BY label`, stateFilter)
 	}
 	if err != nil {
@@ -223,7 +239,8 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var todosJSON string
 		var stateSince, stateUpdatedAt, lastSeen string
 		var muted, isWorktree int
-		var branch, mainRepo sql.NullString
+		var branch, mainRepo, windowID sql.NullString
+		var cgWindowID sql.NullInt64
 
 		err := rows.Scan(
 			&session.ID,
@@ -238,6 +255,8 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			&todosJSON,
 			&lastSeen,
 			&muted,
+			&windowID,
+			&cgWindowID,
 		)
 		if err != nil {
 			continue
@@ -251,6 +270,12 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		}
 		if mainRepo.Valid && mainRepo.String != "" {
 			session.MainRepo = protocol.Ptr(mainRepo.String)
+		}
+		if windowID.Valid && windowID.String != "" {
+			session.WindowID = protocol.Ptr(windowID.String)
+		}
+		if cgWindowID.Valid {
+			session.CgWindowID = protocol.Ptr(int(cgWindowID.Int64))
 		}
 		session.StateSince = stateSince
 		session.StateUpdatedAt = stateUpdatedAt
@@ -1159,6 +1184,174 @@ func (s *Store) RemoveRecentLocation(path string) {
 	}
 
 	s.execLog("DELETE FROM recent_locations WHERE path = ?", path)
+}
+
+// AddThreadSubscription adds or ignores a duplicate subscription. Returns the row ID.
+func (s *Store) AddThreadSubscription(platform, channelID, threadTS, sessionID, channelName string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return 0, fmt.Errorf("database not initialized")
+	}
+
+	var cn interface{}
+	if channelName != "" {
+		cn = channelName
+	}
+
+	result, err := s.db.Exec(`
+		INSERT OR IGNORE INTO thread_subscriptions (platform, channel_id, thread_ts, session_id, channel_name)
+		VALUES (?, ?, ?, ?, ?)`,
+		platform, channelID, threadTS, sessionID, cn)
+	if err != nil {
+		return 0, fmt.Errorf("insert thread subscription: %w", err)
+	}
+
+	return result.LastInsertId()
+}
+
+// RemoveThreadSubscription removes a specific subscription.
+func (s *Store) RemoveThreadSubscription(platform, channelID, threadTS, sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	_, err := s.db.Exec(`
+		DELETE FROM thread_subscriptions
+		WHERE platform = ? AND channel_id = ? AND thread_ts = ? AND session_id = ?`,
+		platform, channelID, threadTS, sessionID)
+	return err
+}
+
+// GetThreadSubscriptions returns all active subscriptions.
+func (s *Store) GetThreadSubscriptions() ([]protocol.ThreadSubscription, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+
+	rows, err := s.db.Query(`
+		SELECT id, platform, channel_id, thread_ts, session_id, channel_name, created_at
+		FROM thread_subscriptions ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []protocol.ThreadSubscription
+	for rows.Next() {
+		var sub protocol.ThreadSubscription
+		var channelName sql.NullString
+		if err := rows.Scan(&sub.ID, &sub.Platform, &sub.ChannelID, &sub.ThreadTS, &sub.SessionID, &channelName, &sub.CreatedAt); err != nil {
+			continue
+		}
+		if channelName.Valid {
+			sub.ChannelName = &channelName.String
+		}
+		result = append(result, sub)
+	}
+	return result, nil
+}
+
+// GetThreadSubscriptionsBySession returns subscriptions for a specific session.
+func (s *Store) GetThreadSubscriptionsBySession(sessionID string) ([]protocol.ThreadSubscription, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+
+	rows, err := s.db.Query(`
+		SELECT id, platform, channel_id, thread_ts, session_id, channel_name, created_at
+		FROM thread_subscriptions WHERE session_id = ? ORDER BY created_at`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []protocol.ThreadSubscription
+	for rows.Next() {
+		var sub protocol.ThreadSubscription
+		var channelName sql.NullString
+		if err := rows.Scan(&sub.ID, &sub.Platform, &sub.ChannelID, &sub.ThreadTS, &sub.SessionID, &channelName, &sub.CreatedAt); err != nil {
+			continue
+		}
+		if channelName.Valid {
+			sub.ChannelName = &channelName.String
+		}
+		result = append(result, sub)
+	}
+	return result, nil
+}
+
+// GetSubscribedThreadKeys returns a map of "platform:channel_id:thread_ts" -> []sessionID
+// for all active subscriptions.
+func (s *Store) GetSubscribedThreadKeys() (map[string][]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+
+	rows, err := s.db.Query(`SELECT platform, channel_id, thread_ts, session_id FROM thread_subscriptions`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string][]string)
+	for rows.Next() {
+		var platform, channelID, threadTS, sessionID string
+		if err := rows.Scan(&platform, &channelID, &threadTS, &sessionID); err != nil {
+			continue
+		}
+		key := platform + ":" + channelID + ":" + threadTS
+		result[key] = append(result[key], sessionID)
+	}
+	return result, nil
+}
+
+// CleanupSessionSubscriptions removes all subscriptions for a session. Returns count deleted.
+func (s *Store) CleanupSessionSubscriptions(sessionID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return 0, nil
+	}
+
+	result, err := s.db.Exec(`DELETE FROM thread_subscriptions WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return 0, err
+	}
+
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
+}
+
+// HasAnySubscriptions returns true if there are any active thread subscriptions.
+func (s *Store) HasAnySubscriptions() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return false
+	}
+
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM thread_subscriptions`).Scan(&count)
+	if err != nil {
+		return false
+	}
+	return count > 0
 }
 
 // Helper functions

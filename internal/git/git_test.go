@@ -94,6 +94,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 		"GIT_AUTHOR_EMAIL=test@test.com",
 		"GIT_COMMITTER_NAME=test",
 		"GIT_COMMITTER_EMAIL=test@test.com",
+		"GIT_TEMPLATE_DIR=",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)

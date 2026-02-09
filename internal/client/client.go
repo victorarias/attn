@@ -58,12 +58,18 @@ func (c *Client) send(msg interface{}) (*protocol.Response, error) {
 }
 
 // Register registers a new session
-func (c *Client) Register(id, label, dir string) error {
+func (c *Client) Register(id, label, dir, windowID string, cgWindowID int) error {
 	msg := protocol.RegisterMessage{
 		Cmd:   protocol.CmdRegister,
 		ID:    id,
 		Label: protocol.Ptr(label),
 		Dir:   dir,
+	}
+	if windowID != "" {
+		msg.WindowID = protocol.Ptr(windowID)
+	}
+	if cgWindowID != 0 {
+		msg.CgWindowID = protocol.Ptr(cgWindowID)
 	}
 	_, err := c.send(msg)
 	return err
@@ -230,4 +236,48 @@ func (c *Client) IsRunning() bool {
 	}
 	conn.Close()
 	return true
+}
+
+// SubscribeThread subscribes a session to a chat thread
+func (c *Client) SubscribeThread(platform, channelID, threadTS, sessionID, channelName string) error {
+	msg := protocol.SubscribeThreadMessage{
+		Cmd:       protocol.CmdSubscribeThread,
+		Platform:  platform,
+		ChannelID: channelID,
+		ThreadTS:  threadTS,
+		SessionID: sessionID,
+	}
+	if channelName != "" {
+		msg.ChannelName = protocol.Ptr(channelName)
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// UnsubscribeThread removes a session's subscription to a chat thread
+func (c *Client) UnsubscribeThread(platform, channelID, threadTS, sessionID string) error {
+	msg := protocol.UnsubscribeThreadMessage{
+		Cmd:       protocol.CmdUnsubscribeThread,
+		Platform:  platform,
+		ChannelID: channelID,
+		ThreadTS:  threadTS,
+		SessionID: sessionID,
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// ListSubscriptions returns active thread subscriptions, optionally filtered by session
+func (c *Client) ListSubscriptions(sessionID string) ([]protocol.ThreadSubscription, error) {
+	msg := protocol.ListSubscriptionsMessage{
+		Cmd: protocol.CmdListSubscriptions,
+	}
+	if sessionID != "" {
+		msg.SessionID = protocol.Ptr(sessionID)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Subscriptions, nil
 }

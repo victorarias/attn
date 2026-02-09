@@ -149,6 +149,18 @@ var migrations = []migration{
 		ALTER TABLE review_comments ADD COLUMN wont_fix_by TEXT NOT NULL DEFAULT '';
 		ALTER TABLE review_comments ADD COLUMN wont_fix_at TEXT NOT NULL DEFAULT '';
 	`},
+	{18, "add window_id to sessions", "ALTER TABLE sessions ADD COLUMN window_id TEXT"},
+	{19, "add cg_window_id to sessions", "ALTER TABLE sessions ADD COLUMN cg_window_id INTEGER"},
+	{20, "create thread_subscriptions table", `CREATE TABLE IF NOT EXISTS thread_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    thread_ts TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    channel_name TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(platform, channel_id, thread_ts, session_id)
+)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
