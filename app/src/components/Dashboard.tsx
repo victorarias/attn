@@ -47,13 +47,23 @@ export function Dashboard({
   onSetSetting,
 }: DashboardProps) {
   const waitingSessions = sessions.filter((s) => s.state === 'waiting_input');
+  const pendingApprovalSessions = sessions.filter((s) => s.state === 'pending_approval');
   const workingSessions = sessions.filter((s) => s.state === 'working');
   const idleSessions = sessions.filter((s) => s.state === 'idle');
 
   // Debug: log session states
   if (sessions.length > 0) {
     console.log('[Dashboard] sessions:', sessions.map(s => ({ id: s.id, state: s.state })));
-    console.log('[Dashboard] waiting:', waitingSessions.length, 'working:', workingSessions.length, 'idle:', idleSessions.length);
+    console.log(
+      '[Dashboard] waiting:',
+      waitingSessions.length,
+      'pending:',
+      pendingApprovalSessions.length,
+      'working:',
+      workingSessions.length,
+      'idle:',
+      idleSessions.length
+    );
   }
 
   // Group PRs by repo
@@ -226,6 +236,23 @@ export function Dashboard({
                         onClick={() => onSelectSession(s.id)}
                       >
                         <StateIndicator state="waiting_input" size="sm" />
+                        <span className="session-name">{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {pendingApprovalSessions.length > 0 && (
+                  <div className="session-group" data-testid="session-group-pending">
+                    <div className="group-label">Pending approval</div>
+                    {pendingApprovalSessions.map((s) => (
+                      <div
+                        key={s.id}
+                        className="session-row clickable"
+                        data-testid={`session-${s.id}`}
+                        data-state={s.state}
+                        onClick={() => onSelectSession(s.id)}
+                      >
+                        <StateIndicator state="pending_approval" size="sm" />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}

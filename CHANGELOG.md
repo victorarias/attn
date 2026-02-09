@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-09]
+
+### Fixed
+- **Dashboard Session Visibility**: Home dashboard now renders `pending_approval` sessions in a dedicated "Pending approval" group, so active sessions waiting on tool/permission approval are no longer hidden.
+
 ## [2026-02-08]
 
 ### Added
