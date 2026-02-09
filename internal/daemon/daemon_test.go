@@ -351,16 +351,26 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	// Register a session to verify it's counted
 	c := client.New(sockPath)
 	c.Register("test-1", "test", "/tmp")
 
-	// Hit the health endpoint
-	resp, err := http.Get("http://127.0.0.1:" + wsPort + "/health")
-	if err != nil {
-		t.Fatalf("Health check failed: %v", err)
+	// Poll the health endpoint until the HTTP server is ready
+	healthURL := "http://127.0.0.1:" + wsPort + "/health"
+	var resp *http.Response
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, err := http.Get(healthURL)
+		if err == nil {
+			resp = r
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if resp == nil {
+		t.Fatalf("Health endpoint not ready after 5s")
 	}
 	defer resp.Body.Close()
 
