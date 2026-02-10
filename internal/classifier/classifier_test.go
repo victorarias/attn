@@ -72,6 +72,9 @@ func TestParseResponse_SurroundingText(t *testing.T) {
 		want     string
 	}{
 		{"WAITING line prefix", "WAITING - asks a follow-up", "waiting_input"},
+		{"multi-line waiting with rationale", "WAITING\nThe text ends with a direct question.", "waiting_input"},
+		{"verdict label with done", "Verdict: DONE", "idle"},
+		{"verdict label with waiting", "verdict = waiting", "waiting_input"},
 		{"DONE line prefix", "DONE (completed)", "idle"},
 		{"multi-line with final verdict", "analysis...\nDONE", "idle"},
 		{"sentence without explicit verdict prefix", "The assistant is waiting for user input", "idle"},
@@ -91,6 +94,57 @@ func TestParseResponse_NoStandaloneToken(t *testing.T) {
 	got := ParseResponse("This appears complete without further input.")
 	if got != "idle" {
 		t.Errorf("expected idle when no WAITING/DONE prefix, got %q", got)
+	}
+}
+
+func TestParseResponse_JSONStructured(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		want     string
+	}{
+		{"json verdict waiting", `{"verdict":"WAITING"}`, "waiting_input"},
+		{"json state done", `{"state":"DONE"}`, "idle"},
+		{"json status idle", `{"status":"IDLE"}`, "idle"},
+		{"json needs_input true", `{"needs_input":true}`, "waiting_input"},
+		{"fenced json verdict waiting", "```json\n{\"verdict\":\"WAITING\"}\n```", "waiting_input"},
+		{"fenced json verdict done", "```json\n{\"verdict\":\"DONE\"}\n```", "idle"},
+		{"invalid json no verdict", `{"foo":"bar"}`, "idle"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseResponse(tt.response)
+			if got != tt.want {
+				t.Errorf("ParseResponse(%q) = %q, want %q", tt.response, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseVerdictFromResponse_ExplicitVerdictRequired(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		want     string
+		ok       bool
+	}{
+		{"plain sentence no explicit verdict", "The assistant is waiting for user input", "", false},
+		{"explicit waiting verdict", "WAITING\nbecause it asks a question", "waiting_input", true},
+		{"explicit done verdict", "Verdict: DONE", "idle", true},
+		{"json verdict", `{"verdict":"DONE"}`, "idle", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseVerdictFromResponse(tt.response)
+			if ok != tt.ok {
+				t.Fatalf("parseVerdictFromResponse(%q) ok=%v, want %v", tt.response, ok, tt.ok)
+			}
+			if got != tt.want {
+				t.Fatalf("parseVerdictFromResponse(%q) = %q, want %q", tt.response, got, tt.want)
+			}
+		})
 	}
 }
 

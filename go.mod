@@ -9,7 +9,7 @@ require (
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/victorarias/claude-agent-sdk-go v0.1.1
+	github.com/victorarias/claude-agent-sdk-go v1.0.0-beta
 )
 
 require (

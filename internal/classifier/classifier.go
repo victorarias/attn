@@ -2,9 +2,11 @@ package classifier
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -34,30 +36,117 @@ Text to analyze:
 """
 `
 
+var classifierOutputFormat = map[string]any{
+	"type": "json_schema",
+	"schema": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"verdict": map[string]any{
+				"type": "string",
+				"enum": []string{"WAITING", "DONE"},
+			},
+		},
+		"required":             []string{"verdict"},
+		"additionalProperties": false,
+	},
+}
+
+var verdictLineRegex = regexp.MustCompile(`(?i)^\s*(?:[-*>\d.)]+\s*)?(?:VERDICT\s*[:=]\s*)?(WAITING_INPUT|WAITING|DONE|IDLE)\b`)
+
 // BuildPrompt creates the classification prompt
 func BuildPrompt(text string) string {
 	return fmt.Sprintf(promptTemplate, text)
 }
 
-// ParseResponse parses the LLM response into a state
-func ParseResponse(response string) string {
-	lastLine := ""
-	for _, line := range strings.Split(strings.TrimSpace(response), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			lastLine = trimmed
-		}
-	}
-	if lastLine == "" {
-		return "idle"
+func parseVerdictToken(value string) (string, bool) {
+	match := verdictLineRegex.FindStringSubmatch(strings.TrimSpace(value))
+	if len(match) < 2 {
+		return "", false
 	}
 
-	normalized := strings.ToUpper(lastLine)
-	if strings.HasPrefix(normalized, "WAITING") {
-		return "waiting_input"
+	switch strings.ToUpper(match[1]) {
+	case "WAITING", "WAITING_INPUT":
+		return "waiting_input", true
+	case "DONE", "IDLE":
+		return "idle", true
+	default:
+		return "", false
 	}
-	if strings.HasPrefix(normalized, "DONE") {
-		return "idle"
+}
+
+func parseVerdictFromValue(value any) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return parseVerdictToken(typed)
+	case map[string]any:
+		for _, key := range []string{"verdict", "state", "status"} {
+			if raw, ok := typed[key]; ok {
+				if result, ok := parseVerdictFromValue(raw); ok {
+					return result, true
+				}
+			}
+		}
+		if raw, ok := typed["classification"]; ok {
+			if result, ok := parseVerdictFromValue(raw); ok {
+				return result, true
+			}
+		}
+		if raw, ok := typed["needs_input"]; ok {
+			if needsInput, ok := raw.(bool); ok {
+				if needsInput {
+					return "waiting_input", true
+				}
+				return "idle", true
+			}
+		}
+	}
+	return "", false
+}
+
+func parseVerdictFromJSONResponse(response string) (string, bool) {
+	trimmed := strings.TrimSpace(response)
+	if trimmed == "" {
+		return "", false
+	}
+
+	var parsed any
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+		return parseVerdictFromValue(parsed)
+	}
+
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start >= 0 && end > start {
+		if err := json.Unmarshal([]byte(trimmed[start:end+1]), &parsed); err == nil {
+			return parseVerdictFromValue(parsed)
+		}
+	}
+
+	return "", false
+}
+
+func parseVerdictFromResponse(response string) (string, bool) {
+	if result, ok := parseVerdictFromJSONResponse(response); ok {
+		return result, true
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(response), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if result, ok := parseVerdictToken(trimmed); ok {
+			return result, true
+		}
+	}
+
+	return "", false
+}
+
+// ParseResponse parses the LLM response into a state
+func ParseResponse(response string) string {
+	if result, ok := parseVerdictFromResponse(response); ok {
+		return result
 	}
 
 	return "idle"
@@ -100,27 +189,50 @@ func ClassifyWithClaude(text string, timeout time.Duration) (string, error) {
 	}
 
 	DefaultLogger("classifier: calling claude SDK model=%s timeout=%d seconds", model, int(timeout.Seconds()))
-	messages, err := sdk.RunQuery(ctx, prompt, types.WithModel(model))
+	messages, err := sdk.RunQuery(
+		ctx,
+		prompt,
+		types.WithModel(model),
+		types.WithOutputFormat(classifierOutputFormat),
+		types.WithMaxTurns(1),
+	)
 	if err != nil {
 		DefaultLogger("classifier: claude SDK error: %v", err)
 		return "waiting_input", fmt.Errorf("claude sdk: %w", err)
 	}
 
-	// Extract text from AssistantMessage
+	var lastAssistantResponse string
 	for _, msg := range messages {
-		if m, ok := msg.(*types.AssistantMessage); ok {
-			response := m.Text()
-			DefaultLogger("classifier: claude SDK response (%d chars): %q", len(response), response)
-
-			result := ParseResponse(response)
-			DefaultLogger("classifier: parsed result: %s", result)
-
-			return result, nil
+		switch typed := msg.(type) {
+		case *types.AssistantMessage:
+			lastAssistantResponse = typed.Text()
+		case *types.ResultMessage:
+			if result, ok := parseVerdictFromValue(typed.StructuredOutput); ok {
+				DefaultLogger("classifier: parsed result from structured output: %s", result)
+				return result, nil
+			}
+			if typed.Result != nil {
+				if result, ok := parseVerdictFromResponse(*typed.Result); ok {
+					DefaultLogger("classifier: parsed result from result payload: %s", result)
+					return result, nil
+				}
+			}
 		}
 	}
 
-	// No assistant message found
-	DefaultLogger("classifier: no assistant message in claude response")
+	if lastAssistantResponse != "" {
+		DefaultLogger("classifier: claude SDK response (%d chars): %q", len(lastAssistantResponse), lastAssistantResponse)
+		result, ok := parseVerdictFromResponse(lastAssistantResponse)
+		if !ok {
+			DefaultLogger("classifier: response missing explicit WAITING/DONE verdict, defaulting to waiting_input")
+			return "waiting_input", nil
+		}
+		DefaultLogger("classifier: parsed result: %s", result)
+		return result, nil
+	}
+
+	// No usable response found
+	DefaultLogger("classifier: no assistant or structured result in claude response")
 	return "waiting_input", nil
 }
 
@@ -192,7 +304,11 @@ func ClassifyWithCopilot(text string, timeout time.Duration) (string, error) {
 
 	DefaultLogger("classifier: copilot CLI response (%d chars): %q", len(outputText), outputText)
 
-	result := ParseResponse(outputText)
+	result, ok := parseVerdictFromResponse(outputText)
+	if !ok {
+		DefaultLogger("classifier: copilot response missing explicit WAITING/DONE verdict, defaulting to waiting_input")
+		return "waiting_input", nil
+	}
 	DefaultLogger("classifier: parsed result: %s", result)
 	return result, nil
 }

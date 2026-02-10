@@ -11,6 +11,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Terminal Cmd+Click Link Open**: Terminal hyperlinks now open directly via Tauri opener for both plain URLs and OSC 8 links, removing the xterm warning prompt and fixing links that previously failed to open after confirmation.
 
+### Changed
+- **Classifier SDK Runtime**: Upgrade Claude Agent SDK dependency to `v1.0.0-beta`.
+
+### Fixed
+- **Classifier WAITING/DONE Parsing**: Stop-time state classification now handles multiline/model-explanatory outputs correctly (including responses that start with `WAITING` and then add rationale), preventing false `idle` states when user input is still required.
+- **Classifier Structured Output Handling**: Claude classifier requests a JSON-schema verdict (`WAITING`/`DONE`) and consumes structured/result payloads when available, with robust fallback parsing for plain-text outputs.
+
 ## [2026-02-09]
 
 ### Fixed
