@@ -115,7 +115,7 @@ Adopt per-session worker sidecars (`Option 2`): daemon is control plane, each se
 
 ### Plan
 
-See `docs/plans/2026-02-08-pty-worker-sidecar-plan.md`.
+See `docs/plans/2026-02-08-pty-worker-sidecar-plan.md` (updated 2026-02-10, implementation-ready).
 
 ### Acceptance criteria (MVP)
 

@@ -1,229 +1,566 @@
-# PTY Decoupling Plan: Per-Session Worker Sidecars
+# PTY Restart-Survival Design: Per-Session Worker Sidecars
 
 Date: 2026-02-08  
-Status: Draft  
+Updated: 2026-02-10  
+Status: Ready for implementation  
 Owner: daemon/pty
 
-## Why
+## Why this follow-up exists
 
-Today PTY lifecycle is owned by the daemon process. If daemon restarts, active PTYs are lost.  
-We want PTYs to survive daemon restarts and be recoverable, while keeping a path for remote/VM deployment.
+`docs/plans/demonize.md` Phase 8 sketches restart survival via shim processes, but execution details were still open.
+
+Current behavior is still daemon-owned PTY runtime (`internal/pty`). If daemon exits, active PTYs exit with it. This document defines the concrete follow-up design to make sessions survive daemon restarts without changing frontend PTY protocol.
 
 ## Decision
 
-Use **Option 2**: one lightweight `attn-pty-worker` process per session.
+Adopt one worker process per session using `attn pty-worker` (subcommand in same binary).
 
-- Daemon remains control plane and API surface for frontend.
-- Worker owns one PTY lifecycle (`spawn`, `attach`, `input`, `resize`, `kill`, replay/snapshot).
-- Daemon can crash/restart and reconnect to live workers via registry discovery.
+- Daemon remains the only API surface for app/web clients.
+- Worker owns PTY + child process lifecycle and output state (`seq`, scrollback, optional screen snapshot).
+- Daemon restart rehydrates by discovering live workers and reconnecting.
 
-This is chosen for simplicity and incremental delivery.  
-If needed later, this can evolve into a single supervisor (`Option 1`) behind the same daemon-facing worker RPC shape.
+This aligns with the existing `internal/pty` API shape and keeps the remote-ready daemon-centric architecture.
 
 ## Goals
 
-1. Daemon restart does not kill active PTYs.
-2. Daemon can reconstruct session/PTy state from workers on boot.
-3. Frontend protocol remains daemon-centric (no direct worker client connections).
-4. Design remains compatible with daemon on remote host/VM.
+1. Daemon restart does not kill active PTY sessions.
+2. Daemon can deterministically recover sessions from workers on startup.
+3. Frontend WebSocket PTY protocol remains unchanged.
+4. Design remains compatible with daemon and workers running on remote host/VM.
 
-## Non-Goals (Phase 1)
+## Non-goals (MVP)
 
-1. Multi-user shared daemon tenancy.
-2. Full transport/auth hardening for public network exposure.
+1. Multi-user tenancy and cross-user isolation beyond same-UID local usage.
+2. Public network exposure hardening (TLS/auth stays daemon-level future work).
 3. Cross-host worker scheduling.
+4. Guaranteed crash-proof durability of scrollback to disk.
+
+## Terminology and path model
+
+1. `data_root`:
+- Daemon runtime root directory, default `~/.attn`.
+- Multiple daemons on one host must use distinct `data_root` values.
+
+2. `daemon_instance_id`:
+- Stable ID stored at `<data_root>/daemon-id`.
+- Identity is scoped to one daemon endpoint/profile, not globally to a host/user.
+
+3. `worker_root`:
+- `<data_root>/workers/<daemon_instance_id>/`
+- Canonical subpaths:
+  - registry: `<worker_root>/registry/<session_id>.json`
+  - sockets: `<worker_root>/sock/<session_id>.sock`
+  - quarantine: `<worker_root>/quarantine/<session_id>.json`
+
+## Future-proof constraints (multi-daemon and remote)
+
+These constraints must hold during implementation even though multi-daemon UX is deferred.
+
+1. Daemon remains the only network endpoint. Workers stay host-local and are never exposed to clients.
+2. Worker RPC transport stays Unix-socket local. Remote access uses daemon transport (direct, SSH tunnel, Tailscale, VM port forward).
+3. Session identity must be endpoint-scoped: treat `(daemon_instance_id, session_id)` as canonical identity for future client-side multi-daemon views.
+4. PTY commands/events remain endpoint-local and protocol-stable so one client can hold multiple daemon connections without special PTY branching.
+5. Recovery and registry logic are per-daemon-instance only; no cross-daemon worker adoption.
+6. Any UI features that need filesystem/process access must route through daemon APIs, not local-client assumptions, to keep remote daemon support clean.
+
+## Architecture decisions we lock now (to actively move toward the vision)
+
+1. Persistent daemon identity:
+- Each daemon instance has a stable `daemon_instance_id` stored at `<data_root>/daemon-id` (`data_root` defaults to `~/.attn`).
+- ID survives daemon restarts and binary upgrades.
+- If missing/corrupt, daemon regenerates and rewrites atomically.
+
+2. Endpoint-scoped session identity:
+- Client/runtime identity is `(daemon_instance_id, session_id)`, not `session_id` alone.
+- Any in-memory maps (pending actions, terminal routing, attach subscriptions) must be keyed by endpoint + session.
+
+3. Protocol foundation for multi-daemon clients:
+- Daemon includes optional `daemon_instance_id` in initial handshake payload (`initial_state`) and warning/telemetry payloads where useful.
+- Field addition is additive and backward-compatible.
+
+4. Namespaced worker runtime state:
+- Worker runtime paths use canonical `worker_root`:
+  - `<data_root>/workers/<daemon_instance_id>/registry/*.json`
+  - `<data_root>/workers/<daemon_instance_id>/sock/*.sock`
+- Prevents collisions if multiple daemons run on one host (dev/stable, VM chroot variants, etc.).
+
+5. Remote-transport neutrality:
+- Frontend treats daemon endpoint as opaque connection profile (localhost, SSH tunnel endpoint, Tailscale IP, VM forward).
+- No PTY-path branching by transport; same daemon WS protocol path everywhere.
+
+6. Upgrade compatibility window:
+- Worker RPC is additive-first.
+- Daemon must support reconnecting to workers from the previous compatible worker RPC minor version.
+- Breaking worker RPC changes require explicit drain/migration plan and are not allowed as silent rollout changes.
+
+## Baseline assumptions from current code
+
+1. Frontend already uses daemon WebSocket PTY commands/events (`spawn_session`, `attach_session`, `pty_input`, `pty_resize`, `kill_session`, `pty_output`, `attach_result`, `session_exited`, `pty_desync`).
+2. `internal/pty` already provides session runtime features we need to preserve: scrollback, seq, snapshot, state detection.
+3. Daemon currently prunes sessions with no live PTY on startup; this must be changed for recovery mode.
 
 ## Architecture
 
-## Components
+### Components
 
-1. `attn-daemon` (control plane)
-- WebSocket/API for app clients.
-- Store/session metadata, git/GitHub logic, warnings, policy.
-- Worker lifecycle management + restart recovery.
+1. `attn daemon` (control plane)
+- Owns WebSocket, store, git/GitHub, hooks ingestion.
+- Routes PTY commands to backend interface.
+- Performs worker discovery/recovery at boot.
 
-2. `attn-pty-worker` (data plane, one per session)
-- Owns PTY + child agent process.
-- Maintains `seq`, replay buffer, optional visible snapshot.
-- Serves local RPC over Unix socket.
+2. `attn pty-worker` (data plane, one per session)
+- Owns PTY master + child agent process group.
+- Maintains output state and attach replay metadata.
+- Serves local Unix-socket RPC.
 
-3. Worker registry (`~/.attn/workers/`)
-- One file per session ID with:
-  - `session_id`
-  - `pid`
-  - `socket_path`
-  - `created_at`
-  - `agent`
-  - `cwd`
-- Atomic writes (`.tmp` + rename), removed on clean worker exit.
+3. Worker registry (`<worker_root>/registry/`)
+- One metadata file per session.
+- Enables daemon recovery after restart.
 
-## Data Flow
+Use canonical layout:
 
-1. Spawn session
-- Daemon starts worker process with launch args/env.
-- Worker creates PTY + starts agent.
-- Daemon marks session active and attaches frontend stream.
+- `<data_root>/workers/<daemon_instance_id>/registry/`
+- `<data_root>/workers/<daemon_instance_id>/sock/`
+- `<data_root>/workers/<daemon_instance_id>/quarantine/`
 
-2. Runtime
-- Frontend sends PTY commands to daemon.
-- Daemon forwards to worker RPC.
-- Worker streams output/replay metadata to daemon; daemon emits existing WS events.
+### Process model
 
-3. Daemon restart
-- Workers continue running.
-- New daemon scans registry + validates PID/socket.
-- Daemon reattaches to workers, rehydrates session state, emits initial state.
+1. Daemon spawns worker as detached child process.
+2. Worker spawns wrapper/agent PTY child and starts RPC listener.
+3. Daemon opens persistent RPC connection and proxies frontend PTY commands.
+4. If daemon exits, worker keeps PTY child alive.
+5. New daemon reconnects via registry and resumes proxying.
 
-## Worker RPC (stable contract)
+## Backend seam in daemon
 
-Minimal RPC (JSON over Unix domain socket; request/response + stream):
+Introduce daemon-internal backend interface and keep handlers unchanged.
 
-1. `info`
-- returns `running`, `pid`, `agent`, `cwd`, `cols`, `rows`, `last_seq`
+```go
+// internal/ptybackend/backend.go
+type OutputEvent struct {
+    Kind   string // "output" | "desync" | "exit"
+    Data   []byte
+    Seq    uint32
+    Reason string
+}
 
-2. `attach`
-- returns replay payload (`scrollback`, `last_seq`, optional `screen_snapshot`)
-- starts output stream subscription
+type Stream interface {
+    Events() <-chan OutputEvent
+    Close() error
+}
 
-3. `detach`
-- stop subscription for caller
+type Backend interface {
+    Spawn(ctx context.Context, opts SpawnOptions) error
+    Attach(ctx context.Context, sessionID, subscriberID string) (AttachInfo, Stream, error)
+    Input(ctx context.Context, sessionID string, data []byte) error
+    Resize(ctx context.Context, sessionID string, cols, rows uint16) error
+    Kill(ctx context.Context, sessionID string, sig syscall.Signal) error
+    Remove(ctx context.Context, sessionID string) error
+    SessionIDs(ctx context.Context) []string
+    Recover(ctx context.Context) (RecoveryReport, error)
+    Shutdown(ctx context.Context) error
+}
+```
 
-4. `input`
-- write bytes to PTY stdin
+Daemon (WebSocket layer) owns subscriber buffering/backpressure policy and maps backend `desync`/`exit` events to current frontend protocol events (`pty_desync`, `session_exited`).
 
-5. `resize`
-- set PTY size
+Implementations:
 
-6. `kill`
-- terminate session process
+1. `embedded` adapter over current `internal/pty.Manager` (no behavior change).
+2. `worker` adapter over worker RPC.
 
-7. `health`
-- readiness and worker version
+Selection via env flag:
 
-## Phased Implementation
+- `ATTN_PTY_BACKEND=embedded|worker`
+- Default: `embedded` until rollout gate is met.
 
-## Phase 0: Contract + flags
+## Worker runtime contract
 
-1. Add backend flag:
-- `ATTN_PTY_BACKEND=embedded|worker` (default `embedded` initially).
-2. Define worker RPC structs and version field.
-3. Add compatibility tests for contract encoding/decoding.
+### Subcommand choice
 
-Exit criteria:
-- Daemon compiles with dual backend interface and no behavior change by default.
+Use `attn pty-worker` (not separate install artifact).
 
-## Phase 1: Worker binary (single-session)
+Why:
 
-1. Add `cmd/attn-pty-worker`.
-2. Move/reuse PTY session logic from `internal/pty/session.go` into worker-owned runtime package.
-3. Implement registry file create/update/remove.
-4. Implement RPC server and attach/replay output stream.
+1. Existing install paths and update flow remain simple (`make install` / app packaging).
+2. Daemon/worker versions are typically aligned because they ship in one binary, while compatibility rules still cover live-worker upgrade windows.
+3. Lower operational complexity than shipping `attn-pty-worker` separately.
 
-Exit criteria:
-- Worker can spawn agent PTY, accept input/resize, and serve replay/stream with seq.
+### Launch inputs
 
-## Phase 2: Daemon worker backend integration
+Daemon starts worker with required args:
 
-1. Add `internal/ptybackend` interface used by websocket handlers.
-2. Implement worker-backed adapter in daemon:
-- spawn worker process
-- connect RPC
-- forward attach/input/resize/kill
-3. Preserve existing WS protocol to frontend (no app contract changes).
+- `--daemon-instance-id`
+- `--session-id`
+- `--agent`
+- `--cwd`
+- `--cols`
+- `--rows`
+- `--registry-path`
+- `--socket-path`
+- `--control-token`
+- optional resume/fork/executable fields already present in spawn flow
 
-Exit criteria:
-- App behavior unchanged under `ATTN_PTY_BACKEND=worker` for normal session usage.
+### Registry schema
 
-## Phase 3: Restart recovery
+Path: `<data_root>/workers/<daemon_instance_id>/registry/<session-id>.json`
 
-1. On daemon startup, scan `~/.attn/workers/*.json`.
-2. Validate each worker:
-- PID alive
-- Unix socket reachable
-- `info` succeeds
-3. Rehydrate session state in store and mark stale registry entries for cleanup.
-4. If store says session exists but no live worker exists, emit stale-session warning.
+```json
+{
+  "version": 1,
+  "daemon_instance_id": "d-123",
+  "session_id": "uuid",
+  "worker_pid": 12345,
+  "child_pid": 12367,
+  "socket_path": "<data_root>/workers/<daemon_instance_id>/sock/<session-id>.sock",
+  "agent": "codex",
+  "cwd": "/path/to/repo",
+  "started_at": "2026-02-10T22:10:00Z",
+  "control_token": "base64-random-32b"
+}
+```
 
-Exit criteria:
-- Kill daemon, keep workers alive, restart daemon: sessions recover and reattach.
+Rules:
 
-## Phase 4: Hardening
+1. Write atomically (`.tmp` then rename).
+2. Registry dir permissions `0700`; file permissions `0600`.
+3. Worker removes metadata and socket on clean termination.
 
-1. Heartbeats between daemon and workers.
-2. Timeouts/circuit breakers for blocked worker RPC.
-3. Backpressure handling and bounded attach queue.
-4. Robust orphan cleanup:
-- missing PID
-- stale socket
-- stale registry file
+## Worker RPC protocol
 
-Exit criteria:
-- Repeated daemon restarts and partial crashes do not leak broken workers indefinitely.
+Transport: JSON Lines (`\n` delimited) over Unix domain socket, full-duplex.
 
-## Phase 5: Remote/VM readiness
+Envelope:
 
-1. Keep worker RPC local-only (Unix socket on daemon host).
-2. Add daemon network mode for client access (later):
-- TCP/TLS WebSocket or SSH-tunnel model.
-3. Ensure no frontend dependency on local filesystem/sockets.
+```json
+{"type":"req","id":"r1","method":"attach","params":{...}}
+{"type":"res","id":"r1","ok":true,"result":{...}}
+{"type":"evt","event":"output","session_id":"...","seq":42,"data":"...base64..."}
+{"type":"evt","event":"exit","session_id":"...","exit_code":0}
+```
 
-Exit criteria:
-- Daemon + workers run on remote host/VM; local UI connects over daemon endpoint.
+### Required methods
 
-## Testing Plan
+1. `hello`
+- request: `{ "rpc_major": 1, "rpc_minor": 0, "daemon_instance_id": "...", "control_token": "..." }`
+- response: `{ "worker_version": "...", "rpc_major": 1, "rpc_minor": 0, "daemon_instance_id": "...", "session_id": "..." }`
 
-1. Unit
-- Worker RPC handlers (`attach`, `input`, `resize`, `kill`, `info`)
-- Registry lifecycle and atomic write behavior
-- Recovery scanner validation logic
+2. `info`
+- response: `{ running, agent, cwd, cols, rows, worker_pid, child_pid, last_seq }`
 
-2. Integration
-- Spawn session via daemon(worker backend), attach, type, resize, close.
-- Daemon crash/restart while worker stays alive; verify reattach + visible restore.
+3. `attach`
+- response: `AttachInfo` equivalent:
+  - `scrollback`, `scrollback_truncated`, `last_seq`
+  - `screen_snapshot` and cursor metadata when available
+  - `running`, `exit_code`, `exit_signal`, size/pid fields
+- starts `output` event flow for this daemon connection
 
-3. E2E (Playwright)
-- Start session, produce output, restart daemon, verify output continuity.
-- Utility terminal `Cmd+T` path under worker backend.
-- Codex visible snapshot restore after daemon restart.
+4. `detach`
+- stop sending output events for this daemon connection
 
-## Operational Model
+5. `input`
+- request contains base64 bytes
 
-1. Local dev
-- Default `embedded` until worker backend is stable.
-- CI matrix can run selected suites with `ATTN_PTY_BACKEND=worker`.
+6. `resize`
+- request contains `cols`, `rows`
 
-2. Production rollout
-- Gate with feature flag.
-- Enable for dev builds first, then opt-in for regular usage.
+7. `signal`
+- request contains signal name; worker signals child process group
 
-## Risks and Mitigations
+8. `remove`
+- explicit terminal cleanup signal from daemon after session fully done
 
-1. Too many processes
-- Risk: high session counts create overhead.
-- Mitigation: cap concurrent sessions, monitor RSS/CPU, later graduate to shared supervisor if needed.
+9. `health`
+- lightweight liveness check
 
-2. Worker/daemon protocol drift
-- Risk: incompatibility after upgrades.
-- Mitigation: worker RPC version negotiation + explicit mismatch error.
+### Versioning and upgrade compatibility
 
-3. Registry corruption/staleness
-- Risk: false recovery or leaked workers.
-- Mitigation: validate with live PID + socket + `info`, never trust file alone.
+1. Worker RPC uses `(rpc_major, rpc_minor)`.
+2. Compatibility rule:
+- `rpc_major` mismatch is incompatible.
+- Daemon must accept worker `rpc_minor` within a defined compatibility window (current and previous minor for this track).
+3. RPC evolution rule:
+- New fields/methods must be optional/additive first.
+- Removing/changing semantics requires major bump and explicit migration plan.
+4. Upgrade-safety requirement:
+- A freshly upgraded daemon must be able to reconnect to still-running workers from the previous compatible version.
 
-4. Complex shutdown semantics
-- Risk: daemon exit accidentally kills workers.
-- Mitigation: spawn workers detached from daemon process group; explicit kill only on session close.
+### Error model
 
-## Open Questions
+Each response may include structured error:
 
-1. Should worker binary be separate install artifact or subcommand (`attn pty-worker`)?
-2. Keep replay buffer only in worker memory, or add optional disk-backed snapshot?
-3. Should daemon enforce max worker count per user/config?
-4. For remote mode, prefer first-class TLS listener or documented SSH tunnel workflow first?
+```json
+{"type":"res","id":"r2","ok":false,"error":{"code":"session_not_running","message":"..."}}
+```
 
-## Acceptance Criteria (MVP)
+Canonical codes:
 
-1. With worker backend enabled, daemon restart preserves active sessions.
-2. Reattached session keeps terminal continuity (replay/snapshot + live output).
-3. No frontend protocol changes required for MVP.
-4. Works when daemon and workers run inside a VM and client connects to daemon endpoint.
+- `bad_request`
+- `unsupported_version`
+- `unauthorized`
+- `session_not_found`
+- `session_not_running`
+- `io_error`
+- `internal_error`
+
+## Session/output semantics
+
+1. Worker owns `seq` counter and scrollback ring buffer; daemon does not regenerate either.
+2. Output ordering is guaranteed per session (`seq` monotonic, no rewrites).
+3. On daemon backpressure, daemon may drop a subscriber and send existing `pty_desync` to frontend; worker remains source of truth.
+4. `session_exited` remains daemon-originated WS event, sourced from worker `exit` event.
+
+## Recovery algorithm on daemon start
+
+### Startup order change
+
+Current startup prunes stale store sessions before any PTY recovery. With worker backend this must be reordered:
+
+1. Start daemon infra (store, pid lock, listeners) but keep WebSocket command handling in `recovering` barrier mode.
+2. Initialize selected PTY backend.
+3. Run backend recovery (`Recover`).
+4. Reconcile store against recovered live sessions.
+5. Prune only confirmed stale entries.
+6. Lift recovery barrier and serve `initial_state` only after reconciliation completes.
+
+### Recovery barrier rules
+
+1. While recovering:
+- WS clients may connect, but daemon does not emit final `initial_state` and rejects PTY commands (`spawn/attach/input/resize/kill/unregister`) with retryable `daemon_recovering` error.
+2. After recovery:
+- Daemon emits a single coherent `initial_state` snapshot.
+- Normal PTY command handling begins.
+
+### Worker discovery and validation
+
+For each `<data_root>/workers/<daemon_instance_id>/registry/*.json`:
+
+1. Parse JSON and validate `version`, `session_id`, `socket_path`.
+2. Check PID liveness (`kill(pid, 0)`).
+3. Verify socket exists and is connectable.
+4. Connect and call `hello` with token + version.
+5. Call `info`; if valid, mark session recovered.
+6. Apply failure classification:
+- stale: dead PID, missing socket, malformed metadata => prune entry.
+- transient: connect timeout / temporary I/O => retry with bounded backoff, then quarantine.
+- ownership/version mismatch: live worker with unexpected owner/version => quarantine and warn; do not delete.
+
+### Ownership enforcement (no cross-daemon adoption)
+
+1. Worker metadata includes `daemon_instance_id` and `control_token`.
+2. Worker `hello` requires both fields and rejects mismatches (`unauthorized`).
+3. Daemon only scans its own namespaced registry path.
+4. Mismatch cases are quarantined for operator inspection, not auto-adopted.
+
+### Store reconciliation rules
+
+For each recovered live worker:
+
+1. If store session exists: keep metadata (`label`, branch info, etc.), update runtime fields (`LastSeen`, state baseline).
+2. If store session is missing: create minimal session row from worker metadata (`id`, `cwd`, `agent`, state=`working`) and set label to `basename(cwd)`.
+3. If worker reports exited: emit exit event and remove runtime entry.
+
+For each store session not recovered:
+
+1. If already terminal/idle and no worker, keep.
+2. If expected running but no worker, mark idle and emit warning (`stale_session_missing_worker`).
+
+Recovery output should include counts: recovered, pruned, missing, failed.
+
+### Runtime authority model
+
+1. Worker is authoritative for runtime PTY facts:
+- `running`, `child_pid`, `cols/rows`, `last_seq`, `scrollback`, `screen_snapshot`, `exit_code/signal`.
+2. Store is authoritative for user/domain metadata:
+- label, directory, branch/worktree metadata, review/git/GitHub annotations.
+3. Session state reconciliation on recovery:
+- if worker is running and store state is `waiting_input` or `pending_approval`, preserve store state.
+- if worker is running and store state is other/non-runtime value, set `working`.
+- if worker is exited, set `idle` and emit `session_exited` once.
+4. Daemon never fabricates `seq`; it relays worker sequence authority.
+
+## Lifecycle rules
+
+1. Normal daemon stop must not signal workers under worker backend.
+2. Explicit session close/unregister must call worker `signal` then `remove`.
+3. Worker child exit should trigger registry/socket cleanup after `45s` TTL if no active daemon attachment.
+4. Orphan policy:
+- Dead worker PID + stale file => prune immediately.
+- Live worker + unreadable info => quarantine and warn; do not kill automatically.
+
+## Security and local isolation
+
+1. Unix sockets under `<data_root>/workers/<daemon_instance_id>/sock` with `0700` directory.
+2. Worker RPC accepts only local same-UID connections (filesystem perms + explicit UID check where available).
+3. `control_token` required in handshake for ownership correlation and anti-misroute.
+4. Do not expose worker sockets to frontend; daemon remains only bridge.
+5. `control_token` is not a substitute for network authentication. Remote auth/TLS is enforced at daemon endpoint layer, not worker RPC.
+
+## Observability
+
+Add low-noise lifecycle logs (no PTY payload logs):
+
+1. Worker spawn/attach/detach/exit.
+2. Recovery scan summary.
+3. Registry prune actions.
+4. Version mismatch failures.
+
+Add daemon warning events for:
+
+- `worker_recovery_partial`
+- `worker_registry_corrupt`
+- `worker_protocol_mismatch`
+
+For future multi-daemon operations, include `daemon_instance_id` in recovery and warning logs so host/endpoint attribution is unambiguous.
+
+## File-level implementation map
+
+1. `cmd/attn/main.go`
+- Add `pty-worker` subcommand entrypoint.
+
+2. `internal/ptybackend/`
+- `backend.go` interface and shared types.
+- `embedded.go` adapter over existing `internal/pty` manager.
+- `worker.go` daemon-side worker RPC adapter.
+- `recovery.go` discovery + reconciliation helpers.
+
+3. `internal/ptyworker/`
+- `runtime.go` worker session runtime (reusing existing PTY session logic where possible).
+- `rpc.go` JSONL RPC server/client helpers.
+- `registry.go` atomic registry file management.
+- `protocol.go` RPC envelope/types/version.
+
+4. `internal/daemon/daemon.go`
+- Select backend via env.
+- Move prune logic to run after backend recovery.
+- Add recovery barrier before serving coherent initial state.
+- Keep shutdown semantics backend-aware.
+
+5. `internal/daemon/websocket.go`
+- Replace direct `d.ptyManager` calls with backend interface calls.
+- Preserve frontend message schema and event timing.
+
+6. `internal/protocol/` and frontend
+- No breaking PTY protocol schema changes required for MVP.
+- Additive protocol metadata is required: optional `daemon_instance_id` in initial handshake/state payloads.
+
+## Rollout plan
+
+### Phase A: Backend seam (no behavior change)
+
+1. Introduce `ptybackend.Backend`.
+2. Wire daemon to `embedded` adapter only.
+3. Add persistent `daemon_instance_id` generation/load.
+4. Include additive `daemon_instance_id` in initial handshake payload.
+5. Define helper key format for endpoint-scoped runtime identity (`<daemon_instance_id>:<session_id>`).
+6. Add recovery barrier scaffold (even in embedded mode).
+7. Ensure tests pass unchanged for PTY behavior.
+
+Exit gate:
+
+- Existing PTY tests green.
+- No PTY protocol diffs.
+- Additive handshake field is tolerated by older clients.
+- Initial state is not emitted before recovery barrier lift.
+
+### Phase B: Worker runtime + RPC
+
+1. Add worker subcommand and runtime package.
+2. Implement registry + hello handshake.
+3. Implement daemon-ID namespaced worker paths.
+4. Add unit tests for RPC and registry behavior.
+5. Add compatibility tests for `rpc_minor` window behavior.
+
+Exit gate:
+
+- Worker passes standalone spawn/input/resize/kill tests.
+
+### Phase C: Worker backend integration (flagged)
+
+1. Add daemon worker adapter.
+2. Route PTY commands through backend interface.
+3. Keep default `embedded`.
+
+Exit gate:
+
+- `ATTN_PTY_BACKEND=worker` works for normal interactive usage.
+
+### Phase D: Restart recovery
+
+1. Implement boot discovery/recovery path.
+2. Reconcile store/runtime deterministically.
+3. Add startup warnings for partial recovery.
+
+Exit gate (core requirement):
+
+- Kill daemon, keep worker alive, restart daemon, reattach, continue typing in same session.
+
+### Phase E: Hardening + promotion
+
+1. Backpressure and timeout tuning.
+2. Crash/orphan cleanup hardening.
+3. Soak in dev builds.
+4. Promote default to `worker`, retain `embedded` fallback for one release window.
+
+## Test plan
+
+### Unit
+
+1. Worker registry atomic write/read/prune.
+2. RPC encode/decode and version negotiation.
+3. Worker runtime attach/replay/input/resize/signal.
+
+### Integration (Go daemon)
+
+1. Spawn with worker backend, attach, type, resize, kill.
+2. Daemon restart recovery against live worker.
+3. Recovery with stale metadata and dead PID.
+4. Mixed state reconciliation (store has missing/extra sessions).
+5. Recovery barrier behavior (no stale initial state leak).
+6. Ownership mismatch and version mismatch quarantine behavior.
+
+### E2E (Playwright)
+
+1. Start session, produce output, restart daemon, confirm continuity.
+2. `Cmd+T` utility terminal path with worker backend.
+3. Codex visible snapshot restore after restart.
+
+## Risks and mitigations
+
+1. Process count overhead at high session counts.
+- Mitigation: configurable max sessions + metrics; revisit supervisor model only if needed.
+
+2. Protocol drift between daemon and worker.
+- Mitigation: explicit `(rpc_major, rpc_minor)` compatibility policy, additive-first evolution, and mismatch quarantine warnings.
+
+3. Registry staleness leading to false recovery.
+- Mitigation: never trust file alone; require PID + socket + successful `hello/info`.
+
+4. Shutdown semantic regressions.
+- Mitigation: backend-specific shutdown tests; daemon stop must not kill worker sessions.
+
+## Decisions locked
+
+1. Exited worker TTL: `45s` grace window before cleanup.
+2. Recovery-created label when store row is missing: `basename(cwd)`.
+3. Snapshot persistence model for this track: memory-only in worker (no disk-backed snapshot).
+4. Daemon identity is persistent and surfaced as additive protocol metadata.
+5. Worker registry/socket paths are daemon-ID namespaced.
+6. Session runtime identity is endpoint-scoped (`daemon_instance_id + session_id`).
+7. Daemon startup uses a recovery barrier before emitting coherent initial state.
+8. Worker RPC follows additive-first evolution with compatibility window and explicit migration for breaking changes.
+
+## Deferred decisions (not blocking this implementation)
+
+1. Multi-daemon client UX model (single window with many endpoints vs endpoint switcher).
+2. Endpoint trust/auth strategy for non-localhost usage (token, mTLS, SSH-only posture).
+3. Whether to support federated search/actions across endpoints or keep per-endpoint isolation in v1.
+
+## Acceptance criteria (MVP)
+
+1. With `ATTN_PTY_BACKEND=worker`, daemon restart preserves active PTY sessions in integration tests (100% across at least 30 restart cycles).
+2. Recovery completes and coherent `initial_state` is emitted within 3 seconds for up to 25 live workers on reference dev hardware.
+3. Reattached sessions restore continuity (replay/snapshot + live stream) with no duplicate session rows and no cross-endpoint ID collisions.
+4. No cross-daemon worker adoption occurs: ownership/version mismatch cases are quarantined and surfaced as warnings.
+5. Frontend protocol remains PTY-compatible (no breaking PTY schema changes); additive `daemon_instance_id` metadata is handled by old and new clients.
+6. Recovery behavior, barrier behavior, and mismatch handling are covered by automated unit/integration/E2E tests.
