@@ -15,6 +15,14 @@ const TERMINAL_SCROLLBACK_LINES = 50000;
 // Source: Constants.MaxCanvasWidth in terminalInstance.ts (line 103)
 const MAX_CANVAS_WIDTH = 4096;
 
+async function openExternalUri(uri: string): Promise<void> {
+  try {
+    await openUrl(uri);
+  } catch (error) {
+    console.error('[Terminal] Failed to open external URL:', uri, error);
+  }
+}
+
 /**
  * Measure font dimensions using DOM measurement.
  * This is VS Code's fallback when xterm renderer isn't ready.
@@ -223,12 +231,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           cursorAccent: '#1e1e1e',
           selectionBackground: '#264f78',
         },
+        // Handle OSC 8 hyperlinks without the default confirm prompt + window.open fallback.
+        linkHandler: {
+          activate: (event, text) => {
+            if (event.metaKey || event.ctrlKey) {
+              void openExternalUri(text);
+            }
+          },
+        },
       });
 
       // Load WebLinksAddon before open - Cmd/Ctrl+click to open URLs
       term.loadAddon(new WebLinksAddon(async (event, uri) => {
         if (event.metaKey || event.ctrlKey) {
-          await openUrl(uri);
+          await openExternalUri(uri);
         }
       }));
 
