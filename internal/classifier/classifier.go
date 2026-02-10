@@ -51,7 +51,7 @@ var classifierOutputFormat = map[string]any{
 	},
 }
 
-var verdictLineRegex = regexp.MustCompile(`(?i)^\s*(?:[-*>\d.)]+\s*)?(?:VERDICT\s*[:=]\s*)?(WAITING_INPUT|WAITING|DONE|IDLE)\b`)
+var verdictLineRegex = regexp.MustCompile(`(?i)^\s*(?:VERDICT\s*[:=]\s*)?(WAITING_INPUT|WAITING|DONE|IDLE)(?:\s*(?:[-:]\s+.*|\([^)]*\)|[.!?]))?\s*$`)
 
 // BuildPrompt creates the classification prompt
 func BuildPrompt(text string) string {

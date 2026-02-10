@@ -109,6 +109,7 @@ func TestParseResponse_JSONStructured(t *testing.T) {
 		{"json needs_input true", `{"needs_input":true}`, "waiting_input"},
 		{"fenced json verdict waiting", "```json\n{\"verdict\":\"WAITING\"}\n```", "waiting_input"},
 		{"fenced json verdict done", "```json\n{\"verdict\":\"DONE\"}\n```", "idle"},
+		{"bulleted rubric line then verdict", "- WAITING means asks a question\nVerdict: DONE", "idle"},
 		{"invalid json no verdict", `{"foo":"bar"}`, "idle"},
 	}
 
