@@ -564,10 +564,7 @@ function AppContent({
 
   // Worktree cleanup prompt state
   const [closedWorktree, setClosedWorktree] = useState<{ path: string; branch?: string } | null>(null);
-  const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(() => {
-    const stored = localStorage.getItem('alwaysKeepWorktrees');
-    return stored === 'true';
-  });
+  const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(false);
 
   // Review panel state
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
@@ -1094,7 +1091,6 @@ function AppContent({
 
   const handleWorktreeAlwaysKeep = useCallback(() => {
     setAlwaysKeepWorktrees(true);
-    localStorage.setItem('alwaysKeepWorktrees', 'true');
     setClosedWorktree(null);
   }, []);
 
