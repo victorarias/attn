@@ -9,7 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-02-11]
 
 ### Changed
-- **Source Build Update Checks**: Source-installed app builds now default to `source` install channel and skip GitHub release update polling/banner noise, while tagged release builds keep update notifications.
+- **Source Build Update Checks**: Source-installed app builds now set `source` install channel and skip GitHub release update polling/banner noise, while tagged release builds keep update notifications.
 
 ### Fixed
 - **Release Banner Dismissal**: Added an explicit dismiss control (`×`) for the GitHub release banner and persist dismissal per release version, so a dismissed banner stays hidden until a newer release is published.

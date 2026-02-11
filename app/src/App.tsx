@@ -104,7 +104,7 @@ function App() {
   const [updateAvailableVersion, setUpdateAvailableVersion] = useState<string | null>(null);
   const [updateReleaseUrl, setUpdateReleaseUrl] = useState<string>(RELEASES_LATEST_WEB);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() => getDismissedUpdateVersion());
-  const installChannel = useMemo(() => normalizeInstallChannel(import.meta.env.VITE_INSTALL_CHANNEL), []);
+  const installChannel = normalizeInstallChannel(import.meta.env.VITE_INSTALL_CHANNEL);
 
   const {
     daemonSessions,

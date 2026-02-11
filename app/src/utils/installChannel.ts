@@ -8,7 +8,8 @@ export type InstallChannel =
 
 export function normalizeInstallChannel(channel?: string | null): InstallChannel {
   const normalized = (channel ?? '').trim().toLowerCase();
-  if (normalized === '' || normalized === 'source') return 'source';
+  if (normalized === '') return 'unknown';
+  if (normalized === 'source') return 'source';
   if (normalized === 'release') return 'release';
   if (normalized === 'homebrew') return 'homebrew';
   if (normalized === 'cask') return 'cask';
@@ -18,5 +19,6 @@ export function normalizeInstallChannel(channel?: string | null): InstallChannel
 
 export function shouldCheckForReleaseUpdates(channel?: string | null): boolean {
   const normalized = normalizeInstallChannel(channel);
-  return normalized === 'release' || normalized === 'homebrew' || normalized === 'cask' || normalized === 'dmg';
+  // Fail open: only explicit source installs skip release polling.
+  return normalized !== 'source';
 }
