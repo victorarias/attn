@@ -40,6 +40,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Terminal Cmd+Click Link Open**: Terminal hyperlinks now open directly via Tauri opener for both plain URLs and OSC 8 links, removing the xterm warning prompt and fixing links that previously failed to open after confirmation.
 
 ### Added
+- **Worker PTY Sidecar Runtime (Feature Rollout)**: Add restart-survivable PTY execution by moving session runtime into per-session worker sidecars, with daemon recovery/reconnect flow and embedded-backend fallback for compatibility.
 - **PTY Backend Abstraction (Phase A)**: Introduce `internal/ptybackend` with an embedded adapter so daemon PTY flows route through a backend interface instead of directly through the in-process PTY manager.
 - **Persistent Daemon Instance Identity**: Daemon now creates and reuses `<data_root>/daemon-id` and includes `daemon_instance_id` in `initial_state`.
 - **Recovery Barrier Scaffold**: Daemon now tracks a startup recovery barrier, defers `initial_state` until recovery completes, and returns `command_error` (`daemon_recovering`) for PTY commands during the barrier window.
