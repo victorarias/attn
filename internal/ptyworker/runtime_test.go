@@ -50,39 +50,49 @@ func TestRuntime_ExitCleanupWaitsForConnectionsToClose(t *testing.T) {
 func TestConnCtx_NextReadTimeout(t *testing.T) {
 	tests := []struct {
 		name        string
-		ctx         connCtx
+		authed      bool
+		subID       string
+		watching    bool
 		wantTimeout time.Duration
 		wantSet     bool
 	}{
 		{
 			name:        "hello deadline before auth",
-			ctx:         connCtx{authed: false},
+			authed:      false,
 			wantTimeout: connHelloTimeout,
 			wantSet:     true,
 		},
 		{
 			name:        "idle rpc connection uses idle deadline",
-			ctx:         connCtx{authed: true},
+			authed:      true,
 			wantTimeout: connIdleReadTimeout,
 			wantSet:     true,
 		},
 		{
 			name:        "attached stream disables read deadline",
-			ctx:         connCtx{authed: true, subID: "sub-1"},
+			authed:      true,
+			subID:       "sub-1",
 			wantTimeout: 0,
 			wantSet:     false,
 		},
 		{
 			name:        "watch stream disables read deadline",
-			ctx:         connCtx{authed: true, watching: true},
+			authed:      true,
+			watching:    true,
 			wantTimeout: 0,
 			wantSet:     false,
 		},
 	}
 
-	for _, tt := range tests {
+	for i := range tests {
+		tt := tests[i]
 		t.Run(tt.name, func(t *testing.T) {
-			gotTimeout, gotSet := tt.ctx.nextReadTimeout()
+			ctx := &connCtx{
+				authed:   tt.authed,
+				subID:    tt.subID,
+				watching: tt.watching,
+			}
+			gotTimeout, gotSet := ctx.nextReadTimeout()
 			if gotTimeout != tt.wantTimeout {
 				t.Fatalf("nextReadTimeout timeout = %v, want %v", gotTimeout, tt.wantTimeout)
 			}
