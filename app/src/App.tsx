@@ -37,6 +37,7 @@ import './App.css';
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
 const RELEASES_LATEST_WEB = 'https://github.com/victorarias/attn/releases/latest';
 const RELEASE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_BANNER_DISMISSED_STORAGE_KEY = 'attn.update_banner.dismissed_version';
 
 interface GitHubReleaseResponse {
   tag_name?: string;
@@ -59,6 +60,23 @@ function isNewerVersion(currentVersion: string, latestVersion: string): boolean 
   if (latest[0] !== current[0]) return latest[0] > current[0];
   if (latest[1] !== current[1]) return latest[1] > current[1];
   return latest[2] > current[2];
+}
+
+function getDismissedUpdateVersion(): string | null {
+  try {
+    return window.localStorage.getItem(UPDATE_BANNER_DISMISSED_STORAGE_KEY);
+  } catch (err) {
+    console.warn('[App] Failed to read dismissed update version:', err);
+    return null;
+  }
+}
+
+function persistDismissedUpdateVersion(version: string): void {
+  try {
+    window.localStorage.setItem(UPDATE_BANNER_DISMISSED_STORAGE_KEY, version);
+  } catch (err) {
+    console.warn('[App] Failed to persist dismissed update version:', err);
+  }
 }
 
 function App() {
@@ -84,6 +102,7 @@ function App() {
   const [gitStatus, setGitStatus] = useState<GitStatusUpdate | null>(null);
   const [updateAvailableVersion, setUpdateAvailableVersion] = useState<string | null>(null);
   const [updateReleaseUrl, setUpdateReleaseUrl] = useState<string>(RELEASES_LATEST_WEB);
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() => getDismissedUpdateVersion());
 
   const {
     daemonSessions,
@@ -153,8 +172,14 @@ function App() {
         const releaseUrl = latest.html_url || RELEASES_LATEST_WEB;
         setUpdateReleaseUrl(releaseUrl);
 
+        const latestVersion = latest.tag_name.replace(/^v/, '');
         if (isNewerVersion(currentVersion, latest.tag_name)) {
-          setUpdateAvailableVersion(latest.tag_name.replace(/^v/, ''));
+          if (dismissedUpdateVersion === latestVersion) {
+            setUpdateAvailableVersion(null);
+            return;
+          }
+
+          setUpdateAvailableVersion(latestVersion);
           return;
         }
 
@@ -174,7 +199,7 @@ function App() {
       cancelled = true;
       if (intervalId) clearInterval(intervalId);
     };
-  }, []);
+  }, [dismissedUpdateVersion]);
 
   const handleOpenLatestRelease = useCallback(async () => {
     try {
@@ -183,6 +208,14 @@ function App() {
       console.error('[App] Failed to open release URL:', err);
     }
   }, [updateReleaseUrl]);
+
+  const handleDismissLatestRelease = useCallback(() => {
+    if (!updateAvailableVersion) return;
+
+    persistDismissedUpdateVersion(updateAvailableVersion);
+    setDismissedUpdateVersion(updateAvailableVersion);
+    setUpdateAvailableVersion(null);
+  }, [updateAvailableVersion]);
 
   // Reviewer callbacks for streaming events
   const reviewerCallbacks = useMemo(() => ({
@@ -314,6 +347,7 @@ function App() {
         clearWarnings={clearWarnings}
         updateAvailableVersion={updateAvailableVersion}
         onOpenLatestRelease={handleOpenLatestRelease}
+        onDismissLatestRelease={handleDismissLatestRelease}
         settingError={settingError}
         clearSettingError={() => setSettingError(null)}
         // Daemon socket functions
@@ -381,6 +415,7 @@ interface AppContentProps {
   clearWarnings: () => void;
   updateAvailableVersion: string | null;
   onOpenLatestRelease: () => Promise<void>;
+  onDismissLatestRelease: () => void;
   settingError: string | null;
   clearSettingError: () => void;
   // All the daemon socket functions
@@ -444,6 +479,7 @@ function AppContent({
   clearWarnings,
   updateAvailableVersion,
   onOpenLatestRelease,
+  onDismissLatestRelease,
   settingError,
   clearSettingError,
   sendPRAction,
@@ -1371,6 +1407,14 @@ function AppContent({
             onClick={() => void onOpenLatestRelease()}
           >
             View Release
+          </button>
+          <button
+            className="update-dismiss"
+            onClick={onDismissLatestRelease}
+            title="Dismiss"
+            aria-label="Dismiss update banner"
+          >
+            ×
           </button>
         </div>
       )}

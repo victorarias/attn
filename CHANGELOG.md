@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-11]
+
+### Fixed
+- **Release Banner Dismissal**: Added an explicit dismiss control (`×`) for the GitHub release banner and persist dismissal per release version, so a dismissed banner stays hidden until a newer release is published.
+
 ## [2026-02-10]
 
 ### Fixed

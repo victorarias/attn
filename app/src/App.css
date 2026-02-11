@@ -250,3 +250,18 @@ html, body, #root {
   cursor: wait;
   opacity: 0.8;
 }
+
+.update-dismiss {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+.update-dismiss:hover {
+  opacity: 1;
+}
