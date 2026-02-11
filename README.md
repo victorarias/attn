@@ -129,6 +129,8 @@ attn daemon          # Run daemon in foreground
 
 Requires Go 1.25+, Rust (stable), Node.js 20+, pnpm, and [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
+Source builds intentionally disable GitHub release update banners by default.
+
 ```bash
 git clone https://github.com/victorarias/attn.git && cd attn
 ```
