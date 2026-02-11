@@ -200,6 +200,22 @@ func TestSessionAdapter(t *testing.T) {
 	if adapter.NeedsAttention() {
 		t.Error("Working session should not need attention")
 	}
+
+	session.State = protocol.SessionStatePendingApproval
+	if !adapter.NeedsAttention() {
+		t.Error("Pending approval session should need attention")
+	}
+	if adapter.AttentionReason() != "pending_approval" {
+		t.Errorf("AttentionReason() = %q, want %q", adapter.AttentionReason(), "pending_approval")
+	}
+
+	session.State = protocol.SessionStateUnknown
+	if !adapter.NeedsAttention() {
+		t.Error("Unknown session should need attention")
+	}
+	if adapter.AttentionReason() != "unknown" {
+		t.Errorf("AttentionReason() = %q, want %q", adapter.AttentionReason(), "unknown")
+	}
 }
 
 func TestPRAdapter(t *testing.T) {

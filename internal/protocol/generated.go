@@ -1516,7 +1516,9 @@ type SessionStateChangedMessage struct {
 }
 
 const SessionStateIdle SessionState = "idle"
+const SessionStateLaunching SessionState = "launching"
 const SessionStatePendingApproval SessionState = "pending_approval"
+const SessionStateUnknown SessionState = "unknown"
 const SessionStateWaitingInput SessionState = "waiting_input"
 const SessionStateWorking SessionState = "working"
 

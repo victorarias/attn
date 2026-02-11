@@ -10,10 +10,12 @@ namespace Protocol;
 // ============================================================================
 
 enum SessionState {
+  launching,
   working,
   waiting_input,
   idle,
   pending_approval,
+  state_unknown: "unknown",
 }
 
 enum PRRole {

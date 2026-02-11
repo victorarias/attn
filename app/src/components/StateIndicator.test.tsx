@@ -24,6 +24,9 @@ describe('StateIndicator', () => {
     const { rerender } = render(<StateIndicator state="idle" />);
     expect(screen.getByTestId('state-indicator')).toHaveClass('state-indicator--idle');
 
+    rerender(<StateIndicator state="launching" seed="sess-1" />);
+    expect(screen.getByTestId('state-indicator')).toHaveClass('state-indicator--launching');
+
     rerender(<StateIndicator state="working" />);
     expect(screen.getByTestId('state-indicator')).toHaveClass('state-indicator--working');
 
@@ -61,10 +64,16 @@ describe('StateIndicator', () => {
     expect(indicator).not.toHaveClass('state-indicator--waiting_input');
   });
 
-  it('renders unknown state with question mark', () => {
-    render(<StateIndicator state="idle" unknown />);
+  it('renders unknown state class', () => {
+    render(<StateIndicator state="unknown" />);
     const indicator = screen.getByTestId('state-indicator');
     expect(indicator).toHaveClass('state-indicator--unknown');
-    expect(indicator).toHaveTextContent('?');
+  });
+
+  it('renders launching state with emoji', () => {
+    render(<StateIndicator state="launching" seed="session-emoji-seed" />);
+    const indicator = screen.getByTestId('state-indicator');
+    expect(indicator).toHaveClass('state-indicator--launching');
+    expect(indicator.textContent?.length).toBeGreaterThan(0);
   });
 });

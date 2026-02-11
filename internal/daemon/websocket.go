@@ -868,7 +868,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			Label:          label,
 			Agent:          protocol.SessionAgent(agent),
 			Directory:      msg.Cwd,
-			State:          protocol.SessionStateWorking,
+			State:          protocol.SessionStateLaunching,
 			StateSince:     nowStr,
 			StateUpdatedAt: nowStr,
 			LastSeen:       nowStr,

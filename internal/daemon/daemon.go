@@ -420,6 +420,14 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 		state != protocol.StatePendingApproval {
 		return
 	}
+	// Copilot emits frequent redraw chunks while approval prompts are visible.
+	// Treat PTY "working" as a hint only, and let transcript watcher clear
+	// pending_approval when the gated tool either completes or the turn closes.
+	if agent == protocol.SessionAgentCopilot &&
+		session.State == protocol.SessionStatePendingApproval &&
+		state == protocol.StateWorking {
+		return
+	}
 
 	d.logf("pty state update: session=%s agent=%s state=%s", sessionID, agent, state)
 	d.store.UpdateState(sessionID, state)
@@ -734,7 +742,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		Label:          protocol.Deref(msg.Label),
 		Agent:          agent,
 		Directory:      msg.Dir,
-		State:          protocol.SessionStateWaitingInput,
+		State:          protocol.SessionStateLaunching,
 		StateSince:     nowStr,
 		StateUpdatedAt: nowStr,
 		LastSeen:       nowStr,
@@ -863,8 +871,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	lastMessage, err := d.extractLastAssistantMessage(session, resolvedTranscriptPath, 500)
 	if err != nil {
 		d.logf("classifySessionState: transcript parse error for %s: %v", sessionID, err)
-		// Default to waiting_input on error (safer)
-		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateWaitingInput, classificationStartTime)
+		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateUnknown, classificationStartTime)
 		return
 	}
 
@@ -898,8 +905,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	}
 	if err != nil {
 		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)
-		// Default to waiting_input on error
-		state = protocol.StateWaitingInput
+		state = protocol.StateUnknown
 	}
 
 	d.logf("classifySessionState: session %s classified as %s", sessionID, state)

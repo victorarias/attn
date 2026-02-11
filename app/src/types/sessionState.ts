@@ -5,20 +5,29 @@ import { SessionState } from './generated';
 
 // Type aliases for backward compatibility
 export type DaemonSessionState = SessionState;
-export type UISessionState = 'working' | 'waiting_input' | 'idle' | 'pending_approval';
+export type UISessionState =
+  | 'launching'
+  | 'working'
+  | 'waiting_input'
+  | 'idle'
+  | 'pending_approval'
+  | 'unknown';
 
 // Normalize daemon state to UI state
-// Daemon always sends 'waiting_input' for sessions (from SessionState enum)
-// The 'waiting' string is only used for PR state (PRStateWaiting), not sessions
 export function normalizeSessionState(state: string): UISessionState {
-  if (state === 'waiting_input') {
-    return 'waiting_input';
+  switch (state) {
+    case 'launching':
+    case 'working':
+    case 'waiting_input':
+    case 'idle':
+    case 'pending_approval':
+    case 'unknown':
+      return state;
+    default:
+      return 'unknown';
   }
-  if (state === 'working') {
-    return 'working';
-  }
-  if (state === 'pending_approval') {
-    return 'pending_approval';
-  }
-  return 'idle';
+}
+
+export function isAttentionSessionState(state: UISessionState): boolean {
+  return state === 'waiting_input' || state === 'pending_approval' || state === 'unknown';
 }

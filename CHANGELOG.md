@@ -10,10 +10,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Source Build Update Checks**: Source-installed app builds now set `source` install channel and skip GitHub release update polling/banner noise, while tagged release builds keep update notifications.
+- **Session Startup State**: New sessions now start in `launching` (emoji indicator) instead of immediately showing `working` green, then transition once runtime signals arrive.
+- **Classifier Turn Budget**: Claude SDK classifier now runs with `maxTurns=2` for more reliable structured verdict extraction.
 
 ### Fixed
 - **Release Banner Dismissal**: Added an explicit dismiss control (`×`) for the GitHub release banner and persist dismissal per release version, so a dismissed banner stays hidden until a newer release is published.
 - **Worktree Close Cleanup Prompt**: Restored the delete/keep prompt when closing worktree sessions even if an old persisted "always keep" preference exists; "always keep" now applies only for the current app run.
+- **Copilot Permission Prompt State**: Copilot numbered command-approval dialogs (for example, "Do you want to run this command?" with `1/2/3` choices) are now recognized as `pending_approval` instead of falling through to stale idle/gray state.
+- **Copilot Transcript Pending Latch**: Transcript watcher now tracks unresolved Copilot tool calls and keeps sessions in `pending_approval` while a stalled approval-gated tool call is outstanding, then clears back to `working` on completion.
+- **Copilot Mid-Turn Idle Regression**: Transcript watcher now treats `assistant.turn_start`/`assistant.turn_end` as authoritative turn boundaries and suppresses stop-time classification while a turn is open, preventing active Copilot sessions from flashing/sticking gray during ongoing tool work.
+- **Copilot Pending Approval Stability**: While Copilot is in `pending_approval`, noisy PTY redraws that heuristically look like `working` no longer override state; pending now clears only when transcript evidence indicates the approval gate has resolved.
+- **Copilot Long-Running Tool Stability**: Transcript-based pending promotion now only elevates non-working states (`idle`, `waiting_input`, `launching`, `unknown`), preventing long-running approved tools from being mislabeled as pending approval.
+- **Claude Classifier Diagnostics**: When Claude classifier output cannot be parsed into a verdict, daemon logs now include a structured dump of returned SDK messages (or explicit empty-response marker) to diagnose false `waiting_input` fallbacks.
+- **Claude Structured Result Parsing Compatibility**: Bumped `claude-agent-sdk-go` to include merged parser fixes on `main` so classifier flows can reliably consume structured/result payload fields from SDK `result` messages.
+- **Unknown Classification Handling**: Added explicit `unknown` session state (purple) for transcript/classifier uncertainty or errors; removed implicit fallback to `waiting_input`.
 
 ## [2026-02-10]
 

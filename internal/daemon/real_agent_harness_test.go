@@ -159,7 +159,7 @@ func TestRealAgentHarness(t *testing.T) {
 	for !seenInterestingState {
 		select {
 		case st := <-stateCh:
-			if st == protocol.StateWaitingInput || st == protocol.StateIdle || st == protocol.StatePendingApproval {
+			if st == protocol.StateWaitingInput || st == protocol.StateIdle || st == protocol.StatePendingApproval || st == protocol.StateUnknown {
 				seenInterestingState = true
 				t.Logf("harness reached state=%s", st)
 			}

@@ -24,7 +24,7 @@ import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore } from './store/sessions';
 import { ptyWrite } from './pty/bridge';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse, BranchDiffFile, DaemonWarning } from './hooks/useDaemonSocket';
-import { normalizeSessionState } from './types/sessionState';
+import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
@@ -1127,13 +1127,13 @@ function AppContent({
   );
 
   // Calculate attention count for drawer badge
-  const waitingLocalSessions = enrichedLocalSessions.filter((s) => s.state === 'waiting_input');
+  const waitingLocalSessions = enrichedLocalSessions.filter((s) => isAttentionSessionState(s.state));
   const { needsAttention: prsNeedingAttention } = usePRsNeedingAttention(prs);
   const attentionCount = waitingLocalSessions.length + prsNeedingAttention.length;
 
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
-    const waiting = enrichedLocalSessions.find((s) => s.state === 'waiting_input');
+    const waiting = enrichedLocalSessions.find((s) => isAttentionSessionState(s.state));
     if (waiting) {
       handleSelectSession(waiting.id);
     }

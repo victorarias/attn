@@ -83,6 +83,12 @@ type copilotEventEntry struct {
 	} `json:"data"`
 }
 
+type CopilotToolLifecycle struct {
+	Kind       string
+	ToolCallID string
+	ToolName   string
+}
+
 // ExtractAssistantContent extracts assistant content from Claude Code, Codex, or Copilot JSONL lines.
 func ExtractAssistantContent(line []byte) string {
 	var entry transcriptEntry
@@ -132,6 +138,40 @@ func ExtractAssistantContent(line []byte) string {
 	}
 
 	return ""
+}
+
+// ExtractCopilotToolLifecycle extracts Copilot tool lifecycle events from JSONL lines.
+// It returns start/complete events with the associated toolCallId and toolName (for starts).
+func ExtractCopilotToolLifecycle(line []byte) (CopilotToolLifecycle, bool) {
+	var evt struct {
+		Type string `json:"type"`
+		Data struct {
+			ToolCallID string `json:"toolCallId"`
+			ToolName   string `json:"toolName"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(line, &evt); err != nil {
+		return CopilotToolLifecycle{}, false
+	}
+	if evt.Data.ToolCallID == "" {
+		return CopilotToolLifecycle{}, false
+	}
+
+	switch evt.Type {
+	case "tool.execution_start":
+		return CopilotToolLifecycle{
+			Kind:       "start",
+			ToolCallID: evt.Data.ToolCallID,
+			ToolName:   evt.Data.ToolName,
+		}, true
+	case "tool.execution_complete":
+		return CopilotToolLifecycle{
+			Kind:       "complete",
+			ToolCallID: evt.Data.ToolCallID,
+		}, true
+	default:
+		return CopilotToolLifecycle{}, false
+	}
 }
 
 // extractTextContent extracts text from the content field which can be:

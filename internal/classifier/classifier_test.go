@@ -3,6 +3,8 @@ package classifier
 import (
 	"strings"
 	"testing"
+
+	"github.com/victorarias/claude-agent-sdk-go/types"
 )
 
 func TestParseResponse_Waiting(t *testing.T) {
@@ -189,9 +191,12 @@ func TestBuildPrompt(t *testing.T) {
 func TestBuildPrompt_ContainsRequiredElements(t *testing.T) {
 	prompt := BuildPrompt("Test input text")
 
-	// Verify prompt asks for single word response
-	if !strings.Contains(prompt, "one word") {
-		t.Error("BuildPrompt should request single word response")
+	// Verify prompt requests strict JSON response
+	if !strings.Contains(prompt, "STRICT JSON") {
+		t.Error("BuildPrompt should request strict JSON response")
+	}
+	if !strings.Contains(prompt, `{"verdict":"WAITING"}`) || !strings.Contains(prompt, `{"verdict":"DONE"}`) {
+		t.Error("BuildPrompt should include exact JSON verdict formats")
 	}
 
 	// Verify prompt explains WAITING criteria
@@ -199,12 +204,14 @@ func TestBuildPrompt_ContainsRequiredElements(t *testing.T) {
 		t.Error("BuildPrompt should explain WAITING criteria (asks a question)")
 	}
 
-	// Verify prompt explains DONE criteria
-	if !strings.Contains(prompt, "completion") || !strings.Contains(prompt, "results") {
-		// Check for various ways of describing DONE criteria
-		if !strings.Contains(prompt, "States completion") && !strings.Contains(prompt, "Reports results") {
-			t.Error("BuildPrompt should explain DONE criteria")
-		}
+	// Verify prompt explains DONE criteria in contrast with asking for user input
+	if !strings.Contains(prompt, "DONE only") || !strings.Contains(prompt, "does not ask the user") {
+		t.Error("BuildPrompt should explain DONE criteria")
+	}
+
+	// Verify prompt includes concrete examples for greeting questions
+	if !strings.Contains(prompt, "What can I help you with today?") {
+		t.Error("BuildPrompt should include greeting question example")
 	}
 }
 
@@ -229,5 +236,55 @@ func TestClassify_EmptyText_ReturnsIdleImmediately(t *testing.T) {
 	}
 	if result != "idle" {
 		t.Errorf("Classify empty text = %q, want 'idle'", result)
+	}
+}
+
+func TestClassifyClaudeMessages_PreservesAssistantVerdictWhenLaterToolCallIsEmpty(t *testing.T) {
+	messages := []types.Message{
+		&types.AssistantMessage{
+			Content: []types.ContentBlock{
+				&types.TextBlock{TextContent: "WAITING"},
+			},
+		},
+		&types.AssistantMessage{
+			Content: []types.ContentBlock{
+				&types.ToolUseBlock{Name: "StructuredOutput"},
+			},
+		},
+		&types.ResultMessage{
+			Subtype: "error_max_turns",
+		},
+	}
+
+	result, ok, lastAssistant := classifyClaudeMessages(messages)
+	if !ok {
+		t.Fatal("expected classifyClaudeMessages to return a verdict")
+	}
+	if result != "waiting_input" {
+		t.Fatalf("result = %q, want waiting_input", result)
+	}
+	if lastAssistant != "WAITING" {
+		t.Fatalf("lastAssistant = %q, want WAITING", lastAssistant)
+	}
+}
+
+func TestClassifyClaudeMessages_PrefersStructuredOutputOverAssistantText(t *testing.T) {
+	messages := []types.Message{
+		&types.AssistantMessage{
+			Content: []types.ContentBlock{
+				&types.TextBlock{TextContent: "WAITING"},
+			},
+		},
+		&types.ResultMessage{
+			StructuredOutput: map[string]any{"verdict": "DONE"},
+		},
+	}
+
+	result, ok, _ := classifyClaudeMessages(messages)
+	if !ok {
+		t.Fatal("expected classifyClaudeMessages to return a verdict")
+	}
+	if result != "idle" {
+		t.Fatalf("result = %q, want idle", result)
 	}
 }

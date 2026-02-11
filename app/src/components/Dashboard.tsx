@@ -9,6 +9,7 @@ import { useDaemonContext } from '../contexts/DaemonContext';
 import { useDaemonStore } from '../store/daemonSessions';
 import { getRepoName } from '../utils/repo';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import type { UISessionState } from '../types/sessionState';
 import appIcon from '../assets/icon.png';
 import './Dashboard.css';
 
@@ -16,7 +17,7 @@ interface DashboardProps {
   sessions: Array<{
     id: string;
     label: string;
-    state: 'working' | 'waiting_input' | 'idle' | 'pending_approval';
+    state: UISessionState;
     cwd: string;
   }>;
   prs: DaemonPR[];
@@ -48,23 +49,10 @@ export function Dashboard({
 }: DashboardProps) {
   const waitingSessions = sessions.filter((s) => s.state === 'waiting_input');
   const pendingApprovalSessions = sessions.filter((s) => s.state === 'pending_approval');
+  const launchingSessions = sessions.filter((s) => s.state === 'launching');
   const workingSessions = sessions.filter((s) => s.state === 'working');
   const idleSessions = sessions.filter((s) => s.state === 'idle');
-
-  // Debug: log session states
-  if (sessions.length > 0) {
-    console.log('[Dashboard] sessions:', sessions.map(s => ({ id: s.id, state: s.state })));
-    console.log(
-      '[Dashboard] waiting:',
-      waitingSessions.length,
-      'pending:',
-      pendingApprovalSessions.length,
-      'working:',
-      workingSessions.length,
-      'idle:',
-      idleSessions.length
-    );
-  }
+  const unknownSessions = sessions.filter((s) => s.state === 'unknown');
 
   // Group PRs by repo
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
@@ -235,7 +223,7 @@ export function Dashboard({
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
-                        <StateIndicator state="waiting_input" size="sm" />
+                        <StateIndicator state="waiting_input" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}
@@ -252,7 +240,24 @@ export function Dashboard({
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
-                        <StateIndicator state="pending_approval" size="sm" />
+                        <StateIndicator state="pending_approval" size="sm" seed={s.id} />
+                        <span className="session-name">{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {launchingSessions.length > 0 && (
+                  <div className="session-group" data-testid="session-group-launching">
+                    <div className="group-label">Launching</div>
+                    {launchingSessions.map((s) => (
+                      <div
+                        key={s.id}
+                        className="session-row clickable"
+                        data-testid={`session-${s.id}`}
+                        data-state={s.state}
+                        onClick={() => onSelectSession(s.id)}
+                      >
+                        <StateIndicator state="launching" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}
@@ -269,7 +274,7 @@ export function Dashboard({
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
-                        <StateIndicator state="working" size="sm" />
+                        <StateIndicator state="working" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}
@@ -286,7 +291,24 @@ export function Dashboard({
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
-                        <StateIndicator state="idle" size="sm" />
+                        <StateIndicator state="idle" size="sm" seed={s.id} />
+                        <span className="session-name">{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {unknownSessions.length > 0 && (
+                  <div className="session-group" data-testid="session-group-unknown">
+                    <div className="group-label">Unknown / error</div>
+                    {unknownSessions.map((s) => (
+                      <div
+                        key={s.id}
+                        className="session-row clickable"
+                        data-testid={`session-${s.id}`}
+                        data-state={s.state}
+                        onClick={() => onSelectSession(s.id)}
+                      >
+                        <StateIndicator state="unknown" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                       </div>
                     ))}

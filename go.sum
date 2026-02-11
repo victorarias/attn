@@ -6,8 +6,8 @@ github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02 h1:AgcIVYPa6XJnU3phs
 github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02/go.mod h1:Q48J4R4DvxnHolD5P8pOtXigYlRuPLGl6moFx3ulM68=
 github.com/mattn/go-sqlite3 v1.14.32 h1:JD12Ag3oLy1zQA+BNn74xRgaBbdhbNIDYvQUEuuErjs=
 github.com/mattn/go-sqlite3 v1.14.32/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
-github.com/victorarias/claude-agent-sdk-go v1.0.0-beta h1:Gx57wE2TEr8rI9wTBXnbnrVnKV7igDXccBHliMvlDEk=
-github.com/victorarias/claude-agent-sdk-go v1.0.0-beta/go.mod h1:jgle5NmNKHfdJHSWyJBx2KwQgzAcUBingOBFIttfOSc=
+github.com/victorarias/claude-agent-sdk-go v0.1.2-0.20260211221525-a3b128e9dad5 h1:RJs1Sbqr9xc2pO22vnFeSOQPsoILghzINHIgwbFZFE8=
+github.com/victorarias/claude-agent-sdk-go v0.1.2-0.20260211221525-a3b128e9dad5/go.mod h1:jgle5NmNKHfdJHSWyJBx2KwQgzAcUBingOBFIttfOSc=
 golang.org/x/time v0.14.0 h1:MRx4UaLrDotUKUdCIqzPC48t1Y9hANFKIRpNx+Te8PI=
 golang.org/x/time v0.14.0/go.mod h1:eL/Oa2bBBK0TkX57Fyni+NgnyQQN4LitPmob2Hjnqw4=
 nhooyr.io/websocket v1.8.17 h1:KEVeLJkUywCKVsnLIDlD/5gtayKp8VoCkksHCGGfT9Y=

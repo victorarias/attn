@@ -141,7 +141,7 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 
 	c := client.New(sockPath)
 
-	// Register multiple sessions (all start as waiting_input)
+	// Register multiple sessions (all start as launching)
 	c.Register("1", "one", "/tmp/1")
 	c.Register("2", "two", "/tmp/2")
 	c.Register("3", "three", "/tmp/3")
@@ -149,10 +149,10 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 	// Update one to working
 	c.UpdateState("2", protocol.StateWorking)
 
-	// Query waiting_input (sessions 1 and 3)
-	waiting, _ := c.Query(protocol.StateWaitingInput)
-	if len(waiting) != 2 {
-		t.Errorf("got %d waiting_input, want 2", len(waiting))
+	// Query launching (sessions 1 and 3)
+	launching, _ := c.Query(protocol.StateLaunching)
+	if len(launching) != 2 {
+		t.Errorf("got %d launching, want 2", len(launching))
 	}
 
 	// Query working (session 2)
@@ -1142,8 +1142,8 @@ func TestDaemon_StateTransitions_AllStates(t *testing.T) {
 		t.Fatalf("Read initial state error: %v", err)
 	}
 
-	// Test all three states: working → waiting_input → idle → working
-	states := []string{protocol.StateWaitingInput, protocol.StateIdle, protocol.StateWorking}
+	// Test state transitions after register default (launching)
+	states := []string{protocol.StateWaitingInput, protocol.StateIdle, protocol.StateWorking, protocol.StateUnknown}
 
 	for _, expectedState := range states {
 		err = c.UpdateState("test-session", expectedState)
@@ -1345,7 +1345,7 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 	// does NOT short-circuit to waiting_input based on todos alone.
 	// Instead, it proceeds to classification.
 	//
-	// When transcript parsing fails, it defaults to waiting_input (safer),
+	// When transcript parsing fails, it now returns unknown,
 	// but that's different from the todos short-circuit path.
 
 	// Use /tmp directly to avoid long socket paths
@@ -1401,7 +1401,7 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 
 	// With all completed todos, stop should proceed to classification (not short-circuit)
 	// Since we're providing a nonexistent transcript, classification will fail
-	// and default to waiting_input - but this is different from todos short-circuit
+	// and return unknown - but this is different from todos short-circuit
 	//
 	// The key difference:
 	// - With pending todos: immediately returns waiting_input (no transcript parsing)

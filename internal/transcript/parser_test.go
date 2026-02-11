@@ -202,3 +202,50 @@ func TestExtractLastAssistantMessage_CopilotEvents(t *testing.T) {
 		t.Errorf("got %q, want %q", result, expected)
 	}
 }
+
+func TestExtractCopilotToolLifecycle_Start(t *testing.T) {
+	line := []byte(`{"type":"tool.execution_start","data":{"toolCallId":"tool-123","toolName":"bash"}}`)
+	got, ok := ExtractCopilotToolLifecycle(line)
+	if !ok {
+		t.Fatal("expected lifecycle event")
+	}
+	if got.Kind != "start" {
+		t.Fatalf("kind = %q, want %q", got.Kind, "start")
+	}
+	if got.ToolCallID != "tool-123" {
+		t.Fatalf("toolCallId = %q, want %q", got.ToolCallID, "tool-123")
+	}
+	if got.ToolName != "bash" {
+		t.Fatalf("toolName = %q, want %q", got.ToolName, "bash")
+	}
+}
+
+func TestExtractCopilotToolLifecycle_Complete(t *testing.T) {
+	line := []byte(`{"type":"tool.execution_complete","data":{"toolCallId":"tool-123","success":true}}`)
+	got, ok := ExtractCopilotToolLifecycle(line)
+	if !ok {
+		t.Fatal("expected lifecycle event")
+	}
+	if got.Kind != "complete" {
+		t.Fatalf("kind = %q, want %q", got.Kind, "complete")
+	}
+	if got.ToolCallID != "tool-123" {
+		t.Fatalf("toolCallId = %q, want %q", got.ToolCallID, "tool-123")
+	}
+	if got.ToolName != "" {
+		t.Fatalf("toolName = %q, want empty", got.ToolName)
+	}
+}
+
+func TestExtractCopilotToolLifecycle_IgnoresNonLifecycle(t *testing.T) {
+	cases := [][]byte{
+		[]byte(`{"type":"assistant.message","data":{"content":"hello"}}`),
+		[]byte(`{"type":"tool.execution_start","data":{"toolName":"bash"}}`),
+		[]byte(`not-json`),
+	}
+	for _, line := range cases {
+		if _, ok := ExtractCopilotToolLifecycle(line); ok {
+			t.Fatalf("expected no lifecycle for line: %s", string(line))
+		}
+	}
+}

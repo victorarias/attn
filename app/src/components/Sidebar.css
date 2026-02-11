@@ -297,14 +297,8 @@
 }
 
 .mini-badge.unknown {
-  background: transparent;
-  border: 1px solid #6b7280;
-  color: #6b7280;
-  font-size: 8px;
-  line-height: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: #a855f7;
+  border: none;
 }
 
 @keyframes flash-pending {
