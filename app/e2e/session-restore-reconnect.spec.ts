@@ -54,7 +54,7 @@ test.describe('Session restore and reconnect harness', () => {
     await expect(page.locator('[data-testid="sidebar-session-restore-s2"][data-state="waiting_input"]')).not.toHaveClass(/selected/);
   });
 
-  test('reconnects after daemon restart and drops stale sessions without live PTY', async ({ page, daemon }) => {
+  test('reconnects after daemon restart and marks stale running sessions idle when worker is missing', async ({ page, daemon }) => {
     await daemon.start();
 
     await daemon.injectSession({
@@ -75,9 +75,10 @@ test.describe('Session restore and reconnect harness', () => {
 
     await daemon.restart();
 
-    // Session should be pruned because daemon restarted with no live PTY state.
-    await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(0, { timeout: 15000 });
-    await expect(page.locator('.warning-banner')).toContainText('Removed 1 stale sessions', { timeout: 10000 });
+    // Session remains tracked, but should be downgraded from running to idle.
+    await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(1, { timeout: 15000 });
+    await expect(page.locator('[data-testid="session-reconnect-s1"][data-state="idle"]')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.warning-banner')).toContainText('they were marked idle', { timeout: 10000 });
 
     await daemon.injectSession({
       id: 'reconnect-s2',

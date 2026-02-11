@@ -953,14 +953,15 @@ export enum HeartbeatMessageCmd {
 }
 
 export interface InitialStateMessage {
-    authors?:          AuthorElement[];
-    event:             InitialStateMessageEvent;
-    protocol_version?: string;
-    prs?:              PRElement[];
-    repos?:            RepoElement[];
-    sessions?:         SessionElement[];
-    settings?:         { [key: string]: any };
-    warnings?:         WarningElement[];
+    authors?:            AuthorElement[];
+    daemon_instance_id?: string;
+    event:               InitialStateMessageEvent;
+    protocol_version?:   string;
+    prs?:                PRElement[];
+    repos?:              RepoElement[];
+    sessions?:           SessionElement[];
+    settings?:           { [key: string]: any };
+    warnings?:           WarningElement[];
     [property: string]: any;
 }
 
@@ -3718,6 +3719,7 @@ const typeMap: any = {
     ], "any"),
     "InitialStateMessage": o([
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
+        { json: "daemon_instance_id", js: "daemon_instance_id", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("InitialStateMessageEvent") },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },

@@ -10,20 +10,65 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Source Build Update Checks**: Source-installed app builds now set `source` install channel and skip GitHub release update polling/banner noise, while tagged release builds keep update notifications.
+- **PTY Backend Visibility in Settings**: Settings now displays the active PTY runtime mode (`External worker sidecar` vs `Embedded in daemon`) so restart-survival behavior is visible in the UI.
 
 ### Fixed
 - **Release Banner Dismissal**: Added an explicit dismiss control (`×`) for the GitHub release banner and persist dismissal per release version, so a dismissed banner stays hidden until a newer release is published.
 - **Worktree Close Cleanup Prompt**: Restored the delete/keep prompt when closing worktree sessions even if an old persisted "always keep" preference exists; "always keep" now applies only for the current app run.
+- **Ownership-Mismatch Worker Reclaim Safety**: Worker registry entries now include daemon owner-lease metadata (`owner_pid`, `owner_started_at`, `owner_nonce`), and recovery now reclaims ownership-mismatched workers only when the recorded owner is provably stale via authenticated worker RPC removal. Conservative quarantine-only behavior remains when ownership cannot be proven stale.
 
 ## [2026-02-10]
 
 ### Fixed
 - **Terminal Cmd+Click Link Open**: Terminal hyperlinks now open directly via Tauri opener for both plain URLs and OSC 8 links, removing the xterm warning prompt and fixing links that previously failed to open after confirmation.
 
+### Added
+- **PTY Backend Abstraction (Phase A)**: Introduce `internal/ptybackend` with an embedded adapter so daemon PTY flows route through a backend interface instead of directly through the in-process PTY manager.
+- **Persistent Daemon Instance Identity**: Daemon now creates and reuses `<data_root>/daemon-id` and includes `daemon_instance_id` in `initial_state`.
+- **Recovery Barrier Scaffold**: Daemon now tracks a startup recovery barrier, defers `initial_state` until recovery completes, and returns `command_error` (`daemon_recovering`) for PTY commands during the barrier window.
+- **Per-Session PTY Worker Runtime (Phase B)**: Add `attn pty-worker` and `internal/ptyworker` with JSONL RPC (`hello`, `info`, `attach`, `detach`, `input`, `resize`, `signal`, `remove`, `health`) plus atomic worker registry files.
+- **Worker Backend Adapter (Phase C)**: Add daemon-side worker backend implementation (`internal/ptybackend/worker.go`) with worker spawn/attach/input/resize/kill/remove routing and registry-based recovery scan.
+- **Worker Cleanup TTL Coverage**: Add worker runtime tests to verify exited-session cleanup timing when daemon attachments are absent.
+- **Worker Restart-Recovery Integration Coverage**: Add an opt-in integration test that simulates backend restart and verifies recovered worker sessions remain attachable and interactive.
+
 ### Changed
+- **Protocol Version**: Bump daemon/app protocol version to `28`.
+- **Daemon PTY Routing**: PTY command handling (`spawn`, `attach`, `input`, `resize`, `kill`) and startup PTY session reconciliation now route through the backend seam.
+- **Backend Selection Defaults (Phase E)**: Worker backend is now the default startup mode; `ATTN_PTY_BACKEND=embedded` remains available as fallback/override.
+- **Worker Recovery Reconciliation**: On worker backend startup, daemon now reconciles recovered runtime sessions into store state (create missing live sessions, preserve waiting/approval states, mark missing-running sessions idle).
 - **Classifier SDK Runtime**: Upgrade Claude Agent SDK dependency to `v1.0.0-beta`.
 
 ### Fixed
+- **Worker Backend Selection Ordering**: Daemon instance ID is now initialized before worker backend selection, so worker backend activation is deterministic.
+- **Worker Poller Exit Deadlock Risk**: Poller exit callbacks are now asynchronous, preventing re-entrant `Remove()`/`stopPoller()` deadlocks.
+- **Attach Stream Deadline Handling**: Worker attach handshake now clears per-RPC connection deadlines before long-lived stream forwarding to avoid premature idle disconnects.
+- **PTY Stream Cleanup on Backpressure**: PTY forwarder now closes streams when client outbound buffers overflow, preventing orphaned worker attachments.
+- **Worker Stream Backpressure Deadlock**: Worker stream event publishing now handles overflow without blocking indefinitely.
+- **Worker RPC Hang Risk**: Worker backend RPC calls now run with context/time bounds to avoid indefinite blocking on stalled sockets.
+- **Worker Recovery Ownership Handling**: Ownership-mismatched worker registry entries are quarantined instead of left in the active registry path.
+- **Worker Recovery Transient Handling**: Recovery now retries transient worker RPC failures before deferring them and surfaces partial-recovery warnings.
+- **Recovery Startup Bound**: Daemon recovery scan now runs with a bounded startup timeout to avoid unbounded barrier delays.
+- **Worker Session ID Path Safety**: Session IDs are validated before worker registry/socket path derivation to avoid unsafe path traversal patterns.
+- **Reconnect Reattach Race**: Frontend PTY reattach now waits for `initial_state`, avoiding `attach_session` failures during recovery barrier windows.
+- **Daemon Identity Reset Hygiene**: Frontend clears PTY runtime caches when `daemon_instance_id` changes to avoid stale stream replay after endpoint identity changes.
+- **Daemon Identity Reattach Continuity**: Frontend now preserves the attached-session set across daemon instance changes so terminal streams reattach automatically after recovery.
+- **Worker Runtime Observability**: Worker stdout/stderr is now captured to per-session logs under `<data_root>/workers/<daemon_instance_id>/log/`.
+- **Worker Session Reattach Idempotency**: Re-attaching an already attached session now closes the previous stream first, preventing duplicate PTY subscriptions and repeated output delivery.
+- **Reattach Failure Safety**: PTY re-attach now keeps the existing stream if replacement attach fails, avoiding transient detach/data-loss windows.
+- **Recovered Session State Accuracy**: Worker reconciliation now treats recovered sessions with non-running child processes as `idle` instead of incorrectly forcing `working`.
+- **Embedded Stream Close Safety**: Embedded PTY stream close/publish path is now synchronized to prevent close/send races during detach and shutdown.
+- **Worker Recovery Stabilization**: Startup now performs bounded recovery retries before demoting sessions, reducing false `idle` transitions during transient worker unavailability.
+- **Worker Stream Close Boundedness**: Worker stream detach now uses a short write deadline so close/shutdown paths do not hang when the peer socket is stalled.
+- **Spawn Failure Worker Cleanup**: Worker backend now terminates and reaps unready worker sidecars when spawn readiness fails/timeouts, preventing orphaned worker processes.
+- **Registry Socket Path Validation**: Recovery and lazy session lookup now reject/quarantine registry entries with unexpected socket paths and avoid deleting arbitrary filesystem paths from untrusted metadata.
+- **Deferred Recovery Convergence**: Daemon now runs deferred recovery reconciliation after partial startup recovery so stale sessions eventually converge to accurate idle/running state.
+- **Forced-Demotion Safety Check**: Session demotion now probes worker liveness signals (registry + PID + managed socket path) to avoid incorrectly idling sessions during prolonged control-plane outages.
+- **Liveness Uncertainty Handling**: Ambiguous liveness probe failures now defer idle demotion instead of treating unknown as dead, reducing false idle transitions during transient worker/socket failures.
+- **Recovery Demotion Cutoff**: Startup reconciliation now skips idle demotion for sessions updated after recovery began, reducing startup state flapping for freshly active sessions.
+- **Recovery Deferred Reconcile Triggering**: Missing worker metadata now triggers deferred reconciliation retries, improving eventual convergence for transient info-read failures.
+- **Recovery Clear Sessions Semantics**: `clear_sessions` is now blocked during startup recovery barrier to prevent worker-recovered sessions from immediately reappearing after a clear.
+- **Startup Recovery Flow Decomposition**: Daemon startup now delegates PTY recovery/reconciliation into focused helpers, reducing coupling in `Start()` while preserving behavior.
+- **Terminal Cmd+Click Link Open**: Terminal hyperlinks now open directly via Tauri opener for both plain URLs and OSC 8 links, removing the xterm warning prompt and fixing links that previously failed to open after confirmation.
 - **Classifier WAITING/DONE Parsing**: Stop-time state classification now handles multiline/model-explanatory outputs correctly (including responses that start with `WAITING` and then add rationale), preventing false `idle` states when user input is still required.
 - **Classifier Structured Output Handling**: Claude classifier requests a JSON-schema verdict (`WAITING`/`DONE`) and consumes structured/result payloads when available, with robust fallback parsing for plain-text outputs.
 
