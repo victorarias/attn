@@ -939,7 +939,7 @@ func (d *Daemon) extractLastAssistantMessage(session *protocol.Session, transcri
 
 	deadline := time.Now().Add(claudeTranscriptRetryWindow)
 	for {
-		lastMessage, err := transcript.ExtractLastAssistantMessage(transcriptPath, maxChars)
+		lastMessage, err := transcript.ExtractLastAssistantMessageAfterLastUser(transcriptPath, maxChars)
 		if err == nil && strings.TrimSpace(lastMessage) != "" {
 			return lastMessage, nil
 		}

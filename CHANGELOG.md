@@ -24,6 +24,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Claude Classifier Diagnostics**: When Claude classifier output cannot be parsed into a verdict, daemon logs now include a structured dump of returned SDK messages (or explicit empty-response marker) to diagnose false `waiting_input` fallbacks.
 - **Claude Structured Result Parsing Compatibility**: Bumped `claude-agent-sdk-go` to include merged parser fixes on `main` so classifier flows can reliably consume structured/result payload fields from SDK `result` messages.
 - **Unknown Classification Handling**: Added explicit `unknown` session state (purple) for transcript/classifier uncertainty or errors; removed implicit fallback to `waiting_input`.
+- **Claude Stop-Time Transcript Race**: Claude classification now ignores stale assistant messages that occur before the latest user turn, preventing off-by-one misclassification when the newest assistant response has not flushed to transcript yet.
 
 ## [2026-02-10]
 

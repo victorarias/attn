@@ -23,6 +23,45 @@ type transcriptEntry struct {
 	} `json:"message"`
 }
 
+func isUserEntry(line []byte) bool {
+	var entry transcriptEntry
+	if err := json.Unmarshal(line, &entry); err == nil {
+		if entry.Type == "user" || entry.Message.Role == "user" {
+			return true
+		}
+	}
+
+	var codex codexEnvelope
+	if err := json.Unmarshal(line, &codex); err == nil {
+		switch codex.Type {
+		case "event_msg":
+			var payload codexEventMessage
+			if err := json.Unmarshal(codex.Payload, &payload); err == nil {
+				if payload.Type == "user_message" && payload.Message != "" {
+					return true
+				}
+			}
+		case "response_item":
+			var payload codexResponseMessage
+			if err := json.Unmarshal(codex.Payload, &payload); err == nil {
+				if payload.Type == "message" && payload.Role == "user" {
+					return true
+				}
+			}
+		}
+	}
+
+	var copilot struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(line, &copilot); err == nil {
+		if copilot.Type == "user.message" {
+			return true
+		}
+	}
+	return false
+}
+
 // ExtractLastAssistantMessage reads a JSONL transcript and returns
 // the last N characters of the last assistant message.
 func ExtractLastAssistantMessage(path string, maxChars int) (string, error) {
@@ -57,6 +96,58 @@ func ExtractLastAssistantMessage(path string, maxChars int) (string, error) {
 		lastAssistantContent = lastAssistantContent[len(lastAssistantContent)-maxChars:]
 	}
 
+	return lastAssistantContent, nil
+}
+
+// ExtractLastAssistantMessageAfterLastUser reads a JSONL transcript and returns
+// the last assistant message only if it appears after the latest user message.
+// This prevents returning a stale prior-turn assistant message when a new turn
+// has started but the assistant response has not been flushed yet.
+func ExtractLastAssistantMessageAfterLastUser(path string, maxChars int) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	var (
+		lastAssistantContent string
+		lastAssistantSeq     int
+		lastUserSeq          int
+		seq                  int
+	)
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		seq++
+
+		if isUserEntry(line) {
+			lastUserSeq = seq
+		}
+		if content := ExtractAssistantContent(line); content != "" {
+			lastAssistantContent = content
+			lastAssistantSeq = seq
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	// Latest user has no subsequent assistant yet.
+	if lastUserSeq > 0 && lastAssistantSeq <= lastUserSeq {
+		return "", nil
+	}
+
+	if len(lastAssistantContent) > maxChars {
+		lastAssistantContent = lastAssistantContent[len(lastAssistantContent)-maxChars:]
+	}
 	return lastAssistantContent, nil
 }
 

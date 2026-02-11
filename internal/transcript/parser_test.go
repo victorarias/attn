@@ -249,3 +249,76 @@ func TestExtractCopilotToolLifecycle_IgnoresNonLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractLastAssistantMessageAfterLastUser_Claude_StaleAssistantIgnored(t *testing.T) {
+	content := `{"type":"user","message":{"content":"hello"}}
+{"type":"assistant","message":{"content":"Hi! How can I help?"}}
+{"type":"user","message":{"content":"show me what this bot does"}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessageAfterLastUser(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "" {
+		t.Fatalf("expected empty result, got %q", result)
+	}
+}
+
+func TestExtractLastAssistantMessageAfterLastUser_Claude_AssistantAfterLatestUser(t *testing.T) {
+	content := `{"type":"user","message":{"content":"hello"}}
+{"type":"assistant","message":{"content":"Hi! How can I help?"}}
+{"type":"user","message":{"content":"show me what this bot does"}}
+{"type":"assistant","message":{"content":"This bot tracks sessions and attention."}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessageAfterLastUser(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := "This bot tracks sessions and attention."
+	if result != expected {
+		t.Fatalf("got %q, want %q", result, expected)
+	}
+}
+
+func TestExtractLastAssistantMessageAfterLastUser_Claude_NoUserStillReturnsLastAssistant(t *testing.T) {
+	content := `{"type":"assistant","message":{"content":"Hello! What can I help you with today?"}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessageAfterLastUser(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := "Hello! What can I help you with today?"
+	if result != expected {
+		t.Fatalf("got %q, want %q", result, expected)
+	}
+}
+
+func TestExtractLastAssistantMessageAfterLastUser_Copilot_StaleAssistantIgnored(t *testing.T) {
+	content := `{"type":"user.message","data":{"content":"hello"}}
+{"type":"assistant.message","data":{"content":"Hi there!"}}
+{"type":"user.message","data":{"content":"run this command"}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "events.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	result, err := ExtractLastAssistantMessageAfterLastUser(path, 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "" {
+		t.Fatalf("expected empty result, got %q", result)
+	}
+}
