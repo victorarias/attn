@@ -258,6 +258,18 @@
   color: #ff9f7a;
 }
 
+.settings-status.mode-worker {
+  color: #79d29a;
+}
+
+.settings-status.mode-embedded {
+  color: #86b7ff;
+}
+
+.settings-status.mode-unknown {
+  color: #ffcf7a;
+}
+
 .settings-agent-warning {
   margin-bottom: 10px;
   font-size: 11px;

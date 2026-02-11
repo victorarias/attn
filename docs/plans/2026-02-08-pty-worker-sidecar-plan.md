@@ -1,9 +1,101 @@
 # PTY Restart-Survival Design: Per-Session Worker Sidecars
 
 Date: 2026-02-08  
-Updated: 2026-02-10  
-Status: Ready for implementation  
+Updated: 2026-02-11  
+Status: Phases A-F implemented (worker backend default, embedded fallback retained)  
 Owner: daemon/pty
+
+## Phase F hardening targets (2026-02-11)
+
+These are intentionally tracked as post-promotion hardening tasks and are now in active implementation:
+
+1. Worker lifecycle/state propagation should be worker-pushed, not primarily poll-driven.
+- Current issue:
+  - backend poller currently performs frequent `info` RPCs for state/exit propagation.
+  - this introduces control-plane load proportional to active session count and adds jitter around state transitions.
+- Plan:
+  - add a worker lifecycle watch stream (`watch`) that pushes state/exit events from worker to backend.
+  - keep poller as liveness fallback (and compatibility path for older workers), not as primary state transport.
+
+2. Worker backend default selection needs startup capability probe.
+- Current issue:
+  - backend selection proves directory/path setup but can defer runtime incompatibilities until first real spawn.
+- Plan:
+  - add worker startup probe in daemon boot path before committing to worker backend default.
+  - on probe failure, surface warning and fall back to embedded backend immediately.
+
+3. Ownership mismatch recovery should reclaim stale workers when safe.
+- Current issue:
+  - on `daemon_instance_id` ownership mismatch, recovery quarantines metadata but intentionally preserves the live worker process.
+  - this avoids cross-daemon termination but can leave orphan worker processes after daemon crashes/restarts with rewritten identity metadata.
+- Plan:
+  - include daemon-owner lease metadata in worker registry (`owner_pid`, `owner_started_at`, `owner_nonce`).
+  - during mismatch recovery, reclaim only when owner lease is provably stale; otherwise keep conservative quarantine-only behavior.
+  - reclaim path should prefer authenticated worker RPC termination using the recorded owner identity/token, not blind PID kill.
+
+## Progress update (2026-02-10)
+
+Completed in this branch:
+
+1. Added daemon-internal `internal/ptybackend` seam with an `embedded` adapter over existing `internal/pty.Manager`.
+2. Switched daemon/websocket PTY command paths (`spawn`, `attach`, `input`, `resize`, `kill`, session listing/shutdown) to backend interface calls.
+3. Added persistent `daemon_instance_id` stored at `<data_root>/daemon-id` and surfaced it in `initial_state`.
+4. Added startup recovery-barrier scaffolding:
+- daemon tracks `recovering` state
+- PTY commands are rejected with `command_error` + `daemon_recovering` while recovering
+- `initial_state` delivery is deferred until barrier lift
+5. Added unit coverage for daemon ID persistence and recovery-barrier behavior.
+6. Added `attn pty-worker` subcommand and worker runtime (`internal/ptyworker`) with:
+- per-session PTY ownership
+- JSONL RPC server (`hello/info/attach/detach/input/resize/signal/remove/health`)
+- atomic registry file management
+7. Added daemon-side worker backend adapter (`internal/ptybackend/worker.go`) and backend selection:
+- `ATTN_PTY_BACKEND=worker` now activates worker mode
+- default is now `worker` (`ATTN_PTY_BACKEND=embedded` override supported)
+- unsupported/failed worker init falls back to embedded with warnings
+8. Added worker backend recovery scan wiring via registry discovery in backend `Recover()`.
+9. Added worker protocol/registry tests and an opt-in worker integration test scaffold (`ATTN_RUN_WORKER_INTEGRATION=1`).
+10. Implemented Phase D recovery reconciliation for worker backend:
+- startup reconciliation now restores/creates live sessions from recovered workers
+- non-recovered running sessions are marked `idle` instead of hard-deleted
+- waiting/approval states are preserved when workers are live
+11. Added worker-side hardening:
+- ownership mismatch registry files are quarantined
+- worker RPC calls are context/time-bounded
+- worker poller escalates persistent worker-unreachable failures
+12. Fixed PTY stream robustness:
+- stream closes on outbound send failure
+- worker stream backpressure no longer blocks indefinitely
+13. Completed Phase E hardening and promotion work:
+- worker backend promoted to default with explicit embedded override/fallback window
+- worker RPC handshake now enforces compatibility window (`rpc_major` + bounded `rpc_minor`)
+- startup recovery now runs under a bounded timeout and surfaces transient recovery warnings
+- recovery scan retries transient worker RPC failures before deferring/quarantining
+- poller exit callbacks are asynchronous to avoid re-entrant remove deadlocks
+- worker-side exited-session cleanup TTL (`45s`) is enforced when no daemon attachments remain
+- session IDs are validated before worker path derivation to prevent unsafe path usage
+- reconnect PTY reattach in frontend now waits for `initial_state` (post-recovery barrier)
+- worker stdout/stderr is now captured per session under `<worker_root>/log/<session_id>.log`
+- added opt-in integration coverage for backend restart recovery (`ATTN_RUN_WORKER_INTEGRATION=1`)
+
+Progress update (2026-02-11, completed):
+
+14. Phase F implementation started:
+- documenting lifecycle push architecture + fallback behavior in this plan
+- implementing worker startup capability probe and early embedded fallback
+- implementing worker-pushed lifecycle watch stream with poll compatibility fallback
+
+15. Phase F polish and risk-reduction fixes:
+- worker runtime no longer applies idle read deadlines to long-lived attach/watch streams, preventing periodic stream teardown on idle sessions
+- deferred worker reconciliation now broadcasts updated session snapshots so connected clients immediately reflect state demotions/promotions
+- `clear_sessions` now performs a recovery scan before termination, so registry-only worker sessions are included in termination attempts
+- recovery quarantine now cleans up owned socket artifacts for ownership/socket-path mismatch registry entries
+- recovery-mode frontend notice now includes `spawn_session` and `attach_session` command failures
+
+16. Ownership-mismatch stale-owner reclaim hardening:
+- worker registry now records daemon-owner lease metadata (`owner_pid`, `owner_started_at`, `owner_nonce`) for each worker session
+- ownership mismatch recovery now attempts authenticated worker `remove` RPC only when the recorded owner lease is provably stale
+- if stale-owner proof is unavailable (or reclaim fails), recovery remains conservative (quarantine + preserve process) to avoid unsafe cross-daemon termination
 
 ## Why this follow-up exists
 
@@ -496,6 +588,8 @@ Exit gate (core requirement):
 - Kill daemon, keep worker alive, restart daemon, reattach, continue typing in same session.
 
 ### Phase E: Hardening + promotion
+
+Status: completed on 2026-02-10.
 
 1. Backpressure and timeout tuning.
 2. Crash/orphan cleanup hardening.

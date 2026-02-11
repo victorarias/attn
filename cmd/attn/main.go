@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/pathutil"
+	"github.com/victorarias/attn/internal/ptyworker"
 	"github.com/victorarias/attn/internal/wrapper"
 )
 
@@ -47,6 +49,8 @@ func main() {
 	switch os.Args[1] {
 	case "daemon":
 		runDaemon()
+	case "pty-worker":
+		runPTYWorker()
 	case "list":
 		runList()
 	case "_hook-stop":
@@ -61,6 +65,56 @@ func main() {
 			fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 			os.Exit(1)
 		}
+	}
+}
+
+func runPTYWorker() {
+	fs := flag.NewFlagSet("pty-worker", flag.ExitOnError)
+	var cfg ptyworker.Config
+	var cols int
+	var rows int
+	fs.StringVar(&cfg.DaemonInstanceID, "daemon-instance-id", "", "daemon instance id")
+	fs.StringVar(&cfg.SessionID, "session-id", "", "session id")
+	fs.StringVar(&cfg.Agent, "agent", "", "session agent")
+	fs.StringVar(&cfg.CWD, "cwd", "", "working directory")
+	fs.IntVar(&cols, "cols", 80, "terminal cols")
+	fs.IntVar(&rows, "rows", 24, "terminal rows")
+	fs.StringVar(&cfg.Label, "label", "", "session label")
+	fs.StringVar(&cfg.ResumeSessionID, "resume-session-id", "", "resume session id")
+	fs.BoolVar(&cfg.ResumePicker, "resume-picker", false, "resume picker")
+	fs.BoolVar(&cfg.ForkSession, "fork-session", false, "fork session")
+	fs.StringVar(&cfg.ClaudeExecutable, "claude-executable", "", "claude executable override")
+	fs.StringVar(&cfg.CodexExecutable, "codex-executable", "", "codex executable override")
+	fs.StringVar(&cfg.CopilotExecutable, "copilot-executable", "", "copilot executable override")
+	fs.StringVar(&cfg.RegistryPath, "registry-path", "", "registry path")
+	fs.StringVar(&cfg.SocketPath, "socket-path", "", "socket path")
+	fs.StringVar(&cfg.ControlToken, "control-token", "", "control token")
+	fs.IntVar(&cfg.OwnerPID, "owner-pid", 0, "daemon owner pid")
+	fs.StringVar(&cfg.OwnerStartedAt, "owner-started-at", "", "daemon owner started-at timestamp")
+	fs.StringVar(&cfg.OwnerNonce, "owner-nonce", "", "daemon owner nonce")
+
+	_ = fs.Parse(os.Args[2:])
+	if cols > 0 {
+		if cols > 65535 {
+			fmt.Fprintf(os.Stderr, "pty-worker error: --cols must be <= 65535 (got %d)\n", cols)
+			os.Exit(1)
+		}
+		cfg.Cols = uint16(cols)
+	}
+	if rows > 0 {
+		if rows > 65535 {
+			fmt.Fprintf(os.Stderr, "pty-worker error: --rows must be <= 65535 (got %d)\n", rows)
+			os.Exit(1)
+		}
+		cfg.Rows = uint16(rows)
+	}
+	cfg.Logf = func(format string, args ...interface{}) {
+		fmt.Fprintf(os.Stderr, "[pty-worker] "+format+"\n", args...)
+	}
+
+	if err := ptyworker.Run(context.Background(), cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "pty-worker error: %v\n", err)
+		os.Exit(1)
 	}
 }
 

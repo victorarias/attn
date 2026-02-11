@@ -54,6 +54,22 @@ export function SettingsModal({
   const actualEditorExecutable = settings.editor_executable || '';
   const actualDefaultAgent = normalizeSessionAgent(settings.new_session_agent, 'claude');
   const resolvedDefaultAgent = resolvePreferredAgent(actualDefaultAgent, agentAvailability, 'codex');
+  const rawPtyBackendMode = (settings.pty_backend_mode || 'unknown').toLowerCase();
+  const ptyBackendMode = rawPtyBackendMode === 'worker' || rawPtyBackendMode === 'embedded'
+    ? rawPtyBackendMode
+    : 'unknown';
+  const ptyBackendLabel =
+    ptyBackendMode === 'worker'
+      ? 'External worker sidecar'
+      : ptyBackendMode === 'embedded'
+        ? 'Embedded in daemon'
+        : 'Unknown';
+  const ptyBackendHint =
+    ptyBackendMode === 'worker'
+      ? 'Sessions run in per-session worker processes and can survive daemon restarts.'
+      : ptyBackendMode === 'embedded'
+        ? 'Sessions run inside the daemon process and stop if the daemon restarts.'
+        : 'Backend mode is not currently reported by the daemon.';
 
   useEffect(() => {
     if (!isOpen) return;
@@ -330,6 +346,20 @@ export function SettingsModal({
               >
                 Copilot
               </button>
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <h3>PTY Backend</h3>
+            <p className="settings-description">
+              Shows whether terminal sessions run in external worker processes or directly in the daemon.
+            </p>
+            <div className="settings-field">
+              <label className="settings-label">Runtime mode</label>
+              <span className={`settings-status mode-${ptyBackendMode}`}>
+                {ptyBackendLabel}
+              </span>
+              <div className="settings-hint">{ptyBackendHint}</div>
             </div>
           </div>
 

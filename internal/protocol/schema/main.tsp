@@ -526,6 +526,7 @@ model KillSessionMessage {
 model InitialStateMessage {
   event: "initial_state";
   protocol_version?: string;
+  daemon_instance_id?: string;
   sessions?: Session[];
   prs?: PR[];
   repos?: RepoState[];
