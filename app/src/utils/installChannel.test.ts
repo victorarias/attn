@@ -1,0 +1,30 @@
+import { describe, expect, it } from 'vitest';
+import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './installChannel';
+
+describe('installChannel', () => {
+  it('defaults empty or missing to source', () => {
+    expect(normalizeInstallChannel(undefined)).toBe('source');
+    expect(normalizeInstallChannel('')).toBe('source');
+    expect(normalizeInstallChannel('source')).toBe('source');
+  });
+
+  it('normalizes known release channels', () => {
+    expect(normalizeInstallChannel('release')).toBe('release');
+    expect(normalizeInstallChannel('homebrew')).toBe('homebrew');
+    expect(normalizeInstallChannel('cask')).toBe('cask');
+    expect(normalizeInstallChannel('dmg')).toBe('dmg');
+  });
+
+  it('marks unknown channels as unknown', () => {
+    expect(normalizeInstallChannel('nightly')).toBe('unknown');
+  });
+
+  it('checks for updates only on release-style channels', () => {
+    expect(shouldCheckForReleaseUpdates('source')).toBe(false);
+    expect(shouldCheckForReleaseUpdates(undefined)).toBe(false);
+    expect(shouldCheckForReleaseUpdates('release')).toBe(true);
+    expect(shouldCheckForReleaseUpdates('homebrew')).toBe(true);
+    expect(shouldCheckForReleaseUpdates('cask')).toBe(true);
+    expect(shouldCheckForReleaseUpdates('dmg')).toBe(true);
+  });
+});

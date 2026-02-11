@@ -32,6 +32,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useUIScale } from './hooks/useUIScale';
 import { useOpenPR } from './hooks/useOpenPR';
 import { getAgentAvailability, hasAnyAvailableAgents, resolvePreferredAgent } from './utils/agentAvailability';
+import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
 import './App.css';
 
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
@@ -103,6 +104,7 @@ function App() {
   const [updateAvailableVersion, setUpdateAvailableVersion] = useState<string | null>(null);
   const [updateReleaseUrl, setUpdateReleaseUrl] = useState<string>(RELEASES_LATEST_WEB);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() => getDismissedUpdateVersion());
+  const installChannel = useMemo(() => normalizeInstallChannel(import.meta.env.VITE_INSTALL_CHANNEL), []);
 
   const {
     daemonSessions,
@@ -143,6 +145,10 @@ function App() {
   // Check latest GitHub release periodically and notify when newer than local app.
   useEffect(() => {
     if (!isTauri()) return;
+    if (!shouldCheckForReleaseUpdates(installChannel)) {
+      setUpdateAvailableVersion(null);
+      return;
+    }
 
     let cancelled = false;
     let intervalId: ReturnType<typeof setInterval> | undefined;
@@ -199,7 +205,7 @@ function App() {
       cancelled = true;
       if (intervalId) clearInterval(intervalId);
     };
-  }, [dismissedUpdateVersion]);
+  }, [dismissedUpdateVersion, installChannel]);
 
   const handleOpenLatestRelease = useCallback(async () => {
     try {

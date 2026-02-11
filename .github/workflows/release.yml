@@ -74,6 +74,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_INSTALL_CHANNEL: release
         with:
           projectPath: app
           tagName: ${{ env.RELEASE_TAG }}

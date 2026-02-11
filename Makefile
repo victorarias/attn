@@ -88,7 +88,7 @@ check-types: generate-types
 build-app: build
 	@mkdir -p app/src-tauri/binaries
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
-	cd app && pnpm tauri build --bundles app
+	cd app && VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles app
 
 # Install Tauri app to /Applications
 install-app: build-app
@@ -101,7 +101,7 @@ install-all: install install-app
 
 # Create distributable DMG
 dist: build-app
-	cd app && pnpm tauri build --bundles dmg
+	cd app && VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles dmg
 	@echo "DMG created at app/src-tauri/target/release/bundle/dmg/"
 
 release:
