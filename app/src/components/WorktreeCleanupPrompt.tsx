@@ -106,7 +106,7 @@ export function WorktreeCleanupPrompt({
             Delete
           </button>
           <button ref={alwaysRef} className="cleanup-btn always" onClick={handleAlwaysKeep}>
-            Always keep
+            Always keep (this app run)
           </button>
         </div>
       </div>
