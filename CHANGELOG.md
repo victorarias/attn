@@ -10,10 +10,27 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Source Build Update Checks**: Source-installed app builds now set `source` install channel and skip GitHub release update polling/banner noise, while tagged release builds keep update notifications.
+- **Session Startup State**: New sessions now start in `launching` (emoji indicator) instead of immediately showing `working` green, then transition once runtime signals arrive.
+- **Classifier Turn Budget**: Claude SDK classifier now runs with `maxTurns=2` for more reliable structured verdict extraction.
 
 ### Fixed
 - **Release Banner Dismissal**: Added an explicit dismiss control (`×`) for the GitHub release banner and persist dismissal per release version, so a dismissed banner stays hidden until a newer release is published.
 - **Worktree Close Cleanup Prompt**: Restored the delete/keep prompt when closing worktree sessions even if an old persisted "always keep" preference exists; "always keep" now applies only for the current app run.
+- **Copilot Permission Prompt State**: Copilot numbered command-approval dialogs (for example, "Do you want to run this command?" with `1/2/3` choices) are now recognized as `pending_approval` instead of falling through to stale idle/gray state.
+- **Copilot Transcript Pending Latch**: Transcript watcher now tracks unresolved Copilot tool calls and keeps sessions in `pending_approval` while a stalled approval-gated tool call is outstanding, then clears back to `working` on completion.
+- **Copilot Mid-Turn Idle Regression**: Transcript watcher now treats `assistant.turn_start`/`assistant.turn_end` as authoritative turn boundaries and suppresses stop-time classification while a turn is open, preventing active Copilot sessions from flashing/sticking gray during ongoing tool work.
+- **Copilot Pending Approval Stability**: While Copilot is in `pending_approval`, noisy PTY redraws that heuristically look like `working` no longer override state; pending now clears only when transcript evidence indicates the approval gate has resolved.
+- **Copilot Long-Running Tool Stability**: Transcript-based pending promotion now only elevates non-working states (`idle`, `waiting_input`, `launching`, `unknown`), preventing long-running approved tools from being mislabeled as pending approval.
+- **Claude Classifier Diagnostics**: When Claude classifier output cannot be parsed into a verdict, daemon logs now include a structured dump of returned SDK messages (or explicit empty-response marker) to diagnose false `waiting_input` fallbacks.
+- **Claude Structured Result Parsing Compatibility**: Bumped `claude-agent-sdk-go` to include merged parser fixes on `main` so classifier flows can reliably consume structured/result payload fields from SDK `result` messages.
+- **Unknown Classification Handling**: Added explicit `unknown` session state (purple) for transcript/classifier uncertainty or errors; removed implicit fallback to `waiting_input`.
+- **Claude Stop-Time Transcript Race**: Claude classification now ignores stale assistant messages that occur before the latest user turn, preventing off-by-one misclassification when the newest assistant response has not flushed to transcript yet.
+- **Claude Stop-Time Freshness Guard**: Claude classification now also enforces assistant-message recency relative to the current stop event, so a previous turn cannot be reused when the latest turn has not fully flushed to transcript.
+- **Claude Turn-Scoped Classification Idempotency**: Stop-time classification now tracks and de-duplicates by Claude assistant turn UUID, preventing repeated LLM classification on the same assistant message when hooks fire faster than transcript flush.
+- **Claude Concurrent Classification De-Duplication**: Added an in-flight Claude turn guard so stop-hook and transcript-watcher triggers cannot classify the same assistant turn concurrently, eliminating duplicate classifier calls for a single turn.
+- **Claude Transcript Watcher**: Claude sessions now use transcript-tail quiet-window monitoring (like Codex/Copilot) as a second classification trigger, so delayed transcript flushes still converge to the correct post-turn state even if stop hooks arrive early.
+- **Local Install Daemon Restart**: `make install` now always `pkill`s existing daemon processes, restarts `~/.local/bin/attn daemon`, and fails fast if the local daemon process is not detected.
+- **E2E Port Cleanup on macOS**: `make test-e2e` now prefers `lsof` on Darwin when clearing stale Vite port `1421`, avoiding noisy `fuser` usage output from incompatible flags.
 
 ## [2026-02-10]
 

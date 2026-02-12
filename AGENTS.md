@@ -114,6 +114,15 @@ Attention Manager (`attn`) tracks multiple Claude Code sessions and surfaces whi
    - `Stop` → triggers classifier
    - `TodoWrite` → updates todo list
 
+### Session State Semantics (UI)
+
+- `launching` (emoji): Freshly opened session before first definitive runtime signal.
+- `working` (green): Agent is actively running/responding.
+- `pending_approval` (flashing yellow): Agent is blocked on a permission/approval prompt.
+- `waiting_input` (yellow): Agent stopped and is waiting for user direction/input.
+- `idle` (gray): Agent is done and not waiting for anything.
+- `unknown` (purple): State could not be determined reliably (classifier/transcript uncertainty or error).
+
 3. **Daemon** (`internal/daemon`): Background process listening on `~/.attn/attn.sock` (unix socket) and `ws://localhost:9849` (WebSocket). Handles session lifecycle, git operations, GitHub PR polling, and real-time updates to the app.
 
 4. **Store** (`internal/store`): SQLite-backed storage with thread-safe in-memory caching. Uses RWMutex for concurrent reads. Always `defer mu.Unlock()` immediately after lock, before any I/O.

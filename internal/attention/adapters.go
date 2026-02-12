@@ -24,12 +24,23 @@ func (s SessionAdapter) AttentionLabel() string {
 }
 
 func (s SessionAdapter) NeedsAttention() bool {
-	return s.Session.State == protocol.SessionStateWaitingInput && !s.Session.Muted
+	if s.Session.Muted {
+		return false
+	}
+	return s.Session.State == protocol.SessionStateWaitingInput ||
+		s.Session.State == protocol.SessionStatePendingApproval ||
+		s.Session.State == protocol.SessionStateUnknown
 }
 
 func (s SessionAdapter) AttentionReason() string {
 	if s.Session.State == protocol.SessionStateWaitingInput {
 		return "waiting_input"
+	}
+	if s.Session.State == protocol.SessionStatePendingApproval {
+		return "pending_approval"
+	}
+	if s.Session.State == protocol.SessionStateUnknown {
+		return "unknown"
 	}
 	return ""
 }

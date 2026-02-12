@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,50 @@ import (
 	"github.com/victorarias/attn/internal/store"
 	"nhooyr.io/websocket"
 )
+
+type countingClassifier struct {
+	state string
+	calls int
+}
+
+func (c *countingClassifier) Classify(text string, timeout time.Duration) (string, error) {
+	c.calls++
+	return c.state, nil
+}
+
+type blockingClassifier struct {
+	state   string
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+}
+
+func newBlockingClassifier(state string) *blockingClassifier {
+	return &blockingClassifier{
+		state:   state,
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+}
+
+func (c *blockingClassifier) Classify(text string, timeout time.Duration) (string, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	select {
+	case c.started <- struct{}{}:
+	default:
+	}
+	<-c.release
+	return c.state, nil
+}
+
+func (c *blockingClassifier) CallCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
 
 // waitForSocket waits for a unix socket to be ready for connections.
 // This is more reliable than fixed sleeps, especially in CI environments.
@@ -141,7 +186,7 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 
 	c := client.New(sockPath)
 
-	// Register multiple sessions (all start as waiting_input)
+	// Register multiple sessions (all start as launching)
 	c.Register("1", "one", "/tmp/1")
 	c.Register("2", "two", "/tmp/2")
 	c.Register("3", "three", "/tmp/3")
@@ -149,10 +194,10 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 	// Update one to working
 	c.UpdateState("2", protocol.StateWorking)
 
-	// Query waiting_input (sessions 1 and 3)
-	waiting, _ := c.Query(protocol.StateWaitingInput)
-	if len(waiting) != 2 {
-		t.Errorf("got %d waiting_input, want 2", len(waiting))
+	// Query launching (sessions 1 and 3)
+	launching, _ := c.Query(protocol.StateLaunching)
+	if len(launching) != 2 {
+		t.Errorf("got %d launching, want 2", len(launching))
 	}
 
 	// Query working (session 2)
@@ -1142,8 +1187,8 @@ func TestDaemon_StateTransitions_AllStates(t *testing.T) {
 		t.Fatalf("Read initial state error: %v", err)
 	}
 
-	// Test all three states: working → waiting_input → idle → working
-	states := []string{protocol.StateWaitingInput, protocol.StateIdle, protocol.StateWorking}
+	// Test state transitions after register default (launching)
+	states := []string{protocol.StateWaitingInput, protocol.StateIdle, protocol.StateWorking, protocol.StateUnknown}
 
 	for _, expectedState := range states {
 		err = c.UpdateState("test-session", expectedState)
@@ -1345,7 +1390,7 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 	// does NOT short-circuit to waiting_input based on todos alone.
 	// Instead, it proceeds to classification.
 	//
-	// When transcript parsing fails, it defaults to waiting_input (safer),
+	// When transcript parsing fails, it now returns unknown,
 	// but that's different from the todos short-circuit path.
 
 	// Use /tmp directly to avoid long socket paths
@@ -1401,7 +1446,7 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 
 	// With all completed todos, stop should proceed to classification (not short-circuit)
 	// Since we're providing a nonexistent transcript, classification will fail
-	// and default to waiting_input - but this is different from todos short-circuit
+	// and return unknown - but this is different from todos short-circuit
 	//
 	// The key difference:
 	// - With pending todos: immediately returns waiting_input (no transcript parsing)
@@ -1409,4 +1454,129 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 	//
 	// This test mainly ensures the todos count logic correctly skips completed todos
 	t.Log("Test passed: todos with [✓] prefix are counted as completed, allowing classification to proceed")
+}
+
+func TestClassifySessionState_ClaudeSkipsDuplicateAssistantTurn(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	mockClassifier := &countingClassifier{state: protocol.StateWaitingInput}
+	d.classifier = mockClassifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-1",
+		Agent:          protocol.SessionAgentClaude,
+		Label:          "test",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	content := fmt.Sprintf(
+		`{"type":"user","uuid":"u1","timestamp":"%s","message":{"role":"user","content":"hello"}}
+{"type":"assistant","uuid":"a1","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"Hello! What can I help you with today?"}]}}
+`,
+		now.Add(-1*time.Second).UTC().Format(time.RFC3339Nano),
+		now.UTC().Format(time.RFC3339Nano),
+	)
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	d.classifySessionState("sess-1", transcriptPath)
+	if mockClassifier.calls != 1 {
+		t.Fatalf("first classify calls=%d, want 1", mockClassifier.calls)
+	}
+
+	sess := d.store.Get("sess-1")
+	if sess == nil {
+		t.Fatal("session missing after first classify")
+	}
+	firstState := sess.State
+
+	d.classifySessionState("sess-1", transcriptPath)
+	if mockClassifier.calls != 1 {
+		t.Fatalf("second classify calls=%d, want still 1", mockClassifier.calls)
+	}
+
+	sess = d.store.Get("sess-1")
+	if sess == nil {
+		t.Fatal("session missing after second classify")
+	}
+	if sess.State != firstState {
+		t.Fatalf("state changed on duplicate turn: got %q want %q", sess.State, firstState)
+	}
+}
+
+func TestClassifySessionState_ClaudeConcurrentDuplicateTurnRunsOnce(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	mockClassifier := newBlockingClassifier(protocol.StateWaitingInput)
+	d.classifier = mockClassifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-2",
+		Agent:          protocol.SessionAgentClaude,
+		Label:          "test",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	content := fmt.Sprintf(
+		`{"type":"user","uuid":"u2","timestamp":"%s","message":{"role":"user","content":"hello"}}
+{"type":"assistant","uuid":"a2","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"Hello! What can I help you with today?"}]}}
+`,
+		now.Add(-1*time.Second).UTC().Format(time.RFC3339Nano),
+		now.UTC().Format(time.RFC3339Nano),
+	)
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	firstDone := make(chan struct{})
+	go func() {
+		d.classifySessionState("sess-2", transcriptPath)
+		close(firstDone)
+	}()
+
+	select {
+	case <-mockClassifier.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("classifier did not start for first classification")
+	}
+
+	secondDone := make(chan struct{})
+	go func() {
+		d.classifySessionState("sess-2", transcriptPath)
+		close(secondDone)
+	}()
+
+	select {
+	case <-secondDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second classification did not return promptly")
+	}
+
+	if got := mockClassifier.CallCount(); got != 1 {
+		t.Fatalf("classifier calls=%d, want 1 while duplicate turn in flight", got)
+	}
+
+	close(mockClassifier.release)
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first classification did not complete")
+	}
+
+	if got := mockClassifier.CallCount(); got != 1 {
+		t.Fatalf("classifier calls=%d, want 1", got)
+	}
 }

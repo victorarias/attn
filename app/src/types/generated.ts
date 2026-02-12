@@ -306,7 +306,9 @@ export enum SessionAgent {
 
 export enum SessionState {
     Idle = "idle",
+    Launching = "launching",
     PendingApproval = "pending_approval",
+    Unknown = "unknown",
     WaitingInput = "waiting_input",
     Working = "working",
 }
@@ -4302,7 +4304,9 @@ const typeMap: any = {
     ],
     "SessionState": [
         "idle",
+        "launching",
         "pending_approval",
+        "unknown",
         "waiting_input",
         "working",
     ],

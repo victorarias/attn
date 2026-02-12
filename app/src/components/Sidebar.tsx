@@ -1,10 +1,11 @@
 import './Sidebar.css';
 import { StateIndicator } from './StateIndicator';
+import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
 
 interface LocalSession {
   id: string;
   label: string;
-  state: 'working' | 'waiting_input' | 'idle' | 'pending_approval';
+  state: UISessionState;
   agent?: string;
   branch?: string;
   isWorktree?: boolean;
@@ -74,8 +75,8 @@ export function Sidebar({
               title={`${session.label} (⌘${index + 1})`}
             >
               ▸
-              {(session.state === 'waiting_input' || session.state === 'pending_approval') && (
-                <span className={`mini-badge ${session.state === 'pending_approval' ? 'pending' : ''}`} />
+              {isAttentionSessionState(session.state) && (
+                <span className={`mini-badge ${session.state === 'pending_approval' ? 'pending' : ''} ${session.state === 'unknown' ? 'unknown' : ''}`} />
               )}
             </button>
           ))}
@@ -122,7 +123,7 @@ export function Sidebar({
                 data-state={session.state}
                 onClick={() => onSelectSession(session.id)}
               >
-                <StateIndicator state={session.state} size="md" />
+                <StateIndicator state={session.state} size="md" seed={session.id} />
                 <div className="session-info">
                   <span className="session-label">{session.label}</span>
                   {session.branch && (
@@ -163,7 +164,7 @@ export function Sidebar({
                     data-state={session.state}
                     onClick={() => onSelectSession(session.id)}
                   >
-                    <StateIndicator state={session.state} size="md" />
+                    <StateIndicator state={session.state} size="md" seed={session.id} />
                     <span className="session-label">{session.label}</span>
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <span className="session-shortcut">⌘{globalIndex + 1}</span>

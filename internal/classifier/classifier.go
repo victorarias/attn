@@ -14,21 +14,22 @@ import (
 	"github.com/victorarias/claude-agent-sdk-go/types"
 )
 
-const promptTemplate = `Analyze this text from an AI assistant and determine if it's waiting for user input.
+const promptTemplate = `Classify whether this assistant message is waiting for user input.
 
-Reply with exactly one word: WAITING or DONE
+Return STRICT JSON only, matching exactly one of:
+{"verdict":"WAITING"}
+{"verdict":"DONE"}
 
-WAITING means:
-- Asks a question
-- Requests clarification
-- Offers choices requiring selection
-- Asks for confirmation to proceed
+Decision rules (in order):
+1) WAITING if the assistant asks the user any direct question.
+2) WAITING if the assistant asks for confirmation, permission, choice, clarification, or next direction.
+3) DONE only if the assistant message is complete and does not ask the user for anything.
 
-DONE means:
-- States completion
-- Provides information without asking
-- Reports results
-- No question or request for input
+Examples:
+- "Hello! What can I help you with today?" -> WAITING
+- "Would you like me to continue?" -> WAITING
+- "I finished the task and saved the file." -> DONE
+- "I'm here whenever you need me." -> DONE
 
 Text to analyze:
 """
@@ -52,6 +53,8 @@ var classifierOutputFormat = map[string]any{
 }
 
 var verdictLineRegex = regexp.MustCompile(`(?i)^\s*(?:VERDICT\s*[:=]\s*)?(WAITING_INPUT|WAITING|DONE|IDLE)(?:\s*(?:[-:]\s+.*|\([^)]*\)|[.!?]))?\s*$`)
+
+const classifierLogSnippetMaxChars = 600
 
 // BuildPrompt creates the classification prompt
 func BuildPrompt(text string) string {
@@ -143,6 +146,117 @@ func parseVerdictFromResponse(response string) (string, bool) {
 	return "", false
 }
 
+func truncateForLog(value string, maxChars int) string {
+	if maxChars <= 0 || len(value) <= maxChars {
+		return value
+	}
+	return value[:maxChars] + "...(truncated)"
+}
+
+func logClaudeMessageDump(messages []types.Message) {
+	if len(messages) == 0 {
+		DefaultLogger("classifier: claude SDK message dump: empty messages slice")
+		return
+	}
+	for i, msg := range messages {
+		switch typed := msg.(type) {
+		case *types.SystemMessage:
+			dataJSON, _ := json.Marshal(typed.Data)
+			DefaultLogger(
+				"classifier: claude SDK message[%d/%d] system subtype=%q session_id=%q version=%q data=%s",
+				i+1,
+				len(messages),
+				typed.Subtype,
+				typed.SessionID,
+				typed.Version,
+				truncateForLog(string(dataJSON), classifierLogSnippetMaxChars),
+			)
+		case *types.AssistantMessage:
+			toolNames := make([]string, 0, len(typed.ToolCalls()))
+			for _, call := range typed.ToolCalls() {
+				if call != nil {
+					toolNames = append(toolNames, call.Name)
+				}
+			}
+			DefaultLogger(
+				"classifier: claude SDK message[%d/%d] assistant model=%q stop_reason=%q error=%v text=%q thinking_chars=%d tool_calls=%d tool_names=%q",
+				i+1,
+				len(messages),
+				typed.Model,
+				typed.StopReason,
+				typed.Error,
+				truncateForLog(typed.Text(), classifierLogSnippetMaxChars),
+				len(typed.Thinking()),
+				len(toolNames),
+				toolNames,
+			)
+		case *types.ResultMessage:
+			resultText := ""
+			if typed.Result != nil {
+				resultText = *typed.Result
+			}
+			structuredJSON, _ := json.Marshal(typed.StructuredOutput)
+			DefaultLogger(
+				"classifier: claude SDK message[%d/%d] result subtype=%q is_error=%v num_turns=%d duration_ms=%d duration_api_ms=%d result=%q structured_output=%s",
+				i+1,
+				len(messages),
+				typed.Subtype,
+				typed.IsError,
+				typed.NumTurns,
+				typed.DurationMS,
+				typed.DurationAPI,
+				truncateForLog(resultText, classifierLogSnippetMaxChars),
+				truncateForLog(string(structuredJSON), classifierLogSnippetMaxChars),
+			)
+		default:
+			payload, _ := json.Marshal(msg)
+			DefaultLogger(
+				"classifier: claude SDK message[%d/%d] type=%T payload=%s",
+				i+1,
+				len(messages),
+				msg,
+				truncateForLog(string(payload), classifierLogSnippetMaxChars),
+			)
+		}
+	}
+}
+
+func classifyClaudeMessages(messages []types.Message) (result string, ok bool, lastAssistantResponse string) {
+	var lastAssistantVerdict string
+
+	for _, msg := range messages {
+		switch typed := msg.(type) {
+		case *types.AssistantMessage:
+			assistantText := strings.TrimSpace(typed.Text())
+			if assistantText == "" {
+				continue
+			}
+			lastAssistantResponse = assistantText
+			if parsed, parsedOK := parseVerdictFromResponse(assistantText); parsedOK {
+				lastAssistantVerdict = parsed
+			}
+		case *types.ResultMessage:
+			if parsed, parsedOK := parseVerdictFromValue(typed.StructuredOutput); parsedOK {
+				DefaultLogger("classifier: parsed result from structured output: %s", parsed)
+				return parsed, true, lastAssistantResponse
+			}
+			if typed.Result != nil {
+				if parsed, parsedOK := parseVerdictFromResponse(*typed.Result); parsedOK {
+					DefaultLogger("classifier: parsed result from result payload: %s", parsed)
+					return parsed, true, lastAssistantResponse
+				}
+			}
+		}
+	}
+
+	if lastAssistantVerdict != "" {
+		DefaultLogger("classifier: parsed result from assistant message: %s", lastAssistantVerdict)
+		return lastAssistantVerdict, true, lastAssistantResponse
+	}
+
+	return "", false, lastAssistantResponse
+}
+
 // ParseResponse parses the LLM response into a state
 func ParseResponse(response string) string {
 	if result, ok := parseVerdictFromResponse(response); ok {
@@ -164,13 +278,13 @@ func SetLogger(fn LogFunc) {
 }
 
 // Classify uses the default classifier backend (Claude SDK).
-// Returns "waiting_input" or "idle"
+// Returns "waiting_input", "idle", or "unknown".
 func Classify(text string, timeout time.Duration) (string, error) {
 	return ClassifyWithClaude(text, timeout)
 }
 
 // ClassifyWithClaude uses Claude SDK (Haiku) to classify text.
-// Returns "waiting_input" or "idle".
+// Returns "waiting_input", "idle", or "unknown".
 func ClassifyWithClaude(text string, timeout time.Duration) (string, error) {
 	if text == "" {
 		DefaultLogger("classifier: empty text, returning idle")
@@ -194,50 +308,33 @@ func ClassifyWithClaude(text string, timeout time.Duration) (string, error) {
 		prompt,
 		types.WithModel(model),
 		types.WithOutputFormat(classifierOutputFormat),
-		types.WithMaxTurns(1),
+		types.WithMaxTurns(2),
 	)
 	if err != nil {
 		DefaultLogger("classifier: claude SDK error: %v", err)
-		return "waiting_input", fmt.Errorf("claude sdk: %w", err)
+		return "unknown", fmt.Errorf("claude sdk: %w", err)
 	}
 
-	var lastAssistantResponse string
-	for _, msg := range messages {
-		switch typed := msg.(type) {
-		case *types.AssistantMessage:
-			lastAssistantResponse = typed.Text()
-		case *types.ResultMessage:
-			if result, ok := parseVerdictFromValue(typed.StructuredOutput); ok {
-				DefaultLogger("classifier: parsed result from structured output: %s", result)
-				return result, nil
-			}
-			if typed.Result != nil {
-				if result, ok := parseVerdictFromResponse(*typed.Result); ok {
-					DefaultLogger("classifier: parsed result from result payload: %s", result)
-					return result, nil
-				}
-			}
-		}
+	result, ok, lastAssistantResponse := classifyClaudeMessages(messages)
+	if ok {
+		return result, nil
 	}
 
 	if lastAssistantResponse != "" {
 		DefaultLogger("classifier: claude SDK response (%d chars): %q", len(lastAssistantResponse), lastAssistantResponse)
-		result, ok := parseVerdictFromResponse(lastAssistantResponse)
-		if !ok {
-			DefaultLogger("classifier: response missing explicit WAITING/DONE verdict, defaulting to waiting_input")
-			return "waiting_input", nil
-		}
-		DefaultLogger("classifier: parsed result: %s", result)
-		return result, nil
+		DefaultLogger("classifier: response missing explicit WAITING/DONE verdict, returning unknown")
+		logClaudeMessageDump(messages)
+		return "unknown", nil
 	}
 
 	// No usable response found
 	DefaultLogger("classifier: no assistant or structured result in claude response")
-	return "waiting_input", nil
+	logClaudeMessageDump(messages)
+	return "unknown", nil
 }
 
 // ClassifyWithCopilot uses Copilot CLI (Haiku model) to classify text.
-// Returns "waiting_input" or "idle".
+// Returns "waiting_input", "idle", or "unknown".
 func ClassifyWithCopilot(text string, timeout time.Duration) (string, error) {
 	if text == "" {
 		DefaultLogger("classifier: empty text, returning idle")
@@ -287,7 +384,7 @@ func ClassifyWithCopilot(text string, timeout time.Duration) (string, error) {
 	outputText := strings.TrimSpace(string(output))
 	if ctx.Err() == context.DeadlineExceeded {
 		DefaultLogger("classifier: timeout reached while calling copilot")
-		return "waiting_input", fmt.Errorf("copilot timeout: %w", ctx.Err())
+		return "unknown", fmt.Errorf("copilot timeout: %w", ctx.Err())
 	}
 	if err != nil {
 		if outputText != "" {
@@ -295,19 +392,19 @@ func ClassifyWithCopilot(text string, timeout time.Duration) (string, error) {
 		} else {
 			DefaultLogger("classifier: copilot CLI error: %v", err)
 		}
-		return "waiting_input", fmt.Errorf("copilot cli: %w", err)
+		return "unknown", fmt.Errorf("copilot cli: %w", err)
 	}
 	if outputText == "" {
 		DefaultLogger("classifier: copilot CLI returned empty response")
-		return "waiting_input", nil
+		return "unknown", nil
 	}
 
 	DefaultLogger("classifier: copilot CLI response (%d chars): %q", len(outputText), outputText)
 
 	result, ok := parseVerdictFromResponse(outputText)
 	if !ok {
-		DefaultLogger("classifier: copilot response missing explicit WAITING/DONE verdict, defaulting to waiting_input")
-		return "waiting_input", nil
+		DefaultLogger("classifier: copilot response missing explicit WAITING/DONE verdict, returning unknown")
+		return "unknown", nil
 	}
 	DefaultLogger("classifier: parsed result: %s", result)
 	return result, nil

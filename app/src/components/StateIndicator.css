@@ -25,28 +25,26 @@
   height: 10px;
 }
 
-/* Unknown state */
-.state-indicator--unknown {
-  background: transparent;
-  border: 1px solid #6b7280;
-  color: #6b7280;
-  font-weight: 600;
+/* Session states */
+.state-indicator--session.state-indicator--launching {
+  width: auto;
+  height: auto;
+  border-radius: 0;
   line-height: 1;
 }
 
-.state-indicator--sm.state-indicator--unknown {
-  font-size: 8px;
+.state-indicator--sm.state-indicator--launching {
+  font-size: 11px;
 }
 
-.state-indicator--md.state-indicator--unknown {
-  font-size: 10px;
+.state-indicator--md.state-indicator--launching {
+  font-size: 13px;
 }
 
-.state-indicator--lg.state-indicator--unknown {
-  font-size: 12px;
+.state-indicator--lg.state-indicator--launching {
+  font-size: 15px;
 }
 
-/* Session states */
 .state-indicator--session.state-indicator--waiting-input {
   background-color: #f59e0b; /* amber/orange */
 }
@@ -62,6 +60,10 @@
 .state-indicator--session.state-indicator--pending-approval {
   background-color: #eab308; /* yellow-500 */
   animation: flash-pending 1s ease-in-out infinite;
+}
+
+.state-indicator--session.state-indicator--unknown {
+  background-color: #a855f7; /* purple */
 }
 
 @keyframes flash-pending {

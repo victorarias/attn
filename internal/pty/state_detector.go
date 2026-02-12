@@ -168,6 +168,15 @@ func isPendingApproval(text string) bool {
 	if strings.Contains(lower, "would you like to run the following command") {
 		return true
 	}
+	if strings.Contains(lower, "do you want to run this command") {
+		return true
+	}
+	if strings.Contains(lower, "allow directory access") {
+		return true
+	}
+	if strings.Contains(lower, "do you want to add these directories to the allowed list") {
+		return true
+	}
 
 	hasKeyword := strings.Contains(lower, "approve") ||
 		strings.Contains(lower, "approval") ||
@@ -187,15 +196,25 @@ func isPendingApproval(text string) bool {
 		strings.Contains(lower, "yes/no") ||
 		strings.Contains(lower, "press y") ||
 		strings.Contains(lower, "type y") ||
-		strings.Contains(lower, "press enter to confirm")
+		strings.Contains(lower, "press enter to confirm") ||
+		strings.Contains(lower, "confirm with number keys") ||
+		strings.Contains(lower, "cancel with esc") ||
+		strings.Contains(lower, "esc to cancel") ||
+		strings.Contains(lower, "enter to select")
 
 	hasReason := strings.Contains(lower, "reason:")
 	hasOption := strings.Contains(lower, "yes, proceed") ||
+		strings.Contains(lower, "yes, and approve") ||
 		strings.Contains(lower, "don't ask again") ||
 		strings.Contains(lower, "dont ask again") ||
 		strings.Contains(lower, "no, and tell")
+	hasBinaryChoices := strings.Contains(lower, "1. yes") &&
+		(strings.Contains(lower, "2. no") || strings.Contains(lower, "2. no (esc)"))
+	hasEnumeratedChoices := strings.Contains(lower, "1. yes") &&
+		strings.Contains(lower, "2.") &&
+		strings.Contains(lower, "3. no")
 
-	return (hasKeyword && hasPrompt) || (hasReason && hasOption)
+	return (hasKeyword && (hasPrompt || hasOption || hasEnumeratedChoices || hasBinaryChoices)) || (hasReason && hasOption)
 }
 
 func isPromptLine(line string) bool {

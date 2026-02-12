@@ -32,7 +32,9 @@ test-frontend:
 
 test-e2e:
 	@# Ensure stale Vite test server is not running
-	@if command -v fuser >/dev/null 2>&1; then \
+	@if [ "$(UNAME_S)" = "Darwin" ] && command -v lsof >/dev/null 2>&1; then \
+		lsof -ti tcp:1421 | xargs -r kill 2>/dev/null || true; \
+	elif command -v fuser >/dev/null 2>&1; then \
 		fuser -k 1421/tcp 2>/dev/null || true; \
 	elif command -v lsof >/dev/null 2>&1; then \
 		lsof -ti tcp:1421 | xargs -r kill 2>/dev/null || true; \
@@ -58,11 +60,18 @@ install: build
 	else \
 		echo "Skipping macOS quarantine removal and codesign on $(UNAME_S)"; \
 	fi
-	@# Kill running daemon and restart with new code
+	@# Kill running daemon and restart with new local code.
 	-pkill -f "$(BINARY_NAME) daemon" 2>/dev/null || true
 	@sleep 0.2
 	@nohup $(INSTALL_DIR)/$(BINARY_NAME) daemon >/dev/null 2>&1 &
-	@echo "Installed $(BINARY_NAME) to $(INSTALL_DIR) (daemon restarted)"
+	@sleep 0.2
+	@pid=$$(pgrep -f -x "$(INSTALL_DIR)/$(BINARY_NAME) daemon" | head -n 1); \
+	if [ -n "$$pid" ]; then \
+		echo "Installed $(BINARY_NAME) to $(INSTALL_DIR) (daemon restarted: $$pid)"; \
+	else \
+		echo "Installed $(BINARY_NAME) to $(INSTALL_DIR) (daemon restart failed)"; \
+		exit 1; \
+	fi
 
 clean:
 	rm -f $(BINARY_NAME)

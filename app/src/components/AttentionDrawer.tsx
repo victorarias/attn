@@ -4,6 +4,7 @@ import { usePRsNeedingAttention } from '../hooks/usePRsNeedingAttention';
 import { PRActions } from './PRActions';
 import { StateIndicator } from './StateIndicator';
 import { getRepoName } from '../utils/repo';
+import type { UISessionState } from '../types/sessionState';
 import './AttentionDrawer.css';
 
 interface AttentionDrawerProps {
@@ -12,7 +13,7 @@ interface AttentionDrawerProps {
   waitingSessions: Array<{
     id: string;
     label: string;
-    state: 'working' | 'waiting_input' | 'idle' | 'pending_approval';
+    state: UISessionState;
   }>;
   prs: DaemonPR[];
   onSelectSession: (id: string) => void;
@@ -54,7 +55,7 @@ export function AttentionDrawer({
                   data-state={s.state}
                   onClick={() => onSelectSession(s.id)}
                 >
-                  <StateIndicator state={s.state} size="sm" kind="session" />
+                  <StateIndicator state={s.state} size="sm" kind="session" seed={s.id} />
                   <span className="item-name">{s.label}</span>
                 </div>
               );

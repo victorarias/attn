@@ -219,7 +219,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const session: Session = {
       id,
       label,
-      state: 'working',
+      state: 'launching',
       terminal: null,
       cwd,
       agent: resolvedAgent,
@@ -556,7 +556,7 @@ if (import.meta.env.DEV) {
     }));
   };
 
-  window.__TEST_UPDATE_SESSION_STATE = (id: string, state: 'working' | 'waiting_input' | 'idle' | 'pending_approval') => {
+  window.__TEST_UPDATE_SESSION_STATE = (id: string, state: UISessionState) => {
     useSessionStore.setState((s) => ({
       sessions: s.sessions.map((session) =>
         session.id === id ? { ...session, state } : session
