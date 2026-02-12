@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"time"
 )
 
 // contentBlock represents a single content block in the message
@@ -62,6 +63,23 @@ func isUserEntry(line []byte) bool {
 	return false
 }
 
+func extractLineTimestamp(line []byte) time.Time {
+	var entry struct {
+		Timestamp string `json:"timestamp"`
+	}
+	if err := json.Unmarshal(line, &entry); err != nil {
+		return time.Time{}
+	}
+	if strings.TrimSpace(entry.Timestamp) == "" {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
+}
+
 // ExtractLastAssistantMessage reads a JSONL transcript and returns
 // the last N characters of the last assistant message.
 func ExtractLastAssistantMessage(path string, maxChars int) (string, error) {
@@ -104,6 +122,14 @@ func ExtractLastAssistantMessage(path string, maxChars int) (string, error) {
 // This prevents returning a stale prior-turn assistant message when a new turn
 // has started but the assistant response has not been flushed yet.
 func ExtractLastAssistantMessageAfterLastUser(path string, maxChars int) (string, error) {
+	return ExtractLastAssistantMessageAfterLastUserSince(path, maxChars, time.Time{})
+}
+
+// ExtractLastAssistantMessageAfterLastUserSince reads a JSONL transcript and returns
+// the last assistant message only if it appears after the latest user message.
+// If minAssistantTimestamp is non-zero, assistant messages older than that are
+// ignored (treated as stale).
+func ExtractLastAssistantMessageAfterLastUserSince(path string, maxChars int, minAssistantTimestamp time.Time) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -114,6 +140,7 @@ func ExtractLastAssistantMessageAfterLastUser(path string, maxChars int) (string
 		lastAssistantContent string
 		lastAssistantSeq     int
 		lastUserSeq          int
+		lastAssistantTS      time.Time
 		seq                  int
 	)
 
@@ -133,6 +160,7 @@ func ExtractLastAssistantMessageAfterLastUser(path string, maxChars int) (string
 		if content := ExtractAssistantContent(line); content != "" {
 			lastAssistantContent = content
 			lastAssistantSeq = seq
+			lastAssistantTS = extractLineTimestamp(line)
 		}
 	}
 
@@ -142,6 +170,9 @@ func ExtractLastAssistantMessageAfterLastUser(path string, maxChars int) (string
 
 	// Latest user has no subsequent assistant yet.
 	if lastUserSeq > 0 && lastAssistantSeq <= lastUserSeq {
+		return "", nil
+	}
+	if !minAssistantTimestamp.IsZero() && !lastAssistantTS.IsZero() && lastAssistantTS.Before(minAssistantTimestamp) {
 		return "", nil
 	}
 

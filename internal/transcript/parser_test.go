@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestExtractLastAssistantMessage(t *testing.T) {
@@ -320,5 +321,42 @@ func TestExtractLastAssistantMessageAfterLastUser_Copilot_StaleAssistantIgnored(
 	}
 	if result != "" {
 		t.Fatalf("expected empty result, got %q", result)
+	}
+}
+
+func TestExtractLastAssistantMessageAfterLastUserSince_Claude_StaleByTimestampIgnored(t *testing.T) {
+	content := `{"type":"user","timestamp":"2026-02-11T23:57:15.222Z","message":{"role":"user","content":"hhello!"}}
+{"type":"assistant","timestamp":"2026-02-11T23:57:18.631Z","message":{"role":"assistant","content":[{"type":"text","text":"Hey! How can I help you today?"}]}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	minTS := time.Date(2026, 2, 11, 23, 57, 30, 0, time.UTC)
+	result, err := ExtractLastAssistantMessageAfterLastUserSince(path, 500, minTS)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "" {
+		t.Fatalf("expected empty result for stale assistant, got %q", result)
+	}
+}
+
+func TestExtractLastAssistantMessageAfterLastUserSince_Claude_FreshAssistantReturned(t *testing.T) {
+	content := `{"type":"user","timestamp":"2026-02-11T23:57:35.472Z","message":{"role":"user","content":"i don tknow"}}
+{"type":"assistant","timestamp":"2026-02-11T23:57:38.427Z","message":{"role":"assistant","content":[{"type":"text","text":"No worries! Whenever something comes up, I'm here."}]}}
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+	os.WriteFile(path, []byte(content), 0644)
+
+	minTS := time.Date(2026, 2, 11, 23, 57, 30, 0, time.UTC)
+	result, err := ExtractLastAssistantMessageAfterLastUserSince(path, 500, minTS)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := "No worries! Whenever something comes up, I'm here."
+	if result != expected {
+		t.Fatalf("got %q, want %q", result, expected)
 	}
 }

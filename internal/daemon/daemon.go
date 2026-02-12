@@ -38,6 +38,7 @@ type repoCache struct {
 const (
 	claudeTranscriptRetryWindow   = 2 * time.Second
 	claudeTranscriptRetryInterval = 100 * time.Millisecond
+	claudeTranscriptFreshnessSkew = 5 * time.Second
 )
 
 // ReviewerFactory creates a reviewer for testing
@@ -868,7 +869,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 
 	// Parse transcript for last assistant message
 	d.logf("classifySessionState: parsing transcript for session %s", sessionID)
-	lastMessage, err := d.extractLastAssistantMessage(session, resolvedTranscriptPath, 500)
+	lastMessage, err := d.extractLastAssistantMessage(session, resolvedTranscriptPath, 500, classificationStartTime)
 	if err != nil {
 		d.logf("classifySessionState: transcript parse error for %s: %v", sessionID, err)
 		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateUnknown, classificationStartTime)
@@ -932,14 +933,19 @@ func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, tran
 	return path
 }
 
-func (d *Daemon) extractLastAssistantMessage(session *protocol.Session, transcriptPath string, maxChars int) (string, error) {
+func (d *Daemon) extractLastAssistantMessage(session *protocol.Session, transcriptPath string, maxChars int, classificationStart time.Time) (string, error) {
 	if session == nil || session.Agent != protocol.SessionAgentClaude {
 		return transcript.ExtractLastAssistantMessage(transcriptPath, maxChars)
 	}
 
 	deadline := time.Now().Add(claudeTranscriptRetryWindow)
+	minAssistantTimestamp := classificationStart.Add(-claudeTranscriptFreshnessSkew)
 	for {
-		lastMessage, err := transcript.ExtractLastAssistantMessageAfterLastUser(transcriptPath, maxChars)
+		lastMessage, err := transcript.ExtractLastAssistantMessageAfterLastUserSince(
+			transcriptPath,
+			maxChars,
+			minAssistantTimestamp,
+		)
 		if err == nil && strings.TrimSpace(lastMessage) != "" {
 			return lastMessage, nil
 		}
