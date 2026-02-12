@@ -41,6 +41,8 @@ const (
 	claudeTranscriptFreshnessSkew = 5 * time.Second
 )
 
+var errNoNewAssistantTurn = errors.New("no new assistant turn")
+
 // ReviewerFactory creates a reviewer for testing
 type ReviewerFactory func(*store.Store) Reviewer
 
@@ -109,6 +111,8 @@ type Daemon struct {
 	ptyManager      *pty.Manager
 	watchersMu      sync.Mutex
 	transcriptWatch map[string]*transcriptWatcher
+	classifiedMu    sync.Mutex
+	classifiedTurn  map[string]string
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -197,6 +201,7 @@ func New(socketPath string) *Daemon {
 		warnings:        startupWarnings,
 		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, logger.Infof),
 		transcriptWatch: make(map[string]*transcriptWatcher),
+		classifiedTurn:  make(map[string]string),
 	}
 }
 
@@ -214,6 +219,7 @@ func NewForTesting(socketPath string) *Daemon {
 		repoCaches:      make(map[string]*repoCache),
 		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, nil),
 		transcriptWatch: make(map[string]*transcriptWatcher),
+		classifiedTurn:  make(map[string]string),
 	}
 }
 
@@ -235,6 +241,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		repoCaches:      make(map[string]*repoCache),
 		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, nil),
 		transcriptWatch: make(map[string]*transcriptWatcher),
+		classifiedTurn:  make(map[string]string),
 	}
 }
 
@@ -791,6 +798,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 
 	d.terminateSession(msg.ID, syscall.SIGTERM)
 	d.store.Remove(msg.ID)
+	d.clearClassifiedTurn(msg.ID)
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
@@ -869,8 +877,12 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 
 	// Parse transcript for last assistant message
 	d.logf("classifySessionState: parsing transcript for session %s", sessionID)
-	lastMessage, err := d.extractLastAssistantMessage(session, resolvedTranscriptPath, 500, classificationStartTime)
+	lastMessage, assistantTurnID, err := d.extractLastAssistantMessage(session, resolvedTranscriptPath, 500, classificationStartTime)
 	if err != nil {
+		if errors.Is(err, errNoNewAssistantTurn) {
+			d.logf("classifySessionState: no new assistant turn for session %s, skipping classification", sessionID)
+			return
+		}
 		d.logf("classifySessionState: transcript parse error for %s: %v", sessionID, err)
 		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateUnknown, classificationStartTime)
 		return
@@ -910,6 +922,9 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	}
 
 	d.logf("classifySessionState: session %s classified as %s", sessionID, state)
+	if session.Agent == protocol.SessionAgentClaude && strings.TrimSpace(assistantTurnID) != "" {
+		d.setClassifiedTurnID(sessionID, assistantTurnID)
+	}
 	d.updateAndBroadcastStateWithTimestamp(sessionID, state, classificationStartTime)
 }
 
@@ -933,27 +948,63 @@ func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, tran
 	return path
 }
 
-func (d *Daemon) extractLastAssistantMessage(session *protocol.Session, transcriptPath string, maxChars int, classificationStart time.Time) (string, error) {
+func (d *Daemon) extractLastAssistantMessage(session *protocol.Session, transcriptPath string, maxChars int, classificationStart time.Time) (string, string, error) {
 	if session == nil || session.Agent != protocol.SessionAgentClaude {
-		return transcript.ExtractLastAssistantMessage(transcriptPath, maxChars)
+		lastMessage, err := transcript.ExtractLastAssistantMessage(transcriptPath, maxChars)
+		return lastMessage, "", err
 	}
 
 	deadline := time.Now().Add(claudeTranscriptRetryWindow)
 	minAssistantTimestamp := classificationStart.Add(-claudeTranscriptFreshnessSkew)
+	lastClassifiedTurnID := d.classifiedTurnID(session.ID)
 	for {
-		lastMessage, err := transcript.ExtractLastAssistantMessageAfterLastUserSince(
+		turn, err := transcript.ExtractLastAssistantTurnAfterLastUserSince(
 			transcriptPath,
 			maxChars,
 			minAssistantTimestamp,
 		)
-		if err == nil && strings.TrimSpace(lastMessage) != "" {
-			return lastMessage, nil
+		if err == nil && strings.TrimSpace(turn.Content) != "" {
+			if strings.TrimSpace(turn.UUID) != "" && turn.UUID == lastClassifiedTurnID {
+				err = errNoNewAssistantTurn
+			} else {
+				return turn.Content, turn.UUID, nil
+			}
 		}
 		if !time.Now().Before(deadline) {
-			return lastMessage, err
+			if err == nil {
+				err = errNoNewAssistantTurn
+			}
+			return "", "", err
 		}
 		time.Sleep(claudeTranscriptRetryInterval)
 	}
+}
+
+func (d *Daemon) classifiedTurnID(sessionID string) string {
+	d.classifiedMu.Lock()
+	defer d.classifiedMu.Unlock()
+	if d.classifiedTurn == nil {
+		return ""
+	}
+	return d.classifiedTurn[sessionID]
+}
+
+func (d *Daemon) setClassifiedTurnID(sessionID, turnID string) {
+	d.classifiedMu.Lock()
+	defer d.classifiedMu.Unlock()
+	if d.classifiedTurn == nil {
+		d.classifiedTurn = make(map[string]string)
+	}
+	d.classifiedTurn[sessionID] = turnID
+}
+
+func (d *Daemon) clearClassifiedTurn(sessionID string) {
+	d.classifiedMu.Lock()
+	defer d.classifiedMu.Unlock()
+	if d.classifiedTurn == nil {
+		return
+	}
+	delete(d.classifiedTurn, sessionID)
 }
 
 func (d *Daemon) updateAndBroadcastState(sessionID, state string) {

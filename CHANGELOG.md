@@ -26,6 +26,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Unknown Classification Handling**: Added explicit `unknown` session state (purple) for transcript/classifier uncertainty or errors; removed implicit fallback to `waiting_input`.
 - **Claude Stop-Time Transcript Race**: Claude classification now ignores stale assistant messages that occur before the latest user turn, preventing off-by-one misclassification when the newest assistant response has not flushed to transcript yet.
 - **Claude Stop-Time Freshness Guard**: Claude classification now also enforces assistant-message recency relative to the current stop event, so a previous turn cannot be reused when the latest turn has not fully flushed to transcript.
+- **Claude Turn-Scoped Classification Idempotency**: Stop-time classification now tracks and de-duplicates by Claude assistant turn UUID, preventing repeated LLM classification on the same assistant message when hooks fire faster than transcript flush.
 
 ## [2026-02-10]
 

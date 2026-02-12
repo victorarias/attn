@@ -18,6 +18,7 @@ type contentBlock struct {
 // Claude Code uses content as an array of content blocks, not a string
 type transcriptEntry struct {
 	Type    string `json:"type"`
+	UUID    string `json:"uuid"`
 	Message struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"` // Can be string or array
@@ -80,6 +81,22 @@ func extractLineTimestamp(line []byte) time.Time {
 	return ts
 }
 
+func extractLineUUID(line []byte) string {
+	var entry struct {
+		UUID string `json:"uuid"`
+	}
+	if err := json.Unmarshal(line, &entry); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(entry.UUID)
+}
+
+type AssistantTurn struct {
+	Content   string
+	Timestamp time.Time
+	UUID      string
+}
+
 // ExtractLastAssistantMessage reads a JSONL transcript and returns
 // the last N characters of the last assistant message.
 func ExtractLastAssistantMessage(path string, maxChars int) (string, error) {
@@ -130,9 +147,19 @@ func ExtractLastAssistantMessageAfterLastUser(path string, maxChars int) (string
 // If minAssistantTimestamp is non-zero, assistant messages older than that are
 // ignored (treated as stale).
 func ExtractLastAssistantMessageAfterLastUserSince(path string, maxChars int, minAssistantTimestamp time.Time) (string, error) {
-	file, err := os.Open(path)
+	turn, err := ExtractLastAssistantTurnAfterLastUserSince(path, maxChars, minAssistantTimestamp)
 	if err != nil {
 		return "", err
+	}
+	return turn.Content, nil
+}
+
+// ExtractLastAssistantTurnAfterLastUserSince reads a JSONL transcript and returns
+// metadata for the last assistant message after the latest user message.
+func ExtractLastAssistantTurnAfterLastUserSince(path string, maxChars int, minAssistantTimestamp time.Time) (AssistantTurn, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return AssistantTurn{}, err
 	}
 	defer file.Close()
 
@@ -141,6 +168,7 @@ func ExtractLastAssistantMessageAfterLastUserSince(path string, maxChars int, mi
 		lastAssistantSeq     int
 		lastUserSeq          int
 		lastAssistantTS      time.Time
+		lastAssistantUUID    string
 		seq                  int
 	)
 
@@ -161,25 +189,30 @@ func ExtractLastAssistantMessageAfterLastUserSince(path string, maxChars int, mi
 			lastAssistantContent = content
 			lastAssistantSeq = seq
 			lastAssistantTS = extractLineTimestamp(line)
+			lastAssistantUUID = extractLineUUID(line)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return "", err
+		return AssistantTurn{}, err
 	}
 
 	// Latest user has no subsequent assistant yet.
 	if lastUserSeq > 0 && lastAssistantSeq <= lastUserSeq {
-		return "", nil
+		return AssistantTurn{}, nil
 	}
 	if !minAssistantTimestamp.IsZero() && !lastAssistantTS.IsZero() && lastAssistantTS.Before(minAssistantTimestamp) {
-		return "", nil
+		return AssistantTurn{}, nil
 	}
 
 	if len(lastAssistantContent) > maxChars {
 		lastAssistantContent = lastAssistantContent[len(lastAssistantContent)-maxChars:]
 	}
-	return lastAssistantContent, nil
+	return AssistantTurn{
+		Content:   lastAssistantContent,
+		Timestamp: lastAssistantTS,
+		UUID:      lastAssistantUUID,
+	}, nil
 }
 
 type codexEnvelope struct {

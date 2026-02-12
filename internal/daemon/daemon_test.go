@@ -21,6 +21,16 @@ import (
 	"nhooyr.io/websocket"
 )
 
+type countingClassifier struct {
+	state string
+	calls int
+}
+
+func (c *countingClassifier) Classify(text string, timeout time.Duration) (string, error) {
+	c.calls++
+	return c.state, nil
+}
+
 // waitForSocket waits for a unix socket to be ready for connections.
 // This is more reliable than fixed sleeps, especially in CI environments.
 func waitForSocket(t *testing.T, sockPath string, timeout time.Duration) {
@@ -1409,4 +1419,59 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 	//
 	// This test mainly ensures the todos count logic correctly skips completed todos
 	t.Log("Test passed: todos with [✓] prefix are counted as completed, allowing classification to proceed")
+}
+
+func TestClassifySessionState_ClaudeSkipsDuplicateAssistantTurn(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	mockClassifier := &countingClassifier{state: protocol.StateWaitingInput}
+	d.classifier = mockClassifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-1",
+		Agent:          protocol.SessionAgentClaude,
+		Label:          "test",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	content := fmt.Sprintf(
+		`{"type":"user","uuid":"u1","timestamp":"%s","message":{"role":"user","content":"hello"}}
+{"type":"assistant","uuid":"a1","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"Hello! What can I help you with today?"}]}}
+`,
+		now.Add(-1*time.Second).UTC().Format(time.RFC3339Nano),
+		now.UTC().Format(time.RFC3339Nano),
+	)
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	d.classifySessionState("sess-1", transcriptPath)
+	if mockClassifier.calls != 1 {
+		t.Fatalf("first classify calls=%d, want 1", mockClassifier.calls)
+	}
+
+	sess := d.store.Get("sess-1")
+	if sess == nil {
+		t.Fatal("session missing after first classify")
+	}
+	firstState := sess.State
+
+	d.classifySessionState("sess-1", transcriptPath)
+	if mockClassifier.calls != 1 {
+		t.Fatalf("second classify calls=%d, want still 1", mockClassifier.calls)
+	}
+
+	sess = d.store.Get("sess-1")
+	if sess == nil {
+		t.Fatal("session missing after second classify")
+	}
+	if sess.State != firstState {
+		t.Fatalf("state changed on duplicate turn: got %q want %q", sess.State, firstState)
+	}
 }
