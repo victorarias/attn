@@ -27,7 +27,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Claude Stop-Time Transcript Race**: Claude classification now ignores stale assistant messages that occur before the latest user turn, preventing off-by-one misclassification when the newest assistant response has not flushed to transcript yet.
 - **Claude Stop-Time Freshness Guard**: Claude classification now also enforces assistant-message recency relative to the current stop event, so a previous turn cannot be reused when the latest turn has not fully flushed to transcript.
 - **Claude Turn-Scoped Classification Idempotency**: Stop-time classification now tracks and de-duplicates by Claude assistant turn UUID, preventing repeated LLM classification on the same assistant message when hooks fire faster than transcript flush.
+- **Claude Concurrent Classification De-Duplication**: Added an in-flight Claude turn guard so stop-hook and transcript-watcher triggers cannot classify the same assistant turn concurrently, eliminating duplicate classifier calls for a single turn.
 - **Claude Transcript Watcher**: Claude sessions now use transcript-tail quiet-window monitoring (like Codex/Copilot) as a second classification trigger, so delayed transcript flushes still converge to the correct post-turn state even if stop hooks arrive early.
+- **Local Install Daemon Restart**: `make install` now always `pkill`s existing daemon processes, restarts `~/.local/bin/attn daemon`, and fails fast if the local daemon process is not detected.
 
 ## [2026-02-10]
 

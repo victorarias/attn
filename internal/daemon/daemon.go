@@ -113,6 +113,7 @@ type Daemon struct {
 	transcriptWatch map[string]*transcriptWatcher
 	classifiedMu    sync.Mutex
 	classifiedTurn  map[string]string
+	classifyingTurn map[string]string
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -202,6 +203,7 @@ func New(socketPath string) *Daemon {
 		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, logger.Infof),
 		transcriptWatch: make(map[string]*transcriptWatcher),
 		classifiedTurn:  make(map[string]string),
+		classifyingTurn: make(map[string]string),
 	}
 }
 
@@ -220,6 +222,7 @@ func NewForTesting(socketPath string) *Daemon {
 		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, nil),
 		transcriptWatch: make(map[string]*transcriptWatcher),
 		classifiedTurn:  make(map[string]string),
+		classifyingTurn: make(map[string]string),
 	}
 }
 
@@ -242,6 +245,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, nil),
 		transcriptWatch: make(map[string]*transcriptWatcher),
 		classifiedTurn:  make(map[string]string),
+		classifyingTurn: make(map[string]string),
 	}
 }
 
@@ -799,6 +803,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 	d.terminateSession(msg.ID, syscall.SIGTERM)
 	d.store.Remove(msg.ID)
 	d.clearClassifiedTurn(msg.ID)
+	d.clearClassifyingTurn(msg.ID)
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
@@ -887,6 +892,9 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateUnknown, classificationStartTime)
 		return
 	}
+	if session.Agent == protocol.SessionAgentClaude && strings.TrimSpace(assistantTurnID) != "" {
+		defer d.clearClassifyingTurn(sessionID)
+	}
 
 	lastMessage = strings.TrimSpace(lastMessage)
 	if lastMessage == "" {
@@ -967,6 +975,11 @@ func (d *Daemon) extractLastAssistantMessage(session *protocol.Session, transcri
 			if strings.TrimSpace(turn.UUID) != "" && turn.UUID == lastClassifiedTurnID {
 				err = errNoNewAssistantTurn
 			} else {
+				if session.Agent == protocol.SessionAgentClaude && strings.TrimSpace(turn.UUID) != "" {
+					if !d.beginClassifyingTurn(session.ID, turn.UUID) {
+						return "", "", errNoNewAssistantTurn
+					}
+				}
 				return turn.Content, turn.UUID, nil
 			}
 		}
@@ -1005,6 +1018,31 @@ func (d *Daemon) clearClassifiedTurn(sessionID string) {
 		return
 	}
 	delete(d.classifiedTurn, sessionID)
+}
+
+func (d *Daemon) beginClassifyingTurn(sessionID, turnID string) bool {
+	d.classifiedMu.Lock()
+	defer d.classifiedMu.Unlock()
+	if d.classifyingTurn == nil {
+		d.classifyingTurn = make(map[string]string)
+	}
+	if d.classifiedTurn != nil && d.classifiedTurn[sessionID] == turnID {
+		return false
+	}
+	if d.classifyingTurn[sessionID] == turnID {
+		return false
+	}
+	d.classifyingTurn[sessionID] = turnID
+	return true
+}
+
+func (d *Daemon) clearClassifyingTurn(sessionID string) {
+	d.classifiedMu.Lock()
+	defer d.classifiedMu.Unlock()
+	if d.classifyingTurn == nil {
+		return
+	}
+	delete(d.classifyingTurn, sessionID)
 }
 
 func (d *Daemon) updateAndBroadcastState(sessionID, state string) {

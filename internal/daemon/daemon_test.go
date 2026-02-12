@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +30,40 @@ type countingClassifier struct {
 func (c *countingClassifier) Classify(text string, timeout time.Duration) (string, error) {
 	c.calls++
 	return c.state, nil
+}
+
+type blockingClassifier struct {
+	state   string
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+}
+
+func newBlockingClassifier(state string) *blockingClassifier {
+	return &blockingClassifier{
+		state:   state,
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+}
+
+func (c *blockingClassifier) Classify(text string, timeout time.Duration) (string, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	select {
+	case c.started <- struct{}{}:
+	default:
+	}
+	<-c.release
+	return c.state, nil
+}
+
+func (c *blockingClassifier) CallCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
 }
 
 // waitForSocket waits for a unix socket to be ready for connections.
@@ -1473,5 +1508,75 @@ func TestClassifySessionState_ClaudeSkipsDuplicateAssistantTurn(t *testing.T) {
 	}
 	if sess.State != firstState {
 		t.Fatalf("state changed on duplicate turn: got %q want %q", sess.State, firstState)
+	}
+}
+
+func TestClassifySessionState_ClaudeConcurrentDuplicateTurnRunsOnce(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	mockClassifier := newBlockingClassifier(protocol.StateWaitingInput)
+	d.classifier = mockClassifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-2",
+		Agent:          protocol.SessionAgentClaude,
+		Label:          "test",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	content := fmt.Sprintf(
+		`{"type":"user","uuid":"u2","timestamp":"%s","message":{"role":"user","content":"hello"}}
+{"type":"assistant","uuid":"a2","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"Hello! What can I help you with today?"}]}}
+`,
+		now.Add(-1*time.Second).UTC().Format(time.RFC3339Nano),
+		now.UTC().Format(time.RFC3339Nano),
+	)
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	firstDone := make(chan struct{})
+	go func() {
+		d.classifySessionState("sess-2", transcriptPath)
+		close(firstDone)
+	}()
+
+	select {
+	case <-mockClassifier.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("classifier did not start for first classification")
+	}
+
+	secondDone := make(chan struct{})
+	go func() {
+		d.classifySessionState("sess-2", transcriptPath)
+		close(secondDone)
+	}()
+
+	select {
+	case <-secondDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second classification did not return promptly")
+	}
+
+	if got := mockClassifier.CallCount(); got != 1 {
+		t.Fatalf("classifier calls=%d, want 1 while duplicate turn in flight", got)
+	}
+
+	close(mockClassifier.release)
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first classification did not complete")
+	}
+
+	if got := mockClassifier.CallCount(); got != 1 {
+		t.Fatalf("classifier calls=%d, want 1", got)
 	}
 }

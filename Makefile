@@ -58,11 +58,18 @@ install: build
 	else \
 		echo "Skipping macOS quarantine removal and codesign on $(UNAME_S)"; \
 	fi
-	@# Kill running daemon and restart with new code
+	@# Kill running daemon and restart with new local code.
 	-pkill -f "$(BINARY_NAME) daemon" 2>/dev/null || true
 	@sleep 0.2
 	@nohup $(INSTALL_DIR)/$(BINARY_NAME) daemon >/dev/null 2>&1 &
-	@echo "Installed $(BINARY_NAME) to $(INSTALL_DIR) (daemon restarted)"
+	@sleep 0.2
+	@pid=$$(pgrep -f "^$(INSTALL_DIR)/$(BINARY_NAME) daemon$$" | head -n 1); \
+	if [ -n "$$pid" ]; then \
+		echo "Installed $(BINARY_NAME) to $(INSTALL_DIR) (daemon restarted: $$pid)"; \
+	else \
+		echo "Installed $(BINARY_NAME) to $(INSTALL_DIR) (daemon restart failed)"; \
+		exit 1; \
+	fi
 
 clean:
 	rm -f $(BINARY_NAME)
