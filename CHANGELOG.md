@@ -30,6 +30,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Claude Concurrent Classification De-Duplication**: Added an in-flight Claude turn guard so stop-hook and transcript-watcher triggers cannot classify the same assistant turn concurrently, eliminating duplicate classifier calls for a single turn.
 - **Claude Transcript Watcher**: Claude sessions now use transcript-tail quiet-window monitoring (like Codex/Copilot) as a second classification trigger, so delayed transcript flushes still converge to the correct post-turn state even if stop hooks arrive early.
 - **Local Install Daemon Restart**: `make install` now always `pkill`s existing daemon processes, restarts `~/.local/bin/attn daemon`, and fails fast if the local daemon process is not detected.
+- **E2E Port Cleanup on macOS**: `make test-e2e` now prefers `lsof` on Darwin when clearing stale Vite port `1421`, avoiding noisy `fuser` usage output from incompatible flags.
 
 ## [2026-02-10]
 

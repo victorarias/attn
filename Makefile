@@ -32,7 +32,9 @@ test-frontend:
 
 test-e2e:
 	@# Ensure stale Vite test server is not running
-	@if command -v fuser >/dev/null 2>&1; then \
+	@if [ "$(UNAME_S)" = "Darwin" ] && command -v lsof >/dev/null 2>&1; then \
+		lsof -ti tcp:1421 | xargs -r kill 2>/dev/null || true; \
+	elif command -v fuser >/dev/null 2>&1; then \
 		fuser -k 1421/tcp 2>/dev/null || true; \
 	elif command -v lsof >/dev/null 2>&1; then \
 		lsof -ti tcp:1421 | xargs -r kill 2>/dev/null || true; \
@@ -63,7 +65,7 @@ install: build
 	@sleep 0.2
 	@nohup $(INSTALL_DIR)/$(BINARY_NAME) daemon >/dev/null 2>&1 &
 	@sleep 0.2
-	@pid=$$(pgrep -f "^$(INSTALL_DIR)/$(BINARY_NAME) daemon$$" | head -n 1); \
+	@pid=$$(pgrep -f -x "$(INSTALL_DIR)/$(BINARY_NAME) daemon" | head -n 1); \
 	if [ -n "$$pid" ]; then \
 		echo "Installed $(BINARY_NAME) to $(INSTALL_DIR) (daemon restarted: $$pid)"; \
 	else \
