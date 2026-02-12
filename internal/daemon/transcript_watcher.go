@@ -17,6 +17,7 @@ const (
 	assistantDedupWindow   = 2 * time.Second
 	toolStartGraceWindow   = 1200 * time.Millisecond
 	copilotBootstrapBytes  = 512 * 1024
+	claudeBootstrapBytes   = 256 * 1024
 )
 
 type copilotPendingTool struct {
@@ -84,7 +85,7 @@ func isDuplicateAssistantEvent(lastContent string, lastAt time.Time, content str
 }
 
 func isTranscriptWatchedAgent(agent protocol.SessionAgent) bool {
-	return agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot
+	return agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot || agent == protocol.SessionAgentClaude
 }
 
 func (d *Daemon) startTranscriptWatcher(sessionID string, agent protocol.SessionAgent, cwd string, startedAt time.Time) {
@@ -182,6 +183,8 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 
 		if transcriptPath == "" {
 			switch w.agent {
+			case protocol.SessionAgentClaude:
+				transcriptPath = transcript.FindClaudeTranscript(w.sessionID)
 			case protocol.SessionAgentCodex:
 				transcriptPath = transcript.FindCodexTranscript(w.cwd, w.startedAt)
 			case protocol.SessionAgentCopilot:
@@ -207,6 +210,13 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 			if w.agent == protocol.SessionAgentCopilot {
 				if info.Size() > copilotBootstrapBytes {
 					lastOffset = info.Size() - copilotBootstrapBytes
+				} else {
+					lastOffset = 0
+				}
+			}
+			if w.agent == protocol.SessionAgentClaude {
+				if info.Size() > claudeBootstrapBytes {
+					lastOffset = info.Size() - claudeBootstrapBytes
 				} else {
 					lastOffset = 0
 				}
@@ -301,7 +311,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				if w.agent == protocol.SessionAgentCopilot {
 					copilotTurnOpen = true
 				}
-				if isDuplicateAssistantEvent(lastAssistant, lastAssistantAt, content, now) {
+				if w.agent != protocol.SessionAgentClaude && isDuplicateAssistantEvent(lastAssistant, lastAssistantAt, content, now) {
 					continue
 				}
 				assistantSeq++

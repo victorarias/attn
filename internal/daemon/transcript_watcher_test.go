@@ -187,3 +187,15 @@ func TestExtractEventType(t *testing.T) {
 		t.Fatalf("extractEventType(non-json) = %q, want empty", got)
 	}
 }
+
+func TestIsTranscriptWatchedAgent(t *testing.T) {
+	if !isTranscriptWatchedAgent(protocol.SessionAgentClaude) {
+		t.Fatal("claude should be transcript-watched")
+	}
+	if !isTranscriptWatchedAgent(protocol.SessionAgentCodex) {
+		t.Fatal("codex should be transcript-watched")
+	}
+	if !isTranscriptWatchedAgent(protocol.SessionAgentCopilot) {
+		t.Fatal("copilot should be transcript-watched")
+	}
+}
