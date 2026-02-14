@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/github/mockserver"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 	"nhooyr.io/websocket"
 )
@@ -66,6 +69,15 @@ func (c *blockingClassifier) CallCount() int {
 	return c.calls
 }
 
+func TestMain(m *testing.M) {
+	// Keep daemon package tests on embedded PTY by default to avoid spawning
+	// large numbers of worker subprocesses. Tests that need worker behavior
+	// explicitly override these with t.Setenv.
+	_ = os.Setenv("ATTN_PTY_BACKEND", "embedded")
+	_ = os.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "1")
+	os.Exit(m.Run())
+}
+
 // waitForSocket waits for a unix socket to be ready for connections.
 // This is more reliable than fixed sleeps, especially in CI environments.
 func waitForSocket(t *testing.T, sockPath string, timeout time.Duration) {
@@ -82,6 +94,22 @@ func waitForSocket(t *testing.T, sockPath string, timeout time.Duration) {
 	t.Fatalf("socket %s not ready after %v", sockPath, timeout)
 }
 
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	// Unix socket paths are length-limited (notably on macOS). The default
+	// `t.TempDir()` path can be too long, so keep the base dir short.
+	base := "/tmp"
+	if _, err := os.Stat(base); err != nil {
+		base = ""
+	}
+	dir, err := os.MkdirTemp(base, "attn-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 func TestDaemon_RegisterAndQuery(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19900")
 
@@ -92,8 +120,7 @@ func TestDaemon_RegisterAndQuery(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	// Wait for daemon to start
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
@@ -126,7 +153,7 @@ func TestDaemon_StateUpdate(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
@@ -159,7 +186,7 @@ func TestDaemon_Unregister(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
@@ -182,7 +209,7 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
@@ -221,7 +248,7 @@ func TestDaemon_SocketCleanup(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	// Should still work (stale socket removed)
 	c := client.New(sockPath)
@@ -233,6 +260,7 @@ func TestDaemon_SocketCleanup(t *testing.T) {
 
 func TestDaemon_PrunesSessionsWithoutLivePTYOnStart(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19924")
+	t.Setenv("ATTN_PTY_BACKEND", "embedded")
 	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-prune-%d.sock", time.Now().UnixNano()))
 
 	d := NewForTesting(sockPath)
@@ -280,6 +308,859 @@ func TestDaemon_PrunesSessionsWithoutLivePTYOnStart(t *testing.T) {
 	if warnings[0].Code != "stale_sessions_pruned" {
 		t.Fatalf("warning code = %q, want stale_sessions_pruned", warnings[0].Code)
 	}
+}
+
+func TestDaemon_Start_SelectsWorkerBackendWhenRequested(t *testing.T) {
+	t.Setenv("ATTN_PTY_BACKEND", "worker")
+	t.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "1")
+	t.Setenv("ATTN_WS_PORT", "19926")
+
+	sockPath := filepath.Join(shortTempDir(t), "worker-select.sock")
+	d := NewForTesting(sockPath)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- d.Start()
+	}()
+	if !d.waitStarted(3 * time.Second) {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("daemon start error: %v", err)
+			}
+			t.Fatal("daemon exited unexpectedly during startup")
+		default:
+			t.Fatal("daemon did not signal startup")
+		}
+	}
+	defer d.Stop()
+
+	waitForSocket(t, sockPath, 3*time.Second)
+
+	if d.daemonInstanceID == "" {
+		t.Fatal("daemon_instance_id should be initialized before backend selection")
+	}
+	if _, ok := d.ptyBackend.(*ptybackend.WorkerBackend); !ok {
+		t.Fatalf("expected worker backend, got %T", d.ptyBackend)
+	}
+}
+
+func TestDaemon_Start_WorkerProbeFailureFallsBackToEmbedded(t *testing.T) {
+	t.Setenv("ATTN_PTY_BACKEND", "worker")
+	t.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "0")
+	t.Setenv("ATTN_PTY_WORKER_BINARY", filepath.Join(t.TempDir(), "missing-attn-binary"))
+	t.Setenv("ATTN_WS_PORT", "19936")
+
+	sockPath := filepath.Join(shortTempDir(t), "worker-probe-fallback.sock")
+	d := NewForTesting(sockPath)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- d.Start()
+	}()
+	if !d.waitStarted(3 * time.Second) {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("daemon start error: %v", err)
+			}
+			t.Fatal("daemon exited unexpectedly during startup")
+		default:
+			t.Fatal("daemon did not signal startup")
+		}
+	}
+	defer d.Stop()
+
+	if _, ok := d.ptyBackend.(*ptybackend.EmbeddedBackend); !ok {
+		t.Fatalf("expected embedded backend after probe failure, got %T", d.ptyBackend)
+	}
+	hasFallbackWarning := false
+	for _, w := range d.getWarnings() {
+		if w.Code == warnPTYBackendFallback {
+			hasFallbackWarning = true
+			break
+		}
+	}
+	if !hasFallbackWarning {
+		t.Fatalf("expected %q warning after worker probe failure", warnPTYBackendFallback)
+	}
+}
+
+func TestDaemon_Start_SelectsEmbeddedBackendWhenRequested(t *testing.T) {
+	t.Setenv("ATTN_PTY_BACKEND", "embedded")
+	t.Setenv("ATTN_WS_PORT", "19927")
+
+	sockPath := filepath.Join(shortTempDir(t), "embedded-select.sock")
+	d := NewForTesting(sockPath)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- d.Start()
+	}()
+	if !d.waitStarted(3 * time.Second) {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("daemon start error: %v", err)
+			}
+			t.Fatal("daemon exited unexpectedly during startup")
+		default:
+			t.Fatal("daemon did not signal startup")
+		}
+	}
+	defer d.Stop()
+
+	waitForSocket(t, sockPath, 3*time.Second)
+
+	if _, ok := d.ptyBackend.(*ptybackend.EmbeddedBackend); !ok {
+		t.Fatalf("expected embedded backend, got %T", d.ptyBackend)
+	}
+}
+
+type fakeWorkerReconcileBackend struct {
+	liveIDs []string
+	info    map[string]ptybackend.SessionInfo
+}
+
+func (b *fakeWorkerReconcileBackend) Spawn(context.Context, ptybackend.SpawnOptions) error {
+	return nil
+}
+func (b *fakeWorkerReconcileBackend) Attach(context.Context, string, string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
+	return ptybackend.AttachInfo{}, nil, nil
+}
+func (b *fakeWorkerReconcileBackend) Input(context.Context, string, []byte) error { return nil }
+func (b *fakeWorkerReconcileBackend) Resize(context.Context, string, uint16, uint16) error {
+	return nil
+}
+func (b *fakeWorkerReconcileBackend) Kill(context.Context, string, syscall.Signal) error { return nil }
+func (b *fakeWorkerReconcileBackend) Remove(context.Context, string) error               { return nil }
+func (b *fakeWorkerReconcileBackend) SessionIDs(context.Context) []string {
+	return append([]string(nil), b.liveIDs...)
+}
+func (b *fakeWorkerReconcileBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {
+	return ptybackend.RecoveryReport{Recovered: len(b.liveIDs)}, nil
+}
+func (b *fakeWorkerReconcileBackend) Shutdown(context.Context) error { return nil }
+func (b *fakeWorkerReconcileBackend) SessionInfo(_ context.Context, sessionID string) (ptybackend.SessionInfo, error) {
+	info, ok := b.info[sessionID]
+	if !ok {
+		return ptybackend.SessionInfo{}, fmt.Errorf("missing info for %s", sessionID)
+	}
+	return info, nil
+}
+
+type fakeDeferredRecoveryBackend struct {
+	fakeWorkerReconcileBackend
+	mu          sync.Mutex
+	reports     []ptybackend.RecoveryReport
+	likelyAlive map[string]bool
+	likelyErr   map[string]error
+}
+
+func (b *fakeDeferredRecoveryBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.reports) == 0 {
+		return ptybackend.RecoveryReport{}, nil
+	}
+	report := b.reports[0]
+	b.reports = b.reports[1:]
+	return report, nil
+}
+
+func (b *fakeDeferredRecoveryBackend) SessionLikelyAlive(_ context.Context, sessionID string) (bool, error) {
+	if err, ok := b.likelyErr[sessionID]; ok {
+		return false, err
+	}
+	return b.likelyAlive[sessionID], nil
+}
+
+type fakeClearSessionsBackend struct {
+	mu               sync.Mutex
+	sessionIDs       []string
+	recoveredIDs     []string
+	recoverCalled    bool
+	killed           []string
+	removed          []string
+	killErrBySession map[string]error
+}
+
+func (b *fakeClearSessionsBackend) Spawn(context.Context, ptybackend.SpawnOptions) error { return nil }
+func (b *fakeClearSessionsBackend) Attach(context.Context, string, string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
+	return ptybackend.AttachInfo{}, nil, nil
+}
+func (b *fakeClearSessionsBackend) Input(context.Context, string, []byte) error { return nil }
+func (b *fakeClearSessionsBackend) Resize(context.Context, string, uint16, uint16) error {
+	return nil
+}
+func (b *fakeClearSessionsBackend) Kill(_ context.Context, sessionID string, _ syscall.Signal) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.killed = append(b.killed, sessionID)
+	if b.killErrBySession != nil {
+		return b.killErrBySession[sessionID]
+	}
+	return nil
+}
+func (b *fakeClearSessionsBackend) Remove(_ context.Context, sessionID string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.removed = append(b.removed, sessionID)
+	return nil
+}
+func (b *fakeClearSessionsBackend) SessionIDs(context.Context) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.sessionIDs...)
+}
+func (b *fakeClearSessionsBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.recoverCalled = true
+	b.sessionIDs = append(append([]string(nil), b.sessionIDs...), b.recoveredIDs...)
+	return ptybackend.RecoveryReport{Recovered: len(b.recoveredIDs)}, nil
+}
+func (b *fakeClearSessionsBackend) Shutdown(context.Context) error { return nil }
+
+func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "live-existing",
+		Label:          "existing",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/existing",
+		State:          protocol.SessionStateWaitingInput,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	d.store.Add(&protocol.Session{
+		ID:             "missing-running",
+		Label:          "missing",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/missing",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	d.store.Add(&protocol.Session{
+		ID:             "missing-idle",
+		Label:          "missing-idle",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/missing-idle",
+		State:          protocol.SessionStateIdle,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	d.store.Add(&protocol.Session{
+		ID:             "live-exited",
+		Label:          "live-exited",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/live-exited",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	d.ptyBackend = &fakeWorkerReconcileBackend{
+		liveIDs: []string{"live-existing", "live-new", "live-new-exited", "live-exited", "live-shell"},
+		info: map[string]ptybackend.SessionInfo{
+			"live-existing": {
+				SessionID: "live-existing",
+				Agent:     string(protocol.SessionAgentCodex),
+				CWD:       "/tmp/existing",
+				Running:   true,
+				State:     protocol.StateWaitingInput,
+			},
+			"live-new": {
+				SessionID: "live-new",
+				Agent:     string(protocol.SessionAgentCopilot),
+				CWD:       "/tmp/new-repo",
+				Running:   true,
+				State:     protocol.StateWorking,
+			},
+			"live-new-exited": {
+				SessionID: "live-new-exited",
+				Agent:     string(protocol.SessionAgentCodex),
+				CWD:       "/tmp/new-exited",
+				Running:   false,
+				State:     protocol.StateWorking,
+			},
+			"live-exited": {
+				SessionID: "live-exited",
+				Agent:     string(protocol.SessionAgentCodex),
+				CWD:       "/tmp/live-exited",
+				Running:   false,
+				State:     protocol.StateWorking,
+			},
+			"live-shell": {
+				SessionID: "live-shell",
+				Agent:     protocol.AgentShellValue,
+				CWD:       "/tmp/utility-shell",
+				Running:   true,
+				State:     protocol.StateWorking,
+			},
+		},
+	}
+
+	report := d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
+	if report.Created != 2 {
+		t.Fatalf("created = %d, want 2", report.Created)
+	}
+	if report.StateUpdated != 3 {
+		t.Fatalf("state_updated = %d, want 3", report.StateUpdated)
+	}
+	if report.MarkedIdle != 1 {
+		t.Fatalf("marked_idle = %d, want 1", report.MarkedIdle)
+	}
+	if report.SkippedShell != 1 {
+		t.Fatalf("skipped_shell = %d, want 1", report.SkippedShell)
+	}
+
+	existing := d.store.Get("live-existing")
+	if existing == nil {
+		t.Fatal("live-existing session missing after reconcile")
+	}
+	if existing.State != protocol.SessionStateWorking {
+		t.Fatalf("live-existing state = %s, want working for codex recovery policy", existing.State)
+	}
+
+	liveNew := d.store.Get("live-new")
+	if liveNew == nil {
+		t.Fatal("live-new session was not created from worker metadata")
+	}
+	if liveNew.Label != "new-repo" {
+		t.Fatalf("live-new label = %q, want %q", liveNew.Label, "new-repo")
+	}
+	if liveNew.Agent != protocol.SessionAgentCopilot {
+		t.Fatalf("live-new agent = %s, want %s", liveNew.Agent, protocol.SessionAgentCopilot)
+	}
+	if liveNew.State != protocol.SessionStateWorking {
+		t.Fatalf("live-new state = %s, want %s", liveNew.State, protocol.SessionStateWorking)
+	}
+	liveNewExited := d.store.Get("live-new-exited")
+	if liveNewExited == nil {
+		t.Fatal("live-new-exited session was not created from worker metadata")
+	}
+	if liveNewExited.State != protocol.SessionStateIdle {
+		t.Fatalf("live-new-exited state = %s, want %s", liveNewExited.State, protocol.SessionStateIdle)
+	}
+	if liveShell := d.store.Get("live-shell"); liveShell != nil {
+		t.Fatalf("live-shell session should not be created from worker metadata, got %#v", liveShell)
+	}
+
+	liveExited := d.store.Get("live-exited")
+	if liveExited == nil {
+		t.Fatal("live-exited session missing after reconcile")
+	}
+	if liveExited.State != protocol.SessionStateIdle {
+		t.Fatalf("live-exited state = %s, want %s", liveExited.State, protocol.SessionStateIdle)
+	}
+
+	missingRunning := d.store.Get("missing-running")
+	if missingRunning == nil {
+		t.Fatal("missing-running session missing after reconcile")
+	}
+	if missingRunning.State != protocol.SessionStateIdle {
+		t.Fatalf("missing-running state = %s, want idle", missingRunning.State)
+	}
+
+	missingIdle := d.store.Get("missing-idle")
+	if missingIdle == nil {
+		t.Fatal("missing-idle session missing after reconcile")
+	}
+	if missingIdle.State != protocol.SessionStateIdle {
+		t.Fatalf("missing-idle state = %s, want idle", missingIdle.State)
+	}
+}
+
+func TestDaemon_RunDeferredWorkerReconciliationForcesIdleDemotion(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "stale-running",
+		Label:          "stale-running",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/stale-running",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	d.ptyBackend = &fakeDeferredRecoveryBackend{
+		fakeWorkerReconcileBackend: fakeWorkerReconcileBackend{
+			liveIDs: nil,
+			info:    map[string]ptybackend.SessionInfo{},
+		},
+		reports: []ptybackend.RecoveryReport{
+			{Missing: 1},
+		},
+	}
+
+	d.runDeferredWorkerReconciliation(1, 0, time.Now())
+
+	session := d.store.Get("stale-running")
+	if session == nil {
+		t.Fatal("stale-running session missing")
+	}
+	if session.State != protocol.SessionStateIdle {
+		t.Fatalf("state = %q, want %q", session.State, protocol.SessionStateIdle)
+	}
+
+	warnings := d.getWarnings()
+	hasPartial := false
+	for _, w := range warnings {
+		if w.Code == "worker_recovery_partial" && strings.Contains(w.Message, "Forced stale-session reconciliation") {
+			hasPartial = true
+			break
+		}
+	}
+	if !hasPartial {
+		t.Fatalf("expected forced reconciliation warning, got %+v", warnings)
+	}
+}
+
+func TestDaemon_RunDeferredWorkerReconciliation_BroadcastsSessionsUpdatedOnChange(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "stale-running",
+		Label:          "stale-running",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/stale-running",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	d.ptyBackend = &fakeDeferredRecoveryBackend{
+		fakeWorkerReconcileBackend: fakeWorkerReconcileBackend{
+			liveIDs: nil,
+			info:    map[string]ptybackend.SessionInfo{},
+		},
+		reports: []ptybackend.RecoveryReport{
+			{Missing: 1},
+		},
+	}
+
+	broadcasts := 0
+	d.wsHub.broadcastListener = func(event *protocol.WebSocketEvent) {
+		if event != nil && event.Event == protocol.EventSessionsUpdated {
+			broadcasts++
+		}
+	}
+
+	d.runDeferredWorkerReconciliation(1, 0, time.Now())
+
+	if broadcasts == 0 {
+		t.Fatal("expected deferred reconciliation to broadcast sessions_updated after state changes")
+	}
+}
+
+func TestDaemon_ReconcileSessionsWithWorkerBackend_PreservesLikelyAliveSessions(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "stale-running",
+		Label:          "stale-running",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/stale-running",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	d.ptyBackend = &fakeDeferredRecoveryBackend{
+		fakeWorkerReconcileBackend: fakeWorkerReconcileBackend{
+			liveIDs: nil,
+			info:    map[string]ptybackend.SessionInfo{},
+		},
+		likelyAlive: map[string]bool{
+			"stale-running": true,
+		},
+	}
+
+	report := d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
+	if report.MarkedIdle != 0 {
+		t.Fatalf("marked_idle = %d, want 0", report.MarkedIdle)
+	}
+	if report.LikelyAlive != 1 {
+		t.Fatalf("likely_alive = %d, want 1", report.LikelyAlive)
+	}
+	session := d.store.Get("stale-running")
+	if session == nil {
+		t.Fatal("stale-running session missing")
+	}
+	if session.State != protocol.SessionStateWorking {
+		t.Fatalf("state = %q, want %q", session.State, protocol.SessionStateWorking)
+	}
+}
+
+func TestDaemon_ReconcileSessionsWithWorkerBackend_SkipsIdleDemotionOnLivenessProbeError(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "stale-running",
+		Label:          "stale-running",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/stale-running",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	d.ptyBackend = &fakeDeferredRecoveryBackend{
+		fakeWorkerReconcileBackend: fakeWorkerReconcileBackend{
+			liveIDs: nil,
+			info:    map[string]ptybackend.SessionInfo{},
+		},
+		likelyErr: map[string]error{
+			"stale-running": errors.New("probe timeout"),
+		},
+	}
+
+	report := d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
+	if report.MarkedIdle != 0 {
+		t.Fatalf("marked_idle = %d, want 0", report.MarkedIdle)
+	}
+	if report.LivenessUnknown != 1 {
+		t.Fatalf("liveness_unknown = %d, want 1", report.LivenessUnknown)
+	}
+	session := d.store.Get("stale-running")
+	if session == nil {
+		t.Fatal("stale-running session missing")
+	}
+	if session.State != protocol.SessionStateWorking {
+		t.Fatalf("state = %q, want %q", session.State, protocol.SessionStateWorking)
+	}
+}
+
+func TestDaemon_ReconcileSessionsWithWorkerBackend_SkipsIdleDemotionOnIncompleteRecovery(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "missing-running",
+		Label:          "missing",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/missing",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	d.ptyBackend = &fakeWorkerReconcileBackend{
+		liveIDs: nil,
+		info:    map[string]ptybackend.SessionInfo{},
+	}
+
+	report := d.reconcileSessionsWithWorkerBackend(context.Background(), false, time.Time{})
+	if report.MarkedIdle != 0 {
+		t.Fatalf("marked_idle = %d, want 0", report.MarkedIdle)
+	}
+	if report.SkippedIdle != 1 {
+		t.Fatalf("skipped_idle = %d, want 1", report.SkippedIdle)
+	}
+	session := d.store.Get("missing-running")
+	if session == nil {
+		t.Fatal("missing-running session missing after reconcile")
+	}
+	if session.State != protocol.SessionStateWorking {
+		t.Fatalf("missing-running state = %s, want working", session.State)
+	}
+}
+
+func TestDaemon_ReconcileSessionsWithWorkerBackend_SkipsRecentlyUpdatedSessions(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	cutoff := time.Now().Add(-time.Minute).Truncate(time.Second)
+	updatedAt := cutoff.Add(10 * time.Second)
+	timestamp := protocol.NewTimestamp(updatedAt).String()
+
+	d.store.Add(&protocol.Session{
+		ID:             "recent-running",
+		Label:          "recent",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/recent",
+		State:          protocol.SessionStateWorking,
+		StateSince:     timestamp,
+		StateUpdatedAt: timestamp,
+		LastSeen:       timestamp,
+	})
+
+	d.ptyBackend = &fakeWorkerReconcileBackend{
+		liveIDs: nil,
+		info:    map[string]ptybackend.SessionInfo{},
+	}
+
+	report := d.reconcileSessionsWithWorkerBackend(context.Background(), true, cutoff)
+	if report.MarkedIdle != 0 {
+		t.Fatalf("marked_idle = %d, want 0", report.MarkedIdle)
+	}
+	if report.SkippedRecent != 1 {
+		t.Fatalf("skipped_recent = %d, want 1", report.SkippedRecent)
+	}
+	session := d.store.Get("recent-running")
+	if session == nil {
+		t.Fatal("recent-running session missing after reconcile")
+	}
+	if session.State != protocol.SessionStateWorking {
+		t.Fatalf("recent-running state = %s, want working", session.State)
+	}
+}
+
+func TestSessionStateFromRecoveredInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		info ptybackend.SessionInfo
+		want protocol.SessionState
+	}{
+		{
+			name: "not running is idle",
+			info: ptybackend.SessionInfo{Running: false, State: protocol.StateWorking},
+			want: protocol.SessionStateIdle,
+		},
+		{
+			name: "waiting input",
+			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude), State: protocol.StateWaitingInput},
+			want: protocol.SessionStateWaitingInput,
+		},
+		{
+			name: "codex waiting input normalizes to working",
+			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentCodex), State: protocol.StateWaitingInput},
+			want: protocol.SessionStateWorking,
+		},
+		{
+			name: "pending approval",
+			info: ptybackend.SessionInfo{Running: true, State: protocol.StatePendingApproval},
+			want: protocol.SessionStatePendingApproval,
+		},
+		{
+			name: "explicit idle",
+			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude), State: protocol.StateIdle},
+			want: protocol.SessionStateIdle,
+		},
+		{
+			name: "copilot explicit idle normalizes to working",
+			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentCopilot), State: protocol.StateIdle},
+			want: protocol.SessionStateWorking,
+		},
+		{
+			name: "default working",
+			info: ptybackend.SessionInfo{Running: true, State: protocol.StateWorking},
+			want: protocol.SessionStateWorking,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sessionStateFromRecoveredInfo(tt.info)
+			if got != tt.want {
+				t.Fatalf("sessionStateFromRecoveredInfo() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+type fakeOutputStream struct {
+	mu         sync.Mutex
+	events     chan ptybackend.OutputEvent
+	closeCount int
+	once       sync.Once
+}
+
+func newFakeOutputStream() *fakeOutputStream {
+	return &fakeOutputStream{events: make(chan ptybackend.OutputEvent, 8)}
+}
+
+func (s *fakeOutputStream) Events() <-chan ptybackend.OutputEvent { return s.events }
+func (s *fakeOutputStream) Close() error {
+	s.once.Do(func() {
+		s.mu.Lock()
+		s.closeCount++
+		s.mu.Unlock()
+		close(s.events)
+	})
+	return nil
+}
+
+func (s *fakeOutputStream) ClosedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closeCount
+}
+
+type fakeAttachBackend struct {
+	mu      sync.Mutex
+	streams []*fakeOutputStream
+	failErr error
+}
+
+func (b *fakeAttachBackend) Spawn(context.Context, ptybackend.SpawnOptions) error { return nil }
+func (b *fakeAttachBackend) Attach(context.Context, string, string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
+	b.mu.Lock()
+	if b.failErr != nil {
+		err := b.failErr
+		b.mu.Unlock()
+		return ptybackend.AttachInfo{}, nil, err
+	}
+	b.mu.Unlock()
+
+	stream := newFakeOutputStream()
+	b.mu.Lock()
+	b.streams = append(b.streams, stream)
+	b.mu.Unlock()
+	return ptybackend.AttachInfo{Running: true}, stream, nil
+}
+func (b *fakeAttachBackend) Input(context.Context, string, []byte) error { return nil }
+func (b *fakeAttachBackend) Resize(context.Context, string, uint16, uint16) error {
+	return nil
+}
+func (b *fakeAttachBackend) Kill(context.Context, string, syscall.Signal) error { return nil }
+func (b *fakeAttachBackend) Remove(context.Context, string) error               { return nil }
+func (b *fakeAttachBackend) SessionIDs(context.Context) []string                { return nil }
+func (b *fakeAttachBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {
+	return ptybackend.RecoveryReport{}, nil
+}
+func (b *fakeAttachBackend) Shutdown(context.Context) error { return nil }
+
+func (b *fakeAttachBackend) Streams() []*fakeOutputStream {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]*fakeOutputStream, len(b.streams))
+	copy(out, b.streams)
+	return out
+}
+
+func (b *fakeAttachBackend) FailNextAttach(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.failErr = err
+}
+
+func TestDaemon_ForwardPTYStreamEvents_ClosesStreamOnSendFailure(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := &wsClient{
+		send:            make(chan outboundMessage, 1),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	// Fill send buffer so sendOutbound() fails.
+	client.send <- outboundMessage{kind: messageKindText, payload: []byte(`{\"event\":\"noop\"}`)}
+
+	stream := newFakeOutputStream()
+	client.attachedStreams["sess-1"] = stream
+
+	done := make(chan struct{})
+	go func() {
+		d.forwardPTYStreamEvents(client, "sess-1", stream)
+		close(done)
+	}()
+
+	stream.events <- ptybackend.OutputEvent{
+		Kind: ptybackend.OutputEventKindOutput,
+		Data: []byte("hello"),
+		Seq:  1,
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwardPTYStreamEvents did not exit after send failure")
+	}
+
+	if stream.ClosedCount() == 0 {
+		t.Fatal("stream should be closed after send failure")
+	}
+}
+
+func TestDaemon_HandleAttachSession_ReattachFailureKeepsExistingStream(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+	d.ptyBackend = backend
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 4),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{Cmd: protocol.CmdAttachSession, ID: "sess-1"})
+	firstMsg := <-client.send
+	var first protocol.AttachResultMessage
+	if err := json.Unmarshal(firstMsg.payload, &first); err != nil {
+		t.Fatalf("decode first attach result: %v", err)
+	}
+	if !first.Success {
+		t.Fatalf("first attach success = false, err=%q", protocol.Deref(first.Error))
+	}
+
+	streams := backend.Streams()
+	if len(streams) != 1 {
+		t.Fatalf("streams len = %d, want 1", len(streams))
+	}
+	firstStream := streams[0]
+	if got := firstStream.ClosedCount(); got != 0 {
+		t.Fatalf("first stream closed count = %d, want 0", got)
+	}
+
+	backend.FailNextAttach(errors.New("temporary attach failure"))
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{Cmd: protocol.CmdAttachSession, ID: "sess-1"})
+	secondMsg := <-client.send
+	var second protocol.AttachResultMessage
+	if err := json.Unmarshal(secondMsg.payload, &second); err != nil {
+		t.Fatalf("decode second attach result: %v", err)
+	}
+	if second.Success {
+		t.Fatal("second attach should fail")
+	}
+
+	client.attachMu.Lock()
+	current := client.attachedStreams["sess-1"]
+	client.attachMu.Unlock()
+	if current == nil {
+		t.Fatal("existing stream should remain attached after reattach failure")
+	}
+	if current != firstStream {
+		t.Fatal("attached stream changed after reattach failure")
+	}
+	if got := firstStream.ClosedCount(); got != 0 {
+		t.Fatalf("first stream closed count = %d, want 0 after failed reattach", got)
+	}
+}
+
+func TestDaemon_HandleAttachSession_ReattachClosesOldStream(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+	d.ptyBackend = backend
+	client := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
+
+	streams := backend.Streams()
+	if len(streams) != 2 {
+		t.Fatalf("attach streams = %d, want 2", len(streams))
+	}
+	if streams[0].ClosedCount() == 0 {
+		t.Fatal("first stream should be closed on reattach")
+	}
+
+	client.attachMu.Lock()
+	current, ok := client.attachedStreams["sess-1"]
+	client.attachMu.Unlock()
+	if !ok {
+		t.Fatal("expected current attached stream for sess-1")
+	}
+	if current != streams[1] {
+		t.Fatal("attached stream should be the most recent stream")
+	}
+
+	d.detachSession(client, "sess-1")
 }
 
 func TestDaemon_NewAddsWarningWhenPersistenceFallsBackToMemory(t *testing.T) {
@@ -345,13 +1226,24 @@ func TestDaemon_HandleClientMessage_ClearWarnings(t *testing.T) {
 	}
 }
 
+func TestDaemon_AddWarning_DedupesByCodeAndMessage(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.addWarning("worker_recovery_partial", "first")
+	d.addWarning("worker_recovery_partial", "second")
+	d.addWarning("worker_recovery_partial", "second")
+
+	warnings := d.getWarnings()
+	if len(warnings) != 2 {
+		t.Fatalf("warnings len = %d, want 2", len(warnings))
+	}
+}
+
 func TestDaemon_ClearWarningsNotReplayedInInitialState(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.addWarning("stale_sessions_pruned", "Removed 1 stale sessions from a previous daemon run because no live PTY was found.")
 
 	client := &wsClient{
-		send:             make(chan outboundMessage, 4),
-		attachedSessions: make(map[string]string),
+		send: make(chan outboundMessage, 4),
 	}
 
 	d.sendInitialState(client)
@@ -380,6 +1272,195 @@ func TestDaemon_ClearWarningsNotReplayedInInitialState(t *testing.T) {
 	}
 	if got := len(secondEvent.Warnings); got != 0 {
 		t.Fatalf("second initial_state warnings = %d, want 0", got)
+	}
+}
+
+func TestDaemon_InitialState_IncludesDaemonInstanceID(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.daemonInstanceID = "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.sendInitialState(client)
+	msg := <-client.send
+
+	var initial protocol.InitialStateMessage
+	if err := json.Unmarshal(msg.payload, &initial); err != nil {
+		t.Fatalf("decode initial_state: %v", err)
+	}
+	if protocol.Deref(initial.DaemonInstanceID) != d.daemonInstanceID {
+		t.Fatalf("daemon_instance_id = %q, want %q", protocol.Deref(initial.DaemonInstanceID), d.daemonInstanceID)
+	}
+}
+
+func TestDaemon_RecoveryBarrier_BlocksPTYCommands(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.setRecovering(true)
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleClientMessage(client, []byte(`{"cmd":"attach_session","id":"sess-1"}`))
+
+	msg := <-client.send
+	var event protocol.WebSocketEvent
+	if err := json.Unmarshal(msg.payload, &event); err != nil {
+		t.Fatalf("decode command_error: %v", err)
+	}
+	if event.Event != protocol.EventCommandError {
+		t.Fatalf("event = %q, want %q", event.Event, protocol.EventCommandError)
+	}
+	if protocol.Deref(event.Cmd) != protocol.CmdAttachSession {
+		t.Fatalf("cmd = %q, want %q", protocol.Deref(event.Cmd), protocol.CmdAttachSession)
+	}
+	if protocol.Deref(event.Error) != "daemon_recovering" {
+		t.Fatalf("error = %q, want %q", protocol.Deref(event.Error), "daemon_recovering")
+	}
+}
+
+func TestDaemon_RecoveryBarrier_BlocksClearSessions(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.setRecovering(true)
+
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "sess-1",
+		Label:          "sess-1",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/sess-1",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleClientMessage(client, []byte(`{"cmd":"clear_sessions"}`))
+
+	msg := <-client.send
+	var event protocol.WebSocketEvent
+	if err := json.Unmarshal(msg.payload, &event); err != nil {
+		t.Fatalf("decode command_error: %v", err)
+	}
+	if event.Event != protocol.EventCommandError {
+		t.Fatalf("event = %q, want %q", event.Event, protocol.EventCommandError)
+	}
+	if protocol.Deref(event.Cmd) != protocol.CmdClearSessions {
+		t.Fatalf("cmd = %q, want %q", protocol.Deref(event.Cmd), protocol.CmdClearSessions)
+	}
+	if protocol.Deref(event.Error) != "daemon_recovering" {
+		t.Fatalf("error = %q, want %q", protocol.Deref(event.Error), "daemon_recovering")
+	}
+	if got := len(d.store.List("")); got != 1 {
+		t.Fatalf("store sessions = %d, want 1 (clear should be blocked during recovery)", got)
+	}
+}
+
+func TestDaemon_ClearAllSessions_RecoversAndTerminatesKnownSessions(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "store-session",
+		Label:          "store-session",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/store-session",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	backend := &fakeClearSessionsBackend{
+		sessionIDs:   []string{"attached-session"},
+		recoveredIDs: []string{"registry-only-session"},
+	}
+	d.ptyBackend = backend
+
+	d.clearAllSessions()
+
+	if got := len(d.store.List("")); got != 0 {
+		t.Fatalf("store sessions = %d, want 0", got)
+	}
+
+	backend.mu.Lock()
+	recoverCalled := backend.recoverCalled
+	killed := append([]string(nil), backend.killed...)
+	removed := append([]string(nil), backend.removed...)
+	backend.mu.Unlock()
+
+	if !recoverCalled {
+		t.Fatal("expected clearAllSessions to call backend Recover()")
+	}
+	expectKilled := map[string]bool{
+		"store-session":         false,
+		"attached-session":      false,
+		"registry-only-session": false,
+	}
+	for _, id := range killed {
+		if _, ok := expectKilled[id]; ok {
+			expectKilled[id] = true
+		}
+	}
+	for id, seen := range expectKilled {
+		if !seen {
+			t.Fatalf("expected kill for %s, got kills=%v", id, killed)
+		}
+	}
+	expectRemoved := map[string]bool{
+		"store-session":         false,
+		"attached-session":      false,
+		"registry-only-session": false,
+	}
+	for _, id := range removed {
+		if _, ok := expectRemoved[id]; ok {
+			expectRemoved[id] = true
+		}
+	}
+	for id, seen := range expectRemoved {
+		if !seen {
+			t.Fatalf("expected remove for %s, got removes=%v", id, removed)
+		}
+	}
+}
+
+func TestDaemon_RecoveryBarrier_DefersInitialState(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.daemonInstanceID = "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	d.setRecovering(true)
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.scheduleInitialState(client)
+	select {
+	case <-client.send:
+		t.Fatal("initial_state was sent while daemon was recovering")
+	default:
+	}
+
+	d.setRecovering(false)
+	select {
+	case msg := <-client.send:
+		var initial protocol.InitialStateMessage
+		if err := json.Unmarshal(msg.payload, &initial); err != nil {
+			t.Fatalf("decode deferred initial_state: %v", err)
+		}
+		if initial.Event != protocol.EventInitialState {
+			t.Fatalf("event = %q, want %q", initial.Event, protocol.EventInitialState)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for deferred initial_state")
 	}
 }
 
@@ -433,6 +1514,9 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 	}
 	if health["protocol"] != protocol.ProtocolVersion {
 		t.Errorf("protocol = %v, want %s", health["protocol"], protocol.ProtocolVersion)
+	}
+	if daemonID, ok := health["daemon_instance_id"].(string); !ok || daemonID == "" {
+		t.Errorf("daemon_instance_id = %v, want non-empty string", health["daemon_instance_id"])
 	}
 	// sessions should be 1.0 (float64 from JSON)
 	if sessions, ok := health["sessions"].(float64); !ok || sessions != 1 {
@@ -493,6 +1577,9 @@ func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
 	if got := settings[SettingCopilotAvailable]; got != "false" {
 		t.Fatalf("settings[%s] = %v, want false", SettingCopilotAvailable, got)
 	}
+	if got := settings[SettingPTYBackendMode]; got != "unknown" {
+		t.Fatalf("settings[%s] = %v, want unknown", SettingPTYBackendMode, got)
+	}
 
 	tmp := t.TempDir()
 	custom := filepath.Join(tmp, "custom-codex")
@@ -511,6 +1598,30 @@ func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
 	}
 	if got := settings[SettingCopilotAvailable]; got != "false" {
 		t.Fatalf("settings[%s] = %v, want false", SettingCopilotAvailable, got)
+	}
+}
+
+func TestDaemon_SettingsIncludePTYBackendMode(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+
+	settings := d.settingsWithAgentAvailability()
+	if got := settings[SettingPTYBackendMode]; got != "embedded" {
+		t.Fatalf("settings[%s] = %v, want embedded", SettingPTYBackendMode, got)
+	}
+
+	workerBackend, err := ptybackend.NewWorker(ptybackend.WorkerBackendConfig{
+		DataRoot:         t.TempDir(),
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BinaryPath:       "/bin/true",
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+	d.ptyBackend = workerBackend
+
+	settings = d.settingsWithAgentAvailability()
+	if got := settings[SettingPTYBackendMode]; got != "worker" {
+		t.Fatalf("settings[%s] = %v, want worker", SettingPTYBackendMode, got)
 	}
 }
 
@@ -651,8 +1762,7 @@ func TestDaemon_InjectTestPR(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	// Wait for daemon to start
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 

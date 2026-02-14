@@ -409,11 +409,13 @@ export function useDaemonSocket({
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
   const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
+  const recoveryNoticeTimeoutRef = useRef<number | null>(null);
   const gitStatusSubscriptionRef = useRef<string | null>(null);
   const branchDiffInFlightRef = useRef<Map<string, Promise<BranchDiffFilesResult>>>(new Map());
   const attachedPtySessionsRef = useRef<Set<string>>(new Set());
   const ptySeqRef = useRef<Map<string, number>>(new Map());
   const pendingAttachOutputsRef = useRef<Map<string, Array<{ data: string; seq?: number }>>>(new Map());
+  const daemonInstanceIDRef = useRef<string>('');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
@@ -426,6 +428,33 @@ export function useDaemonSocket({
 
   const MAX_RECONNECTS_BEFORE_PAUSE = 8;
   const MAX_RECONNECT_DELAY_MS = 5000;
+  const RECOVERY_NOTICE = 'Daemon is recovering PTY sessions. Please retry in a moment.';
+
+  const showRecoveringNoticeForCommand = useCallback((cmd: string | undefined) => {
+    if (!cmd) return;
+    const needsNotice = new Set([
+      'spawn_session',
+      'attach_session',
+      'detach_session',
+      'pty_input',
+      'pty_resize',
+      'kill_session',
+      'clear_sessions',
+      'unregister',
+    ]);
+    if (!needsNotice.has(cmd)) {
+      return;
+    }
+
+    setConnectionError(RECOVERY_NOTICE);
+    if (recoveryNoticeTimeoutRef.current) {
+      clearTimeout(recoveryNoticeTimeoutRef.current);
+    }
+    recoveryNoticeTimeoutRef.current = window.setTimeout(() => {
+      setConnectionError((prev) => (prev === RECOVERY_NOTICE ? null : prev));
+      recoveryNoticeTimeoutRef.current = null;
+    }, 2000);
+  }, []);
 
   const rejectPendingByPredicate = useCallback((predicate: (key: string) => boolean, error: Error) => {
     for (const [key, pending] of pendingActionsRef.current.entries()) {
@@ -509,10 +538,6 @@ export function useDaemonSocket({
         circuitResetTimeoutRef.current = null;
       }
 
-      // Re-attach terminal streams after reconnect.
-      for (const sessionId of attachedPtySessionsRef.current) {
-        ws.send(JSON.stringify({ cmd: 'attach_session', id: sessionId }));
-      }
       if (gitStatusSubscriptionRef.current) {
         ws.send(JSON.stringify({ cmd: 'subscribe_git_status', directory: gitStatusSubscriptionRef.current }));
       }
@@ -524,6 +549,18 @@ export function useDaemonSocket({
 
         switch (data.event) {
           case 'initial_state':
+            if (
+              data.daemon_instance_id &&
+              daemonInstanceIDRef.current &&
+              data.daemon_instance_id !== daemonInstanceIDRef.current
+            ) {
+              // Endpoint identity changed (new daemon instance). Keep the
+              // attached session set so we can reattach after initial_state,
+              // but clear stream caches to force clean replay.
+              ptySeqRef.current.clear();
+              pendingAttachOutputsRef.current.clear();
+            }
+            daemonInstanceIDRef.current = data.daemon_instance_id || '';
             // Check protocol version on initial connection
             if (data.protocol_version && data.protocol_version !== PROTOCOL_VERSION) {
               console.error(`[Daemon] Protocol version mismatch: daemon=${data.protocol_version}, client=${PROTOCOL_VERSION}`);
@@ -575,6 +612,13 @@ export function useDaemonSocket({
               ws.send(JSON.stringify({ cmd: 'clear_warnings' }));
             }
             setHasReceivedInitialState(true);
+            if (ws.readyState === WebSocket.OPEN) {
+              // Re-attach PTY streams only after recovery barrier has lifted and
+              // initial_state has arrived.
+              for (const sessionId of attachedPtySessionsRef.current) {
+                ws.send(JSON.stringify({ cmd: 'attach_session', id: sessionId }));
+              }
+            }
             break;
 
           case 'spawn_result': {
@@ -1287,6 +1331,12 @@ export function useDaemonSocket({
             break;
 
           case 'command_error':
+            if (data.error === 'daemon_recovering') {
+              console.debug('[Daemon] Command deferred while daemon recovers:', data.cmd);
+              rejectPendingForCommand(data.cmd, 'Daemon is recovering. Please retry in a moment.');
+              showRecoveringNoticeForCommand(data.cmd);
+              break;
+            }
             console.error('[Daemon] Command error:', data.cmd, data.error);
             rejectPendingForCommand(data.cmd, data.error || `Command ${data.cmd || ''} failed`);
             break;
@@ -1330,7 +1380,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning]);
+  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand]);
 
   useEffect(() => {
     void connect();
@@ -1341,6 +1391,9 @@ export function useDaemonSocket({
       }
       if (circuitResetTimeoutRef.current) {
         clearTimeout(circuitResetTimeoutRef.current);
+      }
+      if (recoveryNoticeTimeoutRef.current) {
+        clearTimeout(recoveryNoticeTimeoutRef.current);
       }
       wsRef.current?.close();
     };

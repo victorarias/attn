@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -26,6 +25,7 @@ import (
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
+	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/transcript"
 )
@@ -35,10 +35,39 @@ type repoCache struct {
 	branches  []protocol.Branch
 }
 
+type workerReconcileReport struct {
+	Created         int
+	StateUpdated    int
+	MarkedIdle      int
+	SkippedIdle     int
+	SkippedRecent   int
+	SkippedShell    int
+	LikelyAlive     int
+	LivenessUnknown int
+	MissingMetadata int
+	Changed         bool
+}
+
 const (
 	claudeTranscriptRetryWindow   = 2 * time.Second
 	claudeTranscriptRetryInterval = 100 * time.Millisecond
 	claudeTranscriptFreshnessSkew = 5 * time.Second
+
+	startupRecoveryRetryMax       = 2
+	startupRecoveryRetryDelay     = 500 * time.Millisecond
+	deferredRecoveryMaxAttempts   = 3
+	deferredRecoveryRetryInterval = 10 * time.Second
+	deferredRecoveryRPCTimeout    = 5 * time.Second
+	workerStartupProbeTimeout     = 10 * time.Second
+
+	warnPersistenceDegraded       = "persistence_degraded"
+	warnWorkerRecoveryPartial     = "worker_recovery_partial"
+	warnStaleSessionsPruned       = "stale_sessions_pruned"
+	warnStaleSessionMissingWorker = "stale_session_missing_worker"
+	warnPTYBackendFallback        = "pty_backend_fallback"
+	warnPTYBackendUnsupported     = "pty_backend_unsupported"
+	warnGHNotInstalled            = "gh_not_installed"
+	warnGHVersionTooOld           = "gh_version_too_old"
 )
 
 var errNoNewAssistantTurn = errors.New("no new assistant turn")
@@ -92,28 +121,35 @@ type ReviewerToolUse struct {
 
 // Daemon manages Claude sessions
 type Daemon struct {
-	socketPath      string
-	pidPath         string
-	pidFile         *os.File // Held open with flock for exclusive access
-	store           *store.Store
-	listener        net.Listener
-	httpServer      *http.Server
-	wsHub           *wsHub
-	done            chan struct{}
-	logger          *logging.Logger
-	ghRegistry      *github.ClientRegistry
-	classifier      Classifier      // Optional, uses package-level classifier.Classify if nil
-	reviewerFactory ReviewerFactory // Optional, creates real reviewer if nil
-	repoCaches      map[string]*repoCache
-	repoCacheMu     sync.RWMutex
-	warnings        []protocol.DaemonWarning
-	warningsMu      sync.RWMutex
-	ptyManager      *pty.Manager
-	watchersMu      sync.Mutex
-	transcriptWatch map[string]*transcriptWatcher
-	classifiedMu    sync.Mutex
-	classifiedTurn  map[string]string
-	classifyingTurn map[string]string
+	socketPath       string
+	pidPath          string
+	pidFile          *os.File // Held open with flock for exclusive access
+	dataRoot         string
+	daemonInstanceID string
+	store            *store.Store
+	listener         net.Listener
+	httpServer       *http.Server
+	wsHub            *wsHub
+	done             chan struct{}
+	logger           *logging.Logger
+	ghRegistry       *github.ClientRegistry
+	classifier       Classifier      // Optional, uses package-level classifier.Classify if nil
+	reviewerFactory  ReviewerFactory // Optional, creates real reviewer if nil
+	repoCaches       map[string]*repoCache
+	repoCacheMu      sync.RWMutex
+	warnings         []protocol.DaemonWarning
+	warningsMu       sync.RWMutex
+	ptyBackend       ptybackend.Backend
+	watchersMu       sync.Mutex
+	transcriptWatch  map[string]*transcriptWatcher
+	classifiedMu     sync.Mutex
+	classifiedTurn   map[string]string
+	classifyingTurn  map[string]string
+	recoveryMu       sync.RWMutex
+	recovering       bool
+	pendingInitialWS map[*wsClient]struct{}
+	startedOnce      sync.Once
+	startedCh        chan struct{}
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -122,7 +158,7 @@ func (d *Daemon) addWarning(code, message string) {
 	defer d.warningsMu.Unlock()
 	// Avoid duplicates
 	for _, w := range d.warnings {
-		if w.Code == code {
+		if w.Code == code && w.Message == message {
 			return
 		}
 	}
@@ -150,6 +186,76 @@ func (d *Daemon) clearWarnings() {
 	d.warnings = nil
 }
 
+func (d *Daemon) setRecovering(value bool) {
+	var pending []*wsClient
+
+	d.recoveryMu.Lock()
+	d.recovering = value
+	if !value {
+		pending = make([]*wsClient, 0, len(d.pendingInitialWS))
+		for client := range d.pendingInitialWS {
+			pending = append(pending, client)
+		}
+		d.pendingInitialWS = make(map[*wsClient]struct{})
+	}
+	d.recoveryMu.Unlock()
+
+	if !value {
+		for _, client := range pending {
+			d.sendInitialState(client)
+		}
+	}
+}
+
+func (d *Daemon) isRecovering() bool {
+	d.recoveryMu.RLock()
+	defer d.recoveryMu.RUnlock()
+	return d.recovering
+}
+
+func (d *Daemon) scheduleInitialState(client *wsClient) {
+	sendNow := false
+
+	d.recoveryMu.Lock()
+	if d.recovering {
+		d.pendingInitialWS[client] = struct{}{}
+	} else {
+		sendNow = true
+	}
+	d.recoveryMu.Unlock()
+
+	if sendNow {
+		d.sendInitialState(client)
+	}
+}
+
+func (d *Daemon) dropPendingInitialState(client *wsClient) {
+	d.recoveryMu.Lock()
+	defer d.recoveryMu.Unlock()
+	delete(d.pendingInitialWS, client)
+}
+
+func (d *Daemon) signalStarted() {
+	d.startedOnce.Do(func() {
+		if d.startedCh == nil {
+			d.startedCh = make(chan struct{})
+		}
+		close(d.startedCh)
+	})
+}
+
+func (d *Daemon) waitStarted(timeout time.Duration) bool {
+	if d.startedCh == nil {
+		return false
+	}
+	select {
+	case <-d.startedCh:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 // New creates a new daemon
 func New(socketPath string) *Daemon {
 	logger, _ := logging.New(logging.DefaultLogPath())
@@ -171,7 +277,7 @@ func New(socketPath string) *Daemon {
 		logger.Infof("Failed to open DB at %s: %v (using in-memory)", dbPath, err)
 		sessionStore = store.New() // Fallback to in-memory
 		startupWarnings = append(startupWarnings, protocol.DaemonWarning{
-			Code: "persistence_degraded",
+			Code: warnPersistenceDegraded,
 			Message: fmt.Sprintf(
 				"Persistence degraded: unable to open durable state at %s. Running in-memory only; session state will not survive daemon restarts. See daemon log in %s for details.",
 				dbPath,
@@ -187,90 +293,188 @@ func New(socketPath string) *Daemon {
 		logger.Infof("Removed legacy state file: %s", legacyPath)
 	}
 
-	// Derive PID path from socket path directory
-	pidPath := filepath.Join(filepath.Dir(socketPath), "attn.pid")
+	// Derive paths from socket path directory.
+	dataRoot := filepath.Dir(socketPath)
+	pidPath := filepath.Join(dataRoot, "attn.pid")
+	manager := pty.NewManager(pty.DefaultScrollbackSize, logger.Infof)
 
 	return &Daemon{
-		socketPath:      socketPath,
-		pidPath:         pidPath,
-		store:           sessionStore,
-		wsHub:           newWSHub(),
-		done:            make(chan struct{}),
-		logger:          logger,
-		ghRegistry:      github.NewClientRegistry(),
-		repoCaches:      make(map[string]*repoCache),
-		warnings:        startupWarnings,
-		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, logger.Infof),
-		transcriptWatch: make(map[string]*transcriptWatcher),
-		classifiedTurn:  make(map[string]string),
-		classifyingTurn: make(map[string]string),
+		socketPath:       socketPath,
+		pidPath:          pidPath,
+		dataRoot:         dataRoot,
+		store:            sessionStore,
+		wsHub:            newWSHub(),
+		done:             make(chan struct{}),
+		logger:           logger,
+		ghRegistry:       github.NewClientRegistry(),
+		repoCaches:       make(map[string]*repoCache),
+		warnings:         startupWarnings,
+		ptyBackend:       ptybackend.NewEmbedded(manager),
+		transcriptWatch:  make(map[string]*transcriptWatcher),
+		pendingInitialWS: make(map[*wsClient]struct{}),
+		startedCh:        make(chan struct{}),
+		classifiedTurn:   make(map[string]string),
+		classifyingTurn:  make(map[string]string),
 	}
 }
 
 // NewForTesting creates a daemon with a non-persistent store for tests
 func NewForTesting(socketPath string) *Daemon {
-	pidPath := filepath.Join(filepath.Dir(socketPath), "attn.pid")
+	dataRoot := filepath.Dir(socketPath)
+	pidPath := filepath.Join(dataRoot, "attn.pid")
+	manager := pty.NewManager(pty.DefaultScrollbackSize, nil)
 	return &Daemon{
-		socketPath:      socketPath,
-		pidPath:         pidPath,
-		store:           store.New(),
-		wsHub:           newWSHub(),
-		done:            make(chan struct{}),
-		logger:          nil, // No logging in tests
-		ghRegistry:      github.NewClientRegistry(),
-		repoCaches:      make(map[string]*repoCache),
-		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, nil),
-		transcriptWatch: make(map[string]*transcriptWatcher),
-		classifiedTurn:  make(map[string]string),
-		classifyingTurn: make(map[string]string),
+		socketPath:       socketPath,
+		pidPath:          pidPath,
+		dataRoot:         dataRoot,
+		store:            store.New(),
+		wsHub:            newWSHub(),
+		done:             make(chan struct{}),
+		logger:           nil, // No logging in tests
+		ghRegistry:       github.NewClientRegistry(),
+		repoCaches:       make(map[string]*repoCache),
+		ptyBackend:       ptybackend.NewEmbedded(manager),
+		transcriptWatch:  make(map[string]*transcriptWatcher),
+		pendingInitialWS: make(map[*wsClient]struct{}),
+		startedCh:        make(chan struct{}),
+		classifiedTurn:   make(map[string]string),
+		classifyingTurn:  make(map[string]string),
 	}
 }
 
 // NewWithGitHubClient creates a daemon with a custom GitHub client for testing
 func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemon {
-	pidPath := filepath.Join(filepath.Dir(socketPath), "attn.pid")
+	dataRoot := filepath.Dir(socketPath)
+	pidPath := filepath.Join(dataRoot, "attn.pid")
 	registry := github.NewClientRegistry()
 	if client, ok := ghClient.(*github.Client); ok {
 		registry.Register(client.Host(), client)
 	}
+	manager := pty.NewManager(pty.DefaultScrollbackSize, nil)
 	return &Daemon{
-		socketPath:      socketPath,
-		pidPath:         pidPath,
-		store:           store.New(),
-		wsHub:           newWSHub(),
-		done:            make(chan struct{}),
-		logger:          nil,
-		ghRegistry:      registry,
-		repoCaches:      make(map[string]*repoCache),
-		ptyManager:      pty.NewManager(pty.DefaultScrollbackSize, nil),
-		transcriptWatch: make(map[string]*transcriptWatcher),
-		classifiedTurn:  make(map[string]string),
-		classifyingTurn: make(map[string]string),
+		socketPath:       socketPath,
+		pidPath:          pidPath,
+		dataRoot:         dataRoot,
+		store:            store.New(),
+		wsHub:            newWSHub(),
+		done:             make(chan struct{}),
+		logger:           nil,
+		ghRegistry:       registry,
+		repoCaches:       make(map[string]*repoCache),
+		ptyBackend:       ptybackend.NewEmbedded(manager),
+		transcriptWatch:  make(map[string]*transcriptWatcher),
+		pendingInitialWS: make(map[*wsClient]struct{}),
+		startedCh:        make(chan struct{}),
+		classifiedTurn:   make(map[string]string),
+		classifyingTurn:  make(map[string]string),
 	}
 }
 
 // Start starts the daemon
 func (d *Daemon) Start() error {
-	if d.ptyManager == nil {
-		d.ptyManager = pty.NewManager(pty.DefaultScrollbackSize, d.logf)
+	if d.dataRoot == "" {
+		d.dataRoot = filepath.Dir(d.socketPath)
+	}
+	if d.pendingInitialWS == nil {
+		d.pendingInitialWS = make(map[*wsClient]struct{})
+	}
+	if d.startedCh == nil {
+		d.startedCh = make(chan struct{})
 	}
 	if d.transcriptWatch == nil {
 		d.transcriptWatch = make(map[string]*transcriptWatcher)
 	}
-
-	removedSessions := d.pruneSessionsWithoutPTY()
-	if removedSessions > 0 {
-		d.logf("pruned %d stale sessions without live PTY on startup", removedSessions)
+	if d.classifiedTurn == nil {
+		d.classifiedTurn = make(map[string]string)
+	}
+	if d.classifyingTurn == nil {
+		d.classifyingTurn = make(map[string]string)
+	}
+	if d.ptyBackend == nil {
+		d.ptyBackend = ptybackend.NewEmbedded(pty.NewManager(pty.DefaultScrollbackSize, d.logf))
+	}
+	if d.daemonInstanceID == "" {
+		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
+		if err != nil {
+			return fmt.Errorf("ensure daemon instance id: %w", err)
+		}
+		d.daemonInstanceID = instanceID
+	}
+	selectedBackend := strings.TrimSpace(strings.ToLower(os.Getenv("ATTN_PTY_BACKEND")))
+	if selectedBackend == "" {
+		selectedBackend = "worker"
+	}
+	switch selectedBackend {
+	case "embedded":
+		// already initialized
+	case "worker":
+		workerBackend, err := ptybackend.NewWorker(ptybackend.WorkerBackendConfig{
+			DataRoot:         d.dataRoot,
+			DaemonInstanceID: d.daemonInstanceID,
+			BinaryPath:       strings.TrimSpace(os.Getenv("ATTN_PTY_WORKER_BINARY")),
+			Logf:             d.logf,
+		})
+		if err != nil {
+			d.logf("failed to initialize worker PTY backend: %v; falling back to embedded", err)
+			d.addWarning(
+				warnPTYBackendFallback,
+				fmt.Sprintf("Failed to initialize worker PTY backend (%v). Falling back to embedded.", err),
+			)
+		} else {
+			if shouldRunWorkerStartupProbe() {
+				probeCtx, cancelProbe := context.WithTimeout(context.Background(), workerStartupProbeTimeout)
+				probeErr := workerBackend.Probe(probeCtx)
+				cancelProbe()
+				if probeErr != nil {
+					d.logf("worker PTY backend startup probe failed: %v; falling back to embedded", probeErr)
+					d.addWarning(
+						warnPTYBackendFallback,
+						fmt.Sprintf("Worker PTY backend probe failed (%v). Falling back to embedded.", probeErr),
+					)
+				} else {
+					d.ptyBackend = workerBackend
+					d.logf("using PTY backend: worker")
+				}
+			} else {
+				d.ptyBackend = workerBackend
+				d.logf("using PTY backend: worker (startup probe disabled)")
+			}
+		}
+	default:
+		d.logf("unsupported PTY backend %q, falling back to embedded", selectedBackend)
 		d.addWarning(
-			"stale_sessions_pruned",
-			fmt.Sprintf("Removed %d stale sessions from a previous daemon run because no live PTY was found.", removedSessions),
+			warnPTYBackendUnsupported,
+			fmt.Sprintf("PTY backend %q is not available in this build. Falling back to embedded.", selectedBackend),
 		)
 	}
+
+	d.setRecovering(true)
+	startSucceeded := false
+	defer func() {
+		if !startSucceeded {
+			d.setRecovering(false)
+		}
+	}()
 
 	// Acquire PID lock (kills any existing daemon)
 	if err := d.acquirePIDLock(); err != nil {
 		return fmt.Errorf("acquire PID lock: %w", err)
 	}
+	defer func() {
+		if startSucceeded {
+			return
+		}
+		if d.httpServer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = d.httpServer.Shutdown(ctx)
+			cancel()
+		}
+		if d.listener != nil {
+			_ = d.listener.Close()
+			d.listener = nil
+		}
+		d.releasePIDLock()
+	}()
 
 	// Remove stale socket
 	os.Remove(d.socketPath)
@@ -287,12 +491,20 @@ func (d *Daemon) Start() error {
 	go d.wsHub.run()
 
 	// PTY exit events are emitted asynchronously from read loops.
-	d.ptyManager.SetExitHandler(d.handlePTYExit)
-	d.ptyManager.SetStateHandler(d.handlePTYState)
+	if hooks, ok := d.ptyBackend.(ptybackend.LifecycleHooks); ok {
+		hooks.SetExitHandler(d.handlePTYExit)
+		hooks.SetStateHandler(d.handlePTYState)
+	}
 
 	// Create HTTP server for WebSocket (must be created synchronously to avoid race with Stop())
 	d.initHTTPServer()
 	go d.runHTTPServer()
+
+	recoveryStartedAt := time.Now()
+	go func() {
+		d.performStartupPTYRecovery(recoveryStartedAt)
+		d.setRecovering(false)
+	}()
 
 	// Note: No background persistence needed - SQLite persists immediately
 
@@ -310,6 +522,9 @@ func (d *Daemon) Start() error {
 	// Start branch monitoring
 	go d.monitorBranches()
 
+	d.signalStarted()
+	startSucceeded = true
+
 	for {
 		select {
 		case <-d.done:
@@ -323,7 +538,7 @@ func (d *Daemon) Start() error {
 			case <-d.done:
 				return nil
 			default:
-				log.Printf("accept error: %v", err)
+				d.logf("accept error: %v", err)
 				continue
 			}
 		}
@@ -338,8 +553,8 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 	}
 
 	liveIDs := make(map[string]struct{})
-	if d.ptyManager != nil {
-		for _, id := range d.ptyManager.SessionIDs() {
+	if d.ptyBackend != nil {
+		for _, id := range d.ptyBackend.SessionIDs(context.Background()) {
 			liveIDs[id] = struct{}{}
 		}
 	}
@@ -356,13 +571,369 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 	return removed
 }
 
+func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
+	recoveryReport, recoverErr := d.recoverPTYBackend(10 * time.Second)
+	if recoverErr != nil {
+		d.logf("PTY backend recovery failed: %v", recoverErr)
+		d.addWarning(warnWorkerRecoveryPartial, fmt.Sprintf("PTY recovery failed: %v", recoverErr))
+	} else {
+		d.logf(
+			"PTY recovery summary: recovered=%d pruned=%d missing=%d failed=%d",
+			recoveryReport.Recovered,
+			recoveryReport.Pruned,
+			recoveryReport.Missing,
+			recoveryReport.Failed,
+		)
+		if recoveryReport.Missing > 0 {
+			d.addWarning(
+				warnWorkerRecoveryPartial,
+				fmt.Sprintf("PTY recovery skipped %d workers due to transient unavailability.", recoveryReport.Missing),
+			)
+		}
+	}
+
+	if _, ok := d.ptyBackend.(ptybackend.RecoverableRuntime); ok {
+		d.reconcileStartupWorkerSessions(recoveryReport, recoverErr, recoveryStartedAt)
+		return
+	}
+
+	removedSessions := d.pruneSessionsWithoutPTY()
+	if removedSessions > 0 {
+		d.logf("pruned %d stale sessions without live PTY on startup", removedSessions)
+		d.addWarning(
+			warnStaleSessionsPruned,
+			fmt.Sprintf("Removed %d stale sessions from a previous daemon run because no live PTY was found.", removedSessions),
+		)
+	}
+}
+
+func (d *Daemon) recoverPTYBackend(timeout time.Duration) (ptybackend.RecoveryReport, error) {
+	recoveryCtx, cancelRecovery := context.WithTimeout(context.Background(), timeout)
+	defer cancelRecovery()
+	return d.ptyBackend.Recover(recoveryCtx)
+}
+
+func (d *Daemon) reconcileStartupWorkerSessions(recoveryReport ptybackend.RecoveryReport, recoverErr error, recoveryStartedAt time.Time) {
+	allowIdleDemotion := recoverErr == nil && recoveryReport.Missing == 0 && recoveryReport.Failed == 0
+	if !allowIdleDemotion {
+		for attempt := 1; attempt <= startupRecoveryRetryMax; attempt++ {
+			retryReport, retryErr := d.recoverPTYBackend(5 * time.Second)
+			if retryErr == nil && retryReport.Missing == 0 && retryReport.Failed == 0 {
+				recoveryReport = retryReport
+				recoverErr = nil
+				allowIdleDemotion = true
+				d.logf(
+					"PTY recovery stabilized after retry %d: recovered=%d pruned=%d missing=%d failed=%d",
+					attempt,
+					retryReport.Recovered,
+					retryReport.Pruned,
+					retryReport.Missing,
+					retryReport.Failed,
+				)
+				break
+			}
+			d.logf("PTY recovery retry %d incomplete: err=%v missing=%d failed=%d", attempt, retryErr, retryReport.Missing, retryReport.Failed)
+			if attempt < startupRecoveryRetryMax {
+				time.Sleep(startupRecoveryRetryDelay)
+			}
+		}
+	}
+
+	reconcile := d.reconcileSessionsWithWorkerBackend(context.Background(), allowIdleDemotion, recoveryStartedAt)
+	if reconcile.Created > 0 || reconcile.StateUpdated > 0 || reconcile.MarkedIdle > 0 || reconcile.SkippedIdle > 0 || reconcile.SkippedRecent > 0 || reconcile.SkippedShell > 0 || reconcile.LikelyAlive > 0 || reconcile.LivenessUnknown > 0 || reconcile.MissingMetadata > 0 {
+		d.logf(
+			"worker session reconciliation summary: created=%d state_updated=%d marked_idle=%d skipped_idle=%d skipped_recent=%d skipped_shell=%d likely_alive=%d liveness_unknown=%d missing_metadata=%d",
+			reconcile.Created,
+			reconcile.StateUpdated,
+			reconcile.MarkedIdle,
+			reconcile.SkippedIdle,
+			reconcile.SkippedRecent,
+			reconcile.SkippedShell,
+			reconcile.LikelyAlive,
+			reconcile.LivenessUnknown,
+			reconcile.MissingMetadata,
+		)
+	}
+	if reconcile.SkippedIdle > 0 {
+		d.addWarning(
+			warnWorkerRecoveryPartial,
+			fmt.Sprintf("Deferred marking %d tracked sessions idle because PTY recovery was incomplete.", reconcile.SkippedIdle),
+		)
+	}
+	if reconcile.MarkedIdle > 0 {
+		d.addWarning(
+			warnStaleSessionMissingWorker,
+			fmt.Sprintf("%d tracked sessions were expected to be running but no worker was recovered; they were marked idle.", reconcile.MarkedIdle),
+		)
+	}
+	if reconcile.MissingMetadata > 0 {
+		d.addWarning(
+			warnWorkerRecoveryPartial,
+			fmt.Sprintf("Recovered workers were missing metadata for %d sessions.", reconcile.MissingMetadata),
+		)
+	}
+	if reconcile.LikelyAlive > 0 {
+		d.addWarning(
+			warnWorkerRecoveryPartial,
+			fmt.Sprintf("Retained %d sessions in non-idle state because worker liveness signals were still present.", reconcile.LikelyAlive),
+		)
+	}
+	if reconcile.LivenessUnknown > 0 {
+		d.addWarning(
+			warnWorkerRecoveryPartial,
+			fmt.Sprintf("Retained %d sessions in non-idle state because worker liveness checks were inconclusive.", reconcile.LivenessUnknown),
+		)
+	}
+	if reconcile.SkippedRecent > 0 {
+		d.addWarning(
+			warnWorkerRecoveryPartial,
+			fmt.Sprintf("Retained %d sessions in non-idle state because they were updated after recovery started.", reconcile.SkippedRecent),
+		)
+	}
+	if reconcile.SkippedIdle > 0 || reconcile.SkippedRecent > 0 || reconcile.LivenessUnknown > 0 || reconcile.MissingMetadata > 0 {
+		d.scheduleDeferredWorkerReconciliation(recoveryStartedAt)
+	}
+}
+
+func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowIdleDemotion bool, demotionCutoff time.Time) workerReconcileReport {
+	report := workerReconcileReport{}
+	if d.store == nil || d.ptyBackend == nil {
+		return report
+	}
+
+	liveIDs := make(map[string]struct{})
+	for _, id := range d.ptyBackend.SessionIDs(ctx) {
+		liveIDs[id] = struct{}{}
+	}
+
+	infoProvider, _ := d.ptyBackend.(ptybackend.SessionInfoProvider)
+	livenessProber, _ := d.ptyBackend.(ptybackend.SessionLivenessProber)
+
+	for sessionID := range liveIDs {
+		existing := d.store.Get(sessionID)
+		var info ptybackend.SessionInfo
+		var haveInfo bool
+		if infoProvider != nil {
+			fetched, err := infoProvider.SessionInfo(ctx, sessionID)
+			if err == nil {
+				info = fetched
+				haveInfo = true
+			}
+		}
+
+		if existing == nil {
+			if !haveInfo {
+				report.MissingMetadata++
+				continue
+			}
+			if protocol.NormalizeSpawnAgent(info.Agent, string(protocol.SessionAgentCodex)) == protocol.AgentShellValue {
+				report.SkippedShell++
+				continue
+			}
+
+			now := string(protocol.TimestampNow())
+			directory := strings.TrimSpace(info.CWD)
+			if directory == "" {
+				report.MissingMetadata++
+				continue
+			}
+			label := filepath.Base(directory)
+			if label == "" || label == "." || label == string(filepath.Separator) {
+				label = sessionID
+			}
+
+			state := sessionStateFromRecoveredInfo(info)
+
+			d.store.Add(&protocol.Session{
+				ID:             sessionID,
+				Label:          label,
+				Agent:          protocol.NormalizeSessionAgent(protocol.SessionAgent(info.Agent), protocol.SessionAgentCodex),
+				Directory:      directory,
+				State:          state,
+				StateSince:     now,
+				StateUpdatedAt: now,
+				LastSeen:       now,
+			})
+			report.Created++
+			report.Changed = true
+			continue
+		}
+
+		d.store.Touch(sessionID)
+		if haveInfo {
+			nextState := sessionStateFromRecoveredInfo(info)
+			if existing.State != nextState {
+				d.store.UpdateState(sessionID, string(nextState))
+				report.StateUpdated++
+				report.Changed = true
+			}
+			continue
+		}
+		switch existing.State {
+		case protocol.SessionStateWaitingInput, protocol.SessionStatePendingApproval:
+			// Preserve interactive waiting/approval states during recovery.
+		default:
+			if existing.State != protocol.SessionStateWorking {
+				d.store.UpdateState(sessionID, protocol.StateWorking)
+				report.StateUpdated++
+				report.Changed = true
+			}
+		}
+	}
+
+	for _, session := range d.store.List("") {
+		if _, ok := liveIDs[session.ID]; ok {
+			continue
+		}
+		if session.State == protocol.SessionStateIdle {
+			continue
+		}
+		if sessionUpdatedAfter(session, demotionCutoff) {
+			report.SkippedRecent++
+			continue
+		}
+		if livenessProber != nil {
+			likelyAlive, probeErr := livenessProber.SessionLikelyAlive(ctx, session.ID)
+			if probeErr != nil {
+				d.logf("worker liveness probe failed for session %s: %v", session.ID, probeErr)
+				report.LivenessUnknown++
+				continue
+			}
+			if likelyAlive {
+				report.LikelyAlive++
+				continue
+			}
+		}
+		if !allowIdleDemotion {
+			report.SkippedIdle++
+			continue
+		}
+		d.store.UpdateState(session.ID, protocol.StateIdle)
+		report.StateUpdated++
+		report.Changed = true
+		report.MarkedIdle++
+	}
+
+	return report
+}
+
+func (d *Daemon) scheduleDeferredWorkerReconciliation(recoveryStartedAt time.Time) {
+	go d.runDeferredWorkerReconciliation(deferredRecoveryMaxAttempts, deferredRecoveryRetryInterval, recoveryStartedAt)
+}
+
+func (d *Daemon) runDeferredWorkerReconciliation(maxAttempts int, retryInterval time.Duration, recoveryStartedAt time.Time) {
+	if d.ptyBackend == nil || maxAttempts <= 0 {
+		return
+	}
+	if _, ok := d.ptyBackend.(ptybackend.RecoverableRuntime); !ok {
+		return
+	}
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		select {
+		case <-d.done:
+			return
+		default:
+		}
+		if attempt > 1 && retryInterval > 0 {
+			select {
+			case <-d.done:
+				return
+			case <-time.After(retryInterval):
+			}
+		}
+
+		recoveryCtx, cancel := context.WithTimeout(context.Background(), deferredRecoveryRPCTimeout)
+		recoveryReport, recoverErr := d.ptyBackend.Recover(recoveryCtx)
+		cancel()
+
+		fullyRecovered := recoverErr == nil && recoveryReport.Missing == 0 && recoveryReport.Failed == 0
+		forceIdleDemotion := attempt == maxAttempts
+		if !fullyRecovered && !forceIdleDemotion {
+			d.logf("deferred PTY recovery attempt %d incomplete: err=%v missing=%d failed=%d", attempt, recoverErr, recoveryReport.Missing, recoveryReport.Failed)
+			continue
+		}
+
+		reconcile := d.reconcileSessionsWithWorkerBackend(context.Background(), true, recoveryStartedAt)
+		if reconcile.Changed {
+			d.broadcastSessionsUpdated()
+		}
+		if reconcile.MarkedIdle > 0 {
+			d.addWarning(
+				warnStaleSessionMissingWorker,
+				fmt.Sprintf("%d tracked sessions were expected to be running but no worker was recovered; they were marked idle.", reconcile.MarkedIdle),
+			)
+		}
+		if !fullyRecovered {
+			d.addWarning(
+				warnWorkerRecoveryPartial,
+				fmt.Sprintf(
+					"Forced stale-session reconciliation after %d deferred PTY recovery attempts (missing=%d failed=%d).",
+					maxAttempts,
+					recoveryReport.Missing,
+					recoveryReport.Failed,
+				),
+			)
+		}
+		if reconcile.LivenessUnknown > 0 {
+			d.addWarning(
+				warnWorkerRecoveryPartial,
+				fmt.Sprintf("Deferred stale-session idle demotion for %d sessions because liveness checks remained inconclusive.", reconcile.LivenessUnknown),
+			)
+		}
+		if reconcile.SkippedRecent > 0 {
+			d.addWarning(
+				warnWorkerRecoveryPartial,
+				fmt.Sprintf("Deferred stale-session idle demotion for %d sessions that were updated after recovery began.", reconcile.SkippedRecent),
+			)
+		} else if reconcile.MarkedIdle > 0 {
+			d.logf("deferred worker reconciliation marked %d stale sessions idle after recovery stabilized", reconcile.MarkedIdle)
+		}
+		return
+	}
+}
+
+func sessionUpdatedAfter(session *protocol.Session, cutoff time.Time) bool {
+	if session == nil || cutoff.IsZero() {
+		return false
+	}
+	updatedAt := protocol.Timestamp(session.StateUpdatedAt).Time()
+	if updatedAt.IsZero() {
+		return false
+	}
+	return updatedAt.After(cutoff)
+}
+
+func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.SessionState {
+	if !info.Running {
+		return protocol.SessionStateIdle
+	}
+	agent := protocol.NormalizeSessionAgent(protocol.SessionAgent(info.Agent), protocol.SessionAgentCodex)
+	switch info.State {
+	case protocol.StateWaitingInput:
+		if agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot {
+			return protocol.SessionStateWorking
+		}
+		return protocol.SessionStateWaitingInput
+	case protocol.StatePendingApproval:
+		return protocol.SessionStatePendingApproval
+	case protocol.StateIdle:
+		if agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot {
+			return protocol.SessionStateWorking
+		}
+		return protocol.SessionStateIdle
+	default:
+		return protocol.SessionStateWorking
+	}
+}
+
 // Stop stops the daemon
 func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
 	d.stopAllTranscriptWatchers()
-	if d.ptyManager != nil {
-		d.ptyManager.Shutdown()
+	if d.ptyBackend != nil {
+		_ = d.ptyBackend.Shutdown(context.Background())
 	}
 	if d.httpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -379,11 +950,13 @@ func (d *Daemon) Stop() {
 	}
 }
 
-func (d *Daemon) handlePTYExit(info pty.ExitInfo) {
+func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	d.stopTranscriptWatcher(info.ID)
 
-	if d.ptyManager != nil {
-		d.ptyManager.Remove(info.ID)
+	if d.ptyBackend != nil {
+		if err := d.removePTYSession(info.ID); err != nil {
+			d.logf("pty backend remove on exit failed for %s: %v", info.ID, err)
+		}
 	}
 
 	if session := d.store.Get(info.ID); session != nil {
@@ -409,16 +982,45 @@ func (d *Daemon) handlePTYExit(info pty.ExitInfo) {
 	d.wsHub.Broadcast(event)
 }
 
+func (d *Daemon) removePTYSession(sessionID string) error {
+	if d.ptyBackend == nil {
+		return nil
+	}
+	// Avoid hanging the exit path; we'll retry on transient errors.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := d.ptyBackend.Remove(ctx, sessionID)
+	if err == nil || errors.Is(err, pty.ErrSessionNotFound) || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	go func() {
+		// Best-effort retry: transport issues can race daemon exit events.
+		backoff := 250 * time.Millisecond
+		for i := 0; i < 4; i++ {
+			time.Sleep(backoff)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			retryErr := d.ptyBackend.Remove(ctx, sessionID)
+			cancel()
+			if retryErr == nil || errors.Is(retryErr, pty.ErrSessionNotFound) || errors.Is(retryErr, os.ErrNotExist) {
+				return
+			}
+			backoff *= 2
+		}
+		d.logf("pty backend remove still failing after retries for %s: %v", sessionID, err)
+	}()
+	return err
+}
+
 func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 	d.stopTranscriptWatcher(sessionID)
 
-	if d.ptyManager == nil {
+	if d.ptyBackend == nil {
 		return
 	}
-	if err := d.ptyManager.Kill(sessionID, sig); err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
+	if err := d.ptyBackend.Kill(context.Background(), sessionID, sig); err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
 		d.logf("terminate session failed for %s: %v", sessionID, err)
 	}
-	d.ptyManager.Remove(sessionID)
+	_ = d.ptyBackend.Remove(context.Background(), sessionID)
 }
 
 func (d *Daemon) handlePTYState(sessionID, state string) {
@@ -492,6 +1094,16 @@ func (d *Daemon) logf(format string, args ...interface{}) {
 	}
 }
 
+func shouldRunWorkerStartupProbe() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("ATTN_PTY_SKIP_STARTUP_PROBE")))
+	switch raw {
+	case "1", "true", "yes", "on":
+		return false
+	default:
+		return true
+	}
+}
+
 func (d *Daemon) refreshGitHubHostsLoop() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -524,10 +1136,10 @@ func (d *Daemon) refreshGitHubHosts() error {
 	if err := github.RequireGHVersion("2.81.0"); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			d.logf("gh CLI not available: %v", err)
-			d.addWarning("gh_not_installed", "GitHub CLI not installed. PR monitoring disabled. Run: brew install gh")
+			d.addWarning(warnGHNotInstalled, "GitHub CLI not installed. PR monitoring disabled. Run: brew install gh")
 		} else {
 			d.logf("gh CLI version too old (need 2.81.0+): %v", err)
-			d.addWarning("gh_version_too_old", "GitHub CLI needs upgrade to v2.81.0+ for PR monitoring. Run: brew upgrade gh")
+			d.addWarning(warnGHVersionTooOld, "GitHub CLI needs upgrade to v2.81.0+ for PR monitoring. Run: brew upgrade gh")
 		}
 		return nil
 	}
@@ -1747,13 +2359,18 @@ func (d *Daemon) checkAllBranches() {
 	}
 
 	if changed {
-		// Broadcast all sessions with updated branch info
-		sessions = d.store.List("")
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:    protocol.EventSessionsUpdated,
-			Sessions: protocol.SessionsToValues(sessions),
-		})
+		d.broadcastSessionsUpdated()
 	}
+}
+
+func (d *Daemon) broadcastSessionsUpdated() {
+	if d.wsHub == nil || d.store == nil {
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:    protocol.EventSessionsUpdated,
+		Sessions: protocol.SessionsToValues(d.store.List("")),
+	})
 }
 
 // handleHealth returns daemon health status
@@ -1762,12 +2379,13 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 	prs := d.store.ListPRs("")
 
 	health := map[string]interface{}{
-		"status":           "ok",
-		"protocol":         protocol.ProtocolVersion,
-		"sessions":         len(sessions),
-		"prs":              len(prs),
-		"ws_clients":       d.wsHub.ClientCount(),
-		"github_available": d.githubAvailable(),
+		"status":             "ok",
+		"protocol":           protocol.ProtocolVersion,
+		"daemon_instance_id": d.daemonInstanceID,
+		"sessions":           len(sessions),
+		"prs":                len(prs),
+		"ws_clients":         d.wsHub.ClientCount(),
+		"github_available":   d.githubAvailable(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -182,6 +182,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
       ATTN_WS_PORT: TEST_DAEMON_PORT, // Use test port to avoid conflicts with production daemon
       ATTN_SOCKET_PATH: socketPath, // Test isolation: separate socket
       ATTN_DB_PATH: dbPath, // Test isolation: separate database
+      ATTN_PTY_SKIP_STARTUP_PROBE: '1',
       ATTN_MOCK_REVIEWER: '1', // Use mock reviewer for predictable E2E tests
       ATTN_MOCK_GH_URL: ghUrl,
       ATTN_MOCK_GH_TOKEN: 'test-token',
@@ -266,6 +267,7 @@ function createManagedDaemon(ghUrl: string): ManagedDaemon {
         ATTN_WS_PORT: TEST_DAEMON_PORT,
         ATTN_SOCKET_PATH: socketPath,
         ATTN_DB_PATH: dbPath,
+        ATTN_PTY_SKIP_STARTUP_PROBE: '1',
         ATTN_MOCK_REVIEWER: '1',
         ATTN_MOCK_GH_URL: ghUrl,
         ATTN_MOCK_GH_TOKEN: 'test-token',
