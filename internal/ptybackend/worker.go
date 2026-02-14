@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -984,29 +985,36 @@ func unixSocketPathFits(path string) bool {
 func (b *WorkerBackend) expectedSocketPath(sessionID string) (string, error) {
 	root := b.sockDir()
 
-	// Fall back to a deterministic hash filename to stay within the unix socket
-	// path limit. This matters on macOS where $HOME can be long and session IDs
-	// are UUIDs.
+	// Use a deterministic hash filename to stay within the unix socket path
+	// limit. This matters on macOS where $HOME can be long and session IDs are
+	// UUIDs.
 	sum := sha256.Sum256([]byte(sessionID))
-	hash := hex.EncodeToString(sum[:])
+	hash := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(sum[:])
 
 	// Full path is: root + "/" + base. Compute available chars for base.
 	avail := unixSocketPathLimit() - 1 - len(root) - 1
-	if avail <= len("h-.sock") {
+	if avail <= len(".sock") {
 		return "", fmt.Errorf("unix socket directory path too long: %s", root)
 	}
-	keep := avail - len("h-") - len(".sock")
+	keep := avail - len(".sock")
+	ext := ".sock"
+	// If we're very constrained, prefer a shorter extension to free up entropy.
+	if keep < 5 {
+		ext = ".s"
+		keep = avail - len(ext)
+	}
+	if keep <= 0 {
+		return "", fmt.Errorf("unix socket path too constrained for session %s (dir=%s)", sessionID, root)
+	}
 	if keep > len(hash) {
 		keep = len(hash)
 	}
-	if keep%2 == 1 {
-		keep--
-	}
-	if keep < 16 {
+	// If we can't fit even ~25 bits of hash, don't risk collisions.
+	if keep < 5 {
 		return "", fmt.Errorf("unix socket path too constrained for session %s (dir=%s)", sessionID, root)
 	}
 
-	path := filepath.Join(root, "h-"+hash[:keep]+".sock")
+	path := filepath.Join(root, hash[:keep]+ext)
 	if !unixSocketPathFits(path) {
 		return "", fmt.Errorf("unix socket path too long: %s", path)
 	}

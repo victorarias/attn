@@ -954,7 +954,9 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	d.stopTranscriptWatcher(info.ID)
 
 	if d.ptyBackend != nil {
-		_ = d.ptyBackend.Remove(context.Background(), info.ID)
+		if err := d.removePTYSession(info.ID); err != nil {
+			d.logf("pty backend remove on exit failed for %s: %v", info.ID, err)
+		}
 	}
 
 	if session := d.store.Get(info.ID); session != nil {
@@ -978,6 +980,35 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 		event.Signal = protocol.Ptr(info.Signal)
 	}
 	d.wsHub.Broadcast(event)
+}
+
+func (d *Daemon) removePTYSession(sessionID string) error {
+	if d.ptyBackend == nil {
+		return nil
+	}
+	// Avoid hanging the exit path; we'll retry on transient errors.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := d.ptyBackend.Remove(ctx, sessionID)
+	if err == nil || errors.Is(err, pty.ErrSessionNotFound) || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	go func() {
+		// Best-effort retry: transport issues can race daemon exit events.
+		backoff := 250 * time.Millisecond
+		for i := 0; i < 4; i++ {
+			time.Sleep(backoff)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			retryErr := d.ptyBackend.Remove(ctx, sessionID)
+			cancel()
+			if retryErr == nil || errors.Is(retryErr, pty.ErrSessionNotFound) || errors.Is(retryErr, os.ErrNotExist) {
+				return
+			}
+			backoff *= 2
+		}
+		d.logf("pty backend remove still failing after retries for %s: %v", sessionID, err)
+	}()
+	return err
 }
 
 func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
