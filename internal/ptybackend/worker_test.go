@@ -32,6 +32,15 @@ func newWorkerBackendTestRoot(t *testing.T) string {
 	return root
 }
 
+func mustWorkerSocketPath(t *testing.T, backend *WorkerBackend, sessionID string) string {
+	t.Helper()
+	path, err := backend.expectedSocketPath(sessionID)
+	if err != nil {
+		t.Fatalf("expectedSocketPath(%q) error: %v", sessionID, err)
+	}
+	return path
+}
+
 func TestWorkerBackend_Recover_QuarantinesOwnershipMismatch(t *testing.T) {
 	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
@@ -43,7 +52,7 @@ func TestWorkerBackend_Recover_QuarantinesOwnershipMismatch(t *testing.T) {
 		t.Fatalf("NewWorker() error: %v", err)
 	}
 
-	socketPath := filepath.Join(backend.sockDir(), "sess-1.sock")
+	socketPath := mustWorkerSocketPath(t, backend, "sess-1")
 	if err := os.WriteFile(socketPath, []byte("stale"), 0600); err != nil {
 		t.Fatalf("WriteFile(stale socket) error: %v", err)
 	}
@@ -97,7 +106,7 @@ func TestWorkerBackend_Recover_ReclaimsStaleOwnershipMismatch(t *testing.T) {
 	}
 
 	sessionID := "sess-reclaim"
-	socketPath := filepath.Join(backend.sockDir(), sessionID+".sock")
+	socketPath := mustWorkerSocketPath(t, backend, sessionID)
 	stopServer := startFakeWorkerRPCServer(
 		t,
 		"d-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -161,7 +170,7 @@ func TestWorkerBackend_Recover_PreservesLiveOwnerMismatch(t *testing.T) {
 	}
 
 	sessionID := "sess-live-owner"
-	socketPath := filepath.Join(backend.sockDir(), sessionID+".sock")
+	socketPath := mustWorkerSocketPath(t, backend, sessionID)
 	if err := os.WriteFile(socketPath, []byte("stale"), 0600); err != nil {
 		t.Fatalf("WriteFile(stale socket) error: %v", err)
 	}
@@ -370,12 +379,13 @@ func TestWorkerBackend_SessionLikelyAlive_UsesValidatedRegistry(t *testing.T) {
 	}
 
 	registryPath := filepath.Join(backend.registryDir(), "sess-1.json")
+	socketPath := mustWorkerSocketPath(t, backend, "sess-1")
 	entry := ptyworker.NewRegistryEntry(
 		"d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"sess-1",
 		os.Getpid(),
 		os.Getpid(),
-		filepath.Join(backend.sockDir(), "sess-1.sock"),
+		socketPath,
 		"codex",
 		t.TempDir(),
 		"tok",
@@ -383,7 +393,7 @@ func TestWorkerBackend_SessionLikelyAlive_UsesValidatedRegistry(t *testing.T) {
 	if err := ptyworker.WriteRegistryAtomic(registryPath, entry); err != nil {
 		t.Fatalf("WriteRegistryAtomic() error: %v", err)
 	}
-	stopServer := startFakeWorkerRPCServer(t, backend.cfg.DaemonInstanceID, "sess-1", "tok", entry.SocketPath, "codex", t.TempDir())
+	stopServer := startFakeWorkerRPCServer(t, backend.cfg.DaemonInstanceID, "sess-1", "tok", socketPath, "codex", t.TempDir())
 	defer stopServer()
 
 	alive, err := backend.SessionLikelyAlive(context.Background(), "sess-1")
@@ -443,7 +453,7 @@ func TestWorkerBackend_Recover_SecondCallReusesExistingSession(t *testing.T) {
 		t.Fatalf("NewWorker() error: %v", err)
 	}
 
-	socketPath := filepath.Join(backend.sockDir(), "sess-1.sock")
+	socketPath := mustWorkerSocketPath(t, backend, "sess-1")
 	stopServer := startFakeWorkerRPCServer(t, backend.cfg.DaemonInstanceID, "sess-1", "tok", socketPath, "codex", t.TempDir())
 	defer stopServer()
 
@@ -498,7 +508,7 @@ func TestWorkerBackend_GetSession_PrunesDeadRegistryEntry(t *testing.T) {
 	}
 
 	sessionID := "sess-stale"
-	socketPath := filepath.Join(backend.sockDir(), sessionID+".sock")
+	socketPath := mustWorkerSocketPath(t, backend, sessionID)
 	if err := os.WriteFile(socketPath, []byte("stale"), 0600); err != nil {
 		t.Fatalf("WriteFile(stale socket placeholder) error: %v", err)
 	}
@@ -690,7 +700,7 @@ func TestWorkerBackend_StopMonitor_DoesNotHangWhenWatchResponseMissing(t *testin
 	}
 
 	sessionID := "sess-watch-stall"
-	socketPath := filepath.Join(backend.sockDir(), sessionID+".sock")
+	socketPath := mustWorkerSocketPath(t, backend, sessionID)
 	stopServer := startWatchStallWorkerRPCServer(t, backend.cfg.DaemonInstanceID, sessionID, "tok-watch", socketPath)
 	defer stopServer()
 
@@ -730,7 +740,7 @@ func TestWorkerBackend_ForceSessionEviction_StopsMonitorAndPrunes(t *testing.T) 
 
 	sessionID := "sess-evict"
 	registryPath := filepath.Join(backend.registryDir(), sessionID+".json")
-	socketPath := filepath.Join(backend.sockDir(), sessionID+".sock")
+	socketPath := mustWorkerSocketPath(t, backend, sessionID)
 	if err := os.WriteFile(registryPath, []byte("registry"), 0600); err != nil {
 		t.Fatalf("WriteFile(registry) error: %v", err)
 	}

@@ -984,11 +984,6 @@ func unixSocketPathFits(path string) bool {
 func (b *WorkerBackend) expectedSocketPath(sessionID string) (string, error) {
 	root := b.sockDir()
 
-	legacy := filepath.Join(root, sessionID+".sock")
-	if unixSocketPathFits(legacy) {
-		return legacy, nil
-	}
-
 	// Fall back to a deterministic hash filename to stay within the unix socket
 	// path limit. This matters on macOS where $HOME can be long and session IDs
 	// are UUIDs.
