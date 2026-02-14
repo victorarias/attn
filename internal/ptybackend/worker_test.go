@@ -18,8 +18,22 @@ import (
 	"github.com/victorarias/attn/internal/ptyworker"
 )
 
+func newWorkerBackendTestRoot(t *testing.T) string {
+	t.Helper()
+	base := "/tmp"
+	if _, err := os.Stat(base); err != nil {
+		base = ""
+	}
+	root, err := os.MkdirTemp(base, "attnwb-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	return root
+}
+
 func TestWorkerBackend_Recover_QuarantinesOwnershipMismatch(t *testing.T) {
-	root := t.TempDir()
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -72,11 +86,7 @@ func TestWorkerBackend_Recover_QuarantinesOwnershipMismatch(t *testing.T) {
 }
 
 func TestWorkerBackend_Recover_ReclaimsStaleOwnershipMismatch(t *testing.T) {
-	root, err := os.MkdirTemp("", "attnwb-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error: %v", err)
-	}
-	defer os.RemoveAll(root)
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -140,11 +150,7 @@ func TestWorkerBackend_Recover_ReclaimsStaleOwnershipMismatch(t *testing.T) {
 }
 
 func TestWorkerBackend_Recover_PreservesLiveOwnerMismatch(t *testing.T) {
-	root, err := os.MkdirTemp("", "attnwb-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error: %v", err)
-	}
-	defer os.RemoveAll(root)
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -195,7 +201,7 @@ func TestWorkerBackend_Recover_PreservesLiveOwnerMismatch(t *testing.T) {
 }
 
 func TestWorkerBackend_Probe_FailsWhenBinaryUnavailable(t *testing.T) {
-	root := t.TempDir()
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -212,7 +218,7 @@ func TestWorkerBackend_Probe_FailsWhenBinaryUnavailable(t *testing.T) {
 }
 
 func TestWorkerBackend_Remove_RetainsTrackedSessionOnTransientError(t *testing.T) {
-	root := t.TempDir()
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -302,7 +308,7 @@ func TestWorkerBackend_Remove_RetainsTrackedSessionOnTransientError(t *testing.T
 }
 
 func TestWorkerBackend_Recover_RejectsUnexpectedSocketPath(t *testing.T) {
-	root := t.TempDir()
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -353,11 +359,7 @@ func TestWorkerBackend_Recover_RejectsUnexpectedSocketPath(t *testing.T) {
 }
 
 func TestWorkerBackend_SessionLikelyAlive_UsesValidatedRegistry(t *testing.T) {
-	root, err := os.MkdirTemp("", "attnwb-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error: %v", err)
-	}
-	defer os.RemoveAll(root)
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -406,7 +408,7 @@ func TestWorkerBackend_SessionLikelyAlive_UsesValidatedRegistry(t *testing.T) {
 }
 
 func TestWorkerBackend_SessionLikelyAlive_MalformedRegistryReturnsError(t *testing.T) {
-	root := t.TempDir()
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -431,11 +433,7 @@ func TestWorkerBackend_SessionLikelyAlive_MalformedRegistryReturnsError(t *testi
 }
 
 func TestWorkerBackend_Recover_SecondCallReusesExistingSession(t *testing.T) {
-	root, err := os.MkdirTemp("", "attnwb-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error: %v", err)
-	}
-	defer os.RemoveAll(root)
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -489,7 +487,7 @@ func TestWorkerBackend_Recover_SecondCallReusesExistingSession(t *testing.T) {
 }
 
 func TestWorkerBackend_GetSession_PrunesDeadRegistryEntry(t *testing.T) {
-	root := t.TempDir()
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -680,11 +678,7 @@ func TestWorkerSession_NotePollRecoveryResetsUnreachableState(t *testing.T) {
 }
 
 func TestWorkerBackend_StopMonitor_DoesNotHangWhenWatchResponseMissing(t *testing.T) {
-	root, err := os.MkdirTemp("", "attnwb-")
-	if err != nil {
-		t.Fatalf("MkdirTemp() error: %v", err)
-	}
-	defer os.RemoveAll(root)
+	root := newWorkerBackendTestRoot(t)
 
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
@@ -724,7 +718,7 @@ func TestWorkerBackend_StopMonitor_DoesNotHangWhenWatchResponseMissing(t *testin
 }
 
 func TestWorkerBackend_ForceSessionEviction_StopsMonitorAndPrunes(t *testing.T) {
-	root := t.TempDir()
+	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -779,7 +773,7 @@ func TestWorkerBackend_ForceSessionEviction_StopsMonitorAndPrunes(t *testing.T) 
 }
 
 func TestWorkerBackend_Spawn_CleansUpUnreadyWorkerProcess(t *testing.T) {
-	root := t.TempDir()
+	root := newWorkerBackendTestRoot(t)
 	pidFile := filepath.Join(root, "worker.pid")
 	scriptPath := filepath.Join(root, "fake-worker.sh")
 	script := "#!/bin/sh\n" +

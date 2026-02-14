@@ -94,6 +94,22 @@ func waitForSocket(t *testing.T, sockPath string, timeout time.Duration) {
 	t.Fatalf("socket %s not ready after %v", sockPath, timeout)
 }
 
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	// Unix socket paths are length-limited (notably on macOS). The default
+	// `t.TempDir()` path can be too long, so keep the base dir short.
+	base := "/tmp"
+	if _, err := os.Stat(base); err != nil {
+		base = ""
+	}
+	dir, err := os.MkdirTemp(base, "attn-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 func TestDaemon_RegisterAndQuery(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19900")
 
@@ -104,8 +120,7 @@ func TestDaemon_RegisterAndQuery(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	// Wait for daemon to start
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
@@ -138,7 +153,7 @@ func TestDaemon_StateUpdate(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
@@ -171,7 +186,7 @@ func TestDaemon_Unregister(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
@@ -194,7 +209,7 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
@@ -233,7 +248,7 @@ func TestDaemon_SocketCleanup(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	// Should still work (stale socket removed)
 	c := client.New(sockPath)
@@ -300,7 +315,7 @@ func TestDaemon_Start_SelectsWorkerBackendWhenRequested(t *testing.T) {
 	t.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "1")
 	t.Setenv("ATTN_WS_PORT", "19926")
 
-	sockPath := filepath.Join(t.TempDir(), "worker-select.sock")
+	sockPath := filepath.Join(shortTempDir(t), "worker-select.sock")
 	d := NewForTesting(sockPath)
 
 	errCh := make(chan error, 1)
@@ -336,7 +351,7 @@ func TestDaemon_Start_WorkerProbeFailureFallsBackToEmbedded(t *testing.T) {
 	t.Setenv("ATTN_PTY_WORKER_BINARY", filepath.Join(t.TempDir(), "missing-attn-binary"))
 	t.Setenv("ATTN_WS_PORT", "19936")
 
-	sockPath := filepath.Join(t.TempDir(), "worker-probe-fallback.sock")
+	sockPath := filepath.Join(shortTempDir(t), "worker-probe-fallback.sock")
 	d := NewForTesting(sockPath)
 
 	errCh := make(chan error, 1)
@@ -375,7 +390,7 @@ func TestDaemon_Start_SelectsEmbeddedBackendWhenRequested(t *testing.T) {
 	t.Setenv("ATTN_PTY_BACKEND", "embedded")
 	t.Setenv("ATTN_WS_PORT", "19927")
 
-	sockPath := filepath.Join(t.TempDir(), "embedded-select.sock")
+	sockPath := filepath.Join(shortTempDir(t), "embedded-select.sock")
 	d := NewForTesting(sockPath)
 
 	errCh := make(chan error, 1)
@@ -1747,8 +1762,7 @@ func TestDaemon_InjectTestPR(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 
-	// Wait for daemon to start
-	time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
