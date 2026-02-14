@@ -3,6 +3,7 @@ package ptybackend
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -234,9 +236,13 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		return err
 	}
 	sessionID := opts.ID
+	socketPath, err := b.expectedSocketPath(sessionID)
+	if err != nil {
+		return err
+	}
 	session := &workerSession{
 		SessionID:    sessionID,
-		SocketPath:   filepath.Join(b.sockDir(), sessionID+".sock"),
+		SocketPath:   socketPath,
 		RegistryPath: filepath.Join(b.registryDir(), sessionID+".json"),
 		ControlToken: token,
 	}
@@ -531,7 +537,9 @@ func (b *WorkerBackend) Recover(ctx context.Context) (RecoveryReport, error) {
 			b.quarantineRegistry(path, "socket_path_mismatch")
 			// Best-effort cleanup of owned socket artifacts for quarantined entries.
 			b.removeOwnedSocket(entry.SocketPath)
-			b.removeOwnedSocket(b.expectedSocketPath(entry.SessionID))
+			if expected, expectedErr := b.expectedSocketPath(entry.SessionID); expectedErr == nil {
+				b.removeOwnedSocket(expected)
+			}
 			continue
 		}
 		if entry.DaemonInstanceID != b.cfg.DaemonInstanceID {
@@ -952,12 +960,69 @@ func (b *WorkerBackend) rpcError(sessionID string, rpcErr *ptyworker.RPCError) e
 	}
 }
 
-func (b *WorkerBackend) expectedSocketPath(sessionID string) string {
-	return filepath.Join(b.sockDir(), sessionID+".sock")
+func unixSocketPathLimit() int {
+	// sockaddr_un.sun_path is 104 bytes on Darwin, 108 bytes on Linux.
+	// Keep 1 byte of slack for a trailing NUL.
+	switch runtime.GOOS {
+	case "linux":
+		return 108
+	case "darwin":
+		return 104
+	default:
+		return 104
+	}
+}
+
+func unixSocketPathFits(path string) bool {
+	limit := unixSocketPathLimit()
+	if limit <= 1 {
+		return false
+	}
+	return len(path) <= limit-1
+}
+
+func (b *WorkerBackend) expectedSocketPath(sessionID string) (string, error) {
+	root := b.sockDir()
+
+	legacy := filepath.Join(root, sessionID+".sock")
+	if unixSocketPathFits(legacy) {
+		return legacy, nil
+	}
+
+	// Fall back to a deterministic hash filename to stay within the unix socket
+	// path limit. This matters on macOS where $HOME can be long and session IDs
+	// are UUIDs.
+	sum := sha256.Sum256([]byte(sessionID))
+	hash := hex.EncodeToString(sum[:])
+
+	// Full path is: root + "/" + base. Compute available chars for base.
+	avail := unixSocketPathLimit() - 1 - len(root) - 1
+	if avail <= len("h-.sock") {
+		return "", fmt.Errorf("unix socket directory path too long: %s", root)
+	}
+	keep := avail - len("h-") - len(".sock")
+	if keep > len(hash) {
+		keep = len(hash)
+	}
+	if keep%2 == 1 {
+		keep--
+	}
+	if keep < 16 {
+		return "", fmt.Errorf("unix socket path too constrained for session %s (dir=%s)", sessionID, root)
+	}
+
+	path := filepath.Join(root, "h-"+hash[:keep]+".sock")
+	if !unixSocketPathFits(path) {
+		return "", fmt.Errorf("unix socket path too long: %s", path)
+	}
+	return path, nil
 }
 
 func (b *WorkerBackend) validateRegistrySocketPath(sessionID, socketPath string) (string, error) {
-	expected := b.expectedSocketPath(sessionID)
+	expected, err := b.expectedSocketPath(sessionID)
+	if err != nil {
+		return "", err
+	}
 	if filepath.Clean(socketPath) != filepath.Clean(expected) {
 		return "", fmt.Errorf("unexpected socket path for session %s", sessionID)
 	}
