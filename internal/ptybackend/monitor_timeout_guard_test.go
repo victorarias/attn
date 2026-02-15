@@ -53,7 +53,10 @@ func TestMonitorTimeoutGuard_AbortsAfterFastTimeoutLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("onTimeout() error = nil, want non-nil")
 	}
-	if !strings.Contains(err.Error(), "timeout loop") {
-		t.Fatalf("onTimeout() error = %q, want it to mention timeout loop", err.Error())
+	if !errors.Is(err, errLifecycleWatchTimeoutLoop) {
+		t.Fatalf("onTimeout() error = %v, want errors.Is(..., errLifecycleWatchTimeoutLoop)=true", err)
+	}
+	if !strings.Contains(err.Error(), "session=sess") {
+		t.Fatalf("onTimeout() error = %q, want it to include session id", err.Error())
 	}
 }

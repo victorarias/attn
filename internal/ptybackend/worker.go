@@ -1392,6 +1392,7 @@ func (b *WorkerBackend) startPoller(session *workerSession) {
 }
 
 var errLifecycleWatchUnsupported = errors.New("worker lifecycle watch unsupported")
+var errLifecycleWatchTimeoutLoop = errors.New("worker lifecycle watch timeout loop")
 
 type monitorTimeoutGuard struct {
 	consecutiveFastTimeouts int
@@ -1424,7 +1425,8 @@ func (g *monitorTimeoutGuard) onTimeout(sessionID string, dt time.Duration, err 
 	}
 
 	if g.consecutiveFastTimeouts >= monitorFastTimeoutLimit {
-		return 0, fmt.Errorf("worker lifecycle watch timeout loop (session %s): %w", sessionID, err)
+		// Treat a fast-timeout loop as a broken watch stream. Degrade to poll-based lifecycle.
+		return 0, fmt.Errorf("%w: session=%s: %v", errLifecycleWatchTimeoutLoop, sessionID, err)
 	}
 	return monitorTimeoutBackoff, nil
 }
@@ -1459,6 +1461,13 @@ func (b *WorkerBackend) startMonitor(session *workerSession) {
 				session.legacyLifecycle = true
 				session.mu.Unlock()
 				b.cfg.Logf("worker backend lifecycle watch unsupported for session %s; falling back to poll-based lifecycle", session.SessionID)
+				return
+			}
+			if errors.Is(err, errLifecycleWatchTimeoutLoop) {
+				session.mu.Lock()
+				session.legacyLifecycle = true
+				session.mu.Unlock()
+				b.cfg.Logf("worker backend lifecycle watch unreliable for session %s; falling back to poll-based lifecycle", session.SessionID)
 				return
 			}
 			b.cfg.Logf("worker backend lifecycle watch disconnected for session %s: %v", session.SessionID, err)
