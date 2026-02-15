@@ -1393,6 +1393,42 @@ func (b *WorkerBackend) startPoller(session *workerSession) {
 
 var errLifecycleWatchUnsupported = errors.New("worker lifecycle watch unsupported")
 
+type monitorTimeoutGuard struct {
+	consecutiveFastTimeouts int
+	lastFastTimeoutLog      time.Time
+}
+
+func (g *monitorTimeoutGuard) reset() {
+	g.consecutiveFastTimeouts = 0
+}
+
+// onTimeout returns (backoff, abortErr). backoff is non-zero only for fast timeout loops.
+func (g *monitorTimeoutGuard) onTimeout(sessionID string, dt time.Duration, err error, logf func(format string, args ...interface{})) (time.Duration, error) {
+	if dt > monitorFastTimeoutAfter {
+		g.consecutiveFastTimeouts = 0
+		return 0, nil
+	}
+
+	g.consecutiveFastTimeouts++
+
+	now := time.Now()
+	if now.Sub(g.lastFastTimeoutLog) >= monitorFastTimeoutLogEvery {
+		logf(
+			"worker backend lifecycle watch: fast timeout loop session=%s consecutive=%d dt=%s err=%v",
+			sessionID,
+			g.consecutiveFastTimeouts,
+			dt,
+			err,
+		)
+		g.lastFastTimeoutLog = now
+	}
+
+	if g.consecutiveFastTimeouts >= monitorFastTimeoutLimit {
+		return 0, fmt.Errorf("worker lifecycle watch timeout loop (session %s): %w", sessionID, err)
+	}
+	return monitorTimeoutBackoff, nil
+}
+
 func (b *WorkerBackend) startMonitor(session *workerSession) {
 	session.mu.Lock()
 	if session.monitorStop != nil || session.legacyLifecycle {
@@ -1445,10 +1481,7 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 	}
 	defer conn.Close()
 
-	var (
-		consecutiveFastTimeouts int
-		lastFastTimeoutLog      time.Time
-	)
+	guard := &monitorTimeoutGuard{}
 
 	watchReqID := b.nextReqID("watch")
 	if err := writeRequest(enc, watchReqID, ptyworker.MethodWatch, map[string]any{}); err != nil {
@@ -1472,55 +1505,29 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				dt := time.Since(readStart)
-				if dt <= monitorFastTimeoutAfter {
-					consecutiveFastTimeouts++
-					now := time.Now()
-					if now.Sub(lastFastTimeoutLog) >= monitorFastTimeoutLogEvery {
-						b.cfg.Logf(
-							"worker backend lifecycle watch: fast timeout loop session=%s consecutive=%d dt=%s err=%v",
-							session.SessionID,
-							consecutiveFastTimeouts,
-							dt,
-							err,
-						)
-						lastFastTimeoutLog = now
-					}
-					if consecutiveFastTimeouts >= monitorFastTimeoutLimit {
-						return fmt.Errorf("worker lifecycle watch timeout loop (session %s): %w", session.SessionID, err)
-					}
-					time.Sleep(monitorTimeoutBackoff)
-				} else {
-					consecutiveFastTimeouts = 0
+				backoff, terr := guard.onTimeout(session.SessionID, dt, err, b.cfg.Logf)
+				if terr != nil {
+					return terr
+				}
+				if backoff > 0 {
+					time.Sleep(backoff)
 				}
 				continue
 			}
 			if errors.As(err, &netErr) && netErr.Timeout() {
 				dt := time.Since(readStart)
-				if dt <= monitorFastTimeoutAfter {
-					consecutiveFastTimeouts++
-					now := time.Now()
-					if now.Sub(lastFastTimeoutLog) >= monitorFastTimeoutLogEvery {
-						b.cfg.Logf(
-							"worker backend lifecycle watch: fast timeout loop session=%s consecutive=%d dt=%s err=%v",
-							session.SessionID,
-							consecutiveFastTimeouts,
-							dt,
-							err,
-						)
-						lastFastTimeoutLog = now
-					}
-					if consecutiveFastTimeouts >= monitorFastTimeoutLimit {
-						return fmt.Errorf("worker lifecycle watch timeout loop (session %s): %w", session.SessionID, err)
-					}
-					time.Sleep(monitorTimeoutBackoff)
-				} else {
-					consecutiveFastTimeouts = 0
+				backoff, terr := guard.onTimeout(session.SessionID, dt, err, b.cfg.Logf)
+				if terr != nil {
+					return terr
+				}
+				if backoff > 0 {
+					time.Sleep(backoff)
 				}
 				continue
 			}
 			return err
 		}
-		consecutiveFastTimeouts = 0
+		guard.reset()
 		if frameType != "res" || res.ID != watchReqID {
 			continue
 		}
@@ -1550,55 +1557,29 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				dt := time.Since(readStart)
-				if dt <= monitorFastTimeoutAfter {
-					consecutiveFastTimeouts++
-					now := time.Now()
-					if now.Sub(lastFastTimeoutLog) >= monitorFastTimeoutLogEvery {
-						b.cfg.Logf(
-							"worker backend lifecycle watch: fast timeout loop session=%s consecutive=%d dt=%s err=%v",
-							session.SessionID,
-							consecutiveFastTimeouts,
-							dt,
-							err,
-						)
-						lastFastTimeoutLog = now
-					}
-					if consecutiveFastTimeouts >= monitorFastTimeoutLimit {
-						return fmt.Errorf("worker lifecycle watch timeout loop (session %s): %w", session.SessionID, err)
-					}
-					time.Sleep(monitorTimeoutBackoff)
-				} else {
-					consecutiveFastTimeouts = 0
+				backoff, terr := guard.onTimeout(session.SessionID, dt, err, b.cfg.Logf)
+				if terr != nil {
+					return terr
+				}
+				if backoff > 0 {
+					time.Sleep(backoff)
 				}
 				continue
 			}
 			if errors.As(err, &netErr) && netErr.Timeout() {
 				dt := time.Since(readStart)
-				if dt <= monitorFastTimeoutAfter {
-					consecutiveFastTimeouts++
-					now := time.Now()
-					if now.Sub(lastFastTimeoutLog) >= monitorFastTimeoutLogEvery {
-						b.cfg.Logf(
-							"worker backend lifecycle watch: fast timeout loop session=%s consecutive=%d dt=%s err=%v",
-							session.SessionID,
-							consecutiveFastTimeouts,
-							dt,
-							err,
-						)
-						lastFastTimeoutLog = now
-					}
-					if consecutiveFastTimeouts >= monitorFastTimeoutLimit {
-						return fmt.Errorf("worker lifecycle watch timeout loop (session %s): %w", session.SessionID, err)
-					}
-					time.Sleep(monitorTimeoutBackoff)
-				} else {
-					consecutiveFastTimeouts = 0
+				backoff, terr := guard.onTimeout(session.SessionID, dt, err, b.cfg.Logf)
+				if terr != nil {
+					return terr
+				}
+				if backoff > 0 {
+					time.Sleep(backoff)
 				}
 				continue
 			}
 			return err
 		}
-		consecutiveFastTimeouts = 0
+		guard.reset()
 		if frameType != "evt" {
 			continue
 		}
