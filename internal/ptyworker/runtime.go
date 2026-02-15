@@ -667,10 +667,16 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 		}
 		c.sendResult(req.ID, map[string]any{"ok": true})
 	case MethodRemove:
-		_ = c.runtime.manager.Kill(c.runtime.cfg.SessionID, syscall.SIGTERM)
-		c.runtime.manager.Remove(c.runtime.cfg.SessionID)
+		// Respond before killing so the RPC doesn't block on process exit.
+		// Kill can wait up to defaultKillTimeout (10s) for the process to
+		// exit, which exceeds the daemon's 5s RPC timeout and causes
+		// spurious "i/o timeout" probe failures.  The subsequent
+		// requestStop() shuts down the worker, which SIGHUPs the child
+		// anyway if it's still alive.
 		c.sendResult(req.ID, map[string]any{"ok": true})
 		c.shutdown = true
+		_ = c.runtime.manager.Kill(c.runtime.cfg.SessionID, syscall.SIGTERM)
+		c.runtime.manager.Remove(c.runtime.cfg.SessionID)
 		c.runtime.requestStop()
 	case MethodWatch:
 		if !c.watching {

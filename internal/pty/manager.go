@@ -354,6 +354,12 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 		}
 	}
 
+	// Strip CLAUDECODE after all merges so spawned sessions don't think
+	// they're nested.  This var leaks into the daemon env when started
+	// from a Claude Code session, and readLoginShellEnv re-captures it
+	// because the login shell inherits the current process environment.
+	env = filterEnvKeys(env, "CLAUDECODE")
+
 	env = mergeEnvironment(env, []string{"TERM=xterm-256color"})
 	if agent != "shell" {
 		env = mergeEnvironment(env, []string{
@@ -433,6 +439,25 @@ func mergeEnvironment(base, overlay []string) []string {
 		add(entry)
 	}
 	return merged
+}
+
+func filterEnvKeys(env []string, keys ...string) []string {
+	drop := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		drop[k] = struct{}{}
+	}
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		key := entry
+		if idx := strings.Index(entry, "="); idx >= 0 {
+			key = entry[:idx]
+		}
+		if _, ok := drop[key]; ok {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func preferredShellCandidates(primary string) []string {
