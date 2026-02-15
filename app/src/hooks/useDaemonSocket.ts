@@ -513,7 +513,7 @@ export function useDaemonSocket({
       const isRunning = await invoke<boolean>('is_daemon_running');
       if (!isRunning) {
         console.log('[Daemon] Not running during reconnect, starting daemon...');
-        await invoke('start_daemon');
+        await invoke('start_daemon', { prefer_local: import.meta.env.VITE_INSTALL_CHANNEL === 'source' });
       }
     } catch (err) {
       console.error('[Daemon] Failed to ensure daemon is running:', err);

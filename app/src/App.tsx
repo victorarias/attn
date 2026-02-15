@@ -132,7 +132,7 @@ function App() {
         const isRunning = await invoke<boolean>('is_daemon_running');
         if (!isRunning) {
           console.log('[App] Daemon not running, starting...');
-          await invoke('start_daemon');
+          await invoke('start_daemon', { prefer_local: installChannel === 'source' });
           console.log('[App] Daemon started');
         }
       } catch (err) {

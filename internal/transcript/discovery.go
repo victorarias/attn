@@ -149,39 +149,36 @@ func readCopilotEventMeta(eventsPath string) copilotEventMeta {
 	defer f.Close()
 
 	meta := copilotEventMeta{}
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
+	_ = readJSONLLines(f, func(line []byte) {
+		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
-			continue
+			return
 		}
 
 		var evt copilotEventEnvelope
 		if err := json.Unmarshal(line, &evt); err != nil {
-			continue
+			return
 		}
 
 		switch evt.Type {
 		case "session.start":
 			var data copilotSessionStartData
 			if err := json.Unmarshal(evt.Data, &data); err != nil {
-				continue
+				return
 			}
 			if data.StartTime == "" {
-				continue
+				return
 			}
 			ts, parseErr := time.Parse(time.RFC3339Nano, data.StartTime)
 			if parseErr != nil {
-				continue
+				return
 			}
 			meta.StartTime = ts
 			meta.HasStartTime = true
 		case "assistant.message":
 			meta.HasAssistantMessage = true
 		}
-	}
+	})
 
 	return meta
 }

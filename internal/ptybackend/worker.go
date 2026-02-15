@@ -506,6 +506,11 @@ func (b *WorkerBackend) SessionIDs(_ context.Context) []string {
 
 func (b *WorkerBackend) Recover(ctx context.Context) (RecoveryReport, error) {
 	report := RecoveryReport{}
+	// Best-effort: restore registries that were quarantined due to historical
+	// socket-path validation changes. If they're now valid (new or legacy format),
+	// move them back so daemon restarts can recover live sessions.
+	b.restoreSocketMismatchQuarantine()
+
 	files, err := filepath.Glob(filepath.Join(b.registryDir(), "*.json"))
 	if err != nil {
 		return report, err
@@ -536,8 +541,9 @@ func (b *WorkerBackend) Recover(ctx context.Context) (RecoveryReport, error) {
 		if err != nil {
 			report.Failed++
 			b.quarantineRegistry(path, "socket_path_mismatch")
-			// Best-effort cleanup of owned socket artifacts for quarantined entries.
-			b.removeOwnedSocket(entry.SocketPath)
+			// Do NOT remove entry.SocketPath here: a bad validation change could
+			// otherwise unlink a live worker socket, permanently orphaning the session.
+			// Best-effort cleanup only for the derived expected path.
 			if expected, expectedErr := b.expectedSocketPath(entry.SessionID); expectedErr == nil {
 				b.removeOwnedSocket(expected)
 			}
@@ -612,6 +618,43 @@ func (b *WorkerBackend) Recover(ctx context.Context) (RecoveryReport, error) {
 		report.Recovered++
 	}
 	return report, nil
+}
+
+func (b *WorkerBackend) restoreSocketMismatchQuarantine() {
+	pattern := filepath.Join(b.quarantineDir(), "*.socket_path_mismatch.*")
+	files, err := filepath.Glob(pattern)
+	if err != nil || len(files) == 0 {
+		return
+	}
+	for _, quarantined := range files {
+		entry, err := ptyworker.ReadRegistry(quarantined)
+		if err != nil {
+			continue
+		}
+		if entry.Version != 1 || entry.SessionID == "" || entry.SocketPath == "" {
+			continue
+		}
+		if err := validateSessionID(entry.SessionID); err != nil {
+			continue
+		}
+		// Only restore entries that belong to this daemon instance.
+		if entry.DaemonInstanceID != b.cfg.DaemonInstanceID {
+			continue
+		}
+		// Only restore if the socket path is now considered valid.
+		if _, err := b.validateRegistrySocketPath(entry.SessionID, entry.SocketPath); err != nil {
+			continue
+		}
+		dest := filepath.Join(b.registryDir(), entry.SessionID+".json")
+		if _, err := os.Stat(dest); err == nil {
+			// Registry already exists; keep quarantine artifact for inspection.
+			continue
+		}
+		if err := os.Rename(quarantined, dest); err != nil {
+			continue
+		}
+		b.cfg.Logf("worker registry restored from quarantine: session=%s dest=%s", entry.SessionID, dest)
+	}
 }
 
 func (b *WorkerBackend) SessionInfo(ctx context.Context, sessionID string) (SessionInfo, error) {
@@ -1021,15 +1064,60 @@ func (b *WorkerBackend) expectedSocketPath(sessionID string) (string, error) {
 	return path, nil
 }
 
+// legacyExpectedSocketPath matches the pre-base32 socket naming format used by older
+// attn versions (prefix "h-" + hex sha256).
+//
+// This exists to support daemon restarts/upgrades without breaking live workers
+// whose registry entries still point at the legacy socket filename.
+func (b *WorkerBackend) legacyExpectedSocketPath(sessionID string) (string, error) {
+	root := b.sockDir()
+
+	sum := sha256.Sum256([]byte(sessionID))
+	hexHash := hex.EncodeToString(sum[:])
+
+	avail := unixSocketPathLimit() - 1 - len(root) - 1
+	if avail <= len("h-")+len(".sock") {
+		return "", fmt.Errorf("unix socket directory path too long: %s", root)
+	}
+	ext := ".sock"
+	keep := avail - len("h-") - len(ext)
+	if keep < 5 {
+		ext = ".s"
+		keep = avail - len("h-") - len(ext)
+	}
+	if keep <= 0 {
+		return "", fmt.Errorf("unix socket path too constrained for session %s (dir=%s)", sessionID, root)
+	}
+	if keep > len(hexHash) {
+		keep = len(hexHash)
+	}
+	// If we can't fit even ~20 bits of hash, don't risk collisions.
+	if keep < 5 {
+		return "", fmt.Errorf("unix socket path too constrained for session %s (dir=%s)", sessionID, root)
+	}
+
+	path := filepath.Join(root, "h-"+hexHash[:keep]+ext)
+	if !unixSocketPathFits(path) {
+		return "", fmt.Errorf("unix socket path too long: %s", path)
+	}
+	return path, nil
+}
+
 func (b *WorkerBackend) validateRegistrySocketPath(sessionID, socketPath string) (string, error) {
 	expected, err := b.expectedSocketPath(sessionID)
 	if err != nil {
 		return "", err
 	}
-	if filepath.Clean(socketPath) != filepath.Clean(expected) {
-		return "", fmt.Errorf("unexpected socket path for session %s", sessionID)
+	clean := filepath.Clean(socketPath)
+	if clean == filepath.Clean(expected) {
+		return expected, nil
 	}
-	return expected, nil
+
+	legacy, legacyErr := b.legacyExpectedSocketPath(sessionID)
+	if legacyErr == nil && clean == filepath.Clean(legacy) {
+		return legacy, nil
+	}
+	return "", fmt.Errorf("unexpected socket path for session %s", sessionID)
 }
 
 func (b *WorkerBackend) reclaimOwnershipMismatch(ctx context.Context, registryPath string, entry ptyworker.RegistryEntry, expectedSocketPath string) (bool, error) {
@@ -1362,10 +1450,17 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 			return nil
 		default:
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(monitorReadDeadline))
+		// If setting the deadline fails, reads can immediately return timeout and spin CPU.
+		if err := conn.SetReadDeadline(time.Now().Add(monitorReadDeadline)); err != nil {
+			return err
+		}
 		frameType, res, _, err := readFrame(dec)
 		if err != nil {
 			var netErr net.Error
+			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
 			if errors.As(err, &netErr) && netErr.Timeout() {
 				continue
 			}
@@ -1389,10 +1484,17 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 			return nil
 		default:
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(monitorReadDeadline))
+		// If setting the deadline fails, reads can immediately return timeout and spin CPU.
+		if err := conn.SetReadDeadline(time.Now().Add(monitorReadDeadline)); err != nil {
+			return err
+		}
 		frameType, _, evt, err := readFrame(dec)
 		if err != nil {
 			var netErr net.Error
+			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
 			if errors.As(err, &netErr) && netErr.Timeout() {
 				continue
 			}

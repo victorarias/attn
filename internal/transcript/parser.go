@@ -2,11 +2,35 @@ package transcript
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"strings"
 	"time"
 )
+
+// readJSONLLines iterates JSONL lines without bufio.Scanner token limits.
+// It returns an error only on underlying I/O errors.
+func readJSONLLines(r io.Reader, fn func(line []byte)) error {
+	br := bufio.NewReader(r)
+	for {
+		line, err := br.ReadBytes('\n')
+		if len(line) > 0 {
+			line = bytes.TrimSpace(line)
+			if len(line) > 0 {
+				fn(line)
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
+}
 
 // contentBlock represents a single content block in the message
 type contentBlock struct {
@@ -107,22 +131,11 @@ func ExtractLastAssistantMessage(path string, maxChars int) (string, error) {
 	defer file.Close()
 
 	var lastAssistantContent string
-	scanner := bufio.NewScanner(file)
-	// Increase buffer size for long lines
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
+	if err := readJSONLLines(file, func(line []byte) {
 		if content := ExtractAssistantContent(line); content != "" {
 			lastAssistantContent = content
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
+	}); err != nil {
 		return "", err
 	}
 
@@ -172,18 +185,11 @@ func ExtractLastAssistantTurnAfterLastUserSince(path string, maxChars int, minAs
 		seq                  int
 	)
 
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
+	if err := readJSONLLines(file, func(line []byte) {
 		seq++
-
 		if isUserEntry(line) {
 			lastUserSeq = seq
+			return
 		}
 		if content := ExtractAssistantContent(line); content != "" {
 			lastAssistantContent = content
@@ -191,9 +197,7 @@ func ExtractLastAssistantTurnAfterLastUserSince(path string, maxChars int, minAs
 			lastAssistantTS = extractLineTimestamp(line)
 			lastAssistantUUID = extractLineUUID(line)
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
+	}); err != nil {
 		return AssistantTurn{}, err
 	}
 

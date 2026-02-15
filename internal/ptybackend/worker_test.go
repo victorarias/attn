@@ -367,6 +367,100 @@ func TestWorkerBackend_Recover_RejectsUnexpectedSocketPath(t *testing.T) {
 	}
 }
 
+func TestWorkerBackend_Recover_AcceptsLegacySocketPath(t *testing.T) {
+	root := newWorkerBackendTestRoot(t)
+	backend, err := NewWorker(WorkerBackendConfig{
+		DataRoot:         root,
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BinaryPath:       "/bin/true",
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+
+	sessionID := "sess-legacy"
+	socketPath, err := backend.legacyExpectedSocketPath(sessionID)
+	if err != nil {
+		t.Fatalf("legacyExpectedSocketPath() error: %v", err)
+	}
+	registryPath := filepath.Join(backend.registryDir(), sessionID+".json")
+	entry := ptyworker.NewRegistryEntry(
+		backend.cfg.DaemonInstanceID,
+		sessionID,
+		os.Getpid(),
+		os.Getpid(),
+		socketPath,
+		"codex",
+		t.TempDir(),
+		"tok",
+	)
+	if err := ptyworker.WriteRegistryAtomic(registryPath, entry); err != nil {
+		t.Fatalf("WriteRegistryAtomic() error: %v", err)
+	}
+	stopServer := startFakeWorkerRPCServer(t, backend.cfg.DaemonInstanceID, sessionID, "tok", socketPath, "codex", t.TempDir())
+	defer stopServer()
+
+	report, err := backend.Recover(context.Background())
+	if err != nil {
+		t.Fatalf("Recover() error: %v", err)
+	}
+	if report.Recovered != 1 {
+		t.Fatalf("recovered = %d, want 1", report.Recovered)
+	}
+	if report.Failed != 0 {
+		t.Fatalf("failed = %d, want 0", report.Failed)
+	}
+}
+
+func TestWorkerBackend_Recover_RestoresSocketMismatchQuarantine(t *testing.T) {
+	root := newWorkerBackendTestRoot(t)
+	backend, err := NewWorker(WorkerBackendConfig{
+		DataRoot:         root,
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BinaryPath:       "/bin/true",
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+
+	sessionID := "sess-quarantine-restore"
+	socketPath, err := backend.legacyExpectedSocketPath(sessionID)
+	if err != nil {
+		t.Fatalf("legacyExpectedSocketPath() error: %v", err)
+	}
+
+	quarantinePath := filepath.Join(backend.quarantineDir(), sessionID+".json.socket_path_mismatch.123")
+	entry := ptyworker.NewRegistryEntry(
+		backend.cfg.DaemonInstanceID,
+		sessionID,
+		os.Getpid(),
+		os.Getpid(),
+		socketPath,
+		"codex",
+		t.TempDir(),
+		"tok",
+	)
+	if err := ptyworker.WriteRegistryAtomic(quarantinePath, entry); err != nil {
+		t.Fatalf("WriteRegistryAtomic(quarantine) error: %v", err)
+	}
+	stopServer := startFakeWorkerRPCServer(t, backend.cfg.DaemonInstanceID, sessionID, "tok", socketPath, "codex", t.TempDir())
+	defer stopServer()
+
+	report, err := backend.Recover(context.Background())
+	if err != nil {
+		t.Fatalf("Recover() error: %v", err)
+	}
+	if report.Recovered != 1 {
+		t.Fatalf("recovered = %d, want 1", report.Recovered)
+	}
+	if _, err := os.Stat(filepath.Join(backend.registryDir(), sessionID+".json")); err != nil {
+		t.Fatalf("restored registry missing: %v", err)
+	}
+	if _, err := os.Stat(quarantinePath); err == nil {
+		t.Fatal("quarantine file should have been moved")
+	}
+}
+
 func TestWorkerBackend_SessionLikelyAlive_UsesValidatedRegistry(t *testing.T) {
 	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
