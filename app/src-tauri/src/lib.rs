@@ -53,17 +53,19 @@ fn is_daemon_running() -> bool {
 /// Start the daemon process
 /// Uses bundled app daemon by default, with optional local override for development.
 #[tauri::command]
-fn start_daemon(_app: tauri::AppHandle) -> Result<(), String> {
+fn start_daemon(_app: tauri::AppHandle, prefer_local: Option<bool>) -> Result<(), String> {
     use std::thread;
     use std::time::Duration;
 
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let prefer_local = matches!(
+    let prefer_local_env = matches!(
         env::var("ATTN_PREFER_LOCAL_DAEMON")
             .ok()
             .map(|value| value.trim().to_ascii_lowercase()),
         Some(value) if value == "1" || value == "true" || value == "yes"
     );
+    let prefer_local_hint = prefer_local.unwrap_or(false);
+    let prefer_local = prefer_local_env || prefer_local_hint;
 
     // 1. Local dev daemon (~/.local/bin/attn)
     let local_path = home.join(".local/bin/attn");
