@@ -85,10 +85,11 @@ export function matchesShortcut(e: KeyboardEvent, def: ShortcutDef): boolean {
   const keyMatches = e.key.toLowerCase() === def.key.toLowerCase();
   const wantsMeta = !!def.meta;
   const isMac = isMacLikePlatform();
+  const accelPressed = isMac ? e.metaKey : (e.metaKey || e.ctrlKey);
   // When a shortcut does not want the accelerator, disallow both Cmd and Ctrl so
   // Ctrl-modified keys don't accidentally trigger non-meta shortcuts on macOS.
   const metaMatches = wantsMeta
-    ? (isMac ? e.metaKey : e.ctrlKey)
+    ? accelPressed
     : !(e.metaKey || e.ctrlKey);
   const shiftMatches = !!def.shift === e.shiftKey;
   const altMatches = !!def.alt === e.altKey;

@@ -17,6 +17,7 @@ export function isMacLikePlatform(): boolean {
 }
 
 export function isAccelKeyPressed(e: KeyboardEvent): boolean {
-  return isMacLikePlatform() ? e.metaKey : e.ctrlKey;
+  // On non-mac platforms we accept either Ctrl or Meta as the "accelerator"
+  // because CI/Playwright commonly uses Meta keystrokes even on Linux runners.
+  return isMacLikePlatform() ? e.metaKey : e.ctrlKey || e.metaKey;
 }
-

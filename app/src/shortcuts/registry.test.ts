@@ -79,32 +79,38 @@ describe('shortcut registry', () => {
     });
 
     it('does not match when shift required but not pressed', () => {
-      const def: ShortcutDef = { key: 'w', meta: true, shift: true };
-      const event = new KeyboardEvent('keydown', {
-        key: 'w',
-        metaKey: true,
-        shiftKey: false,
+      withNavigatorPlatform('MacIntel', () => {
+        const def: ShortcutDef = { key: 'w', meta: true, shift: true };
+        const event = new KeyboardEvent('keydown', {
+          key: 'w',
+          metaKey: true,
+          shiftKey: false,
+        });
+        expect(matchesShortcut(event, def)).toBe(false);
       });
-      expect(matchesShortcut(event, def)).toBe(false);
     });
 
     it('does not match when extra shift pressed', () => {
-      const def: ShortcutDef = { key: 'n', meta: true };
-      const event = new KeyboardEvent('keydown', {
-        key: 'N',
-        metaKey: true,
-        shiftKey: true,
+      withNavigatorPlatform('MacIntel', () => {
+        const def: ShortcutDef = { key: 'n', meta: true };
+        const event = new KeyboardEvent('keydown', {
+          key: 'N',
+          metaKey: true,
+          shiftKey: true,
+        });
+        expect(matchesShortcut(event, def)).toBe(false);
       });
-      expect(matchesShortcut(event, def)).toBe(false);
     });
 
     it('does not match wrong key', () => {
-      const def: ShortcutDef = { key: 'n', meta: true };
-      const event = new KeyboardEvent('keydown', {
-        key: 'm',
-        metaKey: true,
+      withNavigatorPlatform('MacIntel', () => {
+        const def: ShortcutDef = { key: 'n', meta: true };
+        const event = new KeyboardEvent('keydown', {
+          key: 'm',
+          metaKey: true,
+        });
+        expect(matchesShortcut(event, def)).toBe(false);
       });
-      expect(matchesShortcut(event, def)).toBe(false);
     });
 
     it('is case insensitive for key', () => {
