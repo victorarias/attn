@@ -32,22 +32,20 @@ const (
 	reclaimRPCTimeout    = 3 * time.Second
 	pollerInterval       = 5 * time.Second
 	monitorRetryInterval = 1 * time.Second
-	monitorReadDeadline  = 2 * time.Second
-	// Backoff after timeout errors to avoid CPU spin if reads repeatedly return
-	// immediate timeouts.
-	monitorTimeoutBackoff      = 25 * time.Millisecond
-	monitorFastTimeoutAfter    = 50 * time.Millisecond
-	monitorFastTimeoutLimit    = 20
-	monitorFastTimeoutLogEvery = 5 * time.Second
-	pollerFailureThreshold     = 3
-	pollerUnreachableAfter     = 30 * time.Second
-	spawnReadyTimeout          = 8 * time.Second
-	spawnReadyPollInterval     = 100 * time.Millisecond
-	spawnKillGracePeriod       = 1 * time.Second
-	spawnWaitTimeout           = 500 * time.Millisecond
-	probeTimeout               = 8 * time.Second
-	streamEventBufferSize      = 256
-	streamPreEventBufferCap    = 8
+	// watchResponseTimeout is how long we'll wait for the worker to ACK MethodWatch.
+	// We intentionally do not use conn deadlines here because they have caused
+	// spurious immediate timeouts on some systems; instead we close the conn on
+	// timeout to unblock the read.
+	watchResponseTimeout    = 5 * time.Second
+	pollerFailureThreshold  = 3
+	pollerUnreachableAfter  = 30 * time.Second
+	spawnReadyTimeout       = 8 * time.Second
+	spawnReadyPollInterval  = 100 * time.Millisecond
+	spawnKillGracePeriod    = 1 * time.Second
+	spawnWaitTimeout        = 500 * time.Millisecond
+	probeTimeout            = 8 * time.Second
+	streamEventBufferSize   = 256
+	streamPreEventBufferCap = 8
 )
 
 type WorkerBackendConfig struct {
@@ -1392,44 +1390,7 @@ func (b *WorkerBackend) startPoller(session *workerSession) {
 }
 
 var errLifecycleWatchUnsupported = errors.New("worker lifecycle watch unsupported")
-var errLifecycleWatchTimeoutLoop = errors.New("worker lifecycle watch timeout loop")
-
-type monitorTimeoutGuard struct {
-	consecutiveFastTimeouts int
-	lastFastTimeoutLog      time.Time
-}
-
-func (g *monitorTimeoutGuard) reset() {
-	g.consecutiveFastTimeouts = 0
-}
-
-// onTimeout returns (backoff, abortErr). backoff is non-zero only for fast timeout loops.
-func (g *monitorTimeoutGuard) onTimeout(sessionID string, dt time.Duration, err error, logf func(format string, args ...interface{})) (time.Duration, error) {
-	if dt > monitorFastTimeoutAfter {
-		g.consecutiveFastTimeouts = 0
-		return 0, nil
-	}
-
-	g.consecutiveFastTimeouts++
-
-	now := time.Now()
-	if now.Sub(g.lastFastTimeoutLog) >= monitorFastTimeoutLogEvery {
-		logf(
-			"worker backend lifecycle watch: fast timeout loop session=%s consecutive=%d dt=%s err=%v",
-			sessionID,
-			g.consecutiveFastTimeouts,
-			dt,
-			err,
-		)
-		g.lastFastTimeoutLog = now
-	}
-
-	if g.consecutiveFastTimeouts >= monitorFastTimeoutLimit {
-		// Treat a fast-timeout loop as a broken watch stream. Degrade to poll-based lifecycle.
-		return 0, fmt.Errorf("%w: session=%s: %v", errLifecycleWatchTimeoutLoop, sessionID, err)
-	}
-	return monitorTimeoutBackoff, nil
-}
+var errLifecycleWatchHandshakeTimeout = errors.New("worker lifecycle watch handshake timeout")
 
 func (b *WorkerBackend) startMonitor(session *workerSession) {
 	session.mu.Lock()
@@ -1463,11 +1424,11 @@ func (b *WorkerBackend) startMonitor(session *workerSession) {
 				b.cfg.Logf("worker backend lifecycle watch unsupported for session %s; falling back to poll-based lifecycle", session.SessionID)
 				return
 			}
-			if errors.Is(err, errLifecycleWatchTimeoutLoop) {
+			if errors.Is(err, errLifecycleWatchHandshakeTimeout) {
 				session.mu.Lock()
 				session.legacyLifecycle = true
 				session.mu.Unlock()
-				b.cfg.Logf("worker backend lifecycle watch unreliable for session %s; falling back to poll-based lifecycle", session.SessionID)
+				b.cfg.Logf("worker backend lifecycle watch handshake timed out for session %s; falling back to poll-based lifecycle", session.SessionID)
 				return
 			}
 			b.cfg.Logf("worker backend lifecycle watch disconnected for session %s: %v", session.SessionID, err)
@@ -1490,53 +1451,41 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 	}
 	defer conn.Close()
 
-	guard := &monitorTimeoutGuard{}
+	stopDone := make(chan struct{})
+	go func() {
+		select {
+		case <-stopCh:
+			_ = conn.Close()
+		case <-stopDone:
+		}
+	}()
+	defer close(stopDone)
 
 	watchReqID := b.nextReqID("watch")
 	if err := writeRequest(enc, watchReqID, ptyworker.MethodWatch, map[string]any{}); err != nil {
 		return err
 	}
 
+	var handshakeTimedOut atomic.Bool
+	handshakeTimer := time.AfterFunc(watchResponseTimeout, func() {
+		handshakeTimedOut.Store(true)
+		_ = conn.Close()
+	})
+	defer handshakeTimer.Stop()
+
 	for {
-		select {
-		case <-stopCh:
-			return nil
-		default:
-		}
-		// If reads return immediate timeouts, the loop can spin CPU.
-		if err := conn.SetReadDeadline(time.Now().Add(monitorReadDeadline)); err != nil {
-			return err
-		}
-		readStart := time.Now()
 		frameType, res, _, err := readFrame(dec)
 		if err != nil {
-			var netErr net.Error
-			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				dt := time.Since(readStart)
-				backoff, terr := guard.onTimeout(session.SessionID, dt, err, b.cfg.Logf)
-				if terr != nil {
-					return terr
-				}
-				if backoff > 0 {
-					time.Sleep(backoff)
-				}
-				continue
+			select {
+			case <-stopCh:
+				return nil
+			default:
 			}
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				dt := time.Since(readStart)
-				backoff, terr := guard.onTimeout(session.SessionID, dt, err, b.cfg.Logf)
-				if terr != nil {
-					return terr
-				}
-				if backoff > 0 {
-					time.Sleep(backoff)
-				}
-				continue
+			if handshakeTimedOut.Load() {
+				return errLifecycleWatchHandshakeTimeout
 			}
 			return err
 		}
-		guard.reset()
 		if frameType != "res" || res.ID != watchReqID {
 			continue
 		}
@@ -1546,49 +1495,20 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 			}
 			return b.rpcError(session.SessionID, res.Error)
 		}
+		handshakeTimer.Stop()
 		break
 	}
 
 	for {
-		select {
-		case <-stopCh:
-			return nil
-		default:
-		}
-		// If reads return immediate timeouts, the loop can spin CPU.
-		if err := conn.SetReadDeadline(time.Now().Add(monitorReadDeadline)); err != nil {
-			return err
-		}
-		readStart := time.Now()
 		frameType, _, evt, err := readFrame(dec)
 		if err != nil {
-			var netErr net.Error
-			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				dt := time.Since(readStart)
-				backoff, terr := guard.onTimeout(session.SessionID, dt, err, b.cfg.Logf)
-				if terr != nil {
-					return terr
-				}
-				if backoff > 0 {
-					time.Sleep(backoff)
-				}
-				continue
-			}
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				dt := time.Since(readStart)
-				backoff, terr := guard.onTimeout(session.SessionID, dt, err, b.cfg.Logf)
-				if terr != nil {
-					return terr
-				}
-				if backoff > 0 {
-					time.Sleep(backoff)
-				}
-				continue
+			select {
+			case <-stopCh:
+				return nil
+			default:
 			}
 			return err
 		}
-		guard.reset()
 		if frameType != "evt" {
 			continue
 		}

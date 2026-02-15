@@ -897,24 +897,30 @@ func TestWorkerBackend_Spawn_CleansUpUnreadyWorkerProcess(t *testing.T) {
 		t.Fatalf("NewWorker() error: %v", err)
 	}
 
-	// Give the worker process time to start and write the PID file before the
-	// spawn context cancels. This avoids flakes under load.
-	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-	defer cancel()
-	err = backend.Spawn(ctx, SpawnOptions{
-		ID:    "sess-timeout",
-		Agent: "codex",
-		CWD:   root,
-		Cols:  80,
-		Rows:  24,
-	})
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Spawn() error = %v, want context deadline exceeded", err)
-	}
+	// Use manual cancellation after we observe the worker process has started.
+	// This avoids flakes where the context cancels before the child gets
+	// scheduled and writes its PID file.
+	ctx, cancel := context.WithCancel(context.Background())
+	spawnDone := make(chan error, 1)
+	go func() {
+		spawnDone <- backend.Spawn(ctx, SpawnOptions{
+			ID:    "sess-timeout",
+			Agent: "codex",
+			CWD:   root,
+			Cols:  80,
+			Rows:  24,
+		})
+	}()
 
 	var pid int
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
+		select {
+		case err := <-spawnDone:
+			cancel()
+			t.Fatalf("Spawn() returned before worker started (pid file missing): %v", err)
+		default:
+		}
 		data, readErr := os.ReadFile(pidFile)
 		if readErr != nil {
 			time.Sleep(25 * time.Millisecond)
@@ -931,7 +937,17 @@ func TestWorkerBackend_Spawn_CleansUpUnreadyWorkerProcess(t *testing.T) {
 		t.Fatalf("timed out waiting for fake worker pid file at %s", pidFile)
 	}
 
-	deadline = time.Now().Add(3 * time.Second)
+	cancel()
+	select {
+	case err := <-spawnDone:
+		if err == nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("Spawn() error = %v, want context canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Spawn() did not return after context cancellation")
+	}
+
+	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if !pidAlive(pid) {
 			return
