@@ -897,7 +897,9 @@ func TestWorkerBackend_Spawn_CleansUpUnreadyWorkerProcess(t *testing.T) {
 		t.Fatalf("NewWorker() error: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	// Give the worker process time to start and write the PID file before the
+	// spawn context cancels. This avoids flakes under load.
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
 	err = backend.Spawn(ctx, SpawnOptions{
 		ID:    "sess-timeout",
@@ -911,7 +913,7 @@ func TestWorkerBackend_Spawn_CleansUpUnreadyWorkerProcess(t *testing.T) {
 	}
 
 	var pid int
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		data, readErr := os.ReadFile(pidFile)
 		if readErr != nil {

@@ -33,18 +33,21 @@ const (
 	pollerInterval       = 5 * time.Second
 	monitorRetryInterval = 1 * time.Second
 	monitorReadDeadline  = 2 * time.Second
-	// Backoff after timeout errors to avoid CPU spin if a connection repeatedly
-	// returns timeouts immediately (e.g. due to a broken deadline implementation).
-	monitorTimeoutBackoff   = 25 * time.Millisecond
-	pollerFailureThreshold  = 3
-	pollerUnreachableAfter  = 30 * time.Second
-	spawnReadyTimeout       = 8 * time.Second
-	spawnReadyPollInterval  = 100 * time.Millisecond
-	spawnKillGracePeriod    = 1 * time.Second
-	spawnWaitTimeout        = 500 * time.Millisecond
-	probeTimeout            = 8 * time.Second
-	streamEventBufferSize   = 256
-	streamPreEventBufferCap = 8
+	// Backoff after timeout errors to avoid CPU spin if reads repeatedly return
+	// immediate timeouts.
+	monitorTimeoutBackoff      = 25 * time.Millisecond
+	monitorFastTimeoutAfter    = 50 * time.Millisecond
+	monitorFastTimeoutLimit    = 20
+	monitorFastTimeoutLogEvery = 5 * time.Second
+	pollerFailureThreshold     = 3
+	pollerUnreachableAfter     = 30 * time.Second
+	spawnReadyTimeout          = 8 * time.Second
+	spawnReadyPollInterval     = 100 * time.Millisecond
+	spawnKillGracePeriod       = 1 * time.Second
+	spawnWaitTimeout           = 500 * time.Millisecond
+	probeTimeout               = 8 * time.Second
+	streamEventBufferSize      = 256
+	streamPreEventBufferCap    = 8
 )
 
 type WorkerBackendConfig struct {
@@ -1442,6 +1445,11 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 	}
 	defer conn.Close()
 
+	var (
+		consecutiveFastTimeouts int
+		lastFastTimeoutLog      time.Time
+	)
+
 	watchReqID := b.nextReqID("watch")
 	if err := writeRequest(enc, watchReqID, ptyworker.MethodWatch, map[string]any{}); err != nil {
 		return err
@@ -1453,24 +1461,66 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 			return nil
 		default:
 		}
-		// If setting the deadline fails, reads can immediately return timeout and spin CPU.
+		// If reads return immediate timeouts, the loop can spin CPU.
 		if err := conn.SetReadDeadline(time.Now().Add(monitorReadDeadline)); err != nil {
 			return err
 		}
+		readStart := time.Now()
 		frameType, res, _, err := readFrame(dec)
 		if err != nil {
 			var netErr net.Error
 			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				time.Sleep(monitorTimeoutBackoff)
+				dt := time.Since(readStart)
+				if dt <= monitorFastTimeoutAfter {
+					consecutiveFastTimeouts++
+					now := time.Now()
+					if now.Sub(lastFastTimeoutLog) >= monitorFastTimeoutLogEvery {
+						b.cfg.Logf(
+							"worker backend lifecycle watch: fast timeout loop session=%s consecutive=%d dt=%s err=%v",
+							session.SessionID,
+							consecutiveFastTimeouts,
+							dt,
+							err,
+						)
+						lastFastTimeoutLog = now
+					}
+					if consecutiveFastTimeouts >= monitorFastTimeoutLimit {
+						return fmt.Errorf("worker lifecycle watch timeout loop (session %s): %w", session.SessionID, err)
+					}
+					time.Sleep(monitorTimeoutBackoff)
+				} else {
+					consecutiveFastTimeouts = 0
+				}
 				continue
 			}
 			if errors.As(err, &netErr) && netErr.Timeout() {
-				time.Sleep(monitorTimeoutBackoff)
+				dt := time.Since(readStart)
+				if dt <= monitorFastTimeoutAfter {
+					consecutiveFastTimeouts++
+					now := time.Now()
+					if now.Sub(lastFastTimeoutLog) >= monitorFastTimeoutLogEvery {
+						b.cfg.Logf(
+							"worker backend lifecycle watch: fast timeout loop session=%s consecutive=%d dt=%s err=%v",
+							session.SessionID,
+							consecutiveFastTimeouts,
+							dt,
+							err,
+						)
+						lastFastTimeoutLog = now
+					}
+					if consecutiveFastTimeouts >= monitorFastTimeoutLimit {
+						return fmt.Errorf("worker lifecycle watch timeout loop (session %s): %w", session.SessionID, err)
+					}
+					time.Sleep(monitorTimeoutBackoff)
+				} else {
+					consecutiveFastTimeouts = 0
+				}
 				continue
 			}
 			return err
 		}
+		consecutiveFastTimeouts = 0
 		if frameType != "res" || res.ID != watchReqID {
 			continue
 		}
@@ -1489,24 +1539,66 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 			return nil
 		default:
 		}
-		// If setting the deadline fails, reads can immediately return timeout and spin CPU.
+		// If reads return immediate timeouts, the loop can spin CPU.
 		if err := conn.SetReadDeadline(time.Now().Add(monitorReadDeadline)); err != nil {
 			return err
 		}
+		readStart := time.Now()
 		frameType, _, evt, err := readFrame(dec)
 		if err != nil {
 			var netErr net.Error
 			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				time.Sleep(monitorTimeoutBackoff)
+				dt := time.Since(readStart)
+				if dt <= monitorFastTimeoutAfter {
+					consecutiveFastTimeouts++
+					now := time.Now()
+					if now.Sub(lastFastTimeoutLog) >= monitorFastTimeoutLogEvery {
+						b.cfg.Logf(
+							"worker backend lifecycle watch: fast timeout loop session=%s consecutive=%d dt=%s err=%v",
+							session.SessionID,
+							consecutiveFastTimeouts,
+							dt,
+							err,
+						)
+						lastFastTimeoutLog = now
+					}
+					if consecutiveFastTimeouts >= monitorFastTimeoutLimit {
+						return fmt.Errorf("worker lifecycle watch timeout loop (session %s): %w", session.SessionID, err)
+					}
+					time.Sleep(monitorTimeoutBackoff)
+				} else {
+					consecutiveFastTimeouts = 0
+				}
 				continue
 			}
 			if errors.As(err, &netErr) && netErr.Timeout() {
-				time.Sleep(monitorTimeoutBackoff)
+				dt := time.Since(readStart)
+				if dt <= monitorFastTimeoutAfter {
+					consecutiveFastTimeouts++
+					now := time.Now()
+					if now.Sub(lastFastTimeoutLog) >= monitorFastTimeoutLogEvery {
+						b.cfg.Logf(
+							"worker backend lifecycle watch: fast timeout loop session=%s consecutive=%d dt=%s err=%v",
+							session.SessionID,
+							consecutiveFastTimeouts,
+							dt,
+							err,
+						)
+						lastFastTimeoutLog = now
+					}
+					if consecutiveFastTimeouts >= monitorFastTimeoutLimit {
+						return fmt.Errorf("worker lifecycle watch timeout loop (session %s): %w", session.SessionID, err)
+					}
+					time.Sleep(monitorTimeoutBackoff)
+				} else {
+					consecutiveFastTimeouts = 0
+				}
 				continue
 			}
 			return err
 		}
+		consecutiveFastTimeouts = 0
 		if frameType != "evt" {
 			continue
 		}
