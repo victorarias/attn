@@ -1,6 +1,7 @@
 // app/src/hooks/useKeyboardShortcuts.ts
 import { useEffect, useCallback } from 'react';
 import { useShortcut } from '../shortcuts';
+import { isAccelKeyPressed } from '../shortcuts/platform';
 
 interface KeyboardShortcutsConfig {
   onNewSession: () => void;
@@ -71,7 +72,7 @@ export function useKeyboardShortcuts({
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!enabled) return;
-      const isMeta = e.metaKey || e.ctrlKey;
+      const isMeta = isAccelKeyPressed(e);
 
       // ⌘1-9 - Select session by index
       if (isMeta && e.key >= '1' && e.key <= '9') {
