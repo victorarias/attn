@@ -27,12 +27,16 @@ import (
 )
 
 const (
-	defaultRPCTimeout       = 5 * time.Second
-	livenessRPCTimeout      = 2 * time.Second
-	reclaimRPCTimeout       = 3 * time.Second
-	pollerInterval          = 5 * time.Second
-	monitorRetryInterval    = 1 * time.Second
-	monitorReadDeadline     = 2 * time.Second
+	defaultRPCTimeout    = 5 * time.Second
+	livenessRPCTimeout   = 2 * time.Second
+	reclaimRPCTimeout    = 3 * time.Second
+	pollerInterval       = 5 * time.Second
+	monitorRetryInterval = 1 * time.Second
+	// watchResponseTimeout is how long we'll wait for the worker to ACK MethodWatch.
+	// We intentionally do not use conn deadlines here because they have caused
+	// spurious immediate timeouts on some systems; instead we close the conn on
+	// timeout to unblock the read.
+	watchResponseTimeout    = 5 * time.Second
 	pollerFailureThreshold  = 3
 	pollerUnreachableAfter  = 30 * time.Second
 	spawnReadyTimeout       = 8 * time.Second
@@ -1386,6 +1390,7 @@ func (b *WorkerBackend) startPoller(session *workerSession) {
 }
 
 var errLifecycleWatchUnsupported = errors.New("worker lifecycle watch unsupported")
+var errLifecycleWatchHandshakeTimeout = errors.New("worker lifecycle watch handshake timeout")
 
 func (b *WorkerBackend) startMonitor(session *workerSession) {
 	session.mu.Lock()
@@ -1419,6 +1424,13 @@ func (b *WorkerBackend) startMonitor(session *workerSession) {
 				b.cfg.Logf("worker backend lifecycle watch unsupported for session %s; falling back to poll-based lifecycle", session.SessionID)
 				return
 			}
+			if errors.Is(err, errLifecycleWatchHandshakeTimeout) {
+				session.mu.Lock()
+				session.legacyLifecycle = true
+				session.mu.Unlock()
+				b.cfg.Logf("worker backend lifecycle watch handshake timed out for session %s; falling back to poll-based lifecycle", session.SessionID)
+				return
+			}
 			b.cfg.Logf("worker backend lifecycle watch disconnected for session %s: %v", session.SessionID, err)
 
 			select {
@@ -1439,30 +1451,38 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 	}
 	defer conn.Close()
 
+	stopDone := make(chan struct{})
+	go func() {
+		select {
+		case <-stopCh:
+			_ = conn.Close()
+		case <-stopDone:
+		}
+	}()
+	defer close(stopDone)
+
 	watchReqID := b.nextReqID("watch")
 	if err := writeRequest(enc, watchReqID, ptyworker.MethodWatch, map[string]any{}); err != nil {
 		return err
 	}
 
+	var handshakeTimedOut atomic.Bool
+	handshakeTimer := time.AfterFunc(watchResponseTimeout, func() {
+		handshakeTimedOut.Store(true)
+		_ = conn.Close()
+	})
+	defer handshakeTimer.Stop()
+
 	for {
-		select {
-		case <-stopCh:
-			return nil
-		default:
-		}
-		// If setting the deadline fails, reads can immediately return timeout and spin CPU.
-		if err := conn.SetReadDeadline(time.Now().Add(monitorReadDeadline)); err != nil {
-			return err
-		}
 		frameType, res, _, err := readFrame(dec)
 		if err != nil {
-			var netErr net.Error
-			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				continue
+			select {
+			case <-stopCh:
+				return nil
+			default:
 			}
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				continue
+			if handshakeTimedOut.Load() {
+				return errLifecycleWatchHandshakeTimeout
 			}
 			return err
 		}
@@ -1475,28 +1495,17 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 			}
 			return b.rpcError(session.SessionID, res.Error)
 		}
+		handshakeTimer.Stop()
 		break
 	}
 
 	for {
-		select {
-		case <-stopCh:
-			return nil
-		default:
-		}
-		// If setting the deadline fails, reads can immediately return timeout and spin CPU.
-		if err := conn.SetReadDeadline(time.Now().Add(monitorReadDeadline)); err != nil {
-			return err
-		}
 		frameType, _, evt, err := readFrame(dec)
 		if err != nil {
-			var netErr net.Error
-			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				continue
-			}
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				continue
+			select {
+			case <-stopCh:
+				return nil
+			default:
 			}
 			return err
 		}
