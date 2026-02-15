@@ -27,12 +27,15 @@ import (
 )
 
 const (
-	defaultRPCTimeout       = 5 * time.Second
-	livenessRPCTimeout      = 2 * time.Second
-	reclaimRPCTimeout       = 3 * time.Second
-	pollerInterval          = 5 * time.Second
-	monitorRetryInterval    = 1 * time.Second
-	monitorReadDeadline     = 2 * time.Second
+	defaultRPCTimeout    = 5 * time.Second
+	livenessRPCTimeout   = 2 * time.Second
+	reclaimRPCTimeout    = 3 * time.Second
+	pollerInterval       = 5 * time.Second
+	monitorRetryInterval = 1 * time.Second
+	monitorReadDeadline  = 2 * time.Second
+	// Backoff after timeout errors to avoid CPU spin if a connection repeatedly
+	// returns timeouts immediately (e.g. due to a broken deadline implementation).
+	monitorTimeoutBackoff   = 25 * time.Millisecond
 	pollerFailureThreshold  = 3
 	pollerUnreachableAfter  = 30 * time.Second
 	spawnReadyTimeout       = 8 * time.Second
@@ -1459,9 +1462,11 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 			var netErr net.Error
 			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				time.Sleep(monitorTimeoutBackoff)
 				continue
 			}
 			if errors.As(err, &netErr) && netErr.Timeout() {
+				time.Sleep(monitorTimeoutBackoff)
 				continue
 			}
 			return err
@@ -1493,9 +1498,11 @@ func (b *WorkerBackend) runLifecycleMonitor(session *workerSession, stopCh <-cha
 			var netErr net.Error
 			// Fast-path: avoid reflect-heavy errors.As on the hot timeout path.
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				time.Sleep(monitorTimeoutBackoff)
 				continue
 			}
 			if errors.As(err, &netErr) && netErr.Timeout() {
+				time.Sleep(monitorTimeoutBackoff)
 				continue
 			}
 			return err
