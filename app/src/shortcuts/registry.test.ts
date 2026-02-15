@@ -2,34 +2,62 @@
 import { describe, it, expect } from 'vitest';
 import { SHORTCUTS, ShortcutDef, matchesShortcut } from './registry';
 
+function withNavigatorPlatform<T>(platform: string, fn: () => T): T {
+  const nav = window.navigator as Navigator & { platform?: string };
+  const original = nav.platform;
+  Object.defineProperty(nav, 'platform', { value: platform, configurable: true });
+  try {
+    return fn();
+  } finally {
+    Object.defineProperty(nav, 'platform', { value: original, configurable: true });
+  }
+}
+
 describe('shortcut registry', () => {
   describe('matchesShortcut', () => {
-    it('matches simple meta+key shortcut', () => {
-      const def: ShortcutDef = { key: 'n', meta: true };
-      const event = new KeyboardEvent('keydown', {
-        key: 'n',
-        metaKey: true,
+    it('matches cmd+key shortcut on macOS', () => {
+      withNavigatorPlatform('MacIntel', () => {
+        const def: ShortcutDef = { key: 'n', meta: true };
+        const event = new KeyboardEvent('keydown', {
+          key: 'n',
+          metaKey: true,
+        });
+        expect(matchesShortcut(event, def)).toBe(true);
       });
-      expect(matchesShortcut(event, def)).toBe(true);
     });
 
-    it('matches ctrl as meta alternative', () => {
-      const def: ShortcutDef = { key: 'n', meta: true };
-      const event = new KeyboardEvent('keydown', {
-        key: 'n',
-        ctrlKey: true,
+    it('matches ctrl as meta alternative on non-mac platforms', () => {
+      withNavigatorPlatform('Win32', () => {
+        const def: ShortcutDef = { key: 'n', meta: true };
+        const event = new KeyboardEvent('keydown', {
+          key: 'n',
+          ctrlKey: true,
+        });
+        expect(matchesShortcut(event, def)).toBe(true);
       });
-      expect(matchesShortcut(event, def)).toBe(true);
     });
 
-    it('matches meta+shift+key shortcut', () => {
-      const def: ShortcutDef = { key: 'w', meta: true, shift: true };
-      const event = new KeyboardEvent('keydown', {
-        key: 'W',
-        metaKey: true,
-        shiftKey: true,
+    it('does not treat ctrl as meta on macOS', () => {
+      withNavigatorPlatform('MacIntel', () => {
+        const def: ShortcutDef = { key: 'w', meta: true };
+        const event = new KeyboardEvent('keydown', {
+          key: 'w',
+          ctrlKey: true,
+        });
+        expect(matchesShortcut(event, def)).toBe(false);
       });
-      expect(matchesShortcut(event, def)).toBe(true);
+    });
+
+    it('matches cmd+shift+key shortcut on macOS', () => {
+      withNavigatorPlatform('MacIntel', () => {
+        const def: ShortcutDef = { key: 'w', meta: true, shift: true };
+        const event = new KeyboardEvent('keydown', {
+          key: 'W',
+          metaKey: true,
+          shiftKey: true,
+        });
+        expect(matchesShortcut(event, def)).toBe(true);
+      });
     });
 
     it('matches shift-only shortcut (e.g., Shift+`)', () => {
@@ -80,31 +108,37 @@ describe('shortcut registry', () => {
     });
 
     it('is case insensitive for key', () => {
-      const def: ShortcutDef = { key: 'N', meta: true };
-      const event = new KeyboardEvent('keydown', {
-        key: 'n',
-        metaKey: true,
+      withNavigatorPlatform('MacIntel', () => {
+        const def: ShortcutDef = { key: 'N', meta: true };
+        const event = new KeyboardEvent('keydown', {
+          key: 'n',
+          metaKey: true,
+        });
+        expect(matchesShortcut(event, def)).toBe(true);
       });
-      expect(matchesShortcut(event, def)).toBe(true);
     });
 
     it('matches special characters like backtick', () => {
-      const def: ShortcutDef = { key: '`', meta: true };
-      const event = new KeyboardEvent('keydown', {
-        key: '`',
-        metaKey: true,
+      withNavigatorPlatform('MacIntel', () => {
+        const def: ShortcutDef = { key: '`', meta: true };
+        const event = new KeyboardEvent('keydown', {
+          key: '`',
+          metaKey: true,
+        });
+        expect(matchesShortcut(event, def)).toBe(true);
       });
-      expect(matchesShortcut(event, def)).toBe(true);
     });
 
     it('matches shifted special characters (Shift+[ = {)', () => {
-      const def: ShortcutDef = { key: '{', meta: true, shift: true };
-      const event = new KeyboardEvent('keydown', {
-        key: '{',
-        metaKey: true,
-        shiftKey: true,
+      withNavigatorPlatform('MacIntel', () => {
+        const def: ShortcutDef = { key: '{', meta: true, shift: true };
+        const event = new KeyboardEvent('keydown', {
+          key: '{',
+          metaKey: true,
+          shiftKey: true,
+        });
+        expect(matchesShortcut(event, def)).toBe(true);
       });
-      expect(matchesShortcut(event, def)).toBe(true);
     });
   });
 

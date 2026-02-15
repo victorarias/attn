@@ -1,5 +1,7 @@
 // app/src/shortcuts/registry.ts
 
+import { isMacLikePlatform } from './platform';
+
 export interface ShortcutDef {
   key: string;
   meta?: boolean;
@@ -81,7 +83,13 @@ export function validateNoConflicts(): void {
  */
 export function matchesShortcut(e: KeyboardEvent, def: ShortcutDef): boolean {
   const keyMatches = e.key.toLowerCase() === def.key.toLowerCase();
-  const metaMatches = !!def.meta === (e.metaKey || e.ctrlKey);
+  const wantsMeta = !!def.meta;
+  const isMac = isMacLikePlatform();
+  // When a shortcut does not want the accelerator, disallow both Cmd and Ctrl so
+  // Ctrl-modified keys don't accidentally trigger non-meta shortcuts on macOS.
+  const metaMatches = wantsMeta
+    ? (isMac ? e.metaKey : e.ctrlKey)
+    : !(e.metaKey || e.ctrlKey);
   const shiftMatches = !!def.shift === e.shiftKey;
   const altMatches = !!def.alt === e.altKey;
 
