@@ -12,7 +12,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Claude Transcript Parsing**: Removed `bufio.Scanner` token-size limitations when reading JSONL transcripts, preventing stop-time classification from erroring and sessions from flashing/sticking `unknown` due to very long lines.
 - **Worker PTY Restart Survival**: Worker backend recovery now accepts legacy socket-path filenames and restores prior `socket_path_mismatch` quarantine entries when they match supported formats, improving daemon restart resilience.
 - **Worker PTY Recovery Safety**: Socket-path mismatch quarantine no longer unlinks the registry-reported worker socket path, preventing accidental orphaning of live worker sessions.
-- **Worker Lifecycle Monitor CPU Spike**: Reduced CPU usage on monitor timeout paths by fast-pathing timeout checks, handling read-deadline errors, and adding a small timeout backoff to prevent CPU spin.
+- **Worker Lifecycle Monitor CPU Spike**: Lifecycle watch no longer relies on socket read deadlines; it blocks on the watch stream and stops by closing the connection, preventing immediate-timeout loops that could peg CPU.
 - **Source App Daemon Selection**: Source-built apps now prefer `~/.local/bin/attn daemon` (when it is at least as new as the bundled daemon) so `make install` daemon changes take effect without rebuilding the app.
 - **macOS Shortcut Regression**: `Ctrl+W` no longer closes sessions; closing is now `Cmd+W` only (so terminals keep standard delete-word behavior).
 
