@@ -251,6 +251,95 @@ func TestExtractCopilotToolLifecycle_IgnoresNonLifecycle(t *testing.T) {
 	}
 }
 
+func TestExtractCodexLifecycle_TurnSignals(t *testing.T) {
+	cases := []struct {
+		name     string
+		line     string
+		wantKind string
+	}{
+		{
+			name:     "task started opens turn",
+			line:     `{"type":"event_msg","payload":{"type":"task_started"}}`,
+			wantKind: "turn_start",
+		},
+		{
+			name:     "user message opens turn",
+			line:     `{"type":"event_msg","payload":{"type":"user_message","message":"hi"}}`,
+			wantKind: "turn_start",
+		},
+		{
+			name:     "task complete closes turn",
+			line:     `{"type":"event_msg","payload":{"type":"task_complete"}}`,
+			wantKind: "turn_end",
+		},
+		{
+			name:     "turn aborted closes turn",
+			line:     `{"type":"event_msg","payload":{"type":"turn_aborted"}}`,
+			wantKind: "turn_aborted",
+		},
+		{
+			name:     "reasoning counts as activity",
+			line:     `{"type":"event_msg","payload":{"type":"agent_reasoning"}}`,
+			wantKind: "activity",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ExtractCodexLifecycle([]byte(tc.line))
+			if !ok {
+				t.Fatalf("expected lifecycle event for line: %s", tc.line)
+			}
+			if got.Kind != tc.wantKind {
+				t.Fatalf("kind=%q want=%q", got.Kind, tc.wantKind)
+			}
+		})
+	}
+}
+
+func TestExtractCodexLifecycle_ToolSignals(t *testing.T) {
+	startLine := []byte(`{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call_abc"}}`)
+	start, ok := ExtractCodexLifecycle(startLine)
+	if !ok {
+		t.Fatal("expected tool_start lifecycle")
+	}
+	if start.Kind != "tool_start" {
+		t.Fatalf("kind=%q want=tool_start", start.Kind)
+	}
+	if start.ToolCallID != "call_abc" {
+		t.Fatalf("toolCallId=%q want=call_abc", start.ToolCallID)
+	}
+	if start.ToolName != "exec_command" {
+		t.Fatalf("toolName=%q want=exec_command", start.ToolName)
+	}
+
+	completeLine := []byte(`{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_abc","output":"ok"}}`)
+	complete, ok := ExtractCodexLifecycle(completeLine)
+	if !ok {
+		t.Fatal("expected tool_complete lifecycle")
+	}
+	if complete.Kind != "tool_complete" {
+		t.Fatalf("kind=%q want=tool_complete", complete.Kind)
+	}
+	if complete.ToolCallID != "call_abc" {
+		t.Fatalf("toolCallId=%q want=call_abc", complete.ToolCallID)
+	}
+}
+
+func TestExtractCodexLifecycle_IgnoresUnknown(t *testing.T) {
+	cases := [][]byte{
+		[]byte(`{"type":"event_msg","payload":{"type":"unknown"}}`),
+		[]byte(`{"type":"response_item","payload":{"type":"unknown"}}`),
+		[]byte(`not-json`),
+	}
+
+	for _, line := range cases {
+		if _, ok := ExtractCodexLifecycle(line); ok {
+			t.Fatalf("expected no lifecycle event for line: %s", string(line))
+		}
+	}
+}
+
 func TestExtractLastAssistantMessageAfterLastUser_Claude_StaleAssistantIgnored(t *testing.T) {
 	content := `{"type":"user","message":{"content":"hello"}}
 {"type":"assistant","message":{"content":"Hi! How can I help?"}}

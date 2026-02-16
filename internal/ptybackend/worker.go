@@ -46,6 +46,7 @@ const (
 	probeTimeout            = 8 * time.Second
 	streamEventBufferSize   = 256
 	streamPreEventBufferCap = 8
+	workingStatePulseWindow = 2 * time.Second
 )
 
 type WorkerBackendConfig struct {
@@ -66,6 +67,7 @@ type workerSession struct {
 
 	mu              sync.Mutex
 	lastState       string
+	lastStateSentAt time.Time
 	exitNotified    bool
 	unreachable     bool
 	unreachableAt   time.Time
@@ -119,6 +121,16 @@ func (s *workerSession) notePollRecovery() {
 	s.pollFailures = 0
 	s.unreachable = false
 	s.unreachableAt = time.Time{}
+}
+
+func shouldForwardStateLocked(session *workerSession, state string, now time.Time) bool {
+	if state == "" {
+		return false
+	}
+	if state != session.lastState {
+		return true
+	}
+	return state == "working" && now.Sub(session.lastStateSentAt) >= workingStatePulseWindow
 }
 
 func NewWorker(cfg WorkerBackendConfig) (*WorkerBackend, error) {
@@ -1349,10 +1361,12 @@ func (b *WorkerBackend) startPoller(session *workerSession) {
 					exitCode     int
 					exitSignal   string
 				)
+				now := time.Now()
 				session.mu.Lock()
-				stateChanged = info.State != "" && info.State != session.lastState
+				stateChanged = shouldForwardStateLocked(session, info.State, now)
 				if stateChanged {
 					session.lastState = info.State
+					session.lastStateSentAt = now
 					newState = info.State
 				}
 				exitNow = !info.Running && !session.exitNotified
@@ -1526,12 +1540,14 @@ func (b *WorkerBackend) handleLifecycleEvent(session *workerSession, evt ptywork
 		if state == "" {
 			return
 		}
+		now := time.Now()
 		session.mu.Lock()
-		if state == session.lastState {
+		if !shouldForwardStateLocked(session, state, now) {
 			session.mu.Unlock()
 			return
 		}
 		session.lastState = state
+		session.lastStateSentAt = now
 		session.mu.Unlock()
 
 		b.hooksMu.RLock()

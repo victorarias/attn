@@ -41,6 +41,30 @@ func mustWorkerSocketPath(t *testing.T, backend *WorkerBackend, sessionID string
 	return path
 }
 
+func TestShouldForwardStateLocked(t *testing.T) {
+	now := time.Now()
+	session := &workerSession{}
+
+	if !shouldForwardStateLocked(session, "working", now) {
+		t.Fatal("first state should always forward")
+	}
+
+	session.lastState = "working"
+	session.lastStateSentAt = now
+	if shouldForwardStateLocked(session, "working", now.Add(500*time.Millisecond)) {
+		t.Fatal("working pulse inside throttle window should not forward")
+	}
+	if !shouldForwardStateLocked(session, "working", now.Add(workingStatePulseWindow+50*time.Millisecond)) {
+		t.Fatal("working pulse after throttle window should forward")
+	}
+
+	session.lastState = "working"
+	session.lastStateSentAt = now
+	if !shouldForwardStateLocked(session, "pending_approval", now) {
+		t.Fatal("state transition should always forward")
+	}
+}
+
 func TestWorkerBackend_Recover_QuarantinesOwnershipMismatch(t *testing.T) {
 	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{

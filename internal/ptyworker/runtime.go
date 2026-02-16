@@ -61,6 +61,7 @@ type Runtime struct {
 	manager  *pty.Manager
 	listener net.Listener
 	logf     func(format string, args ...interface{})
+	capture  *debugCapture
 
 	stateMu    sync.RWMutex
 	state      string
@@ -104,9 +105,21 @@ func (r *Runtime) run(ctx context.Context) error {
 	r.manager = pty.NewManager(pty.DefaultScrollbackSize, r.logf)
 	r.manager.SetStateHandler(func(_ string, state string) {
 		r.stateMu.Lock()
-		changed := r.state != state
+		previousState := r.state
+		changed := previousState != state
 		r.state = state
 		r.stateMu.Unlock()
+		if r.capture != nil {
+			r.capture.recordState(state)
+			if isWorkingToStopTransition(previousState, state) {
+				path, err := r.capture.dump("working_to_" + state)
+				if err != nil {
+					r.logf("worker debug capture dump failed: session=%s reason=%s err=%v", r.cfg.SessionID, state, err)
+				} else if path != "" {
+					r.logf("worker debug capture dump: session=%s reason=working_to_%s path=%s", r.cfg.SessionID, state, path)
+				}
+			}
+		}
 		if changed {
 			r.broadcastLifecycle(EventEnvelope{
 				Type:      "evt",
@@ -125,6 +138,15 @@ func (r *Runtime) run(ctx context.Context) error {
 			r.exitSignal = &sig
 		}
 		r.stateMu.Unlock()
+		if r.capture != nil {
+			r.capture.recordNote(fmt.Sprintf("exit code=%d signal=%s", info.ExitCode, info.Signal))
+			path, err := r.capture.dump("exit")
+			if err != nil {
+				r.logf("worker debug capture dump failed: session=%s reason=exit err=%v", r.cfg.SessionID, err)
+			} else if path != "" {
+				r.logf("worker debug capture dump: session=%s reason=exit path=%s", r.cfg.SessionID, path)
+			}
+		}
 		r.noteSessionExited()
 		r.broadcastLifecycle(EventEnvelope{
 			Type:       "evt",
@@ -153,6 +175,17 @@ func (r *Runtime) run(ctx context.Context) error {
 	defer func() {
 		r.requestStop()
 		if r.manager != nil {
+			r.manager.Detach(r.cfg.SessionID, debugCaptureSubscriberID)
+		}
+		if r.capture != nil {
+			path, err := r.capture.dump("runtime_shutdown")
+			if err != nil {
+				r.logf("worker debug capture dump failed: session=%s reason=runtime_shutdown err=%v", r.cfg.SessionID, err)
+			} else if path != "" {
+				r.logf("worker debug capture dump: session=%s reason=runtime_shutdown path=%s", r.cfg.SessionID, path)
+			}
+		}
+		if r.manager != nil {
 			r.manager.Shutdown()
 		}
 		r.cleanup()
@@ -173,6 +206,32 @@ func (r *Runtime) run(ctx context.Context) error {
 		CopilotExecutable: r.cfg.CopilotExecutable,
 	}); err != nil {
 		return fmt.Errorf("spawn PTY session: %w", err)
+	}
+	r.capture = newDebugCapture(r.cfg, r.logf)
+	if r.capture != nil {
+		r.capture.recordNote("capture enabled")
+		r.capture.recordState("working")
+		_, err := r.manager.Attach(
+			r.cfg.SessionID,
+			debugCaptureSubscriberID,
+			func(data []byte, seq uint32) bool {
+				if r.capture != nil {
+					r.capture.recordOutput(seq, data)
+				}
+				return true
+			},
+			func(reason string) {
+				if r.capture != nil {
+					r.capture.recordNote("capture subscriber drop: " + reason)
+				}
+			},
+		)
+		if err != nil {
+			r.logf("worker debug capture attach failed: session=%s err=%v", r.cfg.SessionID, err)
+			r.capture = nil
+		} else {
+			r.logf("worker debug capture enabled: session=%s", r.cfg.SessionID)
+		}
 	}
 
 	info, err := r.sessionInfo()
@@ -617,6 +676,9 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 		if err != nil {
 			c.sendError(req.ID, ErrBadRequest, "invalid base64 input payload")
 			return
+		}
+		if c.runtime.capture != nil {
+			c.runtime.capture.recordInput(data)
 		}
 		if err := c.runtime.manager.Input(c.runtime.cfg.SessionID, data); err != nil {
 			if errors.Is(err, pty.ErrSessionNotFound) {
