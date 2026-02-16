@@ -81,6 +81,19 @@ func shouldKeepCodexWorking(turnOpen bool, pendingTools map[string]codexPendingT
 	return false
 }
 
+func shouldPromoteCodexNoOutputTurn(sawTurnStart bool, assistantMessages int, sessionState protocol.SessionState) bool {
+	if !sawTurnStart {
+		return false
+	}
+	if assistantMessages > 0 {
+		return false
+	}
+	if sessionState == protocol.SessionStatePendingApproval || sessionState == protocol.SessionStateWaitingInput {
+		return false
+	}
+	return true
+}
+
 func extractEventType(line []byte) string {
 	var evt struct {
 		Type string `json:"type"`
@@ -185,6 +198,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 		codexTurnOpen         bool
 		codexActivityAt       time.Time
 		codexAssistantInTurn  int
+		codexTurnSawStart     bool
 	)
 
 	for {
@@ -232,6 +246,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				codexTurnOpen = false
 				codexActivityAt = time.Time{}
 				codexAssistantInTurn = 0
+				codexTurnSawStart = false
 				continue
 			}
 			lastOffset = info.Size()
@@ -264,6 +279,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 			codexTurnOpen = false
 			codexActivityAt = time.Time{}
 			codexAssistantInTurn = 0
+			codexTurnSawStart = false
 			d.logf("transcript watcher: transcript discovered session=%s path=%s offset=%d", w.sessionID, transcriptPath, lastOffset)
 			continue
 		}
@@ -282,6 +298,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				codexTurnOpen = false
 				codexActivityAt = time.Time{}
 				codexAssistantInTurn = 0
+				codexTurnSawStart = false
 				continue
 			}
 			d.logf("transcript watcher: transcript stat error session=%s path=%s err=%v", w.sessionID, transcriptPath, err)
@@ -319,6 +336,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 							codexTurnOpen = true
 							codexActivityAt = now
 							codexAssistantInTurn = 0
+							codexTurnSawStart = true
 							d.logf("transcript watcher: codex turn start session=%s", w.sessionID)
 						case "turn_end":
 							codexTurnOpen = false
@@ -332,18 +350,19 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 							if codexAssistantInTurn == 0 {
 								current := d.store.Get(w.sessionID)
 								if current != nil &&
-									current.State != protocol.SessionStatePendingApproval &&
-									current.State != protocol.SessionStateWaitingInput {
+									shouldPromoteCodexNoOutputTurn(codexTurnSawStart, codexAssistantInTurn, current.State) {
 									d.logf("transcript watcher: codex turn ended with no assistant output, setting waiting_input session=%s", w.sessionID)
 									d.updateAndBroadcastState(w.sessionID, protocol.StateWaitingInput)
 								}
 							}
 							codexAssistantInTurn = 0
+							codexTurnSawStart = false
 						case "turn_aborted":
 							codexTurnOpen = false
 							codexActivityAt = now
 							codexPendingTools = make(map[string]codexPendingTool)
 							codexAssistantInTurn = 0
+							codexTurnSawStart = false
 							current := d.store.Get(w.sessionID)
 							if current != nil &&
 								current.State != protocol.SessionStatePendingApproval &&

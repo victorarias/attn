@@ -195,6 +195,61 @@ func TestShouldKeepCodexWorking(t *testing.T) {
 	}
 }
 
+func TestShouldPromoteCodexNoOutputTurn(t *testing.T) {
+	tests := []struct {
+		name              string
+		sawTurnStart      bool
+		assistantMessages int
+		state             protocol.SessionState
+		want              bool
+	}{
+		{
+			name:              "requires turn start signal",
+			sawTurnStart:      false,
+			assistantMessages: 0,
+			state:             protocol.SessionStateWorking,
+			want:              false,
+		},
+		{
+			name:              "requires zero assistant messages",
+			sawTurnStart:      true,
+			assistantMessages: 1,
+			state:             protocol.SessionStateWorking,
+			want:              false,
+		},
+		{
+			name:              "suppresses on pending approval",
+			sawTurnStart:      true,
+			assistantMessages: 0,
+			state:             protocol.SessionStatePendingApproval,
+			want:              false,
+		},
+		{
+			name:              "suppresses on waiting_input",
+			sawTurnStart:      true,
+			assistantMessages: 0,
+			state:             protocol.SessionStateWaitingInput,
+			want:              false,
+		},
+		{
+			name:              "promotes when observed start and no output",
+			sawTurnStart:      true,
+			assistantMessages: 0,
+			state:             protocol.SessionStateWorking,
+			want:              true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldPromoteCodexNoOutputTurn(tt.sawTurnStart, tt.assistantMessages, tt.state)
+			if got != tt.want {
+				t.Fatalf("shouldPromoteCodexNoOutputTurn(%v, %d, %s) = %v, want %v", tt.sawTurnStart, tt.assistantMessages, tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractEventType(t *testing.T) {
 	if got := extractEventType([]byte(`{"type":"assistant.turn_start","data":{}}`)); got != "assistant.turn_start" {
 		t.Fatalf("extractEventType() = %q, want assistant.turn_start", got)

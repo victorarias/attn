@@ -1,7 +1,6 @@
 package classifier
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -309,9 +308,8 @@ func resolveCodexExecutable(configuredExecutable string) string {
 }
 
 func parseCodexErrorFromJSONL(output []byte) string {
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for _, rawLine := range bytes.Split(output, []byte{'\n'}) {
+		line := strings.TrimSpace(string(rawLine))
 		if line == "" {
 			continue
 		}
@@ -330,9 +328,8 @@ func parseCodexErrorFromJSONL(output []byte) string {
 }
 
 func parseVerdictFromCodexJSONL(output []byte) (string, bool) {
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for _, rawLine := range bytes.Split(output, []byte{'\n'}) {
+		line := strings.TrimSpace(string(rawLine))
 		if line == "" {
 			continue
 		}
