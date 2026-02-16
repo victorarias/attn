@@ -242,6 +242,18 @@ type copilotEventEntry struct {
 	} `json:"data"`
 }
 
+type codexLifecyclePayload struct {
+	Type   string `json:"type"`
+	Name   string `json:"name"`
+	CallID string `json:"call_id"`
+}
+
+type CodexLifecycle struct {
+	Kind       string
+	ToolCallID string
+	ToolName   string
+}
+
 type CopilotToolLifecycle struct {
 	Kind       string
 	ToolCallID string
@@ -330,6 +342,56 @@ func ExtractCopilotToolLifecycle(line []byte) (CopilotToolLifecycle, bool) {
 		}, true
 	default:
 		return CopilotToolLifecycle{}, false
+	}
+}
+
+// ExtractCodexLifecycle extracts Codex transcript lifecycle signals.
+// It normalizes turn boundaries, tool-call lifecycle, and liveness hints.
+func ExtractCodexLifecycle(line []byte) (CodexLifecycle, bool) {
+	var codex codexEnvelope
+	if err := json.Unmarshal(line, &codex); err != nil {
+		return CodexLifecycle{}, false
+	}
+
+	var payload codexLifecyclePayload
+	if err := json.Unmarshal(codex.Payload, &payload); err != nil {
+		return CodexLifecycle{}, false
+	}
+
+	switch codex.Type {
+	case "event_msg":
+		switch payload.Type {
+		case "task_started", "user_message":
+			return CodexLifecycle{Kind: "turn_start"}, true
+		case "task_complete":
+			return CodexLifecycle{Kind: "turn_end"}, true
+		case "turn_aborted":
+			return CodexLifecycle{Kind: "turn_aborted"}, true
+		case "agent_reasoning", "token_count", "agent_message", "context_compacted":
+			return CodexLifecycle{Kind: "activity"}, true
+		default:
+			return CodexLifecycle{}, false
+		}
+	case "response_item":
+		switch payload.Type {
+		case "function_call", "custom_tool_call":
+			return CodexLifecycle{
+				Kind:       "tool_start",
+				ToolCallID: strings.TrimSpace(payload.CallID),
+				ToolName:   strings.TrimSpace(payload.Name),
+			}, true
+		case "function_call_output", "custom_tool_call_output":
+			return CodexLifecycle{
+				Kind:       "tool_complete",
+				ToolCallID: strings.TrimSpace(payload.CallID),
+			}, true
+		case "reasoning", "message":
+			return CodexLifecycle{Kind: "activity"}, true
+		default:
+			return CodexLifecycle{}, false
+		}
+	default:
+		return CodexLifecycle{}, false
 	}
 }
 

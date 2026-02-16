@@ -1531,8 +1531,14 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		switch session.Agent {
 		case protocol.SessionAgentCopilot:
 			state, err = classifier.ClassifyWithCopilot(lastMessage, 30*time.Second)
+		case protocol.SessionAgentCodex:
+			state, err = classifier.ClassifyWithCodexExecutable(
+				lastMessage,
+				d.store.GetSetting(SettingCodexExecutable),
+				30*time.Second,
+			)
 		default:
-			// Use Claude SDK for Claude and Codex sessions.
+			// Use Claude SDK for Claude sessions.
 			state, err = classifier.ClassifyWithClaude(lastMessage, 30*time.Second)
 		}
 	}

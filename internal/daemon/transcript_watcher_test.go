@@ -179,6 +179,22 @@ func TestShouldPromoteTranscriptPending(t *testing.T) {
 	}
 }
 
+func TestShouldKeepCodexWorking(t *testing.T) {
+	now := time.Now()
+	if !shouldKeepCodexWorking(true, map[string]codexPendingTool{}, time.Time{}, now) {
+		t.Fatal("open turn should keep codex in working")
+	}
+	if !shouldKeepCodexWorking(false, map[string]codexPendingTool{"call": {name: "exec_command", startedAt: now}}, time.Time{}, now) {
+		t.Fatal("pending tool should keep codex in working")
+	}
+	if !shouldKeepCodexWorking(false, map[string]codexPendingTool{}, now.Add(-(codexActiveWindow - 500*time.Millisecond)), now) {
+		t.Fatal("recent activity should keep codex in working")
+	}
+	if shouldKeepCodexWorking(false, map[string]codexPendingTool{}, now.Add(-(codexActiveWindow + 500*time.Millisecond)), now) {
+		t.Fatal("stale activity with no turn/pending work should not force working")
+	}
+}
+
 func TestExtractEventType(t *testing.T) {
 	if got := extractEventType([]byte(`{"type":"assistant.turn_start","data":{}}`)); got != "assistant.turn_start" {
 		t.Fatalf("extractEventType() = %q, want assistant.turn_start", got)

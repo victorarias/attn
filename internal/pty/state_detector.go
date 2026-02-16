@@ -1,6 +1,9 @@
 package pty
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	stateWorking         = "working"
@@ -36,19 +39,23 @@ var defaultStateHeuristics = stateHeuristics{
 }
 
 type codexStateDetector struct {
-	tail      string
-	lastState string
+	tail             string
+	lastState        string
+	lastWorkingPulse time.Time
 }
 
 func newCodexStateDetector() *codexStateDetector {
 	return &codexStateDetector{}
 }
 
+const workingPulseInterval = 1200 * time.Millisecond
+
 func (d *codexStateDetector) Observe(chunk []byte) (string, bool) {
 	if len(chunk) == 0 {
 		return "", false
 	}
-	cleaned := stripANSI(string(chunk))
+	raw := string(chunk)
+	cleaned := stripANSI(raw)
 	if strings.TrimSpace(cleaned) == "" {
 		return "", false
 	}
@@ -64,11 +71,34 @@ func (d *codexStateDetector) Observe(chunk []byte) (string, bool) {
 	if desired == "" {
 		return "", false
 	}
-	if desired == d.lastState {
+
+	now := time.Now()
+	emitWorkingPulse := desired == stateWorking &&
+		desired == d.lastState &&
+		looksLikeWorkingAnimation(raw) &&
+		(now.Sub(d.lastWorkingPulse) >= workingPulseInterval)
+
+	if desired == d.lastState && !emitWorkingPulse {
 		return "", false
 	}
 	d.lastState = desired
+	if desired == stateWorking {
+		d.lastWorkingPulse = now
+	}
 	return desired, true
+}
+
+func looksLikeWorkingAnimation(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	lower := strings.ToLower(stripANSI(raw))
+	hasWorkingKeyword := strings.Contains(lower, "working") ||
+		strings.Contains(lower, "thinking") ||
+		strings.Contains(lower, "running") ||
+		strings.Contains(lower, "executing")
+	// Progress-wave redraws are emitted as ANSI-updated carriage-return frames.
+	return hasWorkingKeyword && strings.Contains(raw, "\r") && strings.Contains(raw, "\x1b[")
 }
 
 func trimToLastChars(input string, maxChars int) string {

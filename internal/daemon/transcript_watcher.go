@@ -16,11 +16,18 @@ const (
 	transcriptQuietWindow  = 1500 * time.Millisecond
 	assistantDedupWindow   = 2 * time.Second
 	toolStartGraceWindow   = 1200 * time.Millisecond
+	codexActiveWindow      = 3 * time.Second
+	codexBootstrapBytes    = 256 * 1024
 	copilotBootstrapBytes  = 512 * 1024
 	claudeBootstrapBytes   = 256 * 1024
 )
 
 type copilotPendingTool struct {
+	name      string
+	startedAt time.Time
+}
+
+type codexPendingTool struct {
 	name      string
 	startedAt time.Time
 }
@@ -59,6 +66,19 @@ func shouldPromoteTranscriptPending(sessionState protocol.SessionState) bool {
 	default:
 		return false
 	}
+}
+
+func shouldKeepCodexWorking(turnOpen bool, pendingTools map[string]codexPendingTool, lastActivityAt time.Time, now time.Time) bool {
+	if turnOpen {
+		return true
+	}
+	if len(pendingTools) > 0 {
+		return true
+	}
+	if !lastActivityAt.IsZero() && now.Sub(lastActivityAt) <= codexActiveWindow {
+		return true
+	}
+	return false
 }
 
 func extractEventType(line []byte) string {
@@ -159,8 +179,12 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 
 		lastDiscoveryLog      time.Time
 		pendingTools          = make(map[string]copilotPendingTool)
+		codexPendingTools     = make(map[string]codexPendingTool)
 		transcriptPendingLive bool
 		copilotTurnOpen       bool
+		codexTurnOpen         bool
+		codexActivityAt       time.Time
+		codexAssistantInTurn  int
 	)
 
 	for {
@@ -202,11 +226,22 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				d.logf("transcript watcher: transcript stat failed session=%s path=%s err=%v", w.sessionID, transcriptPath, err)
 				transcriptPath = ""
 				pendingTools = make(map[string]copilotPendingTool)
+				codexPendingTools = make(map[string]codexPendingTool)
 				transcriptPendingLive = false
 				copilotTurnOpen = false
+				codexTurnOpen = false
+				codexActivityAt = time.Time{}
+				codexAssistantInTurn = 0
 				continue
 			}
 			lastOffset = info.Size()
+			if w.agent == protocol.SessionAgentCodex {
+				if info.Size() > codexBootstrapBytes {
+					lastOffset = info.Size() - codexBootstrapBytes
+				} else {
+					lastOffset = 0
+				}
+			}
 			if w.agent == protocol.SessionAgentCopilot {
 				if info.Size() > copilotBootstrapBytes {
 					lastOffset = info.Size() - copilotBootstrapBytes
@@ -223,8 +258,12 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 			}
 			partialLine = ""
 			pendingTools = make(map[string]copilotPendingTool)
+			codexPendingTools = make(map[string]codexPendingTool)
 			transcriptPendingLive = false
 			copilotTurnOpen = false
+			codexTurnOpen = false
+			codexActivityAt = time.Time{}
+			codexAssistantInTurn = 0
 			d.logf("transcript watcher: transcript discovered session=%s path=%s offset=%d", w.sessionID, transcriptPath, lastOffset)
 			continue
 		}
@@ -237,8 +276,12 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				lastOffset = 0
 				partialLine = ""
 				pendingTools = make(map[string]copilotPendingTool)
+				codexPendingTools = make(map[string]codexPendingTool)
 				transcriptPendingLive = false
 				copilotTurnOpen = false
+				codexTurnOpen = false
+				codexActivityAt = time.Time{}
+				codexAssistantInTurn = 0
 				continue
 			}
 			d.logf("transcript watcher: transcript stat error session=%s path=%s err=%v", w.sessionID, transcriptPath, err)
@@ -267,6 +310,72 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				line = strings.TrimRight(line, "\r")
 				if strings.TrimSpace(line) == "" {
 					continue
+				}
+				now := time.Now()
+				if w.agent == protocol.SessionAgentCodex {
+					if evt, ok := transcript.ExtractCodexLifecycle([]byte(line)); ok {
+						switch evt.Kind {
+						case "turn_start":
+							codexTurnOpen = true
+							codexActivityAt = now
+							codexAssistantInTurn = 0
+							d.logf("transcript watcher: codex turn start session=%s", w.sessionID)
+						case "turn_end":
+							codexTurnOpen = false
+							codexActivityAt = now
+							codexPendingTools = make(map[string]codexPendingTool)
+							d.logf(
+								"transcript watcher: codex turn end session=%s assistant_messages=%d",
+								w.sessionID,
+								codexAssistantInTurn,
+							)
+							if codexAssistantInTurn == 0 {
+								current := d.store.Get(w.sessionID)
+								if current != nil &&
+									current.State != protocol.SessionStatePendingApproval &&
+									current.State != protocol.SessionStateWaitingInput {
+									d.logf("transcript watcher: codex turn ended with no assistant output, setting waiting_input session=%s", w.sessionID)
+									d.updateAndBroadcastState(w.sessionID, protocol.StateWaitingInput)
+								}
+							}
+							codexAssistantInTurn = 0
+						case "turn_aborted":
+							codexTurnOpen = false
+							codexActivityAt = now
+							codexPendingTools = make(map[string]codexPendingTool)
+							codexAssistantInTurn = 0
+							current := d.store.Get(w.sessionID)
+							if current != nil &&
+								current.State != protocol.SessionStatePendingApproval &&
+								current.State != protocol.SessionStateWaitingInput {
+								d.logf("transcript watcher: codex turn aborted, setting waiting_input session=%s", w.sessionID)
+								d.updateAndBroadcastState(w.sessionID, protocol.StateWaitingInput)
+							}
+						case "tool_start":
+							codexTurnOpen = true
+							codexActivityAt = now
+							if evt.ToolCallID != "" {
+								codexPendingTools[evt.ToolCallID] = codexPendingTool{
+									name:      evt.ToolName,
+									startedAt: now,
+								}
+								d.logf(
+									"transcript watcher: codex tool start session=%s tool=%s call=%s",
+									w.sessionID,
+									evt.ToolName,
+									evt.ToolCallID,
+								)
+							}
+						case "tool_complete":
+							codexActivityAt = now
+							if evt.ToolCallID != "" {
+								delete(codexPendingTools, evt.ToolCallID)
+								d.logf("transcript watcher: codex tool complete session=%s call=%s", w.sessionID, evt.ToolCallID)
+							}
+						case "activity":
+							codexActivityAt = now
+						}
+					}
 				}
 				if w.agent == protocol.SessionAgentCopilot {
 					switch extractEventType([]byte(line)) {
@@ -307,9 +416,12 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				if content == "" {
 					continue
 				}
-				now := time.Now()
 				if w.agent == protocol.SessionAgentCopilot {
 					copilotTurnOpen = true
+				}
+				if w.agent == protocol.SessionAgentCodex {
+					codexActivityAt = now
+					codexAssistantInTurn++
 				}
 				if w.agent != protocol.SessionAgentClaude && isDuplicateAssistantEvent(lastAssistant, lastAssistantAt, content, now) {
 					continue
@@ -355,6 +467,27 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 			continue
 		}
 
+		if w.agent == protocol.SessionAgentCodex && shouldKeepCodexWorking(codexTurnOpen, codexPendingTools, codexActivityAt, time.Now()) {
+			current := d.store.Get(w.sessionID)
+			if current != nil &&
+				current.State != protocol.SessionStateWorking &&
+				current.State != protocol.SessionStatePendingApproval {
+				activityAge := int64(-1)
+				if !codexActivityAt.IsZero() {
+					activityAge = time.Since(codexActivityAt).Milliseconds()
+				}
+				d.logf(
+					"transcript watcher: keeping codex working session=%s turn_open=%v pending_tools=%d activity_age_ms=%d",
+					w.sessionID,
+					codexTurnOpen,
+					len(codexPendingTools),
+					activityAge,
+				)
+				d.updateAndBroadcastState(w.sessionID, protocol.StateWorking)
+			}
+			continue
+		}
+
 		if w.agent == protocol.SessionAgentCopilot && copilotTurnOpen {
 			current := d.store.Get(w.sessionID)
 			if current != nil &&
@@ -366,13 +499,19 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 			continue
 		}
 
-		if assistantSeq > classifiedSeq && !lastAssistantAt.IsZero() && time.Since(lastAssistantAt) >= transcriptQuietWindow {
+		quietSince := lastAssistantAt
+		if w.agent == protocol.SessionAgentCodex && codexActivityAt.After(quietSince) {
+			quietSince = codexActivityAt
+		}
+
+		if assistantSeq > classifiedSeq && !lastAssistantAt.IsZero() && !quietSince.IsZero() && time.Since(quietSince) >= transcriptQuietWindow {
 			classifiedSeq = assistantSeq
 			d.logf(
-				"transcript watcher: quiet window reached session=%s seq=%d transcript=%s",
+				"transcript watcher: quiet window reached session=%s seq=%d transcript=%s quiet_since=%s",
 				w.sessionID,
 				assistantSeq,
 				transcriptPath,
+				quietSince.Format(time.RFC3339Nano),
 			)
 			go d.classifySessionState(w.sessionID, transcriptPath)
 		}

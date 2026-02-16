@@ -1,6 +1,9 @@
 package pty
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestClassifyState_PromptAtEndIsWaiting(t *testing.T) {
 	text := "All done.\n› "
@@ -65,5 +68,39 @@ up/down to navigate - Enter to select - Esc to cancel`
 	got := classifyState(text, defaultStateHeuristics)
 	if got != statePendingApproval {
 		t.Fatalf("classifyState() = %q, want %q", got, statePendingApproval)
+	}
+}
+
+func TestCodexStateDetector_EmitsWorkingPulseForAnimationFrames(t *testing.T) {
+	d := newCodexStateDetector()
+	frame := []byte("\x1b[2m• working\x1b[0m\r")
+
+	state, changed := d.Observe(frame)
+	if !changed {
+		t.Fatal("first animation frame should produce a state update")
+	}
+	if state != stateWorking {
+		t.Fatalf("state=%q want=%q", state, stateWorking)
+	}
+
+	d.lastWorkingPulse = time.Now().Add(-workingPulseInterval - 50*time.Millisecond)
+	state, changed = d.Observe(frame)
+	if !changed {
+		t.Fatal("animation heartbeat should emit a working pulse")
+	}
+	if state != stateWorking {
+		t.Fatalf("state=%q want=%q", state, stateWorking)
+	}
+}
+
+func TestLooksLikeWorkingAnimation(t *testing.T) {
+	if !looksLikeWorkingAnimation("\x1b[2mworking on it\x1b[0m\r") {
+		t.Fatal("ansi carriage-return frame should be treated as animation")
+	}
+	if looksLikeWorkingAnimation("\x1b[2mstatus line\x1b[0m\r") {
+		t.Fatal("frames without working keywords should not be treated as animation")
+	}
+	if looksLikeWorkingAnimation("plain output\n") {
+		t.Fatal("plain output should not be treated as animation")
 	}
 }

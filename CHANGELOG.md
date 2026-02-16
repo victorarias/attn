@@ -6,6 +6,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-16]
+
+### Fixed
+- **Codex Mid-Turn Idle Regression**: Codex transcript watching now uses turn/tool lifecycle events (`task_started`, `task_complete`, `turn_aborted`, tool call start/complete) to keep active turns in `working` and defer stop-time classification until turn-close quiet windows.
+- **Codex No-Output Turn Handling**: Turns that end without assistant output now resolve to `waiting_input` instead of lingering in a stale running state.
+- **Codex Watcher Bootstrap Gap**: Codex transcript watchers now bootstrap from a recent transcript tail instead of attaching strictly at EOF, so restored/reopened sessions can still classify to `idle`/`waiting_input` when no new assistant lines arrive.
+- **Codex Working Animation Liveness**: PTY detector now treats ANSI carriage-return animation frames as `working` heartbeat pulses, and worker backend forwards throttled repeated `working` pulses so active Codex runs can recover quickly from accidental `idle` demotions.
+- **Codex Pulse False Positives**: Working pulses now require explicit working-status keywords (`working`, `thinking`, `running`, `executing`) in animated redraw frames, reducing prompt-redraw misclassification as active work.
+- **Codex Stop-Time Backend Selection**: Codex sessions now use the Codex CLI classifier path (instead of Claude SDK), matching the agent/runtime used by the session itself.
+- **Codex Executable Consistency**: Codex classification now uses the same configured `codex_executable` setting as session launch (with `ATTN_CODEX_EXECUTABLE` env override still taking precedence), avoiding classifier failures when `codex` is not on `PATH`.
+- **Codex JSON Mode Parsing**: Codex classifier now treats `--output-last-message` as the primary verdict source and falls back to JSONL `item.completed` parsing, so stderr rollout noise no longer pollutes verdict extraction.
+- **Codex Model Fallback**: Codex classifier now attempts configured models in order (default: `gpt-5.3-codex-spark` then `gpt-5.3-codex`) with low reasoning effort, and falls through automatically when the first model is unavailable.
+- **Temporary PTY Capture for Work→Stop Debugging**: Worker runtime now records a rolling 90-second PTY stream window (output + input + state transitions) for Codex sessions and dumps JSONL captures automatically on `working -> waiting_input|idle`, plus on exit/shutdown, under `<data_root>/workers/<daemon_instance_id>/captures/`.
+
 ## [2026-02-15]
 
 ### Fixed
