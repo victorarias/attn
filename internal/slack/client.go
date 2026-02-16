@@ -189,14 +189,20 @@ func (c *Client) listenOnce(ctx context.Context, handler MessageHandler) error {
 			Type       string `json:"type"`
 			Payload    struct {
 				Event struct {
-					Type     string `json:"type"`
-					Subtype  string `json:"subtype"`
-					Channel  string `json:"channel"`
-					ThreadTS string `json:"thread_ts"`
-					User     string `json:"user"`
-					Text     string `json:"text"`
-					TS       string `json:"ts"`
-					BotID    string `json:"bot_id"`
+					Type        string `json:"type"`
+					Subtype     string `json:"subtype"`
+					Channel     string `json:"channel"`
+					ThreadTS    string `json:"thread_ts"`
+					User        string `json:"user"`
+					Text        string `json:"text"`
+					TS          string `json:"ts"`
+					BotID       string `json:"bot_id"`
+					Attachments []struct {
+						Fallback string `json:"fallback"`
+						Pretext  string `json:"pretext"`
+						Title    string `json:"title"`
+						Text     string `json:"text"`
+					} `json:"attachments"`
 				} `json:"event"`
 			} `json:"payload"`
 		}
@@ -215,26 +221,44 @@ func (c *Client) listenOnce(ctx context.Context, handler MessageHandler) error {
 
 		// Only process events_api envelopes with message events
 		if envelope.Type != "events_api" {
+			c.logf("[slack] skip envelope type=%s (not events_api)", envelope.Type)
 			continue
 		}
 		event := envelope.Payload.Event
 		if event.Type != "message" {
+			c.logf("[slack] skip event type=%s channel=%s", event.Type, event.Channel)
 			continue
 		}
 
-		// Skip bot messages, edits, deletes
+		// Skip edits, deletes, and other subtypes.
+		// Note: Events API bot messages (e.g. GitHub app) arrive with subtype="" and
+		// bot_id set — unlike legacy RTM which used subtype="bot_message". So this
+		// filter naturally passes bot messages through. Self-filtering happens in the
+		// daemon layer via [xxxx] session prefix matching.
 		if event.Subtype != "" {
+			c.logf("[slack] skip subtype=%s channel=%s ts=%s", event.Subtype, event.Channel, event.TS)
 			continue
 		}
-		// Skip if no thread_ts (not a thread reply)
-		if event.ThreadTS == "" {
+		// Skip parent echo (thread_ts == ts is the parent re-sent when a reply arrives)
+		if event.ThreadTS != "" && event.ThreadTS == event.TS {
+			c.logf("[slack] skip parent echo channel=%s ts=%s", event.Channel, event.TS)
 			continue
 		}
-		// Skip parent messages (thread_ts == ts means it's the thread starter)
-		if event.ThreadTS == event.TS {
-			continue
+		// Non-thread messages (ThreadTS == "") pass through for channel-wide subscriptions
+
+		// Extract text from attachments if primary text is empty (e.g. GitHub bot messages)
+		text := event.Text
+		if text == "" && len(event.Attachments) > 0 {
+			att := event.Attachments[0]
+			if att.Fallback != "" {
+				text = att.Fallback
+			} else if att.Pretext != "" {
+				text = att.Pretext
+				if att.Title != "" {
+					text += " " + att.Title
+				}
+			}
 		}
-		// Bot messages pass through - daemon filters by session [xxxx] prefix instead
 
 		// Resolve username
 		username := c.resolveUsername(event.User)
@@ -245,10 +269,102 @@ func (c *Client) listenOnce(ctx context.Context, handler MessageHandler) error {
 			ThreadTS:  event.ThreadTS,
 			UserID:    event.User,
 			Username:  username,
-			Text:      event.Text,
+			Text:      text,
 			TS:        event.TS,
 		})
 	}
+}
+
+// channelsCachePath returns the path to the local channel name cache.
+func channelsCachePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "slack", "channels.json")
+}
+
+// loadChannelsCache reads the name→id mapping from ~/.config/slack/channels.json.
+func loadChannelsCache() map[string]string {
+	path := channelsCachePath()
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var cache map[string]string
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return nil
+	}
+	return cache
+}
+
+// saveChannelsCache writes the name→id mapping back to disk.
+func saveChannelsCache(cache map[string]string) {
+	path := channelsCachePath()
+	if path == "" {
+		return
+	}
+	data, _ := json.MarshalIndent(cache, "", "  ")
+	os.MkdirAll(filepath.Dir(path), 0755)
+	os.WriteFile(path, append(data, '\n'), 0644)
+}
+
+// ResolveChannelName looks up a channel's name by ID.
+// Checks local cache (~/.config/slack/channels.json) first, falls back to
+// Slack API, and updates the cache with any new resolutions.
+func ResolveChannelName(botToken, channelID string) string {
+	// Check local cache (name→id format, reverse lookup)
+	cache := loadChannelsCache()
+	if cache != nil {
+		for name, id := range cache {
+			if id == channelID {
+				return "#" + name
+			}
+		}
+	}
+
+	// Fall back to Slack API
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://slack.com/api/conversations.info?channel=%s", channelID), nil)
+	if err != nil {
+		return channelID
+	}
+	req.Header.Set("Authorization", "Bearer "+botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return channelID
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return channelID
+	}
+
+	var result struct {
+		OK      bool `json:"ok"`
+		Channel struct {
+			Name string `json:"name"`
+		} `json:"channel"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil || !result.OK {
+		return channelID
+	}
+	if result.Channel.Name == "" {
+		return channelID
+	}
+
+	// Update cache with the new resolution
+	if cache == nil {
+		cache = make(map[string]string)
+	}
+	cache[result.Channel.Name] = channelID
+	saveChannelsCache(cache)
+
+	return "#" + result.Channel.Name
 }
 
 // resolveUsername looks up a user's display name, with caching

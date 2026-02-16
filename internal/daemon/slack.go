@@ -102,17 +102,36 @@ func (d *Daemon) handleSlackMessage(event slack.MessageEvent) {
 		d.slackMon.seenMu.Unlock()
 	}
 
-	key := event.Platform + ":" + event.ChannelID + ":" + event.ThreadTS
-
 	keys, err := d.store.GetSubscribedThreadKeys()
 	if err != nil {
 		d.logf("[slack] error getting subscriptions: %v", err)
 		return
 	}
 
-	sessions, ok := keys[key]
-	if !ok {
-		return // No subscriptions for this thread
+	// Collect target sessions from exact thread match and channel-wide wildcard
+	seen := make(map[string]bool)
+	var targetSessions []string
+
+	if event.ThreadTS != "" {
+		key := event.Platform + ":" + event.ChannelID + ":" + event.ThreadTS
+		for _, sid := range keys[key] {
+			if !seen[sid] {
+				seen[sid] = true
+				targetSessions = append(targetSessions, sid)
+			}
+		}
+	}
+	// Channel-wide subscriptions (thread_ts = "*")
+	channelKey := event.Platform + ":" + event.ChannelID + ":*"
+	for _, sid := range keys[channelKey] {
+		if !seen[sid] {
+			seen[sid] = true
+			targetSessions = append(targetSessions, sid)
+		}
+	}
+
+	if len(targetSessions) == 0 {
+		return
 	}
 
 	// Truncate long messages
@@ -121,9 +140,13 @@ func (d *Daemon) handleSlackMessage(event slack.MessageEvent) {
 		text = text[:297] + "..."
 	}
 
-	message := fmt.Sprintf("Slack thread reply from @%s: %s", event.Username, text)
+	label := "thread reply"
+	if event.ThreadTS == "" {
+		label = "message"
+	}
+	message := fmt.Sprintf("Slack %s from @%s: %s", label, event.Username, text)
 
-	for _, sessionID := range sessions {
+	for _, sessionID := range targetSessions {
 		// Skip messages from this session (match [xxxx] prefix from slack-post)
 		shortID := sessionID[:4]
 		if strings.HasPrefix(event.Text, "["+shortID+"]") {

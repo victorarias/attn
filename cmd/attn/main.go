@@ -18,6 +18,7 @@ import (
 
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
+	slackpkg "github.com/victorarias/attn/internal/slack"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/status"
 	"github.com/victorarias/attn/internal/wrapper"
@@ -111,48 +112,71 @@ func runSubscribe() {
 	fs := flag.NewFlagSet("subscribe", flag.ExitOnError)
 	platform := fs.String("platform", "slack", "Chat platform (slack, discord, etc.)")
 	channelName := fs.String("name", "", "Channel display name (optional)")
+	sessionFlag := fs.String("session", "", "Target session ID (subscribe a different session instead of current)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: attn subscribe [options] <channel_id> <thread_ts>\n\n")
-		fmt.Fprintf(os.Stderr, "Subscribe current session to a chat thread.\n")
-		fmt.Fprintf(os.Stderr, "Requires ATTN_SESSION_ID to be set.\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: attn subscribe [options] <channel_id> [thread_ts]\n\n")
+		fmt.Fprintf(os.Stderr, "Subscribe a session to a chat thread or entire channel.\n")
+		fmt.Fprintf(os.Stderr, "Omit thread_ts to subscribe to all messages in the channel.\n")
+		fmt.Fprintf(os.Stderr, "Uses --session if provided, otherwise ATTN_SESSION_ID.\n\n")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[2:])
 
 	args := fs.Args()
-	if len(args) < 2 {
+	if len(args) < 1 {
 		fs.Usage()
 		os.Exit(1)
 	}
 
-	sessionID := os.Getenv("ATTN_SESSION_ID")
+	sessionID := *sessionFlag
 	if sessionID == "" {
-		fmt.Fprintln(os.Stderr, "error: ATTN_SESSION_ID not set")
-		os.Exit(1)
+		sessionID = os.Getenv("ATTN_SESSION_ID")
+		if sessionID == "" {
+			fmt.Fprintln(os.Stderr, "error: ATTN_SESSION_ID not set and --session not provided")
+			os.Exit(1)
+		}
+	}
+
+	channelID := args[0]
+	threadTS := "*" // channel-wide subscription
+	if len(args) >= 2 {
+		threadTS = args[1]
+	}
+
+	// Auto-resolve channel name from Slack API if not provided
+	if *channelName == "" && *platform == "slack" {
+		if auth, err := slackpkg.LoadAuth(); err == nil {
+			*channelName = slackpkg.ResolveChannelName(auth.BotToken, channelID)
+		}
 	}
 
 	c := client.New("")
-	err := c.SubscribeThread(*platform, args[0], args[1], sessionID, *channelName)
+	err := c.SubscribeThread(*platform, channelID, threadTS, sessionID, *channelName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Subscribed to %s thread %s:%s\n", *platform, args[0], args[1])
+	if threadTS == "*" {
+		fmt.Printf("Subscribed to all messages in %s channel %s\n", *platform, channelID)
+	} else {
+		fmt.Printf("Subscribed to %s thread %s:%s\n", *platform, channelID, threadTS)
+	}
 }
 
 func runUnsubscribe() {
 	fs := flag.NewFlagSet("unsubscribe", flag.ExitOnError)
 	platform := fs.String("platform", "slack", "Chat platform (slack, discord, etc.)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: attn unsubscribe [options] <channel_id> <thread_ts>\n\n")
-		fmt.Fprintf(os.Stderr, "Unsubscribe current session from a chat thread.\n")
+		fmt.Fprintf(os.Stderr, "Usage: attn unsubscribe [options] <channel_id> [thread_ts]\n\n")
+		fmt.Fprintf(os.Stderr, "Unsubscribe current session from a chat thread or entire channel.\n")
+		fmt.Fprintf(os.Stderr, "Omit thread_ts to unsubscribe from the channel-wide subscription.\n")
 		fmt.Fprintf(os.Stderr, "Requires ATTN_SESSION_ID to be set.\n\n")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[2:])
 
 	args := fs.Args()
-	if len(args) < 2 {
+	if len(args) < 1 {
 		fs.Usage()
 		os.Exit(1)
 	}
@@ -163,13 +187,23 @@ func runUnsubscribe() {
 		os.Exit(1)
 	}
 
+	channelID := args[0]
+	threadTS := "*"
+	if len(args) >= 2 {
+		threadTS = args[1]
+	}
+
 	c := client.New("")
-	err := c.UnsubscribeThread(*platform, args[0], args[1], sessionID)
+	err := c.UnsubscribeThread(*platform, channelID, threadTS, sessionID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Unsubscribed from %s thread %s:%s\n", *platform, args[0], args[1])
+	if threadTS == "*" {
+		fmt.Printf("Unsubscribed from %s channel %s\n", *platform, channelID)
+	} else {
+		fmt.Printf("Unsubscribed from %s thread %s:%s\n", *platform, channelID, threadTS)
+	}
 }
 
 func runSubscriptions() {

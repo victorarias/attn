@@ -165,11 +165,22 @@ func updatePathFromHelper() error {
 
 	currentPath := os.Getenv("PATH")
 	if currentPath == "" {
-		return os.Setenv("PATH", helperPath)
+		currentPath = helperPath
+	} else {
+		currentPath = mergePaths(currentPath, helperPath)
 	}
 
-	mergedPath := mergePaths(currentPath, helperPath)
-	return os.Setenv("PATH", mergedPath)
+	// Also capture the user's full login shell PATH (includes personal bins
+	// from .zshrc/.bashrc that path_helper doesn't know about).
+	shellCmd := exec.Command("zsh", "-l", "-i", "-c", "echo $PATH")
+	if shellOutput, err := shellCmd.Output(); err == nil {
+		shellPath := strings.TrimSpace(string(shellOutput))
+		if shellPath != "" {
+			currentPath = mergePaths(shellPath, currentPath)
+		}
+	}
+
+	return os.Setenv("PATH", currentPath)
 }
 
 func extractPathFromShellOutput(output string) string {
