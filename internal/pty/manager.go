@@ -388,7 +388,7 @@ func readLoginShellEnv(shellPath string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), shellEnvTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, shellPath, "-l", "-c", "env -0")
+	cmd := exec.CommandContext(ctx, shellPath, "-l", "-i", "-c", "env -0")
 	output, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
