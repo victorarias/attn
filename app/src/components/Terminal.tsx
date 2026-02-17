@@ -11,10 +11,39 @@ import './Terminal.css';
 const FONT_FAMILY = 'Iosevka, Menlo, Monaco, "Courier New", monospace';
 const DEFAULT_FONT_SIZE = 14;
 const TERMINAL_SCROLLBACK_LINES = 50000;
+const TERMINAL_DEBUG_STORAGE_KEY = 'attn:terminal-debug';
+const SUSPICIOUS_COLS_THRESHOLD = 20;
+const SUSPICIOUS_ROWS_THRESHOLD = 10;
 
 // VS Code limits canvas width to prevent performance issues with very wide terminals
 // Source: Constants.MaxCanvasWidth in terminalInstance.ts (line 103)
 const MAX_CANVAS_WIDTH = 4096;
+
+function isTerminalDebugEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(TERMINAL_DEBUG_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function getContainerDebugInfo(container: HTMLElement) {
+  const rect = container.getBoundingClientRect();
+  const style = getComputedStyle(container);
+  const parent = container.parentElement;
+  const parentRect = parent?.getBoundingClientRect();
+  const parentStyle = parent ? getComputedStyle(parent) : null;
+
+  return {
+    containerRect: { width: Math.round(rect.width), height: Math.round(rect.height) },
+    containerDisplay: style.display,
+    containerVisibility: style.visibility,
+    parentRect: parentRect ? { width: Math.round(parentRect.width), height: Math.round(parentRect.height) } : null,
+    parentDisplay: parentStyle?.display ?? null,
+    parentVisibility: parentStyle?.visibility ?? null,
+    dpr: window.devicePixelRatio,
+  };
+}
 
 async function openExternalUri(uri: string): Promise<void> {
   try {
@@ -60,6 +89,7 @@ export interface TerminalHandle {
 
 interface TerminalProps {
   fontSize?: number;
+  debugName?: string;
   onInit?: (terminal: XTerm) => void;
   onReady?: (terminal: XTerm) => void;
   onResize?: (cols: number, rows: number) => void;
@@ -130,10 +160,12 @@ function getScaledDimensions(
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
-  function Terminal({ fontSize = DEFAULT_FONT_SIZE, onInit, onReady, onResize }, ref) {
+  function Terminal({ fontSize = DEFAULT_FONT_SIZE, debugName, onInit, onReady, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
     const webglAddonRef = useRef<WebglAddon | null>(null);
+    const debugNameRef = useRef(debugName || 'unknown');
+    const visibleRef = useRef(true);
 
     // Store callbacks and values in refs to avoid re-running effect when they change
     const onReadyRef = useRef(onReady);
@@ -146,10 +178,57 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       onInitRef.current = onInit;
       onResizeRef.current = onResize;
       fontSizeRef.current = fontSize;
+      debugNameRef.current = debugName || 'unknown';
     });
 
+    const logTerminal = (
+      level: 'log' | 'warn',
+      message: string,
+      details?: Record<string, unknown>
+    ) => {
+      if (level === 'log' && !isTerminalDebugEnabled()) {
+        return;
+      }
+      const prefix = `[Terminal:${debugNameRef.current}] ${message}`;
+      if (level === 'warn') {
+        if (details) {
+          console.warn(prefix, details);
+        } else {
+          console.warn(prefix);
+        }
+        return;
+      }
+      if (details) {
+        console.log(prefix, details);
+      } else {
+        console.log(prefix);
+      }
+    };
+
     // Helper to resize terminal and notify PTY
-    const resizeTerminal = (term: XTerm, cols: number, rows: number) => {
+    const resizeTerminal = (term: XTerm, cols: number, rows: number, reason: string) => {
+      const suspiciousResize = cols <= SUSPICIOUS_COLS_THRESHOLD || rows <= SUSPICIOUS_ROWS_THRESHOLD;
+      if (suspiciousResize) {
+        const container = containerRef.current;
+        logTerminal('warn', 'Applying suspicious resize', {
+          reason,
+          nextCols: cols,
+          nextRows: rows,
+          prevCols: term.cols,
+          prevRows: term.rows,
+          isVisible: visibleRef.current,
+          container: container ? getContainerDebugInfo(container) : null,
+        });
+      } else {
+        logTerminal('log', 'Applying resize', {
+          reason,
+          nextCols: cols,
+          nextRows: rows,
+          prevCols: term.cols,
+          prevRows: term.rows,
+          isVisible: visibleRef.current,
+        });
+      }
       if (cols !== term.cols || rows !== term.rows) {
         term.resize(cols, rows);
         onResizeRef.current?.(cols, rows);
@@ -164,9 +243,24 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         if (!term || !container) return;
 
         const dims = getScaledDimensions(container, term, fontSizeRef.current);
-        if (dims) {
-          resizeTerminal(term, dims.cols, dims.rows);
+        if (!dims) {
+          logTerminal('warn', 'fit() produced no dimensions', {
+            fontSize: fontSizeRef.current,
+            isVisible: visibleRef.current,
+            container: getContainerDebugInfo(container),
+          });
+          return;
         }
+        if (dims.cols <= SUSPICIOUS_COLS_THRESHOLD || dims.rows <= SUSPICIOUS_ROWS_THRESHOLD) {
+          logTerminal('warn', 'fit() produced suspicious dimensions', {
+            cols: dims.cols,
+            rows: dims.rows,
+            fontSize: fontSizeRef.current,
+            isVisible: visibleRef.current,
+            container: getContainerDebugInfo(container),
+          });
+        }
+        resizeTerminal(term, dims.cols, dims.rows, 'fit');
       },
       focus: () => {
         xtermRef.current?.focus();
@@ -271,7 +365,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             requestAnimationFrame(() => {
               const dims = getScaledDimensions(container, term, fontSizeRef.current);
               if (dims) {
-                resizeTerminal(term, dims.cols, dims.rows);
+                resizeTerminal(term, dims.cols, dims.rows, 'webgl_context_loss');
               }
             });
           }
@@ -308,19 +402,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const resizeBoth = (cols: number, rows: number) => {
         lastCols = cols;
         lastRows = rows;
-        resizeTerminal(term, cols, rows);
+        resizeTerminal(term, cols, rows, 'resize_both');
       };
 
       // Resize X only (debounced)
       const resizeX = (cols: number) => {
         lastCols = cols;
-        resizeTerminal(term, cols, term.rows);
+        resizeTerminal(term, cols, term.rows, 'resize_x');
       };
 
       // Resize Y only (immediate)
       const resizeY = (rows: number) => {
         lastRows = rows;
-        resizeTerminal(term, term.cols, rows);
+        resizeTerminal(term, term.cols, rows, 'resize_y');
       };
 
       const handleResize = () => {
@@ -328,11 +422,29 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         if (!container) return;
 
         const dims = getScaledDimensions(container, term, fontSizeRef.current);
-        if (!dims) return;
+        if (!dims) {
+          logTerminal('log', 'handleResize: no dimensions', {
+            isVisible: visibleRef.current,
+            container: getContainerDebugInfo(container),
+          });
+          return;
+        }
 
         const { cols, rows } = dims;
         latestX = cols;
         latestY = rows;
+
+        if (cols <= SUSPICIOUS_COLS_THRESHOLD || rows <= SUSPICIOUS_ROWS_THRESHOLD) {
+          logTerminal('warn', 'handleResize: suspicious dimensions detected', {
+            cols,
+            rows,
+            lastCols,
+            lastRows,
+            bufferLength: term.buffer.normal.length,
+            isVisible: visibleRef.current,
+            container: getContainerDebugInfo(container),
+          });
+        }
 
         const colsChanged = cols !== lastCols;
         const rowsChanged = rows !== lastRows;
@@ -375,6 +487,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const resizeObserver = new ResizeObserver((entries) => {
         const entry = entries[0];
         if (!entry || entry.contentRect.width <= 0 || entry.contentRect.height <= 0) {
+          if (entry && isTerminalDebugEnabled()) {
+            logTerminal('log', 'ResizeObserver ignored non-positive size', {
+              contentRectWidth: entry.contentRect.width,
+              contentRectHeight: entry.contentRect.height,
+              isVisible: visibleRef.current,
+            });
+          }
           return;
         }
 
@@ -387,6 +506,21 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
               readyFired = true;
               lastCols = dims.cols;
               lastRows = dims.rows;
+
+              if (dims.cols <= SUSPICIOUS_COLS_THRESHOLD || dims.rows <= SUSPICIOUS_ROWS_THRESHOLD) {
+                logTerminal('warn', 'ready resize produced suspicious dimensions', {
+                  cols: dims.cols,
+                  rows: dims.rows,
+                  isVisible: visibleRef.current,
+                  container: containerRef.current ? getContainerDebugInfo(containerRef.current) : null,
+                });
+              } else {
+                logTerminal('log', 'terminal ready', {
+                  cols: dims.cols,
+                  rows: dims.rows,
+                  isVisible: visibleRef.current,
+                });
+              }
 
               // Resize to calculated dimensions
               term.resize(dims.cols, dims.rows);
@@ -415,6 +549,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           const nowVisible = entries[0]?.isIntersecting ?? true;
           const wasHidden = !isVisible && nowVisible;
           isVisible = nowVisible;
+          visibleRef.current = nowVisible;
+          logTerminal('log', 'Visibility changed', { nowVisible, wasHidden, readyFired });
 
           // VS Code pattern: flush pending resizes when becoming visible
           if (wasHidden && readyFired) {
@@ -425,7 +561,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
               if (dims) {
                 lastCols = dims.cols;
                 lastRows = dims.rows;
-                resizeTerminal(term, dims.cols, dims.rows);
+                resizeTerminal(term, dims.cols, dims.rows, 'visibility_flush');
               }
             }
           }
@@ -445,7 +581,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           if (container) {
             const dims = getScaledDimensions(container, term, fontSizeRef.current);
             if (dims) {
-              resizeTerminal(term, dims.cols, dims.rows);
+              resizeTerminal(term, dims.cols, dims.rows, 'dpr_change');
             }
           }
         }
@@ -477,6 +613,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // Recalculate dimensions with new font size
       const dims = getScaledDimensions(container, term, fontSize);
       if (dims) {
+        if (dims.cols <= SUSPICIOUS_COLS_THRESHOLD || dims.rows <= SUSPICIOUS_ROWS_THRESHOLD) {
+          logTerminal('warn', 'fontSize resize produced suspicious dimensions', {
+            cols: dims.cols,
+            rows: dims.rows,
+            fontSize,
+            isVisible: visibleRef.current,
+            container: getContainerDebugInfo(container),
+          });
+        }
         term.resize(dims.cols, dims.rows);
         onResizeRef.current?.(dims.cols, dims.rows);
       }

@@ -96,6 +96,29 @@ func TestStore_List(t *testing.T) {
 	}
 }
 
+func TestStore_List_StableOrderForDuplicateLabels(t *testing.T) {
+	s := New()
+
+	s.Add(&protocol.Session{ID: "b-id", Label: "dup", State: protocol.SessionStateWorking})
+	s.Add(&protocol.Session{ID: "a-id", Label: "dup", State: protocol.SessionStateWorking})
+	s.Add(&protocol.Session{ID: "c-id", Label: "zzz", State: protocol.SessionStateWorking})
+
+	all := s.List("")
+	if len(all) != 3 {
+		t.Fatalf("List() returned %d sessions, want 3", len(all))
+	}
+
+	if all[0].ID != "a-id" || all[1].ID != "b-id" || all[2].ID != "c-id" {
+		t.Fatalf("unexpected order: got [%s %s %s], want [a-id b-id c-id]", all[0].ID, all[1].ID, all[2].ID)
+	}
+
+	// Re-read to ensure deterministic ordering across calls.
+	all2 := s.List("")
+	if all2[0].ID != "a-id" || all2[1].ID != "b-id" || all2[2].ID != "c-id" {
+		t.Fatalf("order changed across calls: got [%s %s %s], want [a-id b-id c-id]", all2[0].ID, all2[1].ID, all2[2].ID)
+	}
+}
+
 func TestStore_UpdateState(t *testing.T) {
 	s := New()
 

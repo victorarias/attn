@@ -88,6 +88,17 @@ export interface RateLimitState {
 // Increment when making breaking changes to the protocol
 const PROTOCOL_VERSION = '28';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
+const TERMINAL_DEBUG_STORAGE_KEY = 'attn:terminal-debug';
+const SUSPICIOUS_COLS_THRESHOLD = 20;
+const SUSPICIOUS_ROWS_THRESHOLD = 10;
+
+function isTerminalDebugEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(TERMINAL_DEBUG_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 interface PRActionResult {
   success: boolean;
@@ -1489,6 +1500,12 @@ export function useDaemonSocket({
   const sendPtyResize = useCallback((id: string, cols: number, rows: number) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const suspiciousResize = cols <= SUSPICIOUS_COLS_THRESHOLD || rows <= SUSPICIOUS_ROWS_THRESHOLD;
+    if (suspiciousResize) {
+      console.warn('[DaemonSocket] Sending suspicious PTY resize', { id, cols, rows });
+    } else if (isTerminalDebugEnabled()) {
+      console.log('[DaemonSocket] Sending PTY resize', { id, cols, rows });
+    }
     ws.send(JSON.stringify({ cmd: 'pty_resize', id, cols, rows }));
   }, []);
 
