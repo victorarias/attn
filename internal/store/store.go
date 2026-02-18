@@ -195,7 +195,8 @@ func (s *Store) ClearSessions() {
 	}
 }
 
-// List returns sessions, optionally filtered by state, sorted by label
+// List returns sessions, optionally filtered by state, sorted by label then ID.
+// The ID tie-breaker keeps ordering stable when labels are duplicated.
 func (s *Store) List(stateFilter string) []*protocol.Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -210,11 +211,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
 			SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
-			FROM sessions ORDER BY label`)
+			FROM sessions ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
 			SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
-			FROM sessions WHERE state = ? ORDER BY label`, stateFilter)
+			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
 		return nil

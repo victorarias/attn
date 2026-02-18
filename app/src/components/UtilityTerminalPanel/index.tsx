@@ -432,6 +432,7 @@ export function UtilityTerminalPanel({
                 // No-op: cleanup is handled by terminal list reconciliation.
               }}
               fontSize={fontSize}
+              debugName={`utility:${terminal.title}:${terminal.id}`}
               onInit={handleTerminalInit(terminal.id, terminal.ptyId)}
               onReady={handleTerminalReady(terminal.id, terminal.ptyId)}
               onResize={handleTerminalResize(terminal.ptyId)}

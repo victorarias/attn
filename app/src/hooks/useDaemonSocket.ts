@@ -18,6 +18,7 @@ import type {
   HeatState,
 } from '../types/generated';
 import { emitPtyEvent, setPtyBackend, type PtySpawnArgs } from '../pty/bridge';
+import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
 
 // Re-export types from generated for consumers
 // Use type aliases to maintain backward compatibility
@@ -1489,6 +1490,12 @@ export function useDaemonSocket({
   const sendPtyResize = useCallback((id: string, cols: number, rows: number) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const suspiciousResize = isSuspiciousTerminalSize(cols, rows);
+    if (suspiciousResize) {
+      console.warn('[DaemonSocket] Sending suspicious PTY resize', { id, cols, rows });
+    } else if (isTerminalDebugEnabled()) {
+      console.log('[DaemonSocket] Sending PTY resize', { id, cols, rows });
+    }
     ws.send(JSON.stringify({ cmd: 'pty_resize', id, cols, rows }));
   }, []);
 

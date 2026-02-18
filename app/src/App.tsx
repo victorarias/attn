@@ -1460,6 +1460,7 @@ function AppContent({
                 <Terminal
                   ref={setTerminalRef(session.id)}
                   fontSize={terminalFontSize}
+                  debugName={`main:${session.label}:${session.id}`}
                   onReady={handleTerminalReady(session.id)}
                   onResize={handleResize(session.id)}
                 />
