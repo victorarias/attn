@@ -43,6 +43,47 @@ type blockingClassifier struct {
 	calls   int
 }
 
+type errorClassifier struct {
+	state string
+	err   error
+}
+
+func (c *errorClassifier) Classify(text string, timeout time.Duration) (string, error) {
+	return c.state, c.err
+}
+
+type sequenceClassifierResponse struct {
+	state string
+	err   error
+}
+
+type sequenceClassifier struct {
+	mu        sync.Mutex
+	responses []sequenceClassifierResponse
+	calls     int
+}
+
+func (c *sequenceClassifier) Classify(text string, timeout time.Duration) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	idx := c.calls - 1
+	if idx >= len(c.responses) {
+		idx = len(c.responses) - 1
+	}
+	if idx < 0 {
+		return protocol.StateUnknown, errors.New("no responses configured")
+	}
+	resp := c.responses[idx]
+	return resp.state, resp.err
+}
+
+func (c *sequenceClassifier) CallCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
 func newBlockingClassifier(state string) *blockingClassifier {
 	return &blockingClassifier{
 		state:   state,
@@ -2564,6 +2605,144 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 	//
 	// This test mainly ensures the todos count logic correctly skips completed todos
 	t.Log("Test passed: todos with [✓] prefix are counted as completed, allowing classification to proceed")
+}
+
+func TestClassifySessionState_ClassifierError_StaysUnknown(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.classifier = &errorClassifier{
+		state: protocol.StateUnknown,
+		err:   errors.New("claude sdk: message parse error: unknown message type: rate_limit_event"),
+	}
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-unknown",
+		Agent:          protocol.SessionAgentCodex,
+		Label:          "test",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	content := `{"type":"assistant","message":{"role":"assistant","content":"Now running pre-review."}}
+`
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	d.classifySessionState("sess-unknown", transcriptPath)
+
+	sess := d.store.Get("sess-unknown")
+	if sess == nil {
+		t.Fatal("session missing after classify")
+	}
+	if sess.State != protocol.StateUnknown {
+		t.Fatalf("state = %s, want %s", sess.State, protocol.StateUnknown)
+	}
+}
+
+func TestClassifySessionState_RateLimitError_RetriesClassifier(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	classifier := &sequenceClassifier{
+		responses: []sequenceClassifierResponse{
+			{
+				state: protocol.StateUnknown,
+				err:   errors.New("claude sdk: message parse error: unknown message type: rate_limit_event"),
+			},
+			{
+				state: protocol.StateIdle,
+				err:   nil,
+			},
+		},
+	}
+	d.classifier = classifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-retry-rate-limit",
+		Agent:          protocol.SessionAgentCodex,
+		Label:          "test",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	content := `{"type":"assistant","message":{"role":"assistant","content":"Now running pre-review."}}
+`
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	d.classifySessionState("sess-retry-rate-limit", transcriptPath)
+
+	sess := d.store.Get("sess-retry-rate-limit")
+	if sess == nil {
+		t.Fatal("session missing after classify")
+	}
+	if sess.State != protocol.StateIdle {
+		t.Fatalf("state = %s, want %s", sess.State, protocol.StateIdle)
+	}
+	if got := classifier.CallCount(); got != 2 {
+		t.Fatalf("classifier calls=%d, want 2", got)
+	}
+}
+
+func TestClassifySessionState_NonRateLimitError_DoesNotRetryClassifier(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	classifier := &sequenceClassifier{
+		responses: []sequenceClassifierResponse{
+			{
+				state: protocol.StateUnknown,
+				err:   errors.New("claude sdk: message parse error: unknown message type: something_else"),
+			},
+			{
+				state: protocol.StateIdle,
+				err:   nil,
+			},
+		},
+	}
+	d.classifier = classifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-no-retry",
+		Agent:          protocol.SessionAgentCodex,
+		Label:          "test",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	content := `{"type":"assistant","message":{"role":"assistant","content":"Now running pre-review."}}
+`
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	d.classifySessionState("sess-no-retry", transcriptPath)
+
+	sess := d.store.Get("sess-no-retry")
+	if sess == nil {
+		t.Fatal("session missing after classify")
+	}
+	if sess.State != protocol.StateUnknown {
+		t.Fatalf("state = %s, want %s", sess.State, protocol.StateUnknown)
+	}
+	if got := classifier.CallCount(); got != 1 {
+		t.Fatalf("classifier calls=%d, want 1", got)
+	}
 }
 
 func TestClassifySessionState_ClaudeSkipsDuplicateAssistantTurn(t *testing.T) {

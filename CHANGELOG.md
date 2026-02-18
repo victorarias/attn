@@ -6,6 +6,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-18]
+
+### Changed
+- **Unknown State Diagnostics**: Stop-time classification now logs explicit unknown reason codes (for example `transcript_parse_error`, `classifier_error`, and `classifier_unknown_response`) so purple-state transitions can be traced from runtime evidence.
+
+### Fixed
+- **Classifier Rate-Limit Retry**: Stop-time classification now retries `rate_limit_event` parser failures with short exponential backoff (up to 3 attempts) before returning `unknown`, reducing avoidable purple transitions during transient classifier stream throttling.
+
 ## [2026-02-17]
 
 ### Fixed

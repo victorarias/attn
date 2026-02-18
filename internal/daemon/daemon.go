@@ -52,6 +52,8 @@ const (
 	claudeTranscriptRetryWindow   = 2 * time.Second
 	claudeTranscriptRetryInterval = 100 * time.Millisecond
 	claudeTranscriptFreshnessSkew = 5 * time.Second
+	classifierRetryMaxAttempts    = 3
+	classifierRetryBaseBackoff    = 250 * time.Millisecond
 
 	startupRecoveryRetryMax       = 2
 	startupRecoveryRetryDelay     = 500 * time.Millisecond
@@ -1501,6 +1503,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 			return
 		}
 		d.logf("classifySessionState: transcript parse error for %s: %v", sessionID, err)
+		d.logf("classifySessionState: unknown reason=transcript_parse_error session=%s transcript=%s", sessionID, resolvedTranscriptPath)
 		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateUnknown, classificationStartTime)
 		return
 	}
@@ -1524,27 +1527,14 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 
 	// Classify with LLM (can be slow - 30+ seconds)
 	d.logf("classifySessionState: calling classifier for session %s", sessionID)
-	var state string
-	if d.classifier != nil {
-		state, err = d.classifier.Classify(lastMessage, 30*time.Second)
-	} else {
-		switch session.Agent {
-		case protocol.SessionAgentCopilot:
-			state, err = classifier.ClassifyWithCopilot(lastMessage, 30*time.Second)
-		case protocol.SessionAgentCodex:
-			state, err = classifier.ClassifyWithCodexExecutable(
-				lastMessage,
-				d.store.GetSetting(SettingCodexExecutable),
-				30*time.Second,
-			)
-		default:
-			// Use Claude SDK for Claude sessions.
-			state, err = classifier.ClassifyWithClaude(lastMessage, 30*time.Second)
-		}
-	}
+	state, err := d.classifyWithRetry(session, lastMessage, 30*time.Second)
 	if err != nil {
 		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)
+		d.logf("classifySessionState: unknown reason=classifier_error session=%s err=%v", sessionID, err)
 		state = protocol.StateUnknown
+	}
+	if err == nil && state == protocol.StateUnknown {
+		d.logf("classifySessionState: unknown reason=classifier_unknown_response session=%s", sessionID)
 	}
 
 	d.logf("classifySessionState: session %s classified as %s", sessionID, state)
@@ -1552,6 +1542,56 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		d.setClassifiedTurnID(sessionID, assistantTurnID)
 	}
 	d.updateAndBroadcastStateWithTimestamp(sessionID, state, classificationStartTime)
+}
+
+func (d *Daemon) classifyWithRetry(session *protocol.Session, text string, timeout time.Duration) (string, error) {
+	state, err := d.runClassifier(session, text, timeout)
+	attempt := 1
+	for attempt < classifierRetryMaxAttempts && isClassifierRateLimitError(err) {
+		backoff := classifierRetryBaseBackoff * time.Duration(1<<(attempt-1))
+		d.logf(
+			"classifySessionState: classifier retry after rate_limit_event session=%s attempt=%d/%d backoff=%s",
+			session.ID,
+			attempt+1,
+			classifierRetryMaxAttempts,
+			backoff,
+		)
+		time.Sleep(backoff)
+		attempt++
+		state, err = d.runClassifier(session, text, timeout)
+	}
+	if err == nil && attempt > 1 {
+		d.logf("classifySessionState: classifier recovered after retry session=%s attempts=%d", session.ID, attempt)
+	}
+	return state, err
+}
+
+func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout time.Duration) (string, error) {
+	if d.classifier != nil {
+		return d.classifier.Classify(text, timeout)
+	}
+	if session != nil {
+		switch session.Agent {
+		case protocol.SessionAgentCopilot:
+			return classifier.ClassifyWithCopilot(text, timeout)
+		case protocol.SessionAgentCodex:
+			return classifier.ClassifyWithCodexExecutable(
+				text,
+				d.store.GetSetting(SettingCodexExecutable),
+				timeout,
+			)
+		}
+	}
+	// Use Claude SDK for Claude sessions.
+	return classifier.ClassifyWithClaude(text, timeout)
+}
+
+func isClassifierRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "rate_limit_event")
 }
 
 func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, transcriptPath string) string {
