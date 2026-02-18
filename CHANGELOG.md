@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Terminal Emoji Width**: Add Unicode 11 addon to xterm.js so emojis and CJK characters are correctly treated as double-width, fixing misaligned columns in status bars and context displays.
+- **Login Shell Environment Capture**: PTY sessions now source `.zshrc` when capturing the login shell environment, fixing missing PATH entries (e.g. Google Cloud SDK) that are configured in `.zshrc` rather than `.zprofile`.
 
 ## [2026-02-16]
 
