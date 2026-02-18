@@ -80,6 +80,9 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.5.2
+      '@xterm/addon-unicode11':
+        specifier: ^0.9.0
+        version: 0.9.0
       '@xterm/addon-web-links':
         specifier: 0.12.0-beta.136
         version: 0.12.0-beta.136(@xterm/xterm@5.6.0-beta.136)
@@ -895,6 +898,9 @@ packages:
 
   '@vitest/utils@4.0.15':
     resolution: {integrity: sha512-HXjPW2w5dxhTD0dLwtYHDnelK3j8sR8cWIaLxr22evTyY6q8pRCjZSmhRWVjBaOVXChQd6AwMzi9pucorXCPZA==}
+
+  '@xterm/addon-unicode11@0.9.0':
+    resolution: {integrity: sha512-FxDnYcyuXhNl+XSqGZL/t0U9eiNb/q3EWT5rYkQT/zuig8Gz/VagnQANKHdDWFM2lTMk9ly0EFQxxxtZUoRetw==}
 
   '@xterm/addon-web-links@0.12.0-beta.136':
     resolution: {integrity: sha512-w2w73DKZEzToWa0nYNiUnn1+5/eY8x799BP/4iJATal9lHBi8IdvxS2pR6a6ZmgVLFQM1zJWAoKD0zC3AS7Lqg==}
@@ -2358,6 +2364,8 @@ snapshots:
     dependencies:
       '@vitest/pretty-format': 4.0.15
       tinyrainbow: 3.0.3
+
+  '@xterm/addon-unicode11@0.9.0': {}
 
   '@xterm/addon-web-links@0.12.0-beta.136(@xterm/xterm@5.6.0-beta.136)':
     dependencies:

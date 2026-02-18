@@ -2,6 +2,7 @@ import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
@@ -247,6 +248,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           await openExternalUri(uri);
         }
       }));
+
+      // Enable Unicode 11 for correct emoji/CJK width calculation
+      term.loadAddon(new Unicode11Addon());
+      term.unicode.activeVersion = '11';
 
       // VS Code: open() FIRST, then load WebGL
       // Source: xtermTerminal.ts attachToElement() - WebGL is loaded AFTER raw.open()
