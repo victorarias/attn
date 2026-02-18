@@ -773,8 +773,8 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 		case protocol.SessionStateWaitingInput, protocol.SessionStatePendingApproval:
 			// Preserve interactive waiting/approval states during recovery.
 		default:
-			if existing.State != protocol.SessionStateWorking {
-				d.store.UpdateState(sessionID, protocol.StateWorking)
+			if existing.State != protocol.SessionStateLaunching {
+				d.store.UpdateState(sessionID, protocol.StateLaunching)
 				report.StateUpdated++
 				report.Changed = true
 			}
@@ -912,18 +912,15 @@ func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.Session
 	switch info.State {
 	case protocol.StateWaitingInput:
 		if agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot {
-			return protocol.SessionStateWorking
+			return protocol.SessionStateLaunching
 		}
 		return protocol.SessionStateWaitingInput
 	case protocol.StatePendingApproval:
 		return protocol.SessionStatePendingApproval
 	case protocol.StateIdle:
-		if agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot {
-			return protocol.SessionStateWorking
-		}
-		return protocol.SessionStateIdle
+		return protocol.SessionStateLaunching
 	default:
-		return protocol.SessionStateWorking
+		return protocol.SessionStateLaunching
 	}
 }
 

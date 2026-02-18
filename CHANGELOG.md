@@ -11,6 +11,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **Unknown State Diagnostics**: Stop-time classification now logs explicit unknown reason codes (for example `transcript_parse_error`, `classifier_error`, and `classifier_unknown_response`) so purple-state transitions can be traced from runtime evidence.
 - **Classifier SDK Dependency**: Upgrade `claude-agent-sdk-go` to include first-class `rate_limit_event` parsing and avoid aborting classifier queries on that stream event.
+- **Restart Recovery Default State**: Worker session reconciliation after daemon restart now defaults live-running sessions to `launching` (emoji) instead of `working`, unless runtime metadata explicitly indicates `pending_approval` or `waiting_input`.
 
 ### Fixed
 - **Classifier Flow Cleanup**: Remove daemon-side retry logic that depended on brittle `rate_limit_event` error-string matching, now that SDK parsing handles the event directly.

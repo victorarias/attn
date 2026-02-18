@@ -634,8 +634,8 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 	if existing == nil {
 		t.Fatal("live-existing session missing after reconcile")
 	}
-	if existing.State != protocol.SessionStateWorking {
-		t.Fatalf("live-existing state = %s, want working for codex recovery policy", existing.State)
+	if existing.State != protocol.SessionStateLaunching {
+		t.Fatalf("live-existing state = %s, want launching for recovery default", existing.State)
 	}
 
 	liveNew := d.store.Get("live-new")
@@ -648,8 +648,8 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 	if liveNew.Agent != protocol.SessionAgentCopilot {
 		t.Fatalf("live-new agent = %s, want %s", liveNew.Agent, protocol.SessionAgentCopilot)
 	}
-	if liveNew.State != protocol.SessionStateWorking {
-		t.Fatalf("live-new state = %s, want %s", liveNew.State, protocol.SessionStateWorking)
+	if liveNew.State != protocol.SessionStateLaunching {
+		t.Fatalf("live-new state = %s, want %s", liveNew.State, protocol.SessionStateLaunching)
 	}
 	liveNewExited := d.store.Get("live-new-exited")
 	if liveNewExited == nil {
@@ -938,9 +938,9 @@ func TestSessionStateFromRecoveredInfo(t *testing.T) {
 			want: protocol.SessionStateWaitingInput,
 		},
 		{
-			name: "codex waiting input normalizes to working",
+			name: "codex waiting input normalizes to launching",
 			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentCodex), State: protocol.StateWaitingInput},
-			want: protocol.SessionStateWorking,
+			want: protocol.SessionStateLaunching,
 		},
 		{
 			name: "pending approval",
@@ -948,19 +948,19 @@ func TestSessionStateFromRecoveredInfo(t *testing.T) {
 			want: protocol.SessionStatePendingApproval,
 		},
 		{
-			name: "explicit idle",
+			name: "explicit idle running session normalizes to launching",
 			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude), State: protocol.StateIdle},
-			want: protocol.SessionStateIdle,
+			want: protocol.SessionStateLaunching,
 		},
 		{
-			name: "copilot explicit idle normalizes to working",
+			name: "copilot explicit idle normalizes to launching",
 			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentCopilot), State: protocol.StateIdle},
-			want: protocol.SessionStateWorking,
+			want: protocol.SessionStateLaunching,
 		},
 		{
-			name: "default working",
+			name: "default working normalizes to launching",
 			info: ptybackend.SessionInfo{Running: true, State: protocol.StateWorking},
-			want: protocol.SessionStateWorking,
+			want: protocol.SessionStateLaunching,
 		},
 	}
 	for _, tt := range tests {
