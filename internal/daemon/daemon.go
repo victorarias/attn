@@ -773,8 +773,8 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 		case protocol.SessionStateWaitingInput, protocol.SessionStatePendingApproval:
 			// Preserve interactive waiting/approval states during recovery.
 		default:
-			if existing.State != protocol.SessionStateWorking {
-				d.store.UpdateState(sessionID, protocol.StateWorking)
+			if existing.State != protocol.SessionStateLaunching {
+				d.store.UpdateState(sessionID, protocol.StateLaunching)
 				report.StateUpdated++
 				report.Changed = true
 			}
@@ -912,18 +912,15 @@ func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.Session
 	switch info.State {
 	case protocol.StateWaitingInput:
 		if agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot {
-			return protocol.SessionStateWorking
+			return protocol.SessionStateLaunching
 		}
 		return protocol.SessionStateWaitingInput
 	case protocol.StatePendingApproval:
 		return protocol.SessionStatePendingApproval
 	case protocol.StateIdle:
-		if agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot {
-			return protocol.SessionStateWorking
-		}
-		return protocol.SessionStateIdle
+		return protocol.SessionStateLaunching
 	default:
-		return protocol.SessionStateWorking
+		return protocol.SessionStateLaunching
 	}
 }
 
@@ -1501,6 +1498,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 			return
 		}
 		d.logf("classifySessionState: transcript parse error for %s: %v", sessionID, err)
+		d.logf("classifySessionState: unknown reason=transcript_parse_error session=%s transcript=%s", sessionID, resolvedTranscriptPath)
 		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateUnknown, classificationStartTime)
 		return
 	}
@@ -1524,27 +1522,14 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 
 	// Classify with LLM (can be slow - 30+ seconds)
 	d.logf("classifySessionState: calling classifier for session %s", sessionID)
-	var state string
-	if d.classifier != nil {
-		state, err = d.classifier.Classify(lastMessage, 30*time.Second)
-	} else {
-		switch session.Agent {
-		case protocol.SessionAgentCopilot:
-			state, err = classifier.ClassifyWithCopilot(lastMessage, 30*time.Second)
-		case protocol.SessionAgentCodex:
-			state, err = classifier.ClassifyWithCodexExecutable(
-				lastMessage,
-				d.store.GetSetting(SettingCodexExecutable),
-				30*time.Second,
-			)
-		default:
-			// Use Claude SDK for Claude sessions.
-			state, err = classifier.ClassifyWithClaude(lastMessage, 30*time.Second)
-		}
-	}
+	state, err := d.runClassifier(session, lastMessage, 30*time.Second)
 	if err != nil {
 		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)
+		d.logf("classifySessionState: unknown reason=classifier_error session=%s err=%v", sessionID, err)
 		state = protocol.StateUnknown
+	}
+	if err == nil && state == protocol.StateUnknown {
+		d.logf("classifySessionState: unknown reason=classifier_unknown_response session=%s", sessionID)
 	}
 
 	d.logf("classifySessionState: session %s classified as %s", sessionID, state)
@@ -1552,6 +1537,26 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		d.setClassifiedTurnID(sessionID, assistantTurnID)
 	}
 	d.updateAndBroadcastStateWithTimestamp(sessionID, state, classificationStartTime)
+}
+
+func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout time.Duration) (string, error) {
+	if d.classifier != nil {
+		return d.classifier.Classify(text, timeout)
+	}
+	if session != nil {
+		switch session.Agent {
+		case protocol.SessionAgentCopilot:
+			return classifier.ClassifyWithCopilot(text, timeout)
+		case protocol.SessionAgentCodex:
+			return classifier.ClassifyWithCodexExecutable(
+				text,
+				d.store.GetSetting(SettingCodexExecutable),
+				timeout,
+			)
+		}
+	}
+	// Use Claude SDK for Claude sessions.
+	return classifier.ClassifyWithClaude(text, timeout)
 }
 
 func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, transcriptPath string) string {
