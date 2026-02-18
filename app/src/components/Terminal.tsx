@@ -1,4 +1,4 @@
-import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -6,26 +6,16 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
+import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
 
 // Terminal font configuration (matches xterm options)
 const FONT_FAMILY = 'Iosevka, Menlo, Monaco, "Courier New", monospace';
 const DEFAULT_FONT_SIZE = 14;
 const TERMINAL_SCROLLBACK_LINES = 50000;
-const TERMINAL_DEBUG_STORAGE_KEY = 'attn:terminal-debug';
-const SUSPICIOUS_COLS_THRESHOLD = 20;
-const SUSPICIOUS_ROWS_THRESHOLD = 10;
 
 // VS Code limits canvas width to prevent performance issues with very wide terminals
 // Source: Constants.MaxCanvasWidth in terminalInstance.ts (line 103)
 const MAX_CANVAS_WIDTH = 4096;
-
-function isTerminalDebugEnabled(): boolean {
-  try {
-    return window.localStorage.getItem(TERMINAL_DEBUG_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
 
 function getContainerDebugInfo(container: HTMLElement) {
   const rect = container.getBoundingClientRect();
@@ -181,7 +171,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       debugNameRef.current = debugName || 'unknown';
     });
 
-    const logTerminal = (
+    const logTerminal = useCallback((
       level: 'log' | 'warn',
       message: string,
       details?: Record<string, unknown>
@@ -203,11 +193,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       } else {
         console.log(prefix);
       }
-    };
+    }, []);
 
     // Helper to resize terminal and notify PTY
-    const resizeTerminal = (term: XTerm, cols: number, rows: number, reason: string) => {
-      const suspiciousResize = cols <= SUSPICIOUS_COLS_THRESHOLD || rows <= SUSPICIOUS_ROWS_THRESHOLD;
+    const resizeTerminal = useCallback((term: XTerm, cols: number, rows: number, reason: string) => {
+      const suspiciousResize = isSuspiciousTerminalSize(cols, rows);
       if (suspiciousResize) {
         const container = containerRef.current;
         logTerminal('warn', 'Applying suspicious resize', {
@@ -233,7 +223,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         term.resize(cols, rows);
         onResizeRef.current?.(cols, rows);
       }
-    };
+    }, [logTerminal]);
 
     useImperativeHandle(ref, () => ({
       terminal: xtermRef.current,
@@ -251,7 +241,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           });
           return;
         }
-        if (dims.cols <= SUSPICIOUS_COLS_THRESHOLD || dims.rows <= SUSPICIOUS_ROWS_THRESHOLD) {
+        if (isSuspiciousTerminalSize(dims.cols, dims.rows)) {
           logTerminal('warn', 'fit() produced suspicious dimensions', {
             cols: dims.cols,
             rows: dims.rows,
@@ -434,7 +424,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         latestX = cols;
         latestY = rows;
 
-        if (cols <= SUSPICIOUS_COLS_THRESHOLD || rows <= SUSPICIOUS_ROWS_THRESHOLD) {
+        if (isSuspiciousTerminalSize(cols, rows)) {
           logTerminal('warn', 'handleResize: suspicious dimensions detected', {
             cols,
             rows,
@@ -507,7 +497,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
               lastCols = dims.cols;
               lastRows = dims.rows;
 
-              if (dims.cols <= SUSPICIOUS_COLS_THRESHOLD || dims.rows <= SUSPICIOUS_ROWS_THRESHOLD) {
+              if (isSuspiciousTerminalSize(dims.cols, dims.rows)) {
                 logTerminal('warn', 'ready resize produced suspicious dimensions', {
                   cols: dims.cols,
                   rows: dims.rows,
@@ -599,7 +589,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         webglAddon?.dispose();
         term.dispose();
       };
-    }, []);
+    }, [logTerminal, resizeTerminal]);
 
     // Handle fontSize changes after terminal is created
     useEffect(() => {
@@ -613,7 +603,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // Recalculate dimensions with new font size
       const dims = getScaledDimensions(container, term, fontSize);
       if (dims) {
-        if (dims.cols <= SUSPICIOUS_COLS_THRESHOLD || dims.rows <= SUSPICIOUS_ROWS_THRESHOLD) {
+        if (isSuspiciousTerminalSize(dims.cols, dims.rows)) {
           logTerminal('warn', 'fontSize resize produced suspicious dimensions', {
             cols: dims.cols,
             rows: dims.rows,

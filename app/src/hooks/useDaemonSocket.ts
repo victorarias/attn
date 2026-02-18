@@ -18,6 +18,7 @@ import type {
   HeatState,
 } from '../types/generated';
 import { emitPtyEvent, setPtyBackend, type PtySpawnArgs } from '../pty/bridge';
+import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
 
 // Re-export types from generated for consumers
 // Use type aliases to maintain backward compatibility
@@ -88,17 +89,6 @@ export interface RateLimitState {
 // Increment when making breaking changes to the protocol
 const PROTOCOL_VERSION = '28';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
-const TERMINAL_DEBUG_STORAGE_KEY = 'attn:terminal-debug';
-const SUSPICIOUS_COLS_THRESHOLD = 20;
-const SUSPICIOUS_ROWS_THRESHOLD = 10;
-
-function isTerminalDebugEnabled(): boolean {
-  try {
-    return window.localStorage.getItem(TERMINAL_DEBUG_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
 
 interface PRActionResult {
   success: boolean;
@@ -1500,7 +1490,7 @@ export function useDaemonSocket({
   const sendPtyResize = useCallback((id: string, cols: number, rows: number) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const suspiciousResize = cols <= SUSPICIOUS_COLS_THRESHOLD || rows <= SUSPICIOUS_ROWS_THRESHOLD;
+    const suspiciousResize = isSuspiciousTerminalSize(cols, rows);
     if (suspiciousResize) {
       console.warn('[DaemonSocket] Sending suspicious PTY resize', { id, cols, rows });
     } else if (isTerminalDebugEnabled()) {
