@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-17]
+
+### Fixed
+- **Terminal Emoji Width**: Add Unicode 11 addon to xterm.js so emojis and CJK characters are correctly treated as double-width, fixing misaligned columns in status bars and context displays.
+
 ## [2026-02-16]
 
 ### Fixed
