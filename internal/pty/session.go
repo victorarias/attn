@@ -19,6 +19,10 @@ type sessionSubscriber struct {
 	onDrop func(reason string)
 }
 
+type stateDetector interface {
+	Observe(chunk []byte) (string, bool)
+}
+
 type Session struct {
 	id    string
 	cwd   string
@@ -40,8 +44,8 @@ type Session struct {
 
 	writeMu sync.Mutex
 
-	// CLI state detection based on PTY output (currently Codex/Copilot).
-	detector *codexStateDetector
+	// CLI state detection based on PTY output.
+	detector stateDetector
 	onState  func(state string)
 
 	exitMu     sync.RWMutex

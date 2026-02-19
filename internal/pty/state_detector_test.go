@@ -104,3 +104,40 @@ func TestLooksLikeWorkingAnimation(t *testing.T) {
 		t.Fatal("plain output should not be treated as animation")
 	}
 }
+
+func TestClaudeWorkingDetector_EmitsWorkingPulseForStatusFrames(t *testing.T) {
+	d := newClaudeWorkingDetector()
+	frame := []byte("\x1b[35m✻\x1b[0m \x1b[36mMetamorphosing…\x1b[0m (3m 53s · ↓ 2.9k tokens)\r")
+
+	state, changed := d.Observe(frame)
+	if !changed {
+		t.Fatal("first claude status frame should produce a state update")
+	}
+	if state != stateWorking {
+		t.Fatalf("state=%q want=%q", state, stateWorking)
+	}
+
+	d.lastWorkingPulse = time.Now().Add(-workingPulseInterval - 50*time.Millisecond)
+	state, changed = d.Observe(frame)
+	if !changed {
+		t.Fatal("claude status heartbeat should emit a working pulse")
+	}
+	if state != stateWorking {
+		t.Fatalf("state=%q want=%q", state, stateWorking)
+	}
+}
+
+func TestLooksLikeClaudeWorkingStatusFrame(t *testing.T) {
+	if !looksLikeClaudeWorkingStatusFrame("\x1b[35m✻\x1b[0m \x1b[36mMetamorphosing…\x1b[0m (3m 53s · ↓ 2.9k tokens)\r") {
+		t.Fatal("animated claude status line should be treated as working")
+	}
+	if looksLikeClaudeWorkingStatusFrame("\x1b[35m✻\x1b[0m Brewed for 3m 27s\n") {
+		t.Fatal("final brewed summary must not be treated as working animation")
+	}
+	if looksLikeClaudeWorkingStatusFrame("\x1b[35m✻\x1b[0m Simmered for 3m 27s\r") {
+		t.Fatal("final summary wording variants must not be treated as working animation")
+	}
+	if looksLikeClaudeWorkingStatusFrame("\x1b[35m✻\x1b[0m Metamorphosing…\r") {
+		t.Fatal("status lines without timer should not be treated as working animation")
+	}
+}

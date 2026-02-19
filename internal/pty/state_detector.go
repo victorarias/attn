@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
@@ -44,11 +45,23 @@ type codexStateDetector struct {
 	lastWorkingPulse time.Time
 }
 
+type claudeWorkingDetector struct {
+	lastState        string
+	lastWorkingPulse time.Time
+}
+
 func newCodexStateDetector() *codexStateDetector {
 	return &codexStateDetector{}
 }
 
+func newClaudeWorkingDetector() *claudeWorkingDetector {
+	return &claudeWorkingDetector{}
+}
+
 const workingPulseInterval = 1200 * time.Millisecond
+
+var claudeStatusTimerPattern = regexp.MustCompile(`\((?:\d+h\s+)?(?:\d+m\s+)?\d+s(?:\s+·[^)]*)?\)`)
+var claudeFinalSummaryPattern = regexp.MustCompile(`(?i)\bfor\s+(?:\d+h\s+)?(?:\d+m\s+)?\d+s\b`)
 
 func (d *codexStateDetector) Observe(chunk []byte) (string, bool) {
 	if len(chunk) == 0 {
@@ -99,6 +112,63 @@ func looksLikeWorkingAnimation(raw string) bool {
 		strings.Contains(lower, "executing")
 	// Progress-wave redraws are emitted as ANSI-updated carriage-return frames.
 	return hasWorkingKeyword && strings.Contains(raw, "\r") && strings.Contains(raw, "\x1b[")
+}
+
+func (d *claudeWorkingDetector) Observe(chunk []byte) (string, bool) {
+	if len(chunk) == 0 {
+		return "", false
+	}
+	raw := string(chunk)
+	if !looksLikeClaudeWorkingStatusFrame(raw) {
+		return "", false
+	}
+
+	now := time.Now()
+	if d.lastState != stateWorking {
+		d.lastState = stateWorking
+		d.lastWorkingPulse = now
+		return stateWorking, true
+	}
+	if now.Sub(d.lastWorkingPulse) >= workingPulseInterval {
+		d.lastWorkingPulse = now
+		return stateWorking, true
+	}
+	return "", false
+}
+
+func looksLikeClaudeWorkingStatusFrame(raw string) bool {
+	if raw == "" || !strings.Contains(raw, "\r") {
+		return false
+	}
+
+	cleaned := strings.TrimSpace(stripANSI(raw))
+	if cleaned == "" {
+		return false
+	}
+	if !hasClaudeStatusGlyphPrefix(cleaned) {
+		return false
+	}
+	if claudeFinalSummaryPattern.MatchString(cleaned) && !claudeStatusTimerPattern.MatchString(cleaned) {
+		// Final completion summary lines vary by wording, but consistently look like:
+		// "✻ <verb> for 3m 27s" without the live status parenthesized timer.
+		return false
+	}
+	return claudeStatusTimerPattern.MatchString(cleaned)
+}
+
+func hasClaudeStatusGlyphPrefix(text string) bool {
+	trimmed := strings.TrimLeft(text, " \t")
+	if trimmed == "" {
+		return false
+	}
+
+	runes := []rune(trimmed)
+	switch runes[0] {
+	case '✻', '✶', '✢', '✳':
+		return true
+	default:
+		return false
+	}
 }
 
 func trimToLastChars(input string, maxChars int) string {

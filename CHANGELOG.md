@@ -6,6 +6,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-19]
+
+### Fixed
+- **Claude Working-State PTY Heartbeats**: Claude sessions now emit `working` pulses from the live animated status line (`✻ ... (Xm Ys · ...)`) so green/running state stays accurate during long turns.
+- **Claude Final Summary Guard**: PTY state detection now excludes terminal final summary lines (`✻ <verb> for ...`) from working animation matching, avoiding false “still running” signals at turn completion.
+
 ## [2026-02-18]
 
 ### Changed
