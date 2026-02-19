@@ -194,12 +194,15 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	onState := m.onState
 	m.mu.Unlock()
 
-	if agent == "codex" || agent == "copilot" {
+	switch agent {
+	case "codex", "copilot":
 		session.detector = newCodexStateDetector()
-		if onState != nil {
-			session.onState = func(state string) {
-				onState(opts.ID, state)
-			}
+	case "claude":
+		session.detector = newClaudeWorkingDetector()
+	}
+	if session.detector != nil && onState != nil {
+		session.onState = func(state string) {
+			onState(opts.ID, state)
 		}
 	}
 
