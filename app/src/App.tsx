@@ -1608,6 +1608,7 @@ function AppContent({
           reviewerError={reviewerError}
           agentComments={pendingAgentComments}
           agentResolvedCommentIds={agentResolvedCommentIds}
+          resolvedTheme={resolvedTheme}
           initialSelectedFile={initialReviewFile || undefined}
           onOpenEditor={handleOpenEditorForReview}
         />
