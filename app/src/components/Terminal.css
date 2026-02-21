@@ -7,7 +7,7 @@
 .terminal-container {
   width: 100%;
   height: 100%;
-  background: #1e1e1e;
+  background: var(--color-bg-editor);
   /* VS Code: overflow hidden prevents content from escaping container */
   overflow: hidden;
   /* VS Code: relative positioning for absolute children */
@@ -27,7 +27,7 @@
   user-select: none;
   -webkit-user-select: none;
   /* Fill any gap with terminal background color */
-  background: #1e1e1e;
+  background: var(--color-bg-editor);
 }
 
 /* VS Code: Hide outline when focus jumps (terminal.css line 208-211) */
@@ -43,7 +43,7 @@
   /* VS Code: box-sizing for accurate dimensions */
   box-sizing: border-box;
   /* Fix black rectangle: viewport background shows in gap between xterm-screen and container */
-  background: #1e1e1e !important;
+  background: var(--color-bg-editor) !important;
 }
 
 /* VS Code: CRITICAL - viewport needs right offset for scrollbar (terminal.css line 163-167) */
@@ -57,7 +57,7 @@
   cursor: text;
   /* Fill full width - remainder gap gets terminal background */
   width: 100% !important;
-  background: #1e1e1e;
+  background: var(--color-bg-editor);
 }
 
 /* VS Code: decoration overview ruler z-index (terminal.css line 112-116) */

@@ -7,8 +7,8 @@
   right: -600px;
   bottom: 0;
   width: 600px;
-  background: linear-gradient(180deg, #0d0d0f 0%, #111113 100%);
-  border-left: 1px solid #1f1f22;
+  background: linear-gradient(180deg, var(--color-bg-app) 0%, var(--color-bg-panel) 100%);
+  border-left: 1px solid var(--color-border-subtle);
   display: flex;
   flex-direction: column;
   transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -26,7 +26,7 @@
   align-items: center;
   gap: 12px;
   padding: 20px 20px 16px;
-  border-bottom: 1px solid #1f1f22;
+  border-bottom: 1px solid var(--color-border-subtle);
   background: rgba(0, 0, 0, 0.2);
 }
 
@@ -36,7 +36,7 @@
   font-weight: 500;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 .drawer-count {
@@ -55,7 +55,7 @@
   margin-left: auto;
   background: none;
   border: none;
-  color: #444;
+  color: var(--color-text-dimmed);
   font-size: var(--font-size-lg);
   cursor: pointer;
   padding: 4px 8px;
@@ -65,7 +65,7 @@
 }
 
 .drawer-close:hover {
-  color: #e8e8e8;
+  color: var(--color-text-primary);
   background: rgba(255, 255, 255, 0.05);
 }
 
@@ -90,7 +90,7 @@
   font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #555;
+  color: var(--color-text-dimmed);
   padding: 4px 4px 10px;
 }
 
@@ -111,7 +111,7 @@
   padding: 12px 14px;
   border-radius: 8px;
   font-size: var(--font-size-md);
-  color: #e8e8e8;
+  color: var(--color-text-primary);
   text-decoration: none;
   margin-bottom: 4px;
   background: rgba(255, 255, 255, 0.02);
@@ -125,7 +125,7 @@
 
 .attention-item.clickable:hover {
   background: rgba(255, 255, 255, 0.04);
-  border-color: #2a2a2d;
+  border-color: var(--color-border);
 }
 
 /* Session/PR indicator dots */
@@ -176,14 +176,14 @@
   align-items: stretch;
   gap: 0;
   padding: 0;
-  background: #161618;
-  border: 1px solid #222225;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   overflow: hidden;
 }
 
 .attention-item.pr-item:hover {
-  background: #1a1a1d;
-  border-color: #2d2d32;
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border);
 }
 
 /* PR link fills the card */
@@ -209,7 +209,7 @@
   gap: 8px;
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-sm);
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 .pr-meta .item-dot {
@@ -218,18 +218,18 @@
 }
 
 .pr-repo {
-  color: #888;
+  color: var(--color-text-tertiary);
 }
 
 .pr-number {
-  color: #555;
+  color: var(--color-text-dimmed);
 }
 
 /* PR title - full display, wraps to 2 lines max */
 .pr-title-full {
   font-size: var(--font-size-md);
   line-height: 1.4;
-  color: #d4d4d4;
+  color: var(--color-text-primary);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -239,7 +239,7 @@
 }
 
 .attention-item.pr-item:hover .pr-title-full {
-  color: #f0f0f0;
+  color: var(--color-text-primary);
 }
 
 /* PR footer with reason and actions */
@@ -256,7 +256,7 @@
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
   letter-spacing: 0.05em;
-  color: #666;
+  color: var(--color-text-muted);
   background: rgba(255, 255, 255, 0.04);
   padding: 3px 8px;
   border-radius: 4px;
@@ -273,7 +273,7 @@
 .item-reason {
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
-  color: #666;
+  color: var(--color-text-muted);
   background: rgba(255, 255, 255, 0.04);
   padding: 3px 8px;
   border-radius: 4px;
@@ -282,7 +282,7 @@
 
 /* Empty state */
 .drawer-empty {
-  color: #444;
+  color: var(--color-text-dimmed);
   font-size: var(--font-size-md);
   text-align: center;
   padding: 60px 24px;
@@ -294,24 +294,24 @@
   display: flex;
   gap: 20px;
   padding: 14px 20px;
-  border-top: 1px solid #1f1f22;
+  border-top: 1px solid var(--color-border-subtle);
   background: rgba(0, 0, 0, 0.2);
 }
 
 .drawer-footer .shortcut {
   font-size: var(--font-size-sm);
-  color: #444;
+  color: var(--color-text-dimmed);
 }
 
 .drawer-footer kbd {
-  background: #1a1a1d;
-  border: 1px solid #2a2a2d;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 3px 6px;
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
   margin-right: 6px;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 /* Scrollbar styling */
@@ -324,10 +324,10 @@
 }
 
 .drawer-body::-webkit-scrollbar-thumb {
-  background: #2a2a2d;
+  background: var(--color-border);
   border-radius: 3px;
 }
 
 .drawer-body::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3d;
+  background: var(--color-border-hover);
 }

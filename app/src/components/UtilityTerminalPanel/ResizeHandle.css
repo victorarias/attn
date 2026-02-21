@@ -1,7 +1,7 @@
 /* app/src/components/UtilityTerminalPanel/ResizeHandle.css */
 .terminal-resize-handle {
   height: 4px;
-  background: #252526;
+  background: var(--color-bg-button);
   cursor: ns-resize;
   flex-shrink: 0;
 }

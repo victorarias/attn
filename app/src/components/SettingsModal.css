@@ -2,7 +2,7 @@
 .settings-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--color-bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -12,17 +12,17 @@
 .settings-modal {
   width: 480px;
   max-height: 80vh;
-  background: #111113;
-  border: 1px solid #2a2a2d;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 24px 64px var(--color-bg-overlay);
   display: flex;
   flex-direction: column;
 }
 
 .settings-header {
   padding: 16px;
-  border-bottom: 1px solid #2a2a2d;
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -32,14 +32,14 @@
   font-family: 'JetBrains Mono', monospace;
   font-size: 14px;
   font-weight: 600;
-  color: #e8e8e8;
+  color: var(--color-text-primary);
   margin: 0;
 }
 
 .settings-close {
   background: transparent;
   border: none;
-  color: #555;
+  color: var(--color-text-dimmed);
   font-size: 20px;
   cursor: pointer;
   padding: 0;
@@ -47,7 +47,7 @@
 }
 
 .settings-close:hover {
-  color: #e8e8e8;
+  color: var(--color-text-primary);
 }
 
 .settings-body {
@@ -60,12 +60,12 @@
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #555;
+  color: var(--color-text-dimmed);
   margin: 0 0 12px 0;
 }
 
 .settings-empty {
-  color: #555;
+  color: var(--color-text-dimmed);
   font-size: 13px;
   margin: 0;
 }
@@ -86,31 +86,31 @@
 }
 
 .muted-item:hover {
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
 }
 
 .muted-item-name {
   font-size: 13px;
-  color: #e8e8e8;
+  color: var(--color-text-primary);
   font-family: 'JetBrains Mono', monospace;
 }
 
 .unmute-btn {
-  background: #252528;
-  border: 1px solid #3a3a3d;
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border-hover);
   border-radius: 4px;
   padding: 4px 10px;
   font-size: 11px;
   font-weight: 600;
-  color: #bbb;
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: all 150ms ease-out;
 }
 
 .unmute-btn:hover {
-  background: #111113;
-  color: #e8e8e8;
-  border-color: #4a4a4d;
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-focus);
 }
 
 .unmute-btn:focus {
@@ -129,7 +129,7 @@
 
 .settings-description {
   font-size: 12px;
-  color: #888;
+  color: var(--color-text-tertiary);
   margin: 0 0 12px 0;
   line-height: 1.4;
 }
@@ -143,9 +143,9 @@
 .host-pill {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
-  color: #d0d0d0;
-  background: #1a1a1d;
-  border: 1px solid #2a2a2d;
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
   padding: 4px 8px;
   border-radius: 12px;
 }
@@ -153,7 +153,7 @@
 .settings-hint {
   margin-top: 8px;
   font-size: 11px;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 /* Projects directory input */
@@ -164,22 +164,22 @@
 
 .settings-input {
   flex: 1;
-  background: #0d0d0e;
-  border: 1px solid #2a2a2d;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 10px 12px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
-  color: #e8e8e8;
+  color: var(--color-text-primary);
   outline: none;
 }
 
 .settings-input:focus {
-  border-color: #4a4a4d;
+  border-color: var(--color-border-focus);
 }
 
 .settings-input::placeholder {
-  color: #555;
+  color: var(--color-text-dimmed);
 }
 
 .settings-field {
@@ -197,7 +197,7 @@
   display: inline-flex;
   gap: 8px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-bg-elevated);
   padding: 6px;
 }
 
@@ -207,21 +207,21 @@
   padding: 8px 14px;
   font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.75);
-  background: rgba(255, 255, 255, 0.02);
+  color: var(--color-text-secondary);
+  background: transparent;
   cursor: pointer;
   transition: all 120ms ease;
 }
 
 .settings-agent-toggle .agent-option:hover {
-  color: rgba(255, 255, 255, 0.95);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+  background: var(--color-bg-button);
 }
 
 .settings-agent-toggle .agent-option:disabled {
   cursor: not-allowed;
   opacity: 0.45;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-muted);
 }
 
 .settings-agent-toggle .agent-option.active {
@@ -232,15 +232,15 @@
 }
 
 .settings-agent-toggle .agent-option.active:disabled {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--color-bg-button);
+  color: var(--color-text-secondary);
   box-shadow: none;
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--color-border);
 }
 
 .settings-label {
   font-size: 12px;
-  color: #bbb;
+  color: var(--color-text-secondary);
   font-family: 'JetBrains Mono', monospace;
 }
 
@@ -277,22 +277,22 @@
 }
 
 .browse-btn {
-  background: #252528;
-  border: 1px solid #3a3a3d;
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border-hover);
   border-radius: 6px;
   padding: 10px 16px;
   font-size: 12px;
   font-weight: 600;
-  color: #bbb;
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: all 150ms ease-out;
   white-space: nowrap;
 }
 
 .browse-btn:hover {
-  background: #111113;
-  color: #e8e8e8;
-  border-color: #4a4a4d;
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-focus);
 }
 
 .browse-btn:focus {

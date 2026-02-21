@@ -4,9 +4,9 @@
   align-items: center;
   justify-content: space-between;
   height: 32px;
-  background: #1a1a1c;
+  background: var(--color-bg-elevated);
   border-top: 1px solid rgba(255, 107, 53, 0.3);
-  border-bottom: 1px solid #2a2a2d;
+  border-bottom: 1px solid var(--color-border);
   padding: 0 8px;
   user-select: none;
 }
@@ -27,19 +27,19 @@
   background: transparent;
   border-radius: 4px;
   cursor: pointer;
-  color: #808080;
+  color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
 .terminal-tab:hover {
-  background: #252528;
-  color: #cccccc;
+  background: var(--color-bg-button);
+  color: var(--color-text-secondary);
 }
 
 .terminal-tab.active {
-  background: #1e1e1e;
-  color: #ffffff;
+  background: var(--color-bg-editor);
+  color: var(--color-text-primary);
 }
 
 .terminal-tab-title {
@@ -49,9 +49,9 @@
 }
 
 .terminal-tab-input {
-  background: #3c3c3c;
+  background: var(--color-border-hover);
   border: 1px solid #007acc;
-  color: #ffffff;
+  color: var(--color-text-primary);
   font-size: var(--font-size-sm);
   padding: 2px 4px;
   border-radius: 2px;
@@ -68,7 +68,7 @@
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: #808080;
+  color: var(--color-text-tertiary);
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
@@ -80,8 +80,8 @@
 }
 
 .terminal-tab-close:hover {
-  background: #5a5a5a;
-  color: #ffffff;
+  background: var(--color-border-focus);
+  color: var(--color-text-primary);
 }
 
 .terminal-tab-new {
@@ -93,15 +93,15 @@
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: #808080;
+  color: var(--color-text-tertiary);
   cursor: pointer;
   font-size: 18px;
   margin-left: 4px;
 }
 
 .terminal-tab-new:hover {
-  background: #252528;
-  color: #ffffff;
+  background: var(--color-bg-button);
+  color: var(--color-text-primary);
 }
 
 .terminal-collapse {
@@ -113,12 +113,12 @@
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: #808080;
+  color: var(--color-text-tertiary);
   cursor: pointer;
   font-size: 14px;
 }
 
 .terminal-collapse:hover {
-  background: #252528;
-  color: #ffffff;
+  background: var(--color-bg-button);
+  color: var(--color-text-primary);
 }

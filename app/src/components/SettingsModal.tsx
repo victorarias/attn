@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { DaemonSettings } from '../hooks/useDaemonSocket';
 import { normalizeSessionAgent, type SessionAgent } from '../types/sessionAgent';
+import type { ThemePreference } from '../hooks/useTheme';
 import {
   getAgentAvailability,
   hasAnyAvailableAgents,
@@ -21,6 +22,8 @@ interface SettingsModalProps {
   onUnmuteAuthor: (author: string) => void;
   settings: DaemonSettings;
   onSetSetting: (key: string, value: string) => void;
+  themePreference: ThemePreference;
+  onSetTheme: (theme: ThemePreference) => void;
 }
 
 export function SettingsModal({
@@ -33,6 +36,8 @@ export function SettingsModal({
   onUnmuteAuthor,
   settings,
   onSetSetting,
+  themePreference,
+  onSetTheme,
 }: SettingsModalProps) {
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
   const [claudeExecutable, setClaudeExecutable] = useState(settings.claude_executable || '');
@@ -201,6 +206,36 @@ export function SettingsModal({
           <button className="settings-close" onClick={onClose}>×</button>
         </div>
         <div className="settings-body">
+          <div className="settings-section">
+            <h3>Theme</h3>
+            <div className="settings-agent-toggle" role="radiogroup" aria-label="Theme preference">
+              <button
+                type="button"
+                className={`agent-option ${themePreference === 'dark' ? 'active' : ''}`}
+                onClick={() => onSetTheme('dark')}
+                aria-checked={themePreference === 'dark'}
+              >
+                Dark
+              </button>
+              <button
+                type="button"
+                className={`agent-option ${themePreference === 'light' ? 'active' : ''}`}
+                onClick={() => onSetTheme('light')}
+                aria-checked={themePreference === 'light'}
+              >
+                Light
+              </button>
+              <button
+                type="button"
+                className={`agent-option ${themePreference === 'system' ? 'active' : ''}`}
+                onClick={() => onSetTheme('system')}
+                aria-checked={themePreference === 'system'}
+              >
+                System
+              </button>
+            </div>
+          </div>
+
           <div className="settings-section">
             <h3>Projects Directory</h3>
             <p className="settings-description">

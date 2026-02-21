@@ -71,6 +71,24 @@ function measureFont(
   };
 }
 
+export type ResolvedTheme = 'dark' | 'light';
+
+const DARK_TERMINAL_THEME = {
+  background: '#1e1e1e',
+  foreground: '#d4d4d4',
+  cursor: '#d4d4d4',
+  cursorAccent: '#1e1e1e',
+  selectionBackground: '#264f78',
+};
+
+const LIGHT_TERMINAL_THEME = {
+  background: '#ffffff',
+  foreground: '#3b3b3b',
+  cursor: '#3b3b3b',
+  cursorAccent: '#ffffff',
+  selectionBackground: '#add6ff',
+};
+
 export interface TerminalHandle {
   terminal: XTerm | null;
   fit: () => void;
@@ -79,6 +97,7 @@ export interface TerminalHandle {
 
 interface TerminalProps {
   fontSize?: number;
+  resolvedTheme?: ResolvedTheme;
   debugName?: string;
   onInit?: (terminal: XTerm) => void;
   onReady?: (terminal: XTerm) => void;
@@ -150,7 +169,7 @@ function getScaledDimensions(
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
-  function Terminal({ fontSize = DEFAULT_FONT_SIZE, debugName, onInit, onReady, onResize }, ref) {
+  function Terminal({ fontSize = DEFAULT_FONT_SIZE, resolvedTheme = 'dark', debugName, onInit, onReady, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
     const webglAddonRef = useRef<WebglAddon | null>(null);
@@ -162,14 +181,24 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const onInitRef = useRef(onInit);
     const onResizeRef = useRef(onResize);
     const fontSizeRef = useRef(fontSize);
+    const resolvedThemeRef = useRef(resolvedTheme);
 
     useEffect(() => {
       onReadyRef.current = onReady;
       onInitRef.current = onInit;
       onResizeRef.current = onResize;
       fontSizeRef.current = fontSize;
+      resolvedThemeRef.current = resolvedTheme;
       debugNameRef.current = debugName || 'unknown';
     });
+
+    // Update xterm theme at runtime when resolved theme changes
+    useEffect(() => {
+      const term = xtermRef.current;
+      if (!term) return;
+      const themeObj = resolvedTheme === 'light' ? LIGHT_TERMINAL_THEME : DARK_TERMINAL_THEME;
+      term.options.theme = themeObj;
+    }, [resolvedTheme]);
 
     const logTerminal = useCallback((
       level: 'log' | 'warn',
@@ -309,13 +338,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           width: 14,
           showTopBorder: true,
         },
-        theme: {
-          background: '#1e1e1e',
-          foreground: '#d4d4d4',
-          cursor: '#d4d4d4',
-          cursorAccent: '#1e1e1e',
-          selectionBackground: '#264f78',
-        },
+        theme: resolvedTheme === 'light' ? LIGHT_TERMINAL_THEME : DARK_TERMINAL_THEME,
         // Handle OSC 8 hyperlinks without the default confirm prompt + window.open fallback.
         linkHandler: {
           activate: (event, text) => {

@@ -2,8 +2,8 @@
 .changes-panel {
   width: 200px;
   height: 100%;
-  background: #111113;
-  border-left: 1px solid #2a2a2d;
+  background: var(--color-bg-panel);
+  border-left: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -14,7 +14,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px;
-  border-bottom: 1px solid #2a2a2d;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .changes-title {
@@ -23,7 +23,7 @@
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #555;
+  color: var(--color-text-dimmed);
 }
 
 .changes-header-actions {
@@ -96,7 +96,7 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #555;
+  color: var(--color-text-dimmed);
   padding: 4px 12px;
 }
 
@@ -110,7 +110,7 @@
 }
 
 .dir-name {
-  color: #888;
+  color: var(--color-text-tertiary);
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
 }
@@ -129,11 +129,11 @@
 }
 
 .change-file:hover {
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
 }
 
 .change-file.selected {
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
   border-left: 2px solid #ff6b35;
   padding-left: 10px;
 }
@@ -149,7 +149,7 @@
 .file-status.modified { color: #f59e0b; }
 .file-status.added { color: #22c55e; }
 .file-status.deleted { color: #ef4444; }
-.file-status.untracked { color: #888; }
+.file-status.untracked { color: var(--color-text-tertiary); }
 .file-status.renamed { color: #3b82f6; }
 
 .file-name {
@@ -157,7 +157,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #e8e8e8;
+  color: var(--color-text-primary);
 }
 
 .file-stats {
@@ -173,10 +173,10 @@
 
 .changes-summary {
   padding: 8px 12px;
-  border-bottom: 1px solid #2a2a2d;
+  border-bottom: 1px solid var(--color-border);
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
-  color: #888;
+  color: var(--color-text-tertiary);
   display: flex;
   gap: 8px;
 }
@@ -184,7 +184,7 @@
 .changes-empty {
   padding: 20px 12px;
   text-align: center;
-  color: #555;
+  color: var(--color-text-dimmed);
   font-size: var(--font-size-sm);
 }
 

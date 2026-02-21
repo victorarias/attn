@@ -4,7 +4,7 @@
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%) translateY(8px);
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
   border: 1px solid #dc2626;
   border-radius: 8px;
   padding: 10px 16px;
@@ -12,7 +12,7 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #e8e8e8;
+  color: var(--color-text-primary);
   box-shadow: 0 8px 24px rgba(220, 38, 38, 0.2);
   z-index: 400;
   opacity: 0;

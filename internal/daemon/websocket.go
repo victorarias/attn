@@ -38,6 +38,7 @@ const (
 	SettingCodexAvailable    = "codex_available"
 	SettingCopilotAvailable  = "copilot_available"
 	SettingPTYBackendMode    = "pty_backend_mode"
+	SettingTheme             = "theme"
 )
 
 // wsClient represents a connected WebSocket client
@@ -1241,6 +1242,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateEditorSetting(value)
 	case SettingNewSessionAgent:
 		return validateNewSessionAgent(value)
+	case SettingTheme:
+		return validateTheme(value)
 	default:
 		return fmt.Errorf("unknown setting: %s", key)
 	}
@@ -1353,6 +1356,13 @@ func validateNewSessionAgent(value string) error {
 	lower := strings.ToLower(agent)
 	if lower != "codex" && lower != "claude" && lower != "copilot" {
 		return fmt.Errorf("unknown agent: %s", value)
+	}
+	return nil
+}
+
+func validateTheme(value string) error {
+	if value != "dark" && value != "light" && value != "system" {
+		return fmt.Errorf("invalid theme: %s (must be dark, light, or system)", value)
 	}
 	return nil
 }

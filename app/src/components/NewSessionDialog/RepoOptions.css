@@ -4,15 +4,15 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #0a0a0c;
-  color: #e8e8ec;
+  background: var(--color-bg-app);
+  color: var(--color-text-primary);
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 13px;
 }
 
 .repo-options-header {
   padding: 16px;
-  border-bottom: 1px solid #1a1a1e;
+  border-bottom: 1px solid var(--color-border-subtle);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -20,9 +20,9 @@
 
 .repo-options-back {
   background: none;
-  border: 1px solid #2a2a30;
+  border: 1px solid var(--color-border);
   border-radius: 4px;
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
   padding: 6px 10px;
   font-size: 12px;
   cursor: pointer;
@@ -30,9 +30,9 @@
 }
 
 .repo-options-back:hover {
-  background: #111115;
-  border-color: #3a3a40;
-  color: #f0f0f0;
+  background: var(--color-bg-panel);
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
 }
 
 .repo-options-title {
@@ -56,11 +56,11 @@
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.12em;
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
   margin-top: 16px;
   margin-bottom: 8px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #1a1a1e;
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .repo-section-header:first-child {
@@ -83,7 +83,7 @@
 
 .repo-option-item:hover {
   background: rgba(255, 255, 255, 0.03);
-  border-color: #1f1f25;
+  border-color: var(--color-border-subtle);
 }
 
 .repo-option-item.selected {
@@ -113,8 +113,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  background: #111115;
-  border: 1px solid #1f1f25;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border-subtle);
 }
 
 .icon-green {
@@ -130,7 +130,7 @@
 }
 
 .icon-muted {
-  color: #6a6a75;
+  color: var(--color-text-muted);
 }
 
 .repo-option-item.selected .repo-option-icon {
@@ -143,7 +143,7 @@
 /* Name and details */
 .repo-option-name {
   font-weight: 500;
-  color: #e8e8ec;
+  color: var(--color-text-primary);
 }
 
 .repo-option-item.selected .repo-option-name {
@@ -152,18 +152,18 @@
 
 .repo-option-detail {
   font-size: 11px;
-  color: #6a6a75;
+  color: var(--color-text-muted);
 }
 
 .repo-option-item.selected .repo-option-detail {
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
 }
 
 .repo-option-shortcut {
   font-size: 10px;
-  color: #8a8a95;
-  background: #111115;
-  border: 1px solid #2a2a30;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   padding: 3px 6px;
   border-radius: 3px;
   min-width: 22px;
@@ -178,8 +178,8 @@
 
 /* New worktree form */
 .new-worktree-form {
-  background: #0d0d10;
-  border: 1px solid #1f1f25;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 6px;
   padding: 14px;
   margin: 6px 0 10px 0;
@@ -194,11 +194,11 @@
 }
 
 .new-worktree-input {
-  background: #040405;
-  border: 1px solid #2a2a30;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 8px 10px;
-  color: #f0f0f0;
+  color: var(--color-text-primary);
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 13px;
   outline: none;
@@ -212,7 +212,7 @@
 }
 
 .new-worktree-input::placeholder {
-  color: #4a4a55;
+  color: var(--color-text-dimmed);
 }
 
 .new-worktree-radio-row {
@@ -232,16 +232,16 @@
   cursor: pointer;
   transition: all 0.1s ease-out;
   font-size: 12px;
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
 }
 
 .new-worktree-radio-row label:hover {
   background: rgba(255, 255, 255, 0.03);
-  border-color: #1f1f25;
+  border-color: var(--color-border-subtle);
 }
 
 .new-worktree-radio-row label.selected {
-  color: #e8e8ec;
+  color: var(--color-text-primary);
   background: rgba(255, 107, 53, 0.06);
   border-color: rgba(255, 107, 53, 0.15);
 }
@@ -254,20 +254,20 @@
 
 .new-worktree-hint {
   font-size: 11px;
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
   text-align: center;
   padding-top: 10px;
-  border-top: 1px solid #1a1a1e;
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .new-worktree-hint kbd {
-  background: #111115;
-  border: 1px solid #2a2a30;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   border-radius: 3px;
   padding: 2px 5px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 10px;
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
 }
 
 /* Footer */
@@ -276,9 +276,9 @@
   gap: 20px;
   padding: 10px 16px;
   background: rgba(0, 0, 0, 0.3);
-  border-top: 1px solid #1a1a1e;
+  border-top: 1px solid var(--color-border-subtle);
   font-size: 11px;
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
 }
 
 .repo-options-footer span {
@@ -289,28 +289,28 @@
 }
 
 .repo-options-footer kbd {
-  background: #111115;
-  border: 1px solid #2a2a30;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   border-radius: 3px;
   padding: 3px 6px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 10px;
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
   min-width: 20px;
   text-align: center;
 }
 
 .repo-options-footer .fetch-time {
   margin-left: auto;
-  color: #4a4a55;
+  color: var(--color-text-dimmed);
 }
 
 /* Refresh button */
 .repo-refresh-btn {
   background: none;
-  border: 1px solid #2a2a30;
+  border: 1px solid var(--color-border);
   border-radius: 3px;
-  color: #6a6a75;
+  color: var(--color-text-muted);
   padding: 2px 6px;
   font-size: 12px;
   cursor: pointer;
@@ -318,8 +318,8 @@
 }
 
 .repo-refresh-btn:hover {
-  background: #111115;
-  border-color: #3a3a40;
+  background: var(--color-bg-panel);
+  border-color: var(--color-border-hover);
   color: #ff6b35;
 }
 
@@ -338,10 +338,10 @@
 }
 
 .repo-options-content::-webkit-scrollbar-thumb {
-  background: #2a2a30;
+  background: var(--color-border);
   border-radius: 4px;
 }
 
 .repo-options-content::-webkit-scrollbar-thumb:hover {
-  background: #3a3a40;
+  background: var(--color-border-hover);
 }

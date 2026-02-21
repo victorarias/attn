@@ -18,6 +18,7 @@ interface KeyboardShortcutsConfig {
   onOpenBranchPicker?: () => void;
   onForkSession?: () => void;
   onQuickFind?: () => void;
+  onOpenSettings?: () => void;
   onIncreaseFontSize?: () => void;
   onDecreaseFontSize?: () => void;
   onResetFontSize?: () => void;
@@ -39,6 +40,7 @@ export function useKeyboardShortcuts({
   onOpenBranchPicker,
   onForkSession,
   onQuickFind,
+  onOpenSettings,
   onIncreaseFontSize,
   onDecreaseFontSize,
   onResetFontSize,
@@ -62,6 +64,9 @@ export function useKeyboardShortcuts({
 
   // Drawer
   useShortcut('drawer.toggle', onToggleDrawer, enabled);
+
+  // Settings (always enabled)
+  useShortcut('ui.openSettings', onOpenSettings ?? (() => {}), !!onOpenSettings);
 
   // Font scaling (always enabled)
   useShortcut('ui.increaseFontSize', onIncreaseFontSize ?? (() => {}), !!onIncreaseFontSize);

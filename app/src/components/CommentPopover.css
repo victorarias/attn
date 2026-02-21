@@ -3,8 +3,8 @@
   z-index: 1100;
   min-width: 320px;
   max-width: 480px;
-  background: #2d2d2d;
-  border: 1px solid #454545;
+  background: var(--color-border);
+  border: 1px solid var(--color-border-focus);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   padding: 12px;
@@ -38,7 +38,7 @@
 }
 
 .comment-time {
-  color: #808080;
+  color: var(--color-text-tertiary);
 }
 
 .comment-resolved-badge {
@@ -52,7 +52,7 @@
 }
 
 .comment-lines {
-  color: #808080;
+  color: var(--color-text-tertiary);
   font-size: 12px;
 }
 
@@ -60,10 +60,10 @@
   width: 100%;
   min-height: 80px;
   padding: 8px;
-  background: #1e1e1e;
-  border: 1px solid #454545;
+  background: var(--color-bg-editor);
+  border: 1px solid var(--color-border-focus);
   border-radius: 4px;
-  color: #e0e0e0;
+  color: var(--color-text-primary);
   font-family: inherit;
   font-size: 13px;
   line-height: 1.5;
@@ -77,11 +77,11 @@
 }
 
 .comment-textarea::placeholder {
-  color: #606060;
+  color: var(--color-text-muted);
 }
 
 .comment-content {
-  color: #e0e0e0;
+  color: var(--color-text-primary);
   font-size: 13px;
   line-height: 1.5;
   word-wrap: break-word;
@@ -98,7 +98,7 @@
 }
 
 .comment-content code {
-  background: #1e1e1e;
+  background: var(--color-bg-editor);
   padding: 1px 4px;
   border-radius: 3px;
   font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
@@ -106,7 +106,7 @@
 }
 
 .comment-content pre {
-  background: #1e1e1e;
+  background: var(--color-bg-editor);
   padding: 8px;
   border-radius: 4px;
   overflow-x: auto;
@@ -138,10 +138,10 @@
 }
 
 .comment-content blockquote {
-  border-left: 3px solid #454545;
+  border-left: 3px solid var(--color-border-focus);
   margin: 8px 0;
   padding-left: 12px;
-  color: #a0a0a0;
+  color: var(--color-text-tertiary);
 }
 
 .comment-content strong {
@@ -187,13 +187,13 @@
 
 .comment-btn.cancel {
   background: transparent;
-  color: #808080;
-  border: 1px solid #454545;
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border-focus);
 }
 
 .comment-btn.cancel:hover:not(:disabled) {
-  background: #3d3d3d;
-  color: #e0e0e0;
+  background: var(--color-border-hover);
+  color: var(--color-text-primary);
 }
 
 .comment-btn.save {
@@ -207,13 +207,13 @@
 
 .comment-btn.edit {
   background: transparent;
-  color: #808080;
-  border: 1px solid #454545;
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border-focus);
 }
 
 .comment-btn.edit:hover:not(:disabled) {
-  background: #3d3d3d;
-  color: #e0e0e0;
+  background: var(--color-border-hover);
+  color: var(--color-text-primary);
 }
 
 .comment-btn.send {
@@ -236,13 +236,13 @@
 
 .comment-btn.unresolve {
   background: transparent;
-  color: #808080;
-  border: 1px solid #454545;
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border-focus);
 }
 
 .comment-btn.unresolve:hover:not(:disabled) {
-  background: #3d3d3d;
-  color: #e0e0e0;
+  background: var(--color-border-hover);
+  color: var(--color-text-primary);
 }
 
 .comment-btn.wontfix {
@@ -256,13 +256,13 @@
 
 .comment-btn.undo-wontfix {
   background: transparent;
-  color: #808080;
-  border: 1px solid #454545;
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border-focus);
 }
 
 .comment-btn.undo-wontfix:hover:not(:disabled) {
-  background: #3d3d3d;
-  color: #e0e0e0;
+  background: var(--color-border-hover);
+  color: var(--color-text-primary);
 }
 
 /* Won't fix state styling */
