@@ -22,8 +22,8 @@
 .fork-dialog {
   width: 420px;
   max-width: 90vw;
-  background: linear-gradient(180deg, #0a0a0c 0%, #08080a 100%);
-  border: 1px solid #1f1f23;
+  background: var(--color-bg-app);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 8px;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.03),
@@ -47,7 +47,7 @@
 /* Header */
 .fork-dialog-header {
   padding: 16px;
-  border-bottom: 1px solid #1a1a1e;
+  border-bottom: 1px solid var(--color-border-subtle);
   background: rgba(255, 255, 255, 0.01);
 }
 
@@ -94,18 +94,18 @@
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
 }
 
 .fork-field input[type="text"] {
   width: 100%;
   padding: 12px 14px;
-  background: #040405;
-  border: 1px solid #2a2a30;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 14px;
-  color: #f0f0f0;
+  color: var(--color-text-primary);
   outline: none;
   caret-color: #ff6b35;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -117,7 +117,7 @@
 }
 
 .fork-field input[type="text"]::placeholder {
-  color: #4a4a55;
+  color: var(--color-text-dimmed);
 }
 
 .fork-field input[type="text"]:disabled {
@@ -132,7 +132,7 @@
   gap: 10px;
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.02);
-  border: 1px solid #1f1f25;
+  border: 1px solid var(--color-border-subtle);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.1s ease-out;
@@ -140,7 +140,7 @@
 
 .fork-checkbox:hover {
   background: rgba(255, 255, 255, 0.04);
-  border-color: #2a2a30;
+  border-color: var(--color-border);
 }
 
 .fork-checkbox input[type="checkbox"] {
@@ -155,14 +155,14 @@
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
-  color: #e8e8ec;
+  color: var(--color-text-primary);
   cursor: pointer;
 }
 
 /* Footer */
 .fork-dialog-footer {
   padding: 12px 16px;
-  border-top: 1px solid #1a1a1e;
+  border-top: 1px solid var(--color-border-subtle);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -171,20 +171,20 @@
 
 .fork-shortcuts {
   font-size: 11px;
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
 .fork-shortcuts kbd {
-  background: #111115;
-  border: 1px solid #2a2a30;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   border-radius: 3px;
   padding: 3px 6px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 10px;
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
   min-width: 20px;
   text-align: center;
 }

@@ -27,6 +27,9 @@ export const SHORTCUTS = {
   // Drawer
   'drawer.toggle': { key: 'k', meta: true },
 
+  // Settings
+  'ui.openSettings': { key: ',', meta: true },
+
   // Font scaling
   'ui.increaseFontSize': { key: '=', meta: true },
   'ui.decreaseFontSize': { key: '-', meta: true },

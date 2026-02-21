@@ -2,7 +2,7 @@
 .utility-terminal-panel {
   display: flex;
   flex-direction: column;
-  background: #1e1e1e;
+  background: var(--color-bg-editor);
   flex-shrink: 0;
   overflow: hidden;
 }

@@ -1,7 +1,7 @@
 // app/src/components/UtilityTerminalPanel/index.tsx
 import { useRef, useCallback, useEffect } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
-import { Terminal, TerminalHandle } from '../Terminal';
+import { Terminal, TerminalHandle, type ResolvedTheme } from '../Terminal';
 import { TabBar } from './TabBar';
 import { ResizeHandle } from './ResizeHandle';
 import { useShortcut } from '../../shortcuts';
@@ -26,6 +26,7 @@ interface UtilityTerminalPanelProps {
   onRemoveTerminal: (terminalId: string) => void;
   onSetActiveTerminal: (terminalId: string) => void;
   onRenameTerminal: (terminalId: string, title: string) => void;
+  resolvedTheme?: ResolvedTheme;
   focusRequestToken?: number;
   enabled: boolean;
 }
@@ -41,6 +42,7 @@ export function UtilityTerminalPanel({
   onRemoveTerminal,
   onSetActiveTerminal,
   onRenameTerminal,
+  resolvedTheme,
   focusRequestToken,
   enabled,
 }: UtilityTerminalPanelProps) {
@@ -432,6 +434,7 @@ export function UtilityTerminalPanel({
                 // No-op: cleanup is handled by terminal list reconciliation.
               }}
               fontSize={fontSize}
+              resolvedTheme={resolvedTheme}
               debugName={`utility:${terminal.title}:${terminal.id}`}
               onInit={handleTerminalInit(terminal.id, terminal.ptyId)}
               onReady={handleTerminalReady(terminal.id, terminal.ptyId)}

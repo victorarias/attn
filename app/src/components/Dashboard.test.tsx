@@ -41,10 +41,9 @@ describe('Dashboard sessions', () => {
         ]}
         prs={[]}
         isLoading={false}
-        settings={{}}
         onSelectSession={vi.fn()}
         onNewSession={vi.fn()}
-        onSetSetting={vi.fn()}
+        onOpenSettings={vi.fn()}
       />
     );
 

@@ -7,13 +7,13 @@
 
 .path-input {
   width: 100%;
-  background: #040405;
-  border: 1px solid #2a2a30;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 12px 14px;
   font-family: inherit;
   font-size: 14px;
-  color: #f0f0f0;
+  color: var(--color-text-primary);
   caret-color: #ff6b35;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -25,7 +25,7 @@
 }
 
 .path-input::placeholder {
-  color: #4a4a55;
+  color: var(--color-text-dimmed);
 }
 
 /* Hidden span for measuring typed text width */
@@ -45,7 +45,7 @@
   top: 50%;
   transform: translateY(-50%);
   font-size: 14px;
-  color: #3a3a45;
+  color: var(--color-text-dimmed);
   pointer-events: none;
   white-space: pre;
   opacity: 0.7;

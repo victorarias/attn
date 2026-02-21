@@ -17,6 +17,7 @@ import { ReviewPanel } from './components/ReviewPanel';
 import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
 import { ThumbsModal } from './components/ThumbsModal';
 import { ForkDialog } from './components/ForkDialog';
+import { SettingsModal } from './components/SettingsModal';
 import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
@@ -30,6 +31,7 @@ import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useUIScale } from './hooks/useUIScale';
+import { useTheme } from './hooks/useTheme';
 import { useOpenPR } from './hooks/useOpenPR';
 import { getAgentAvailability, hasAnyAvailableAgents, resolvePreferredAgent } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
@@ -554,6 +556,28 @@ function AppContent({
   // UI scale for font sizing (Cmd+/Cmd-) - now uses SettingsContext
   const { scale, increaseScale, decreaseScale, resetScale } = useUIScale();
   const terminalFontSize = Math.round(14 * scale);
+
+  // Theme (dark/light/system)
+  const { preference: themePreference, resolved: resolvedTheme, setTheme } = useTheme();
+
+  // Settings modal (lifted from Dashboard for Cmd+, access)
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const { repoStates, authorStates } = useDaemonStore();
+  const mutedRepos = useMemo(() =>
+    repoStates.filter(r => r.muted).map(r => r.repo),
+    [repoStates],
+  );
+  const mutedAuthors = useMemo(() =>
+    authorStates.filter(a => a.muted).map(a => a.author),
+    [authorStates],
+  );
+  const connectedHosts = useMemo(() => {
+    const set = new Set<string>();
+    for (const pr of prs) {
+      if (pr.host) set.add(pr.host);
+    }
+    return Array.from(set).sort();
+  }, [prs]);
 
   // Track PR refresh state for progress indicator
   const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
@@ -1376,6 +1400,7 @@ function AppContent({
     },
     onQuickFind: view === 'session' ? handleOpenQuickFind : undefined,
     onForkSession: view === 'session' ? handleOpenForkDialog : undefined,
+    onOpenSettings: useCallback(() => setSettingsOpen(prev => !prev), []),
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
@@ -1429,12 +1454,11 @@ function AppContent({
           isRefreshing={isRefreshingPRs}
           refreshError={refreshError}
           rateLimit={rateLimit}
-          settings={settings}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onRefreshPRs={handleRefreshPRs}
           onOpenPR={handleOpenPR}
-          onSetSetting={sendSetSetting}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
       </div>
 
@@ -1460,6 +1484,7 @@ function AppContent({
                 <Terminal
                   ref={setTerminalRef(session.id)}
                   fontSize={terminalFontSize}
+                  resolvedTheme={resolvedTheme}
                   debugName={`main:${session.label}:${session.id}`}
                   onReady={handleTerminalReady(session.id)}
                   onResize={handleResize(session.id)}
@@ -1481,6 +1506,7 @@ function AppContent({
                 cwd={activeSession.cwd}
                 panel={activeSession.terminalPanel}
                 fontSize={terminalFontSize}
+                resolvedTheme={resolvedTheme}
                 onOpen={handleOpenTerminalPanel}
                 onCollapse={handleCollapseTerminalPanel}
                 onSetHeight={handleSetTerminalPanelHeight}
@@ -1582,6 +1608,7 @@ function AppContent({
           reviewerError={reviewerError}
           agentComments={pendingAgentComments}
           agentResolvedCommentIds={agentResolvedCommentIds}
+          resolvedTheme={resolvedTheme}
           initialSelectedFile={initialReviewFile || undefined}
           onOpenEditor={handleOpenEditorForReview}
         />
@@ -1601,6 +1628,19 @@ function AppContent({
         error={forkError}
         onClose={handleForkClose}
         onFork={handleForkConfirm}
+      />
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        mutedRepos={mutedRepos}
+        connectedHosts={connectedHosts}
+        onUnmuteRepo={sendMuteRepo}
+        mutedAuthors={mutedAuthors}
+        onUnmuteAuthor={sendMuteAuthor}
+        settings={settings}
+        onSetSetting={sendSetSetting}
+        themePreference={themePreference}
+        onSetTheme={setTheme}
       />
     </div>
     </DaemonProvider>

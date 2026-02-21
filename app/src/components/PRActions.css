@@ -9,7 +9,7 @@
   opacity: 0;
   pointer-events: none;
   transition: opacity 150ms ease-out;
-  background: linear-gradient(90deg, transparent 0%, #1a1a1d 20%, #1a1a1d 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--color-bg-elevated) 20%, var(--color-bg-elevated) 100%);
   padding: 4px 4px 4px 24px;
   border-radius: 4px;
 }
@@ -31,13 +31,13 @@
 }
 
 .pr-action-btn {
-  background: #252528;
-  border: 1px solid #3a3a3d;
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border-hover);
   border-radius: 4px;
   padding: 4px 8px;
   font-size: 11px;
   font-weight: 600;
-  color: #bbb;
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: all 150ms ease-out;
   display: flex;
@@ -55,9 +55,9 @@
 }
 
 .pr-action-btn:hover {
-  background: #111113;
-  color: #e8e8e8;
-  border-color: #4a4a4d;
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-focus);
 }
 
 .pr-action-btn:focus {
@@ -110,7 +110,7 @@
 .spinner {
   width: 10px;
   height: 10px;
-  border: 2px solid #555;
+  border: 2px solid var(--color-text-dimmed);
   border-top-color: transparent;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
@@ -133,27 +133,27 @@
 
 .merge-confirm-modal {
   width: 400px;
-  background: #111113;
-  border: 1px solid #2a2a2d;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
 }
 
 .modal-header {
   padding: 16px;
-  border-bottom: 1px solid #2a2a2d;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .modal-title {
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
   font-weight: 600;
-  color: #e8e8e8;
+  color: var(--color-text-primary);
 }
 
 .modal-body {
   padding: 16px;
-  color: #888;
+  color: var(--color-text-tertiary);
   font-size: 12px;
 }
 
@@ -162,7 +162,7 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-  border-top: 1px solid #2a2a2d;
+  border-top: 1px solid var(--color-border);
 }
 
 .modal-btn {
@@ -171,17 +171,17 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  border: 1px solid #2a2a2d;
+  border: 1px solid var(--color-border);
 }
 
 .modal-btn-cancel {
   background: transparent;
-  color: #888;
+  color: var(--color-text-tertiary);
 }
 
 .modal-btn-cancel:hover {
-  background: #1a1a1d;
-  color: #e8e8e8;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
 }
 
 .modal-btn-primary {

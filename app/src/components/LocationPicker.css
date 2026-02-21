@@ -21,8 +21,8 @@
 
 .location-picker {
   width: 580px;
-  background: linear-gradient(180deg, #0a0a0c 0%, #08080a 100%);
-  border: 1px solid #1f1f23;
+  background: var(--color-bg-app);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 8px;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.03),
@@ -49,7 +49,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  border-bottom: 1px solid #1a1a1e;
+  border-bottom: 1px solid var(--color-border-subtle);
   background: rgba(255, 255, 255, 0.02);
 }
 
@@ -59,7 +59,7 @@
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
 }
 
 .picker-agent-controls {
@@ -73,15 +73,15 @@
   gap: 4px;
   padding: 3px;
   border-radius: 999px;
-  background: #0d0d10;
-  border: 1px solid #222229;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
 .agent-option {
   border: 0;
   background: transparent;
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 11px;
   padding: 6px 12px;
@@ -94,7 +94,7 @@
 }
 
 .agent-option:hover {
-  color: #e8e8ec;
+  color: var(--color-text-primary);
 }
 
 .agent-option:disabled {
@@ -115,17 +115,17 @@
 
 .agent-option.active {
   background: linear-gradient(180deg, #ff6b35 0%, #ff874f 100%);
-  color: #0b0b0d;
+  color: var(--color-bg-app);
   box-shadow: 0 6px 16px rgba(255, 107, 53, 0.25);
 }
 
 .agent-shortcut {
   border-radius: 5px;
   padding: 2px 6px;
-  border: 1px solid #2a2a30;
+  border: 1px solid var(--color-border);
   background: rgba(255, 255, 255, 0.04);
   font-size: 9px;
-  color: #6a6a75;
+  color: var(--color-text-muted);
 }
 
 .agent-option.active .agent-shortcut {
@@ -142,7 +142,7 @@
 
 .picker-agent-warning {
   padding: 8px 16px;
-  border-bottom: 1px solid #1a1a1e;
+  border-bottom: 1px solid var(--color-border-subtle);
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 10px;
   color: #ff9f7a;
@@ -150,10 +150,10 @@
 }
 
 .resume-toggle {
-  border: 1px solid #2a2a30;
+  border: 1px solid var(--color-border);
   border-radius: 999px;
-  background: #0d0d10;
-  color: #8a8a95;
+  background: var(--color-bg-input);
+  color: var(--color-text-tertiary);
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 11px;
   padding: 6px 12px;
@@ -165,7 +165,7 @@
 }
 
 .resume-toggle:hover:not(:disabled) {
-  color: #e8e8ec;
+  color: var(--color-text-primary);
 }
 
 .resume-toggle:focus-visible {
@@ -175,7 +175,7 @@
 
 .resume-toggle.active {
   background: linear-gradient(180deg, #ff6b35 0%, #ff874f 100%);
-  color: #0b0b0d;
+  color: var(--color-bg-app);
   box-shadow: 0 6px 16px rgba(255, 107, 53, 0.25);
 }
 
@@ -188,7 +188,7 @@
 /* Header */
 .picker-header {
   padding: 16px 16px 12px;
-  border-bottom: 1px solid #1a1a1e;
+  border-bottom: 1px solid var(--color-border-subtle);
   background: rgba(255, 255, 255, 0.01);
 }
 
@@ -211,13 +211,13 @@
 
 .picker-input {
   width: 100%;
-  background: #040405;
-  border: 1px solid #2a2a30;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 12px 14px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 14px;
-  color: #f0f0f0;
+  color: var(--color-text-primary);
   outline: none;
   caret-color: #ff6b35;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -229,7 +229,7 @@
 }
 
 .picker-input::placeholder {
-  color: #4a4a55;
+  color: var(--color-text-dimmed);
 }
 
 .picker-loading {
@@ -239,7 +239,7 @@
   transform: translateY(-50%);
   width: 12px;
   height: 12px;
-  border: 2px solid #2a2a30;
+  border: 2px solid var(--color-border);
   border-top-color: #ff6b35;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
@@ -260,11 +260,11 @@
 }
 
 .picker-breadcrumb-label {
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
 }
 
 .picker-breadcrumb-path {
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
   background: rgba(255, 255, 255, 0.03);
   padding: 2px 6px;
   border-radius: 3px;
@@ -288,7 +288,7 @@
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
   padding: 10px 10px 6px;
 }
 
@@ -298,7 +298,7 @@
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
   padding: 14px 10px 6px;
 }
 
@@ -316,7 +316,7 @@
 
 .picker-item:hover {
   background: rgba(255, 255, 255, 0.03);
-  border-color: #1f1f25;
+  border-color: var(--color-border-subtle);
 }
 
 .picker-item.selected {
@@ -329,8 +329,8 @@
   width: 32px;
   height: 32px;
   border-radius: 4px;
-  background: #111115;
-  border: 1px solid #1f1f25;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border-subtle);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -354,7 +354,7 @@
 .picker-name {
   font-size: 13px;
   font-weight: 500;
-  color: #e8e8ec;
+  color: var(--color-text-primary);
 }
 
 .picker-item.selected .picker-name {
@@ -364,7 +364,7 @@
 .picker-path {
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 11px;
-  color: #6a6a75;
+  color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -372,12 +372,12 @@
 }
 
 .picker-item.selected .picker-path {
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
 }
 
 /* Empty state */
 .picker-empty {
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
   font-size: 13px;
   text-align: center;
   padding: 48px 20px;
@@ -386,7 +386,7 @@
 
 /* Footer */
 .picker-footer {
-  border-top: 1px solid #1a1a1e;
+  border-top: 1px solid var(--color-border-subtle);
   padding: 10px 16px;
   display: flex;
   align-items: center;
@@ -396,20 +396,20 @@
 
 .picker-footer .shortcut {
   font-size: 11px;
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
 .picker-footer kbd {
-  background: #111115;
-  border: 1px solid #2a2a30;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   border-radius: 3px;
   padding: 3px 6px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 10px;
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
   min-width: 20px;
   text-align: center;
 }
@@ -419,9 +419,9 @@
   width: 22px;
   height: 22px;
   border-radius: 3px;
-  background: #111115;
-  border: 1px solid #2a2a30;
-  color: #6a6a75;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 600;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
@@ -439,7 +439,7 @@
 
 /* New branch trigger */
 .picker-new-branch-trigger {
-  border-top: 1px solid #1a1a1e;
+  border-top: 1px solid var(--color-border-subtle);
   margin-top: 8px;
   padding-top: 8px;
 }
@@ -448,10 +448,10 @@
 .picker-branch-input {
   width: 100%;
   padding: 10px 12px;
-  background: #040405;
-  border: 1px solid #2a2a30;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
-  color: #f0f0f0;
+  color: var(--color-text-primary);
   font-size: 14px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   caret-color: #ff6b35;
@@ -465,7 +465,7 @@
 }
 
 .picker-branch-input::placeholder {
-  color: #4a4a55;
+  color: var(--color-text-dimmed);
 }
 
 .picker-new-branch {
@@ -483,7 +483,7 @@
 }
 
 .picker-creating {
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
   font-size: 12px;
   margin-top: 8px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
@@ -529,11 +529,11 @@
 }
 
 .picker-icon.branch {
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
 }
 
 .picker-icon.new {
-  color: #6a6a75;
+  color: var(--color-text-muted);
 }
 
 .picker-icon.delete {
@@ -565,18 +565,18 @@
 }
 
 .picker-branch-hint {
-  color: #5a5a65;
+  color: var(--color-text-dimmed);
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
 .picker-branch-hint kbd {
-  background: #111115;
-  border: 1px solid #2a2a30;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   border-radius: 3px;
   padding: 2px 5px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   font-size: 10px;
-  color: #8a8a95;
+  color: var(--color-text-tertiary);
 }

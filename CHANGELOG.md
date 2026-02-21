@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-21]
+
+### Fixed
+- **Review Diff Light Theme Support**: Unified diff editor now follows the app’s resolved dark/light theme, including syntax highlighting, gutters, added/deleted line backgrounds, inline comment widgets, and selection popup styling in light mode.
+
 ## [2026-02-19]
 
 ### Fixed

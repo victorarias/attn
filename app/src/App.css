@@ -11,6 +11,99 @@
   /* Brand colors */
   --accent: #ff6b35;
   --accent-glow: rgba(255, 107, 53, 0.15);
+
+  color-scheme: dark;
+
+  /* Theme colors (dark defaults) */
+  --color-bg-app: #0d0d0f;
+  --color-bg-panel: #111113;
+  --color-bg-elevated: #1a1a1d;
+  --color-bg-input: #0d0d0e;
+  --color-bg-editor: #1e1e1e;
+  --color-bg-button: #252528;
+  --color-bg-overlay: rgba(0, 0, 0, 0.6);
+  --color-border: #2a2a2d;
+  --color-border-hover: #3a3a3d;
+  --color-border-focus: #4a4a4d;
+  --color-border-subtle: #1f1f22;
+  --color-text-primary: #e8e8e8;
+  --color-text-secondary: #bbb;
+  --color-text-tertiary: #888;
+  --color-text-muted: #666;
+  --color-text-dimmed: #555;
+  --color-scrollbar-thumb: #2a2a2d;
+  --color-scrollbar-hover: #3a3a3d;
+}
+
+/* System light: applies when OS is light and no explicit data-theme is set */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --color-bg-app: #f5f5f7;
+    --color-bg-panel: #ffffff;
+    --color-bg-elevated: #f0f0f2;
+    --color-bg-input: #ffffff;
+    --color-bg-editor: #ffffff;
+    --color-bg-button: #e4e4e7;
+    --color-bg-overlay: rgba(0, 0, 0, 0.3);
+    --color-border: #d4d4d8;
+    --color-border-hover: #a1a1aa;
+    --color-border-focus: #71717a;
+    --color-border-subtle: #e4e4e7;
+    --color-text-primary: #18181b;
+    --color-text-secondary: #52525b;
+    --color-text-tertiary: #71717a;
+    --color-text-muted: #a1a1aa;
+    --color-text-dimmed: #c4c4ca;
+    --color-scrollbar-thumb: #c4c4c8;
+    --color-scrollbar-hover: #a1a1aa;
+  }
+}
+
+/* Forced dark: overrides system preference */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg-app: #0d0d0f;
+  --color-bg-panel: #111113;
+  --color-bg-elevated: #1a1a1d;
+  --color-bg-input: #0d0d0e;
+  --color-bg-editor: #1e1e1e;
+  --color-bg-button: #252528;
+  --color-bg-overlay: rgba(0, 0, 0, 0.6);
+  --color-border: #2a2a2d;
+  --color-border-hover: #3a3a3d;
+  --color-border-focus: #4a4a4d;
+  --color-border-subtle: #1f1f22;
+  --color-text-primary: #e8e8e8;
+  --color-text-secondary: #bbb;
+  --color-text-tertiary: #888;
+  --color-text-muted: #666;
+  --color-text-dimmed: #555;
+  --color-scrollbar-thumb: #2a2a2d;
+  --color-scrollbar-hover: #3a3a3d;
+}
+
+/* Forced light: overrides system preference */
+[data-theme="light"] {
+  color-scheme: light;
+  --color-bg-app: #f5f5f7;
+  --color-bg-panel: #ffffff;
+  --color-bg-elevated: #f0f0f2;
+  --color-bg-input: #ffffff;
+  --color-bg-editor: #ffffff;
+  --color-bg-button: #e4e4e7;
+  --color-bg-overlay: rgba(0, 0, 0, 0.3);
+  --color-border: #d4d4d8;
+  --color-border-hover: #a1a1aa;
+  --color-border-focus: #71717a;
+  --color-border-subtle: #e4e4e7;
+  --color-text-primary: #18181b;
+  --color-text-secondary: #52525b;
+  --color-text-tertiary: #71717a;
+  --color-text-muted: #a1a1aa;
+  --color-text-dimmed: #c4c4ca;
+  --color-scrollbar-thumb: #c4c4c8;
+  --color-scrollbar-hover: #a1a1aa;
 }
 
 * {
@@ -31,7 +124,7 @@ html, body, #root {
   height: 100%;
   width: 100%;
   display: flex;
-  background: #0d0d0f;
+  background: var(--color-bg-app);
   position: relative;
 }
 
@@ -46,12 +139,12 @@ html, body, #root {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a2a2d;
+  background: var(--color-scrollbar-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3d;
+  background: var(--color-scrollbar-hover);
 }
 
 ::-webkit-scrollbar-corner {
@@ -69,7 +162,7 @@ html, body, #root {
 }
 
 .view-container.review-view {
-  background: #1e1e1e;
+  background: var(--color-bg-editor);
   opacity: 0;
   transform: translateY(12px) scale(0.995);
   transition: opacity 180ms ease, transform 220ms ease;
@@ -100,7 +193,7 @@ html, body, #root {
   height: 100%;
   overflow: hidden;
   position: relative;
-  background: #1e1e1e;
+  background: var(--color-bg-editor);
   display: flex;
   flex-direction: column;
 }
@@ -130,7 +223,7 @@ html, body, #root {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #606060;
+  color: var(--color-text-muted);
   font-size: var(--font-size);
   gap: 12px;
 }
@@ -139,7 +232,7 @@ html, body, #root {
   content: '>';
   font-family: 'JetBrains Mono', monospace;
   font-size: 32px;
-  color: #333;
+  color: var(--color-text-dimmed);
   animation: cursor-blink 1s steps(1) infinite;
 }
 

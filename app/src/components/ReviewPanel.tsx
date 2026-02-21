@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { GitStatusUpdate, FileDiffResult, ReviewState, BranchDiffFile, BranchDiffFilesResult } from '../hooks/useDaemonSocket';
+import type { ResolvedTheme } from '../hooks/useTheme';
 import type { ReviewComment } from '../types/generated';
 import type { ReviewerEvent } from '../hooks/useDaemonSocket';
 import UnifiedDiffEditor, {
@@ -344,6 +345,7 @@ interface ReviewPanelProps {
   reviewerError?: string;
   agentComments?: ReviewComment[];
   agentResolvedCommentIds?: string[];
+  resolvedTheme?: ResolvedTheme;
   // Initial file to select when panel opens
   initialSelectedFile?: string;
 }
@@ -375,6 +377,7 @@ export function ReviewPanel({
   reviewerError,
   agentComments = [],
   agentResolvedCommentIds = [],
+  resolvedTheme = 'dark',
   initialSelectedFile,
 }: ReviewPanelProps) {
   // Track selected file by path for stability across gitStatus updates
@@ -1327,6 +1330,7 @@ export function ReviewPanel({
                   modified={diffContent.modified}
                   comments={editorComments}
                   editingCommentId={editingCommentId}
+                  resolvedTheme={resolvedTheme}
                   fontSize={fontSize}
                   language={editorLanguage}
                   contextLines={expandedContext === -1 ? 0 : 3}

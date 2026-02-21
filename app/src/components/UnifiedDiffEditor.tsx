@@ -13,6 +13,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { EditorView, Decoration, DecorationSet, WidgetType, gutter, GutterMarker } from '@codemirror/view';
 import { EditorState, StateField, StateEffect, RangeSetBuilder, Extension, Range } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
+import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { highlightSpecialChars } from '@codemirror/view';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
@@ -28,6 +29,7 @@ import { yaml } from '@codemirror/lang-yaml';
 import { diffLines } from 'diff';
 import { marked } from 'marked';
 import { ClaudeIcon } from './icons/ClaudeIcon';
+import type { ResolvedTheme } from '../hooks/useTheme';
 
 // ============================================================================
 // Types
@@ -81,6 +83,7 @@ export interface UnifiedDiffEditorProps {
   modified: string;
   comments: InlineComment[];
   editingCommentId: string | null;
+  resolvedTheme?: ResolvedTheme;
   fontSize?: number;
   language?: string;
   contextLines?: number; // Lines of context around changes (default 3, 0 for full diff)
@@ -95,6 +98,162 @@ export interface UnifiedDiffEditorProps {
   onDeleteComment: (id: string) => Promise<void>;
   onSendToClaude?: (reference: string) => void;
 }
+
+type DiffEditorTheme = {
+  editorBg: string;
+  guttersBg: string;
+  guttersBorder: string;
+  gutterText: string;
+  gutterBlank: string;
+  deletedLineBg: string;
+  addedLineBg: string;
+  commentBg: string;
+  commentBorder: string;
+  commentResolvedBg: string;
+  commentWontFixBg: string;
+  authorText: string;
+  authorBg: string;
+  resolvedText: string;
+  resolvedBadgeBg: string;
+  wontFixText: string;
+  wontFixBadgeBg: string;
+  commentContent: string;
+  commentCodeBg: string;
+  commentLink: string;
+  commentBlockquoteBorder: string;
+  commentBlockquoteText: string;
+  buttonBorder: string;
+  buttonText: string;
+  buttonHoverBg: string;
+  buttonHoverText: string;
+  resolveButton: string;
+  wontFixButton: string;
+  deleteButton: string;
+  sendButton: string;
+  newCommentBg: string;
+  newCommentBorder: string;
+  textareaBg: string;
+  textareaBorder: string;
+  textareaText: string;
+  textareaFocus: string;
+  textareaPlaceholder: string;
+  saveButtonBg: string;
+  saveButtonHoverBg: string;
+  collapsedBg: string;
+  collapsedBorder: string;
+  collapsedText: string;
+  collapsedHoverBg: string;
+  collapsedHoverText: string;
+  popupBg: string;
+  popupBorder: string;
+  popupShadow: string;
+  popupSendIcon: string;
+  popupCommentIcon: string;
+};
+
+const DARK_THEME: DiffEditorTheme = {
+  editorBg: '#282c34',
+  guttersBg: '#21252b',
+  guttersBorder: '#3e4451',
+  gutterText: '#6e7681',
+  gutterBlank: '#3e4451',
+  deletedLineBg: '#3c1f1e',
+  addedLineBg: '#1e3a1e',
+  commentBg: '#2d3748',
+  commentBorder: '#3b82f6',
+  commentResolvedBg: '#1e3a2f',
+  commentWontFixBg: '#3a2f1e',
+  authorText: '#ffffff',
+  authorBg: '#2563eb',
+  resolvedText: '#22c55e',
+  resolvedBadgeBg: 'rgba(34, 197, 94, 0.15)',
+  wontFixText: '#d97706',
+  wontFixBadgeBg: 'rgba(217, 119, 6, 0.15)',
+  commentContent: '#e5e7eb',
+  commentCodeBg: '#1f2937',
+  commentLink: '#60a5fa',
+  commentBlockquoteBorder: '#4b5563',
+  commentBlockquoteText: '#9ca3af',
+  buttonBorder: '#4b5563',
+  buttonText: '#9ca3af',
+  buttonHoverBg: '#374151',
+  buttonHoverText: '#e5e7eb',
+  resolveButton: '#22c55e',
+  wontFixButton: '#d97706',
+  deleteButton: '#ef4444',
+  sendButton: '#d97706',
+  newCommentBg: '#312e81',
+  newCommentBorder: '#6366f1',
+  textareaBg: '#1f2937',
+  textareaBorder: '#4b5563',
+  textareaText: '#e5e7eb',
+  textareaFocus: '#6366f1',
+  textareaPlaceholder: '#6b7280',
+  saveButtonBg: '#3b82f6',
+  saveButtonHoverBg: '#2563eb',
+  collapsedBg: '#1e293b',
+  collapsedBorder: '#334155',
+  collapsedText: '#94a3b8',
+  collapsedHoverBg: '#334155',
+  collapsedHoverText: '#e2e8f0',
+  popupBg: '#2a2a2d',
+  popupBorder: '#3a3a3d',
+  popupShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+  popupSendIcon: '#d4a27f',
+  popupCommentIcon: '#60a5fa',
+};
+
+const LIGHT_THEME: DiffEditorTheme = {
+  editorBg: '#ffffff',
+  guttersBg: '#f6f8fa',
+  guttersBorder: '#d0d7de',
+  gutterText: '#656d76',
+  gutterBlank: '#d0d7de',
+  deletedLineBg: '#ffebe9',
+  addedLineBg: '#dafbe1',
+  commentBg: '#f6f8fa',
+  commentBorder: '#0969da',
+  commentResolvedBg: '#dafbe1',
+  commentWontFixBg: '#fff8c5',
+  authorText: '#ffffff',
+  authorBg: '#0969da',
+  resolvedText: '#1a7f37',
+  resolvedBadgeBg: '#dcffe4',
+  wontFixText: '#9a6700',
+  wontFixBadgeBg: '#fff8c5',
+  commentContent: '#24292f',
+  commentCodeBg: '#eaedf1',
+  commentLink: '#0969da',
+  commentBlockquoteBorder: '#d0d7de',
+  commentBlockquoteText: '#57606a',
+  buttonBorder: '#d0d7de',
+  buttonText: '#57606a',
+  buttonHoverBg: '#eaeef2',
+  buttonHoverText: '#24292f',
+  resolveButton: '#1a7f37',
+  wontFixButton: '#9a6700',
+  deleteButton: '#cf222e',
+  sendButton: '#9a6700',
+  newCommentBg: '#eef2ff',
+  newCommentBorder: '#6366f1',
+  textareaBg: '#ffffff',
+  textareaBorder: '#d0d7de',
+  textareaText: '#24292f',
+  textareaFocus: '#0969da',
+  textareaPlaceholder: '#8c959f',
+  saveButtonBg: '#0969da',
+  saveButtonHoverBg: '#0550ae',
+  collapsedBg: '#f6f8fa',
+  collapsedBorder: '#d0d7de',
+  collapsedText: '#57606a',
+  collapsedHoverBg: '#eaeef2',
+  collapsedHoverText: '#24292f',
+  popupBg: '#ffffff',
+  popupBorder: '#d0d7de',
+  popupShadow: '0 4px 12px rgba(31, 35, 40, 0.15)',
+  popupSendIcon: '#9a6700',
+  popupCommentIcon: '#0969da',
+};
 
 // ============================================================================
 // Diff Parsing
@@ -803,6 +962,7 @@ export function UnifiedDiffEditor({
   modified,
   comments,
   editingCommentId,
+  resolvedTheme = 'dark',
   fontSize = 13,
   language,
   contextLines = 0,
@@ -981,11 +1141,17 @@ export function UnifiedDiffEditor({
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const colorTheme = resolvedTheme === 'light' ? LIGHT_THEME : DARK_THEME;
+    const syntaxTheme =
+      resolvedTheme === 'light'
+        ? syntaxHighlighting(defaultHighlightStyle, { fallback: true })
+        : oneDark;
+
     const theme = EditorView.theme(
       {
         '&': {
           height: '100%',
-          backgroundColor: '#282c34',
+          backgroundColor: colorTheme.editorBg,
           overflow: 'hidden',
         },
         '.cm-scroller': {
@@ -998,15 +1164,15 @@ export function UnifiedDiffEditor({
           minWidth: '0',
         },
         '.cm-gutters': {
-          backgroundColor: '#21252b',
-          borderRight: '1px solid #3e4451',
+          backgroundColor: colorTheme.guttersBg,
+          borderRight: `1px solid ${colorTheme.guttersBorder}`,
         },
         // Custom line number gutters (GitHub-style compact)
         '.cm-original-gutter, .cm-modified-gutter': {
           minWidth: '32px',
           textAlign: 'right',
           padding: '0 4px',
-          color: '#6e7681',
+          color: colorTheme.gutterText,
           fontSize: '12px',
           userSelect: 'none',
         },
@@ -1014,30 +1180,30 @@ export function UnifiedDiffEditor({
           padding: '0 4px',
         },
         '.cm-lineNumber-blank': {
-          color: '#3e4451',
+          color: colorTheme.gutterBlank,
         },
         '.cm-deleted-line': {
-          backgroundColor: '#3c1f1e !important',
+          backgroundColor: `${colorTheme.deletedLineBg} !important`,
         },
         '.cm-added-line': {
-          backgroundColor: '#1e3a1e !important',
+          backgroundColor: `${colorTheme.addedLineBg} !important`,
         },
         // Saved comments
         '.unified-comment': {
-          background: '#2d3748',
-          borderLeft: '3px solid #3b82f6',
+          background: colorTheme.commentBg,
+          borderLeft: `3px solid ${colorTheme.commentBorder}`,
           margin: '2px 0',
           padding: '6px 10px',
           borderRadius: '0 4px 4px 0',
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
         },
         '.unified-comment.resolved': {
-          borderLeftColor: '#22c55e',
-          background: '#1e3a2f',
+          borderLeftColor: colorTheme.resolveButton,
+          background: colorTheme.commentResolvedBg,
         },
         '.unified-comment.wont-fix': {
-          borderLeftColor: '#d97706',
-          background: '#3a2f1e',
+          borderLeftColor: colorTheme.wontFixButton,
+          background: colorTheme.commentWontFixBg,
         },
         '.unified-comment-header': {
           display: 'flex',
@@ -1055,27 +1221,27 @@ export function UnifiedDiffEditor({
           fontWeight: '600',
           padding: '2px 8px',
           borderRadius: '4px',
-          color: '#fff',
-          background: '#2563eb',
+          color: colorTheme.authorText,
+          background: colorTheme.authorBg,
         },
         '.unified-comment-resolved': {
           fontSize: `${fontSize - 2}px`,
           fontWeight: '500',
           padding: '2px 8px',
           borderRadius: '4px',
-          color: '#22c55e',
-          background: 'rgba(34, 197, 94, 0.15)',
+          color: colorTheme.resolvedText,
+          background: colorTheme.resolvedBadgeBg,
         },
         '.unified-comment-wontfix': {
           fontSize: `${fontSize - 2}px`,
           fontWeight: '500',
           padding: '2px 8px',
           borderRadius: '4px',
-          color: '#d97706',
-          background: 'rgba(217, 119, 6, 0.15)',
+          color: colorTheme.wontFixText,
+          background: colorTheme.wontFixBadgeBg,
         },
         '.unified-comment-content': {
-          color: '#e5e7eb',
+          color: colorTheme.commentContent,
           fontSize: `${fontSize}px`,
           lineHeight: '1.4',
         },
@@ -1086,14 +1252,14 @@ export function UnifiedDiffEditor({
           marginBottom: '0',
         },
         '.unified-comment-content code': {
-          background: '#1f2937',
+          background: colorTheme.commentCodeBg,
           padding: '1px 4px',
           borderRadius: '3px',
           fontFamily: "'SF Mono', Monaco, Menlo, monospace",
           fontSize: `${fontSize - 1}px`,
         },
         '.unified-comment-content pre': {
-          background: '#1f2937',
+          background: colorTheme.commentCodeBg,
           padding: '8px',
           borderRadius: '4px',
           overflowX: 'auto',
@@ -1111,17 +1277,17 @@ export function UnifiedDiffEditor({
           margin: '4px 0',
         },
         '.unified-comment-content a': {
-          color: '#60a5fa',
+          color: colorTheme.commentLink,
           textDecoration: 'none',
         },
         '.unified-comment-content a:hover': {
           textDecoration: 'underline',
         },
         '.unified-comment-content blockquote': {
-          borderLeft: '3px solid #4b5563',
+          borderLeft: `3px solid ${colorTheme.commentBlockquoteBorder}`,
           margin: '8px 0',
           paddingLeft: '12px',
-          color: '#9ca3af',
+          color: colorTheme.commentBlockquoteText,
         },
         '.unified-comment-content strong': {
           fontWeight: '600',
@@ -1132,53 +1298,53 @@ export function UnifiedDiffEditor({
         },
         '.unified-comment-actions button': {
           background: 'transparent',
-          border: '1px solid #4b5563',
-          color: '#9ca3af',
+          border: `1px solid ${colorTheme.buttonBorder}`,
+          color: colorTheme.buttonText,
           fontSize: `${fontSize - 2}px`,
           padding: '2px 8px',
           borderRadius: '3px',
           cursor: 'pointer',
         },
         '.unified-comment-actions button:hover': {
-          background: '#374151',
-          color: '#e5e7eb',
+          background: colorTheme.buttonHoverBg,
+          color: colorTheme.buttonHoverText,
         },
         '.unified-comment-actions .resolve-btn': {
-          borderColor: '#22c55e',
-          color: '#22c55e',
+          borderColor: colorTheme.resolveButton,
+          color: colorTheme.resolveButton,
         },
         '.unified-comment-actions .resolve-btn:hover': {
-          background: '#22c55e',
-          color: '#fff',
+          background: colorTheme.resolveButton,
+          color: colorTheme.authorText,
         },
         '.unified-comment-actions .wontfix-btn': {
-          borderColor: '#d97706',
-          color: '#d97706',
+          borderColor: colorTheme.wontFixButton,
+          color: colorTheme.wontFixButton,
         },
         '.unified-comment-actions .wontfix-btn:hover': {
-          background: '#d97706',
-          color: '#fff',
+          background: colorTheme.wontFixButton,
+          color: colorTheme.authorText,
         },
         '.unified-comment-actions .delete-btn': {
-          borderColor: '#ef4444',
-          color: '#ef4444',
+          borderColor: colorTheme.deleteButton,
+          color: colorTheme.deleteButton,
         },
         '.unified-comment-actions .delete-btn:hover': {
-          background: '#ef4444',
-          color: '#fff',
+          background: colorTheme.deleteButton,
+          color: colorTheme.authorText,
         },
         '.unified-comment-actions .send-btn': {
-          borderColor: '#d97706',
-          color: '#d97706',
+          borderColor: colorTheme.sendButton,
+          color: colorTheme.sendButton,
         },
         '.unified-comment-actions .send-btn:hover': {
-          background: '#d97706',
-          color: '#fff',
+          background: colorTheme.sendButton,
+          color: colorTheme.authorText,
         },
         // New comment form
         '.unified-comment-form': {
-          background: '#312e81',
-          borderLeft: '3px solid #6366f1',
+          background: colorTheme.newCommentBg,
+          borderLeft: `3px solid ${colorTheme.newCommentBorder}`,
           margin: '2px 0',
           padding: '6px 10px',
           borderRadius: '0 4px 4px 0',
@@ -1188,10 +1354,10 @@ export function UnifiedDiffEditor({
           width: '100%',
           minHeight: '48px',
           padding: '6px 8px',
-          background: '#1f2937',
-          border: '1px solid #4b5563',
+          background: colorTheme.textareaBg,
+          border: `1px solid ${colorTheme.textareaBorder}`,
           borderRadius: '4px',
-          color: '#e5e7eb',
+          color: colorTheme.textareaText,
           fontFamily: 'inherit',
           fontSize: `${fontSize}px`,
           lineHeight: '1.4',
@@ -1200,10 +1366,10 @@ export function UnifiedDiffEditor({
         },
         '.unified-comment-textarea:focus': {
           outline: 'none',
-          borderColor: '#6366f1',
+          borderColor: colorTheme.textareaFocus,
         },
         '.unified-comment-textarea::placeholder': {
-          color: '#6b7280',
+          color: colorTheme.textareaPlaceholder,
         },
         '.unified-comment-form-actions': {
           display: 'flex',
@@ -1213,25 +1379,25 @@ export function UnifiedDiffEditor({
         },
         '.unified-comment-form-actions button': {
           background: 'transparent',
-          border: '1px solid #4b5563',
-          color: '#9ca3af',
+          border: `1px solid ${colorTheme.buttonBorder}`,
+          color: colorTheme.buttonText,
           fontSize: `${fontSize - 2}px`,
           padding: '2px 8px',
           borderRadius: '3px',
           cursor: 'pointer',
         },
         '.unified-comment-form-actions button:hover': {
-          background: '#374151',
-          color: '#e5e7eb',
+          background: colorTheme.buttonHoverBg,
+          color: colorTheme.buttonHoverText,
         },
         '.unified-comment-form-actions .save-btn': {
-          background: '#3b82f6',
-          borderColor: '#3b82f6',
-          color: '#fff',
+          background: colorTheme.saveButtonBg,
+          borderColor: colorTheme.saveButtonBg,
+          color: colorTheme.authorText,
         },
         '.unified-comment-form-actions .save-btn:hover': {
-          background: '#2563eb',
-          borderColor: '#2563eb',
+          background: colorTheme.saveButtonHoverBg,
+          borderColor: colorTheme.saveButtonHoverBg,
         },
         // Collapsed region indicator
         '.cm-collapsed-region': {
@@ -1240,18 +1406,18 @@ export function UnifiedDiffEditor({
           justifyContent: 'center',
           gap: '8px',
           padding: '4px 16px',
-          background: '#1e293b',
-          borderTop: '1px solid #334155',
-          borderBottom: '1px solid #334155',
-          color: '#94a3b8',
+          background: colorTheme.collapsedBg,
+          borderTop: `1px solid ${colorTheme.collapsedBorder}`,
+          borderBottom: `1px solid ${colorTheme.collapsedBorder}`,
+          color: colorTheme.collapsedText,
           fontSize: `${fontSize - 1}px`,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
           cursor: 'pointer',
           userSelect: 'none',
         },
         '.cm-collapsed-region:hover': {
-          background: '#334155',
-          color: '#e2e8f0',
+          background: colorTheme.collapsedHoverBg,
+          color: colorTheme.collapsedHoverText,
         },
         '.cm-collapsed-icon': {
           fontSize: `${fontSize + 1}px`,
@@ -1260,7 +1426,7 @@ export function UnifiedDiffEditor({
           fontWeight: '500',
         },
       },
-      { dark: true }
+      { dark: resolvedTheme === 'dark' }
     );
 
     // Click handler to open comment form (only when no selection)
@@ -1326,7 +1492,7 @@ export function UnifiedDiffEditor({
           modifiedLineGutter,
           highlightSpecialChars(),
           languageExtension,
-          oneDark,
+          syntaxTheme,
           theme,
           lineDecorationsField,
           collapsedDecorationsField,
@@ -1353,7 +1519,7 @@ export function UnifiedDiffEditor({
       view.destroy();
       editorViewRef.current = null;
     };
-  }, [content, lines, fontSize, languageExtension]);
+  }, [content, lines, fontSize, languageExtension, resolvedTheme]);
 
   // Clear selection when file content changes (prevents stale popup)
   useEffect(() => {
@@ -1520,6 +1686,7 @@ export function UnifiedDiffEditor({
   }, [scrollToLine, lines]);
 
   const popupPosition = getPopupPosition();
+  const colorTheme = resolvedTheme === 'light' ? LIGHT_THEME : DARK_THEME;
 
   return (
     <div
@@ -1538,11 +1705,11 @@ export function UnifiedDiffEditor({
             zIndex: 100,
             display: 'flex',
             gap: '4px',
-            background: '#2a2a2d',
-            border: '1px solid #3a3a3d',
+            background: colorTheme.popupBg,
+            border: `1px solid ${colorTheme.popupBorder}`,
             borderRadius: '4px',
             padding: '4px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+            boxShadow: colorTheme.popupShadow,
           }}
         >
           {onSendToClaude && filePath && (
@@ -1560,7 +1727,7 @@ export function UnifiedDiffEditor({
                 borderRadius: '4px',
                 background: 'transparent',
                 cursor: 'pointer',
-                color: '#d4a27f',
+                color: colorTheme.popupSendIcon,
               }}
             >
               <ClaudeIcon size={16} />
@@ -1580,7 +1747,7 @@ export function UnifiedDiffEditor({
               borderRadius: '4px',
               background: 'transparent',
               cursor: 'pointer',
-              color: '#60a5fa',
+              color: colorTheme.popupCommentIcon,
             }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

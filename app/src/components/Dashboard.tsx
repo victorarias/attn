@@ -1,12 +1,10 @@
 // app/src/components/Dashboard.tsx
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { DaemonPR, DaemonSettings, RateLimitState } from '../hooks/useDaemonSocket';
+import { DaemonPR, RateLimitState } from '../hooks/useDaemonSocket';
 import { usePRsNeedingAttention } from '../hooks/usePRsNeedingAttention';
 import { PRActions } from './PRActions';
-import { SettingsModal } from './SettingsModal';
 import { StateIndicator } from './StateIndicator';
 import { useDaemonContext } from '../contexts/DaemonContext';
-import { useDaemonStore } from '../store/daemonSessions';
 import { getRepoName } from '../utils/repo';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { UISessionState } from '../types/sessionState';
@@ -25,12 +23,11 @@ interface DashboardProps {
   isRefreshing?: boolean;
   refreshError?: string | null;
   rateLimit?: RateLimitState | null;
-  settings: DaemonSettings;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onRefreshPRs?: () => void;
   onOpenPR?: (pr: DaemonPR) => void;
-  onSetSetting: (key: string, value: string) => void;
+  onOpenSettings: () => void;
 }
 
 export function Dashboard({
@@ -40,12 +37,11 @@ export function Dashboard({
   isRefreshing,
   refreshError,
   rateLimit,
-  settings,
   onSelectSession,
   onNewSession,
   onRefreshPRs,
   onOpenPR,
-  onSetSetting,
+  onOpenSettings,
 }: DashboardProps) {
   const waitingSessions = sessions.filter((s) => s.state === 'waiting_input');
   const pendingApprovalSessions = sessions.filter((s) => s.state === 'pending_approval');
@@ -57,37 +53,13 @@ export function Dashboard({
   // Group PRs by repo
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
   const [fadingPRs, setFadingPRs] = useState<Set<string>>(new Set());
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const { sendMuteRepo, sendMuteAuthor, sendPRVisited } = useDaemonContext();
-  const { repoStates, authorStates } = useDaemonStore();
-
-  // Get list of muted repos for settings modal
-  const mutedRepos = useMemo(() =>
-    repoStates.filter(r => r.muted).map(r => r.repo),
-    [repoStates]
-  );
-
-  // Get list of muted authors for settings modal
-  const mutedAuthors = useMemo(() =>
-    authorStates.filter(a => a.muted).map(a => a.author),
-    [authorStates]
-  );
+  const { sendMuteRepo, sendPRVisited } = useDaemonContext();
 
   // PRs that are fully hidden (after fade animation)
   const [hiddenPRs, setHiddenPRs] = useState<Set<string>>(new Set());
 
   // Use centralized PR filtering hook
   const { activePRs, needsAttention } = usePRsNeedingAttention(prs, hiddenPRs);
-
-  const connectedHosts = useMemo(() => {
-    const set = new Set<string>();
-    for (const pr of prs) {
-      if (pr.host) {
-        set.add(pr.host);
-      }
-    }
-    return Array.from(set).sort();
-  }, [prs]);
 
   // Handle PR action completion (approve/merge success)
   // Only fade out on merge - approved PRs stay visible (dimmed)
@@ -177,7 +149,7 @@ export function Dashboard({
         </div>
         <button
           className="settings-btn"
-          onClick={() => setSettingsOpen(true)}
+          onClick={onOpenSettings}
           title="Settings"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -474,20 +446,8 @@ export function Dashboard({
       <footer className="dashboard-footer">
         <span className="shortcut"><kbd>⌘N</kbd> new session</span>
         <span className="shortcut"><kbd>⌘1-9</kbd> switch session</span>
-        <span className="shortcut"><kbd>⌘R</kbd> refresh PRs</span>
+        <span className="shortcut"><kbd>⌘,</kbd> settings</span>
       </footer>
-
-      <SettingsModal
-        isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        mutedRepos={mutedRepos}
-        connectedHosts={connectedHosts}
-        onUnmuteRepo={sendMuteRepo}
-        mutedAuthors={mutedAuthors}
-        onUnmuteAuthor={sendMuteAuthor}
-        settings={settings}
-        onSetSetting={onSetSetting}
-      />
     </div>
   );
 }

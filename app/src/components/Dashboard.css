@@ -2,7 +2,7 @@
 .dashboard {
   height: 100%;
   width: 100%;
-  background: #0d0d0f;
+  background: var(--color-bg-app);
   display: flex;
   flex-direction: column;
   padding: 40px;
@@ -52,7 +52,7 @@
 
 .dashboard-subtitle {
   font-size: var(--font-size-sm);
-  color: #555;
+  color: var(--color-text-dimmed);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -60,7 +60,7 @@
 .settings-btn {
   background: transparent;
   border: none;
-  color: #555;
+  color: var(--color-text-dimmed);
   cursor: pointer;
   padding: 8px;
   border-radius: 6px;
@@ -68,8 +68,8 @@
 }
 
 .settings-btn:hover {
-  background: #1a1a1d;
-  color: #e8e8e8;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
 }
 
 .settings-btn:focus {
@@ -104,8 +104,8 @@
 }
 
 .dashboard-card {
-  background: #111113;
-  border: 1px solid #2a2a2d;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -115,7 +115,7 @@
 }
 
 .dashboard-card:hover {
-  border-color: #3a3a3d;
+  border-color: var(--color-border-hover);
   box-shadow: 0 0 0 1px rgba(255, 107, 53, 0.08), 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
@@ -124,7 +124,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 16px;
-  border-bottom: 1px solid #2a2a2d;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .card-header h2 {
@@ -133,23 +133,23 @@
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #555;
+  color: var(--color-text-dimmed);
   margin: 0;
 }
 
 .card-action {
-  background: #1a1a1d;
-  border: 1px solid #2a2a2d;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
-  color: #888;
+  color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
   padding: 4px 10px;
   cursor: pointer;
 }
 
 .card-action:hover {
-  background: #2a2a2d;
-  color: #e8e8e8;
+  background: var(--color-border);
+  color: var(--color-text-primary);
 }
 
 .card-count {
@@ -170,7 +170,7 @@
 .refresh-btn {
   background: transparent;
   border: none;
-  color: #555;
+  color: var(--color-text-dimmed);
   cursor: pointer;
   padding: 4px;
   border-radius: 4px;
@@ -183,8 +183,8 @@
 }
 
 .refresh-btn:hover {
-  background: #1a1a1d;
-  color: #e8e8e8;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
 }
 
 .refresh-btn:disabled {
@@ -236,7 +236,7 @@
 }
 
 .card-empty {
-  color: #555;
+  color: var(--color-text-dimmed);
   font-size: var(--font-size-md);
   text-align: center;
   padding: 20px;
@@ -248,7 +248,7 @@
 
 .group-label {
   font-size: var(--font-size-xs);
-  color: #555;
+  color: var(--color-text-dimmed);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin-bottom: 8px;
@@ -262,7 +262,7 @@
   padding: 10px 12px;
   border-radius: 6px;
   font-size: var(--font-size-md);
-  color: #e8e8e8;
+  color: var(--color-text-primary);
 }
 
 .session-row.clickable {
@@ -270,7 +270,7 @@
 }
 
 .session-row.clickable:hover {
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
 }
 
 .state-dot {
@@ -303,24 +303,24 @@
   display: flex;
   gap: 24px;
   padding-top: 20px;
-  border-top: 1px solid #2a2a2d;
+  border-top: 1px solid var(--color-border);
   margin-top: 20px;
 }
 
 .shortcut {
   font-size: var(--font-size-sm);
-  color: #555;
+  color: var(--color-text-dimmed);
 }
 
 .shortcut kbd {
-  background: linear-gradient(180deg, #1e1e20 0%, #161618 100%);
-  border: 1px solid #2a2a2d;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 3px 8px;
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-sm);
   margin-right: 6px;
-  box-shadow: 0 1px 0 #2a2a2d, 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 0 var(--color-border), 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 /* PR list styles */
@@ -339,7 +339,7 @@
   padding: 8px 10px;
   border-radius: 6px;
   font-size: var(--font-size-md);
-  color: #e8e8e8;
+  color: var(--color-text-primary);
 }
 
 .repo-header-content {
@@ -354,11 +354,11 @@
 }
 
 .repo-header:hover {
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
 }
 
 .collapse-icon {
-  color: #555;
+  color: var(--color-text-dimmed);
   font-size: 10px;
   transition: transform 0.15s;
 }
@@ -395,7 +395,7 @@
 
 .repo-prs {
   margin-left: 18px;
-  border-left: 1px solid #2a2a2d;
+  border-left: 1px solid var(--color-border);
   padding-left: 12px;
 }
 
@@ -414,7 +414,7 @@
   gap: 8px;
   flex: 1;
   font-size: var(--font-size-sm);
-  color: #888;
+  color: var(--color-text-tertiary);
   text-decoration: none;
   overflow: hidden;
   background: transparent;
@@ -425,12 +425,12 @@
 }
 
 .pr-row:hover {
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
 }
 
 .pr-row:hover .pr-link,
 .pr-row:hover .pr-link * {
-  color: #e8e8e8;
+  color: var(--color-text-primary);
 }
 
 .pr-role {
@@ -438,7 +438,7 @@
 }
 
 .pr-number {
-  color: #555;
+  color: var(--color-text-dimmed);
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-sm);
 }
@@ -448,7 +448,7 @@
   font-size: 10px;
   text-transform: lowercase;
   color: #8b8b8b;
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
   padding: 2px 6px;
   border-radius: 3px;
   line-height: 1;
@@ -463,8 +463,8 @@
 
 .pr-reason {
   font-size: var(--font-size-xs);
-  color: #555;
-  background: #1a1a1d;
+  color: var(--color-text-dimmed);
+  background: var(--color-bg-elevated);
   padding: 2px 6px;
   border-radius: 3px;
   text-transform: lowercase;
@@ -472,10 +472,10 @@
 
 /* Repo mute button */
 .repo-mute-btn {
-  background: #252528;
-  border: 1px solid #3a3a3d;
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border-hover);
   border-radius: 4px;
-  color: #888;
+  color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
   padding: 4px 8px;
   cursor: pointer;
@@ -494,10 +494,10 @@
 
 /* Author mute button (per-PR) - hidden until row hover */
 .pr-row .author-mute-btn {
-  background: #252528;
-  border: 1px solid #3a3a3d;
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border-hover);
   border-radius: 4px;
-  color: #888;
+  color: var(--color-text-tertiary);
   font-size: var(--font-size-xs);
   padding: 2px 6px;
   cursor: pointer;
@@ -538,7 +538,7 @@
 .pr-loading-status {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
-  color: #555;
+  color: var(--color-text-dimmed);
   letter-spacing: 0.05em;
   margin-bottom: 12px;
   padding: 0 10px;
@@ -556,7 +556,7 @@
   width: 16px;
   height: 16px;
   border-radius: 4px;
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
   flex-shrink: 0;
 }
 
@@ -564,7 +564,7 @@
   width: 32px;
   height: 14px;
   border-radius: 3px;
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
   flex-shrink: 0;
 }
 
@@ -572,7 +572,7 @@
   flex: 1;
   height: 14px;
   border-radius: 3px;
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
 }
 
 /* Vary title widths for realism */

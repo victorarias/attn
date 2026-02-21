@@ -2,8 +2,8 @@
 .sidebar {
   width: 240px;
   height: 100%;
-  background: #111113;
-  border-right: 1px solid #2a2a2d;
+  background: var(--color-bg-panel);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -14,14 +14,14 @@
   align-items: center;
   gap: 8px;
   padding: 12px;
-  border-bottom: 1px solid #2a2a2d;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .home-btn {
-  background: #1a1a1d;
-  border: 1px solid #2a2a2d;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
-  color: #888;
+  color: var(--color-text-tertiary);
   font-size: var(--font-size);
   width: 28px;
   height: 28px;
@@ -32,14 +32,14 @@
 }
 
 .home-btn:hover {
-  background: #2a2a2d;
-  color: #e8e8e8;
+  background: var(--color-border);
+  color: var(--color-text-primary);
 }
 
 .home-shortcut {
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
-  color: #555;
+  color: var(--color-text-dimmed);
 }
 
 .sidebar-title {
@@ -48,15 +48,15 @@
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #555;
+  color: var(--color-text-dimmed);
   flex: 1;
 }
 
 .new-session-btn {
-  background: #1a1a1d;
-  border: 1px solid #2a2a2d;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
-  color: #888;
+  color: var(--color-text-tertiary);
   font-size: 16px;
   width: 28px;
   height: 28px;
@@ -67,8 +67,8 @@
 }
 
 .new-session-btn:hover {
-  background: #2a2a2d;
-  color: #e8e8e8;
+  background: var(--color-border);
+  color: var(--color-text-primary);
 }
 
 .session-list {
@@ -87,7 +87,7 @@
   gap: 2px;
   padding: 4px 12px;
   font-size: var(--font-size-sm);
-  color: #888;
+  color: var(--color-text-tertiary);
   font-family: 'JetBrains Mono', monospace;
 }
 
@@ -99,15 +99,15 @@
   border-radius: 6px;
   cursor: pointer;
   font-size: var(--font-size-md);
-  color: #e8e8e8;
+  color: var(--color-text-primary);
 }
 
 .session-item:hover {
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
 }
 
 .session-item.selected {
-  background: #1a1a1d;
+  background: var(--color-bg-elevated);
 }
 
 .session-item.grouped {
@@ -162,7 +162,7 @@
 }
 
 .session-branch {
-  color: #666;
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -170,7 +170,7 @@
 }
 
 .worktree-indicator {
-  color: #888;
+  color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
   margin-left: auto;
   margin-right: 4px;
@@ -179,13 +179,13 @@
 .session-shortcut {
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
-  color: #555;
+  color: var(--color-text-dimmed);
 }
 
 .close-session-btn {
   background: none;
   border: none;
-  color: #555;
+  color: var(--color-text-dimmed);
   font-size: 14px;
   cursor: pointer;
   padding: 0;
@@ -198,31 +198,31 @@
 }
 
 .close-session-btn:hover {
-  color: #e8e8e8;
+  color: var(--color-text-primary);
 }
 
 .sidebar-footer {
   padding: 12px;
-  border-top: 1px solid #2a2a2d;
+  border-top: 1px solid var(--color-border);
 }
 
 .shortcut-hint {
   font-size: var(--font-size-sm);
-  color: #555;
+  color: var(--color-text-dimmed);
 }
 
 /* Collapse button */
 .collapse-btn {
   background: none;
   border: none;
-  color: #555;
+  color: var(--color-text-dimmed);
   font-size: 14px;
   cursor: pointer;
   padding: 4px 8px;
 }
 
 .collapse-btn:hover {
-  color: #888;
+  color: var(--color-text-tertiary);
 }
 
 /* Collapsed state - Icon Rail */
@@ -245,7 +245,7 @@
   border-radius: 8px;
   border: none;
   background: none;
-  color: #555;
+  color: var(--color-text-dimmed);
   font-size: 16px;
   cursor: pointer;
   display: flex;
@@ -256,19 +256,19 @@
 }
 
 .icon-btn:hover {
-  background: #1a1a1d;
-  color: #e8e8e8;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
 }
 
 .icon-btn.active {
-  background: #1a1a1d;
-  color: #e8e8e8;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
 }
 
 .icon-divider {
   width: 24px;
   height: 1px;
-  background: #2a2a2d;
+  background: var(--color-border);
   margin: 8px 0;
 }
 
