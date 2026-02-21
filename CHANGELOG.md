@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-02-21]
 
+### Changed
+- **Long-Run Session Review Gate**: Sessions that run for 5+ minutes now finish in a review-required yellow state (`needs_review_after_long_run`) instead of immediately classifying to idle. Classification resumes only after the user visualizes that session (5s stable selection, or immediate when already focused at completion).
+
 ### Fixed
 - **Review Diff Light Theme Support**: Unified diff editor now follows the app’s resolved dark/light theme, including syntax highlighting, gutters, added/deleted line backgrounds, inline comment widgets, and selection popup styling in light mode.
 - **Contributors**: Thanks to @dakl for the PR that delivered theme toggle and light mode improvements.

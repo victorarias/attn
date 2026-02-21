@@ -122,6 +122,7 @@ Attention Manager (`attn`) tracks multiple Claude Code sessions and surfaces whi
 - `waiting_input` (yellow): Agent stopped and is waiting for user direction/input.
 - `idle` (gray): Agent is done and not waiting for anything.
 - `unknown` (purple): State could not be determined reliably (classifier/transcript uncertainty or error).
+- `needs_review_after_long_run` (session flag): If a run lasts 5+ minutes, completion is held in yellow until the session is visualized (5s stable selection; immediate when already focused at completion). Stop-time classification is deferred until that visualization signal.
 
 3. **Daemon** (`internal/daemon`): Background process listening on `~/.attn/attn.sock` (unix socket) and `ws://localhost:9849` (WebSocket). Handles session lifecycle, git operations, GitHub PR polling, and real-time updates to the app.
 

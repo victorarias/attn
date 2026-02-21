@@ -50,6 +50,7 @@ model Session {
   state: SessionState;
   state_since: string;          // ISO timestamp, always set
   state_updated_at: string;     // ISO timestamp, always set
+  needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
   muted: boolean;               // Always has value (defaults false)
@@ -174,6 +175,11 @@ model QueryMessage {
 
 model HeartbeatMessage {
   cmd: "heartbeat";
+  id: string;
+}
+
+model SessionVisualizedMessage {
+  cmd: "session_visualized";
   id: string;
 }
 
