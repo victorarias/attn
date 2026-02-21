@@ -1919,13 +1919,13 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 // than the current state. Used by classifier to prevent stale results from overwriting
 // newer state updates that arrived during classification.
 func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) {
-	switch state {
-	case protocol.StateWorking:
-		d.markRunStartedIfNeeded(sessionID)
-	case protocol.StateIdle:
-		d.clearLongRunTracking(sessionID)
-	}
 	if d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt) {
+		switch state {
+		case protocol.StateWorking:
+			d.markRunStartedIfNeeded(sessionID)
+		case protocol.StateIdle:
+			d.clearLongRunTracking(sessionID)
+		}
 		// Broadcast to WebSocket clients
 		session := d.sessionForBroadcast(d.store.Get(sessionID))
 		if session != nil {

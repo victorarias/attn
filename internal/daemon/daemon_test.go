@@ -2747,6 +2747,41 @@ func TestClassifySessionState_ClaudeConcurrentDuplicateTurnRunsOnce(t *testing.T
 	}
 }
 
+func TestUpdateAndBroadcastStateWithTimestamp_StaleIdleDoesNotClearLongRunTracking(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-stale",
+		Agent:          protocol.SessionAgentCodex,
+		Label:          "stale",
+		Directory:      "/tmp",
+		State:          protocol.StateWaitingInput,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+	d.longRun["sess-stale"] = longRunSession{
+		workingSince:       now.Add(-6 * time.Minute),
+		deferredTranscript: "/tmp/transcript.jsonl",
+		needsReview:        true,
+	}
+
+	d.updateAndBroadcastStateWithTimestamp("sess-stale", protocol.StateIdle, now.Add(-1*time.Minute))
+
+	session := d.store.Get("sess-stale")
+	if session == nil {
+		t.Fatal("session missing")
+	}
+	if session.State != protocol.StateWaitingInput {
+		t.Fatalf("state=%s, want %s", session.State, protocol.StateWaitingInput)
+	}
+	if !d.sessionNeedsReviewAfterLongRun("sess-stale") {
+		t.Fatal("needs_review_after_long_run should remain set for stale timestamped update")
+	}
+}
+
 func TestClassifyOrDeferAfterStop_LongRunDefersUntilVisualized(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	mockClassifier := &countingClassifier{state: protocol.StateWaitingInput}
