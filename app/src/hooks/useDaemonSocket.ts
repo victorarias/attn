@@ -87,7 +87,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '28';
+const PROTOCOL_VERSION = '29';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -416,6 +416,7 @@ export function useDaemonSocket({
   const attachedPtySessionsRef = useRef<Set<string>>(new Set());
   const ptySeqRef = useRef<Map<string, number>>(new Map());
   const pendingAttachOutputsRef = useRef<Map<string, Array<{ data: string; seq?: number }>>>(new Map());
+  const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
   const daemonInstanceIDRef = useRef<string>('');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
@@ -541,6 +542,13 @@ export function useDaemonSocket({
 
       if (gitStatusSubscriptionRef.current) {
         ws.send(JSON.stringify({ cmd: 'subscribe_git_status', directory: gitStatusSubscriptionRef.current }));
+      }
+
+      if (pendingSessionVisualizedRef.current.size > 0) {
+        for (const sessionID of pendingSessionVisualizedRef.current) {
+          ws.send(JSON.stringify({ cmd: 'session_visualized', id: sessionID }));
+        }
+        pendingSessionVisualizedRef.current.clear();
       }
     };
 
@@ -2191,6 +2199,17 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'unsubscribe_git_status' }));
   }, []);
 
+  // Notify daemon that the user has visualized a session long enough to resume deferred classification.
+  const sendSessionVisualized = useCallback((id: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      pendingSessionVisualizedRef.current.add(id);
+      return;
+    }
+    ws.send(JSON.stringify({ cmd: 'session_visualized', id }));
+    pendingSessionVisualizedRef.current.delete(id);
+  }, []);
+
   // Get file diff
   // Options: staged (deprecated), baseRef (for PR-like branch diffs)
   const sendGetFileDiff = useCallback((
@@ -2595,6 +2614,7 @@ export function useDaemonSocket({
     sendEnsureRepo,
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
+    sendSessionVisualized,
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,

@@ -27,12 +27,21 @@ import (
 
 type countingClassifier struct {
 	state string
+	mu    sync.Mutex
 	calls int
 }
 
 func (c *countingClassifier) Classify(text string, timeout time.Duration) (string, error) {
+	c.mu.Lock()
 	c.calls++
+	c.mu.Unlock()
 	return c.state, nil
+}
+
+func (c *countingClassifier) CallCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
 }
 
 type blockingClassifier struct {
@@ -2644,8 +2653,8 @@ func TestClassifySessionState_ClaudeSkipsDuplicateAssistantTurn(t *testing.T) {
 	}
 
 	d.classifySessionState("sess-1", transcriptPath)
-	if mockClassifier.calls != 1 {
-		t.Fatalf("first classify calls=%d, want 1", mockClassifier.calls)
+	if got := mockClassifier.CallCount(); got != 1 {
+		t.Fatalf("first classify calls=%d, want 1", got)
 	}
 
 	sess := d.store.Get("sess-1")
@@ -2655,8 +2664,8 @@ func TestClassifySessionState_ClaudeSkipsDuplicateAssistantTurn(t *testing.T) {
 	firstState := sess.State
 
 	d.classifySessionState("sess-1", transcriptPath)
-	if mockClassifier.calls != 1 {
-		t.Fatalf("second classify calls=%d, want still 1", mockClassifier.calls)
+	if got := mockClassifier.CallCount(); got != 1 {
+		t.Fatalf("second classify calls=%d, want still 1", got)
 	}
 
 	sess = d.store.Get("sess-1")
@@ -2735,5 +2744,145 @@ func TestClassifySessionState_ClaudeConcurrentDuplicateTurnRunsOnce(t *testing.T
 
 	if got := mockClassifier.CallCount(); got != 1 {
 		t.Fatalf("classifier calls=%d, want 1", got)
+	}
+}
+
+func TestClassifyOrDeferAfterStop_LongRunDefersUntilVisualized(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	mockClassifier := &countingClassifier{state: protocol.StateWaitingInput}
+	d.classifier = mockClassifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-long",
+		Agent:          protocol.SessionAgentCodex,
+		Label:          "long",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+	d.workingRunSince["sess-long"] = now.Add(-6 * time.Minute)
+
+	transcriptPath := filepath.Join(t.TempDir(), "long-transcript.jsonl")
+	content := `{"type":"assistant","message":{"role":"assistant","content":"Completed long run"}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	d.classifyOrDeferAfterStop("sess-long", transcriptPath)
+
+	if got := mockClassifier.CallCount(); got != 0 {
+		t.Fatalf("classifier calls=%d, want 0 while long-run review is deferred", got)
+	}
+	if !d.sessionNeedsReviewAfterLongRun("sess-long") {
+		t.Fatal("needs_review_after_long_run should be set for deferred long run")
+	}
+
+	session := d.store.Get("sess-long")
+	if session == nil {
+		t.Fatal("session missing")
+	}
+	if session.State != protocol.StateWaitingInput {
+		t.Fatalf("state=%s, want %s", session.State, protocol.StateWaitingInput)
+	}
+	decorated := d.sessionForBroadcast(session)
+	if decorated == nil || !protocol.Deref(decorated.NeedsReviewAfterLongRun) {
+		t.Fatal("broadcast session should include needs_review_after_long_run=true")
+	}
+
+	d.handleSessionVisualized("sess-long")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for mockClassifier.CallCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := mockClassifier.CallCount(); got != 1 {
+		t.Fatalf("classifier calls=%d, want 1 after visualization", got)
+	}
+	if d.sessionNeedsReviewAfterLongRun("sess-long") {
+		t.Fatal("needs_review_after_long_run should clear after visualization")
+	}
+}
+
+func TestClassifyOrDeferAfterStop_LongRunKeepsPendingApprovalState(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	mockClassifier := &countingClassifier{state: protocol.StateIdle}
+	d.classifier = mockClassifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-pending",
+		Agent:          protocol.SessionAgentCodex,
+		Label:          "pending",
+		Directory:      "/tmp",
+		State:          protocol.StatePendingApproval,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+	d.workingRunSince["sess-pending"] = now.Add(-7 * time.Minute)
+
+	d.classifyOrDeferAfterStop("sess-pending", "")
+
+	if got := mockClassifier.CallCount(); got != 0 {
+		t.Fatalf("classifier calls=%d, want 0 while deferred", got)
+	}
+	if !d.sessionNeedsReviewAfterLongRun("sess-pending") {
+		t.Fatal("needs_review_after_long_run should be set")
+	}
+
+	session := d.store.Get("sess-pending")
+	if session == nil {
+		t.Fatal("session missing")
+	}
+	if session.State != protocol.StatePendingApproval {
+		t.Fatalf("state=%s, want %s", session.State, protocol.StatePendingApproval)
+	}
+}
+
+func TestClassifyOrDeferAfterStop_ShortRunClassifiesImmediately(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	mockClassifier := &countingClassifier{state: protocol.StateIdle}
+	d.classifier = mockClassifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-short",
+		Agent:          protocol.SessionAgentCodex,
+		Label:          "short",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+	d.workingRunSince["sess-short"] = now.Add(-2 * time.Minute)
+
+	transcriptPath := filepath.Join(t.TempDir(), "short-transcript.jsonl")
+	content := `{"type":"assistant","message":{"role":"assistant","content":"Quick done"}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	d.classifyOrDeferAfterStop("sess-short", transcriptPath)
+
+	if got := mockClassifier.CallCount(); got != 1 {
+		t.Fatalf("classifier calls=%d, want 1 for short run", got)
+	}
+	if d.sessionNeedsReviewAfterLongRun("sess-short") {
+		t.Fatal("needs_review_after_long_run should be false for short run")
+	}
+
+	session := d.store.Get("sess-short")
+	if session == nil {
+		t.Fatal("session missing")
+	}
+	if session.State != protocol.StateIdle {
+		t.Fatalf("state=%s, want %s", session.State, protocol.StateIdle)
 	}
 }

@@ -52,6 +52,7 @@ const (
 	claudeTranscriptRetryWindow   = 2 * time.Second
 	claudeTranscriptRetryInterval = 100 * time.Millisecond
 	claudeTranscriptFreshnessSkew = 5 * time.Second
+	longRunReviewThreshold        = 5 * time.Minute
 
 	startupRecoveryRetryMax       = 2
 	startupRecoveryRetryDelay     = 500 * time.Millisecond
@@ -145,6 +146,10 @@ type Daemon struct {
 	classifiedMu     sync.Mutex
 	classifiedTurn   map[string]string
 	classifyingTurn  map[string]string
+	longRunMu        sync.Mutex
+	workingRunSince  map[string]time.Time
+	deferredClassify map[string]string
+	longRunReview    map[string]bool
 	recoveryMu       sync.RWMutex
 	recovering       bool
 	pendingInitialWS map[*wsClient]struct{}
@@ -315,6 +320,9 @@ func New(socketPath string) *Daemon {
 		startedCh:        make(chan struct{}),
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
+		workingRunSince:  make(map[string]time.Time),
+		deferredClassify: make(map[string]string),
+		longRunReview:    make(map[string]bool),
 	}
 }
 
@@ -339,6 +347,9 @@ func NewForTesting(socketPath string) *Daemon {
 		startedCh:        make(chan struct{}),
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
+		workingRunSince:  make(map[string]time.Time),
+		deferredClassify: make(map[string]string),
+		longRunReview:    make(map[string]bool),
 	}
 }
 
@@ -367,6 +378,9 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		startedCh:        make(chan struct{}),
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
+		workingRunSince:  make(map[string]time.Time),
+		deferredClassify: make(map[string]string),
+		longRunReview:    make(map[string]bool),
 	}
 }
 
@@ -389,6 +403,15 @@ func (d *Daemon) Start() error {
 	}
 	if d.classifyingTurn == nil {
 		d.classifyingTurn = make(map[string]string)
+	}
+	if d.workingRunSince == nil {
+		d.workingRunSince = make(map[string]time.Time)
+	}
+	if d.deferredClassify == nil {
+		d.deferredClassify = make(map[string]string)
+	}
+	if d.longRunReview == nil {
+		d.longRunReview = make(map[string]bool)
 	}
 	if d.ptyBackend == nil {
 		d.ptyBackend = ptybackend.NewEmbedded(pty.NewManager(pty.DefaultScrollbackSize, d.logf))
@@ -949,6 +972,7 @@ func (d *Daemon) Stop() {
 
 func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	d.stopTranscriptWatcher(info.ID)
+	d.clearLongRunTracking(info.ID)
 
 	if d.ptyBackend != nil {
 		if err := d.removePTYSession(info.ID); err != nil {
@@ -959,7 +983,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	if session := d.store.Get(info.ID); session != nil {
 		d.store.Touch(info.ID)
 		d.store.UpdateState(info.ID, protocol.StateIdle)
-		updated := d.store.Get(info.ID)
+		updated := d.sessionForBroadcast(d.store.Get(info.ID))
 		if updated != nil {
 			d.wsHub.Broadcast(&protocol.WebSocketEvent{
 				Event:   protocol.EventSessionStateChanged,
@@ -1041,9 +1065,15 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 	}
 
 	d.logf("pty state update: session=%s agent=%s state=%s", sessionID, agent, state)
+	switch state {
+	case protocol.StateWorking:
+		d.markRunStartedIfNeeded(sessionID)
+	case protocol.StateIdle:
+		d.clearLongRunTracking(sessionID)
+	}
 	d.store.UpdateState(sessionID, state)
 	d.store.Touch(sessionID)
-	updated := d.store.Get(sessionID)
+	updated := d.sessionForBroadcast(d.store.Get(sessionID))
 	if updated == nil {
 		return
 	}
@@ -1318,6 +1348,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleQuery(conn, msg.(*protocol.QueryMessage))
 	case protocol.CmdHeartbeat:
 		d.handleHeartbeat(conn, msg.(*protocol.HeartbeatMessage))
+	case protocol.CmdSessionVisualized:
+		visualizedMsg := msg.(*protocol.SessionVisualizedMessage)
+		d.handleSessionVisualized(visualizedMsg.ID)
+		d.sendOK(conn)
 	case protocol.CmdMute:
 		d.handleMute(conn, msg.(*protocol.MuteMessage))
 	case protocol.CmdQueryPRs:
@@ -1351,6 +1385,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	d.logf("session registered: id=%s label=%s dir=%s", msg.ID, protocol.Deref(msg.Label), msg.Dir)
+	d.clearLongRunTracking(msg.ID)
 	existing := d.store.Get(msg.ID)
 
 	// Get branch info
@@ -1394,7 +1429,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:   eventType,
-		Session: session,
+		Session: d.sessionForBroadcast(session),
 	})
 }
 
@@ -1411,6 +1446,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 
 	d.terminateSession(msg.ID, syscall.SIGTERM)
 	d.store.Remove(msg.ID)
+	d.clearLongRunTracking(msg.ID)
 	d.clearClassifiedTurn(msg.ID)
 	d.clearClassifyingTurn(msg.ID)
 	d.sendOK(conn)
@@ -1419,19 +1455,25 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 	if session != nil {
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:   protocol.EventSessionUnregistered,
-			Session: session,
+			Session: d.sessionForBroadcast(session),
 		})
 	}
 }
 
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.logf("state update: id=%s state=%s", msg.ID, msg.State)
+	switch msg.State {
+	case protocol.StateWorking:
+		d.markRunStartedIfNeeded(msg.ID)
+	case protocol.StateIdle:
+		d.clearLongRunTracking(msg.ID)
+	}
 	d.store.UpdateState(msg.ID, msg.State)
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
-	session := d.store.Get(msg.ID)
+	session := d.sessionForBroadcast(d.store.Get(msg.ID))
 	if session != nil {
 		d.logf("broadcasting state change (from hook): session=%s state=%s clients=%d", msg.ID, msg.State, d.wsHub.ClientCount())
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
@@ -1448,8 +1490,49 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
 
-	// Async classification
-	go d.classifySessionState(msg.ID, msg.TranscriptPath)
+	// Async classification/deferred-review handling
+	go d.classifyOrDeferAfterStop(msg.ID, msg.TranscriptPath)
+}
+
+func (d *Daemon) classifyOrDeferAfterStop(sessionID, transcriptPath string) {
+	if d.sessionNeedsReviewAfterLongRun(sessionID) {
+		d.logf("classifySessionState: long-run review already pending for session=%s", sessionID)
+		return
+	}
+
+	session := d.store.Get(sessionID)
+	if session == nil {
+		d.clearLongRunTracking(sessionID)
+		return
+	}
+
+	runDuration := d.consumeRunDuration(sessionID, session.StateSince)
+	if runDuration >= longRunReviewThreshold {
+		d.setNeedsReviewAfterLongRun(sessionID, transcriptPath)
+		d.logf(
+			"classifySessionState: deferring long-run classification session=%s duration=%s",
+			sessionID,
+			runDuration.Round(time.Second),
+		)
+		if session.State == protocol.SessionStatePendingApproval || session.State == protocol.SessionStateWaitingInput {
+			d.broadcastSessionStateChanged(sessionID)
+		} else {
+			d.updateAndBroadcastState(sessionID, protocol.StateWaitingInput)
+		}
+		return
+	}
+
+	d.clearNeedsReviewAfterLongRun(sessionID)
+	d.classifySessionState(sessionID, transcriptPath)
+}
+
+func (d *Daemon) handleSessionVisualized(sessionID string) {
+	transcriptPath, shouldClassify := d.consumeNeedsReviewAfterLongRun(sessionID)
+	if !shouldClassify {
+		return
+	}
+	d.logf("classifySessionState: resuming deferred long-run classification session=%s", sessionID)
+	go d.classifySessionState(sessionID, transcriptPath)
 }
 
 func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
@@ -1668,11 +1751,173 @@ func (d *Daemon) clearClassifyingTurn(sessionID string) {
 	delete(d.classifyingTurn, sessionID)
 }
 
+func (d *Daemon) markRunStartedIfNeeded(sessionID string) {
+	now := time.Now()
+	d.longRunMu.Lock()
+	defer d.longRunMu.Unlock()
+	if d.workingRunSince == nil {
+		d.workingRunSince = make(map[string]time.Time)
+	}
+	if d.deferredClassify == nil {
+		d.deferredClassify = make(map[string]string)
+	}
+	if d.longRunReview == nil {
+		d.longRunReview = make(map[string]bool)
+	}
+	if _, exists := d.workingRunSince[sessionID]; !exists {
+		d.workingRunSince[sessionID] = now
+	}
+	delete(d.deferredClassify, sessionID)
+	delete(d.longRunReview, sessionID)
+}
+
+func (d *Daemon) consumeRunDuration(sessionID, fallbackStateSince string) time.Duration {
+	now := time.Now()
+	d.longRunMu.Lock()
+	if d.workingRunSince != nil {
+		if startedAt, ok := d.workingRunSince[sessionID]; ok {
+			delete(d.workingRunSince, sessionID)
+			d.longRunMu.Unlock()
+			if startedAt.IsZero() || !now.After(startedAt) {
+				return 0
+			}
+			return now.Sub(startedAt)
+		}
+	}
+	d.longRunMu.Unlock()
+
+	if fallbackStateSince == "" {
+		return 0
+	}
+	startedAt, err := time.Parse(time.RFC3339, fallbackStateSince)
+	if err != nil || startedAt.IsZero() || !now.After(startedAt) {
+		return 0
+	}
+	return now.Sub(startedAt)
+}
+
+func (d *Daemon) setNeedsReviewAfterLongRun(sessionID, transcriptPath string) {
+	d.longRunMu.Lock()
+	defer d.longRunMu.Unlock()
+	if d.deferredClassify == nil {
+		d.deferredClassify = make(map[string]string)
+	}
+	if d.longRunReview == nil {
+		d.longRunReview = make(map[string]bool)
+	}
+	d.deferredClassify[sessionID] = strings.TrimSpace(transcriptPath)
+	d.longRunReview[sessionID] = true
+}
+
+func (d *Daemon) consumeNeedsReviewAfterLongRun(sessionID string) (string, bool) {
+	d.longRunMu.Lock()
+	defer d.longRunMu.Unlock()
+	if d.longRunReview == nil || !d.longRunReview[sessionID] {
+		return "", false
+	}
+	transcriptPath := ""
+	if d.deferredClassify != nil {
+		transcriptPath = d.deferredClassify[sessionID]
+		delete(d.deferredClassify, sessionID)
+	}
+	delete(d.longRunReview, sessionID)
+	return transcriptPath, true
+}
+
+func (d *Daemon) clearNeedsReviewAfterLongRun(sessionID string) {
+	d.longRunMu.Lock()
+	defer d.longRunMu.Unlock()
+	if d.deferredClassify != nil {
+		delete(d.deferredClassify, sessionID)
+	}
+	if d.longRunReview != nil {
+		delete(d.longRunReview, sessionID)
+	}
+}
+
+func (d *Daemon) clearLongRunTracking(sessionID string) {
+	d.longRunMu.Lock()
+	defer d.longRunMu.Unlock()
+	if d.workingRunSince != nil {
+		delete(d.workingRunSince, sessionID)
+	}
+	if d.deferredClassify != nil {
+		delete(d.deferredClassify, sessionID)
+	}
+	if d.longRunReview != nil {
+		delete(d.longRunReview, sessionID)
+	}
+}
+
+func (d *Daemon) sessionNeedsReviewAfterLongRun(sessionID string) bool {
+	d.longRunMu.Lock()
+	defer d.longRunMu.Unlock()
+	if d.longRunReview == nil {
+		return false
+	}
+	return d.longRunReview[sessionID]
+}
+
+func cloneSession(session *protocol.Session) *protocol.Session {
+	if session == nil {
+		return nil
+	}
+	clone := *session
+	if len(session.Todos) > 0 {
+		clone.Todos = append([]string(nil), session.Todos...)
+	}
+	return &clone
+}
+
+func (d *Daemon) sessionForBroadcast(session *protocol.Session) *protocol.Session {
+	clone := cloneSession(session)
+	if clone == nil {
+		return nil
+	}
+	if d.sessionNeedsReviewAfterLongRun(clone.ID) {
+		clone.NeedsReviewAfterLongRun = protocol.Ptr(true)
+	} else {
+		clone.NeedsReviewAfterLongRun = nil
+	}
+	return clone
+}
+
+func (d *Daemon) sessionsForBroadcast(sessions []*protocol.Session) []protocol.Session {
+	if len(sessions) == 0 {
+		return nil
+	}
+	out := make([]protocol.Session, 0, len(sessions))
+	for _, session := range sessions {
+		if decorated := d.sessionForBroadcast(session); decorated != nil {
+			out = append(out, *decorated)
+		}
+	}
+	return out
+}
+
+func (d *Daemon) broadcastSessionStateChanged(sessionID string) {
+	session := d.store.Get(sessionID)
+	decorated := d.sessionForBroadcast(session)
+	if decorated == nil {
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:   protocol.EventSessionStateChanged,
+		Session: decorated,
+	})
+}
+
 func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
+	switch state {
+	case protocol.StateWorking:
+		d.markRunStartedIfNeeded(sessionID)
+	case protocol.StateIdle:
+		d.clearLongRunTracking(sessionID)
+	}
 	d.store.UpdateState(sessionID, state)
 
 	// Broadcast to WebSocket clients
-	session := d.store.Get(sessionID)
+	session := d.sessionForBroadcast(d.store.Get(sessionID))
 	if session != nil {
 		d.logf("broadcasting state change: session=%s state=%s clients=%d", sessionID, state, d.wsHub.ClientCount())
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
@@ -1686,9 +1931,15 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 // than the current state. Used by classifier to prevent stale results from overwriting
 // newer state updates that arrived during classification.
 func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) {
+	switch state {
+	case protocol.StateWorking:
+		d.markRunStartedIfNeeded(sessionID)
+	case protocol.StateIdle:
+		d.clearLongRunTracking(sessionID)
+	}
 	if d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt) {
 		// Broadcast to WebSocket clients
-		session := d.store.Get(sessionID)
+		session := d.sessionForBroadcast(d.store.Get(sessionID))
 		if session != nil {
 			d.logf("broadcasting state change (timestamped): session=%s state=%s clients=%d", sessionID, state, d.wsHub.ClientCount())
 			d.wsHub.Broadcast(&protocol.WebSocketEvent{
@@ -1722,7 +1973,7 @@ func (d *Daemon) handleTodos(conn net.Conn, msg *protocol.TodosMessage) {
 		if s.ID == msg.ID {
 			d.wsHub.Broadcast(&protocol.WebSocketEvent{
 				Event:   protocol.EventSessionTodosUpdated,
-				Session: s,
+				Session: d.sessionForBroadcast(s),
 			})
 			break
 		}
@@ -1733,7 +1984,7 @@ func (d *Daemon) handleQuery(conn net.Conn, msg *protocol.QueryMessage) {
 	sessions := d.store.List(protocol.Deref(msg.Filter))
 	resp := protocol.Response{
 		Ok:       true,
-		Sessions: protocol.SessionsToValues(sessions),
+		Sessions: d.sessionsForBroadcast(sessions),
 	}
 	json.NewEncoder(conn).Encode(resp)
 }
@@ -2184,6 +2435,7 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 		return
 	}
 
+	d.clearLongRunTracking(msg.Session.ID)
 	msg.Session.Agent = protocol.NormalizeSessionAgent(msg.Session.Agent, protocol.SessionAgentCodex)
 
 	// Add session directly to store
@@ -2193,7 +2445,7 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 	// Broadcast to WebSocket clients
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:   protocol.EventSessionRegistered,
-		Session: &msg.Session,
+		Session: d.sessionForBroadcast(&msg.Session),
 	})
 }
 
@@ -2380,7 +2632,7 @@ func (d *Daemon) broadcastSessionsUpdated() {
 	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:    protocol.EventSessionsUpdated,
-		Sessions: protocol.SessionsToValues(d.store.List("")),
+		Sessions: d.sessionsForBroadcast(d.store.List("")),
 	})
 }
 

@@ -296,7 +296,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Event:            protocol.EventInitialState,
 		ProtocolVersion:  protocol.Ptr(protocol.ProtocolVersion),
 		DaemonInstanceID: protocol.Ptr(d.daemonInstanceID),
-		Sessions:         protocol.SessionsToValues(d.store.List("")),
+		Sessions:         d.sessionsForBroadcast(d.store.List("")),
 		Prs:              protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:            protocol.RepoStatesToValues(d.store.ListRepoStates()),
 		Authors:          protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
@@ -557,6 +557,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.logf("Clearing daemon warnings")
 		d.clearWarnings()
 
+	case protocol.CmdSessionVisualized:
+		visualizedMsg := msg.(*protocol.SessionVisualizedMessage)
+		d.handleSessionVisualized(visualizedMsg.ID)
+
 	case protocol.CmdPRVisited:
 		visitedMsg := msg.(*protocol.PRVisitedMessage)
 		d.logf("Marking PR %s as visited", visitedMsg.ID)
@@ -623,10 +627,11 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		session := d.store.Get(unregMsg.ID)
 		d.terminateSession(unregMsg.ID, syscall.SIGTERM)
 		d.store.Remove(unregMsg.ID)
+		d.clearLongRunTracking(unregMsg.ID)
 		if session != nil {
 			d.wsHub.Broadcast(&protocol.WebSocketEvent{
 				Event:   protocol.EventSessionUnregistered,
-				Session: session,
+				Session: d.sessionForBroadcast(session),
 			})
 		}
 		d.broadcastSessionsUpdated()
@@ -836,6 +841,7 @@ func (d *Daemon) clearAllSessions() {
 	d.store.ClearSessions()
 	for sessionID := range sessionIDs {
 		d.terminateSession(sessionID, syscall.SIGTERM)
+		d.clearLongRunTracking(sessionID)
 	}
 	d.broadcastSessionsUpdated()
 }
@@ -924,6 +930,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	}
 
 	if !isShell {
+		d.clearLongRunTracking(msg.ID)
 		existing := d.store.Get(msg.ID)
 		branchInfo, _ := git.GetBranchInfo(msg.Cwd)
 		nowStr := string(protocol.TimestampNow())
@@ -957,7 +964,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:   eventType,
-			Session: session,
+			Session: d.sessionForBroadcast(session),
 		})
 	}
 
@@ -1185,9 +1192,9 @@ func (d *Daemon) broadcastSettings() {
 	})
 }
 
-func (d *Daemon) settingsWithAgentAvailability() protocol.RecordString {
+func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	stored := d.store.GetAllSettings()
-	settings := make(protocol.RecordString, len(stored)+4)
+	settings := make(map[string]interface{}, len(stored)+4)
 	for k, v := range stored {
 		settings[k] = v
 	}

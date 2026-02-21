@@ -90,9 +90,11 @@ The app nudges you when a new release exists. No auto-install — you pick when.
 | Color | What it means |
 |---|---|
 | 🟢 Green | Agent is working — leave it alone |
-| 🟡 Yellow | Agent has a question — go help |
+| 🟡 Yellow | Agent needs attention: asked a question, or finished a long run (5+ min) and is waiting for your review |
 | 🟡 Flashing | Agent wants tool approval — go approve |
 | ⚫ Gray | Agent is done — move on |
+
+Long-run review behavior: if a run takes 5+ minutes, attn keeps it yellow when it finishes, then runs smart done/waiting classification only after you actually view that session (5 seconds stable selection; immediate if you were already focused on it).
 
 ## Shortcuts
 
@@ -123,7 +125,8 @@ attn daemon          # Run daemon in foreground
 2. A background daemon tracks sessions via unix socket (`~/.attn/attn.sock`).
 3. The desktop app connects over WebSocket for real-time updates.
 4. A lightweight classifier figures out if Claude stopped because it's done or because it's waiting for you.
-5. `gh` polls PRs across all your authenticated GitHub hosts.
+5. For 5+ minute runs, classification is intentionally deferred until you visualize the session, so "done" runs still surface for manual review first.
+6. `gh` polls PRs across all your authenticated GitHub hosts.
 
 ## Build from source
 

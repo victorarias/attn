@@ -180,9 +180,10 @@ func (d *Daemon) doDeleteWorktree(path string) error {
 		}
 		d.terminateSession(session.ID, syscall.SIGTERM)
 		d.store.Remove(session.ID)
+		d.clearLongRunTracking(session.ID)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:   protocol.EventSessionUnregistered,
-			Session: session,
+			Session: d.sessionForBroadcast(session),
 		})
 	}
 
@@ -309,7 +310,7 @@ func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWo
 		defer func() {
 			d.wsHub.Broadcast(&protocol.WebSocketEvent{
 				Event:    protocol.EventSessionsUpdated,
-				Sessions: protocol.SessionsToValues(d.store.List("")),
+				Sessions: d.sessionsForBroadcast(d.store.List("")),
 			})
 		}()
 
