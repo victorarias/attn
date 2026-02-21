@@ -2764,7 +2764,7 @@ func TestClassifyOrDeferAfterStop_LongRunDefersUntilVisualized(t *testing.T) {
 		StateUpdatedAt: nowStr,
 		LastSeen:       nowStr,
 	})
-	d.workingRunSince["sess-long"] = now.Add(-6 * time.Minute)
+	d.longRun["sess-long"] = longRunSession{workingSince: now.Add(-6 * time.Minute)}
 
 	transcriptPath := filepath.Join(t.TempDir(), "long-transcript.jsonl")
 	content := `{"type":"assistant","message":{"role":"assistant","content":"Completed long run"}}` + "\n"
@@ -2824,7 +2824,7 @@ func TestClassifyOrDeferAfterStop_LongRunKeepsPendingApprovalState(t *testing.T)
 		StateUpdatedAt: nowStr,
 		LastSeen:       nowStr,
 	})
-	d.workingRunSince["sess-pending"] = now.Add(-7 * time.Minute)
+	d.longRun["sess-pending"] = longRunSession{workingSince: now.Add(-7 * time.Minute)}
 
 	d.classifyOrDeferAfterStop("sess-pending", "")
 
@@ -2861,7 +2861,7 @@ func TestClassifyOrDeferAfterStop_ShortRunClassifiesImmediately(t *testing.T) {
 		StateUpdatedAt: nowStr,
 		LastSeen:       nowStr,
 	})
-	d.workingRunSince["sess-short"] = now.Add(-2 * time.Minute)
+	d.longRun["sess-short"] = longRunSession{workingSince: now.Add(-2 * time.Minute)}
 
 	transcriptPath := filepath.Join(t.TempDir(), "short-transcript.jsonl")
 	content := `{"type":"assistant","message":{"role":"assistant","content":"Quick done"}}` + "\n"

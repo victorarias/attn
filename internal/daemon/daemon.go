@@ -48,6 +48,12 @@ type workerReconcileReport struct {
 	Changed         bool
 }
 
+type longRunSession struct {
+	workingSince       time.Time
+	deferredTranscript string
+	needsReview        bool
+}
+
 const (
 	claudeTranscriptRetryWindow   = 2 * time.Second
 	claudeTranscriptRetryInterval = 100 * time.Millisecond
@@ -147,9 +153,7 @@ type Daemon struct {
 	classifiedTurn   map[string]string
 	classifyingTurn  map[string]string
 	longRunMu        sync.Mutex
-	workingRunSince  map[string]time.Time
-	deferredClassify map[string]string
-	longRunReview    map[string]bool
+	longRun          map[string]longRunSession
 	recoveryMu       sync.RWMutex
 	recovering       bool
 	pendingInitialWS map[*wsClient]struct{}
@@ -320,9 +324,7 @@ func New(socketPath string) *Daemon {
 		startedCh:        make(chan struct{}),
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
-		workingRunSince:  make(map[string]time.Time),
-		deferredClassify: make(map[string]string),
-		longRunReview:    make(map[string]bool),
+		longRun:          make(map[string]longRunSession),
 	}
 }
 
@@ -347,9 +349,7 @@ func NewForTesting(socketPath string) *Daemon {
 		startedCh:        make(chan struct{}),
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
-		workingRunSince:  make(map[string]time.Time),
-		deferredClassify: make(map[string]string),
-		longRunReview:    make(map[string]bool),
+		longRun:          make(map[string]longRunSession),
 	}
 }
 
@@ -378,9 +378,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		startedCh:        make(chan struct{}),
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
-		workingRunSince:  make(map[string]time.Time),
-		deferredClassify: make(map[string]string),
-		longRunReview:    make(map[string]bool),
+		longRun:          make(map[string]longRunSession),
 	}
 }
 
@@ -404,14 +402,8 @@ func (d *Daemon) Start() error {
 	if d.classifyingTurn == nil {
 		d.classifyingTurn = make(map[string]string)
 	}
-	if d.workingRunSince == nil {
-		d.workingRunSince = make(map[string]time.Time)
-	}
-	if d.deferredClassify == nil {
-		d.deferredClassify = make(map[string]string)
-	}
-	if d.longRunReview == nil {
-		d.longRunReview = make(map[string]bool)
+	if d.longRun == nil {
+		d.longRun = make(map[string]longRunSession)
 	}
 	if d.ptyBackend == nil {
 		d.ptyBackend = ptybackend.NewEmbedded(pty.NewManager(pty.DefaultScrollbackSize, d.logf))
@@ -1755,34 +1747,34 @@ func (d *Daemon) markRunStartedIfNeeded(sessionID string) {
 	now := time.Now()
 	d.longRunMu.Lock()
 	defer d.longRunMu.Unlock()
-	if d.workingRunSince == nil {
-		d.workingRunSince = make(map[string]time.Time)
+	if d.longRun == nil {
+		d.longRun = make(map[string]longRunSession)
 	}
-	if d.deferredClassify == nil {
-		d.deferredClassify = make(map[string]string)
+	entry := d.longRun[sessionID]
+	if entry.workingSince.IsZero() {
+		entry.workingSince = now
 	}
-	if d.longRunReview == nil {
-		d.longRunReview = make(map[string]bool)
-	}
-	if _, exists := d.workingRunSince[sessionID]; !exists {
-		d.workingRunSince[sessionID] = now
-	}
-	delete(d.deferredClassify, sessionID)
-	delete(d.longRunReview, sessionID)
+	entry.deferredTranscript = ""
+	entry.needsReview = false
+	d.longRun[sessionID] = entry
 }
 
 func (d *Daemon) consumeRunDuration(sessionID, fallbackStateSince string) time.Duration {
 	now := time.Now()
 	d.longRunMu.Lock()
-	if d.workingRunSince != nil {
-		if startedAt, ok := d.workingRunSince[sessionID]; ok {
-			delete(d.workingRunSince, sessionID)
-			d.longRunMu.Unlock()
-			if startedAt.IsZero() || !now.After(startedAt) {
-				return 0
-			}
-			return now.Sub(startedAt)
+	if entry, ok := d.longRun[sessionID]; ok && !entry.workingSince.IsZero() {
+		startedAt := entry.workingSince
+		entry.workingSince = time.Time{}
+		if entry.deferredTranscript == "" && !entry.needsReview {
+			delete(d.longRun, sessionID)
+		} else {
+			d.longRun[sessionID] = entry
 		}
+		d.longRunMu.Unlock()
+		if startedAt.IsZero() || !now.After(startedAt) {
+			return 0
+		}
+		return now.Sub(startedAt)
 	}
 	d.longRunMu.Unlock()
 
@@ -1799,63 +1791,59 @@ func (d *Daemon) consumeRunDuration(sessionID, fallbackStateSince string) time.D
 func (d *Daemon) setNeedsReviewAfterLongRun(sessionID, transcriptPath string) {
 	d.longRunMu.Lock()
 	defer d.longRunMu.Unlock()
-	if d.deferredClassify == nil {
-		d.deferredClassify = make(map[string]string)
+	if d.longRun == nil {
+		d.longRun = make(map[string]longRunSession)
 	}
-	if d.longRunReview == nil {
-		d.longRunReview = make(map[string]bool)
-	}
-	d.deferredClassify[sessionID] = strings.TrimSpace(transcriptPath)
-	d.longRunReview[sessionID] = true
+	entry := d.longRun[sessionID]
+	entry.deferredTranscript = strings.TrimSpace(transcriptPath)
+	entry.needsReview = true
+	d.longRun[sessionID] = entry
 }
 
 func (d *Daemon) consumeNeedsReviewAfterLongRun(sessionID string) (string, bool) {
 	d.longRunMu.Lock()
 	defer d.longRunMu.Unlock()
-	if d.longRunReview == nil || !d.longRunReview[sessionID] {
+	entry, ok := d.longRun[sessionID]
+	if !ok || !entry.needsReview {
 		return "", false
 	}
-	transcriptPath := ""
-	if d.deferredClassify != nil {
-		transcriptPath = d.deferredClassify[sessionID]
-		delete(d.deferredClassify, sessionID)
+	transcriptPath := entry.deferredTranscript
+	entry.deferredTranscript = ""
+	entry.needsReview = false
+	if entry.workingSince.IsZero() {
+		delete(d.longRun, sessionID)
+	} else {
+		d.longRun[sessionID] = entry
 	}
-	delete(d.longRunReview, sessionID)
 	return transcriptPath, true
 }
 
 func (d *Daemon) clearNeedsReviewAfterLongRun(sessionID string) {
 	d.longRunMu.Lock()
 	defer d.longRunMu.Unlock()
-	if d.deferredClassify != nil {
-		delete(d.deferredClassify, sessionID)
+	entry, ok := d.longRun[sessionID]
+	if !ok {
+		return
 	}
-	if d.longRunReview != nil {
-		delete(d.longRunReview, sessionID)
+	entry.deferredTranscript = ""
+	entry.needsReview = false
+	if entry.workingSince.IsZero() {
+		delete(d.longRun, sessionID)
+	} else {
+		d.longRun[sessionID] = entry
 	}
 }
 
 func (d *Daemon) clearLongRunTracking(sessionID string) {
 	d.longRunMu.Lock()
 	defer d.longRunMu.Unlock()
-	if d.workingRunSince != nil {
-		delete(d.workingRunSince, sessionID)
-	}
-	if d.deferredClassify != nil {
-		delete(d.deferredClassify, sessionID)
-	}
-	if d.longRunReview != nil {
-		delete(d.longRunReview, sessionID)
-	}
+	delete(d.longRun, sessionID)
 }
 
 func (d *Daemon) sessionNeedsReviewAfterLongRun(sessionID string) bool {
 	d.longRunMu.Lock()
 	defer d.longRunMu.Unlock()
-	if d.longRunReview == nil {
-		return false
-	}
-	return d.longRunReview[sessionID]
+	return d.longRun[sessionID].needsReview
 }
 
 func cloneSession(session *protocol.Session) *protocol.Session {
