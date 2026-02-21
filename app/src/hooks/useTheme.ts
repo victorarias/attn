@@ -15,16 +15,13 @@ function getSystemTheme(): ResolvedTheme {
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
-function resolveTheme(preference: ThemePreference): ResolvedTheme {
-  if (preference === 'system') return getSystemTheme();
-  return preference;
-}
-
 export function useTheme() {
   const { settings, setSetting } = useSettings();
   const initializedFromSettings = useRef(false);
 
   const [preference, setPreference] = useState<ThemePreference>(DEFAULT_PREFERENCE);
+  // resolved is state so OS theme changes trigger re-renders (needed for xterm)
+  const [resolved, setResolved] = useState<ResolvedTheme>('dark');
 
   // Sync from daemon settings when they arrive
   useEffect(() => {
@@ -46,21 +43,26 @@ export function useTheme() {
     lastSavedPreference.current = preference;
   }, [preference, setSetting]);
 
-  const resolved = resolveTheme(preference);
-
-  // Apply data-theme attribute to <html>
+  // Apply data-theme attribute and update resolved theme
+  // - "system": remove data-theme, let CSS @media handle it; resolve for xterm via matchMedia
+  // - "dark"/"light": set data-theme explicitly
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', resolved);
-  }, [resolved]);
+    if (preference === 'system') {
+      document.documentElement.removeAttribute('data-theme');
+      setResolved(getSystemTheme());
+    } else {
+      document.documentElement.setAttribute('data-theme', preference);
+      setResolved(preference);
+    }
+  }, [preference]);
 
-  // Listen for system theme changes when preference is 'system'
+  // Listen for OS theme changes (only matters for xterm when preference is "system";
+  // CSS variables update automatically via @media query)
   useEffect(() => {
     if (preference !== 'system') return;
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
-    const handleChange = () => {
-      document.documentElement.setAttribute('data-theme', getSystemTheme());
-    };
+    const handleChange = () => setResolved(getSystemTheme());
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [preference]);

@@ -160,7 +160,9 @@ describe('worktree cleanup prompt', () => {
       setDaemonSessions: vi.fn(),
       prs: [],
       setPRs: vi.fn(),
+      repoStates: [],
       setRepoStates: vi.fn(),
+      authorStates: [],
       setAuthorStates: vi.fn(),
     });
 
