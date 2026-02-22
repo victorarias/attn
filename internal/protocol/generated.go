@@ -771,7 +771,7 @@ type InitialStateMessage struct {
 	Sessions []Session `json:"sessions,omitempty"`
 
 	// Settings corresponds to the JSON schema field "settings".
-	Settings map[string]interface{} `json:"settings,omitempty"`
+	Settings RecordString `json:"settings,omitempty"`
 
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty"`
@@ -1156,6 +1156,8 @@ type RecentLocationsResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type RecordString map[string]interface{}
+
 type RefreshPRsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1419,7 +1421,7 @@ type ReviewState struct {
 
 type ReviewToolUse struct {
 	// Input corresponds to the JSON schema field "input".
-	Input map[string]interface{} `json:"input"`
+	Input RecordString `json:"input"`
 
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
@@ -1492,6 +1494,7 @@ type SessionAgent string
 const SessionAgentClaude SessionAgent = "claude"
 const SessionAgentCodex SessionAgent = "codex"
 const SessionAgentCopilot SessionAgent = "copilot"
+const SessionAgentPi SessionAgent = "pi"
 
 type SessionExitedMessage struct {
 	// Event corresponds to the JSON schema field "event".
@@ -1594,7 +1597,7 @@ type SettingsUpdatedMessage struct {
 	Event string `json:"event"`
 
 	// Settings corresponds to the JSON schema field "settings".
-	Settings map[string]interface{} `json:"settings,omitempty"`
+	Settings RecordString `json:"settings,omitempty"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success *bool `json:"success,omitempty"`
@@ -1636,6 +1639,9 @@ type SpawnSessionMessage struct {
 	// Cwd corresponds to the JSON schema field "cwd".
 	Cwd string `json:"cwd"`
 
+	// Executable corresponds to the JSON schema field "executable".
+	Executable *string `json:"executable,omitempty"`
+
 	// ForkSession corresponds to the JSON schema field "fork_session".
 	ForkSession *bool `json:"fork_session,omitempty"`
 
@@ -1644,6 +1650,9 @@ type SpawnSessionMessage struct {
 
 	// Label corresponds to the JSON schema field "label".
 	Label *string `json:"label,omitempty"`
+
+	// PiExecutable corresponds to the JSON schema field "pi_executable".
+	PiExecutable *string `json:"pi_executable,omitempty"`
 
 	// ResumePicker corresponds to the JSON schema field "resume_picker".
 	ResumePicker *bool `json:"resume_picker,omitempty"`
@@ -1969,7 +1978,7 @@ type WebSocketEvent struct {
 	Sessions []Session `json:"sessions,omitempty"`
 
 	// Settings corresponds to the JSON schema field "settings".
-	Settings map[string]interface{} `json:"settings,omitempty"`
+	Settings RecordString `json:"settings,omitempty"`
 
 	// Signal corresponds to the JSON schema field "signal".
 	Signal *string `json:"signal,omitempty"`

@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/git"
@@ -768,7 +769,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 				report.MissingMetadata++
 				continue
 			}
-			if protocol.NormalizeSpawnAgent(info.Agent, string(protocol.SessionAgentCodex)) == protocol.AgentShellValue {
+			if normalizeSpawnAgent(info.Agent) == protocol.AgentShellValue {
 				report.SkippedShell++
 				continue
 			}
@@ -789,7 +790,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			d.store.Add(&protocol.Session{
 				ID:             sessionID,
 				Label:          label,
-				Agent:          protocol.NormalizeSessionAgent(protocol.SessionAgent(info.Agent), protocol.SessionAgentCodex),
+				Agent:          normalizeStoredSessionAgent(info.Agent, protocol.SessionAgentCodex),
 				Directory:      directory,
 				State:          state,
 				StateSince:     now,
@@ -971,11 +972,25 @@ func sessionUpdatedAfter(session *protocol.Session, cutoff time.Time) bool {
 	return updatedAt.After(cutoff)
 }
 
+func normalizeStoredSessionAgent(agent string, fallback protocol.SessionAgent) protocol.SessionAgent {
+	normalized := strings.TrimSpace(strings.ToLower(agent))
+	if normalized == "" {
+		return protocol.NormalizeSessionAgent(fallback, protocol.SessionAgentCodex)
+	}
+	if normalized == protocol.AgentShellValue {
+		return protocol.SessionAgentCodex
+	}
+	if agentdriver.Get(normalized) != nil {
+		return protocol.SessionAgent(normalized)
+	}
+	return protocol.NormalizeSessionAgent(protocol.SessionAgent(normalized), fallback)
+}
+
 func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.SessionState {
 	if !info.Running {
 		return protocol.SessionStateIdle
 	}
-	agent := protocol.NormalizeSessionAgent(protocol.SessionAgent(info.Agent), protocol.SessionAgentCodex)
+	agent := normalizeStoredSessionAgent(info.Agent, protocol.SessionAgentCodex)
 	switch info.State {
 	case protocol.StateWaitingInput:
 		if agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot {
@@ -1438,7 +1453,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	branchInfo, _ := git.GetBranchInfo(msg.Dir)
 
 	nowStr := string(protocol.TimestampNow())
-	agent := protocol.NormalizeSessionAgent(protocol.Deref(msg.Agent), protocol.SessionAgentClaude)
+	agent := normalizeStoredSessionAgent(string(protocol.Deref(msg.Agent)), protocol.SessionAgentClaude)
 	session := &protocol.Session{
 		ID:             msg.ID,
 		Label:          protocol.Deref(msg.Label),
@@ -1621,6 +1636,16 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		return
 	}
 
+	// Capability gates: agents can independently disable transcript parsing and
+	// classification.
+	transcriptEnabled := true
+	classifierEnabled := true
+	if driver := agentdriver.Get(string(session.Agent)); driver != nil {
+		caps := agentdriver.EffectiveCapabilities(driver)
+		transcriptEnabled = caps.HasTranscript
+		classifierEnabled = caps.HasClassifier
+	}
+
 	// Check pending todos first (fast path)
 	// Todos are stored as "[✓] task" (completed), "[→] task" (in_progress), "[ ] task" (pending)
 	pendingCount := 0
@@ -1633,6 +1658,18 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	if pendingCount > 0 {
 		d.logf("classifySessionState: session %s has pending todos, setting waiting_input", sessionID)
 		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateWaitingInput, classificationStartTime)
+		return
+	}
+
+	if !transcriptEnabled {
+		d.logf("classifySessionState: transcript disabled for agent=%s session=%s, setting idle", session.Agent, sessionID)
+		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateIdle, classificationStartTime)
+		return
+	}
+
+	if !classifierEnabled {
+		d.logf("classifySessionState: classifier disabled for agent=%s session=%s, setting idle", session.Agent, sessionID)
+		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateIdle, classificationStartTime)
 		return
 	}
 
@@ -1701,6 +1738,16 @@ func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout t
 		return d.classifier.Classify(text, timeout)
 	}
 	if session != nil {
+		if driver := agentdriver.Get(string(session.Agent)); driver != nil {
+			if cp, ok := agentdriver.GetClassifier(driver); ok {
+				// Keep codex executable-setting wiring until classifier settings
+				// are migrated into the driver interface.
+				if session.Agent != protocol.SessionAgentCodex {
+					return cp.Classify(text, timeout)
+				}
+			}
+		}
+
 		switch session.Agent {
 		case protocol.SessionAgentCopilot:
 			return classifier.ClassifyWithCopilot(text, timeout)
@@ -1712,13 +1759,13 @@ func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout t
 			)
 		}
 	}
-	// Use Claude SDK for Claude sessions.
+	// Use Claude SDK for Claude sessions and fallback.
 	return classifier.ClassifyWithClaude(text, timeout)
 }
 
 func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, transcriptPath string) string {
 	path := strings.TrimSpace(transcriptPath)
-	if session == nil || session.Agent != protocol.SessionAgentClaude {
+	if session == nil {
 		return path
 	}
 
@@ -1728,9 +1775,12 @@ func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, tran
 		}
 	}
 
-	discovered := transcript.FindClaudeTranscript(session.ID)
-	if discovered != "" {
-		return discovered
+	if driver := agentdriver.Get(string(session.Agent)); driver != nil {
+		if tf, ok := agentdriver.GetTranscriptFinder(driver); ok {
+			if discovered := strings.TrimSpace(tf.FindTranscript(session.ID, session.Directory, time.Now())); discovered != "" {
+				return discovered
+			}
+		}
 	}
 
 	return path
@@ -2506,7 +2556,7 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 	}
 
 	d.clearLongRunTracking(msg.Session.ID)
-	msg.Session.Agent = protocol.NormalizeSessionAgent(msg.Session.Agent, protocol.SessionAgentCodex)
+	msg.Session.Agent = normalizeStoredSessionAgent(string(msg.Session.Agent), protocol.SessionAgentCodex)
 
 	// Add session directly to store
 	d.store.Add(&msg.Session)

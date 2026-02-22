@@ -1766,10 +1766,13 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"valid new_session_agent codex", "new_session_agent", "codex", false},
 		{"valid new_session_agent claude", "new_session_agent", "claude", false},
 		{"valid new_session_agent copilot", "new_session_agent", "copilot", false},
+		{"valid new_session_agent pi", "new_session_agent", "pi", false},
 		{"empty new_session_agent", "new_session_agent", "", false},
 		{"empty claude_executable", "claude_executable", "", false},
 		{"empty codex_executable", "codex_executable", "", false},
 		{"empty copilot_executable", "copilot_executable", "", false},
+		{"empty pi_executable", "pi_executable", "", false},
+		{"dynamic executable key for known agent", "pi_executable", "not-a-real-binary-123", true},
 		{"invalid claude_executable", "claude_executable", "not-a-real-binary-123", true},
 		{"invalid new_session_agent", "new_session_agent", "gpt", true},
 		{"invalid key", "unknown_setting", "value", true},
@@ -1805,6 +1808,15 @@ func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
 	if got := settings[SettingCopilotAvailable]; got != "false" {
 		t.Fatalf("settings[%s] = %v, want false", SettingCopilotAvailable, got)
 	}
+	if got := settings[SettingPiAvailable]; got != "false" {
+		t.Fatalf("settings[%s] = %v, want false", SettingPiAvailable, got)
+	}
+	if got := settings["pi_cap_transcript"]; got != "false" {
+		t.Fatalf("settings[pi_cap_transcript] = %v, want false", got)
+	}
+	if got := settings["codex_cap_transcript"]; got != "true" {
+		t.Fatalf("settings[codex_cap_transcript] = %v, want true", got)
+	}
 	if got := settings[SettingPTYBackendMode]; got != "unknown" {
 		t.Fatalf("settings[%s] = %v, want unknown", SettingPTYBackendMode, got)
 	}
@@ -1826,6 +1838,9 @@ func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
 	}
 	if got := settings[SettingCopilotAvailable]; got != "false" {
 		t.Fatalf("settings[%s] = %v, want false", SettingCopilotAvailable, got)
+	}
+	if got := settings[SettingPiAvailable]; got != "false" {
+		t.Fatalf("settings[%s] = %v, want false", SettingPiAvailable, got)
 	}
 }
 
@@ -2829,6 +2844,75 @@ func TestClassifySessionState_ClassifierError_StaysUnknown(t *testing.T) {
 	}
 	if sess.State != protocol.StateUnknown {
 		t.Fatalf("state = %s, want %s", sess.State, protocol.StateUnknown)
+	}
+}
+
+func TestClassifySessionState_ClassifierCapabilityDisabled_SetsIdle(t *testing.T) {
+	t.Setenv("ATTN_AGENT_CODEX_CLASSIFIER", "0")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	mockClassifier := &countingClassifier{state: protocol.StateWaitingInput}
+	d.classifier = mockClassifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-no-classifier",
+		Agent:          protocol.SessionAgentCodex,
+		Label:          "test",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+	})
+
+	d.classifySessionState("sess-no-classifier", filepath.Join(t.TempDir(), "missing.jsonl"))
+
+	sess := d.store.Get("sess-no-classifier")
+	if sess == nil {
+		t.Fatal("session missing after classify")
+	}
+	if sess.State != protocol.StateIdle {
+		t.Fatalf("state = %s, want %s", sess.State, protocol.StateIdle)
+	}
+	if got := mockClassifier.CallCount(); got != 0 {
+		t.Fatalf("classifier calls=%d, want 0", got)
+	}
+}
+
+func TestClassifySessionState_TranscriptDisabledWithPendingTodos_SetsWaitingInput(t *testing.T) {
+	t.Setenv("ATTN_AGENT_CODEX_TRANSCRIPT", "0")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	mockClassifier := &countingClassifier{state: protocol.StateIdle}
+	d.classifier = mockClassifier
+
+	now := time.Now()
+	nowStr := string(protocol.NewTimestamp(now))
+	d.store.Add(&protocol.Session{
+		ID:             "sess-no-transcript",
+		Agent:          protocol.SessionAgentCodex,
+		Label:          "test",
+		Directory:      "/tmp",
+		State:          protocol.StateWorking,
+		StateSince:     nowStr,
+		StateUpdatedAt: nowStr,
+		LastSeen:       nowStr,
+		Todos:          []string{"[ ] follow up"},
+	})
+
+	d.classifySessionState("sess-no-transcript", filepath.Join(t.TempDir(), "missing.jsonl"))
+
+	sess := d.store.Get("sess-no-transcript")
+	if sess == nil {
+		t.Fatal("session missing after classify")
+	}
+	if sess.State != protocol.StateWaitingInput {
+		t.Fatalf("state = %s, want %s", sess.State, protocol.StateWaitingInput)
+	}
+	if got := mockClassifier.CallCount(); got != 0 {
+		t.Fatalf("classifier calls=%d, want 0", got)
 	}
 }
 

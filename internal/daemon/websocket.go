@@ -18,6 +18,7 @@ import (
 
 	"nhooyr.io/websocket"
 
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
@@ -32,11 +33,13 @@ const (
 	SettingClaudeExecutable  = "claude_executable"
 	SettingCodexExecutable   = "codex_executable"
 	SettingCopilotExecutable = "copilot_executable"
+	SettingPiExecutable      = "pi_executable"
 	SettingEditorExecutable  = "editor_executable"
 	SettingNewSessionAgent   = "new_session_agent"
 	SettingClaudeAvailable   = "claude_available"
 	SettingCodexAvailable    = "codex_available"
 	SettingCopilotAvailable  = "copilot_available"
+	SettingPiAvailable       = "pi_available"
 	SettingPTYBackendMode    = "pty_backend_mode"
 	SettingTheme             = "theme"
 )
@@ -886,8 +889,19 @@ func (d *Daemon) detachAllSessions(client *wsClient) {
 	}
 }
 
+func normalizeSpawnAgent(raw string) string {
+	agent := strings.TrimSpace(strings.ToLower(raw))
+	if agent == protocol.AgentShellValue {
+		return protocol.AgentShellValue
+	}
+	if d := agentdriver.Get(agent); d != nil {
+		return d.Name()
+	}
+	return protocol.NormalizeSpawnAgent(raw, string(protocol.SessionAgentCodex))
+}
+
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
-	agent := protocol.NormalizeSpawnAgent(msg.Agent, string(protocol.SessionAgentCodex))
+	agent := normalizeSpawnAgent(msg.Agent)
 	isShell := agent == protocol.AgentShellValue
 	spawnStartedAt := time.Now()
 	existingSession := d.store.Get(msg.ID)
@@ -912,6 +926,19 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 	}
 
+	configuredExecutable := strings.TrimSpace(protocol.Deref(msg.Executable))
+	if configuredExecutable == "" {
+		switch agent {
+		case string(protocol.SessionAgentClaude):
+			configuredExecutable = protocol.Deref(msg.ClaudeExecutable)
+		case string(protocol.SessionAgentCodex):
+			configuredExecutable = protocol.Deref(msg.CodexExecutable)
+		case string(protocol.SessionAgentCopilot):
+			configuredExecutable = protocol.Deref(msg.CopilotExecutable)
+		case string(protocol.SessionAgentPi):
+			configuredExecutable = protocol.Deref(msg.PiExecutable)
+		}
+	}
 	spawnOpts := ptybackend.SpawnOptions{
 		ID:                msg.ID,
 		CWD:               msg.Cwd,
@@ -922,9 +949,11 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		ResumeSessionID:   resumeSessionID,
 		ResumePicker:      protocol.Deref(msg.ResumePicker),
 		ForkSession:       protocol.Deref(msg.ForkSession),
+		Executable:        strings.TrimSpace(configuredExecutable),
 		ClaudeExecutable:  protocol.Deref(msg.ClaudeExecutable),
 		CodexExecutable:   protocol.Deref(msg.CodexExecutable),
 		CopilotExecutable: protocol.Deref(msg.CopilotExecutable),
+		PiExecutable:      protocol.Deref(msg.PiExecutable),
 	}
 
 	if err := d.ptyBackend.Spawn(context.Background(), spawnOpts); err != nil {
@@ -1207,15 +1236,92 @@ func (d *Daemon) broadcastSettings() {
 	})
 }
 
+func executableSettingKey(agent string) string {
+	return strings.TrimSpace(strings.ToLower(agent)) + "_executable"
+}
+
+func availabilitySettingKey(agent string) string {
+	return strings.TrimSpace(strings.ToLower(agent)) + "_available"
+}
+
+func capabilitySettingKey(agent, capability string) string {
+	return strings.TrimSpace(strings.ToLower(agent)) + "_cap_" + strings.TrimSpace(strings.ToLower(capability))
+}
+
+func isAgentExecutableSettingKey(key string) (agent string, ok bool) {
+	lower := strings.TrimSpace(strings.ToLower(key))
+	if !strings.HasSuffix(lower, "_executable") {
+		return "", false
+	}
+	agent = strings.TrimSuffix(lower, "_executable")
+	if agent == "" {
+		return "", false
+	}
+	if agentdriver.Get(agent) == nil {
+		return "", false
+	}
+	return agent, true
+}
+
+func canonicalExecutableSettingKey(agent string) string {
+	switch strings.TrimSpace(strings.ToLower(agent)) {
+	case string(protocol.SessionAgentClaude):
+		return SettingClaudeExecutable
+	case string(protocol.SessionAgentCodex):
+		return SettingCodexExecutable
+	case string(protocol.SessionAgentCopilot):
+		return SettingCopilotExecutable
+	case string(protocol.SessionAgentPi):
+		return SettingPiExecutable
+	default:
+		return executableSettingKey(agent)
+	}
+}
+
 func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	stored := d.store.GetAllSettings()
-	settings := make(map[string]interface{}, len(stored)+4)
+	settings := make(map[string]interface{}, len(stored)+8)
 	for k, v := range stored {
 		settings[k] = v
 	}
-	settings[SettingClaudeAvailable] = strconv.FormatBool(isAgentExecutableAvailable(stored[SettingClaudeExecutable], "claude"))
-	settings[SettingCodexAvailable] = strconv.FormatBool(isAgentExecutableAvailable(stored[SettingCodexExecutable], "codex"))
-	settings[SettingCopilotAvailable] = strconv.FormatBool(isAgentExecutableAvailable(stored[SettingCopilotExecutable], "copilot"))
+
+	for _, name := range agentdriver.List() {
+		driver := agentdriver.Get(name)
+		if driver == nil {
+			continue
+		}
+		execKey := canonicalExecutableSettingKey(name)
+		configured := strings.TrimSpace(stored[execKey])
+		if configured == "" {
+			configured = strings.TrimSpace(stored[executableSettingKey(name)])
+		}
+		available := isAgentExecutableAvailable(configured, driver.DefaultExecutable())
+		settings[availabilitySettingKey(name)] = strconv.FormatBool(available)
+
+		caps := agentdriver.EffectiveCapabilities(driver)
+		settings[capabilitySettingKey(name, "hooks")] = strconv.FormatBool(caps.HasHooks)
+		settings[capabilitySettingKey(name, "transcript")] = strconv.FormatBool(caps.HasTranscript)
+		settings[capabilitySettingKey(name, "transcript_watcher")] = strconv.FormatBool(caps.HasTranscriptWatcher)
+		settings[capabilitySettingKey(name, "classifier")] = strconv.FormatBool(caps.HasClassifier)
+		settings[capabilitySettingKey(name, "state_detector")] = strconv.FormatBool(caps.HasStateDetector)
+		settings[capabilitySettingKey(name, "resume")] = strconv.FormatBool(caps.HasResume)
+		settings[capabilitySettingKey(name, "fork")] = strconv.FormatBool(caps.HasFork)
+	}
+
+	// Backward-compatible keys for existing UI paths.
+	if _, ok := settings[SettingClaudeAvailable]; !ok {
+		settings[SettingClaudeAvailable] = settings[availabilitySettingKey(string(protocol.SessionAgentClaude))]
+	}
+	if _, ok := settings[SettingCodexAvailable]; !ok {
+		settings[SettingCodexAvailable] = settings[availabilitySettingKey(string(protocol.SessionAgentCodex))]
+	}
+	if _, ok := settings[SettingCopilotAvailable]; !ok {
+		settings[SettingCopilotAvailable] = settings[availabilitySettingKey(string(protocol.SessionAgentCopilot))]
+	}
+	if _, ok := settings[SettingPiAvailable]; !ok {
+		settings[SettingPiAvailable] = settings[availabilitySettingKey("pi")]
+	}
+
 	settings[SettingPTYBackendMode] = d.ptyBackendMode()
 	return settings
 }
@@ -1258,7 +1364,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateProjectsDirectory(value)
 	case SettingUIScale:
 		return validateUIScale(value)
-	case SettingClaudeExecutable, SettingCodexExecutable, SettingCopilotExecutable:
+	case SettingClaudeExecutable, SettingCodexExecutable, SettingCopilotExecutable, SettingPiExecutable:
 		return validateExecutableSetting(value)
 	case SettingEditorExecutable:
 		return validateEditorSetting(value)
@@ -1267,6 +1373,9 @@ func (d *Daemon) validateSetting(key, value string) error {
 	case SettingTheme:
 		return validateTheme(value)
 	default:
+		if _, ok := isAgentExecutableSettingKey(key); ok {
+			return validateExecutableSetting(value)
+		}
 		return fmt.Errorf("unknown setting: %s", key)
 	}
 }
@@ -1371,12 +1480,11 @@ func validateEditorSetting(value string) error {
 }
 
 func validateNewSessionAgent(value string) error {
-	agent := strings.TrimSpace(value)
+	agent := strings.TrimSpace(strings.ToLower(value))
 	if agent == "" {
 		return nil
 	}
-	lower := strings.ToLower(agent)
-	if lower != "codex" && lower != "claude" && lower != "copilot" {
+	if agentdriver.Get(agent) == nil {
 		return fmt.Errorf("unknown agent: %s", value)
 	}
 	return nil

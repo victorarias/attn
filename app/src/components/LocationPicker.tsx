@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { homeDir } from '@tauri-apps/api/path';
 import { readDir } from '@tauri-apps/plugin-fs';
 import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
@@ -8,9 +8,11 @@ import type { RecentLocation } from '../hooks/useDaemonSocket';
 import type { SessionAgent } from '../types/sessionAgent';
 import { useSettings } from '../contexts/SettingsContext';
 import {
+  agentLabel,
   type AgentAvailability,
   hasAnyAvailableAgents,
   isAgentAvailable,
+  orderedAgents,
   resolvePreferredAgent,
 } from '../utils/agentAvailability';
 import './LocationPicker.css';
@@ -46,15 +48,13 @@ const DEFAULT_AGENT_AVAILABILITY: AgentAvailability = {
   codex: true,
   claude: true,
   copilot: true,
+  pi: false,
 };
 
 const normalizeAgent = (value?: string): SessionAgent | null => {
   if (!value) return null;
-  const lower = value.toLowerCase();
-  if (lower === 'codex' || lower === 'claude' || lower === 'copilot') {
-    return lower as SessionAgent;
-  }
-  return null;
+  const lower = value.toLowerCase().trim();
+  return lower || null;
 };
 
 type Mode = 'path-input' | 'repo-options';
@@ -90,6 +90,7 @@ export function LocationPicker({
   const { settings, setSetting } = useSettings();
   const effectiveAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
   const hasAvailableAgents = hasAnyAvailableAgents(effectiveAgentAvailability);
+  const noAgentsMessage = 'No supported agent CLI found in PATH.';
   const [state, setState] = useState<State>({
     mode: 'path-input',
     inputValue: '',
@@ -157,6 +158,21 @@ export function LocationPicker({
     }
   }, [isOpen, projectsDirectory, state.homePath]);
 
+  const orderedAgentList = useMemo(
+    () => orderedAgents(effectiveAgentAvailability, state.agent, 'codex'),
+    [effectiveAgentAvailability, state.agent],
+  );
+  const shortcutAgentList = useMemo(
+    () => orderedAgentList.filter((agent) => isAgentAvailable(effectiveAgentAvailability, agent)),
+    [effectiveAgentAvailability, orderedAgentList],
+  );
+  const agentShortcutByName = useMemo(() => {
+    const shortcuts = new Map<SessionAgent, number>();
+    shortcutAgentList.forEach((agent, index) => {
+      shortcuts.set(agent, index + 1);
+    });
+    return shortcuts;
+  }, [shortcutAgentList]);
   const savedAgent = normalizeAgent(settings[SESSION_AGENT_KEY]);
   useEffect(() => {
     if (!savedAgent) return;
@@ -227,7 +243,7 @@ export function LocationPicker({
   const handleSelect = useCallback(
     async (rawPath: string) => {
       if (!hasAvailableAgents) {
-        onError?.('No supported agent CLI found in PATH (codex, claude, copilot).');
+        onError?.(noAgentsMessage);
         return;
       }
       // Expand ~ to home path and remove trailing slash
@@ -299,7 +315,7 @@ export function LocationPicker({
   // RepoOptions callbacks
   const handleSelectMainRepo = useCallback(() => {
     if (!hasAvailableAgents) {
-      onError?.('No supported agent CLI found in PATH (codex, claude, copilot).');
+      onError?.(noAgentsMessage);
       return;
     }
     if (state.selectedRepo) {
@@ -311,7 +327,7 @@ export function LocationPicker({
 
   const handleSelectWorktree = useCallback((path: string) => {
     if (!hasAvailableAgents) {
-      onError?.('No supported agent CLI found in PATH (codex, claude, copilot).');
+      onError?.(noAgentsMessage);
       return;
     }
     const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
@@ -321,7 +337,7 @@ export function LocationPicker({
 
   const handleSelectBranch = useCallback((_branch: string) => {
     if (!hasAvailableAgents) {
-      onError?.('No supported agent CLI found in PATH (codex, claude, copilot).');
+      onError?.(noAgentsMessage);
       return;
     }
     if (state.selectedRepo) {
@@ -333,7 +349,7 @@ export function LocationPicker({
 
   const handleCreateWorktree = useCallback(async (branchName: string, startingFrom: string) => {
     if (!hasAvailableAgents) {
-      onError?.('No supported agent CLI found in PATH (codex, claude, copilot).');
+      onError?.(noAgentsMessage);
       return;
     }
     if (!state.selectedRepo || !onCreateWorktree) return;
@@ -385,23 +401,15 @@ export function LocationPicker({
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && !e.metaKey && !e.ctrlKey) {
-        if (e.code === 'Digit1') {
-          if (!isAgentAvailable(effectiveAgentAvailability, 'codex')) return;
-          e.preventDefault();
-          handleAgentChange('codex');
-          return;
-        }
-        if (e.code === 'Digit2') {
-          if (!isAgentAvailable(effectiveAgentAvailability, 'claude')) return;
-          e.preventDefault();
-          handleAgentChange('claude');
-          return;
-        }
-        if (e.code === 'Digit3') {
-          if (!isAgentAvailable(effectiveAgentAvailability, 'copilot')) return;
-          e.preventDefault();
-          handleAgentChange('copilot');
-          return;
+        const digitMatch = /^Digit([1-9])$/.exec(e.code);
+        if (digitMatch) {
+          const idx = Number(digitMatch[1]) - 1;
+          if (idx < shortcutAgentList.length) {
+            const targetAgent = shortcutAgentList[idx];
+            e.preventDefault();
+            handleAgentChange(targetAgent);
+            return;
+          }
         }
       }
 
@@ -440,7 +448,7 @@ export function LocationPicker({
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [effectiveAgentAvailability, fsSuggestions, filteredRecent, handleAgentChange, handleBack, isOpen, onClose, state.mode, state.selectedIndex]);
+  }, [fsSuggestions, filteredRecent, handleAgentChange, handleBack, isOpen, onClose, shortcutAgentList, state.mode, state.selectedIndex]);
 
   // Transform RepoInfo from snake_case to camelCase for RepoOptions
   const transformedRepoInfo = state.repoInfo ? {
@@ -463,47 +471,31 @@ export function LocationPicker({
           <div className="picker-agent-label">SESSION AGENT</div>
           <div className="picker-agent-controls">
             <div className="agent-toggle" role="radiogroup" aria-label="Session agent">
-              <button
-                type="button"
-                className={`agent-option ${state.agent === 'codex' ? 'active' : ''}`}
-                onClick={() => handleAgentChange('codex')}
-                role="radio"
-                aria-checked={state.agent === 'codex'}
-                disabled={!effectiveAgentAvailability.codex}
-                title={!effectiveAgentAvailability.codex ? 'Codex CLI not found in PATH' : undefined}
-              >
-                <span className="agent-option-name">Codex</span>
-                <kbd className="agent-shortcut">⌥1</kbd>
-              </button>
-              <button
-                type="button"
-                className={`agent-option ${state.agent === 'claude' ? 'active' : ''}`}
-                onClick={() => handleAgentChange('claude')}
-                role="radio"
-                aria-checked={state.agent === 'claude'}
-                disabled={!effectiveAgentAvailability.claude}
-                title={!effectiveAgentAvailability.claude ? 'Claude CLI not found in PATH' : undefined}
-              >
-                <span className="agent-option-name">Claude</span>
-                <kbd className="agent-shortcut">⌥2</kbd>
-              </button>
-              <button
-                type="button"
-                className={`agent-option ${state.agent === 'copilot' ? 'active' : ''}`}
-                onClick={() => handleAgentChange('copilot')}
-                role="radio"
-                aria-checked={state.agent === 'copilot'}
-                disabled={!effectiveAgentAvailability.copilot}
-                title={!effectiveAgentAvailability.copilot ? 'Copilot CLI not found in PATH' : undefined}
-              >
-                <span className="agent-option-name">Copilot</span>
-                <kbd className="agent-shortcut">⌥3</kbd>
-              </button>
+              {orderedAgentList.map((agent) => {
+                const available = isAgentAvailable(effectiveAgentAvailability, agent);
+                const shortcutNumber = available ? agentShortcutByName.get(agent) : undefined;
+                const shortcut = shortcutNumber && shortcutNumber <= 9 ? `⌥${shortcutNumber}` : null;
+                return (
+                  <button
+                    key={agent}
+                    type="button"
+                    className={`agent-option ${state.agent === agent ? 'active' : ''}`}
+                    onClick={() => handleAgentChange(agent)}
+                    role="radio"
+                    aria-checked={state.agent === agent}
+                    disabled={!available}
+                    title={!available ? `${agentLabel(agent)} CLI not found in PATH` : undefined}
+                  >
+                    <span className="agent-option-name">{agentLabel(agent)}</span>
+                    {shortcut && <kbd className="agent-shortcut">{shortcut}</kbd>}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
         {!hasAvailableAgents && (
-          <div className="picker-agent-warning">No supported agent CLIs found in PATH.</div>
+          <div className="picker-agent-warning">{noAgentsMessage}</div>
         )}
         {state.mode === 'path-input' ? (
           <>

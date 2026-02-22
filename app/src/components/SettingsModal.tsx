@@ -5,9 +5,15 @@ import { DaemonSettings } from '../hooks/useDaemonSocket';
 import { normalizeSessionAgent, type SessionAgent } from '../types/sessionAgent';
 import type { ThemePreference } from '../hooks/useTheme';
 import {
+  AGENT_CAPABILITY_ORDER,
+  agentCapabilityLabel,
+  agentLabel,
   getAgentAvailability,
+  getAgentCapabilities,
+  getAgentExecutableSettings,
   hasAnyAvailableAgents,
   isAgentAvailable,
+  orderedAgents,
   resolvePreferredAgent,
 } from '../utils/agentAvailability';
 import './SettingsModal.css';
@@ -40,9 +46,7 @@ export function SettingsModal({
   onSetTheme,
 }: SettingsModalProps) {
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
-  const [claudeExecutable, setClaudeExecutable] = useState(settings.claude_executable || '');
-  const [codexExecutable, setCodexExecutable] = useState(settings.codex_executable || '');
-  const [copilotExecutable, setCopilotExecutable] = useState(settings.copilot_executable || '');
+  const [agentExecutables, setAgentExecutables] = useState<Record<SessionAgent, string>>({});
   const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
   const [defaultAgent, setDefaultAgent] = useState<SessionAgent>('claude');
   const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
@@ -53,12 +57,25 @@ export function SettingsModal({
 
   // Sync with settings when modal opens
   const actualProjectsDir = settings.projects_directory || '';
-  const actualClaudeExecutable = settings.claude_executable || '';
-  const actualCodexExecutable = settings.codex_executable || '';
-  const actualCopilotExecutable = settings.copilot_executable || '';
+  const actualAgentExecutables = useMemo(
+    () => getAgentExecutableSettings(settings),
+    [settings],
+  );
+  const actualAgentCapabilities = useMemo(
+    () => getAgentCapabilities(settings),
+    [settings],
+  );
   const actualEditorExecutable = settings.editor_executable || '';
   const actualDefaultAgent = normalizeSessionAgent(settings.new_session_agent, 'claude');
   const resolvedDefaultAgent = resolvePreferredAgent(actualDefaultAgent, agentAvailability, 'codex');
+  const orderedAgentList = useMemo(
+    () => orderedAgents(agentAvailability, resolvedDefaultAgent, 'codex'),
+    [agentAvailability, resolvedDefaultAgent],
+  );
+  const agentCapabilityOrder = useMemo(
+    () => AGENT_CAPABILITY_ORDER.map((cap) => cap as string),
+    [],
+  );
   const rawPtyBackendMode = (settings.pty_backend_mode || 'unknown').toLowerCase();
   const ptyBackendMode = rawPtyBackendMode === 'worker' || rawPtyBackendMode === 'embedded'
     ? rawPtyBackendMode
@@ -79,12 +96,10 @@ export function SettingsModal({
   useEffect(() => {
     if (!isOpen) return;
     setProjectsDir(actualProjectsDir);
-    setClaudeExecutable(actualClaudeExecutable);
-    setCodexExecutable(actualCodexExecutable);
-    setCopilotExecutable(actualCopilotExecutable);
+    setAgentExecutables(actualAgentExecutables);
     setEditorExecutable(actualEditorExecutable);
     setDefaultAgent(resolvedDefaultAgent);
-  }, [isOpen, actualProjectsDir, actualClaudeExecutable, actualCodexExecutable, actualCopilotExecutable, actualEditorExecutable, resolvedDefaultAgent]);
+  }, [isOpen, actualProjectsDir, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent]);
 
   const handleBrowse = useCallback(async () => {
     const selected = await open({
@@ -116,61 +131,27 @@ export function SettingsModal({
     }
   }, [projectsDir, actualProjectsDir, onSetSetting]);
 
-  const handleClaudeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setClaudeExecutable(e.target.value);
+  const handleExecutableChange = useCallback((agent: SessionAgent, value: string) => {
+    setAgentExecutables((prev) => ({ ...prev, [agent]: value }));
   }, []);
 
-  const handleCodexChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setCodexExecutable(e.target.value);
-  }, []);
+  const commitExecutable = useCallback((agent: SessionAgent) => {
+    const nextValue = agentExecutables[agent] || '';
+    const currentValue = actualAgentExecutables[agent] || '';
+    if (nextValue !== currentValue) {
+      onSetSetting(`${agent}_executable`, nextValue);
+    }
+  }, [actualAgentExecutables, agentExecutables, onSetSetting]);
 
   const handleEditorChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setEditorExecutable(e.target.value);
   }, []);
-
-  const handleCopilotChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setCopilotExecutable(e.target.value);
-  }, []);
-
-  const handleClaudeBlur = useCallback(() => {
-    if (claudeExecutable !== actualClaudeExecutable) {
-      onSetSetting('claude_executable', claudeExecutable);
-    }
-  }, [claudeExecutable, actualClaudeExecutable, onSetSetting]);
-
-  const handleCodexBlur = useCallback(() => {
-    if (codexExecutable !== actualCodexExecutable) {
-      onSetSetting('codex_executable', codexExecutable);
-    }
-  }, [codexExecutable, actualCodexExecutable, onSetSetting]);
 
   const handleEditorBlur = useCallback(() => {
     if (editorExecutable !== actualEditorExecutable) {
       onSetSetting('editor_executable', editorExecutable);
     }
   }, [editorExecutable, actualEditorExecutable, onSetSetting]);
-
-  const handleCopilotBlur = useCallback(() => {
-    if (copilotExecutable !== actualCopilotExecutable) {
-      onSetSetting('copilot_executable', copilotExecutable);
-    }
-  }, [copilotExecutable, actualCopilotExecutable, onSetSetting]);
-
-  const handleClaudeKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      if (claudeExecutable !== actualClaudeExecutable) {
-        onSetSetting('claude_executable', claudeExecutable);
-      }
-    }
-  }, [claudeExecutable, actualClaudeExecutable, onSetSetting]);
-
-  const handleCodexKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      if (codexExecutable !== actualCodexExecutable) {
-        onSetSetting('codex_executable', codexExecutable);
-      }
-    }
-  }, [codexExecutable, actualCodexExecutable, onSetSetting]);
 
   const handleEditorKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -179,14 +160,6 @@ export function SettingsModal({
       }
     }
   }, [editorExecutable, actualEditorExecutable, onSetSetting]);
-
-  const handleCopilotKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      if (copilotExecutable !== actualCopilotExecutable) {
-        onSetSetting('copilot_executable', copilotExecutable);
-      }
-    }
-  }, [copilotExecutable, actualCopilotExecutable, onSetSetting]);
 
   const handleDefaultAgentChange = useCallback((agent: SessionAgent) => {
     if (!isAgentAvailable(agentAvailability, agent)) return;
@@ -279,38 +252,33 @@ export function SettingsModal({
             <p className="settings-description">
               Override the CLI used to launch agents. Leave empty to use the default on your PATH.
             </p>
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-claude-exec">Claude Code</label>
-              <span className={`settings-status ${agentAvailability.claude ? 'available' : 'missing'}`}>
-                {agentAvailability.claude ? 'Found in PATH' : 'Not found in PATH'}
-              </span>
-              <input
-                id="settings-claude-exec"
-                type="text"
-                value={claudeExecutable}
-                onChange={handleClaudeChange}
-                onBlur={handleClaudeBlur}
-                onKeyDown={handleClaudeKeyDown}
-                placeholder="claude"
-                className="settings-input"
-              />
-            </div>
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-codex-exec">Codex</label>
-              <span className={`settings-status ${agentAvailability.codex ? 'available' : 'missing'}`}>
-                {agentAvailability.codex ? 'Found in PATH' : 'Not found in PATH'}
-              </span>
-              <input
-                id="settings-codex-exec"
-                type="text"
-                value={codexExecutable}
-                onChange={handleCodexChange}
-                onBlur={handleCodexBlur}
-                onKeyDown={handleCodexKeyDown}
-                placeholder="codex"
-                className="settings-input"
-              />
-            </div>
+            {orderedAgentList.map((agent) => {
+              const available = isAgentAvailable(agentAvailability, agent);
+              const inputId = `settings-${agent}-exec`;
+              const value = agentExecutables[agent] || '';
+              return (
+                <div className="settings-field" key={agent}>
+                  <label className="settings-label" htmlFor={inputId}>{agentLabel(agent)}</label>
+                  <span className={`settings-status ${available ? 'available' : 'missing'}`}>
+                    {available ? 'Found in PATH' : 'Not found in PATH'}
+                  </span>
+                  <input
+                    id={inputId}
+                    type="text"
+                    value={value}
+                    onChange={(e) => handleExecutableChange(agent, e.target.value)}
+                    onBlur={() => commitExecutable(agent)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        commitExecutable(agent);
+                      }
+                    }}
+                    placeholder={agent}
+                    className="settings-input"
+                  />
+                </div>
+              );
+            })}
             <div className="settings-field">
               <label className="settings-label" htmlFor="settings-editor-exec">Editor</label>
               <input
@@ -324,22 +292,6 @@ export function SettingsModal({
                 className="settings-input"
               />
             </div>
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-copilot-exec">Copilot</label>
-              <span className={`settings-status ${agentAvailability.copilot ? 'available' : 'missing'}`}>
-                {agentAvailability.copilot ? 'Found in PATH' : 'Not found in PATH'}
-              </span>
-              <input
-                id="settings-copilot-exec"
-                type="text"
-                value={copilotExecutable}
-                onChange={handleCopilotChange}
-                onBlur={handleCopilotBlur}
-                onKeyDown={handleCopilotKeyDown}
-                placeholder="copilot"
-                className="settings-input"
-              />
-            </div>
           </div>
 
           <div className="settings-section">
@@ -348,39 +300,62 @@ export function SettingsModal({
               Used for new sessions and when opening PRs. You can override per session in the new session dialog.
             </p>
             {!hasAvailableAgents && (
-              <div className="settings-agent-warning">No supported agent CLIs found in PATH.</div>
+              <div className="settings-agent-warning">No supported agent CLI found in PATH.</div>
             )}
             <div className="settings-agent-toggle" role="radiogroup" aria-label="Default session agent">
-              <button
-                type="button"
-                className={`agent-option ${defaultAgent === 'codex' ? 'active' : ''}`}
-                onClick={() => handleDefaultAgentChange('codex')}
-                aria-checked={defaultAgent === 'codex'}
-                disabled={!agentAvailability.codex}
-                title={!agentAvailability.codex ? 'Codex CLI not found in PATH' : undefined}
-              >
-                Codex
-              </button>
-              <button
-                type="button"
-                className={`agent-option ${defaultAgent === 'claude' ? 'active' : ''}`}
-                onClick={() => handleDefaultAgentChange('claude')}
-                aria-checked={defaultAgent === 'claude'}
-                disabled={!agentAvailability.claude}
-                title={!agentAvailability.claude ? 'Claude CLI not found in PATH' : undefined}
-              >
-                Claude
-              </button>
-              <button
-                type="button"
-                className={`agent-option ${defaultAgent === 'copilot' ? 'active' : ''}`}
-                onClick={() => handleDefaultAgentChange('copilot')}
-                aria-checked={defaultAgent === 'copilot'}
-                disabled={!agentAvailability.copilot}
-                title={!agentAvailability.copilot ? 'Copilot CLI not found in PATH' : undefined}
-              >
-                Copilot
-              </button>
+              {orderedAgentList.map((agent) => {
+                const available = isAgentAvailable(agentAvailability, agent);
+                return (
+                  <button
+                    key={agent}
+                    type="button"
+                    className={`agent-option ${defaultAgent === agent ? 'active' : ''}`}
+                    onClick={() => handleDefaultAgentChange(agent)}
+                    aria-checked={defaultAgent === agent}
+                    disabled={!available}
+                    title={!available ? `${agentLabel(agent)} CLI not found in PATH` : undefined}
+                  >
+                    {agentLabel(agent)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <h3>Agent Capabilities</h3>
+            <p className="settings-description">
+              Shows which optional integration features are enabled per agent.
+            </p>
+            <div className="agent-capabilities-list">
+              {orderedAgentList.map((agent) => {
+                const caps = actualAgentCapabilities[agent] || {};
+                const knownCaps = agentCapabilityOrder.filter((cap) => cap in caps);
+                const extraCaps = Object.keys(caps)
+                  .filter((cap) => !agentCapabilityOrder.includes(cap))
+                  .sort((a, b) => a.localeCompare(b));
+                const capKeys = [...knownCaps, ...extraCaps];
+                return (
+                  <div key={agent} className="agent-capabilities-item">
+                    <div className="agent-capabilities-agent">{agentLabel(agent)}</div>
+                    {capKeys.length === 0 ? (
+                      <span className="agent-capability-pill">No capability metadata</span>
+                    ) : (
+                      <div className="agent-capabilities-pills">
+                        {capKeys.map((cap) => (
+                          <span
+                            key={`${agent}-${cap}`}
+                            className={`agent-capability-pill ${caps[cap] ? 'enabled' : 'disabled'}`}
+                            title={caps[cap] ? 'Enabled' : 'Disabled'}
+                          >
+                            {agentCapabilityLabel(cap)}: {caps[cap] ? 'on' : 'off'}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 

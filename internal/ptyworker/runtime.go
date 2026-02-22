@@ -42,9 +42,12 @@ type Config struct {
 	ResumePicker    bool
 	ForkSession     bool
 
+	Executable string
+
 	ClaudeExecutable  string
 	CodexExecutable   string
 	CopilotExecutable string
+	PiExecutable      string
 
 	RegistryPath   string
 	SocketPath     string
@@ -201,9 +204,11 @@ func (r *Runtime) run(ctx context.Context) error {
 		ResumeSessionID:   r.cfg.ResumeSessionID,
 		ResumePicker:      r.cfg.ResumePicker,
 		ForkSession:       r.cfg.ForkSession,
+		Executable:        r.cfg.Executable,
 		ClaudeExecutable:  r.cfg.ClaudeExecutable,
 		CodexExecutable:   r.cfg.CodexExecutable,
 		CopilotExecutable: r.cfg.CopilotExecutable,
+		PiExecutable:      r.cfg.PiExecutable,
 	}); err != nil {
 		return fmt.Errorf("spawn PTY session: %w", err)
 	}

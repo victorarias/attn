@@ -44,9 +44,11 @@ func (b *EmbeddedBackend) Spawn(_ context.Context, opts SpawnOptions) error {
 		ResumeSessionID:   opts.ResumeSessionID,
 		ResumePicker:      opts.ResumePicker,
 		ForkSession:       opts.ForkSession,
+		Executable:        opts.Executable,
 		ClaudeExecutable:  opts.ClaudeExecutable,
 		CodexExecutable:   opts.CodexExecutable,
 		CopilotExecutable: opts.CopilotExecutable,
+		PiExecutable:      opts.PiExecutable,
 	})
 }
 

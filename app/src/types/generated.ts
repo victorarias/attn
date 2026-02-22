@@ -306,6 +306,7 @@ export enum SessionAgent {
     Claude = "claude",
     Codex = "codex",
     Copilot = "copilot",
+    Pi = "pi",
 }
 
 export enum SessionState {
@@ -1699,9 +1700,11 @@ export interface SpawnSessionMessage {
     cols:                number;
     copilot_executable?: string;
     cwd:                 string;
+    executable?:         string;
     fork_session?:       boolean;
     id:                  string;
     label?:              string;
+    pi_executable?:      string;
     resume_picker?:      boolean;
     resume_session_id?:  string;
     rows:                number;
@@ -4163,9 +4166,11 @@ const typeMap: any = {
         { json: "cols", js: "cols", typ: 0 },
         { json: "copilot_executable", js: "copilot_executable", typ: u(undefined, "") },
         { json: "cwd", js: "cwd", typ: "" },
+        { json: "executable", js: "executable", typ: u(undefined, "") },
         { json: "fork_session", js: "fork_session", typ: u(undefined, true) },
         { json: "id", js: "id", typ: "" },
         { json: "label", js: "label", typ: u(undefined, "") },
+        { json: "pi_executable", js: "pi_executable", typ: u(undefined, "") },
         { json: "resume_picker", js: "resume_picker", typ: u(undefined, true) },
         { json: "resume_session_id", js: "resume_session_id", typ: u(undefined, "") },
         { json: "rows", js: "rows", typ: 0 },
@@ -4359,6 +4364,7 @@ const typeMap: any = {
         "claude",
         "codex",
         "copilot",
+        "pi",
     ],
     "SessionState": [
         "idle",

@@ -305,3 +305,10 @@ func TestShouldSkipClaudeWatcherClassification(t *testing.T) {
 		t.Fatal("should skip with legacy RFC3339 timestamp that is still recent")
 	}
 }
+
+func TestIsTranscriptWatchedAgent_CapabilityOverride(t *testing.T) {
+	t.Setenv("ATTN_AGENT_CLAUDE_TRANSCRIPT", "0")
+	if isTranscriptWatchedAgent(protocol.SessionAgentClaude) {
+		t.Fatal("claude transcript watching should be disabled by capability override")
+	}
+}

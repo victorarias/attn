@@ -1444,9 +1444,11 @@ export function useDaemonSocket({
         ...(args.resume_session_id && { resume_session_id: args.resume_session_id }),
         ...(args.resume_picker && { resume_picker: args.resume_picker }),
         ...(args.fork_session && { fork_session: args.fork_session }),
+        ...(args.executable && { executable: args.executable }),
         ...(args.claude_executable && { claude_executable: args.claude_executable }),
         ...(args.codex_executable && { codex_executable: args.codex_executable }),
         ...(args.copilot_executable && { copilot_executable: args.copilot_executable }),
+        ...(args.pi_executable && { pi_executable: args.pi_executable }),
       }));
 
       setTimeout(() => {

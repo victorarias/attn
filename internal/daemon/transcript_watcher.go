@@ -7,19 +7,17 @@ import (
 	"strings"
 	"time"
 
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/transcript"
 )
 
 const (
-	transcriptPollInterval   = 500 * time.Millisecond
-	transcriptQuietWindow    = 1500 * time.Millisecond
-	assistantDedupWindow     = 2 * time.Second
-	toolStartGraceWindow     = 1200 * time.Millisecond
-	codexActiveWindow        = 3 * time.Second
-	codexBootstrapBytes      = 256 * 1024
-	copilotBootstrapBytes    = 512 * 1024
-	claudeBootstrapBytes     = 256 * 1024
+	transcriptPollInterval = 500 * time.Millisecond
+	transcriptQuietWindow  = 1500 * time.Millisecond
+	assistantDedupWindow   = 2 * time.Second
+	toolStartGraceWindow   = 1200 * time.Millisecond
+	codexActiveWindow      = 3 * time.Second
 	claudeHookStaleThreshold = 2 * time.Minute
 )
 
@@ -137,7 +135,35 @@ func shouldSkipClaudeWatcherClassification(agent protocol.SessionAgent, sessionS
 }
 
 func isTranscriptWatchedAgent(agent protocol.SessionAgent) bool {
-	return agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot || agent == protocol.SessionAgentClaude
+	d := agentdriver.Get(string(agent))
+	if d == nil {
+		return false
+	}
+	caps := agentdriver.EffectiveCapabilities(d)
+	if !caps.HasTranscript || !caps.HasTranscriptWatcher {
+		return false
+	}
+	_, ok := agentdriver.GetTranscriptFinder(d)
+	return ok
+}
+
+func (d *Daemon) findTranscriptPathForWatcher(w *transcriptWatcher) string {
+	driver := agentdriver.Get(string(w.agent))
+	tf, ok := agentdriver.GetTranscriptFinder(driver)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(tf.FindTranscript(w.sessionID, w.cwd, w.startedAt))
+}
+
+func (d *Daemon) transcriptBootstrapBytesForAgent(agent protocol.SessionAgent) int64 {
+	driver := agentdriver.Get(string(agent))
+	if tf, ok := agentdriver.GetTranscriptFinder(driver); ok {
+		if n := tf.BootstrapBytes(); n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 func (d *Daemon) startTranscriptWatcher(sessionID string, agent protocol.SessionAgent, cwd string, startedAt time.Time) {
@@ -239,14 +265,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 		}
 
 		if transcriptPath == "" {
-			switch w.agent {
-			case protocol.SessionAgentClaude:
-				transcriptPath = transcript.FindClaudeTranscript(w.sessionID)
-			case protocol.SessionAgentCodex:
-				transcriptPath = transcript.FindCodexTranscript(w.cwd, w.startedAt)
-			case protocol.SessionAgentCopilot:
-				transcriptPath = transcript.FindCopilotTranscript(w.cwd, w.startedAt)
-			}
+			transcriptPath = d.findTranscriptPathForWatcher(w)
 			if transcriptPath == "" {
 				if time.Since(lastDiscoveryLog) >= 5*time.Second {
 					d.logf("transcript watcher: waiting for transcript session=%s agent=%s cwd=%s", w.sessionID, w.agent, w.cwd)
@@ -269,26 +288,11 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				continue
 			}
 			lastOffset = info.Size()
-			if w.agent == protocol.SessionAgentCodex {
-				if info.Size() > codexBootstrapBytes {
-					lastOffset = info.Size() - codexBootstrapBytes
-				} else {
-					lastOffset = 0
-				}
-			}
-			if w.agent == protocol.SessionAgentCopilot {
-				if info.Size() > copilotBootstrapBytes {
-					lastOffset = info.Size() - copilotBootstrapBytes
-				} else {
-					lastOffset = 0
-				}
-			}
-			if w.agent == protocol.SessionAgentClaude {
-				if info.Size() > claudeBootstrapBytes {
-					lastOffset = info.Size() - claudeBootstrapBytes
-				} else {
-					lastOffset = 0
-				}
+			bootstrapBytes := d.transcriptBootstrapBytesForAgent(w.agent)
+			if bootstrapBytes > 0 && info.Size() > bootstrapBytes {
+				lastOffset = info.Size() - bootstrapBytes
+			} else if bootstrapBytes > 0 {
+				lastOffset = 0
 			}
 			partialLine = ""
 			pendingTools = make(map[string]copilotPendingTool)

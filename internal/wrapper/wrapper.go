@@ -22,25 +22,24 @@ func DefaultLabel() string {
 	return filepath.Base(dir)
 }
 
-// WriteHooksConfig writes a temporary hooks configuration file
-// Creates a subdirectory to isolate from other temp files (avoids fs.watch issues)
-func WriteHooksConfig(tmpDir, sessionID, socketPath, wrapperPath string) (string, error) {
-	// Create a subdirectory for this session's hooks
-	// This prevents Claude from trying to watch socket files in the parent temp dir
-	hooksDir := filepath.Join(tmpDir, "attn-hooks-"+sessionID)
-	if err := os.MkdirAll(hooksDir, 0700); err != nil {
+// WriteSettingsConfig writes arbitrary settings content to a temporary file.
+// Creates a subdirectory to isolate from other temp files (avoids fs.watch issues).
+func WriteSettingsConfig(tmpDir, sessionID, content string) (string, error) {
+	settingsDir := filepath.Join(tmpDir, "attn-hooks-"+sessionID)
+	if err := os.MkdirAll(settingsDir, 0700); err != nil {
 		return "", err
 	}
-
-	configPath := filepath.Join(hooksDir, "settings.json")
-
-	content := hooks.Generate(sessionID, socketPath, wrapperPath)
-
+	configPath := filepath.Join(settingsDir, "settings.json")
 	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
 		return "", err
 	}
-
 	return configPath, nil
+}
+
+// WriteHooksConfig writes a temporary hooks configuration file.
+func WriteHooksConfig(tmpDir, sessionID, socketPath, wrapperPath string) (string, error) {
+	content := hooks.Generate(sessionID, socketPath, wrapperPath)
+	return WriteSettingsConfig(tmpDir, sessionID, content)
 }
 
 // CleanupHooksConfig removes the temporary hooks configuration and its directory

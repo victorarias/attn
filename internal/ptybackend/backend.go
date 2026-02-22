@@ -24,9 +24,13 @@ type SpawnOptions struct {
 	ResumePicker    bool
 	ForkSession     bool
 
+	// Executable is the selected CLI path for opts.Agent.
+	Executable string
+
 	ClaudeExecutable  string
 	CodexExecutable   string
 	CopilotExecutable string
+	PiExecutable      string
 }
 
 type AttachInfo struct {
