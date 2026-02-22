@@ -25,7 +25,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Copilot Resume Transcript Discovery API**: Add `transcript.FindCopilotTranscriptForResume()` to expose resume-ID transcript lookup as shared transcript package functionality.
 
 ### Changed
-- **Protocol Update**: Expand protocol payloads for generic executable + `pi` compatibility fields, and align app/daemon handshake on protocol version `31`.
+- **Protocol Update**: Expand protocol payloads for generic executable + `pi` compatibility fields, and align app/daemon handshake on protocol version `32`.
 - **Unified In-App Agent Launcher**: Replace per-agent direct launch duplication in `cmd/attn/main.go` with a shared `runAgentDirectly()` path that uses driver capabilities.
 - **Agent Selection UI is No Longer Hardcoded to 3 Agents**: New-session picker and settings modal now render agent choices dynamically from availability/settings keys rather than fixed Codex/Claude/Copilot button sets.
 - **Dynamic Executable Wiring from UI to Spawn**: Frontend now sends agent-specific executable overrides through a generic spawn field, enabling non-hardcoded agents (including Pi) without bespoke frontend plumbing.
@@ -39,7 +39,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Session Reload Control**: Sidebar session rows now show a small reload button on hover (stacked below close) to restart the underlying PTY for the same session ID.
 
 ### Fixed
-- **Protocol Handshake Version Drift**: Frontend WebSocket protocol constant now matches daemon protocol `31`, preventing immediate disconnects after upgrading.
+- **Protocol Handshake Version Drift**: Frontend WebSocket protocol constant now matches daemon protocol `32`, preventing immediate disconnects after upgrading.
 - **Classifier Capability Enforcement**: Stop-time classification now honors per-agent `classifier` capability toggles and skips LLM classification when disabled.
 - **Direct Launch Resume Flag Parsing**: `attn --resume --fork-session` now correctly opens resume picker mode while preserving `--fork-session` instead of mis-parsing the flag as a resume ID.
 - **Dead Agent Driver Abstractions**: Remove unused transcript-handler and state-detector provider interfaces from the driver layer to reduce indirection and avoid stale integration paths.
