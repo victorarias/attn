@@ -905,7 +905,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		return
 	}
 	resumeSessionID := protocol.Deref(msg.ResumeSessionID)
-	if existingSession != nil && existingSession.Agent == protocol.SessionAgentClaude && protocol.Deref(existingSession.Recoverable) {
+	if existingSession != nil && existingSession.Agent == protocol.SessionAgentClaude {
 		storedResumeSessionID := strings.TrimSpace(d.store.GetResumeSessionID(msg.ID))
 		if storedResumeSessionID != "" && (resumeSessionID == "" || resumeSessionID == msg.ID) {
 			resumeSessionID = storedResumeSessionID

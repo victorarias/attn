@@ -17,6 +17,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Claude Session Reopen After Crash**: Opening a recoverable Claude session now re-spawns it with the same session ID, allowing Claude to resume conversation history instead of failing with a missing-PTY error.
 - **Claude Recoverable Resume Path**: Recoverable Claude sessions now respawn with `--resume <session-id>` (instead of a plain same-ID spawn), matching the first-run/resume contract and reducing same-ID startup conflicts.
 - **Resume-Picker Recovery ID Drift**: Hook events now sync Claude’s actual `session_id` back to the daemon (`set_session_resume_id`), persist it in session state, and reuse it during recoverable spawns so restart recovery resumes the real Claude conversation even when attn ID and Claude ID differ.
+- **Claude Reopen Guardrail**: Reopening known Claude sessions now attempts resume recovery even when a stale `recoverable=false` flag slips through after daemon churn, and spawn-time ID mapping now still prefers stored `resume_session_id`.
 - **Recoverable Flag Consistency**: Recoverable markers are now cleared once a live worker session is confirmed, preventing stale recovery badges.
 - **Worker Probe Early-Exit Detection**: Worker spawn now detects when the sidecar process exits before becoming ready and returns an explicit early-exit error instead of waiting for a socket timeout, making PTY backend probe failures faster and easier to diagnose.
 

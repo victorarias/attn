@@ -1224,6 +1224,50 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForRecoverableClaude
 	}
 }
 
+func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDEvenWhenNotRecoverable(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	d.ptyBackend = backend
+
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "attn-session",
+		Label:          "attn-session",
+		Agent:          protocol.SessionAgentClaude,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+		Recoverable:    protocol.Ptr(false),
+	})
+	d.store.SetResumeSessionID("attn-session", "claude-session")
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	msg := &protocol.SpawnSessionMessage{
+		Cmd:             protocol.CmdSpawnSession,
+		ID:              "attn-session",
+		Cwd:             t.TempDir(),
+		Cols:            80,
+		Rows:            24,
+		Agent:           "claude",
+		ResumeSessionID: protocol.Ptr("attn-session"),
+	}
+
+	d.handleSpawnSession(client, msg)
+
+	lastSpawn, ok := backend.LastSpawn()
+	if !ok {
+		t.Fatal("expected spawn call")
+	}
+	if lastSpawn.ResumeSessionID != "claude-session" {
+		t.Fatalf("resume session id = %q, want %q", lastSpawn.ResumeSessionID, "claude-session")
+	}
+}
+
 func TestDaemon_ForwardPTYStreamEvents_ClosesStreamOnSendFailure(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := &wsClient{

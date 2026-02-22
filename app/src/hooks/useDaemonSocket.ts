@@ -1536,14 +1536,18 @@ export function useDaemonSocket({
           //   first run: --session-id <id>
           //   recover:   --resume <id>
           if (sessionKnownToDaemon) {
-            if (existingSession.recoverable && existingSession.agent === 'claude') {
+            if (existingSession.agent === 'claude') {
               const resumeArgs: PtySpawnArgs = {
                 ...args,
                 resume_session_id: args.id,
                 resume_picker: null,
                 fork_session: null,
               };
-              console.log('[DaemonSocket] Recovering session %s via resume', args.id);
+              console.log(
+                '[DaemonSocket] Recovering session %s via resume (recoverable=%s)',
+                args.id,
+                String(existingSession.recoverable ?? false),
+              );
               try {
                 await sendSpawnSession(resumeArgs);
               } catch (spawnErr) {
