@@ -15,6 +15,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Claude Session Reopen After Crash**: Opening a recoverable Claude session now re-spawns it with the same session ID, allowing Claude to resume conversation history instead of failing with a missing-PTY error.
 - **Recoverable Flag Consistency**: Recoverable markers are now cleared once a live worker session is confirmed, preventing stale recovery badges.
+- **Worker Probe Early-Exit Detection**: Worker spawn now detects when the sidecar process exits before becoming ready and returns an explicit early-exit error instead of waiting for a socket timeout, making PTY backend probe failures faster and easier to diagnose.
 
 ## [2026-02-21]
 
