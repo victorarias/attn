@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { homeDir } from '@tauri-apps/api/path';
 import { readDir } from '@tauri-apps/plugin-fs';
 import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
@@ -12,7 +12,6 @@ import {
   type AgentAvailability,
   hasAnyAvailableAgents,
   isAgentAvailable,
-  orderedAgents,
   resolvePreferredAgent,
 } from '../utils/agentAvailability';
 import './LocationPicker.css';
@@ -50,6 +49,7 @@ const DEFAULT_AGENT_AVAILABILITY: AgentAvailability = {
   copilot: true,
   pi: false,
 };
+const FIXED_AGENT_ORDER: SessionAgent[] = ['claude', 'codex', 'copilot', 'pi'];
 
 const normalizeAgent = (value?: string): SessionAgent | null => {
   if (!value) return null;
@@ -88,11 +88,9 @@ export function LocationPicker({
   agentAvailability,
 }: LocationPickerProps) {
   const { settings, setSetting } = useSettings();
-  const wasOpenRef = useRef(false);
   const effectiveAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
   const hasAvailableAgents = hasAnyAvailableAgents(effectiveAgentAvailability);
   const noAgentsMessage = 'No supported agent CLI found in PATH.';
-  const [agentShortcutAnchor, setAgentShortcutAnchor] = useState<SessionAgent>('codex');
   const [state, setState] = useState<State>({
     mode: 'path-input',
     inputValue: '',
@@ -161,29 +159,34 @@ export function LocationPicker({
   }, [isOpen, projectsDirectory, state.homePath]);
 
   const orderedAgentList = useMemo(
-    () => orderedAgents(effectiveAgentAvailability, agentShortcutAnchor, 'codex'),
-    [effectiveAgentAvailability, agentShortcutAnchor],
-  );
-  const shortcutAgentList = useMemo(
-    () => orderedAgentList.filter((agent) => isAgentAvailable(effectiveAgentAvailability, agent)),
-    [effectiveAgentAvailability, orderedAgentList],
+    () => {
+      const ordered: SessionAgent[] = [];
+      const seen = new Set<SessionAgent>();
+      const push = (agent: SessionAgent) => {
+        if (seen.has(agent)) return;
+        seen.add(agent);
+        ordered.push(agent);
+      };
+      for (const agent of FIXED_AGENT_ORDER) {
+        push(agent);
+      }
+      const dynamicAgents = Object.keys(effectiveAgentAvailability) as SessionAgent[];
+      dynamicAgents.sort((a, b) => a.localeCompare(b));
+      for (const agent of dynamicAgents) {
+        push(agent);
+      }
+      return ordered;
+    },
+    [effectiveAgentAvailability],
   );
   const agentShortcutByName = useMemo(() => {
     const shortcuts = new Map<SessionAgent, number>();
-    shortcutAgentList.forEach((agent, index) => {
+    orderedAgentList.forEach((agent, index) => {
       shortcuts.set(agent, index + 1);
     });
     return shortcuts;
-  }, [shortcutAgentList]);
+  }, [orderedAgentList]);
   const savedAgent = normalizeAgent(settings[SESSION_AGENT_KEY]);
-
-  useEffect(() => {
-    if (isOpen && !wasOpenRef.current) {
-      const preferredOnOpen = resolvePreferredAgent(savedAgent ?? state.agent, effectiveAgentAvailability, 'codex');
-      setAgentShortcutAnchor(preferredOnOpen);
-    }
-    wasOpenRef.current = isOpen;
-  }, [effectiveAgentAvailability, isOpen, savedAgent, state.agent]);
 
   useEffect(() => {
     if (!savedAgent) return;
@@ -415,8 +418,11 @@ export function LocationPicker({
         const digitMatch = /^Digit([1-9])$/.exec(e.code);
         if (digitMatch) {
           const idx = Number(digitMatch[1]) - 1;
-          if (idx < shortcutAgentList.length) {
-            const targetAgent = shortcutAgentList[idx];
+          if (idx < orderedAgentList.length) {
+            const targetAgent = orderedAgentList[idx];
+            if (!isAgentAvailable(effectiveAgentAvailability, targetAgent)) {
+              return;
+            }
             e.preventDefault();
             handleAgentChange(targetAgent);
             return;
@@ -459,7 +465,7 @@ export function LocationPicker({
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [fsSuggestions, filteredRecent, handleAgentChange, handleBack, isOpen, onClose, shortcutAgentList, state.mode, state.selectedIndex]);
+  }, [effectiveAgentAvailability, fsSuggestions, filteredRecent, handleAgentChange, handleBack, isOpen, onClose, orderedAgentList, state.mode, state.selectedIndex]);
 
   // Transform RepoInfo from snake_case to camelCase for RepoOptions
   const transformedRepoInfo = state.repoInfo ? {
@@ -484,7 +490,7 @@ export function LocationPicker({
             <div className="agent-toggle" role="radiogroup" aria-label="Session agent">
               {orderedAgentList.map((agent) => {
                 const available = isAgentAvailable(effectiveAgentAvailability, agent);
-                const shortcutNumber = available ? agentShortcutByName.get(agent) : undefined;
+                const shortcutNumber = agentShortcutByName.get(agent);
                 const shortcut = shortcutNumber && shortcutNumber <= 9 ? `⌥${shortcutNumber}` : null;
                 return (
                   <button
