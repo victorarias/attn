@@ -1471,6 +1471,9 @@ type Session struct {
 	// "needs_review_after_long_run".
 	NeedsReviewAfterLongRun *bool `json:"needs_review_after_long_run,omitempty"`
 
+	// Recoverable corresponds to the JSON schema field "recoverable".
+	Recoverable *bool `json:"recoverable,omitempty"`
+
 	// State corresponds to the JSON schema field "state".
 	State SessionState `json:"state"`
 
@@ -1559,6 +1562,17 @@ type SessionsUpdatedMessage struct {
 
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty"`
+}
+
+type SetSessionResumeIDMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// ResumeSessionID corresponds to the JSON schema field "resume_session_id".
+	ResumeSessionID string `json:"resume_session_id"`
 }
 
 type SetSettingMessage struct {

@@ -169,6 +169,13 @@
   white-space: nowrap;
 }
 
+.session-recoverable {
+  color: #d97706;
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  opacity: 0.85;
+}
+
 .worktree-indicator {
   color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
@@ -182,7 +189,13 @@
   color: var(--color-text-dimmed);
 }
 
-.close-session-btn {
+.session-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-action-btn {
   background: none;
   border: none;
   color: var(--color-text-dimmed);
@@ -191,13 +204,15 @@
   padding: 0;
   opacity: 0;
   transition: opacity 0.1s;
+  width: 14px;
+  line-height: 1;
 }
 
-.session-item:hover .close-session-btn {
+.session-item:hover .session-action-btn {
   opacity: 1;
 }
 
-.close-session-btn:hover {
+.session-action-btn:hover {
   color: var(--color-text-primary);
 }
 

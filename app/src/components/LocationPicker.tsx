@@ -29,7 +29,7 @@ interface RepoInfo {
 interface LocationPickerProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (path: string, agent: SessionAgent, resumeEnabled?: boolean) => void;
+  onSelect: (path: string, agent: SessionAgent) => void;
   onGetRecentLocations?: () => Promise<{ locations: RecentLocation[] }>;
   onGetRepoInfo?: (mainRepo: string) => Promise<{ success: boolean; info?: RepoInfo; error?: string }>;
   onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string) => Promise<{ success: boolean; path?: string }>;
@@ -72,7 +72,6 @@ interface State {
   // (typing or arrow navigation = intentional, Tab auto-selects first child = not intentional)
   hasSelectedSinceTab: boolean;
   agent: SessionAgent;
-  resumeEnabled: boolean;
 }
 
 export function LocationPicker({
@@ -102,7 +101,6 @@ export function LocationPicker({
     refreshing: false,
     hasSelectedSinceTab: false, // Start false - user hasn't navigated yet
     agent: 'claude',
-    resumeEnabled: false,
   });
 
   const { suggestions: fsSuggestions, currentDir } = useFilesystemSuggestions(state.inputValue);
@@ -155,7 +153,6 @@ export function LocationPicker({
         repoInfo: null,
         refreshing: false,
         hasSelectedSinceTab: false, // User hasn't navigated yet
-        resumeEnabled: false,
       }));
     }
   }, [isOpen, projectsDirectory, state.homePath]);
@@ -261,7 +258,7 @@ export function LocationPicker({
             }));
           } else {
             // Failed to get repo info, just select the path
-            onSelect(path, selectedAgent, state.resumeEnabled);
+            onSelect(path, selectedAgent);
             onClose();
           }
           return;
@@ -272,10 +269,10 @@ export function LocationPicker({
       }
 
       // Not a git repo, just select it
-      onSelect(path, selectedAgent, state.resumeEnabled);
+      onSelect(path, selectedAgent);
       onClose();
     },
-    [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onGetRepoInfo, onSelect, state.agent, state.homePath, state.resumeEnabled]
+    [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onGetRepoInfo, onSelect, state.agent, state.homePath]
   );
 
   const handleAgentChange = useCallback((agent: SessionAgent) => {
@@ -283,13 +280,6 @@ export function LocationPicker({
     setState(prev => ({ ...prev, agent }));
     setSetting(SESSION_AGENT_KEY, agent);
   }, [effectiveAgentAvailability, setSetting]);
-
-  const handleResumeToggle = useCallback(() => {
-    setState(prev => ({
-      ...prev,
-      resumeEnabled: !prev.resumeEnabled,
-    }));
-  }, []);
 
   const handlePathInputChange = useCallback((value: string) => {
     setState(prev => ({ ...prev, inputValue: value, hasSelectedSinceTab: true }));
@@ -314,10 +304,10 @@ export function LocationPicker({
     }
     if (state.selectedRepo) {
       const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-      onSelect(state.selectedRepo, selectedAgent, state.resumeEnabled);
+      onSelect(state.selectedRepo, selectedAgent);
       onClose();
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent, state.resumeEnabled, state.selectedRepo]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent, state.selectedRepo]);
 
   const handleSelectWorktree = useCallback((path: string) => {
     if (!hasAvailableAgents) {
@@ -325,9 +315,9 @@ export function LocationPicker({
       return;
     }
     const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-    onSelect(path, selectedAgent, state.resumeEnabled);
+    onSelect(path, selectedAgent);
     onClose();
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent, state.resumeEnabled]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent]);
 
   const handleSelectBranch = useCallback((_branch: string) => {
     if (!hasAvailableAgents) {
@@ -336,10 +326,10 @@ export function LocationPicker({
     }
     if (state.selectedRepo) {
       const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-      onSelect(state.selectedRepo, selectedAgent, state.resumeEnabled);
+      onSelect(state.selectedRepo, selectedAgent);
       onClose();
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent, state.resumeEnabled, state.selectedRepo]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent, state.selectedRepo]);
 
   const handleCreateWorktree = useCallback(async (branchName: string, startingFrom: string) => {
     if (!hasAvailableAgents) {
@@ -411,14 +401,6 @@ export function LocationPicker({
           if (!isAgentAvailable(effectiveAgentAvailability, 'copilot')) return;
           e.preventDefault();
           handleAgentChange('copilot');
-          return;
-        }
-        if (e.code === 'Digit4') {
-          e.preventDefault();
-          setState(prev => ({
-            ...prev,
-            resumeEnabled: !prev.resumeEnabled,
-          }));
           return;
         }
       }
@@ -518,15 +500,6 @@ export function LocationPicker({
                 <kbd className="agent-shortcut">⌥3</kbd>
               </button>
             </div>
-            <button
-              type="button"
-              className={`resume-toggle ${state.resumeEnabled ? 'active' : ''}`}
-              onClick={handleResumeToggle}
-              aria-pressed={state.resumeEnabled}
-            >
-              <span className="resume-toggle-label">Resume</span>
-              <kbd className="agent-shortcut">⌥4</kbd>
-            </button>
           </div>
         </div>
         {!hasAvailableAgents && (

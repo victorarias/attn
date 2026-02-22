@@ -87,7 +87,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '29';
+const PROTOCOL_VERSION = '31';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1516,7 +1516,8 @@ export function useDaemonSocket({
   useEffect(() => {
     setPtyBackend({
       spawn: async (args: PtySpawnArgs) => {
-        const sessionKnownToDaemon = sessionsRef.current.some((session) => session.id === args.id);
+        const existingSession = sessionsRef.current.find((session) => session.id === args.id);
+        const sessionKnownToDaemon = !!existingSession;
 
         // For new spawns, prime PTY size before attach.
         // For existing daemon sessions, avoid transient bootstrap resizes
@@ -1529,10 +1530,37 @@ export function useDaemonSocket({
           await sendAttachSession(args.id);
           return;
         } catch (attachErr) {
-          // If daemon already knows this session but PTY is gone, don't silently create
-          // a brand-new process with the same ID. This causes confusing "restores"
-          // and duplicate session rows.
+          // If daemon already knows this session but PTY is gone, check if it's recoverable.
+          // Claude sessions are recovered by resuming the existing session ID.
+          // This keeps the first-run contract:
+          //   first run: --session-id <id>
+          //   recover:   --resume <id>
           if (sessionKnownToDaemon) {
+            if (existingSession.agent === 'claude') {
+              const resumeArgs: PtySpawnArgs = {
+                ...args,
+                resume_session_id: args.id,
+                resume_picker: null,
+                fork_session: null,
+              };
+              console.log(
+                '[DaemonSocket] Recovering session %s via resume (recoverable=%s)',
+                args.id,
+                String(existingSession.recoverable ?? false),
+              );
+              try {
+                await sendSpawnSession(resumeArgs);
+              } catch (spawnErr) {
+                const message = spawnErr instanceof Error ? spawnErr.message.toLowerCase() : String(spawnErr).toLowerCase();
+                if (!message.includes('already exists')) {
+                  throw new Error(
+                    'Failed to recover session. Close it and start a new session.'
+                  );
+                }
+              }
+              await sendAttachSession(args.id);
+              return;
+            }
             throw new Error(
               'No live PTY found for this session. It likely ended when the daemon restarted. Close it and start a new session.'
             );

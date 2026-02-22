@@ -51,6 +51,7 @@ model Session {
   state_since: string;          // ISO timestamp, always set
   state_updated_at: string;     // ISO timestamp, always set
   needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
+  recoverable?: boolean;        // True when session can be recovered after daemon restart (agent has resumable conversation)
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
   muted: boolean;               // Always has value (defaults false)
@@ -154,6 +155,12 @@ model StateMessage {
   cmd: "state";
   id: string;
   state: string;
+}
+
+model SetSessionResumeIDMessage {
+  cmd: "set_session_resume_id";
+  id: string;
+  resume_session_id: string;
 }
 
 model StopMessage {

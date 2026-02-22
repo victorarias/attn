@@ -55,6 +55,8 @@ func main() {
 		runList()
 	case "_hook-stop":
 		runHookStop()
+	case "_hook-state":
+		runHookState()
 	case "_hook-todo":
 		runHookTodo()
 	default:
@@ -725,6 +727,19 @@ func runClaudeDirectly() {
 	}
 
 	claudeCmd = append(claudeCmd, claudeArgs...)
+	if debug := strings.ToLower(strings.TrimSpace(os.Getenv("DEBUG"))); debug == "debug" || debug == "trace" {
+		fmt.Fprintf(
+			os.Stderr,
+			"[attn] claude launch: session_id=%s resume=%q resume_picker=%t fork=%t use_session_id=%t cwd=%s argv=%v\n",
+			sessionID,
+			*resumeFlag,
+			resumePicker,
+			*forkFlag,
+			useSessionID,
+			cwd,
+			claudeCmd,
+		)
+	}
 
 	claudeExecutable := resolveExecutable("ATTN_CLAUDE_EXECUTABLE", "claude")
 	cmd := exec.Command(claudeExecutable, claudeCmd...)
@@ -1081,9 +1096,29 @@ func runHookStop() {
 	// Note: We gracefully handle stdin parse errors by sending stop without transcript
 
 	// Send stop event to daemon for classification
-	c := client.New("")
+	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	syncSessionResumeID(c, sessionID, input.SessionID)
 	if err := c.SendStop(sessionID, transcriptPath); err != nil {
 		fmt.Fprintf(os.Stderr, "error sending stop: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runHookState() {
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-state <session_id> <state>\n")
+		os.Exit(1)
+	}
+	sessionID := os.Args[2]
+	state := os.Args[3]
+
+	var input hookInput
+	_ = json.NewDecoder(os.Stdin).Decode(&input)
+
+	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	syncSessionResumeID(c, sessionID, input.SessionID)
+	if err := c.UpdateState(sessionID, state); err != nil {
+		fmt.Fprintf(os.Stderr, "error updating state: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -1100,6 +1135,8 @@ func runHookTodo() {
 	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
 		return // Silently fail if no input
 	}
+	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	syncSessionResumeID(c, sessionID, input.SessionID)
 
 	// Parse tool_input to extract todos
 	var todoInput todoWriteInput
@@ -1122,9 +1159,18 @@ func runHookTodo() {
 		todos = append(todos, fmt.Sprintf("%s %s", marker, t.Content))
 	}
 
-	c := client.New("")
 	if err := c.UpdateTodos(sessionID, todos); err != nil {
 		fmt.Fprintf(os.Stderr, "error updating todos: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func syncSessionResumeID(c *client.Client, attnSessionID, claudeSessionID string) {
+	claudeSessionID = strings.TrimSpace(claudeSessionID)
+	if claudeSessionID == "" {
+		return
+	}
+	if err := c.SetSessionResumeID(attnSessionID, claudeSessionID); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not sync resume session id: %v\n", err)
 	}
 }

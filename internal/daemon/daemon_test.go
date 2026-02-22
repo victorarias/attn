@@ -552,6 +552,7 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 		StateSince:     now,
 		StateUpdatedAt: now,
 		LastSeen:       now,
+		Recoverable:    protocol.Ptr(true),
 	})
 	d.store.Add(&protocol.Session{
 		ID:             "missing-running",
@@ -629,11 +630,14 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 	if report.Created != 2 {
 		t.Fatalf("created = %d, want 2", report.Created)
 	}
-	if report.StateUpdated != 3 {
-		t.Fatalf("state_updated = %d, want 3", report.StateUpdated)
+	if report.StateUpdated != 2 {
+		t.Fatalf("state_updated = %d, want 2", report.StateUpdated)
 	}
-	if report.MarkedIdle != 1 {
-		t.Fatalf("marked_idle = %d, want 1", report.MarkedIdle)
+	if report.Reaped != 1 {
+		t.Fatalf("reaped = %d, want 1", report.Reaped)
+	}
+	if report.MarkedIdle != 0 {
+		t.Fatalf("marked_idle = %d, want 0", report.MarkedIdle)
 	}
 	if report.SkippedShell != 1 {
 		t.Fatalf("skipped_shell = %d, want 1", report.SkippedShell)
@@ -645,6 +649,9 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 	}
 	if existing.State != protocol.SessionStateLaunching {
 		t.Fatalf("live-existing state = %s, want launching for recovery default", existing.State)
+	}
+	if protocol.Deref(existing.Recoverable) {
+		t.Fatal("live-existing recoverable flag should be cleared once worker is live")
 	}
 
 	liveNew := d.store.Get("live-new")
@@ -680,11 +687,8 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 	}
 
 	missingRunning := d.store.Get("missing-running")
-	if missingRunning == nil {
-		t.Fatal("missing-running session missing after reconcile")
-	}
-	if missingRunning.State != protocol.SessionStateIdle {
-		t.Fatalf("missing-running state = %s, want idle", missingRunning.State)
+	if missingRunning != nil {
+		t.Fatal("missing-running session should be reaped (non-claude agent without live PTY)")
 	}
 
 	missingIdle := d.store.Get("missing-idle")
@@ -693,6 +697,81 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 	}
 	if missingIdle.State != protocol.SessionStateIdle {
 		t.Fatalf("missing-idle state = %s, want idle", missingIdle.State)
+	}
+}
+
+func TestDaemon_ReconcileSessionsWithWorkerBackend_ClaudeSessionsRecoverable(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+
+	// Claude session without live PTY should be marked recoverable
+	d.store.Add(&protocol.Session{
+		ID:             "claude-stale",
+		Label:          "claude-stale",
+		Agent:          protocol.SessionAgentClaude,
+		Directory:      "/tmp/claude-stale",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	// Codex session without live PTY should be reaped
+	d.store.Add(&protocol.Session{
+		ID:             "codex-stale",
+		Label:          "codex-stale",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/codex-stale",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	// Copilot session without live PTY should be reaped
+	d.store.Add(&protocol.Session{
+		ID:             "copilot-stale",
+		Label:          "copilot-stale",
+		Agent:          protocol.SessionAgentCopilot,
+		Directory:      "/tmp/copilot-stale",
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	d.ptyBackend = &fakeWorkerReconcileBackend{
+		liveIDs: nil,
+		info:    map[string]ptybackend.SessionInfo{},
+	}
+
+	report := d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
+
+	if report.MarkedRecoverable != 1 {
+		t.Fatalf("marked_recoverable = %d, want 1", report.MarkedRecoverable)
+	}
+	if report.Reaped != 2 {
+		t.Fatalf("reaped = %d, want 2", report.Reaped)
+	}
+
+	// Claude session should be idle + recoverable
+	claudeSession := d.store.Get("claude-stale")
+	if claudeSession == nil {
+		t.Fatal("claude-stale session should not be reaped")
+	}
+	if claudeSession.State != protocol.SessionStateIdle {
+		t.Fatalf("claude-stale state = %s, want idle", claudeSession.State)
+	}
+	if !protocol.Deref(claudeSession.Recoverable) {
+		t.Fatal("claude-stale should be marked recoverable")
+	}
+
+	// Non-claude sessions should be removed
+	if d.store.Get("codex-stale") != nil {
+		t.Fatal("codex-stale session should be reaped")
+	}
+	if d.store.Get("copilot-stale") != nil {
+		t.Fatal("copilot-stale session should be reaped")
 	}
 }
 
@@ -722,11 +801,8 @@ func TestDaemon_RunDeferredWorkerReconciliationForcesIdleDemotion(t *testing.T) 
 	d.runDeferredWorkerReconciliation(1, 0, time.Now())
 
 	session := d.store.Get("stale-running")
-	if session == nil {
-		t.Fatal("stale-running session missing")
-	}
-	if session.State != protocol.SessionStateIdle {
-		t.Fatalf("state = %q, want %q", session.State, protocol.SessionStateIdle)
+	if session != nil {
+		t.Fatal("stale-running session should be reaped (non-claude agent without live PTY)")
 	}
 
 	warnings := d.getWarnings()
@@ -1056,6 +1132,140 @@ func (b *fakeAttachBackend) FailNextAttach(err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.failErr = err
+}
+
+type fakeSpawnBackend struct {
+	mu        sync.Mutex
+	spawnOpts []ptybackend.SpawnOptions
+}
+
+func (b *fakeSpawnBackend) Spawn(_ context.Context, opts ptybackend.SpawnOptions) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.spawnOpts = append(b.spawnOpts, opts)
+	return nil
+}
+func (b *fakeSpawnBackend) Attach(context.Context, string, string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
+	return ptybackend.AttachInfo{Running: true}, newFakeOutputStream(), nil
+}
+func (b *fakeSpawnBackend) Input(context.Context, string, []byte) error          { return nil }
+func (b *fakeSpawnBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
+func (b *fakeSpawnBackend) Kill(context.Context, string, syscall.Signal) error   { return nil }
+func (b *fakeSpawnBackend) Remove(context.Context, string) error                 { return nil }
+func (b *fakeSpawnBackend) SessionIDs(context.Context) []string                  { return nil }
+func (b *fakeSpawnBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {
+	return ptybackend.RecoveryReport{}, nil
+}
+func (b *fakeSpawnBackend) Shutdown(context.Context) error { return nil }
+
+func (b *fakeSpawnBackend) LastSpawn() (ptybackend.SpawnOptions, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.spawnOpts) == 0 {
+		return ptybackend.SpawnOptions{}, false
+	}
+	return b.spawnOpts[len(b.spawnOpts)-1], true
+}
+
+func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForRecoverableClaudeSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	d.ptyBackend = backend
+
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "attn-session",
+		Label:          "attn-session",
+		Agent:          protocol.SessionAgentClaude,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+		Recoverable:    protocol.Ptr(true),
+	})
+	d.store.SetResumeSessionID("attn-session", "claude-session")
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	msg := &protocol.SpawnSessionMessage{
+		Cmd:             protocol.CmdSpawnSession,
+		ID:              "attn-session",
+		Cwd:             t.TempDir(),
+		Cols:            80,
+		Rows:            24,
+		Agent:           "claude",
+		ResumeSessionID: protocol.Ptr("attn-session"),
+	}
+
+	d.handleSpawnSession(client, msg)
+
+	lastSpawn, ok := backend.LastSpawn()
+	if !ok {
+		t.Fatal("expected spawn call")
+	}
+	if lastSpawn.ResumeSessionID != "claude-session" {
+		t.Fatalf("resume session id = %q, want %q", lastSpawn.ResumeSessionID, "claude-session")
+	}
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.SpawnResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode spawn_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("spawn_result success=false error=%q", protocol.Deref(result.Error))
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for spawn_result")
+	}
+}
+
+func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDEvenWhenNotRecoverable(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	d.ptyBackend = backend
+
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "attn-session",
+		Label:          "attn-session",
+		Agent:          protocol.SessionAgentClaude,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+		Recoverable:    protocol.Ptr(false),
+	})
+	d.store.SetResumeSessionID("attn-session", "claude-session")
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	msg := &protocol.SpawnSessionMessage{
+		Cmd:             protocol.CmdSpawnSession,
+		ID:              "attn-session",
+		Cwd:             t.TempDir(),
+		Cols:            80,
+		Rows:            24,
+		Agent:           "claude",
+		ResumeSessionID: protocol.Ptr("attn-session"),
+	}
+
+	d.handleSpawnSession(client, msg)
+
+	lastSpawn, ok := backend.LastSpawn()
+	if !ok {
+		t.Fatal("expected spawn call")
+	}
+	if lastSpawn.ResumeSessionID != "claude-session" {
+		t.Fatalf("resume session id = %q, want %q", lastSpawn.ResumeSessionID, "claude-session")
+	}
 }
 
 func TestDaemon_ForwardPTYStreamEvents_ClosesStreamOnSendFailure(t *testing.T) {

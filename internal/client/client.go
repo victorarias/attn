@@ -100,6 +100,17 @@ func (c *Client) UpdateState(id, state string) error {
 	return err
 }
 
+// SetSessionResumeID stores the Claude resume session id for an attn session.
+func (c *Client) SetSessionResumeID(id, resumeSessionID string) error {
+	msg := protocol.SetSessionResumeIDMessage{
+		Cmd:             protocol.CmdSetSessionResumeID,
+		ID:              id,
+		ResumeSessionID: resumeSessionID,
+	}
+	_, err := c.send(msg)
+	return err
+}
+
 // SendStop sends a stop signal with transcript path for classification
 func (c *Client) SendStop(id, transcriptPath string) error {
 	msg := protocol.StopMessage{

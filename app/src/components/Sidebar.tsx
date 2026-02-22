@@ -10,6 +10,7 @@ interface LocalSession {
   branch?: string;
   isWorktree?: boolean;
   cwd?: string;
+  recoverable?: boolean;
 }
 
 interface SessionGroup {
@@ -45,6 +46,7 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onCloseSession: (id: string) => void;
+  onReloadSession: (id: string) => void;
   onGoToDashboard: () => void;
   onToggleCollapse: () => void;
 }
@@ -56,6 +58,7 @@ export function Sidebar({
   onSelectSession,
   onNewSession,
   onCloseSession,
+  onReloadSession,
   onGoToDashboard,
   onToggleCollapse,
 }: SidebarProps) {
@@ -118,10 +121,11 @@ export function Sidebar({
             return (
               <div
                 key={session.id}
-                className={`session-item ${selectedId === session.id ? 'selected' : ''}`}
+                className={`session-item ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''}`}
                 data-testid={`sidebar-session-${session.id}`}
                 data-state={session.state}
                 onClick={() => onSelectSession(session.id)}
+                title={session.recoverable ? 'Session will be recovered when opened' : undefined}
               >
                 <StateIndicator state={session.state} size="md" seed={session.id} />
                 <div className="session-info">
@@ -129,19 +133,35 @@ export function Sidebar({
                   {session.branch && (
                     <span className="session-branch">{session.branch}</span>
                   )}
+                  {session.recoverable && (
+                    <span className="session-recoverable">recoverable</span>
+                  )}
                 </div>
                 {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                 <span className="session-shortcut">⌘{globalIndex + 1}</span>
-                <button
-                  className="close-session-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCloseSession(session.id);
-                  }}
-                  title="Close session (⌘W)"
-                >
-                  ×
-                </button>
+                <div className="session-actions">
+                  <button
+                    className="session-action-btn close-session-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseSession(session.id);
+                    }}
+                    title="Close session (⌘W)"
+                  >
+                    ×
+                  </button>
+                  <button
+                    className="session-action-btn reload-session-btn"
+                    data-testid={`reload-session-${session.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onReloadSession(session.id);
+                    }}
+                    title="Reload session"
+                  >
+                    ↻
+                  </button>
+                </div>
               </div>
             );
           }
@@ -159,25 +179,42 @@ export function Sidebar({
                 return (
                   <div
                     key={session.id}
-                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''}`}
+                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''}`}
                     data-testid={`sidebar-session-${session.id}`}
                     data-state={session.state}
                     onClick={() => onSelectSession(session.id)}
+                    title={session.recoverable ? 'Session will be recovered when opened' : undefined}
                   >
                     <StateIndicator state={session.state} size="md" seed={session.id} />
                     <span className="session-label">{session.label}</span>
+                    {session.recoverable && (
+                      <span className="session-recoverable">recoverable</span>
+                    )}
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <span className="session-shortcut">⌘{globalIndex + 1}</span>
-                    <button
-                      className="close-session-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onCloseSession(session.id);
-                      }}
-                      title="Close session (⌘W)"
-                    >
-                      ×
-                    </button>
+                    <div className="session-actions">
+                      <button
+                        className="session-action-btn close-session-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCloseSession(session.id);
+                        }}
+                        title="Close session (⌘W)"
+                      >
+                        ×
+                      </button>
+                      <button
+                        className="session-action-btn reload-session-btn"
+                        data-testid={`reload-session-${session.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onReloadSession(session.id);
+                        }}
+                        title="Reload session"
+                      >
+                        ↻
+                      </button>
+                    </div>
                   </div>
                 );
               })}

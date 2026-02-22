@@ -36,16 +36,18 @@ type repoCache struct {
 }
 
 type workerReconcileReport struct {
-	Created         int
-	StateUpdated    int
-	MarkedIdle      int
-	SkippedIdle     int
-	SkippedRecent   int
-	SkippedShell    int
-	LikelyAlive     int
-	LivenessUnknown int
-	MissingMetadata int
-	Changed         bool
+	Created           int
+	StateUpdated      int
+	MarkedIdle        int
+	MarkedRecoverable int
+	Reaped            int
+	SkippedIdle       int
+	SkippedRecent     int
+	SkippedShell      int
+	LikelyAlive       int
+	LivenessUnknown   int
+	MissingMetadata   int
+	Changed           bool
 }
 
 type longRunSession struct {
@@ -576,12 +578,23 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 
 	sessions := d.store.List("")
 	removed := 0
+	recoverable := 0
 	for _, session := range sessions {
 		if _, ok := liveIDs[session.ID]; ok {
 			continue
 		}
+		// Claude sessions can be recovered by re-spawning with the same session ID
+		if session.Agent == protocol.SessionAgentClaude {
+			d.store.UpdateState(session.ID, protocol.StateIdle)
+			d.store.SetRecoverable(session.ID, true)
+			recoverable++
+			continue
+		}
 		d.store.Remove(session.ID)
 		removed++
+	}
+	if recoverable > 0 {
+		d.logf("marked %d Claude sessions as recoverable on startup", recoverable)
 	}
 	return removed
 }
@@ -655,12 +668,14 @@ func (d *Daemon) reconcileStartupWorkerSessions(recoveryReport ptybackend.Recove
 	}
 
 	reconcile := d.reconcileSessionsWithWorkerBackend(context.Background(), allowIdleDemotion, recoveryStartedAt)
-	if reconcile.Created > 0 || reconcile.StateUpdated > 0 || reconcile.MarkedIdle > 0 || reconcile.SkippedIdle > 0 || reconcile.SkippedRecent > 0 || reconcile.SkippedShell > 0 || reconcile.LikelyAlive > 0 || reconcile.LivenessUnknown > 0 || reconcile.MissingMetadata > 0 {
+	if reconcile.Created > 0 || reconcile.StateUpdated > 0 || reconcile.MarkedIdle > 0 || reconcile.MarkedRecoverable > 0 || reconcile.Reaped > 0 || reconcile.SkippedIdle > 0 || reconcile.SkippedRecent > 0 || reconcile.SkippedShell > 0 || reconcile.LikelyAlive > 0 || reconcile.LivenessUnknown > 0 || reconcile.MissingMetadata > 0 {
 		d.logf(
-			"worker session reconciliation summary: created=%d state_updated=%d marked_idle=%d skipped_idle=%d skipped_recent=%d skipped_shell=%d likely_alive=%d liveness_unknown=%d missing_metadata=%d",
+			"worker session reconciliation summary: created=%d state_updated=%d marked_idle=%d marked_recoverable=%d reaped=%d skipped_idle=%d skipped_recent=%d skipped_shell=%d likely_alive=%d liveness_unknown=%d missing_metadata=%d",
 			reconcile.Created,
 			reconcile.StateUpdated,
 			reconcile.MarkedIdle,
+			reconcile.MarkedRecoverable,
+			reconcile.Reaped,
 			reconcile.SkippedIdle,
 			reconcile.SkippedRecent,
 			reconcile.SkippedShell,
@@ -673,6 +688,18 @@ func (d *Daemon) reconcileStartupWorkerSessions(recoveryReport ptybackend.Recove
 		d.addWarning(
 			warnWorkerRecoveryPartial,
 			fmt.Sprintf("Deferred marking %d tracked sessions idle because PTY recovery was incomplete.", reconcile.SkippedIdle),
+		)
+	}
+	if reconcile.MarkedRecoverable > 0 {
+		d.addWarning(
+			warnStaleSessionMissingWorker,
+			fmt.Sprintf("%d Claude sessions can be recovered from a previous daemon run.", reconcile.MarkedRecoverable),
+		)
+	}
+	if reconcile.Reaped > 0 {
+		d.addWarning(
+			warnStaleSessionsPruned,
+			fmt.Sprintf("Removed %d non-recoverable sessions from a previous daemon run.", reconcile.Reaped),
 		)
 	}
 	if reconcile.MarkedIdle > 0 {
@@ -775,6 +802,10 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 		}
 
 		d.store.Touch(sessionID)
+		if protocol.Deref(existing.Recoverable) {
+			d.store.SetRecoverable(sessionID, false)
+			report.Changed = true
+		}
 		if haveInfo {
 			nextState := sessionStateFromRecoveredInfo(info)
 			if existing.State != nextState {
@@ -823,10 +854,19 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			report.SkippedIdle++
 			continue
 		}
-		d.store.UpdateState(session.ID, protocol.StateIdle)
-		report.StateUpdated++
-		report.Changed = true
-		report.MarkedIdle++
+		// Claude sessions can be recovered (re-spawned with same session ID to resume conversation).
+		// Non-Claude sessions (codex, copilot, shell) cannot be resumed this way, so reap them.
+		if session.Agent == protocol.SessionAgentClaude {
+			d.store.UpdateState(session.ID, protocol.StateIdle)
+			d.store.SetRecoverable(session.ID, true)
+			report.StateUpdated++
+			report.MarkedRecoverable++
+			report.Changed = true
+		} else {
+			d.store.Remove(session.ID)
+			report.Reaped++
+			report.Changed = true
+		}
 	}
 
 	return report
@@ -873,6 +913,18 @@ func (d *Daemon) runDeferredWorkerReconciliation(maxAttempts int, retryInterval 
 		if reconcile.Changed {
 			d.broadcastSessionsUpdated()
 		}
+		if reconcile.MarkedRecoverable > 0 {
+			d.addWarning(
+				warnStaleSessionMissingWorker,
+				fmt.Sprintf("%d Claude sessions can be recovered from a previous daemon run.", reconcile.MarkedRecoverable),
+			)
+		}
+		if reconcile.Reaped > 0 {
+			d.addWarning(
+				warnStaleSessionsPruned,
+				fmt.Sprintf("Removed %d non-recoverable sessions from a previous daemon run.", reconcile.Reaped),
+			)
+		}
 		if reconcile.MarkedIdle > 0 {
 			d.addWarning(
 				warnStaleSessionMissingWorker,
@@ -901,8 +953,8 @@ func (d *Daemon) runDeferredWorkerReconciliation(maxAttempts int, retryInterval 
 				warnWorkerRecoveryPartial,
 				fmt.Sprintf("Deferred stale-session idle demotion for %d sessions that were updated after recovery began.", reconcile.SkippedRecent),
 			)
-		} else if reconcile.MarkedIdle > 0 {
-			d.logf("deferred worker reconciliation marked %d stale sessions idle after recovery stabilized", reconcile.MarkedIdle)
+		} else if reconcile.MarkedIdle > 0 || reconcile.MarkedRecoverable > 0 || reconcile.Reaped > 0 {
+			d.logf("deferred worker reconciliation: marked_idle=%d marked_recoverable=%d reaped=%d", reconcile.MarkedIdle, reconcile.MarkedRecoverable, reconcile.Reaped)
 		}
 		return
 	}
@@ -1332,6 +1384,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:
 		d.handleState(conn, msg.(*protocol.StateMessage))
+	case protocol.CmdSetSessionResumeID:
+		d.handleSetSessionResumeID(conn, msg.(*protocol.SetSessionResumeIDMessage))
 	case protocol.CmdStop:
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos:
@@ -1477,8 +1531,23 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	}
 }
 
+func (d *Daemon) handleSetSessionResumeID(conn net.Conn, msg *protocol.SetSessionResumeIDMessage) {
+	resumeSessionID := strings.TrimSpace(msg.ResumeSessionID)
+	if resumeSessionID == "" {
+		d.sendError(conn, "missing resume_session_id")
+		return
+	}
+	d.store.SetResumeSessionID(msg.ID, resumeSessionID)
+	d.sendOK(conn)
+}
+
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.logf("handleStop: session=%s, transcript_path=%s", msg.ID, msg.TranscriptPath)
+	if session := d.store.Get(msg.ID); session != nil && session.Agent == protocol.SessionAgentClaude {
+		if resumeSessionID := claudeSessionIDFromTranscriptPath(msg.TranscriptPath); resumeSessionID != "" {
+			d.store.SetResumeSessionID(msg.ID, resumeSessionID)
+		}
+	}
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
 
@@ -1525,6 +1594,19 @@ func (d *Daemon) handleSessionVisualized(sessionID string) {
 	}
 	d.logf("classifySessionState: resuming deferred long-run classification session=%s", sessionID)
 	go d.classifySessionState(sessionID, transcriptPath)
+}
+
+func claudeSessionIDFromTranscriptPath(transcriptPath string) string {
+	clean := strings.TrimSpace(transcriptPath)
+	if clean == "" {
+		return ""
+	}
+	base := filepath.Base(clean)
+	if !strings.HasSuffix(base, ".jsonl") {
+		return ""
+	}
+	id := strings.TrimSuffix(base, ".jsonl")
+	return strings.TrimSpace(id)
 }
 
 func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {

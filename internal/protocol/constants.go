@@ -10,13 +10,14 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "29"
+const ProtocolVersion = "31"
 
 // Commands
 const (
 	CmdRegister                 = "register"
 	CmdUnregister               = "unregister"
 	CmdState                    = "state"
+	CmdSetSessionResumeID       = "set_session_resume_id"
 	CmdStop                     = "stop"
 	CmdTodos                    = "todos"
 	CmdQuery                    = "query"
@@ -233,6 +234,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdState:
 		var msg StateMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSetSessionResumeID:
+		var msg SetSessionResumeIDMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

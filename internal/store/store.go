@@ -86,8 +86,8 @@ func (s *Store) Add(session *protocol.Session) {
 	session.Agent = protocol.NormalizeSessionAgent(session.Agent, protocol.SessionAgentCodex)
 	_, err = s.db.Exec(`
 		INSERT OR REPLACE INTO sessions
-		(id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Label,
 		session.Agent,
@@ -101,6 +101,7 @@ func (s *Store) Add(session *protocol.Session) {
 		string(todosJSON),
 		session.LastSeen,
 		boolToInt(session.Muted),
+		boolToInt(protocol.Deref(session.Recoverable)),
 	)
 	if err != nil {
 		log.Printf("[store] Add: failed to insert session %s: %v", session.ID, err)
@@ -119,11 +120,11 @@ func (s *Store) Get(id string) *protocol.Session {
 	var session protocol.Session
 	var todosJSON string
 	var stateSince, stateUpdatedAt, lastSeen string
-	var muted, isWorktree int
+	var muted, isWorktree, recoverable int
 	var branch, mainRepo sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
+		SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
@@ -138,6 +139,7 @@ func (s *Store) Get(id string) *protocol.Session {
 		&todosJSON,
 		&lastSeen,
 		&muted,
+		&recoverable,
 	)
 	if err != nil {
 		return nil
@@ -156,6 +158,9 @@ func (s *Store) Get(id string) *protocol.Session {
 	session.StateUpdatedAt = stateUpdatedAt
 	session.LastSeen = lastSeen
 	session.Muted = muted == 1
+	if recoverable == 1 {
+		session.Recoverable = protocol.Ptr(true)
+	}
 	if todosJSON != "" && todosJSON != "null" {
 		if err := json.Unmarshal([]byte(todosJSON), &session.Todos); err != nil {
 			log.Printf("[store] Get: failed to unmarshal todos for session %s: %v", id, err)
@@ -210,11 +215,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
+			SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
 			FROM sessions ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted
+			SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
 			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
@@ -227,7 +232,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var session protocol.Session
 		var todosJSON string
 		var stateSince, stateUpdatedAt, lastSeen string
-		var muted, isWorktree int
+		var muted, isWorktree, recoverable int
 		var branch, mainRepo sql.NullString
 
 		err := rows.Scan(
@@ -244,6 +249,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			&todosJSON,
 			&lastSeen,
 			&muted,
+			&recoverable,
 		)
 		if err != nil {
 			continue
@@ -262,6 +268,9 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		session.StateUpdatedAt = stateUpdatedAt
 		session.LastSeen = lastSeen
 		session.Muted = muted == 1
+		if recoverable == 1 {
+			session.Recoverable = protocol.Ptr(true)
+		}
 		if todosJSON != "" && todosJSON != "null" {
 			if err := json.Unmarshal([]byte(todosJSON), &session.Todos); err != nil {
 				log.Printf("[store] List: failed to unmarshal todos for session %s: %v", session.ID, err)
@@ -406,6 +415,54 @@ func (s *Store) Touch(id string) {
 	if err != nil {
 		log.Printf("[store] Touch: failed for session %s: %v", id, err)
 	}
+}
+
+// SetRecoverable marks a session as recoverable (can be resumed after daemon restart)
+func (s *Store) SetRecoverable(id string, recoverable bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	_, err := s.db.Exec("UPDATE sessions SET recoverable = ? WHERE id = ?", boolToInt(recoverable), id)
+	if err != nil {
+		log.Printf("[store] SetRecoverable: failed for session %s: %v", id, err)
+	}
+}
+
+// SetResumeSessionID stores the Claude resume session id for an attn session.
+// This allows recovery to use the real Claude conversation id when it differs
+// from the attn session id (for example, when using Claude resume picker).
+func (s *Store) SetResumeSessionID(id, resumeSessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	_, err := s.db.Exec("UPDATE sessions SET resume_session_id = ? WHERE id = ?", strings.TrimSpace(resumeSessionID), id)
+	if err != nil {
+		log.Printf("[store] SetResumeSessionID: failed for session %s: %v", id, err)
+	}
+}
+
+// GetResumeSessionID returns the stored Claude resume session id for an attn session.
+func (s *Store) GetResumeSessionID(id string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return ""
+	}
+
+	var resumeSessionID string
+	if err := s.db.QueryRow("SELECT resume_session_id FROM sessions WHERE id = ?", id).Scan(&resumeSessionID); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(resumeSessionID)
 }
 
 // ToggleMute toggles a session's muted state

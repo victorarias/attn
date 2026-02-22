@@ -358,6 +358,14 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if workerProc != nil && !pidAlive(workerProc.Pid) {
+			waitErr := cmd.Wait()
+			workerProc = nil
+			if waitErr != nil {
+				return fmt.Errorf("worker exited before ready: %w", waitErr)
+			}
+			return errors.New("worker exited before ready")
+		}
 		_, err := b.callInfo(ctx, session)
 		if err == nil {
 			spawnReady = true
@@ -372,6 +380,14 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		}
 		lastErr = err
 		time.Sleep(spawnReadyPollInterval)
+	}
+	if workerProc != nil && !pidAlive(workerProc.Pid) {
+		waitErr := cmd.Wait()
+		workerProc = nil
+		if waitErr != nil {
+			return fmt.Errorf("worker exited before ready: %w", waitErr)
+		}
+		return errors.New("worker exited before ready")
 	}
 	return fmt.Errorf("worker did not become ready: %w", lastErr)
 }
