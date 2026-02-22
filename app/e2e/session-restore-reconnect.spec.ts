@@ -54,7 +54,7 @@ test.describe('Session restore and reconnect harness', () => {
     await expect(page.locator('[data-testid="sidebar-session-restore-s2"][data-state="waiting_input"]')).not.toHaveClass(/selected/);
   });
 
-  test('reconnects after daemon restart and marks stale running sessions idle when worker is missing', async ({ page, daemon }) => {
+  test('reconnects after daemon restart and marks stale Claude sessions recoverable when worker is missing', async ({ page, daemon }) => {
     await daemon.start();
 
     await daemon.injectSession({
@@ -78,7 +78,7 @@ test.describe('Session restore and reconnect harness', () => {
     // Session remains tracked, but should be downgraded from running to idle.
     await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(1, { timeout: 15000 });
     await expect(page.locator('[data-testid="session-reconnect-s1"][data-state="idle"]')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.warning-banner')).toContainText('they were marked idle', { timeout: 10000 });
+    await expect(page.locator('.warning-banner')).toContainText(/can be recovered/i, { timeout: 10000 });
 
     await daemon.injectSession({
       id: 'reconnect-s2',
