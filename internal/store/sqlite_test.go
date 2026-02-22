@@ -247,9 +247,9 @@ func TestMigration21_IdempotentWhenAgentColumnAlreadyExists(t *testing.T) {
 		t.Fatalf("OpenDB() reopen setup error = %v", err)
 	}
 
-	if _, err := raw.Exec("DELETE FROM schema_migrations WHERE version = 21"); err != nil {
+	if _, err := raw.Exec("DELETE FROM schema_migrations WHERE version >= 21"); err != nil {
 		raw.Close()
-		t.Fatalf("DELETE migration 21 marker error = %v", err)
+		t.Fatalf("DELETE migration >=21 markers error = %v", err)
 	}
 	if _, err := raw.Exec("ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'codex'"); err != nil {
 		_ = err

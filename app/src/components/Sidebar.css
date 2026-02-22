@@ -169,6 +169,13 @@
   white-space: nowrap;
 }
 
+.session-recoverable {
+  color: #d97706;
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  opacity: 0.85;
+}
+
 .worktree-indicator {
   color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);

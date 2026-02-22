@@ -161,6 +161,7 @@ var migrations = []migration{
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_prs_host_repo_number ON prs(host, repo, number);
 	`},
 	{21, "add agent to sessions", "ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'codex'"},
+	{22, "add recoverable to sessions", "ALTER TABLE sessions ADD COLUMN recoverable INTEGER NOT NULL DEFAULT 0"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -234,6 +235,11 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 22 {
+			if err := applyMigration22(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -290,6 +296,20 @@ func applyMigration21(tx *sql.Tx) error {
 		return nil
 	}
 	if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'codex'"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyMigration22(tx *sql.Tx) error {
+	hasRecoverable, err := columnExists(tx, "sessions", "recoverable")
+	if err != nil {
+		return err
+	}
+	if hasRecoverable {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN recoverable INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	return nil

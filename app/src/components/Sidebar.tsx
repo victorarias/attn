@@ -10,6 +10,7 @@ interface LocalSession {
   branch?: string;
   isWorktree?: boolean;
   cwd?: string;
+  recoverable?: boolean;
 }
 
 interface SessionGroup {
@@ -118,16 +119,20 @@ export function Sidebar({
             return (
               <div
                 key={session.id}
-                className={`session-item ${selectedId === session.id ? 'selected' : ''}`}
+                className={`session-item ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''}`}
                 data-testid={`sidebar-session-${session.id}`}
                 data-state={session.state}
                 onClick={() => onSelectSession(session.id)}
+                title={session.recoverable ? 'Session will be recovered when opened' : undefined}
               >
                 <StateIndicator state={session.state} size="md" seed={session.id} />
                 <div className="session-info">
                   <span className="session-label">{session.label}</span>
                   {session.branch && (
                     <span className="session-branch">{session.branch}</span>
+                  )}
+                  {session.recoverable && (
+                    <span className="session-recoverable">recoverable</span>
                   )}
                 </div>
                 {session.isWorktree && <span className="worktree-indicator">⎇</span>}
@@ -159,13 +164,17 @@ export function Sidebar({
                 return (
                   <div
                     key={session.id}
-                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''}`}
+                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''}`}
                     data-testid={`sidebar-session-${session.id}`}
                     data-state={session.state}
                     onClick={() => onSelectSession(session.id)}
+                    title={session.recoverable ? 'Session will be recovered when opened' : undefined}
                   >
                     <StateIndicator state={session.state} size="md" seed={session.id} />
                     <span className="session-label">{session.label}</span>
+                    {session.recoverable && (
+                      <span className="session-recoverable">recoverable</span>
+                    )}
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <span className="session-shortcut">⌘{globalIndex + 1}</span>
                     <button

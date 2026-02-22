@@ -705,6 +705,7 @@ function AppContent({
       state: normalizeSessionState(rawState),
       branch: daemonSession?.branch ?? s.branch,
       isWorktree: daemonSession?.is_worktree ?? s.isWorktree,
+      recoverable: daemonSession?.recoverable ?? false,
     };
   });
 

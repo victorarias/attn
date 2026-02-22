@@ -6,6 +6,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-22]
+
+### Changed
+- **Crash-Recovery Session Handling**: After daemon restart recovery, stale sessions without a live PTY are now handled by agent capability: Claude sessions are marked recoverable and can be reopened, while non-recoverable sessions are automatically reaped.
+- **Protocol Version**: Bump daemon/app protocol version to `30`.
+
+### Fixed
+- **Claude Session Reopen After Crash**: Opening a recoverable Claude session now re-spawns it with the same session ID, allowing Claude to resume conversation history instead of failing with a missing-PTY error.
+- **Recoverable Flag Consistency**: Recoverable markers are now cleared once a live worker session is confirmed, preventing stale recovery badges.
+
 ## [2026-02-21]
 
 ### Changed

@@ -293,6 +293,7 @@ export interface SessionElement {
     main_repo?:                   string;
     muted:                        boolean;
     needs_review_after_long_run?: boolean;
+    recoverable?:                 boolean;
     state:                        SessionState;
     state_since:                  string;
     state_updated_at:             string;
@@ -1563,6 +1564,7 @@ export interface Session {
     main_repo?:                   string;
     muted:                        boolean;
     needs_review_after_long_run?: boolean;
+    recoverable?:                 boolean;
     state:                        SessionState;
     state_since:                  string;
     state_updated_at:             string;
@@ -3402,6 +3404,7 @@ const typeMap: any = {
         { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
         { json: "muted", js: "muted", typ: true },
         { json: "needs_review_after_long_run", js: "needs_review_after_long_run", typ: u(undefined, true) },
+        { json: "recoverable", js: "recoverable", typ: u(undefined, true) },
         { json: "state", js: "state", typ: r("SessionState") },
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
@@ -4074,6 +4077,7 @@ const typeMap: any = {
         { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
         { json: "muted", js: "muted", typ: true },
         { json: "needs_review_after_long_run", js: "needs_review_after_long_run", typ: u(undefined, true) },
+        { json: "recoverable", js: "recoverable", typ: u(undefined, true) },
         { json: "state", js: "state", typ: r("SessionState") },
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
