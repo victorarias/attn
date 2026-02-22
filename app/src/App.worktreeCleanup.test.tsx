@@ -133,6 +133,7 @@ describe('worktree cleanup prompt', () => {
       setActiveSession: vi.fn(),
       connectTerminal: vi.fn(),
       resizeSession: vi.fn(),
+      reloadSession: vi.fn(async () => {}),
       openTerminalPanel: vi.fn(),
       collapseTerminalPanel: vi.fn(),
       setTerminalPanelHeight: vi.fn(),

@@ -544,6 +544,7 @@ function AppContent({
     setActiveSession,
     connectTerminal,
     resizeSession,
+    reloadSession,
     openTerminalPanel,
     collapseTerminalPanel,
     setTerminalPanelHeight,
@@ -1259,6 +1260,10 @@ function AppContent({
     }
   }, [activeSessionId, handleCloseSession]);
 
+  const handleReloadSession = useCallback((id: string) => {
+    void reloadSession(id);
+  }, [reloadSession]);
+
   // Open file in review panel
   const handleFileSelect = useCallback((path: string, _staged: boolean) => {
     setInitialReviewFile(path);
@@ -1537,6 +1542,7 @@ function AppContent({
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onCloseSession={handleCloseSession}
+          onReloadSession={handleReloadSession}
           onGoToDashboard={goToDashboard}
           onToggleCollapse={toggleSidebarCollapse}
         />

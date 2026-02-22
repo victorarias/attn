@@ -46,6 +46,7 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onCloseSession: (id: string) => void;
+  onReloadSession: (id: string) => void;
   onGoToDashboard: () => void;
   onToggleCollapse: () => void;
 }
@@ -57,6 +58,7 @@ export function Sidebar({
   onSelectSession,
   onNewSession,
   onCloseSession,
+  onReloadSession,
   onGoToDashboard,
   onToggleCollapse,
 }: SidebarProps) {
@@ -137,16 +139,29 @@ export function Sidebar({
                 </div>
                 {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                 <span className="session-shortcut">⌘{globalIndex + 1}</span>
-                <button
-                  className="close-session-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCloseSession(session.id);
-                  }}
-                  title="Close session (⌘W)"
-                >
-                  ×
-                </button>
+                <div className="session-actions">
+                  <button
+                    className="session-action-btn close-session-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseSession(session.id);
+                    }}
+                    title="Close session (⌘W)"
+                  >
+                    ×
+                  </button>
+                  <button
+                    className="session-action-btn reload-session-btn"
+                    data-testid={`reload-session-${session.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onReloadSession(session.id);
+                    }}
+                    title="Reload session"
+                  >
+                    ↻
+                  </button>
+                </div>
               </div>
             );
           }
@@ -177,16 +192,29 @@ export function Sidebar({
                     )}
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <span className="session-shortcut">⌘{globalIndex + 1}</span>
-                    <button
-                      className="close-session-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onCloseSession(session.id);
-                      }}
-                      title="Close session (⌘W)"
-                    >
-                      ×
-                    </button>
+                    <div className="session-actions">
+                      <button
+                        className="session-action-btn close-session-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCloseSession(session.id);
+                        }}
+                        title="Close session (⌘W)"
+                      >
+                        ×
+                      </button>
+                      <button
+                        className="session-action-btn reload-session-btn"
+                        data-testid={`reload-session-${session.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onReloadSession(session.id);
+                        }}
+                        title="Reload session"
+                      >
+                        ↻
+                      </button>
+                    </div>
                   </div>
                 );
               })}

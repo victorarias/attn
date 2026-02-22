@@ -74,6 +74,7 @@ interface SessionStore {
   setActiveSession: (id: string | null) => void;
   connectTerminal: (id: string, terminal: Terminal) => Promise<void>;
   resizeSession: (id: string, cols: number, rows: number) => void;
+  reloadSession: (id: string) => Promise<void>;
   setForkParams: (sessionId: string, resumeSessionId: string) => void;
   setLauncherConfig: (config: LauncherConfig) => void;
   syncFromDaemonSessions: (daemonSessions: DaemonSessionSnapshot[]) => void;
@@ -357,6 +358,52 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   resizeSession: (id: string, cols: number, rows: number) => {
     ptyResize({ id, cols, rows }).catch(console.error);
+  },
+
+  reloadSession: async (id: string) => {
+    const { sessions, launcherConfig } = get();
+    const session = sessions.find((s) => s.id === id);
+    if (!session) return;
+
+    const terminal = session.terminal;
+    let cols = terminal?.cols && terminal.cols > 0 ? terminal.cols : 80;
+    let rows = terminal?.rows && terminal.rows > 0 ? terminal.rows : 24;
+    if (cols < MIN_STABLE_COLS || rows < MIN_STABLE_ROWS) {
+      cols = 80;
+      rows = 24;
+    }
+
+    try {
+      await ptyKill({ id });
+    } catch (e) {
+      console.warn('[Session] Reload kill failed, continuing to respawn:', e);
+    }
+
+    try {
+      await ptySpawn({
+        args: {
+          id,
+          cwd: session.cwd,
+          label: session.label,
+          cols,
+          rows,
+          shell: false,
+          agent: session.agent,
+          ...(launcherConfig.claudeExecutable
+            ? { claude_executable: launcherConfig.claudeExecutable }
+            : {}),
+          ...(launcherConfig.codexExecutable
+            ? { codex_executable: launcherConfig.codexExecutable }
+            : {}),
+          ...(launcherConfig.copilotExecutable
+            ? { copilot_executable: launcherConfig.copilotExecutable }
+            : {}),
+        },
+      });
+    } catch (e) {
+      console.error('[Session] Reload spawn failed:', e);
+      terminal?.write(`\r\n[Failed to reload PTY: ${e}]\r\n`);
+    }
   },
 
   setForkParams: (sessionId: string, resumeSessionId: string) => {

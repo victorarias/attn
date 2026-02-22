@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import { Sidebar } from './Sidebar';
 
 const baseProps = {
@@ -8,6 +8,7 @@ const baseProps = {
   onSelectSession: () => {},
   onNewSession: () => {},
   onCloseSession: () => {},
+  onReloadSession: () => {},
   onGoToDashboard: () => {},
   onToggleCollapse: () => {},
 };
@@ -45,5 +46,24 @@ describe('Sidebar', () => {
     expect(container.querySelector('.mini-badge.unknown')).toBeFalsy();
     expect(container.querySelector('.mini-badge')).toBeTruthy();
     expect(screen.queryByText('?')).not.toBeInTheDocument();
+  });
+
+  it('fires reload callback when reload button is clicked', () => {
+    const onReloadSession = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        onReloadSession={onReloadSession}
+        sessions={[{
+          id: 's1',
+          label: 'claude',
+          state: 'idle',
+          agent: 'claude',
+        }]}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('reload-session-s1'));
+    expect(onReloadSession).toHaveBeenCalledWith('s1');
   });
 });
