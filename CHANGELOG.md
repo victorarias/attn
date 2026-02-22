@@ -11,6 +11,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **Crash-Recovery Session Handling**: After daemon restart recovery, stale sessions without a live PTY are now handled by agent capability: Claude sessions are marked recoverable and can be reopened, while non-recoverable sessions are automatically reaped.
 - **Protocol Version**: Bump daemon/app protocol version to `31`.
+- **New-Session Resume UI Simplification**: Remove the Location Picker resume toggle and shortcut so new sessions always start with a fresh attn-managed session ID; resume behavior remains dedicated to recoverable crash-restart flows.
 
 ### Fixed
 - **Claude Session Reopen After Crash**: Opening a recoverable Claude session now re-spawns it with the same session ID, allowing Claude to resume conversation history instead of failing with a missing-PTY error.

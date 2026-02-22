@@ -141,7 +141,6 @@ describe('worktree cleanup prompt', () => {
       setActiveUtilityTerminal: vi.fn(),
       renameUtilityTerminal: vi.fn(),
       setForkParams: vi.fn(),
-      setResumePicker: vi.fn(),
       setLauncherConfig: vi.fn(),
       syncFromDaemonSessions: vi.fn(),
     });

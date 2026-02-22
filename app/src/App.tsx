@@ -552,7 +552,6 @@ function AppContent({
     setActiveUtilityTerminal,
     renameUtilityTerminal,
     setForkParams,
-    setResumePicker,
     setLauncherConfig,
     syncFromDaemonSessions,
   } = useSessionStore();
@@ -916,7 +915,7 @@ function AppContent({
   }, []);
 
   const handleLocationSelect = useCallback(
-    async (path: string, agent: SessionAgent, resumeEnabled?: boolean) => {
+    async (path: string, agent: SessionAgent) => {
       if (!hasAvailableAgents) {
         showError('No supported agent CLI found in PATH (codex, claude, copilot).');
         return;
@@ -924,14 +923,7 @@ function AppContent({
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
       const selectedAgent = resolvePreferredAgent(agent, agentAvailability, 'codex');
-      let sessionId: string;
-      if (resumeEnabled) {
-        sessionId = crypto.randomUUID();
-        setResumePicker(sessionId);
-        await createSession(folderName, path, sessionId, selectedAgent);
-      } else {
-        sessionId = await createSession(folderName, path, undefined, selectedAgent);
-      }
+      const sessionId = await createSession(folderName, path, undefined, selectedAgent);
       // Fit terminal after view becomes visible
       setTimeout(() => {
         const handle = terminalRefs.current.get(sessionId);
@@ -939,7 +931,7 @@ function AppContent({
         handle?.focus();
       }, 100);
     },
-    [agentAvailability, createSession, hasAvailableAgents, setResumePicker, showError]
+    [agentAvailability, createSession, hasAvailableAgents, showError]
   );
 
   const closeLocationPicker = useCallback(() => {
