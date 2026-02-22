@@ -1134,6 +1134,96 @@ func (b *fakeAttachBackend) FailNextAttach(err error) {
 	b.failErr = err
 }
 
+type fakeSpawnBackend struct {
+	mu        sync.Mutex
+	spawnOpts []ptybackend.SpawnOptions
+}
+
+func (b *fakeSpawnBackend) Spawn(_ context.Context, opts ptybackend.SpawnOptions) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.spawnOpts = append(b.spawnOpts, opts)
+	return nil
+}
+func (b *fakeSpawnBackend) Attach(context.Context, string, string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
+	return ptybackend.AttachInfo{Running: true}, newFakeOutputStream(), nil
+}
+func (b *fakeSpawnBackend) Input(context.Context, string, []byte) error          { return nil }
+func (b *fakeSpawnBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
+func (b *fakeSpawnBackend) Kill(context.Context, string, syscall.Signal) error   { return nil }
+func (b *fakeSpawnBackend) Remove(context.Context, string) error                 { return nil }
+func (b *fakeSpawnBackend) SessionIDs(context.Context) []string                  { return nil }
+func (b *fakeSpawnBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {
+	return ptybackend.RecoveryReport{}, nil
+}
+func (b *fakeSpawnBackend) Shutdown(context.Context) error { return nil }
+
+func (b *fakeSpawnBackend) LastSpawn() (ptybackend.SpawnOptions, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.spawnOpts) == 0 {
+		return ptybackend.SpawnOptions{}, false
+	}
+	return b.spawnOpts[len(b.spawnOpts)-1], true
+}
+
+func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForRecoverableClaudeSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	d.ptyBackend = backend
+
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "attn-session",
+		Label:          "attn-session",
+		Agent:          protocol.SessionAgentClaude,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+		Recoverable:    protocol.Ptr(true),
+	})
+	d.store.SetResumeSessionID("attn-session", "claude-session")
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	msg := &protocol.SpawnSessionMessage{
+		Cmd:             protocol.CmdSpawnSession,
+		ID:              "attn-session",
+		Cwd:             t.TempDir(),
+		Cols:            80,
+		Rows:            24,
+		Agent:           "claude",
+		ResumeSessionID: protocol.Ptr("attn-session"),
+	}
+
+	d.handleSpawnSession(client, msg)
+
+	lastSpawn, ok := backend.LastSpawn()
+	if !ok {
+		t.Fatal("expected spawn call")
+	}
+	if lastSpawn.ResumeSessionID != "claude-session" {
+		t.Fatalf("resume session id = %q, want %q", lastSpawn.ResumeSessionID, "claude-session")
+	}
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.SpawnResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode spawn_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("spawn_result success=false error=%q", protocol.Deref(result.Error))
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for spawn_result")
+	}
+}
+
 func TestDaemon_ForwardPTYStreamEvents_ClosesStreamOnSendFailure(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := &wsClient{

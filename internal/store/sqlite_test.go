@@ -154,6 +154,8 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		{"sessions", "is_worktree"},
 		{"sessions", "main_repo"},
 		{"sessions", "agent"},
+		{"sessions", "recoverable"},
+		{"sessions", "resume_session_id"},
 	}
 
 	for _, tc := range migratedColumns {

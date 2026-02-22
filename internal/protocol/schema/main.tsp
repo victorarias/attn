@@ -157,6 +157,12 @@ model StateMessage {
   state: string;
 }
 
+model SetSessionResumeIDMessage {
+  cmd: "set_session_resume_id";
+  id: string;
+  resume_session_id: string;
+}
+
 model StopMessage {
   cmd: "stop";
   id: string;

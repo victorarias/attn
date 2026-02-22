@@ -771,7 +771,7 @@ type InitialStateMessage struct {
 	Sessions []Session `json:"sessions,omitempty"`
 
 	// Settings corresponds to the JSON schema field "settings".
-	Settings RecordString `json:"settings,omitempty"`
+	Settings map[string]interface{} `json:"settings,omitempty"`
 
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty"`
@@ -1156,8 +1156,6 @@ type RecentLocationsResultMessage struct {
 	Success bool `json:"success"`
 }
 
-type RecordString map[string]interface{}
-
 type RefreshPRsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1421,7 +1419,7 @@ type ReviewState struct {
 
 type ReviewToolUse struct {
 	// Input corresponds to the JSON schema field "input".
-	Input RecordString `json:"input"`
+	Input map[string]interface{} `json:"input"`
 
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
@@ -1566,6 +1564,17 @@ type SessionsUpdatedMessage struct {
 	Sessions []Session `json:"sessions,omitempty"`
 }
 
+type SetSessionResumeIDMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// ResumeSessionID corresponds to the JSON schema field "resume_session_id".
+	ResumeSessionID string `json:"resume_session_id"`
+}
+
 type SetSettingMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1585,7 +1594,7 @@ type SettingsUpdatedMessage struct {
 	Event string `json:"event"`
 
 	// Settings corresponds to the JSON schema field "settings".
-	Settings RecordString `json:"settings,omitempty"`
+	Settings map[string]interface{} `json:"settings,omitempty"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success *bool `json:"success,omitempty"`
@@ -1960,7 +1969,7 @@ type WebSocketEvent struct {
 	Sessions []Session `json:"sessions,omitempty"`
 
 	// Settings corresponds to the JSON schema field "settings".
-	Settings RecordString `json:"settings,omitempty"`
+	Settings map[string]interface{} `json:"settings,omitempty"`
 
 	// Signal corresponds to the JSON schema field "signal".
 	Signal *string `json:"signal,omitempty"`

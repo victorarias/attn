@@ -432,6 +432,39 @@ func (s *Store) SetRecoverable(id string, recoverable bool) {
 	}
 }
 
+// SetResumeSessionID stores the Claude resume session id for an attn session.
+// This allows recovery to use the real Claude conversation id when it differs
+// from the attn session id (for example, when using Claude resume picker).
+func (s *Store) SetResumeSessionID(id, resumeSessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	_, err := s.db.Exec("UPDATE sessions SET resume_session_id = ? WHERE id = ?", strings.TrimSpace(resumeSessionID), id)
+	if err != nil {
+		log.Printf("[store] SetResumeSessionID: failed for session %s: %v", id, err)
+	}
+}
+
+// GetResumeSessionID returns the stored Claude resume session id for an attn session.
+func (s *Store) GetResumeSessionID(id string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return ""
+	}
+
+	var resumeSessionID string
+	if err := s.db.QueryRow("SELECT resume_session_id FROM sessions WHERE id = ?", id).Scan(&resumeSessionID); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(resumeSessionID)
+}
+
 // ToggleMute toggles a session's muted state
 func (s *Store) ToggleMute(id string) {
 	s.mu.Lock()

@@ -1384,6 +1384,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:
 		d.handleState(conn, msg.(*protocol.StateMessage))
+	case protocol.CmdSetSessionResumeID:
+		d.handleSetSessionResumeID(conn, msg.(*protocol.SetSessionResumeIDMessage))
 	case protocol.CmdStop:
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos:
@@ -1529,8 +1531,23 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	}
 }
 
+func (d *Daemon) handleSetSessionResumeID(conn net.Conn, msg *protocol.SetSessionResumeIDMessage) {
+	resumeSessionID := strings.TrimSpace(msg.ResumeSessionID)
+	if resumeSessionID == "" {
+		d.sendError(conn, "missing resume_session_id")
+		return
+	}
+	d.store.SetResumeSessionID(msg.ID, resumeSessionID)
+	d.sendOK(conn)
+}
+
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.logf("handleStop: session=%s, transcript_path=%s", msg.ID, msg.TranscriptPath)
+	if session := d.store.Get(msg.ID); session != nil && session.Agent == protocol.SessionAgentClaude {
+		if resumeSessionID := claudeSessionIDFromTranscriptPath(msg.TranscriptPath); resumeSessionID != "" {
+			d.store.SetResumeSessionID(msg.ID, resumeSessionID)
+		}
+	}
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
 
@@ -1577,6 +1594,19 @@ func (d *Daemon) handleSessionVisualized(sessionID string) {
 	}
 	d.logf("classifySessionState: resuming deferred long-run classification session=%s", sessionID)
 	go d.classifySessionState(sessionID, transcriptPath)
+}
+
+func claudeSessionIDFromTranscriptPath(transcriptPath string) string {
+	clean := strings.TrimSpace(transcriptPath)
+	if clean == "" {
+		return ""
+	}
+	base := filepath.Base(clean)
+	if !strings.HasSuffix(base, ".jsonl") {
+		return ""
+	}
+	id := strings.TrimSuffix(base, ".jsonl")
+	return strings.TrimSpace(id)
 }
 
 func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {

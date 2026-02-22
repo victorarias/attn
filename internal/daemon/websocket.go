@@ -890,6 +890,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	agent := protocol.NormalizeSpawnAgent(msg.Agent, string(protocol.SessionAgentCodex))
 	isShell := agent == protocol.AgentShellValue
 	spawnStartedAt := time.Now()
+	existingSession := d.store.Get(msg.ID)
 	label := protocol.Deref(msg.Label)
 	if label == "" {
 		label = filepath.Base(msg.Cwd)
@@ -903,6 +904,13 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		})
 		return
 	}
+	resumeSessionID := protocol.Deref(msg.ResumeSessionID)
+	if existingSession != nil && existingSession.Agent == protocol.SessionAgentClaude && protocol.Deref(existingSession.Recoverable) {
+		storedResumeSessionID := strings.TrimSpace(d.store.GetResumeSessionID(msg.ID))
+		if storedResumeSessionID != "" && (resumeSessionID == "" || resumeSessionID == msg.ID) {
+			resumeSessionID = storedResumeSessionID
+		}
+	}
 
 	spawnOpts := ptybackend.SpawnOptions{
 		ID:                msg.ID,
@@ -911,7 +919,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		Label:             label,
 		Cols:              uint16(msg.Cols),
 		Rows:              uint16(msg.Rows),
-		ResumeSessionID:   protocol.Deref(msg.ResumeSessionID),
+		ResumeSessionID:   resumeSessionID,
 		ResumePicker:      protocol.Deref(msg.ResumePicker),
 		ForkSession:       protocol.Deref(msg.ForkSession),
 		ClaudeExecutable:  protocol.Deref(msg.ClaudeExecutable),
@@ -931,7 +939,6 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 
 	if !isShell {
 		d.clearLongRunTracking(msg.ID)
-		existing := d.store.Get(msg.ID)
 		branchInfo, _ := git.GetBranchInfo(msg.Cwd)
 		nowStr := string(protocol.TimestampNow())
 		session := &protocol.Session{
@@ -956,10 +963,18 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			}
 		}
 		d.store.Add(session)
+		if session.Agent == protocol.SessionAgentClaude {
+			switch {
+			case resumeSessionID != "":
+				d.store.SetResumeSessionID(session.ID, resumeSessionID)
+			case !protocol.Deref(msg.ResumePicker):
+				d.store.SetResumeSessionID(session.ID, session.ID)
+			}
+		}
 		d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
 		d.store.UpsertRecentLocation(msg.Cwd, label)
 		eventType := protocol.EventSessionRegistered
-		if existing != nil {
+		if existingSession != nil {
 			eventType = protocol.EventSessionStateChanged
 		}
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{

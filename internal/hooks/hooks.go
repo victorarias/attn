@@ -30,6 +30,7 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 		wrapper = "attn"
 	}
 	wrapperCmd := shellQuote(wrapper)
+	socketCmd := shellQuote(strings.TrimSpace(socketPath))
 
 	config := SettingsConfig{
 		Hooks: map[string][]HookEntry{
@@ -39,7 +40,7 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`%s _hook-stop "%s"`, wrapperCmd, sessionID),
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-stop "%s"`, socketCmd, wrapperCmd, sessionID),
 						},
 					},
 				},
@@ -50,7 +51,7 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`echo '{"cmd":"state","id":"%s","state":"working"}' | nc -U %s`, sessionID, socketPath),
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-state "%s" "working"`, socketCmd, wrapperCmd, sessionID),
 						},
 					},
 				},
@@ -62,7 +63,7 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`echo '{"cmd":"state","id":"%s","state":"waiting_input"}' | nc -U %s`, sessionID, socketPath),
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-state "%s" "waiting_input"`, socketCmd, wrapperCmd, sessionID),
 						},
 					},
 				},
@@ -74,7 +75,7 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`echo '{"cmd":"state","id":"%s","state":"pending_approval"}' | nc -U %s`, sessionID, socketPath),
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-state "%s" "pending_approval"`, socketCmd, wrapperCmd, sessionID),
 						},
 					},
 				},
@@ -85,7 +86,7 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`%s _hook-todo "%s"`, wrapperCmd, sessionID),
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-todo "%s"`, socketCmd, wrapperCmd, sessionID),
 						},
 					},
 				},
@@ -95,7 +96,7 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`echo '{"cmd":"state","id":"%s","state":"working"}' | nc -U %s`, sessionID, socketPath),
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-state "%s" "working"`, socketCmd, wrapperCmd, sessionID),
 						},
 					},
 				},
@@ -105,7 +106,7 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`echo '{"cmd":"state","id":"%s","state":"working"}' | nc -U %s`, sessionID, socketPath),
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-state "%s" "working"`, socketCmd, wrapperCmd, sessionID),
 						},
 					},
 				},

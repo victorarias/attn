@@ -1531,13 +1531,21 @@ export function useDaemonSocket({
           return;
         } catch (attachErr) {
           // If daemon already knows this session but PTY is gone, check if it's recoverable.
-          // Claude sessions can be recovered by re-spawning with the same session ID
-          // (Claude auto-resumes from the existing transcript file).
+          // Claude sessions are recovered by resuming the existing session ID.
+          // This keeps the first-run contract:
+          //   first run: --session-id <id>
+          //   recover:   --resume <id>
           if (sessionKnownToDaemon) {
             if (existingSession.recoverable && existingSession.agent === 'claude') {
-              console.log('[DaemonSocket] Recovering session %s by re-spawning with same ID', args.id);
+              const resumeArgs: PtySpawnArgs = {
+                ...args,
+                resume_session_id: args.id,
+                resume_picker: null,
+                fork_session: null,
+              };
+              console.log('[DaemonSocket] Recovering session %s via resume', args.id);
               try {
-                await sendSpawnSession(args);
+                await sendSpawnSession(resumeArgs);
               } catch (spawnErr) {
                 const message = spawnErr instanceof Error ? spawnErr.message.toLowerCase() : String(spawnErr).toLowerCase();
                 if (!message.includes('already exists')) {
