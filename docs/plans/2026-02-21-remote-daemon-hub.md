@@ -222,11 +222,16 @@ When the hub forwards a command to a remote daemon, the result event comes back 
 
 **Problem:** The current protocol uses a strict version check — the daemon immediately closes the connection if `ProtocolVersion` doesn't match exactly. In a multi-machine deployment, daemons could temporarily run different versions during upgrades.
 
-**Solution:** Exact version matching + automatic binary updates. The hub auto-updates the remote binary whenever versions differ (see Bootstrap Flow), so version skew is a transient state lasting only seconds during reconnect. No compatibility window needed.
+**Solution:** Keep strict version matching — it's the mechanism that triggers auto-update, not an obstacle. The hub↔remote handshake flow:
 
-If auto-update fails (e.g., binary download fails), the hub refuses the connection and reports the error to the UI. This is safer than allowing unknown version skew.
+1. Hub connects via ws-relay, receives `initial_state` with `protocol_version`.
+2. Version matches → proceed normally.
+3. Version mismatches → hub disconnects, SCPs the matching binary to remote, restarts remote daemon, reconnects. By the time the next handshake happens, versions are in sync.
+4. If auto-update fails (binary download fails, SCP fails, etc.) → hub reports the error to the UI via `endpoint_status_changed` with `status: "error"`. No silent degradation.
 
-`ParseMessage()` currently hard-rejects unknown commands. This is fine under exact-match semantics — hub and remote always run the same version, so unknown commands can't occur. If we later need a compatibility window (e.g., for third-party daemons), we can change `ParseMessage` to return raw JSON for unknown commands as an additive change.
+This means version skew is a transient state lasting only seconds during the update+restart cycle. No compatibility window, no major.minor versioning, no `ParseMessage` changes needed.
+
+`ParseMessage()` currently hard-rejects unknown commands. This is correct under exact-match semantics — hub and remote always run the same version, so unknown commands can't occur in normal operation.
 
 ## Protocol Changes
 
@@ -274,7 +279,7 @@ If auto-update fails (e.g., binary download fails), the hub refuses the connecti
 
 ### No breaking changes
 
-All additions are optional fields. Existing protocol version can be maintained if we follow additive semantics. If we prefer explicit versioning, bump protocol version once when hub support ships.
+All additions are optional fields and new commands — the protocol changes are additive in nature. However, **`ProtocolVersion` must be bumped** whenever new commands or events are introduced. This project relies on strict version checking at connect time to prevent stale background daemons from silently failing when the app sends commands they don't understand. A single version bump when hub support ships (covering all new endpoint commands/events) is sufficient — no need to bump per-command during development.
 
 ## Hub Endpoint Configuration
 
@@ -547,7 +552,7 @@ Changes — Hub (Go):
    - `status_message` (e.g., "Installing attn...", "Starting daemon...", "Connected")
    - `capabilities` (when connected): agents available, projects dir, session count, protocol version, daemon instance ID, PTY backend mode.
 5. Hub starts endpoint clients on daemon boot for all enabled endpoints.
-6. Protocol version check on handshake: reject connection on version mismatch, trigger auto-update of remote binary if versions differ.
+6. Protocol version check on handshake: if versions differ, disconnect, auto-update remote binary via SCP, restart remote daemon, reconnect. Report progress via `endpoint_status_changed`.
 
 Changes — UI:
 1. Endpoint management panel (settings or sidebar section):
