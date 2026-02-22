@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { homeDir } from '@tauri-apps/api/path';
 import { readDir } from '@tauri-apps/plugin-fs';
 import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
@@ -88,9 +88,11 @@ export function LocationPicker({
   agentAvailability,
 }: LocationPickerProps) {
   const { settings, setSetting } = useSettings();
+  const wasOpenRef = useRef(false);
   const effectiveAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
   const hasAvailableAgents = hasAnyAvailableAgents(effectiveAgentAvailability);
   const noAgentsMessage = 'No supported agent CLI found in PATH.';
+  const [agentShortcutAnchor, setAgentShortcutAnchor] = useState<SessionAgent>('codex');
   const [state, setState] = useState<State>({
     mode: 'path-input',
     inputValue: '',
@@ -159,8 +161,8 @@ export function LocationPicker({
   }, [isOpen, projectsDirectory, state.homePath]);
 
   const orderedAgentList = useMemo(
-    () => orderedAgents(effectiveAgentAvailability, state.agent, 'codex'),
-    [effectiveAgentAvailability, state.agent],
+    () => orderedAgents(effectiveAgentAvailability, agentShortcutAnchor, 'codex'),
+    [effectiveAgentAvailability, agentShortcutAnchor],
   );
   const shortcutAgentList = useMemo(
     () => orderedAgentList.filter((agent) => isAgentAvailable(effectiveAgentAvailability, agent)),
@@ -174,6 +176,15 @@ export function LocationPicker({
     return shortcuts;
   }, [shortcutAgentList]);
   const savedAgent = normalizeAgent(settings[SESSION_AGENT_KEY]);
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      const preferredOnOpen = resolvePreferredAgent(savedAgent ?? state.agent, effectiveAgentAvailability, 'codex');
+      setAgentShortcutAnchor(preferredOnOpen);
+    }
+    wasOpenRef.current = isOpen;
+  }, [effectiveAgentAvailability, isOpen, savedAgent, state.agent]);
+
   useEffect(() => {
     if (!savedAgent) return;
     const resolvedSavedAgent = resolvePreferredAgent(savedAgent, effectiveAgentAvailability, 'codex');

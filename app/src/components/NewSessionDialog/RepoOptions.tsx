@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './RepoOptions.css';
 
 interface RepoInfo {
@@ -73,7 +73,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const totalItems = mainRepoCount + worktreeCount + newWorktreeCount + branchCount;
 
   // Check if the currently selected item can be deleted
-  const canDeleteSelectedItem = () => {
+  const canDeleteSelectedItem = useCallback(() => {
     // Index 0 = main repo (can't delete)
     if (selectedIndex === 0) return false;
 
@@ -93,10 +93,53 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     }
 
     return false;
-  };
+  }, [repoInfo.branches, repoInfo.defaultBranch, selectedIndex, worktreeCount]);
+
+  const handleSelect = useCallback((index: number) => {
+    let currentIndex = 0;
+
+    // Main repository
+    if (index === currentIndex) {
+      onSelectMainRepo();
+      return;
+    }
+    currentIndex += mainRepoCount;
+
+    // Worktrees
+    if (index < currentIndex + worktreeCount) {
+      const worktreeIndex = index - currentIndex;
+      onSelectWorktree(repoInfo.worktrees[worktreeIndex].path);
+      return;
+    }
+    currentIndex += worktreeCount;
+
+    // New worktree option
+    if (index === currentIndex) {
+      setShowNewWorktree(true);
+      return;
+    }
+    currentIndex += newWorktreeCount;
+
+    // Branches
+    if (index < currentIndex + branchCount) {
+      const branchIndex = index - currentIndex;
+      onSelectBranch(repoInfo.branches[branchIndex].name);
+      return;
+    }
+  }, [
+    branchCount,
+    mainRepoCount,
+    newWorktreeCount,
+    onSelectBranch,
+    onSelectMainRepo,
+    onSelectWorktree,
+    repoInfo.branches,
+    repoInfo.worktrees,
+    worktreeCount,
+  ]);
 
   // Execute the pending delete operation
-  const executeDelete = async () => {
+  const executeDelete = useCallback(async () => {
     if (pendingDeleteIndex === null) return;
 
     const deletedIndex = pendingDeleteIndex;
@@ -128,7 +171,16 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     }
 
     setPendingDeleteIndex(null);
-  };
+  }, [
+    onDeleteBranch,
+    onDeleteWorktree,
+    onError,
+    pendingDeleteIndex,
+    repoInfo.branches,
+    repoInfo.worktrees,
+    selectedIndex,
+    worktreeCount,
+  ]);
 
   // Handle keyboard navigation
   useEffect(() => {
@@ -210,40 +262,23 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIndex, totalItems, showNewWorktree, newWorktreeName, startingBranch, pendingDeleteIndex]);
-
-  const handleSelect = (index: number) => {
-    let currentIndex = 0;
-
-    // Main repository
-    if (index === currentIndex) {
-      onSelectMainRepo();
-      return;
-    }
-    currentIndex += mainRepoCount;
-
-    // Worktrees
-    if (index < currentIndex + worktreeCount) {
-      const worktreeIndex = index - currentIndex;
-      onSelectWorktree(repoInfo.worktrees[worktreeIndex].path);
-      return;
-    }
-    currentIndex += worktreeCount;
-
-    // New worktree option
-    if (index === currentIndex) {
-      setShowNewWorktree(true);
-      return;
-    }
-    currentIndex += newWorktreeCount;
-
-    // Branches
-    if (index < currentIndex + branchCount) {
-      const branchIndex = index - currentIndex;
-      onSelectBranch(repoInfo.branches[branchIndex].name);
-      return;
-    }
-  };
+  }, [
+    canDeleteSelectedItem,
+    currentSessionBranch,
+    executeDelete,
+    handleSelect,
+    newWorktreeName,
+    onBack,
+    onCreateWorktree,
+    onRefresh,
+    pendingDeleteIndex,
+    repoInfo.currentBranch,
+    repoInfo.defaultBranch,
+    selectedIndex,
+    showNewWorktree,
+    startingBranch,
+    totalItems,
+  ]);
 
   const renderItem = (
     itemIndex: number,

@@ -481,6 +481,9 @@ export function useDaemonSocket({
       case 'attach_session':
         rejectPendingByPredicate((key) => key.startsWith('pty_attach_'), error);
         return;
+      case 'kill_session':
+        rejectPendingByPredicate((key) => key.startsWith('pty_kill_'), error);
+        return;
       case 'approve_pr':
         rejectPendingByPredicate((key) => key.endsWith(':approve'), error);
         return;
@@ -762,6 +765,12 @@ export function useDaemonSocket({
 
           case 'session_exited':
             if (data.id) {
+              const killKey = `pty_kill_${data.id}`;
+              const pendingKill = pendingActionsRef.current.get(killKey);
+              if (pendingKill) {
+                pendingActionsRef.current.delete(killKey);
+                pendingKill.resolve({ success: true });
+              }
               attachedPtySessionsRef.current.delete(data.id);
               ptySeqRef.current.delete(data.id);
               pendingAttachOutputsRef.current.delete(data.id);
@@ -1509,10 +1518,30 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'pty_resize', id, cols, rows }));
   }, []);
 
-  const sendKillSession = useCallback((id: string, signal?: string) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ cmd: 'kill_session', id, ...(signal && { signal }) }));
+  const sendKillSession = useCallback((id: string, signal?: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = `pty_kill_${id}`;
+      pendingActionsRef.current.set(key, {
+        resolve: () => resolve(),
+        reject,
+      });
+
+      ws.send(JSON.stringify({ cmd: 'kill_session', id, ...(signal && { signal }) }));
+
+      // Wait for session_exited to avoid kill/spawn races during reload.
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Kill session timed out'));
+        }
+      }, 3000);
+    });
   }, []);
 
   useEffect(() => {
@@ -1592,7 +1621,7 @@ export function useDaemonSocket({
         attachedPtySessionsRef.current.delete(id);
         ptySeqRef.current.delete(id);
         sendDetachSession(id);
-        sendKillSession(id);
+        await sendKillSession(id);
       },
     });
 

@@ -53,6 +53,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Claude Reopen Guardrail**: Reopening known Claude sessions now attempts resume recovery even when a stale `recoverable=false` flag slips through after daemon churn, and spawn-time ID mapping now still prefers stored `resume_session_id`.
 - **Recoverable Flag Consistency**: Recoverable markers are now cleared once a live worker session is confirmed, preventing stale recovery badges.
 - **Worker Probe Early-Exit Detection**: Worker spawn now detects when the sidecar process exits before becoming ready and returns an explicit early-exit error instead of waiting for a socket timeout, making PTY backend probe failures faster and easier to diagnose.
+- **Reload Kill/Spawn Race**: Session reload now waits for `session_exited` before resolving kill, preventing first-click reload from attaching to a stale PTY and immediately disconnecting.
+- **Sidebar Session Actions Alignment**: Reload/close action stack now stays right-aligned in session rows.
+- **Location Picker Agent Shortcut Stability**: Agent button ordering and `⌥N` bindings now stay stable while the picker is open instead of reordering when selection changes.
+- **Repo Options Keyboard Selection Freshness**: Repo-options keyboard handlers now use up-to-date selection callbacks, so agent changes made while choosing branches/worktrees are reflected in the final session launch.
 
 ## [2026-02-21]
 
