@@ -1,6 +1,7 @@
 import './Sidebar.css';
 import { StateIndicator } from './StateIndicator';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
+import { groupSessionsByDirectory, getVisualSessionOrder } from '../utils/sessionGrouping';
 
 interface LocalSession {
   id: string;
@@ -11,32 +12,6 @@ interface LocalSession {
   isWorktree?: boolean;
   cwd?: string;
   recoverable?: boolean;
-}
-
-interface SessionGroup {
-  directory: string;
-  label: string;
-  branch?: string;
-  sessions: LocalSession[];
-}
-
-function groupSessionsByDirectory(sessions: LocalSession[]): SessionGroup[] {
-  const groups = new Map<string, SessionGroup>();
-
-  for (const session of sessions) {
-    const key = session.cwd || session.id;
-    if (!groups.has(key)) {
-      groups.set(key, {
-        directory: key,
-        label: key.split('/').pop() || key,
-        branch: session.branch,
-        sessions: [],
-      });
-    }
-    groups.get(key)!.sessions.push(session);
-  }
-
-  return Array.from(groups.values());
 }
 
 interface SidebarProps {
@@ -62,6 +37,9 @@ export function Sidebar({
   onGoToDashboard,
   onToggleCollapse,
 }: SidebarProps) {
+  const visualOrder = getVisualSessionOrder(sessions);
+  const visualIndexOf = (id: string) => visualOrder.findIndex(s => s.id === id);
+
   if (collapsed) {
     return (
       <div className="sidebar collapsed">
@@ -70,12 +48,12 @@ export function Sidebar({
             ⌂
           </button>
           <div className="icon-divider" />
-          {sessions.map((session, index) => (
+          {visualOrder.map((session) => (
             <button
               key={session.id}
               className={`icon-btn session-icon ${selectedId === session.id ? 'active' : ''}`}
               onClick={() => onSelectSession(session.id)}
-              title={`${session.label} (⌘${index + 1})`}
+              title={`${session.label} (⌘${visualIndexOf(session.id) + 1})`}
             >
               ▸
               {isAttentionSessionState(session.state) && (
@@ -117,7 +95,7 @@ export function Sidebar({
 
           if (isSingleSession) {
             const session = group.sessions[0];
-            const globalIndex = sessions.findIndex(s => s.id === session.id);
+            const globalIndex = visualIndexOf(session.id);
             return (
               <div
                 key={session.id}
@@ -175,7 +153,7 @@ export function Sidebar({
                 )}
               </div>
               {group.sessions.map((session) => {
-                const globalIndex = sessions.findIndex(s => s.id === session.id);
+                const globalIndex = visualIndexOf(session.id);
                 return (
                   <div
                     key={session.id}

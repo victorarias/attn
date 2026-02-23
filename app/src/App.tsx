@@ -35,6 +35,7 @@ import { useTheme } from './hooks/useTheme';
 import { useOpenPR } from './hooks/useOpenPR';
 import { getAgentAvailability, hasAnyAvailableAgents, resolvePreferredAgent } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
+import { getVisualSessionOrder } from './utils/sessionGrouping';
 import './App.css';
 
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
@@ -1230,29 +1231,32 @@ function AppContent({
     }
   }, [enrichedLocalSessions, handleSelectSession]);
 
+  // Use visual (grouped) order so ⌘1-9 and prev/next match the sidebar
+  const visualSessions = useMemo(() => getVisualSessionOrder(sessions), [sessions]);
+
   const handleSelectSessionByIndex = useCallback(
     (index: number) => {
-      const session = sessions[index];
+      const session = visualSessions[index];
       if (session) {
         handleSelectSession(session.id);
       }
     },
-    [sessions, handleSelectSession]
+    [visualSessions, handleSelectSession]
   );
 
   const handlePrevSession = useCallback(() => {
-    if (!activeSessionId || sessions.length === 0) return;
-    const currentIndex = sessions.findIndex((s) => s.id === activeSessionId);
-    const prevIndex = currentIndex > 0 ? currentIndex - 1 : sessions.length - 1;
-    handleSelectSession(sessions[prevIndex].id);
-  }, [activeSessionId, sessions, handleSelectSession]);
+    if (!activeSessionId || visualSessions.length === 0) return;
+    const currentIndex = visualSessions.findIndex((s) => s.id === activeSessionId);
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : visualSessions.length - 1;
+    handleSelectSession(visualSessions[prevIndex].id);
+  }, [activeSessionId, visualSessions, handleSelectSession]);
 
   const handleNextSession = useCallback(() => {
-    if (!activeSessionId || sessions.length === 0) return;
-    const currentIndex = sessions.findIndex((s) => s.id === activeSessionId);
-    const nextIndex = currentIndex < sessions.length - 1 ? currentIndex + 1 : 0;
-    handleSelectSession(sessions[nextIndex].id);
-  }, [activeSessionId, sessions, handleSelectSession]);
+    if (!activeSessionId || visualSessions.length === 0) return;
+    const currentIndex = visualSessions.findIndex((s) => s.id === activeSessionId);
+    const nextIndex = currentIndex < visualSessions.length - 1 ? currentIndex + 1 : 0;
+    handleSelectSession(visualSessions[nextIndex].id);
+  }, [activeSessionId, visualSessions, handleSelectSession]);
 
   const handleCloseCurrentSession = useCallback(() => {
     if (activeSessionId) {
