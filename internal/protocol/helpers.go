@@ -7,20 +7,25 @@ import (
 	"time"
 )
 
-// Timestamp is a string representation of time in RFC3339 format.
+// Timestamp is a string representation of time in RFC3339Nano format.
 // Used in generated types for JSON serialization, with helper methods
 // for conversion to/from time.Time.
 type Timestamp string
 
 // Time parses the timestamp string into time.Time.
 // Returns zero time if the string is empty or invalid.
+// Accepts both RFC3339 and RFC3339Nano formats.
 func (t Timestamp) Time() time.Time {
 	if t == "" {
 		return time.Time{}
 	}
-	parsed, err := time.Parse(time.RFC3339, string(t))
+	s := string(t)
+	parsed, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
-		return time.Time{}
+		parsed, err = time.Parse(time.RFC3339, s)
+		if err != nil {
+			return time.Time{}
+		}
 	}
 	return parsed
 }
@@ -40,7 +45,7 @@ func NewTimestamp(t time.Time) Timestamp {
 	if t.IsZero() {
 		return ""
 	}
-	return Timestamp(t.Format(time.RFC3339))
+	return Timestamp(t.Format(time.RFC3339Nano))
 }
 
 // Now returns the current time as a Timestamp.

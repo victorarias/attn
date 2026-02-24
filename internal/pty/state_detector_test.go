@@ -141,3 +141,28 @@ func TestLooksLikeClaudeWorkingStatusFrame(t *testing.T) {
 		t.Fatal("status lines without timer should not be treated as working animation")
 	}
 }
+
+func TestHasClaudeStatusGlyphPrefix_DingbatsRange(t *testing.T) {
+	// All decorative star/asterisk glyphs that Claude Code may use should match.
+	for _, glyph := range []rune{'✢', '✣', '✤', '✥', '✦', '✧', '✱', '✲', '✳', '✴', '✵', '✶', '✷', '✸', '✹', '✺', '✻', '✼', '✽', '✾', '✿', '❀', '❁', '❂', '❃', '❄', '❅', '❆', '❇', '❈', '❉', '❊', '❋'} {
+		if !hasClaudeStatusGlyphPrefix(string(glyph) + " Working…") {
+			t.Errorf("glyph %c (U+%04X) should be recognized", glyph, glyph)
+		}
+	}
+	// Non-Dingbats and excluded Dingbats (crosses, circles, squares) should not match.
+	for _, ch := range []rune{'*', '•', '●', '→', 'A', '✡', '✠', '❌', '❍'} {
+		if hasClaudeStatusGlyphPrefix(string(ch) + " Working…") {
+			t.Errorf("character %c (U+%04X) should NOT be recognized", ch, ch)
+		}
+	}
+}
+
+func TestClaudeWorkingDetector_VariousGlyphs(t *testing.T) {
+	// ✽ (U+273D) was previously missed, causing zero PTY pulses.
+	d := newClaudeWorkingDetector()
+	frame := []byte("\x1b[35m✽\x1b[0m \x1b[36mHarmonizing…\x1b[0m (4m 47s · ↑ 4.6k tokens)\r")
+	state, changed := d.Observe(frame)
+	if !changed || state != stateWorking {
+		t.Fatalf("✽ glyph should trigger working: changed=%v state=%q", changed, state)
+	}
+}

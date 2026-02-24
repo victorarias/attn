@@ -1863,8 +1863,8 @@ func (d *Daemon) consumeRunDuration(sessionID, fallbackStateSince string) time.D
 	if fallbackStateSince == "" {
 		return 0
 	}
-	startedAt, err := time.Parse(time.RFC3339, fallbackStateSince)
-	if err != nil || startedAt.IsZero() || !now.After(startedAt) {
+	startedAt := protocol.Timestamp(fallbackStateSince).Time()
+	if startedAt.IsZero() || !now.After(startedAt) {
 		return 0
 	}
 	return now.Sub(startedAt)

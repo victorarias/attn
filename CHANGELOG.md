@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-24]
+
+### Fixed
+- **False Idle Classification During Claude Tool Execution**: Claude sessions running long tools (e.g., nolo production queries) were falsely classified as idle because the PTY working detector only recognized 4 specific glyphs. Expanded to the full Dingbats decorative star/asterisk range (U+2722–U+274B).
+- **Transcript Watcher Guard for Active Claude Sessions**: The transcript watcher no longer triggers classification when hooks confirm a Claude session is actively working or pending approval, preventing the classifier from overriding authoritative hook state during tool execution.
+- **Timestamp Precision Races**: State timestamps now use RFC3339Nano (nanosecond precision) instead of RFC3339, preventing same-second races where stale classifier results could overwrite fresher hook-driven state updates.
+
 ## [2026-02-22]
 
 ### Changed

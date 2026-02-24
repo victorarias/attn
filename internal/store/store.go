@@ -324,7 +324,7 @@ func (s *Store) UpdateState(id, state string) {
 		return
 	}
 
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now().Format(time.RFC3339Nano)
 	_, err := s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
 		state, now, now, id)
 	if err != nil {
@@ -349,17 +349,20 @@ func (s *Store) UpdateStateWithTimestamp(id, state string, updatedAt time.Time) 
 		return false
 	}
 
-	current, err := time.Parse(time.RFC3339, currentUpdatedAt)
+	current, err := time.Parse(time.RFC3339Nano, currentUpdatedAt)
 	if err != nil {
-		log.Printf("[store] UpdateStateWithTimestamp: failed to parse timestamp for session %s: %v", id, err)
-		// If we can't parse current timestamp, accept the update to avoid stuck state
-		current = time.Time{}
+		// Fall back to RFC3339 for timestamps written before the Nano switch.
+		current, err = time.Parse(time.RFC3339, currentUpdatedAt)
+		if err != nil {
+			log.Printf("[store] UpdateStateWithTimestamp: failed to parse timestamp for session %s: %v", id, err)
+			current = time.Time{}
+		}
 	}
 	if !updatedAt.After(current) {
 		return false
 	}
 
-	ts := updatedAt.Format(time.RFC3339)
+	ts := updatedAt.Format(time.RFC3339Nano)
 	_, err = s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
 		state, ts, ts, id)
 	return err == nil
@@ -410,7 +413,7 @@ func (s *Store) Touch(id string) {
 		return
 	}
 
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now().Format(time.RFC3339Nano)
 	_, err := s.db.Exec("UPDATE sessions SET last_seen = ? WHERE id = ?", now, id)
 	if err != nil {
 		log.Printf("[store] Touch: failed for session %s: %v", id, err)
