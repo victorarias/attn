@@ -1,7 +1,7 @@
 import './Sidebar.css';
 import { StateIndicator } from './StateIndicator';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
-import { groupSessionsByDirectory, getVisualSessionOrder } from '../utils/sessionGrouping';
+import type { SessionGroup } from '../utils/sessionGrouping';
 
 interface LocalSession {
   id: string;
@@ -15,7 +15,9 @@ interface LocalSession {
 }
 
 interface SidebarProps {
-  sessions: LocalSession[];
+  sessionGroups: SessionGroup<LocalSession>[];
+  visualOrder: LocalSession[];
+  visualIndexBySessionId: Map<string, number>;
   selectedId: string | null;
   collapsed: boolean;
   onSelectSession: (id: string) => void;
@@ -27,7 +29,9 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  sessions,
+  sessionGroups,
+  visualOrder,
+  visualIndexBySessionId,
   selectedId,
   collapsed,
   onSelectSession,
@@ -37,8 +41,7 @@ export function Sidebar({
   onGoToDashboard,
   onToggleCollapse,
 }: SidebarProps) {
-  const visualOrder = getVisualSessionOrder(sessions);
-  const visualIndexOf = (id: string) => visualOrder.findIndex(s => s.id === id);
+  const visualIndexOf = (id: string) => visualIndexBySessionId.get(id) ?? -1;
 
   if (collapsed) {
     return (
@@ -90,7 +93,7 @@ export function Sidebar({
       </div>
 
       <div className="session-list">
-        {groupSessionsByDirectory(sessions).map((group) => {
+        {sessionGroups.map((group) => {
           const isSingleSession = group.sessions.length === 1;
 
           if (isSingleSession) {
