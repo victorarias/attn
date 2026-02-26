@@ -27,8 +27,8 @@ vi.mock('./components/Terminal', async () => {
 });
 
 vi.mock('./components/Sidebar', () => ({
-  Sidebar: ({ sessions, onCloseSession }: { sessions: Array<{ id: string }>; onCloseSession: (id: string) => void }) => (
-    <button data-testid="close-session" onClick={() => onCloseSession(sessions[0].id)}>
+  Sidebar: ({ visualOrder, onCloseSession }: { visualOrder: Array<{ id: string }>; onCloseSession: (id: string) => void }) => (
+    <button data-testid="close-session" onClick={() => onCloseSession(visualOrder[0].id)}>
       Close Session
     </button>
   ),

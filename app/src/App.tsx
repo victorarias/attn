@@ -35,6 +35,7 @@ import { useTheme } from './hooks/useTheme';
 import { useOpenPR } from './hooks/useOpenPR';
 import { getAgentAvailability, hasAnyAvailableAgents, resolvePreferredAgent } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
+import { groupSessionsByDirectory } from './utils/sessionGrouping';
 import './App.css';
 
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
@@ -1230,29 +1231,39 @@ function AppContent({
     }
   }, [enrichedLocalSessions, handleSelectSession]);
 
+  const sessionGroups = useMemo(() => groupSessionsByDirectory(enrichedLocalSessions), [enrichedLocalSessions]);
+
+  // Use visual (grouped) order so ⌘1-9 and prev/next match the sidebar
+  const visualSessions = useMemo(() => sessionGroups.flatMap((group) => group.sessions), [sessionGroups]);
+  const visualIndexBySessionId = useMemo(() => {
+    return new Map(visualSessions.map((session, index) => [session.id, index]));
+  }, [visualSessions]);
+
   const handleSelectSessionByIndex = useCallback(
     (index: number) => {
-      const session = sessions[index];
+      const session = visualSessions[index];
       if (session) {
         handleSelectSession(session.id);
       }
     },
-    [sessions, handleSelectSession]
+    [visualSessions, handleSelectSession]
   );
 
   const handlePrevSession = useCallback(() => {
-    if (!activeSessionId || sessions.length === 0) return;
-    const currentIndex = sessions.findIndex((s) => s.id === activeSessionId);
-    const prevIndex = currentIndex > 0 ? currentIndex - 1 : sessions.length - 1;
-    handleSelectSession(sessions[prevIndex].id);
-  }, [activeSessionId, sessions, handleSelectSession]);
+    if (!activeSessionId || visualSessions.length === 0) return;
+    const currentIndex = visualIndexBySessionId.get(activeSessionId);
+    if (currentIndex === undefined) return;
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : visualSessions.length - 1;
+    handleSelectSession(visualSessions[prevIndex].id);
+  }, [activeSessionId, visualSessions, visualIndexBySessionId, handleSelectSession]);
 
   const handleNextSession = useCallback(() => {
-    if (!activeSessionId || sessions.length === 0) return;
-    const currentIndex = sessions.findIndex((s) => s.id === activeSessionId);
-    const nextIndex = currentIndex < sessions.length - 1 ? currentIndex + 1 : 0;
-    handleSelectSession(sessions[nextIndex].id);
-  }, [activeSessionId, sessions, handleSelectSession]);
+    if (!activeSessionId || visualSessions.length === 0) return;
+    const currentIndex = visualIndexBySessionId.get(activeSessionId);
+    if (currentIndex === undefined) return;
+    const nextIndex = currentIndex < visualSessions.length - 1 ? currentIndex + 1 : 0;
+    handleSelectSession(visualSessions[nextIndex].id);
+  }, [activeSessionId, visualSessions, visualIndexBySessionId, handleSelectSession]);
 
   const handleCloseCurrentSession = useCallback(() => {
     if (activeSessionId) {
@@ -1536,7 +1547,9 @@ function AppContent({
       {/* Session view - always rendered to keep terminals alive */}
       <div className={`view-container ${view === 'session' ? 'visible' : 'hidden'}`}>
         <Sidebar
-          sessions={enrichedLocalSessions}
+          sessionGroups={sessionGroups}
+          visualOrder={visualSessions}
+          visualIndexBySessionId={visualIndexBySessionId}
           selectedId={activeSessionId}
           collapsed={sidebarCollapsed}
           onSelectSession={handleSelectSession}
