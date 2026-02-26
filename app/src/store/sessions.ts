@@ -56,9 +56,7 @@ export interface DaemonSessionSnapshot {
 }
 
 interface LauncherConfig {
-  claudeExecutable: string;
-  codexExecutable: string;
-  copilotExecutable: string;
+  executables: Record<string, string>;
 }
 
 interface SessionStore {
@@ -170,9 +168,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   activeSessionId: null,
   connected: false,
   launcherConfig: {
-    claudeExecutable: '',
-    codexExecutable: '',
-    copilotExecutable: '',
+    executables: {},
   },
 
   connect: async () => {
@@ -304,6 +300,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const forkParams = pendingForkParams.get(id);
       pendingForkParams.delete(id);
 
+      const selectedExecutable = launcherConfig.executables[session.agent] || '';
       await ptySpawn({
         args: {
           id,
@@ -315,14 +312,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           agent: session.agent,
           resume_session_id: forkParams?.resumeSessionId ?? null,
           fork_session: forkParams?.forkSession ?? null,
-          ...(launcherConfig.claudeExecutable
-            ? { claude_executable: launcherConfig.claudeExecutable }
+          ...(selectedExecutable ? { executable: selectedExecutable } : {}),
+          // Backward compatibility fields for older daemons.
+          ...(session.agent === 'claude' && selectedExecutable
+            ? { claude_executable: selectedExecutable }
             : {}),
-          ...(launcherConfig.codexExecutable
-            ? { codex_executable: launcherConfig.codexExecutable }
+          ...(session.agent === 'codex' && selectedExecutable
+            ? { codex_executable: selectedExecutable }
             : {}),
-          ...(launcherConfig.copilotExecutable
-            ? { copilot_executable: launcherConfig.copilotExecutable }
+          ...(session.agent === 'copilot' && selectedExecutable
+            ? { copilot_executable: selectedExecutable }
+            : {}),
+          ...(session.agent === 'pi' && selectedExecutable
+            ? { pi_executable: selectedExecutable }
             : {}),
         },
       });
@@ -380,6 +382,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     try {
+      const selectedExecutable = launcherConfig.executables[session.agent] || '';
       await ptySpawn({
         args: {
           id,
@@ -389,14 +392,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           rows,
           shell: false,
           agent: session.agent,
-          ...(launcherConfig.claudeExecutable
-            ? { claude_executable: launcherConfig.claudeExecutable }
+          ...(selectedExecutable ? { executable: selectedExecutable } : {}),
+          ...(session.agent === 'claude' && selectedExecutable
+            ? { claude_executable: selectedExecutable }
             : {}),
-          ...(launcherConfig.codexExecutable
-            ? { codex_executable: launcherConfig.codexExecutable }
+          ...(session.agent === 'codex' && selectedExecutable
+            ? { codex_executable: selectedExecutable }
             : {}),
-          ...(launcherConfig.copilotExecutable
-            ? { copilot_executable: launcherConfig.copilotExecutable }
+          ...(session.agent === 'copilot' && selectedExecutable
+            ? { copilot_executable: selectedExecutable }
+            : {}),
+          ...(session.agent === 'pi' && selectedExecutable
+            ? { pi_executable: selectedExecutable }
             : {}),
         },
       });

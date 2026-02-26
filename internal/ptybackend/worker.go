@@ -313,6 +313,9 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if opts.ForkSession {
 		args = append(args, "--fork-session")
 	}
+	if opts.Executable != "" {
+		args = append(args, "--executable", opts.Executable)
+	}
 	if opts.ClaudeExecutable != "" {
 		args = append(args, "--claude-executable", opts.ClaudeExecutable)
 	}
@@ -321,6 +324,9 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	}
 	if opts.CopilotExecutable != "" {
 		args = append(args, "--copilot-executable", opts.CopilotExecutable)
+	}
+	if opts.PiExecutable != "" {
+		args = append(args, "--pi-executable", opts.PiExecutable)
 	}
 
 	cmd := exec.CommandContext(ctx, b.cfg.BinaryPath, args...)

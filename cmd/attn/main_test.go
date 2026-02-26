@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/victorarias/attn/internal/transcript"
 )
 
 func writeCopilotSessionState(t *testing.T, homeDir, sessionID, cwd string, startTime time.Time, withStart, withAssistant bool, modTime time.Time) string {
@@ -80,9 +82,9 @@ func TestFindCopilotTranscript_PrefersClosestStartTime(t *testing.T) {
 		startedAt.Add(2*time.Minute), // Newer modtime, but wrong start window.
 	)
 
-	got := findCopilotTranscript(cwd, startedAt)
+	got := transcript.FindCopilotTranscript(cwd, startedAt)
 	if got != expected {
-		t.Fatalf("findCopilotTranscript() = %q, want %q", got, expected)
+		t.Fatalf("FindCopilotTranscript() = %q, want %q", got, expected)
 	}
 }
 
@@ -120,9 +122,9 @@ func TestFindCopilotTranscript_FallsBackToNewestModTime(t *testing.T) {
 		startedAt.Add(2*time.Minute),
 	)
 
-	got := findCopilotTranscript(cwd, startedAt)
+	got := transcript.FindCopilotTranscript(cwd, startedAt)
 	if got != expected {
-		t.Fatalf("findCopilotTranscript() = %q, want %q", got, expected)
+		t.Fatalf("FindCopilotTranscript() = %q, want %q", got, expected)
 	}
 }
 
@@ -149,9 +151,12 @@ func TestResolveCopilotTranscript_PrefersResumeSessionPath(t *testing.T) {
 		startedAt.Add(30*time.Second),
 	)
 
-	got := resolveCopilotTranscript("/repo/other", resumeID, startedAt)
+	got := transcript.FindCopilotTranscriptForResume(resumeID)
+	if got == "" {
+		got = transcript.FindCopilotTranscript("/repo/other", startedAt)
+	}
 	if got != expected {
-		t.Fatalf("resolveCopilotTranscript() = %q, want %q", got, expected)
+		t.Fatalf("copilot transcript resolution = %q, want %q", got, expected)
 	}
 }
 
@@ -178,8 +183,40 @@ func TestResolveCopilotTranscript_FallsBackWhenResumePathMissing(t *testing.T) {
 		startedAt.Add(1*time.Minute),
 	)
 
-	got := resolveCopilotTranscript(cwd, "missing-resume-id", startedAt)
+	got := transcript.FindCopilotTranscriptForResume("missing-resume-id")
+	if got == "" {
+		got = transcript.FindCopilotTranscript(cwd, startedAt)
+	}
 	if got != expected {
-		t.Fatalf("resolveCopilotTranscript() = %q, want %q", got, expected)
+		t.Fatalf("copilot transcript resolution = %q, want %q", got, expected)
+	}
+}
+
+func TestParseDirectLaunchArgs_ResumePickerWithFlagAfterResume(t *testing.T) {
+	parsed := parseDirectLaunchArgs([]string{"--resume", "--fork-session", "--", "--model", "foo"})
+	if !parsed.resumePicker {
+		t.Fatalf("expected resume picker to be enabled")
+	}
+	if parsed.resumeID != "" {
+		t.Fatalf("expected empty resume id, got %q", parsed.resumeID)
+	}
+	if !parsed.forkSession {
+		t.Fatalf("expected fork-session flag to be preserved")
+	}
+	if len(parsed.agentArgs) != 2 || parsed.agentArgs[0] != "--model" || parsed.agentArgs[1] != "foo" {
+		t.Fatalf("unexpected agent args: %#v", parsed.agentArgs)
+	}
+}
+
+func TestParseDirectLaunchArgs_ResumeIDStillAccepted(t *testing.T) {
+	parsed := parseDirectLaunchArgs([]string{"--resume", "abc123", "--fork-session"})
+	if parsed.resumePicker {
+		t.Fatalf("expected resume picker to be disabled")
+	}
+	if parsed.resumeID != "abc123" {
+		t.Fatalf("expected resume id abc123, got %q", parsed.resumeID)
+	}
+	if !parsed.forkSession {
+		t.Fatalf("expected fork-session flag to be true")
 	}
 }

@@ -153,3 +153,26 @@ func TestBuildSpawnEnv_SetsWrapperPath(t *testing.T) {
 		t.Fatalf("expected ATTN_WRAPPER_PATH in env, got %v", env)
 	}
 }
+
+func TestBuildSpawnEnv_DoesNotSetAgentExecutableForDefaultBinary(t *testing.T) {
+	env := buildSpawnEnv("", SpawnOptions{ID: "session-1", Executable: "codex"}, "codex", "/tmp/attn-wrapper", nil)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "ATTN_CODEX_EXECUTABLE=") {
+			t.Fatalf("did not expect ATTN_CODEX_EXECUTABLE for default binary, got %v", env)
+		}
+	}
+}
+
+func TestBuildSpawnEnv_SetsAgentExecutableForExplicitOverride(t *testing.T) {
+	env := buildSpawnEnv("", SpawnOptions{ID: "session-1", Executable: "/custom/codex"}, "codex", "/tmp/attn-wrapper", nil)
+	found := false
+	for _, entry := range env {
+		if entry == "ATTN_CODEX_EXECUTABLE=/custom/codex" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected ATTN_CODEX_EXECUTABLE override in env, got %v", env)
+	}
+}

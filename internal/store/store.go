@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -83,7 +84,21 @@ func (s *Store) Add(session *protocol.Session) {
 	if err != nil {
 		log.Printf("[store] Add: failed to marshal todos for session %s: %v", session.ID, err)
 	}
-	session.Agent = protocol.NormalizeSessionAgent(session.Agent, protocol.SessionAgentCodex)
+	normalizedAgent := strings.TrimSpace(strings.ToLower(string(session.Agent)))
+	if normalizedAgent == "" {
+		normalizedAgent = string(protocol.SessionAgentCodex)
+	}
+	if normalizedAgent == protocol.AgentShellValue {
+		normalizedAgent = string(protocol.SessionAgentCodex)
+	}
+	if normalizedAgent != string(protocol.SessionAgentClaude) &&
+		normalizedAgent != string(protocol.SessionAgentCodex) &&
+		normalizedAgent != string(protocol.SessionAgentCopilot) {
+		if agentdriver.Get(normalizedAgent) == nil {
+			normalizedAgent = string(protocol.SessionAgentCodex)
+		}
+	}
+	session.Agent = protocol.SessionAgent(normalizedAgent)
 	_, err = s.db.Exec(`
 		INSERT OR REPLACE INTO sessions
 		(id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable)
