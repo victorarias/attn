@@ -6,6 +6,17 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-26]
+
+### Added
+- **Agent Transcript Watcher Behavior Interface**: Add `TranscriptWatcherBehaviorProvider` in the agent driver layer so each agent can define its own transcript lifecycle parsing, activity policy, dedupe behavior, and classification guard logic.
+- **Agent Daemon Policy Interfaces**: Add driver-level policy hooks for startup recovery behavior, PTY state filtering, resume-ID lifecycle, transcript classification extraction, and executable-aware classifier dispatch.
+
+### Changed
+- **Watcher Loop Separation**: Daemon transcript watcher now runs a generic loop and delegates all agent-specific decisions to driver-provided watcher behaviors, removing hardcoded Claude/Codex/Copilot branches from daemon watcher code.
+- **Built-in Agent Watcher Policies**: Move Claude hook-freshness classification guard, Codex lifecycle/working heuristics, and Copilot pending-approval turn policy into `internal/agent` behavior implementations.
+- **Daemon Agent Branch Removal**: Move remaining daemon agent conditionals (recoverability, PTY-state acceptance, stop-hook resume extraction, and stop-time transcript/classifier strategy) behind agent policies and helpers so daemon logic remains agent-agnostic.
+
 ## [2026-02-24]
 
 ### Fixed

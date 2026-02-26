@@ -8,10 +8,16 @@
 //
 // Optional capability interfaces (implement only what the agent supports):
 //
-//	HookProvider       — generates hook/settings configs (e.g. Claude Code hooks)
-//	TranscriptFinder   — locates transcript files on disk
-//	ClassifierProvider — custom classification backend
-//	LaunchPreparer     — best-effort setup before launch (e.g. resume copy)
+//	HookProvider                    — generates hook/settings configs (e.g. Claude Code hooks)
+//	TranscriptFinder                — locates transcript files on disk
+//	TranscriptWatcherBehaviorProvider — custom real-time transcript state policy
+//	ClassifierProvider              — custom classification backend
+//	LaunchPreparer                  — best-effort setup before launch (e.g. resume copy)
+//	SessionRecoveryPolicyProvider   — startup missing-PTY recovery policy
+//	PTYStatePolicyProvider          — PTY state filtering/recovered-state policy
+//	ResumePolicyProvider            — resume ID lifecycle policy
+//	TranscriptClassificationExtractor — stop-time transcript extraction policy
+//	ExecutableClassifierProvider    — classifier hook with explicit executable path
 //
 // Agents that don't implement an optional interface get sensible defaults:
 //   - No hooks: no hook-driven state updates
@@ -315,4 +321,27 @@ func GetClassifier(d Driver) (ClassifierProvider, bool) {
 	}
 	cp, ok := d.(ClassifierProvider)
 	return cp, ok
+}
+
+// GetTranscriptWatcherBehavior returns a transcript watcher behavior for drivers
+// that support transcript watching. Drivers may provide a custom behavior via
+// TranscriptWatcherBehaviorProvider; otherwise a default behavior is used.
+func GetTranscriptWatcherBehavior(d Driver) (TranscriptWatcherBehavior, bool) {
+	if d == nil {
+		return nil, false
+	}
+	caps := EffectiveCapabilities(d)
+	if !caps.HasTranscript || !caps.HasTranscriptWatcher {
+		return nil, false
+	}
+	if p, ok := d.(TranscriptWatcherBehaviorProvider); ok {
+		behavior := p.NewTranscriptWatcherBehavior()
+		if behavior != nil {
+			behavior.Reset()
+			return behavior, true
+		}
+	}
+	behavior := newDefaultTranscriptWatcherBehavior()
+	behavior.Reset()
+	return behavior, true
 }

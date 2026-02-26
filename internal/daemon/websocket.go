@@ -900,6 +900,21 @@ func normalizeSpawnAgent(raw string) string {
 	return protocol.NormalizeSpawnAgent(raw, string(protocol.SessionAgentCodex))
 }
 
+func legacyExecutableFromSpawnMessage(msg *protocol.SpawnSessionMessage, agent string) string {
+	switch strings.TrimSpace(strings.ToLower(agent)) {
+	case string(protocol.SessionAgentClaude):
+		return strings.TrimSpace(protocol.Deref(msg.ClaudeExecutable))
+	case string(protocol.SessionAgentCodex):
+		return strings.TrimSpace(protocol.Deref(msg.CodexExecutable))
+	case string(protocol.SessionAgentCopilot):
+		return strings.TrimSpace(protocol.Deref(msg.CopilotExecutable))
+	case string(protocol.SessionAgentPi):
+		return strings.TrimSpace(protocol.Deref(msg.PiExecutable))
+	default:
+		return ""
+	}
+}
+
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
 	agent := normalizeSpawnAgent(msg.Agent)
 	isShell := agent == protocol.AgentShellValue
@@ -919,25 +934,19 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		return
 	}
 	resumeSessionID := protocol.Deref(msg.ResumeSessionID)
-	if existingSession != nil && existingSession.Agent == protocol.SessionAgentClaude {
-		storedResumeSessionID := strings.TrimSpace(d.store.GetResumeSessionID(msg.ID))
-		if storedResumeSessionID != "" && (resumeSessionID == "" || resumeSessionID == msg.ID) {
-			resumeSessionID = storedResumeSessionID
-		}
+	driver := agentdriver.Get(agent)
+	if existingSession != nil {
+		resumeSessionID = agentdriver.ResolveSpawnResumeSessionID(
+			driver,
+			existingSession.ID,
+			resumeSessionID,
+			d.store.GetResumeSessionID(msg.ID),
+		)
 	}
 
 	configuredExecutable := strings.TrimSpace(protocol.Deref(msg.Executable))
 	if configuredExecutable == "" {
-		switch agent {
-		case string(protocol.SessionAgentClaude):
-			configuredExecutable = protocol.Deref(msg.ClaudeExecutable)
-		case string(protocol.SessionAgentCodex):
-			configuredExecutable = protocol.Deref(msg.CodexExecutable)
-		case string(protocol.SessionAgentCopilot):
-			configuredExecutable = protocol.Deref(msg.CopilotExecutable)
-		case string(protocol.SessionAgentPi):
-			configuredExecutable = protocol.Deref(msg.PiExecutable)
-		}
+		configuredExecutable = legacyExecutableFromSpawnMessage(msg, agent)
 	}
 	spawnOpts := ptybackend.SpawnOptions{
 		ID:                msg.ID,
@@ -992,13 +1001,13 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			}
 		}
 		d.store.Add(session)
-		if session.Agent == protocol.SessionAgentClaude {
-			switch {
-			case resumeSessionID != "":
-				d.store.SetResumeSessionID(session.ID, resumeSessionID)
-			case !protocol.Deref(msg.ResumePicker):
-				d.store.SetResumeSessionID(session.ID, session.ID)
-			}
+		if persistResumeID := agentdriver.SpawnResumeSessionID(
+			driver,
+			session.ID,
+			resumeSessionID,
+			protocol.Deref(msg.ResumePicker),
+		); persistResumeID != "" {
+			d.store.SetResumeSessionID(session.ID, persistResumeID)
 		}
 		d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
 		d.store.UpsertRecentLocation(msg.Cwd, label)
@@ -1264,18 +1273,7 @@ func isAgentExecutableSettingKey(key string) (agent string, ok bool) {
 }
 
 func canonicalExecutableSettingKey(agent string) string {
-	switch strings.TrimSpace(strings.ToLower(agent)) {
-	case string(protocol.SessionAgentClaude):
-		return SettingClaudeExecutable
-	case string(protocol.SessionAgentCodex):
-		return SettingCodexExecutable
-	case string(protocol.SessionAgentCopilot):
-		return SettingCopilotExecutable
-	case string(protocol.SessionAgentPi):
-		return SettingPiExecutable
-	default:
-		return executableSettingKey(agent)
-	}
+	return executableSettingKey(agent)
 }
 
 func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {

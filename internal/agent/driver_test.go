@@ -3,6 +3,9 @@ package agent
 import (
 	"os/exec"
 	"testing"
+	"time"
+
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 type testDriver struct {
@@ -77,5 +80,73 @@ func TestBuiltInPiDriver_MinimalCapabilities(t *testing.T) {
 	caps := EffectiveCapabilities(d)
 	if caps.HasTranscript || caps.HasHooks || caps.HasClassifier {
 		t.Fatalf("pi should be minimal by default, got %+v", caps)
+	}
+}
+
+type behaviorProviderDriver struct {
+	testDriver
+	behavior TranscriptWatcherBehavior
+}
+
+func (d behaviorProviderDriver) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
+	return d.behavior
+}
+
+type customBehavior struct{}
+
+func (b *customBehavior) Reset() {}
+
+func (b *customBehavior) HandleLine(line []byte, now time.Time, sessionState protocol.SessionState) WatcherLineResult {
+	return WatcherLineResult{}
+}
+
+func (b *customBehavior) HandleAssistantMessage(now time.Time) {}
+
+func (b *customBehavior) DeduplicateAssistantEvents() bool { return true }
+
+func (b *customBehavior) QuietSince(lastAssistantAt time.Time) time.Time { return lastAssistantAt }
+
+func (b *customBehavior) Tick(now time.Time, sessionState protocol.SessionState) WatcherTickResult {
+	return WatcherTickResult{}
+}
+
+func (b *customBehavior) SkipClassification(sessionState protocol.SessionState, lastSeen string, now time.Time) (bool, string) {
+	return false, ""
+}
+
+func TestGetTranscriptWatcherBehavior_DefaultFallback(t *testing.T) {
+	d := testDriver{
+		name: "pi",
+		caps: Capabilities{
+			HasTranscript:        true,
+			HasTranscriptWatcher: true,
+		},
+	}
+
+	behavior, ok := GetTranscriptWatcherBehavior(d)
+	if !ok || behavior == nil {
+		t.Fatal("expected default watcher behavior for transcript-enabled driver")
+	}
+}
+
+func TestGetTranscriptWatcherBehavior_ProviderOverride(t *testing.T) {
+	expected := &customBehavior{}
+	d := behaviorProviderDriver{
+		testDriver: testDriver{
+			name: "codex",
+			caps: Capabilities{
+				HasTranscript:        true,
+				HasTranscriptWatcher: true,
+			},
+		},
+		behavior: expected,
+	}
+
+	behavior, ok := GetTranscriptWatcherBehavior(d)
+	if !ok {
+		t.Fatal("expected watcher behavior from provider")
+	}
+	if behavior != expected {
+		t.Fatal("expected provider behavior to be returned unchanged")
 	}
 }

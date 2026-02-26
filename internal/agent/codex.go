@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/classifier"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/transcript"
 )
 
@@ -13,7 +14,10 @@ type Codex struct{}
 
 var _ Driver = (*Codex)(nil)
 var _ TranscriptFinder = (*Codex)(nil)
+var _ TranscriptWatcherBehaviorProvider = (*Codex)(nil)
 var _ ClassifierProvider = (*Codex)(nil)
+var _ PTYStatePolicyProvider = (*Codex)(nil)
+var _ ExecutableClassifierProvider = (*Codex)(nil)
 
 func init() {
 	Register(&Codex{})
@@ -86,8 +90,29 @@ func (c *Codex) BootstrapBytes() int64 {
 	return 256 * 1024
 }
 
+func (c *Codex) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
+	return &codexTranscriptWatcherBehavior{}
+}
+
+func (c *Codex) RecoveredRunningState(ptyState string) protocol.SessionState {
+	switch ptyState {
+	case protocol.StatePendingApproval:
+		return protocol.SessionStatePendingApproval
+	default:
+		return protocol.SessionStateLaunching
+	}
+}
+
+func (c *Codex) ShouldApplyPTYState(current protocol.SessionState, incoming string) bool {
+	return incoming == protocol.StateWorking || incoming == protocol.StatePendingApproval
+}
+
 // --- ClassifierProvider ---
 
 func (c *Codex) Classify(text string, timeout time.Duration) (string, error) {
-	return classifier.ClassifyWithCodexExecutable(text, "", timeout)
+	return c.ClassifyWithExecutable(text, "", timeout)
+}
+
+func (c *Codex) ClassifyWithExecutable(text, executable string, timeout time.Duration) (string, error) {
+	return classifier.ClassifyWithCodexExecutable(text, executable, timeout)
 }

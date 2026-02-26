@@ -20,8 +20,18 @@ type Claude struct{}
 var _ Driver = (*Claude)(nil)
 var _ HookProvider = (*Claude)(nil)
 var _ TranscriptFinder = (*Claude)(nil)
+var _ TranscriptWatcherBehaviorProvider = (*Claude)(nil)
 var _ ClassifierProvider = (*Claude)(nil)
 var _ LaunchPreparer = (*Claude)(nil)
+var _ SessionRecoveryPolicyProvider = (*Claude)(nil)
+var _ ResumePolicyProvider = (*Claude)(nil)
+var _ TranscriptClassificationExtractor = (*Claude)(nil)
+
+const (
+	claudeTranscriptRetryWindow   = 2 * time.Second
+	claudeTranscriptRetryInterval = 100 * time.Millisecond
+	claudeTranscriptFreshnessSkew = 5 * time.Second
+)
 
 func init() {
 	Register(&Claude{})
@@ -113,6 +123,79 @@ func (c *Claude) FindTranscriptForResume(resumeID string) string {
 
 func (c *Claude) BootstrapBytes() int64 {
 	return 256 * 1024
+}
+
+func (c *Claude) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
+	return &claudeTranscriptWatcherBehavior{}
+}
+
+func (c *Claude) RecoverOnMissingPTY() bool {
+	return true
+}
+
+func (c *Claude) ResolveSpawnResumeSessionID(existingSessionID, requestedResumeID, storedResumeID string) string {
+	requested := strings.TrimSpace(requestedResumeID)
+	stored := strings.TrimSpace(storedResumeID)
+	if stored != "" && (requested == "" || requested == strings.TrimSpace(existingSessionID)) {
+		return stored
+	}
+	return requested
+}
+
+func (c *Claude) SpawnResumeSessionID(sessionID, resolvedResumeID string, resumePicker bool) string {
+	resolved := strings.TrimSpace(resolvedResumeID)
+	if resolved != "" {
+		return resolved
+	}
+	if !resumePicker {
+		return strings.TrimSpace(sessionID)
+	}
+	return ""
+}
+
+func (c *Claude) ResumeSessionIDFromStopTranscriptPath(transcriptPath string) string {
+	clean := strings.TrimSpace(transcriptPath)
+	if clean == "" {
+		return ""
+	}
+	base := filepath.Base(clean)
+	if !strings.HasSuffix(base, ".jsonl") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimSuffix(base, ".jsonl"))
+}
+
+func (c *Claude) ExtractLastAssistantForClassification(
+	transcriptPath string,
+	maxChars int,
+	classificationStart time.Time,
+	lastClassifiedTurnID string,
+) (content string, turnID string, err error) {
+	deadline := time.Now().Add(claudeTranscriptRetryWindow)
+	minAssistantTimestamp := classificationStart.Add(-claudeTranscriptFreshnessSkew)
+	lastClassified := strings.TrimSpace(lastClassifiedTurnID)
+	for {
+		turn, turnErr := transcript.ExtractLastAssistantTurnAfterLastUserSince(
+			transcriptPath,
+			maxChars,
+			minAssistantTimestamp,
+		)
+		if turnErr == nil && strings.TrimSpace(turn.Content) != "" {
+			turnUUID := strings.TrimSpace(turn.UUID)
+			if turnUUID != "" && turnUUID == lastClassified {
+				turnErr = ErrNoNewAssistantTurn
+			} else {
+				return turn.Content, turnUUID, nil
+			}
+		}
+		if !time.Now().Before(deadline) {
+			if turnErr == nil {
+				turnErr = ErrNoNewAssistantTurn
+			}
+			return "", "", turnErr
+		}
+		time.Sleep(claudeTranscriptRetryInterval)
+	}
 }
 
 // --- ClassifierProvider ---

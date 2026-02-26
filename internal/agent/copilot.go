@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/classifier"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/transcript"
 )
 
@@ -13,7 +14,9 @@ type Copilot struct{}
 
 var _ Driver = (*Copilot)(nil)
 var _ TranscriptFinder = (*Copilot)(nil)
+var _ TranscriptWatcherBehaviorProvider = (*Copilot)(nil)
 var _ ClassifierProvider = (*Copilot)(nil)
+var _ PTYStatePolicyProvider = (*Copilot)(nil)
 
 func init() {
 	Register(&Copilot{})
@@ -70,6 +73,29 @@ func (c *Copilot) FindTranscriptForResume(resumeID string) string {
 }
 
 func (c *Copilot) BootstrapBytes() int64 { return 512 * 1024 }
+
+func (c *Copilot) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
+	return &copilotTranscriptWatcherBehavior{}
+}
+
+func (c *Copilot) RecoveredRunningState(ptyState string) protocol.SessionState {
+	switch ptyState {
+	case protocol.StatePendingApproval:
+		return protocol.SessionStatePendingApproval
+	default:
+		return protocol.SessionStateLaunching
+	}
+}
+
+func (c *Copilot) ShouldApplyPTYState(current protocol.SessionState, incoming string) bool {
+	if incoming != protocol.StateWorking && incoming != protocol.StatePendingApproval {
+		return false
+	}
+	if current == protocol.SessionStatePendingApproval && incoming == protocol.StateWorking {
+		return false
+	}
+	return true
+}
 
 // --- ClassifierProvider ---
 
