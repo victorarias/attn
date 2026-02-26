@@ -12,14 +12,15 @@ import (
 )
 
 const (
-	transcriptPollInterval = 500 * time.Millisecond
-	transcriptQuietWindow  = 1500 * time.Millisecond
-	assistantDedupWindow   = 2 * time.Second
-	toolStartGraceWindow   = 1200 * time.Millisecond
-	codexActiveWindow      = 3 * time.Second
-	codexBootstrapBytes    = 256 * 1024
-	copilotBootstrapBytes  = 512 * 1024
-	claudeBootstrapBytes   = 256 * 1024
+	transcriptPollInterval   = 500 * time.Millisecond
+	transcriptQuietWindow    = 1500 * time.Millisecond
+	assistantDedupWindow     = 2 * time.Second
+	toolStartGraceWindow     = 1200 * time.Millisecond
+	codexActiveWindow        = 3 * time.Second
+	codexBootstrapBytes      = 256 * 1024
+	copilotBootstrapBytes    = 512 * 1024
+	claudeBootstrapBytes     = 256 * 1024
+	claudeHookStaleThreshold = 2 * time.Minute
 )
 
 type copilotPendingTool struct {
@@ -115,6 +116,24 @@ type transcriptWatcher struct {
 
 func isDuplicateAssistantEvent(lastContent string, lastAt time.Time, content string, now time.Time) bool {
 	return content == lastContent && !lastAt.IsZero() && now.Sub(lastAt) <= assistantDedupWindow
+}
+
+// shouldSkipClaudeWatcherClassification returns true when the transcript watcher
+// should not trigger classification for a Claude session. Hooks are the
+// authoritative source for "working" and "pending_approval" states; the watcher
+// only classifies when the session appears done or when hooks have gone stale.
+func shouldSkipClaudeWatcherClassification(agent protocol.SessionAgent, sessionState protocol.SessionState, lastSeen string) bool {
+	if agent != protocol.SessionAgentClaude {
+		return false
+	}
+	if sessionState != protocol.SessionStateWorking && sessionState != protocol.SessionStatePendingApproval {
+		return false
+	}
+	parsed := protocol.Timestamp(lastSeen).Time()
+	if parsed.IsZero() {
+		return false
+	}
+	return time.Since(parsed) < claudeHookStaleThreshold
 }
 
 func isTranscriptWatchedAgent(agent protocol.SessionAgent) bool {
@@ -524,6 +543,20 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 		}
 
 		if assistantSeq > classifiedSeq && !lastAssistantAt.IsZero() && !quietSince.IsZero() && time.Since(quietSince) >= transcriptQuietWindow {
+			// For Claude, hooks are authoritative for working/pending states.
+			// Skip watcher classification when hooks confirm the session is active.
+			// Don't consume classifiedSeq here — the watcher must re-check each
+			// poll so the 2-minute stale-hook safety valve can eventually fire.
+			if current := d.store.Get(w.sessionID); current != nil &&
+				shouldSkipClaudeWatcherClassification(w.agent, current.State, current.LastSeen) {
+				d.logf(
+					"transcript watcher: skipping classification, hooks active session=%s state=%s",
+					w.sessionID,
+					current.State,
+				)
+				continue
+			}
+
 			classifiedSeq = assistantSeq
 			d.logf(
 				"transcript watcher: quiet window reached session=%s seq=%d transcript=%s quiet_since=%s",

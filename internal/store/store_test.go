@@ -182,6 +182,56 @@ func TestStore_Touch(t *testing.T) {
 	}
 }
 
+func TestStore_UpdateStateWithTimestamp_SubSecondPrecision(t *testing.T) {
+	s := New()
+
+	now := time.Now()
+	s.Add(&protocol.Session{
+		ID:             "nano-test",
+		Label:          "test",
+		State:          protocol.SessionStateIdle,
+		StateSince:     now.Format(time.RFC3339Nano),
+		StateUpdatedAt: now.Format(time.RFC3339Nano),
+		LastSeen:       now.Format(time.RFC3339Nano),
+	})
+
+	// Hook updates state to working (uses UpdateState → writes RFC3339Nano now)
+	s.UpdateState("nano-test", protocol.StateWorking)
+
+	// Classifier started 100ms before the hook — should be rejected
+	classifierTime := now.Add(-100 * time.Millisecond)
+	if s.UpdateStateWithTimestamp("nano-test", protocol.StateIdle, classifierTime) {
+		t.Fatal("stale classifier result should be rejected")
+	}
+	if got := s.Get("nano-test"); got.State != protocol.SessionStateWorking {
+		t.Fatalf("state = %s, want working", got.State)
+	}
+}
+
+func TestStore_UpdateStateWithTimestamp_BackwardCompatibleWithRFC3339(t *testing.T) {
+	s := New()
+
+	// Simulate a session with old-format (second-precision) timestamps
+	oldNow := time.Now().Add(-10 * time.Second)
+	s.Add(&protocol.Session{
+		ID:             "compat-test",
+		Label:          "test",
+		State:          protocol.SessionStateIdle,
+		StateSince:     oldNow.Format(time.RFC3339),
+		StateUpdatedAt: oldNow.Format(time.RFC3339),
+		LastSeen:       oldNow.Format(time.RFC3339),
+	})
+
+	// A new classifier result should still work against old-format timestamps
+	newTime := time.Now()
+	if !s.UpdateStateWithTimestamp("compat-test", protocol.StateWaitingInput, newTime) {
+		t.Fatal("newer timestamp should update state even against old-format DB value")
+	}
+	if got := s.Get("compat-test"); got.State != protocol.SessionStateWaitingInput {
+		t.Fatalf("state = %s, want waiting_input", got.State)
+	}
+}
+
 func TestStore_ToggleMute(t *testing.T) {
 	s := New()
 

@@ -270,3 +270,38 @@ func TestIsTranscriptWatchedAgent(t *testing.T) {
 		t.Fatal("copilot should be transcript-watched")
 	}
 }
+
+func TestShouldSkipClaudeWatcherClassification(t *testing.T) {
+	recent := time.Now().Add(-10 * time.Second).Format(time.RFC3339Nano)
+	stale := time.Now().Add(-3 * time.Minute).Format(time.RFC3339Nano)
+
+	// Claude + working + recent hook → skip
+	if !shouldSkipClaudeWatcherClassification(protocol.SessionAgentClaude, protocol.SessionStateWorking, recent) {
+		t.Fatal("should skip for recently-active working Claude session")
+	}
+	// Claude + pending_approval + recent → skip
+	if !shouldSkipClaudeWatcherClassification(protocol.SessionAgentClaude, protocol.SessionStatePendingApproval, recent) {
+		t.Fatal("should skip for recently-active pending_approval Claude session")
+	}
+	// Claude + working + stale hook → do NOT skip (safety valve)
+	if shouldSkipClaudeWatcherClassification(protocol.SessionAgentClaude, protocol.SessionStateWorking, stale) {
+		t.Fatal("should NOT skip for stale working Claude session")
+	}
+	// Claude + idle → do NOT skip
+	if shouldSkipClaudeWatcherClassification(protocol.SessionAgentClaude, protocol.SessionStateIdle, recent) {
+		t.Fatal("should NOT skip for idle Claude session")
+	}
+	// Codex + working + recent → do NOT skip (not Claude)
+	if shouldSkipClaudeWatcherClassification(protocol.SessionAgentCodex, protocol.SessionStateWorking, recent) {
+		t.Fatal("should NOT skip for Codex session")
+	}
+	// Claude + working + unparseable timestamp → do NOT skip
+	if shouldSkipClaudeWatcherClassification(protocol.SessionAgentClaude, protocol.SessionStateWorking, "garbage") {
+		t.Fatal("should NOT skip when LastSeen is unparseable")
+	}
+	// Claude + working + legacy RFC3339 timestamp (pre-Nano) → skip
+	recentRFC3339 := time.Now().Add(-5 * time.Second).Format(time.RFC3339)
+	if !shouldSkipClaudeWatcherClassification(protocol.SessionAgentClaude, protocol.SessionStateWorking, recentRFC3339) {
+		t.Fatal("should skip with legacy RFC3339 timestamp that is still recent")
+	}
+}

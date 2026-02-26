@@ -162,13 +162,11 @@ func hasClaudeStatusGlyphPrefix(text string) bool {
 		return false
 	}
 
-	runes := []rune(trimmed)
-	switch runes[0] {
-	case '✻', '✶', '✢', '✳':
-		return true
-	default:
-		return false
-	}
+	r := []rune(trimmed)[0]
+	// Claude Code uses varying decorative star/asterisk glyphs from the
+	// Dingbats block. U+2722–U+274B covers asterisks, stars, snowflakes,
+	// and florettes while excluding crosses (U+2720), circles, and squares.
+	return r >= '\u2722' && r <= '\u274B'
 }
 
 func trimToLastChars(input string, maxChars int) string {

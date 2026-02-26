@@ -23,7 +23,7 @@ jobs:
         with:
           credentials_json: ${{ secrets.VERTEX_AI_SA }}
 
-      - uses: victorarias/shitty-reviewing-agent@v0.2.3
+      - uses: victorarias/shitty-reviewing-agent@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
