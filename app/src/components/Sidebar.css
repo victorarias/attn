@@ -179,7 +179,6 @@
 .worktree-indicator {
   color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
-  margin-left: auto;
   margin-right: 4px;
 }
 
@@ -187,12 +186,22 @@
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
   color: var(--color-text-dimmed);
+  margin-left: auto;
 }
 
 .session-actions {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+}
+
+.session-item:hover .session-actions,
+.session-item:focus-within .session-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .session-action-btn {
@@ -202,14 +211,8 @@
   font-size: 14px;
   cursor: pointer;
   padding: 0;
-  opacity: 0;
-  transition: opacity 0.1s;
   width: 14px;
   line-height: 1;
-}
-
-.session-item:hover .session-action-btn {
-  opacity: 1;
 }
 
 .session-action-btn:hover {

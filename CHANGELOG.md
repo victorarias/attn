@@ -6,6 +6,17 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-02-26]
+
+### Added
+- **Agent Transcript Watcher Behavior Interface**: Add `TranscriptWatcherBehaviorProvider` in the agent driver layer so each agent can define its own transcript lifecycle parsing, activity policy, dedupe behavior, and classification guard logic.
+- **Agent Daemon Policy Interfaces**: Add driver-level policy hooks for startup recovery behavior, PTY state filtering, resume-ID lifecycle, transcript classification extraction, and executable-aware classifier dispatch.
+
+### Changed
+- **Watcher Loop Separation**: Daemon transcript watcher now runs a generic loop and delegates all agent-specific decisions to driver-provided watcher behaviors, removing hardcoded Claude/Codex/Copilot branches from daemon watcher code.
+- **Built-in Agent Watcher Policies**: Move Claude hook-freshness classification guard, Codex lifecycle/working heuristics, and Copilot pending-approval turn policy into `internal/agent` behavior implementations.
+- **Daemon Agent Branch Removal**: Move remaining daemon agent conditionals (recoverability, PTY-state acceptance, stop-hook resume extraction, and stop-time transcript/classifier strategy) behind agent policies and helpers so daemon logic remains agent-agnostic.
+
 ## [2026-02-24]
 
 ### Fixed
@@ -15,19 +26,48 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-02-22]
 
+### Added
+- **Agent Driver Abstraction**: Add a new `internal/agent` driver layer (registry + per-agent driver files) with opt-in capabilities for hooks, transcript discovery/watching, classifier, state detector, resume, and fork support.
+- **Capability Env Overrides**: Add per-agent capability toggles via environment variables (for example `ATTN_AGENT_CLAUDE_TRANSCRIPT=0`) so features can be turned on/off without code changes.
+- **Generic Launch Preparation Hook**: Add optional driver pre-launch setup (`LaunchPreparer`) so agent-specific prep (like Claude resume transcript copy) is encapsulated in the agent driver.
+- **Generic Settings Writer**: Add `wrapper.WriteSettingsConfig()` for writing driver-provided settings/hook files (not Claude-specific anymore).
+- **Minimal Pi Driver**: Add an initial `pi` driver with transcript/hook/classifier/state-detector capabilities disabled by default, so Pi can be integrated incrementally.
+- **Dynamic Agent Settings Surface**: Settings now carry per-agent availability and executable keys for all registered drivers (for example `pi_available`, `pi_executable`, or future `<agent>_available/<agent>_executable`).
+- **Copilot Resume Transcript Discovery API**: Add `transcript.FindCopilotTranscriptForResume()` to expose resume-ID transcript lookup as shared transcript package functionality.
+
 ### Changed
+- **Protocol Update**: Expand protocol payloads for generic executable + `pi` compatibility fields, and align app/daemon handshake on protocol version `32`.
+- **Unified In-App Agent Launcher**: Replace per-agent direct launch duplication in `cmd/attn/main.go` with a shared `runAgentDirectly()` path that uses driver capabilities.
+- **Agent Selection UI is No Longer Hardcoded to 3 Agents**: New-session picker and settings modal now render agent choices dynamically from availability/settings keys rather than fixed Codex/Claude/Copilot button sets.
+- **Dynamic Executable Wiring from UI to Spawn**: Frontend now sends agent-specific executable overrides through a generic spawn field, enabling non-hardcoded agents (including Pi) without bespoke frontend plumbing.
+- **Transcript Watch Eligibility**: Daemon transcript watcher now checks driver capabilities instead of hard-coded agent-name allowlists.
+- **Transcript Discovery + Bootstrap**: Transcript watcher now resolves transcript path and bootstrap tail size strictly through agent drivers.
+- **Stop-Time Classification Gate**: When transcript capability is disabled for an agent, stop-time classification now skips transcript parsing and marks the session idle instead of forcing transcript-dependent logic.
+- **PTY Spawn Executable Plumbing**: Add generic `Executable` plumbing through daemon -> PTY backend -> worker runtime so selected CLI paths are passed per agent, while keeping existing agent-specific executable fields for compatibility.
+- **Agent Resolution for Spawn/Register**: Daemon now preserves/accepts registered agent-driver names instead of always coercing unknown values to built-in agents.
 - **Crash-Recovery Session Handling**: After daemon restart recovery, stale sessions without a live PTY are now handled by agent capability: Claude sessions are marked recoverable and can be reopened, while non-recoverable sessions are automatically reaped.
-- **Protocol Version**: Bump daemon/app protocol version to `31`.
 - **New-Session Resume UI Simplification**: Remove the Location Picker resume toggle and shortcut so new sessions always start with a fresh attn-managed session ID; resume behavior remains dedicated to recoverable crash-restart flows.
 - **Session Reload Control**: Sidebar session rows now show a small reload button on hover (stacked below close) to restart the underlying PTY for the same session ID.
 
 ### Fixed
+- **Protocol Handshake Version Drift**: Frontend WebSocket protocol constant now matches daemon protocol `32`, preventing immediate disconnects after upgrading.
+- **Classifier Capability Enforcement**: Stop-time classification now honors per-agent `classifier` capability toggles and skips LLM classification when disabled.
+- **Direct Launch Resume Flag Parsing**: `attn --resume --fork-session` now correctly opens resume picker mode while preserving `--fork-session` instead of mis-parsing the flag as a resume ID.
+- **Dead Agent Driver Abstractions**: Remove unused transcript-handler and state-detector provider interfaces from the driver layer to reduce indirection and avoid stale integration paths.
+- **Agent Isolation Cleanup**: Remove legacy transcript helper wrappers in `cmd/attn/main.go` and remove daemon-side hardcoded transcript discovery/bootstrap fallbacks so transcript behavior now comes from drivers.
+- **Executable Override Injection**: PTY spawn now avoids forcing default `ATTN_*_EXECUTABLE` env vars, preserving login-shell/env-based executable selection unless an explicit override is set.
+- **Todo Priority over Transcript Capability**: Stop-time state classification now evaluates pending todos before transcript-capability short-circuits, so unfinished todo lists still surface as `waiting_input`.
+- **Location Picker Shortcuts**: Agent keyboard shortcuts now index only available agents.
 - **Claude Session Reopen After Crash**: Opening a recoverable Claude session now re-spawns it with the same session ID, allowing Claude to resume conversation history instead of failing with a missing-PTY error.
 - **Claude Recoverable Resume Path**: Recoverable Claude sessions now respawn with `--resume <session-id>` (instead of a plain same-ID spawn), matching the first-run/resume contract and reducing same-ID startup conflicts.
 - **Resume-Picker Recovery ID Drift**: Hook events now sync Claude’s actual `session_id` back to the daemon (`set_session_resume_id`), persist it in session state, and reuse it during recoverable spawns so restart recovery resumes the real Claude conversation even when attn ID and Claude ID differ.
 - **Claude Reopen Guardrail**: Reopening known Claude sessions now attempts resume recovery even when a stale `recoverable=false` flag slips through after daemon churn, and spawn-time ID mapping now still prefers stored `resume_session_id`.
 - **Recoverable Flag Consistency**: Recoverable markers are now cleared once a live worker session is confirmed, preventing stale recovery badges.
 - **Worker Probe Early-Exit Detection**: Worker spawn now detects when the sidecar process exits before becoming ready and returns an explicit early-exit error instead of waiting for a socket timeout, making PTY backend probe failures faster and easier to diagnose.
+- **Reload Kill/Spawn Race**: Session reload now waits for `session_exited` before resolving kill, preventing first-click reload from attaching to a stale PTY and immediately disconnecting.
+- **Sidebar Session Actions Alignment**: Reload/close action stack now stays right-aligned in session rows.
+- **Location Picker Agent Shortcut Stability**: Agent ordering and keybindings are now fixed in the picker (`Claude=⌥1`, `Codex=⌥2`, `Copilot=⌥3`) instead of reordering on selection changes.
+- **Repo Options Keyboard Selection Freshness**: Repo-options keyboard handlers now use up-to-date selection callbacks, so agent changes made while choosing branches/worktrees are reflected in the final session launch.
 
 ## [2026-02-21]
 

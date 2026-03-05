@@ -15,6 +15,7 @@ import (
 	"time"
 
 	creackpty "github.com/creack/pty"
+	agentdriver "github.com/victorarias/attn/internal/agent"
 )
 
 const (
@@ -42,9 +43,13 @@ type SpawnOptions struct {
 	ResumePicker    bool
 	ForkSession     bool
 
+	// Executable is the selected CLI path for the current agent.
+	Executable string
+
 	ClaudeExecutable  string
 	CodexExecutable   string
 	CopilotExecutable string
+	PiExecutable      string
 }
 
 type AttachInfo struct {
@@ -194,11 +199,17 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	onState := m.onState
 	m.mu.Unlock()
 
-	switch agent {
-	case "codex", "copilot":
-		session.detector = newCodexStateDetector()
-	case "claude":
-		session.detector = newClaudeWorkingDetector()
+	detectorEnabled := true
+	if d := agentdriver.Get(agent); d != nil {
+		detectorEnabled = agentdriver.EffectiveCapabilities(d).HasStateDetector
+	}
+	if detectorEnabled {
+		switch agent {
+		case "codex", "copilot":
+			session.detector = newCodexStateDetector()
+		case "claude":
+			session.detector = newClaudeWorkingDetector()
+		}
 	}
 	if session.detector != nil && onState != nil {
 		session.onState = func(state string) {
@@ -310,18 +321,16 @@ func (m *Manager) getSession(id string) (*Session, error) {
 
 func normalizeAgent(agent string) string {
 	a := strings.TrimSpace(strings.ToLower(agent))
-	switch a {
-	case "", "codex":
-		return "codex"
-	case "claude":
-		return "claude"
-	case "copilot":
-		return "copilot"
-	case "shell":
-		return "shell"
-	default:
+	if a == "" {
 		return "codex"
 	}
+	if a == "shell" {
+		return "shell"
+	}
+	if agentdriver.Get(a) != nil {
+		return a
+	}
+	return "codex"
 }
 
 func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string) *exec.Cmd {
@@ -374,17 +383,47 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 		if wrapperPath != "" {
 			env = mergeEnvironment(env, []string{"ATTN_WRAPPER_PATH=" + wrapperPath})
 		}
-		if opts.ClaudeExecutable != "" {
-			env = mergeEnvironment(env, []string{"ATTN_CLAUDE_EXECUTABLE=" + opts.ClaudeExecutable})
-		}
-		if opts.CodexExecutable != "" {
-			env = mergeEnvironment(env, []string{"ATTN_CODEX_EXECUTABLE=" + opts.CodexExecutable})
-		}
-		if opts.CopilotExecutable != "" {
-			env = mergeEnvironment(env, []string{"ATTN_COPILOT_EXECUTABLE=" + opts.CopilotExecutable})
+
+		executable := configuredExecutableForAgent(opts, agent)
+		if d := agentdriver.Get(agent); d != nil {
+			envKey := strings.TrimSpace(d.ExecutableEnvVar())
+			if envKey != "" && executable != "" && executable != d.DefaultExecutable() {
+				env = mergeEnvironment(env, []string{envKey + "=" + executable})
+			}
+		} else {
+			if opts.ClaudeExecutable != "" && opts.ClaudeExecutable != "claude" {
+				env = mergeEnvironment(env, []string{"ATTN_CLAUDE_EXECUTABLE=" + opts.ClaudeExecutable})
+			}
+			if opts.CodexExecutable != "" && opts.CodexExecutable != "codex" {
+				env = mergeEnvironment(env, []string{"ATTN_CODEX_EXECUTABLE=" + opts.CodexExecutable})
+			}
+			if opts.CopilotExecutable != "" && opts.CopilotExecutable != "copilot" {
+				env = mergeEnvironment(env, []string{"ATTN_COPILOT_EXECUTABLE=" + opts.CopilotExecutable})
+			}
+			if opts.PiExecutable != "" && opts.PiExecutable != "pi" {
+				env = mergeEnvironment(env, []string{"ATTN_PI_EXECUTABLE=" + opts.PiExecutable})
+			}
 		}
 	}
 	return env
+}
+
+func configuredExecutableForAgent(opts SpawnOptions, agent string) string {
+	if strings.TrimSpace(opts.Executable) != "" {
+		return strings.TrimSpace(opts.Executable)
+	}
+	switch agent {
+	case "claude":
+		return strings.TrimSpace(opts.ClaudeExecutable)
+	case "codex":
+		return strings.TrimSpace(opts.CodexExecutable)
+	case "copilot":
+		return strings.TrimSpace(opts.CopilotExecutable)
+	case "pi":
+		return strings.TrimSpace(opts.PiExecutable)
+	default:
+		return ""
+	}
 }
 
 func readLoginShellEnv(shellPath string) ([]string, error) {

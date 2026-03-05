@@ -27,6 +27,7 @@ enum SessionAgent {
   claude,
   codex,
   copilot,
+  pi,
 }
 
 enum HeatState {
@@ -498,9 +499,11 @@ model SpawnSessionMessage {
   resume_session_id?: string;
   resume_picker?: boolean;
   fork_session?: boolean;
-  claude_executable?: string;
-  codex_executable?: string;
-  copilot_executable?: string;
+  executable?: string;         // Generic executable override for selected agent
+  claude_executable?: string;  // Backward compatibility
+  codex_executable?: string;   // Backward compatibility
+  copilot_executable?: string; // Backward compatibility
+  pi_executable?: string;      // Backward compatibility
 }
 
 model AttachSessionMessage {

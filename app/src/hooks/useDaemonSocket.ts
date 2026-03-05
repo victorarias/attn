@@ -87,7 +87,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '31';
+const PROTOCOL_VERSION = '32';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -481,6 +481,9 @@ export function useDaemonSocket({
       case 'attach_session':
         rejectPendingByPredicate((key) => key.startsWith('pty_attach_'), error);
         return;
+      case 'kill_session':
+        rejectPendingByPredicate((key) => key.startsWith('pty_kill_'), error);
+        return;
       case 'approve_pr':
         rejectPendingByPredicate((key) => key.endsWith(':approve'), error);
         return;
@@ -762,6 +765,12 @@ export function useDaemonSocket({
 
           case 'session_exited':
             if (data.id) {
+              const killKey = `pty_kill_${data.id}`;
+              const pendingKill = pendingActionsRef.current.get(killKey);
+              if (pendingKill) {
+                pendingActionsRef.current.delete(killKey);
+                pendingKill.resolve({ success: true });
+              }
               attachedPtySessionsRef.current.delete(data.id);
               ptySeqRef.current.delete(data.id);
               pendingAttachOutputsRef.current.delete(data.id);
@@ -1444,9 +1453,11 @@ export function useDaemonSocket({
         ...(args.resume_session_id && { resume_session_id: args.resume_session_id }),
         ...(args.resume_picker && { resume_picker: args.resume_picker }),
         ...(args.fork_session && { fork_session: args.fork_session }),
+        ...(args.executable && { executable: args.executable }),
         ...(args.claude_executable && { claude_executable: args.claude_executable }),
         ...(args.codex_executable && { codex_executable: args.codex_executable }),
         ...(args.copilot_executable && { copilot_executable: args.copilot_executable }),
+        ...(args.pi_executable && { pi_executable: args.pi_executable }),
       }));
 
       setTimeout(() => {
@@ -1507,10 +1518,30 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'pty_resize', id, cols, rows }));
   }, []);
 
-  const sendKillSession = useCallback((id: string, signal?: string) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ cmd: 'kill_session', id, ...(signal && { signal }) }));
+  const sendKillSession = useCallback((id: string, signal?: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = `pty_kill_${id}`;
+      pendingActionsRef.current.set(key, {
+        resolve: () => resolve(),
+        reject,
+      });
+
+      ws.send(JSON.stringify({ cmd: 'kill_session', id, ...(signal && { signal }) }));
+
+      // Wait for session_exited to avoid kill/spawn races during reload.
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Kill session timed out'));
+        }
+      }, 3000);
+    });
   }, []);
 
   useEffect(() => {
@@ -1590,7 +1621,7 @@ export function useDaemonSocket({
         attachedPtySessionsRef.current.delete(id);
         ptySeqRef.current.delete(id);
         sendDetachSession(id);
-        sendKillSession(id);
+        await sendKillSession(id);
       },
     });
 

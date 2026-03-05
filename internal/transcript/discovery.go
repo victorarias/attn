@@ -287,6 +287,29 @@ func FindCopilotTranscript(cwd string, startedAt time.Time) string {
 	return bestPath
 }
 
+// FindCopilotTranscriptForResume resolves a Copilot resume ID to a transcript path.
+// Resume IDs are directory names under ~/.copilot/session-state.
+func FindCopilotTranscriptForResume(resumeID string) string {
+	if strings.TrimSpace(resumeID) == "" {
+		return ""
+	}
+
+	// Resume IDs are directory names; reject path traversal / separators.
+	if strings.Contains(resumeID, "/") || strings.Contains(resumeID, "\\") || strings.Contains(resumeID, "..") {
+		return ""
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(homeDir, ".copilot", "session-state", resumeID, "events.jsonl")
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
+}
+
 // FindClaudeTranscript searches Claude project directories for a transcript
 // file matching the session ID. Returns empty string if not found.
 func FindClaudeTranscript(sessionID string) string {

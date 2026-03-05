@@ -11,9 +11,11 @@ export interface PtySpawnArgs {
   fork_session?: boolean | null;
   agent?: string;
   label?: string;
+  executable?: string;
   claude_executable?: string;
   codex_executable?: string;
   copilot_executable?: string;
+  pi_executable?: string;
 }
 
 export type PtyEventPayload =

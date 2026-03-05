@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/git"
@@ -57,10 +58,7 @@ type longRunSession struct {
 }
 
 const (
-	claudeTranscriptRetryWindow   = 2 * time.Second
-	claudeTranscriptRetryInterval = 100 * time.Millisecond
-	claudeTranscriptFreshnessSkew = 5 * time.Second
-	longRunReviewThreshold        = 5 * time.Minute
+	longRunReviewThreshold = 5 * time.Minute
 
 	startupRecoveryRetryMax       = 2
 	startupRecoveryRetryDelay     = 500 * time.Millisecond
@@ -78,8 +76,6 @@ const (
 	warnGHNotInstalled            = "gh_not_installed"
 	warnGHVersionTooOld           = "gh_version_too_old"
 )
-
-var errNoNewAssistantTurn = errors.New("no new assistant turn")
 
 // ReviewerFactory creates a reviewer for testing
 type ReviewerFactory func(*store.Store) Reviewer
@@ -583,8 +579,7 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 		if _, ok := liveIDs[session.ID]; ok {
 			continue
 		}
-		// Claude sessions can be recovered by re-spawning with the same session ID
-		if session.Agent == protocol.SessionAgentClaude {
+		if agentdriver.RecoverOnMissingPTY(agentdriver.Get(string(session.Agent))) {
 			d.store.UpdateState(session.ID, protocol.StateIdle)
 			d.store.SetRecoverable(session.ID, true)
 			recoverable++
@@ -594,7 +589,7 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 		removed++
 	}
 	if recoverable > 0 {
-		d.logf("marked %d Claude sessions as recoverable on startup", recoverable)
+		d.logf("marked %d sessions as recoverable on startup", recoverable)
 	}
 	return removed
 }
@@ -693,7 +688,7 @@ func (d *Daemon) reconcileStartupWorkerSessions(recoveryReport ptybackend.Recove
 	if reconcile.MarkedRecoverable > 0 {
 		d.addWarning(
 			warnStaleSessionMissingWorker,
-			fmt.Sprintf("%d Claude sessions can be recovered from a previous daemon run.", reconcile.MarkedRecoverable),
+			fmt.Sprintf("%d sessions can be recovered from a previous daemon run.", reconcile.MarkedRecoverable),
 		)
 	}
 	if reconcile.Reaped > 0 {
@@ -768,7 +763,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 				report.MissingMetadata++
 				continue
 			}
-			if protocol.NormalizeSpawnAgent(info.Agent, string(protocol.SessionAgentCodex)) == protocol.AgentShellValue {
+			if normalizeSpawnAgent(info.Agent) == protocol.AgentShellValue {
 				report.SkippedShell++
 				continue
 			}
@@ -789,7 +784,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			d.store.Add(&protocol.Session{
 				ID:             sessionID,
 				Label:          label,
-				Agent:          protocol.NormalizeSessionAgent(protocol.SessionAgent(info.Agent), protocol.SessionAgentCodex),
+				Agent:          normalizeStoredSessionAgent(info.Agent, protocol.SessionAgentCodex),
 				Directory:      directory,
 				State:          state,
 				StateSince:     now,
@@ -854,9 +849,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			report.SkippedIdle++
 			continue
 		}
-		// Claude sessions can be recovered (re-spawned with same session ID to resume conversation).
-		// Non-Claude sessions (codex, copilot, shell) cannot be resumed this way, so reap them.
-		if session.Agent == protocol.SessionAgentClaude {
+		if agentdriver.RecoverOnMissingPTY(agentdriver.Get(string(session.Agent))) {
 			d.store.UpdateState(session.ID, protocol.StateIdle)
 			d.store.SetRecoverable(session.ID, true)
 			report.StateUpdated++
@@ -916,7 +909,7 @@ func (d *Daemon) runDeferredWorkerReconciliation(maxAttempts int, retryInterval 
 		if reconcile.MarkedRecoverable > 0 {
 			d.addWarning(
 				warnStaleSessionMissingWorker,
-				fmt.Sprintf("%d Claude sessions can be recovered from a previous daemon run.", reconcile.MarkedRecoverable),
+				fmt.Sprintf("%d sessions can be recovered from a previous daemon run.", reconcile.MarkedRecoverable),
 			)
 		}
 		if reconcile.Reaped > 0 {
@@ -971,24 +964,26 @@ func sessionUpdatedAfter(session *protocol.Session, cutoff time.Time) bool {
 	return updatedAt.After(cutoff)
 }
 
+func normalizeStoredSessionAgent(agent string, fallback protocol.SessionAgent) protocol.SessionAgent {
+	normalized := strings.TrimSpace(strings.ToLower(agent))
+	if normalized == "" {
+		return protocol.NormalizeSessionAgent(fallback, protocol.SessionAgentCodex)
+	}
+	if normalized == protocol.AgentShellValue {
+		return protocol.SessionAgentCodex
+	}
+	if agentdriver.Get(normalized) != nil {
+		return protocol.SessionAgent(normalized)
+	}
+	return protocol.NormalizeSessionAgent(protocol.SessionAgent(normalized), fallback)
+}
+
 func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.SessionState {
 	if !info.Running {
 		return protocol.SessionStateIdle
 	}
-	agent := protocol.NormalizeSessionAgent(protocol.SessionAgent(info.Agent), protocol.SessionAgentCodex)
-	switch info.State {
-	case protocol.StateWaitingInput:
-		if agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot {
-			return protocol.SessionStateLaunching
-		}
-		return protocol.SessionStateWaitingInput
-	case protocol.StatePendingApproval:
-		return protocol.SessionStatePendingApproval
-	case protocol.StateIdle:
-		return protocol.SessionStateLaunching
-	default:
-		return protocol.SessionStateLaunching
-	}
+	agent := normalizeStoredSessionAgent(info.Agent, protocol.SessionAgentCodex)
+	return agentdriver.RecoveredRunningSessionState(agentdriver.Get(string(agent)), info.State)
 }
 
 // Stop stops the daemon
@@ -1094,17 +1089,8 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 		return
 	}
 	agent := session.Agent
-	if (agent == protocol.SessionAgentCodex || agent == protocol.SessionAgentCopilot) &&
-		state != protocol.StateWorking &&
-		state != protocol.StatePendingApproval {
-		return
-	}
-	// Copilot emits frequent redraw chunks while approval prompts are visible.
-	// Treat PTY "working" as a hint only, and let transcript watcher clear
-	// pending_approval when the gated tool either completes or the turn closes.
-	if agent == protocol.SessionAgentCopilot &&
-		session.State == protocol.SessionStatePendingApproval &&
-		state == protocol.StateWorking {
+	driver := agentdriver.Get(string(agent))
+	if !agentdriver.ShouldApplyPTYState(driver, session.State, state) {
 		return
 	}
 
@@ -1438,7 +1424,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	branchInfo, _ := git.GetBranchInfo(msg.Dir)
 
 	nowStr := string(protocol.TimestampNow())
-	agent := protocol.NormalizeSessionAgent(protocol.Deref(msg.Agent), protocol.SessionAgentClaude)
+	agent := normalizeStoredSessionAgent(string(protocol.Deref(msg.Agent)), protocol.SessionAgentClaude)
 	session := &protocol.Session{
 		ID:             msg.ID,
 		Label:          protocol.Deref(msg.Label),
@@ -1543,8 +1529,11 @@ func (d *Daemon) handleSetSessionResumeID(conn net.Conn, msg *protocol.SetSessio
 
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.logf("handleStop: session=%s, transcript_path=%s", msg.ID, msg.TranscriptPath)
-	if session := d.store.Get(msg.ID); session != nil && session.Agent == protocol.SessionAgentClaude {
-		if resumeSessionID := claudeSessionIDFromTranscriptPath(msg.TranscriptPath); resumeSessionID != "" {
+	if session := d.store.Get(msg.ID); session != nil {
+		if resumeSessionID := agentdriver.ResumeSessionIDFromStopTranscriptPath(
+			agentdriver.Get(string(session.Agent)),
+			msg.TranscriptPath,
+		); resumeSessionID != "" {
 			d.store.SetResumeSessionID(msg.ID, resumeSessionID)
 		}
 	}
@@ -1596,19 +1585,6 @@ func (d *Daemon) handleSessionVisualized(sessionID string) {
 	go d.classifySessionState(sessionID, transcriptPath)
 }
 
-func claudeSessionIDFromTranscriptPath(transcriptPath string) string {
-	clean := strings.TrimSpace(transcriptPath)
-	if clean == "" {
-		return ""
-	}
-	base := filepath.Base(clean)
-	if !strings.HasSuffix(base, ".jsonl") {
-		return ""
-	}
-	id := strings.TrimSuffix(base, ".jsonl")
-	return strings.TrimSpace(id)
-}
-
 func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	// Capture timestamp BEFORE starting classification
 	// This prevents slow classifier results from overwriting newer state updates
@@ -1619,6 +1595,16 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	if session == nil {
 		d.logf("classifySessionState: session %s not found, aborting", sessionID)
 		return
+	}
+
+	// Capability gates: agents can independently disable transcript parsing and
+	// classification.
+	transcriptEnabled := true
+	classifierEnabled := true
+	if driver := agentdriver.Get(string(session.Agent)); driver != nil {
+		caps := agentdriver.EffectiveCapabilities(driver)
+		transcriptEnabled = caps.HasTranscript
+		classifierEnabled = caps.HasClassifier
 	}
 
 	// Check pending todos first (fast path)
@@ -1636,6 +1622,18 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		return
 	}
 
+	if !transcriptEnabled {
+		d.logf("classifySessionState: transcript disabled for agent=%s session=%s, setting idle", session.Agent, sessionID)
+		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateIdle, classificationStartTime)
+		return
+	}
+
+	if !classifierEnabled {
+		d.logf("classifySessionState: classifier disabled for agent=%s session=%s, setting idle", session.Agent, sessionID)
+		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateIdle, classificationStartTime)
+		return
+	}
+
 	resolvedTranscriptPath := d.resolveTranscriptPathForSession(session, transcriptPath)
 	if resolvedTranscriptPath != transcriptPath {
 		d.logf(
@@ -1650,7 +1648,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	d.logf("classifySessionState: parsing transcript for session %s", sessionID)
 	lastMessage, assistantTurnID, err := d.extractLastAssistantMessage(session, resolvedTranscriptPath, 500, classificationStartTime)
 	if err != nil {
-		if errors.Is(err, errNoNewAssistantTurn) {
+		if errors.Is(err, agentdriver.ErrNoNewAssistantTurn) {
 			d.logf("classifySessionState: no new assistant turn for session %s, skipping classification", sessionID)
 			return
 		}
@@ -1659,7 +1657,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateUnknown, classificationStartTime)
 		return
 	}
-	if session.Agent == protocol.SessionAgentClaude && strings.TrimSpace(assistantTurnID) != "" {
+	if strings.TrimSpace(assistantTurnID) != "" {
 		defer d.clearClassifyingTurn(sessionID)
 	}
 
@@ -1690,7 +1688,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	}
 
 	d.logf("classifySessionState: session %s classified as %s", sessionID, state)
-	if session.Agent == protocol.SessionAgentClaude && strings.TrimSpace(assistantTurnID) != "" {
+	if strings.TrimSpace(assistantTurnID) != "" {
 		d.setClassifiedTurnID(sessionID, assistantTurnID)
 	}
 	d.updateAndBroadcastStateWithTimestamp(sessionID, state, classificationStartTime)
@@ -1701,24 +1699,23 @@ func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout t
 		return d.classifier.Classify(text, timeout)
 	}
 	if session != nil {
-		switch session.Agent {
-		case protocol.SessionAgentCopilot:
-			return classifier.ClassifyWithCopilot(text, timeout)
-		case protocol.SessionAgentCodex:
-			return classifier.ClassifyWithCodexExecutable(
-				text,
-				d.store.GetSetting(SettingCodexExecutable),
-				timeout,
-			)
+		driver := agentdriver.Get(string(session.Agent))
+		if state, err, ok := agentdriver.ClassifyWithDriver(
+			driver,
+			text,
+			d.store.GetSetting(executableSettingKey(string(session.Agent))),
+			timeout,
+		); ok {
+			return state, err
 		}
 	}
-	// Use Claude SDK for Claude sessions.
+	// Use Claude SDK for Claude sessions and fallback.
 	return classifier.ClassifyWithClaude(text, timeout)
 }
 
 func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, transcriptPath string) string {
 	path := strings.TrimSpace(transcriptPath)
-	if session == nil || session.Agent != protocol.SessionAgentClaude {
+	if session == nil {
 		return path
 	}
 
@@ -1728,49 +1725,39 @@ func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, tran
 		}
 	}
 
-	discovered := transcript.FindClaudeTranscript(session.ID)
-	if discovered != "" {
-		return discovered
+	if driver := agentdriver.Get(string(session.Agent)); driver != nil {
+		if tf, ok := agentdriver.GetTranscriptFinder(driver); ok {
+			if discovered := strings.TrimSpace(tf.FindTranscript(session.ID, session.Directory, time.Now())); discovered != "" {
+				return discovered
+			}
+		}
 	}
 
 	return path
 }
 
 func (d *Daemon) extractLastAssistantMessage(session *protocol.Session, transcriptPath string, maxChars int, classificationStart time.Time) (string, string, error) {
-	if session == nil || session.Agent != protocol.SessionAgentClaude {
+	if session == nil {
 		lastMessage, err := transcript.ExtractLastAssistantMessage(transcriptPath, maxChars)
 		return lastMessage, "", err
 	}
 
-	deadline := time.Now().Add(claudeTranscriptRetryWindow)
-	minAssistantTimestamp := classificationStart.Add(-claudeTranscriptFreshnessSkew)
-	lastClassifiedTurnID := d.classifiedTurnID(session.ID)
-	for {
-		turn, err := transcript.ExtractLastAssistantTurnAfterLastUserSince(
-			transcriptPath,
-			maxChars,
-			minAssistantTimestamp,
-		)
-		if err == nil && strings.TrimSpace(turn.Content) != "" {
-			if strings.TrimSpace(turn.UUID) != "" && turn.UUID == lastClassifiedTurnID {
-				err = errNoNewAssistantTurn
-			} else {
-				if session.Agent == protocol.SessionAgentClaude && strings.TrimSpace(turn.UUID) != "" {
-					if !d.beginClassifyingTurn(session.ID, turn.UUID) {
-						return "", "", errNoNewAssistantTurn
-					}
-				}
-				return turn.Content, turn.UUID, nil
-			}
-		}
-		if !time.Now().Before(deadline) {
-			if err == nil {
-				err = errNoNewAssistantTurn
-			}
-			return "", "", err
-		}
-		time.Sleep(claudeTranscriptRetryInterval)
+	driver := agentdriver.Get(string(session.Agent))
+	lastMessage, turnID, err := agentdriver.ExtractLastAssistantForClassification(
+		driver,
+		transcriptPath,
+		maxChars,
+		classificationStart,
+		d.classifiedTurnID(session.ID),
+	)
+	if err != nil {
+		return "", "", err
 	}
+	turnID = strings.TrimSpace(turnID)
+	if turnID != "" && !d.beginClassifyingTurn(session.ID, turnID) {
+		return "", "", agentdriver.ErrNoNewAssistantTurn
+	}
+	return lastMessage, turnID, nil
 }
 
 func (d *Daemon) classifiedTurnID(sessionID string) string {
@@ -2506,7 +2493,7 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 	}
 
 	d.clearLongRunTracking(msg.Session.ID)
-	msg.Session.Agent = protocol.NormalizeSessionAgent(msg.Session.Agent, protocol.SessionAgentCodex)
+	msg.Session.Agent = normalizeStoredSessionAgent(string(msg.Session.Agent), protocol.SessionAgentCodex)
 
 	// Add session directly to store
 	d.store.Add(&msg.Session)
