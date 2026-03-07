@@ -124,8 +124,12 @@ func (r *Reviewer) Run(ctx context.Context, config ReviewConfig, onEvent func(Re
 
 	// Build client options
 	// MCP tools must be explicitly allowed using format: mcp__<server_name>__<tool_name>
+	model := strings.TrimSpace(r.store.GetSetting("reviewer_model"))
+	if model == "" {
+		model = "claude-opus-4-6"
+	}
 	opts := []types.Option{
-		types.WithModel("claude-opus-4-5"),
+		types.WithModel(model),
 		types.WithCwd(config.RepoPath),
 		types.WithTools("Read", "Glob", "Grep"),
 		sdk.WithClientMCPServer(mcpServer),

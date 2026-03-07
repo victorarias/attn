@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
@@ -240,6 +241,102 @@ func (c *Client) QueryAuthors() ([]protocol.AuthorState, error) {
 		return nil, err
 	}
 	return resp.Authors, nil
+}
+
+// StartReviewLoop starts a session-level review loop.
+func (c *Client) StartReviewLoop(sessionID, presetID, prompt string, iterationLimit int) (*protocol.ReviewLoopRun, error) {
+	return c.StartReviewLoopWithHandoff(sessionID, presetID, prompt, iterationLimit, nil)
+}
+
+// StartReviewLoopWithHandoff starts a review loop with optional structured handoff JSON.
+func (c *Client) StartReviewLoopWithHandoff(sessionID, presetID, prompt string, iterationLimit int, handoffPayloadJSON *string) (*protocol.ReviewLoopRun, error) {
+	msg := protocol.StartReviewLoopMessage{
+		Cmd:            protocol.CmdStartReviewLoop,
+		SessionID:      sessionID,
+		Prompt:         prompt,
+		IterationLimit: iterationLimit,
+	}
+	if presetID != "" {
+		msg.PresetID = &presetID
+	}
+	if handoffPayloadJSON != nil && strings.TrimSpace(*handoffPayloadJSON) != "" {
+		msg.HandoffPayloadJson = handoffPayloadJSON
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.ReviewLoopRun, nil
+}
+
+// StopReviewLoop stops a session-level review loop.
+func (c *Client) StopReviewLoop(sessionID string) (*protocol.ReviewLoopRun, error) {
+	msg := protocol.StopReviewLoopMessage{
+		Cmd:       protocol.CmdStopReviewLoop,
+		SessionID: sessionID,
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.ReviewLoopRun, nil
+}
+
+// GetReviewLoopState returns session-level review loop state.
+func (c *Client) GetReviewLoopState(sessionID string) (*protocol.ReviewLoopRun, error) {
+	msg := protocol.GetReviewLoopStateMessage{
+		Cmd:       protocol.CmdGetReviewLoopState,
+		SessionID: sessionID,
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.ReviewLoopRun, nil
+}
+
+// GetReviewLoopRun returns a review loop by loop ID.
+func (c *Client) GetReviewLoopRun(loopID string) (*protocol.ReviewLoopRun, error) {
+	msg := protocol.GetReviewLoopRunMessage{
+		Cmd:    protocol.CmdGetReviewLoopRun,
+		LoopID: loopID,
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.ReviewLoopRun, nil
+}
+
+// SetReviewLoopIterationLimit updates the loop iteration limit.
+func (c *Client) SetReviewLoopIterationLimit(sessionID string, iterationLimit int) (*protocol.ReviewLoopRun, error) {
+	msg := protocol.SetReviewLoopIterationLimitMessage{
+		Cmd:            protocol.CmdSetReviewLoopIterations,
+		SessionID:      sessionID,
+		IterationLimit: iterationLimit,
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.ReviewLoopRun, nil
+}
+
+// AnswerReviewLoop provides a user answer and resumes an awaiting loop.
+func (c *Client) AnswerReviewLoop(loopID, interactionID, answer string) (*protocol.ReviewLoopRun, error) {
+	msg := protocol.AnswerReviewLoopMessage{
+		Cmd:    protocol.CmdAnswerReviewLoop,
+		LoopID: loopID,
+		Answer: answer,
+	}
+	if strings.TrimSpace(interactionID) != "" {
+		msg.InteractionID = &interactionID
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.ReviewLoopRun, nil
 }
 
 // FetchPRDetails requests the daemon to fetch PR details for a PR ID

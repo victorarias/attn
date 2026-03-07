@@ -53,7 +53,7 @@ func (b *FixtureBuilder) AddAssistantText(text string) *FixtureBuilder {
 	b.transport.AddMessage(map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
-			"model": "claude-sonnet-4-5",
+			"model": "claude-sonnet-4-6",
 			"content": []any{
 				map[string]any{"type": "text", "text": text},
 			},
@@ -67,7 +67,7 @@ func (b *FixtureBuilder) AddAssistantTextWithDelay(text string, delay time.Durat
 	b.transport.AddMessageWithDelay(map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
-			"model": "claude-sonnet-4-5",
+			"model": "claude-sonnet-4-6",
 			"content": []any{
 				map[string]any{"type": "text", "text": text},
 			},
@@ -81,7 +81,7 @@ func (b *FixtureBuilder) AddAssistantThinking(thinking string) *FixtureBuilder {
 	b.transport.AddMessage(map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
-			"model": "claude-sonnet-4-5",
+			"model": "claude-sonnet-4-6",
 			"content": []any{
 				map[string]any{"type": "thinking", "thinking": thinking, "signature": "mock"},
 			},
@@ -97,7 +97,7 @@ func (b *FixtureBuilder) AddToolUse(toolID, toolName string, input map[string]an
 	b.transport.AddMessage(map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
-			"model": "claude-sonnet-4-5",
+			"model": "claude-sonnet-4-6",
 			"content": []any{
 				map[string]any{
 					"type":  "tool_use",
@@ -116,7 +116,7 @@ func (b *FixtureBuilder) AddToolUseWithDelay(toolID, toolName string, input map[
 	b.transport.AddMessageWithDelay(map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
-			"model": "claude-sonnet-4-5",
+			"model": "claude-sonnet-4-6",
 			"content": []any{
 				map[string]any{
 					"type":  "tool_use",

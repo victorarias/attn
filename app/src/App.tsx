@@ -14,6 +14,7 @@ import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
 import { ReviewPanel } from './components/ReviewPanel';
+import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
 import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
 import { ThumbsModal } from './components/ThumbsModal';
 import { ForkDialog } from './components/ForkDialog';
@@ -24,7 +25,7 @@ import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore } from './store/sessions';
 import { ptyWrite } from './pty/bridge';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse, BranchDiffFile, DaemonWarning } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { useDaemonStore } from './store/daemonSessions';
@@ -97,6 +98,7 @@ function App() {
   const [reviewerEvents, setReviewerEvents] = useState<ReviewerEvent[]>([]);
   const [reviewerRunning, setReviewerRunning] = useState(false);
   const [reviewerError, setReviewerError] = useState<string | undefined>();
+  const [reviewLoopsBySessionId, setReviewLoopsBySessionId] = useState<Record<string, ReviewLoopState>>({});
 
   // Comments added by reviewer agent (passed to ReviewPanel)
   const [pendingAgentComments, setPendingAgentComments] = useState<import('./types/generated').ReviewComment[]>([]);
@@ -312,6 +314,7 @@ function App() {
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,
+    getReviewLoopState,
     getReviewState,
     markFileViewed,
     sendAddComment,
@@ -322,6 +325,10 @@ function App() {
     sendGetComments,
     sendStartReview,
     sendCancelReview,
+    sendStartReviewLoop,
+    sendStopReviewLoop,
+    answerReviewLoop,
+    setReviewLoopIterationLimit,
     connectionError,
     hasReceivedInitialState,
     rateLimit,
@@ -336,8 +343,23 @@ function App() {
     onSettingError: setSettingError,
     onWorktreesUpdate: setWorktrees,
     onGitStatusUpdate: setGitStatus,
+    onReviewLoopUpdate: (state) => {
+      if (!state) return;
+      setReviewLoopsBySessionId(prev => ({ ...prev, [state.source_session_id]: state }));
+    },
     reviewer: reviewerCallbacks,
   });
+
+  const setReviewLoopStateForSession = useCallback((sessionId: string, state: ReviewLoopState | null) => {
+    setReviewLoopsBySessionId(prev => {
+      if (!state) {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      }
+      return { ...prev, [sessionId]: state };
+    });
+  }, []);
 
   // Memoize clearGitStatus to prevent subscription effect from re-running
   const clearGitStatus = useCallback(() => setGitStatus(null), []);
@@ -353,6 +375,7 @@ function App() {
         reviewerEvents={reviewerEvents}
         reviewerRunning={reviewerRunning}
         reviewerError={reviewerError}
+        reviewLoopsBySessionId={reviewLoopsBySessionId}
         pendingAgentComments={pendingAgentComments}
         agentResolvedCommentIds={agentResolvedCommentIds}
         connectionError={connectionError}
@@ -397,6 +420,7 @@ function App() {
         sendGetFileDiff={sendGetFileDiff}
         sendGetBranchDiffFiles={sendGetBranchDiffFiles}
         getRepoInfo={getRepoInfo}
+        getReviewLoopState={getReviewLoopState}
         getReviewState={getReviewState}
         markFileViewed={markFileViewed}
         sendAddComment={sendAddComment}
@@ -407,6 +431,11 @@ function App() {
         sendGetComments={sendGetComments}
         sendStartReview={sendStartReview}
         sendCancelReview={sendCancelReview}
+        sendStartReviewLoop={sendStartReviewLoop}
+        sendStopReviewLoop={sendStopReviewLoop}
+        answerReviewLoop={answerReviewLoop}
+        setReviewLoopIterationLimit={setReviewLoopIterationLimit}
+        setReviewLoopStateForSession={setReviewLoopStateForSession}
         clearGitStatus={clearGitStatus}
       />
     </SettingsProvider>
@@ -422,6 +451,7 @@ interface AppContentProps {
   reviewerEvents: ReviewerEvent[];
   reviewerRunning: boolean;
   reviewerError: string | undefined;
+  reviewLoopsBySessionId: Record<string, ReviewLoopState>;
   pendingAgentComments: import('./types/generated').ReviewComment[];
   agentResolvedCommentIds: string[];
   connectionError: string | null;
@@ -466,6 +496,7 @@ interface AppContentProps {
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
   sendGetBranchDiffFiles: ReturnType<typeof useDaemonSocket>['sendGetBranchDiffFiles'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
+  getReviewLoopState: ReturnType<typeof useDaemonSocket>['getReviewLoopState'];
   getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
   markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
   sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
@@ -476,6 +507,11 @@ interface AppContentProps {
   sendGetComments: ReturnType<typeof useDaemonSocket>['sendGetComments'];
   sendStartReview: ReturnType<typeof useDaemonSocket>['sendStartReview'];
   sendCancelReview: ReturnType<typeof useDaemonSocket>['sendCancelReview'];
+  sendStartReviewLoop: ReturnType<typeof useDaemonSocket>['sendStartReviewLoop'];
+  sendStopReviewLoop: ReturnType<typeof useDaemonSocket>['sendStopReviewLoop'];
+  answerReviewLoop: ReturnType<typeof useDaemonSocket>['answerReviewLoop'];
+  setReviewLoopIterationLimit: ReturnType<typeof useDaemonSocket>['setReviewLoopIterationLimit'];
+  setReviewLoopStateForSession: (sessionId: string, state: ReviewLoopState | null) => void;
   clearGitStatus: () => void;
 }
 
@@ -487,6 +523,7 @@ function AppContent({
   reviewerEvents,
   reviewerRunning,
   reviewerError,
+  reviewLoopsBySessionId,
   pendingAgentComments,
   agentResolvedCommentIds,
   connectionError,
@@ -530,6 +567,7 @@ function AppContent({
   sendGetFileDiff,
   sendGetBranchDiffFiles,
   getRepoInfo,
+  getReviewLoopState,
   getReviewState,
   markFileViewed,
   sendAddComment,
@@ -540,6 +578,11 @@ function AppContent({
   sendGetComments,
   sendStartReview,
   sendCancelReview,
+  sendStartReviewLoop,
+  sendStopReviewLoop,
+  answerReviewLoop,
+  setReviewLoopIterationLimit,
+  setReviewLoopStateForSession,
   clearGitStatus,
 }: AppContentProps) {
   const {
@@ -704,12 +747,14 @@ function AppContent({
   const enrichedLocalSessions = sessions.map((s) => {
     const daemonSession = daemonSessions.find((ds) => ds.id === s.id);
     const rawState = daemonSession?.state ?? s.state;
+    const reviewLoop = reviewLoopsBySessionId[s.id];
     return {
       ...s,
       state: normalizeSessionState(rawState),
       branch: daemonSession?.branch ?? s.branch,
       isWorktree: daemonSession?.is_worktree ?? s.isWorktree,
       recoverable: daemonSession?.recoverable ?? false,
+      reviewLoopStatus: reviewLoop?.status,
     };
   });
 
@@ -888,6 +933,10 @@ function AppContent({
   const [thumbsText, setThumbsText] = useState('');
   const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
   const { message: errorMessage, showError, clearError } = useErrorToast();
+  const activeReviewLoopState = useMemo(
+    () => (activeSessionId ? reviewLoopsBySessionId[activeSessionId] ?? null : null),
+    [activeSessionId, reviewLoopsBySessionId],
+  );
 
   useEffect(() => {
     if (!settingError) {
@@ -896,6 +945,25 @@ function AppContent({
     showError(settingError);
     clearSettingError();
   }, [clearSettingError, settingError, showError]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    let cancelled = false;
+    getReviewLoopState(activeSessionId)
+      .then((result) => {
+        if (cancelled) return;
+        setReviewLoopStateForSession(activeSessionId, result.state);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('[App] Failed to fetch review loop state:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, getReviewLoopState, setReviewLoopStateForSession]);
 
   // Fork dialog state
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
@@ -1422,13 +1490,57 @@ function AppContent({
   // Send code reference to the active Claude terminal
   const handleSendToClaude = useCallback((reference: string) => {
     if (!activeSessionId) return;
-    ptyWrite({ id: activeSessionId, data: reference }).catch(console.error);
+    ptyWrite({ id: activeSessionId, data: reference, source: 'system' }).catch(console.error);
     // Focus the terminal so user can start typing
     setTimeout(() => {
       const handle = terminalRefs.current.get(activeSessionId);
       handle?.focus();
     }, 50);
   }, [activeSessionId]);
+
+  const handleStartReviewLoop = useCallback(async (prompt: string, iterationLimit: number, presetId?: string) => {
+    if (!activeSessionId) return;
+    try {
+      const result = await sendStartReviewLoop(activeSessionId, prompt, iterationLimit, presetId);
+      setReviewLoopStateForSession(activeSessionId, result.state);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Failed to start review loop');
+      throw error;
+    }
+  }, [activeSessionId, sendStartReviewLoop, setReviewLoopStateForSession, showError]);
+
+  const handleStopReviewLoop = useCallback(async () => {
+    if (!activeSessionId) return;
+    try {
+      const result = await sendStopReviewLoop(activeSessionId);
+      setReviewLoopStateForSession(activeSessionId, result.state);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Failed to stop review loop');
+      throw error;
+    }
+  }, [activeSessionId, sendStopReviewLoop, setReviewLoopStateForSession, showError]);
+
+  const handleSetReviewLoopIterations = useCallback(async (iterationLimit: number) => {
+    if (!activeSessionId) return;
+    try {
+      const result = await setReviewLoopIterationLimit(activeSessionId, iterationLimit);
+      setReviewLoopStateForSession(activeSessionId, result.state);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Failed to update review loop iterations');
+      throw error;
+    }
+  }, [activeSessionId, setReviewLoopIterationLimit, setReviewLoopStateForSession, showError]);
+
+  const handleAnswerReviewLoop = useCallback(async (loopId: string, interactionId: string, answer: string) => {
+    if (!activeSessionId) return;
+    try {
+      const result = await answerReviewLoop(loopId, interactionId, answer);
+      setReviewLoopStateForSession(activeSessionId, result.state);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Failed to answer review loop question');
+      throw error;
+    }
+  }, [activeSessionId, answerReviewLoop, setReviewLoopStateForSession, showError]);
 
   // Terminal panel handlers for active session
   const handleOpenTerminalPanel = useCallback(() => {
@@ -1563,6 +1675,16 @@ function AppContent({
           onToggleCollapse={toggleSidebarCollapse}
         />
         <div className="terminal-pane">
+          {activeSessionId && (
+            <SessionReviewLoopBar
+              sessionId={activeSessionId}
+              loopState={activeReviewLoopState}
+              onStart={handleStartReviewLoop}
+              onStop={handleStopReviewLoop}
+              onSetIterations={handleSetReviewLoopIterations}
+              onAnswer={handleAnswerReviewLoop}
+            />
+          )}
           <div className="terminal-main-area">
             {sessions.map((session) => (
               <div

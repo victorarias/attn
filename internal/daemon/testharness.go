@@ -1,12 +1,16 @@
 package daemon
 
 import (
+	"context"
 	"net"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
+	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -231,7 +235,9 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 	sessionStore := store.New()
 
 	pidPath := b.socketPath + ".pid"
+	dataRoot := filepath.Dir(b.socketPath)
 	hub := newWSHub()
+	manager := pty.NewManager(pty.DefaultScrollbackSize, nil)
 
 	// Set up broadcast listener if recording is enabled
 	if b.recordBroadcast {
@@ -241,15 +247,25 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 	}
 
 	d := &Daemon{
-		socketPath:      b.socketPath,
-		pidPath:         pidPath,
-		store:           sessionStore,
-		wsHub:           hub,
-		done:            make(chan struct{}),
-		logger:          nil,
-		ghRegistry:      newRegistryFromClient(b.ghClient),
-		classifier:      classifier,
-		reviewerFactory: b.reviewerFactory,
+		socketPath:       b.socketPath,
+		pidPath:          pidPath,
+		dataRoot:         dataRoot,
+		store:            sessionStore,
+		wsHub:            hub,
+		done:             make(chan struct{}),
+		logger:           nil,
+		ghRegistry:       newRegistryFromClient(b.ghClient),
+		classifier:       classifier,
+		reviewerFactory:  b.reviewerFactory,
+		ptyBackend:       ptybackend.NewEmbedded(manager),
+		transcriptWatch:  make(map[string]*transcriptWatcher),
+		pendingInitialWS: make(map[*wsClient]struct{}),
+		startedCh:        make(chan struct{}),
+		classifiedTurn:   make(map[string]string),
+		classifyingTurn:  make(map[string]string),
+		longRun:          make(map[string]longRunSession),
+		reviewLoopCancel: make(map[string]context.CancelFunc),
+		pendingInputSrc:  make(map[string]string),
 	}
 
 	return &TestHarness{

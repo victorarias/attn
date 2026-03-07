@@ -17,6 +17,7 @@ interface DashboardProps {
     label: string;
     state: UISessionState;
     cwd: string;
+    reviewLoopStatus?: string;
   }>;
   prs: DaemonPR[];
   isLoading: boolean;
@@ -43,6 +44,23 @@ export function Dashboard({
   onOpenPR,
   onOpenSettings,
 }: DashboardProps) {
+  const reviewLoopBadge = (status?: string): string | null => {
+    switch (status) {
+      case 'running':
+        return 'loop';
+      case 'awaiting_user':
+        return 'input';
+      case 'completed':
+        return 'done';
+      case 'stopped':
+        return 'stopped';
+      case 'error':
+        return 'error';
+      default:
+        return null;
+    }
+  };
+
   const waitingSessions = sessions.filter((s) => s.state === 'waiting_input');
   const pendingApprovalSessions = sessions.filter((s) => s.state === 'pending_approval');
   const launchingSessions = sessions.filter((s) => s.state === 'launching');
@@ -197,6 +215,11 @@ export function Dashboard({
                       >
                         <StateIndicator state="waiting_input" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopBadge(s.reviewLoopStatus) && (
+                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                            {reviewLoopBadge(s.reviewLoopStatus)}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -214,6 +237,11 @@ export function Dashboard({
                       >
                         <StateIndicator state="pending_approval" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopBadge(s.reviewLoopStatus) && (
+                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                            {reviewLoopBadge(s.reviewLoopStatus)}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -231,6 +259,11 @@ export function Dashboard({
                       >
                         <StateIndicator state="launching" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopBadge(s.reviewLoopStatus) && (
+                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                            {reviewLoopBadge(s.reviewLoopStatus)}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -248,6 +281,11 @@ export function Dashboard({
                       >
                         <StateIndicator state="working" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopBadge(s.reviewLoopStatus) && (
+                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                            {reviewLoopBadge(s.reviewLoopStatus)}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -265,6 +303,11 @@ export function Dashboard({
                       >
                         <StateIndicator state="idle" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopBadge(s.reviewLoopStatus) && (
+                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                            {reviewLoopBadge(s.reviewLoopStatus)}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -282,6 +325,11 @@ export function Dashboard({
                       >
                         <StateIndicator state="unknown" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopBadge(s.reviewLoopStatus) && (
+                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                            {reviewLoopBadge(s.reviewLoopStatus)}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>

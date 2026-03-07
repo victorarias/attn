@@ -12,6 +12,24 @@ interface LocalSession {
   isWorktree?: boolean;
   cwd?: string;
   recoverable?: boolean;
+  reviewLoopStatus?: string;
+}
+
+function reviewLoopBadge(status?: string): string | null {
+  switch (status) {
+    case 'running':
+      return 'loop';
+    case 'awaiting_user':
+      return 'input';
+    case 'completed':
+      return 'done';
+    case 'stopped':
+      return 'stopped';
+    case 'error':
+      return 'error';
+    default:
+      return null;
+  }
 }
 
 interface SidebarProps {
@@ -117,6 +135,11 @@ export function Sidebar({
                   {session.recoverable && (
                     <span className="session-recoverable">recoverable</span>
                   )}
+                  {reviewLoopBadge(session.reviewLoopStatus) && (
+                    <span className={`session-loop-badge session-loop-badge--${session.reviewLoopStatus}`}>
+                      {reviewLoopBadge(session.reviewLoopStatus)}
+                    </span>
+                  )}
                 </div>
                 {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                 <span className="session-shortcut">⌘{globalIndex + 1}</span>
@@ -170,6 +193,11 @@ export function Sidebar({
                     <span className="session-label">{session.label}</span>
                     {session.recoverable && (
                       <span className="session-recoverable">recoverable</span>
+                    )}
+                    {reviewLoopBadge(session.reviewLoopStatus) && (
+                      <span className={`session-loop-badge session-loop-badge--${session.reviewLoopStatus}`}>
+                        {reviewLoopBadge(session.reviewLoopStatus)}
+                      </span>
                     )}
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <span className="session-shortcut">⌘{globalIndex + 1}</span>

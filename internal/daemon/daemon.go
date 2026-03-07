@@ -79,6 +79,7 @@ const (
 
 // ReviewerFactory creates a reviewer for testing
 type ReviewerFactory func(*store.Store) Reviewer
+type ReviewLoopExecutor func(ctx context.Context, run *protocol.ReviewLoopRun, prompt string) (*reviewLoopOutcome, string, string, string, error)
 
 // Reviewer interface for code review operations
 type Reviewer interface {
@@ -140,6 +141,7 @@ type Daemon struct {
 	ghRegistry       *github.ClientRegistry
 	classifier       Classifier      // Optional, uses package-level classifier.Classify if nil
 	reviewerFactory  ReviewerFactory // Optional, creates real reviewer if nil
+	reviewLoopExec   ReviewLoopExecutor
 	repoCaches       map[string]*repoCache
 	repoCacheMu      sync.RWMutex
 	warnings         []protocol.DaemonWarning
@@ -152,6 +154,10 @@ type Daemon struct {
 	classifyingTurn  map[string]string
 	longRunMu        sync.Mutex
 	longRun          map[string]longRunSession
+	reviewLoopMu     sync.Mutex
+	reviewLoopCancel map[string]context.CancelFunc
+	inputSourceMu    sync.Mutex
+	pendingInputSrc  map[string]string
 	recoveryMu       sync.RWMutex
 	recovering       bool
 	pendingInitialWS map[*wsClient]struct{}
@@ -323,6 +329,8 @@ func New(socketPath string) *Daemon {
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
 		longRun:          make(map[string]longRunSession),
+		reviewLoopCancel: make(map[string]context.CancelFunc),
+		pendingInputSrc:  make(map[string]string),
 	}
 }
 
@@ -348,6 +356,8 @@ func NewForTesting(socketPath string) *Daemon {
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
 		longRun:          make(map[string]longRunSession),
+		reviewLoopCancel: make(map[string]context.CancelFunc),
+		pendingInputSrc:  make(map[string]string),
 	}
 }
 
@@ -377,6 +387,8 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
 		longRun:          make(map[string]longRunSession),
+		reviewLoopCancel: make(map[string]context.CancelFunc),
+		pendingInputSrc:  make(map[string]string),
 	}
 }
 
@@ -1012,6 +1024,7 @@ func (d *Daemon) Stop() {
 func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	d.stopTranscriptWatcher(info.ID)
 	d.clearLongRunTracking(info.ID)
+	d.handleReviewLoopSourceSessionExit(info.ID)
 
 	if d.ptyBackend != nil {
 		if err := d.removePTYSession(info.ID); err != nil {
@@ -1376,6 +1389,18 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos:
 		d.handleTodos(conn, msg.(*protocol.TodosMessage))
+	case protocol.CmdStartReviewLoop:
+		d.handleStartReviewLoop(conn, msg.(*protocol.StartReviewLoopMessage))
+	case protocol.CmdStopReviewLoop:
+		d.handleStopReviewLoop(conn, msg.(*protocol.StopReviewLoopMessage))
+	case protocol.CmdGetReviewLoopState:
+		d.handleGetReviewLoopState(conn, msg.(*protocol.GetReviewLoopStateMessage))
+	case protocol.CmdGetReviewLoopRun:
+		d.handleGetReviewLoopRun(conn, msg.(*protocol.GetReviewLoopRunMessage))
+	case protocol.CmdSetReviewLoopIterations:
+		d.handleSetReviewLoopIterations(conn, msg.(*protocol.SetReviewLoopIterationLimitMessage))
+	case protocol.CmdAnswerReviewLoop:
+		d.handleAnswerReviewLoop(conn, msg.(*protocol.AnswerReviewLoopMessage))
 	case protocol.CmdQuery:
 		d.handleQuery(conn, msg.(*protocol.QueryMessage))
 	case protocol.CmdHeartbeat:
@@ -1477,6 +1502,8 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 	}
 
 	d.terminateSession(msg.ID, syscall.SIGTERM)
+	d.handleReviewLoopSourceSessionExit(msg.ID)
+	d.setPendingInputSource(msg.ID, "")
 	d.store.Remove(msg.ID)
 	d.clearLongRunTracking(msg.ID)
 	d.clearClassifiedTurn(msg.ID)
@@ -1497,6 +1524,7 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	switch msg.State {
 	case protocol.StateWorking:
 		d.markRunStartedIfNeeded(msg.ID)
+		_ = d.takePendingInputSource(msg.ID)
 	case protocol.StateIdle:
 		d.clearLongRunTracking(msg.ID)
 	}
@@ -1972,7 +2000,6 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 		d.clearLongRunTracking(sessionID)
 	}
 	d.store.UpdateState(sessionID, state)
-
 	// Broadcast to WebSocket clients
 	session := d.sessionForBroadcast(d.store.Get(sessionID))
 	if session != nil {

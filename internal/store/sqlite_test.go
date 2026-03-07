@@ -16,7 +16,7 @@ func TestOpenDB_CreatesSchema(t *testing.T) {
 	defer db.Close()
 
 	// Verify tables exist by querying them
-	tables := []string{"sessions", "prs", "repos"}
+	tables := []string{"sessions", "prs", "repos", "review_loop_runs", "review_loop_iterations", "review_loop_interactions"}
 	for _, table := range tables {
 		var count int
 		err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)
