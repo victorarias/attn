@@ -166,3 +166,29 @@ func TestClaudeWorkingDetector_VariousGlyphs(t *testing.T) {
 		t.Fatalf("✽ glyph should trigger working: changed=%v state=%q", changed, state)
 	}
 }
+
+func TestClaudeWorkingDetector_InterruptedPromptBecomesWaitingInput(t *testing.T) {
+	d := newClaudeWorkingDetector()
+	frame := []byte("  Interrupted · What should Claude do instead?\r\n")
+
+	state, changed := d.Observe(frame)
+	if !changed {
+		t.Fatal("interrupted prompt should produce a state update")
+	}
+	if state != stateWaitingInput {
+		t.Fatalf("state=%q want=%q", state, stateWaitingInput)
+	}
+}
+
+func TestClaudeWorkingDetector_WelcomePromptBecomesWaitingInput(t *testing.T) {
+	d := newClaudeWorkingDetector()
+	frame := []byte("❯ \r\n? for shortcuts\r\n")
+
+	state, changed := d.Observe(frame)
+	if !changed {
+		t.Fatal("welcome prompt should produce a state update")
+	}
+	if state != stateWaitingInput {
+		t.Fatalf("state=%q want=%q", state, stateWaitingInput)
+	}
+}

@@ -156,6 +156,13 @@
   color: var(--color-text-muted);
 }
 
+.settings-row-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 /* Projects directory input */
 .projects-dir-input {
   display: flex;
@@ -182,6 +189,23 @@
   color: var(--color-text-dimmed);
 }
 
+.settings-textarea {
+  width: 100%;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  outline: none;
+  resize: vertical;
+}
+
+.settings-textarea:focus {
+  border-color: var(--color-border-focus);
+}
+
 .settings-field {
   display: flex;
   flex-direction: column;
@@ -191,6 +215,22 @@
 
 .settings-field:last-child {
   margin-bottom: 0;
+}
+
+.review-loop-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.review-loop-settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.review-loop-settings-actions {
+  justify-content: flex-start;
 }
 
 .settings-agent-toggle {
@@ -331,6 +371,11 @@
   cursor: pointer;
   transition: all 150ms ease-out;
   white-space: nowrap;
+}
+
+.browse-btn.danger {
+  border-color: rgba(220, 38, 38, 0.35);
+  color: #ef4444;
 }
 
 .browse-btn:hover {

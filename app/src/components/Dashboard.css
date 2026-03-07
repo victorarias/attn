@@ -263,6 +263,7 @@
   border-radius: 6px;
   font-size: var(--font-size-md);
   color: var(--color-text-primary);
+  position: relative;
 }
 
 .session-row.clickable {
@@ -271,6 +272,59 @@
 
 .session-row.clickable:hover {
   background: var(--color-bg-elevated);
+}
+
+.session-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: 6px 0 0 6px;
+  opacity: 0;
+}
+
+.session-row--loop-running::before,
+.session-row--loop-awaiting_user::before,
+.session-row--loop-completed::before,
+.session-row--loop-error::before,
+.session-row--loop-stopped::before {
+  opacity: 1;
+}
+
+.session-row--loop-running::before {
+  background: #f97316;
+}
+
+.session-row--loop-awaiting_user::before {
+  background: #f59e0b;
+}
+
+.session-row--loop-completed::before {
+  background: #22c55e;
+}
+
+.session-row--loop-error::before {
+  background: #ef4444;
+}
+
+.session-row--loop-stopped::before {
+  background: #94a3b8;
+}
+
+.session-row--loop-running {
+  background: linear-gradient(90deg, rgba(249, 115, 22, 0.14), rgba(249, 115, 22, 0.02));
+}
+
+.session-row--loop-awaiting_user {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.03));
+}
+
+.session-row--loop-completed {
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.14), rgba(34, 197, 94, 0.02));
+}
+
+.session-row--loop-error {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.16), rgba(239, 68, 68, 0.03));
 }
 
 .state-dot {
@@ -299,35 +353,27 @@
   white-space: nowrap;
 }
 
-.session-loop-chip {
+.session-loop-state {
+  font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  padding: 2px 7px;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-elevated);
 }
 
-.session-loop-chip--running {
+.session-loop-state--running {
   color: #f97316;
-  border-color: rgba(249, 115, 22, 0.3);
 }
 
-.session-loop-chip--awaiting_user {
+.session-loop-state--awaiting_user {
   color: #f59e0b;
-  border-color: rgba(245, 158, 11, 0.3);
 }
 
-.session-loop-chip--completed {
+.session-loop-state--completed {
   color: #22c55e;
-  border-color: rgba(34, 197, 94, 0.3);
 }
 
-.session-loop-chip--error {
+.session-loop-state--error {
   color: #ef4444;
-  border-color: rgba(239, 68, 68, 0.3);
 }
 
 .dashboard-footer {

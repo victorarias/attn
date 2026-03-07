@@ -33,6 +33,9 @@ func TestEnsureAttnClaudeSkillInstalled(t *testing.T) {
 	if !strings.Contains(text, "attn review-loop show --loop <loop-id>") {
 		t.Fatalf("skill content missing review loop show command: %q", text)
 	}
+	if !strings.Contains(text, "make sure your current implementation work is committed before starting the loop") {
+		t.Fatalf("skill content missing commit-before-review guidance: %q", text)
+	}
 	if !strings.Contains(text, `use your attn skill to start a review loop`) {
 		t.Fatalf("skill content missing natural-language trigger guidance: %q", text)
 	}

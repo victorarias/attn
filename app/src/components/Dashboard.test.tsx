@@ -54,7 +54,7 @@ describe('Dashboard sessions', () => {
     expect(screen.getByTestId('session-s3')).toBeInTheDocument();
   });
 
-  it('shows review loop badge on session rows', () => {
+  it('shows review loop state on session rows', () => {
     render(
       <Dashboard
         sessions={[
@@ -68,6 +68,6 @@ describe('Dashboard sessions', () => {
       />
     );
 
-    expect(screen.getByText('loop')).toBeInTheDocument();
+    expect(screen.getByText('review running')).toBeInTheDocument();
   });
 });

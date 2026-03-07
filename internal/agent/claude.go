@@ -98,6 +98,9 @@ func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 // PrepareLaunch copies resume transcripts into the target project folder so
 // Claude can resolve --resume in fork/session-handoff scenarios.
 func (c *Claude) PrepareLaunch(opts SpawnOpts) error {
+	if err := ensureAttnClaudeSkillInstalled(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(opts.ResumeSessionID) == "" {
 		return nil
 	}

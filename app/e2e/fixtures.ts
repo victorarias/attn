@@ -1,5 +1,5 @@
 import { test as base, expect } from '@playwright/test';
-import { spawn, ChildProcess, execSync } from 'child_process';
+import { spawn, ChildProcess, execSync, execFileSync } from 'child_process';
 import * as http from 'http';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -225,6 +225,54 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
       console.log('Daemon stopped');
     },
   };
+}
+
+
+function sqlQuote(value: string | null | undefined): string {
+  if (value == null) return 'NULL';
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function injectReviewLoopStateIntoDB(
+  dbPath: string,
+  loop: {
+    sessionId: string;
+    status?: string;
+    presetId?: string;
+    customPrompt?: string;
+    resolvedPrompt?: string;
+    iterationCount?: number;
+    iterationLimit?: number;
+    stopRequested?: boolean;
+    advanceToken?: string;
+    stopReason?: string;
+  }
+): void {
+  const now = new Date().toISOString();
+  const sql = `
+    INSERT OR REPLACE INTO session_review_loops (
+      session_id, status, preset_id, custom_prompt, resolved_prompt,
+      iteration_count, iteration_limit, stop_requested, advance_token,
+      stop_reason, last_prompt_at, last_advance_at, last_user_input_at,
+      created_at, updated_at
+    ) VALUES (
+      ${sqlQuote(loop.sessionId)},
+      ${sqlQuote(loop.status ?? 'waiting_for_agent_advance')},
+      ${sqlQuote(loop.presetId ?? 'full-review-fix')},
+      ${sqlQuote(loop.customPrompt ?? 'Do a full review')},
+      ${sqlQuote(loop.resolvedPrompt ?? 'Do a full review')},
+      ${loop.iterationCount ?? 0},
+      ${loop.iterationLimit ?? 2},
+      ${(loop.stopRequested ?? false) ? 1 : 0},
+      ${sqlQuote(loop.advanceToken ?? 'test-token')},
+      ${sqlQuote(loop.stopReason ?? null)},
+      ${sqlQuote(now)},
+      NULL,
+      NULL,
+      ${sqlQuote(now)},
+      ${sqlQuote(now)}
+    );`;
+  execFileSync('sqlite3', [dbPath, sql], { stdio: 'pipe' });
 }
 
 interface ManagedDaemon {
@@ -511,6 +559,7 @@ type DaemonFixture = {
   }) => Promise<void>;
   updateSessionState: (id: string, state: string) => Promise<void>;
   createTestRepo: () => Promise<{ repoPath: string; cleanup: () => void }>;
+  injectReviewLoopState: (loop: { sessionId: string; status?: string; presetId?: string; customPrompt?: string; resolvedPrompt?: string; iterationCount?: number; iterationLimit?: number; stopRequested?: boolean; advanceToken?: string; stopReason?: string }) => Promise<void>;
 };
 
 type Fixtures = {
@@ -590,6 +639,9 @@ export const test = base.extend<Fixtures>({
       },
       createTestRepo: async () => {
         return createTestGitRepo();
+      },
+      injectReviewLoopState: async (loop) => {
+        injectReviewLoopStateIntoDB(managed.dbPath, loop);
       },
     };
 

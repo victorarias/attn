@@ -128,6 +128,26 @@ func (b *EmbeddedBackend) Shutdown(_ context.Context) error {
 	return nil
 }
 
+func (b *EmbeddedBackend) SessionInfo(_ context.Context, sessionID string) (SessionInfo, error) {
+	info, err := b.manager.SessionInfo(sessionID)
+	if err != nil {
+		return SessionInfo{}, err
+	}
+	return SessionInfo{
+		SessionID:  info.SessionID,
+		Agent:      info.Agent,
+		CWD:        info.CWD,
+		Running:    info.Running,
+		State:      info.State,
+		Cols:       info.Cols,
+		Rows:       info.Rows,
+		PID:        info.PID,
+		LastSeq:    info.LastSeq,
+		ExitCode:   info.ExitCode,
+		ExitSignal: info.ExitSignal,
+	}, nil
+}
+
 type embeddedStream struct {
 	events    chan OutputEvent
 	closeFn   func()

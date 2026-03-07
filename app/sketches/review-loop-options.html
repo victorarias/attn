@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>attn Review Loop UI Sketches</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #07090c;
+      --surface: #10141a;
+      --surface-2: #151b23;
+      --surface-3: #1b2430;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #edf3f8;
+      --muted: #8b98a8;
+      --muted-2: #5d6977;
+      --running: #ff8a3d;
+      --running-soft: rgba(255, 138, 61, 0.16);
+      --input: #f6c453;
+      --input-soft: rgba(246, 196, 83, 0.16);
+      --done: #45d483;
+      --done-soft: rgba(69, 212, 131, 0.15);
+      --error: #ff5c6a;
+      --error-soft: rgba(255, 92, 106, 0.16);
+      --shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    }
+
+    body {
+      background:
+        radial-gradient(circle at top left, rgba(255, 138, 61, 0.10), transparent 24%),
+        radial-gradient(circle at top right, rgba(69, 212, 131, 0.08), transparent 22%),
+        linear-gradient(180deg, #050608, #0b0f14 55%, #080b10);
+      color: var(--text);
+      font-family: "IBM Plex Sans", sans-serif;
+      min-height: 100vh;
+      padding: 40px 32px 80px;
+    }
+
+    .page {
+      max-width: 1500px;
+      margin: 0 auto;
+    }
+
+    .header {
+      margin-bottom: 36px;
+    }
+
+    .kicker {
+      color: var(--running);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      font-size: 36px;
+      line-height: 1.04;
+      margin-bottom: 12px;
+    }
+
+    .lede {
+      color: var(--muted);
+      font-size: 16px;
+      max-width: 820px;
+      line-height: 1.6;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .legend-pill {
+      align-items: center;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--muted);
+      display: inline-flex;
+      font-size: 13px;
+      gap: 8px;
+      padding: 8px 12px;
+    }
+
+    .legend-dot {
+      border-radius: 999px;
+      height: 10px;
+      width: 10px;
+    }
+
+    .dot-running { background: var(--running); }
+    .dot-input { background: var(--input); }
+    .dot-done { background: var(--done); }
+    .dot-error { background: var(--error); }
+
+    .grid {
+      display: grid;
+      gap: 36px;
+    }
+
+    .option {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .option-copy {
+      padding: 24px 24px 16px;
+    }
+
+    .option-meta {
+      align-items: baseline;
+      display: flex;
+      gap: 14px;
+      margin-bottom: 10px;
+    }
+
+    .option-label {
+      color: var(--running);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .option-title {
+      font-size: 24px;
+      font-weight: 600;
+    }
+
+    .option-desc {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.6;
+      max-width: 980px;
+    }
+
+    .sketch {
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-top: 1px solid var(--border);
+      padding: 22px;
+    }
+
+    .frame {
+      background: #070a0f;
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 20px;
+      min-height: 560px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 90px 240px 1fr;
+      min-height: 560px;
+    }
+
+    .icon-rail {
+      background: linear-gradient(180deg, #0d1218, #0b1015);
+      border-right: 1px solid var(--border);
+      padding: 18px 14px;
+    }
+
+    .icon {
+      align-items: center;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 14px;
+      color: var(--muted);
+      display: flex;
+      font-size: 17px;
+      height: 48px;
+      justify-content: center;
+      margin-bottom: 10px;
+      position: relative;
+      width: 48px;
+    }
+
+    .icon.active {
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+    }
+
+    .sidebar {
+      background: linear-gradient(180deg, #121821, #10161e);
+      border-right: 1px solid var(--border);
+      padding: 16px 12px;
+    }
+
+    .sidebar-title {
+      color: var(--muted-2);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      margin-bottom: 14px;
+      padding: 0 8px;
+      text-transform: uppercase;
+    }
+
+    .session {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.04);
+      border-radius: 16px;
+      margin-bottom: 10px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .session::before {
+      content: "";
+      inset: 0 auto 0 0;
+      position: absolute;
+      width: 4px;
+    }
+
+    .session.running::before { background: var(--running); }
+    .session.input::before { background: var(--input); }
+    .session.done::before { background: var(--done); }
+    .session.error::before { background: var(--error); }
+
+    .session-body {
+      padding: 12px 14px 12px 16px;
+    }
+
+    .session-name {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .session-sub {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .session-state {
+      color: var(--muted-2);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      margin-top: 8px;
+      text-transform: uppercase;
+    }
+
+    .main {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)),
+        #0a0f15;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      position: relative;
+    }
+
+    .main-header {
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 14px;
+      justify-content: space-between;
+      min-height: 76px;
+      padding: 18px 22px;
+      position: relative;
+    }
+
+    .main-header.running {
+      box-shadow: inset 0 -2px 0 var(--running);
+    }
+
+    .main-header.input {
+      box-shadow: inset 0 -2px 0 var(--input);
+    }
+
+    .header-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .header-title {
+      font-size: 19px;
+      font-weight: 600;
+    }
+
+    .header-sub {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .loop-trigger {
+      align-items: center;
+      border-radius: 999px;
+      color: var(--text);
+      display: inline-flex;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      font-weight: 600;
+      gap: 10px;
+      letter-spacing: 0.05em;
+      padding: 10px 14px;
+      text-transform: uppercase;
+    }
+
+    .loop-trigger.running {
+      background: var(--running-soft);
+      border: 1px solid rgba(255, 138, 61, 0.38);
+    }
+
+    .loop-trigger.input {
+      background: var(--input-soft);
+      border: 1px solid rgba(246, 196, 83, 0.4);
+    }
+
+    .loop-trigger.done {
+      background: var(--done-soft);
+      border: 1px solid rgba(69, 212, 131, 0.35);
+    }
+
+    .loop-trigger.error {
+      background: var(--error-soft);
+      border: 1px solid rgba(255, 92, 106, 0.4);
+    }
+
+    .terminal {
+      color: #9eb0c1;
+      display: grid;
+      flex: 1;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 13px;
+      gap: 10px;
+      line-height: 1.65;
+      padding: 22px;
+    }
+
+    .terminal-line {
+      opacity: 0.9;
+    }
+
+    .prompt {
+      color: #55d68f;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .drawer {
+      background: linear-gradient(180deg, #151d27, #111822);
+      border-left: 1px solid var(--border);
+      box-shadow: -16px 0 40px rgba(0, 0, 0, 0.35);
+      display: flex;
+      flex-direction: column;
+      inset: 0 0 0 auto;
+      position: absolute;
+      width: 380px;
+      z-index: 5;
+    }
+
+    .drawer-header {
+      border-bottom: 1px solid var(--border);
+      padding: 18px 18px 16px;
+    }
+
+    .drawer-topline {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .drawer-kicker {
+      color: var(--muted-2);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .drawer-close {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .drawer-status {
+      align-items: center;
+      display: inline-flex;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      font-weight: 700;
+      gap: 8px;
+      letter-spacing: 0.06em;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+    }
+
+    .drawer-status.running { color: var(--running); }
+    .drawer-status.input { color: var(--input); }
+    .drawer-status.done { color: var(--done); }
+    .drawer-status.error { color: var(--error); }
+
+    .drawer-title {
+      font-size: 22px;
+      font-weight: 650;
+      margin-bottom: 6px;
+    }
+
+    .drawer-sub {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .drawer-body {
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+    }
+
+    .stat-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .stat {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 14px;
+      min-width: 0;
+      padding: 12px;
+    }
+
+    .stat-label {
+      color: var(--muted-2);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      margin-bottom: 7px;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .panel {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 18px;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      align-items: center;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 14px;
+    }
+
+    .panel-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .panel-toggle {
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .panel-content {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 14px;
+    }
+
+    .question {
+      background: var(--input-soft);
+      border: 1px solid rgba(246, 196, 83, 0.28);
+      border-radius: 16px;
+      color: var(--text);
+      padding: 14px;
+    }
+
+    .question-label {
+      color: var(--input);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .answer-box {
+      background: rgba(0,0,0,0.28);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 14px;
+      color: var(--muted);
+      margin-top: 12px;
+      min-height: 88px;
+      padding: 12px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      padding: 0 18px 18px;
+    }
+
+    .btn {
+      border: 1px solid transparent;
+      border-radius: 14px;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 11px 14px;
+    }
+
+    .btn.primary {
+      background: var(--running);
+      color: #091014;
+    }
+
+    .btn.secondary {
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.06);
+      color: var(--text);
+    }
+
+    .btn.danger {
+      background: rgba(255, 92, 106, 0.12);
+      border-color: rgba(255, 92, 106, 0.22);
+      color: #ff9ba4;
+    }
+
+    .log {
+      display: grid;
+      gap: 10px;
+    }
+
+    .log-row {
+      align-items: start;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 56px 1fr;
+    }
+
+    .log-time {
+      color: var(--muted-2);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+    }
+
+    .log-body {
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .log-kind {
+      color: var(--running);
+      display: inline-block;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      font-weight: 700;
+      margin-right: 8px;
+      text-transform: uppercase;
+    }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+      margin-top: 20px;
+      max-width: 900px;
+    }
+
+    @media (max-width: 1200px) {
+      .shell {
+        grid-template-columns: 72px 210px 1fr;
+      }
+
+      .drawer {
+        width: 340px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div class="kicker">Review Loop Sketches</div>
+      <h1>Three directions for making the review loop feel intentional, hidden-by-default, and readable at a glance.</h1>
+      <div class="lede">
+        These sketches assume the review loop only exists for Claude sessions, uses color as the primary state cue, and keeps reviewer output tucked away until the user asks for it or input is required.
+      </div>
+      <div class="legend">
+        <div class="legend-pill"><span class="legend-dot dot-running"></span> Running</div>
+        <div class="legend-pill"><span class="legend-dot dot-input"></span> Needs Input</div>
+        <div class="legend-pill"><span class="legend-dot dot-done"></span> Done</div>
+        <div class="legend-pill"><span class="legend-dot dot-error"></span> Error</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section class="option">
+        <div class="option-copy">
+          <div class="option-meta">
+            <div class="option-label">Sketch A</div>
+            <div class="option-title">Right-Side Review Drawer</div>
+          </div>
+          <div class="option-desc">
+            Recommended direction. The terminal keeps center stage, the loop announces itself through color and a compact trigger in the header, and the full review surface slides in only when needed.
+          </div>
+        </div>
+        <div class="sketch">
+          <div class="frame">
+            <div class="shell">
+              <div class="icon-rail">
+                <div class="icon active">⌂</div>
+                <div class="icon">⋯</div>
+                <div class="icon">⌘</div>
+              </div>
+
+              <div class="sidebar">
+                <div class="sidebar-title">Sessions</div>
+                <div class="session running">
+                  <div class="session-body">
+                    <div class="session-name">nolo-mcp</div>
+                    <div class="session-sub">claude • feature/pg-query</div>
+                    <div class="session-state">review loop running</div>
+                  </div>
+                </div>
+                <div class="session done">
+                  <div class="session-body">
+                    <div class="session-name">attn</div>
+                    <div class="session-sub">claude • main</div>
+                    <div class="session-state">all rounds done</div>
+                  </div>
+                </div>
+                <div class="session error">
+                  <div class="session-body">
+                    <div class="session-name">billing-api</div>
+                    <div class="session-sub">claude • hotfix</div>
+                    <div class="session-state">review loop error</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="main">
+                <div class="main-header running">
+                  <div class="header-stack">
+                    <div class="header-title">nolo-mcp / feature/pg-query</div>
+                    <div class="header-sub">Claude session active · review loop is a separate autonomous reviewer context</div>
+                  </div>
+                  <div class="loop-trigger running">Loop Running ▾</div>
+                </div>
+
+                <div class="terminal">
+                  <div class="terminal-line"><span class="prompt">›</span> use your attn skill to start a review loop</div>
+                  <div class="terminal-line muted">Review loop started. Loop ID: 89265dc5-044e-4481-bc61-bed8f0464be3</div>
+                  <div class="terminal-line">- running with 2 rounds</div>
+                  <div class="terminal-line">- monitoring current repo state</div>
+                  <div class="terminal-line"></div>
+                  <div class="terminal-line muted">The main Claude session stays idle unless the user asks it to act.</div>
+                </div>
+
+                <aside class="drawer">
+                  <div class="drawer-header">
+                    <div class="drawer-topline">
+                      <div class="drawer-kicker">Review Loop</div>
+                      <div class="drawer-close">Hide Panel</div>
+                    </div>
+                    <div class="drawer-status running">Running</div>
+                    <div class="drawer-title">Round 1 of 2</div>
+                    <div class="drawer-sub">Model: Claude Sonnet 4.6 · distinct reviewer context · autonomous until input is required</div>
+                  </div>
+                  <div class="drawer-body">
+                    <div class="stat-grid">
+                      <div class="stat">
+                        <div class="stat-label">Last move</div>
+                        <div class="stat-value">Security issue found</div>
+                      </div>
+                      <div class="stat">
+                        <div class="stat-label">Files</div>
+                        <div class="stat-value">query.go<br>query_test.go</div>
+                      </div>
+                      <div class="stat">
+                        <div class="stat-label">Next</div>
+                        <div class="stat-value">Re-run tests</div>
+                      </div>
+                    </div>
+
+                    <div class="panel">
+                      <div class="panel-header">
+                        <div class="panel-title">Latest reviewer summary</div>
+                        <div class="panel-toggle">live</div>
+                      </div>
+                      <div class="panel-content">
+                        Found a writable CTE bypass path, patched classification, and is now validating the fix with the database test suite.
+                      </div>
+                    </div>
+
+                    <div class="panel">
+                      <div class="panel-header">
+                        <div class="panel-title">Reviewer log</div>
+                        <div class="panel-toggle">expanded</div>
+                      </div>
+                      <div class="panel-content">
+                        <div class="log">
+                          <div class="log-row">
+                            <div class="log-time">10:59</div>
+                            <div class="log-body"><span class="log-kind">assistant</span>Critical writable CTE vulnerability confirmed.</div>
+                          </div>
+                          <div class="log-row">
+                            <div class="log-time">10:59</div>
+                            <div class="log-body"><span class="log-kind">edit</span>Patched `classifyWritableCTEs()` and updated security tests.</div>
+                          </div>
+                          <div class="log-row">
+                            <div class="log-time">11:00</div>
+                            <div class="log-body"><span class="log-kind">bash</span>`go test ./internal/database/...`</div>
+                          </div>
+                          <div class="log-row">
+                            <div class="log-time">11:01</div>
+                            <div class="log-body"><span class="log-kind">assistant</span>All tests pass. Reviewing edge-case coverage before round completion.</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="actions">
+                    <button class="btn secondary">Collapse log</button>
+                    <button class="btn danger">Stop loop</button>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="option">
+        <div class="option-copy">
+          <div class="option-meta">
+            <div class="option-label">Sketch B</div>
+            <div class="option-title">Right Drawer, Auto-Open on Input Needed</div>
+          </div>
+          <div class="option-desc">
+            Same overall architecture as Sketch A, but optimized for interruptions. The drawer stays hidden during normal work and opens itself only when the reviewer needs an answer.
+          </div>
+        </div>
+        <div class="sketch">
+          <div class="frame">
+            <div class="shell">
+              <div class="icon-rail">
+                <div class="icon active">⌂</div>
+                <div class="icon">⋯</div>
+                <div class="icon">⌘</div>
+              </div>
+
+              <div class="sidebar">
+                <div class="sidebar-title">Sessions</div>
+                <div class="session input">
+                  <div class="session-body">
+                    <div class="session-name">nolo-mcp</div>
+                    <div class="session-sub">claude • feature/pg-query</div>
+                    <div class="session-state">needs input now</div>
+                  </div>
+                </div>
+                <div class="session done">
+                  <div class="session-body">
+                    <div class="session-name">search-api</div>
+                    <div class="session-sub">claude • fix/sql</div>
+                    <div class="session-state">2 rounds complete</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="main">
+                <div class="main-header input">
+                  <div class="header-stack">
+                    <div class="header-title">nolo-mcp / feature/pg-query</div>
+                    <div class="header-sub">Header and session row both pulse gold until the question is answered</div>
+                  </div>
+                  <div class="loop-trigger input">Needs Input ▾</div>
+                </div>
+
+                <div class="terminal">
+                  <div class="terminal-line"><span class="prompt">›</span> continuing main task…</div>
+                  <div class="terminal-line muted">review loop interrupted for clarification</div>
+                  <div class="terminal-line muted">terminal stays visible and usable</div>
+                </div>
+
+                <aside class="drawer">
+                  <div class="drawer-header">
+                    <div class="drawer-topline">
+                      <div class="drawer-kicker">Review Loop</div>
+                      <div class="drawer-close">Auto-opened</div>
+                    </div>
+                    <div class="drawer-status input">Needs Input</div>
+                    <div class="drawer-title">Round 1 blocked</div>
+                    <div class="drawer-sub">The reviewer should not continue until the user resolves the ambiguity.</div>
+                  </div>
+                  <div class="drawer-body">
+                    <div class="question">
+                      <div class="question-label">Reviewer asks</div>
+                      Should retry exhaustion be surfaced in the UI, or should it remain daemon-only and only appear in logs?
+                      <div class="answer-box">Type a direct answer here. Sending the answer resumes the same loop ID in a fresh reviewer round.</div>
+                    </div>
+
+                    <div class="panel">
+                      <div class="panel-header">
+                        <div class="panel-title">Why it asked</div>
+                        <div class="panel-toggle">summary</div>
+                      </div>
+                      <div class="panel-content">
+                        The reviewer found two reasonable UX directions and cannot safely choose without product input.
+                      </div>
+                    </div>
+
+                    <div class="panel">
+                      <div class="panel-header">
+                        <div class="panel-title">Reviewer log</div>
+                        <div class="panel-toggle">collapsed</div>
+                      </div>
+                      <div class="panel-content">
+                        Hidden by default while asking a question. Expands on demand if the user wants the full reasoning trail.
+                      </div>
+                    </div>
+                  </div>
+                  <div class="actions">
+                    <button class="btn danger">Stop loop</button>
+                    <button class="btn primary">Send answer</button>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="option">
+        <div class="option-copy">
+          <div class="option-meta">
+            <div class="option-label">Sketch C</div>
+            <div class="option-title">Header Trigger + Bottom Output Sheet</div>
+          </div>
+          <div class="option-desc">
+            Better for long reviewer logs, weaker for general layout economy. Keeps the panel fully hidden most of the time, but when opened it consumes terminal height instead of width.
+          </div>
+        </div>
+        <div class="sketch">
+          <div class="frame">
+            <div class="shell" style="grid-template-columns: 90px 240px 1fr;">
+              <div class="icon-rail">
+                <div class="icon active">⌂</div>
+                <div class="icon">⋯</div>
+                <div class="icon">⌘</div>
+              </div>
+
+              <div class="sidebar">
+                <div class="sidebar-title">Sessions</div>
+                <div class="session done">
+                  <div class="session-body">
+                    <div class="session-name">nolo-mcp</div>
+                    <div class="session-sub">claude • feature/pg-query</div>
+                    <div class="session-state">loop complete</div>
+                  </div>
+                </div>
+                <div class="session running">
+                  <div class="session-body">
+                    <div class="session-name">search-api</div>
+                    <div class="session-sub">claude • branch/review</div>
+                    <div class="session-state">loop running</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="main">
+                <div class="main-header running">
+                  <div class="header-stack">
+                    <div class="header-title">nolo-mcp / feature/pg-query</div>
+                    <div class="header-sub">Compact trigger stays in the header; the detailed output lives in a bottom sheet.</div>
+                  </div>
+                  <div class="loop-trigger done">Done ▾</div>
+                </div>
+
+                <div class="terminal" style="padding-bottom: 240px;">
+                  <div class="terminal-line"><span class="prompt">›</span> review loop finished in 2 rounds</div>
+                  <div class="terminal-line muted">terminal gets full width while the sheet is hidden</div>
+                </div>
+
+                <div style="background: linear-gradient(180deg, #121923, #0f151d); border-top: 1px solid var(--border); inset: auto 0 0 0; min-height: 220px; position: absolute;">
+                  <div class="drawer-header" style="padding-bottom: 14px;">
+                    <div class="drawer-topline">
+                      <div class="drawer-kicker">Review Loop</div>
+                      <div class="drawer-close">Hide Sheet</div>
+                    </div>
+                    <div class="drawer-status done">Completed</div>
+                    <div class="drawer-title">Round 2 converged</div>
+                    <div class="drawer-sub">Good fit if the reviewer output becomes long-form and needs a wider reading surface.</div>
+                  </div>
+                  <div class="drawer-body" style="grid-template-columns: 1.1fr 0.9fr;">
+                    <div class="panel">
+                      <div class="panel-header">
+                        <div class="panel-title">Latest summary</div>
+                        <div class="panel-toggle">visible</div>
+                      </div>
+                      <div class="panel-content">
+                        Fixed critical writable CTE vulnerability, tightened classification, and expanded targeted tests. Review completed with one suggested future follow-up.
+                      </div>
+                    </div>
+                    <div class="panel">
+                      <div class="panel-header">
+                        <div class="panel-title">Reviewer log</div>
+                        <div class="panel-toggle">peek</div>
+                      </div>
+                      <div class="panel-content">
+                        Better for longer reviewer transcripts, but it competes with utility terminals and other bottom surfaces.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="footer-note">
+        Recommendation: build Sketch A first, but borrow Sketch B’s behavior of auto-opening the panel when input is required. That gives you an unobtrusive default, a strong “needs input” interrupt path, and a natural place to hide or reveal the reviewer log on demand.
+      </div>
+    </div>
+  </body>
+  </html>

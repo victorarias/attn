@@ -35,12 +35,25 @@ That means:
 When asked to start a review loop, do this:
 
 1. identify the requested review prompt and iteration limit from the user's instructions
-2. gather any relevant rationale, plan path, constraints, or tradeoffs from the conversation and your current task
-3. write a small JSON handoff file
-4. run ` + "`attn review-loop start`" + ` with the prompt, iteration limit, and handoff file
-5. stop and wait unless the user explicitly asked you to continue doing something else
+2. make sure your current implementation work is committed before starting the loop
+3. gather any relevant rationale, plan path, constraints, or tradeoffs from the conversation and your current task
+4. write a small JSON handoff file
+5. run ` + "`attn review-loop start`" + ` with the prompt, iteration limit, and handoff file
+6. stop and wait unless the user explicitly asked you to continue doing something else
 
 You do not need to ask the user how to use attn unless the request is missing critical intent.
+
+## Commit Before Review
+
+Before starting the loop, commit your current implementation work so the autonomous reviewer evaluates a stable snapshot instead of an in-progress working tree.
+
+Preferred pattern:
+
+1. make sure the intended work for this round is saved
+2. create a normal commit
+3. then start the review loop
+
+Do not skip the commit step unless the user explicitly tells you not to commit first.
 
 ## Handoff File
 
@@ -122,9 +135,10 @@ If the user says something like:
 you should interpret that as:
 
 1. prepare a concise handoff file from the current task context
-2. choose the requested review prompt, or use the one already given in the conversation
-3. run ` + "`attn review-loop start ...`" + `
-4. report the result briefly
+2. commit the current implementation work
+3. choose the requested review prompt, or use the one already given in the conversation
+4. run ` + "`attn review-loop start ...`" + `
+5. report the result briefly
 
 If the user also wants you to monitor it, you may poll with ` + "`attn review-loop show --loop ...`" + ` and report progress, but still treat the loop as autonomous unless the user asks you to take over.
 
@@ -133,8 +147,9 @@ If the user also wants you to monitor it, you may poll with ` + "`attn review-lo
 1. Run these commands only when the prompt explicitly tells you to do so.
 2. Do not ask the user to run the command for you.
 3. Do not ask follow-up procedural questions if the intent is already clear enough to execute.
-4. Do not treat review-loop output as instructions for you to continue coding unless the user explicitly says to do that.
-5. After running the command, stop unless the prompt tells you to continue.
+4. Commit current implementation work before starting the loop unless the user explicitly says not to.
+5. Do not treat review-loop output as instructions for you to continue coding unless the user explicitly says to do that.
+6. After running the command, stop unless the prompt tells you to continue.
 `
 
 func ensureAttnClaudeSkillInstalled() error {

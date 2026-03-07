@@ -47,15 +47,15 @@ export function Dashboard({
   const reviewLoopBadge = (status?: string): string | null => {
     switch (status) {
       case 'running':
-        return 'loop';
+        return 'review running';
       case 'awaiting_user':
-        return 'input';
+        return 'needs input';
       case 'completed':
-        return 'done';
+        return 'all rounds done';
       case 'stopped':
-        return 'stopped';
+        return 'review stopped';
       case 'error':
-        return 'error';
+        return 'review error';
       default:
         return null;
     }
@@ -208,7 +208,7 @@ export function Dashboard({
                     {waitingSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -216,7 +216,7 @@ export function Dashboard({
                         <StateIndicator state="waiting_input" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                         {reviewLoopBadge(s.reviewLoopStatus) && (
-                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                          <span className={`session-loop-state session-loop-state--${s.reviewLoopStatus}`}>
                             {reviewLoopBadge(s.reviewLoopStatus)}
                           </span>
                         )}
@@ -230,7 +230,7 @@ export function Dashboard({
                     {pendingApprovalSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -238,7 +238,7 @@ export function Dashboard({
                         <StateIndicator state="pending_approval" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                         {reviewLoopBadge(s.reviewLoopStatus) && (
-                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                          <span className={`session-loop-state session-loop-state--${s.reviewLoopStatus}`}>
                             {reviewLoopBadge(s.reviewLoopStatus)}
                           </span>
                         )}
@@ -252,7 +252,7 @@ export function Dashboard({
                     {launchingSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -260,7 +260,7 @@ export function Dashboard({
                         <StateIndicator state="launching" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                         {reviewLoopBadge(s.reviewLoopStatus) && (
-                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                          <span className={`session-loop-state session-loop-state--${s.reviewLoopStatus}`}>
                             {reviewLoopBadge(s.reviewLoopStatus)}
                           </span>
                         )}
@@ -274,7 +274,7 @@ export function Dashboard({
                     {workingSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -282,7 +282,7 @@ export function Dashboard({
                         <StateIndicator state="working" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                         {reviewLoopBadge(s.reviewLoopStatus) && (
-                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                          <span className={`session-loop-state session-loop-state--${s.reviewLoopStatus}`}>
                             {reviewLoopBadge(s.reviewLoopStatus)}
                           </span>
                         )}
@@ -296,7 +296,7 @@ export function Dashboard({
                     {idleSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -304,7 +304,7 @@ export function Dashboard({
                         <StateIndicator state="idle" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                         {reviewLoopBadge(s.reviewLoopStatus) && (
-                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                          <span className={`session-loop-state session-loop-state--${s.reviewLoopStatus}`}>
                             {reviewLoopBadge(s.reviewLoopStatus)}
                           </span>
                         )}
@@ -318,7 +318,7 @@ export function Dashboard({
                     {unknownSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
@@ -326,7 +326,7 @@ export function Dashboard({
                         <StateIndicator state="unknown" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                         {reviewLoopBadge(s.reviewLoopStatus) && (
-                          <span className={`session-loop-chip session-loop-chip--${s.reviewLoopStatus}`}>
+                          <span className={`session-loop-state session-loop-state--${s.reviewLoopStatus}`}>
                             {reviewLoopBadge(s.reviewLoopStatus)}
                           </span>
                         )}

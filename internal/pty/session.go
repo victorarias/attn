@@ -45,8 +45,10 @@ type Session struct {
 	writeMu sync.Mutex
 
 	// CLI state detection based on PTY output.
-	detector stateDetector
-	onState  func(state string)
+	detector      stateDetector
+	onState       func(state string)
+	stateMu       sync.RWMutex
+	detectorState string
 
 	exitMu     sync.RWMutex
 	running    bool
@@ -139,6 +141,9 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				s.fanOut(data, seq)
 				if s.detector != nil && s.onState != nil {
 					if state, changed := s.detector.Observe(data); changed {
+						s.stateMu.Lock()
+						s.detectorState = state
+						s.stateMu.Unlock()
 						s.onState(state)
 					}
 				}
@@ -271,6 +276,12 @@ func (s *Session) info() AttachInfo {
 		ScreenCursorVisible: screenCursorVisible,
 		ScreenSnapshotFresh: screenSnapshotFresh,
 	}
+}
+
+func (s *Session) state() string {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.detectorState
 }
 
 func (s *Session) input(data []byte) error {
