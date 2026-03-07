@@ -27,6 +27,10 @@ vi.mock('./components/Terminal', async () => {
 });
 
 vi.mock('./components/Sidebar', () => ({
+  EditorIcon: () => null,
+  ReviewLoopIcon: () => null,
+  DiffIcon: () => null,
+  PRsIcon: () => null,
   Sidebar: ({ visualOrder, onCloseSession }: { visualOrder: Array<{ id: string }>; onCloseSession: (id: string) => void }) => (
     <button data-testid="close-session" onClick={() => onCloseSession(visualOrder[0].id)}>
       Close Session
@@ -40,7 +44,7 @@ vi.mock('./components/LocationPicker', () => ({ LocationPicker: () => null }));
 vi.mock('./components/BranchPicker', () => ({ BranchPicker: () => null }));
 vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
 vi.mock('./components/ChangesPanel', () => ({ ChangesPanel: () => null }));
-vi.mock('./components/ReviewPanel', () => ({ ReviewPanel: () => null }));
+vi.mock('./components/DiffDetailPanel', () => ({ DiffDetailPanel: () => null }));
 vi.mock('./components/UtilityTerminalPanel', () => ({ UtilityTerminalPanel: () => null }));
 vi.mock('./components/ThumbsModal', () => ({ ThumbsModal: () => null }));
 vi.mock('./components/ForkDialog', () => ({ ForkDialog: () => null }));

@@ -191,7 +191,6 @@ type TestHarnessBuilder struct {
 	socketPath      string
 	defaultState    string
 	ghClient        github.GitHubClient
-	reviewerFactory ReviewerFactory
 	recordBroadcast bool
 }
 
@@ -219,12 +218,6 @@ func (b *TestHarnessBuilder) WithGitHubClient(client github.GitHubClient) *TestH
 // WithoutBroadcastRecording disables broadcast recording
 func (b *TestHarnessBuilder) WithoutBroadcastRecording() *TestHarnessBuilder {
 	b.recordBroadcast = false
-	return b
-}
-
-// WithReviewerFactory sets a custom reviewer factory for testing
-func (b *TestHarnessBuilder) WithReviewerFactory(factory ReviewerFactory) *TestHarnessBuilder {
-	b.reviewerFactory = factory
 	return b
 }
 
@@ -256,7 +249,6 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 		logger:           nil,
 		ghRegistry:       newRegistryFromClient(b.ghClient),
 		classifier:       classifier,
-		reviewerFactory:  b.reviewerFactory,
 		ptyBackend:       ptybackend.NewEmbedded(manager),
 		transcriptWatch:  make(map[string]*transcriptWatcher),
 		pendingInitialWS: make(map[*wsClient]struct{}),

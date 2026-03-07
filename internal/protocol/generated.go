@@ -36,17 +36,6 @@ type AddCommentResultMessage struct {
 	Success bool `json:"success"`
 }
 
-type AdvanceReviewLoopMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID string `json:"session_id"`
-
-	// Token corresponds to the JSON schema field "token".
-	Token string `json:"token"`
-}
-
 type AnswerReviewLoopMessage struct {
 	// Answer corresponds to the JSON schema field "answer".
 	Answer string `json:"answer"`
@@ -226,14 +215,6 @@ type BranchesResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
-}
-
-type CancelReviewMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// ReviewID corresponds to the JSON schema field "review_id".
-	ReviewID string `json:"review_id"`
 }
 
 type CheckAttnStashMessage struct {
@@ -1323,25 +1304,6 @@ type Response struct {
 	Sessions []Session `json:"sessions,omitempty"`
 }
 
-type ReviewCancelledMessage struct {
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// ReviewID corresponds to the JSON schema field "review_id".
-	ReviewID string `json:"review_id"`
-}
-
-type ReviewChunkMessage struct {
-	// Content corresponds to the JSON schema field "content".
-	Content string `json:"content"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// ReviewID corresponds to the JSON schema field "review_id".
-	ReviewID string `json:"review_id"`
-}
-
 type ReviewComment struct {
 	// Author corresponds to the JSON schema field "author".
 	Author string `json:"author"`
@@ -1384,62 +1346,6 @@ type ReviewComment struct {
 
 	// WontFixBy corresponds to the JSON schema field "wont_fix_by".
 	WontFixBy *string `json:"wont_fix_by,omitempty"`
-}
-
-type ReviewCommentResolvedMessage struct {
-	// CommentID corresponds to the JSON schema field "comment_id".
-	CommentID string `json:"comment_id"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// ReviewID corresponds to the JSON schema field "review_id".
-	ReviewID string `json:"review_id"`
-}
-
-type ReviewCompleteMessage struct {
-	// Error corresponds to the JSON schema field "error".
-	Error *string `json:"error,omitempty"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// ReviewID corresponds to the JSON schema field "review_id".
-	ReviewID string `json:"review_id"`
-
-	// Success corresponds to the JSON schema field "success".
-	Success bool `json:"success"`
-}
-
-type ReviewFinding struct {
-	// Content corresponds to the JSON schema field "content".
-	Content string `json:"content"`
-
-	// Filepath corresponds to the JSON schema field "filepath".
-	Filepath string `json:"filepath"`
-
-	// LineEnd corresponds to the JSON schema field "line_end".
-	LineEnd int `json:"line_end"`
-
-	// LineStart corresponds to the JSON schema field "line_start".
-	LineStart int `json:"line_start"`
-
-	// Severity corresponds to the JSON schema field "severity".
-	Severity *string `json:"severity,omitempty"`
-}
-
-type ReviewFindingMessage struct {
-	// Comment corresponds to the JSON schema field "comment".
-	Comment *ReviewComment `json:"comment,omitempty"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// Finding corresponds to the JSON schema field "finding".
-	Finding ReviewFinding `json:"finding"`
-
-	// ReviewID corresponds to the JSON schema field "review_id".
-	ReviewID string `json:"review_id"`
 }
 
 type ReviewLoopDecision string
@@ -1704,14 +1610,6 @@ type ReviewLoopUpdatedMessage struct {
 	SessionID string `json:"session_id"`
 }
 
-type ReviewStartedMessage struct {
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// ReviewID corresponds to the JSON schema field "review_id".
-	ReviewID string `json:"review_id"`
-}
-
 type ReviewState struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch string `json:"branch"`
@@ -1724,28 +1622,6 @@ type ReviewState struct {
 
 	// ViewedFiles corresponds to the JSON schema field "viewed_files".
 	ViewedFiles []string `json:"viewed_files"`
-}
-
-type ReviewToolUse struct {
-	// Input corresponds to the JSON schema field "input".
-	Input map[string]interface{} `json:"input"`
-
-	// Name corresponds to the JSON schema field "name".
-	Name string `json:"name"`
-
-	// Output corresponds to the JSON schema field "output".
-	Output string `json:"output"`
-}
-
-type ReviewToolUseMessage struct {
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// ReviewID corresponds to the JSON schema field "review_id".
-	ReviewID string `json:"review_id"`
-
-	// ToolUse corresponds to the JSON schema field "tool_use".
-	ToolUse ReviewToolUse `json:"tool_use"`
 }
 
 type Session struct {
@@ -2002,23 +1878,6 @@ type StartReviewLoopMessage struct {
 	SessionID string `json:"session_id"`
 }
 
-type StartReviewMessage struct {
-	// BaseBranch corresponds to the JSON schema field "base_branch".
-	BaseBranch string `json:"base_branch"`
-
-	// Branch corresponds to the JSON schema field "branch".
-	Branch string `json:"branch"`
-
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// RepoPath corresponds to the JSON schema field "repo_path".
-	RepoPath string `json:"repo_path"`
-
-	// ReviewID corresponds to the JSON schema field "review_id".
-	ReviewID string `json:"review_id"`
-}
-
 type StashMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2197,17 +2056,8 @@ type WebSocketEvent struct {
 	// Cols corresponds to the JSON schema field "cols".
 	Cols *int `json:"cols,omitempty"`
 
-	// Comment corresponds to the JSON schema field "comment".
-	Comment *ReviewComment `json:"comment,omitempty"`
-
-	// CommentID corresponds to the JSON schema field "comment_id".
-	CommentID *string `json:"comment_id,omitempty"`
-
 	// Conflict corresponds to the JSON schema field "conflict".
 	Conflict *bool `json:"conflict,omitempty"`
-
-	// Content corresponds to the JSON schema field "content".
-	Content *string `json:"content,omitempty"`
 
 	// Data corresponds to the JSON schema field "data".
 	Data *string `json:"data,omitempty"`
@@ -2229,9 +2079,6 @@ type WebSocketEvent struct {
 
 	// Files corresponds to the JSON schema field "files".
 	Files []BranchDiffFile `json:"files,omitempty"`
-
-	// Finding corresponds to the JSON schema field "finding".
-	Finding *ReviewFinding `json:"finding,omitempty"`
 
 	// Found corresponds to the JSON schema field "found".
 	Found *bool `json:"found,omitempty"`
@@ -2274,9 +2121,6 @@ type WebSocketEvent struct {
 
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty"`
-
-	// ReviewID corresponds to the JSON schema field "review_id".
-	ReviewID *string `json:"review_id,omitempty"`
 
 	// ReviewLoopRun corresponds to the JSON schema field "review_loop_run".
 	ReviewLoopRun *ReviewLoopRun `json:"review_loop_run,omitempty"`
@@ -2346,9 +2190,6 @@ type WebSocketEvent struct {
 
 	// TargetPath corresponds to the JSON schema field "target_path".
 	TargetPath *string `json:"target_path,omitempty"`
-
-	// ToolUse corresponds to the JSON schema field "tool_use".
-	ToolUse *ReviewToolUse `json:"tool_use,omitempty"`
 
 	// Unstaged corresponds to the JSON schema field "unstaged".
 	Unstaged []GitFileChange `json:"unstaged,omitempty"`

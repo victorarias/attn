@@ -77,53 +77,7 @@ const (
 	warnGHVersionTooOld           = "gh_version_too_old"
 )
 
-// ReviewerFactory creates a reviewer for testing
-type ReviewerFactory func(*store.Store) Reviewer
 type ReviewLoopExecutor func(ctx context.Context, run *protocol.ReviewLoopRun, prompt string) (*reviewLoopOutcome, string, string, string, error)
-
-// Reviewer interface for code review operations
-type Reviewer interface {
-	Run(ctx context.Context, config ReviewerConfig, onEvent func(ReviewerEvent)) error
-}
-
-// ReviewerConfig matches reviewer.ReviewConfig
-type ReviewerConfig struct {
-	RepoPath           string
-	Branch             string
-	BaseBranch         string
-	ReviewID           string
-	IsRereview         bool
-	LastReviewSHA      string
-	PreviousTranscript string
-}
-
-// ReviewerEvent matches reviewer.ReviewEvent
-type ReviewerEvent struct {
-	Type       string // "started", "chunk", "finding", "resolved", "tool_use", "complete", "error", "cancelled"
-	Content    string
-	Finding    *ReviewerFinding
-	ResolvedID string           // For resolved events
-	ToolUse    *ReviewerToolUse // For tool_use events
-	Success    bool
-	Error      string
-}
-
-// ReviewerFinding matches reviewer.Finding
-type ReviewerFinding struct {
-	Filepath  string
-	LineStart int
-	LineEnd   int
-	Content   string
-	Severity  string
-	CommentID string
-}
-
-// ReviewerToolUse matches reviewer.ToolUse
-type ReviewerToolUse struct {
-	Name   string
-	Input  map[string]any
-	Output string
-}
 
 // Daemon manages Claude sessions
 type Daemon struct {
@@ -139,8 +93,7 @@ type Daemon struct {
 	done             chan struct{}
 	logger           *logging.Logger
 	ghRegistry       *github.ClientRegistry
-	classifier       Classifier      // Optional, uses package-level classifier.Classify if nil
-	reviewerFactory  ReviewerFactory // Optional, creates real reviewer if nil
+	classifier       Classifier // Optional, uses package-level classifier.Classify if nil
 	reviewLoopExec   ReviewLoopExecutor
 	repoCaches       map[string]*repoCache
 	repoCacheMu      sync.RWMutex

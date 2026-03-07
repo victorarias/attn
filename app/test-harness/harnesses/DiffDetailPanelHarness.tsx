@@ -1,15 +1,15 @@
 /**
- * ReviewPanel Test Harness
+ * DiffDetailPanel Test Harness
  *
- * Renders ReviewPanel with mocked daemon props for Playwright testing.
+ * Renders DiffDetailPanel with mocked daemon props for Playwright testing.
  * Exposes window.__HARNESS__ API for test control.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ReviewPanel } from '../../src/components/ReviewPanel';
+import { DiffDetailPanel } from '../../src/components/DiffDetailPanel';
 import type { BranchDiffFilesResult, GitStatusUpdate, FileDiffResult, ReviewState } from '../../src/hooks/useDaemonSocket';
 import type { ReviewComment } from '../../src/types/generated';
 import type { HarnessProps } from '../types';
-import '../../src/components/ReviewPanel.css';
+import '../../src/components/DiffDetailPanel.css';
 
 // Generate lines with a marker at specific positions
 function generateLines(count: number, prefix: string): string {
@@ -100,7 +100,7 @@ function toBranchDiffResult(files: string[]): BranchDiffFilesResult {
   };
 }
 
-export function ReviewPanelHarness({ onReady, setTriggerRerender }: HarnessProps) {
+export function DiffDetailPanelHarness({ onReady, setTriggerRerender }: HarnessProps) {
   const params = new URLSearchParams(window.location.search);
   const fetchDelayMs = Number(params.get('fetchDelayMs') || '0');
   const fetchFail = params.get('fetchFail') === '1';
@@ -110,7 +110,7 @@ export function ReviewPanelHarness({ onReady, setTriggerRerender }: HarnessProps
 
   const [savedComments, setSavedComments] = useState<ReviewComment[]>([]);
   // Force re-renders by changing props that trigger the editor effect
-  // We use a state that gets passed to ReviewPanel and causes effect re-run
+  // We use a state that gets passed to DiffDetailPanel and causes effect re-run
   const [, forceRender] = useState(0);
 
   // Register triggerRerender with harness API
@@ -235,7 +235,7 @@ export function ReviewPanelHarness({ onReady, setTriggerRerender }: HarnessProps
   }, [onReady]);
 
   return (
-    <ReviewPanel
+    <DiffDetailPanel
       isOpen={true}
       gitStatus={createGitStatus()}
       repoPath="/test/repo"

@@ -1,11 +1,8 @@
-// app/src/components/ReviewPanel.tsx
+// app/src/components/DiffDetailPanel.tsx
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { GitStatusUpdate, FileDiffResult, ReviewState, BranchDiffFile, BranchDiffFilesResult } from '../hooks/useDaemonSocket';
 import type { ResolvedTheme } from '../hooks/useTheme';
 import type { ReviewComment } from '../types/generated';
-import type { ReviewerEvent } from '../hooks/useDaemonSocket';
 import UnifiedDiffEditor, {
   buildUnifiedDocument,
   resolveAnchor,
@@ -14,138 +11,7 @@ import UnifiedDiffEditor, {
   type CommentAnchor,
   type InlineComment as EditorComment,
 } from './UnifiedDiffEditor';
-import './ReviewPanel.css';
-
-// Regex patterns for file references
-// Pattern 1: file.ext:line or file.ext:line-line (e.g., "src/app.ts:123" or "file.md:10-20")
-const FILE_WITH_LINE_REGEX = /([^\s`"'<>()[\]{}]+\.[a-zA-Z0-9]+):(\d+)(?:-(\d+))?/g;
-
-// Pattern 2: Standalone filenames with common code extensions (inline in text)
-// Matches filenames like "server/go.mod" or "m2-client-walking.md"
-const COMMON_EXTENSIONS = 'md|ts|tsx|js|jsx|go|py|rs|java|css|scss|json|yaml|yml|toml|sql|sh|bash|html|xml|vue|svelte|rb|php|c|cpp|h|hpp|swift|kt|scala|ex|exs|mod|sum|lock';
-const STANDALONE_FILE_REGEX = new RegExp(
-  `(?:^|[\\s,;:()\\[\\]{}])` +  // Start of string or preceded by whitespace/punctuation
-  `((?:[a-zA-Z0-9_.-]+/)*` +     // Optional path segments
-  `[a-zA-Z0-9_.-]+\\.(?:${COMMON_EXTENSIONS}))` +  // Filename with extension
-  `(?=[\\s,;:()\\[\\]{}]|$)`,    // Followed by whitespace/punctuation or end
-  'g'
-);
-
-/**
- * Find a matching file using suffix matching.
- * Returns the full path if exactly ONE file matches, otherwise null.
- *
- * Examples:
- * - "example.go" matches "src/example.go" (suffix match)
- * - "server/go.mod" matches "myapp/server/go.mod" (suffix match)
- * - Returns null if 0 matches or >1 matches
- */
-function findMatchingFile(searchPath: string, availableFiles: string[]): string | null {
-  // Try exact match first
-  if (availableFiles.includes(searchPath)) {
-    return searchPath;
-  }
-
-  // Suffix match: find files ending with /searchPath
-  const suffix = '/' + searchPath;
-  const matches = availableFiles.filter(f => f.endsWith(suffix) || f === searchPath);
-
-  // Only return if exactly one match
-  return matches.length === 1 ? matches[0] : null;
-}
-
-// Helper to parse text and create elements with clickable file references
-// Only makes files clickable if they uniquely match a file in availableFiles
-function parseFileReferences(
-  text: string,
-  availableFiles: string[],
-  onFileClick: (filepath: string, line?: number) => void
-): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-
-  // Collect all matches from both patterns
-  type Match = { index: number; length: number; filepath: string; line?: number; fullMatch: string };
-  const matches: Match[] = [];
-
-  // Pattern 1: file:line references
-  FILE_WITH_LINE_REGEX.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = FILE_WITH_LINE_REGEX.exec(text)) !== null) {
-    matches.push({
-      index: match.index,
-      length: match[0].length,
-      filepath: match[1],
-      line: parseInt(match[2], 10),
-      fullMatch: match[0],
-    });
-  }
-
-  // Pattern 2: standalone filenames (only if not already matched by pattern 1)
-  STANDALONE_FILE_REGEX.lastIndex = 0;
-  while ((match = STANDALONE_FILE_REGEX.exec(text)) !== null) {
-    const filepath = match[1];
-    const fullMatchStart = match.index + match[0].indexOf(filepath);
-
-    // Skip if this overlaps with an existing match
-    const overlaps = matches.some(m =>
-      (fullMatchStart >= m.index && fullMatchStart < m.index + m.length) ||
-      (m.index >= fullMatchStart && m.index < fullMatchStart + filepath.length)
-    );
-
-    if (!overlaps) {
-      matches.push({
-        index: fullMatchStart,
-        length: filepath.length,
-        filepath: filepath,
-        fullMatch: filepath,
-      });
-    }
-  }
-
-  // Sort matches by position
-  matches.sort((a, b) => a.index - b.index);
-
-  // Build result
-  for (const m of matches) {
-    // Add text before the match
-    if (m.index > lastIndex) {
-      parts.push(text.slice(lastIndex, m.index));
-    }
-
-    // Check if this file uniquely matches an available file
-    const resolvedPath = findMatchingFile(m.filepath, availableFiles);
-
-    if (resolvedPath) {
-      // Unique match - make it clickable
-      parts.push(
-        <span
-          key={`${m.index}-${m.filepath}`}
-          className="file-reference clickable"
-          onClick={(e) => {
-            e.stopPropagation();
-            onFileClick(resolvedPath, m.line);
-          }}
-          title={m.line ? `Open ${resolvedPath} at line ${m.line}` : `Open ${resolvedPath}`}
-        >
-          {m.fullMatch}
-        </span>
-      );
-    } else {
-      // No match or multiple matches - just render as plain text
-      parts.push(m.fullMatch);
-    }
-
-    lastIndex = m.index + m.length;
-  }
-
-  // Add remaining text
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
-
-  return parts.length > 0 ? parts : [text];
-}
+import './DiffDetailPanel.css';
 
 // Auto-skip patterns for lockfiles and generated files
 const AUTO_SKIP_PATTERNS = [
@@ -313,12 +179,11 @@ function buildTree(files: ReviewFile[]): TreeNode[] {
 
 // ReviewerEvent is now imported from useDaemonSocket
 
-interface ReviewPanelProps {
+interface DiffDetailPanelProps {
   isOpen: boolean;
   gitStatus: GitStatusUpdate | null;  // Still used for real-time updates
   repoPath: string;
   branch: string;
-  baseBranch?: string;
   onClose: () => void;
   // Diff fetching - options: baseRef for PR-like diffs
   fetchDiff: (path: string, options?: { staged?: boolean; baseRef?: string }) => Promise<FileDiffResult>;
@@ -328,7 +193,6 @@ interface ReviewPanelProps {
   sendFetchRemotes: (repo: string) => Promise<{ success: boolean; error?: string }>;
   getReviewState: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: ReviewState; error?: string }>;
   markFileViewed: (reviewId: string, filepath: string, viewed: boolean) => Promise<{ success: boolean; error?: string }>;
-  onSendToClaude?: (reference: string) => void;
   onOpenEditor?: (filePath?: string) => void;
   // Comment operations
   addComment?: (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => Promise<{ success: boolean; comment?: ReviewComment }>;
@@ -337,32 +201,22 @@ interface ReviewPanelProps {
   wontFixComment?: (commentId: string, wontFix: boolean) => Promise<{ success: boolean }>;
   deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
   getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: ReviewComment[] }>;
-  // Reviewer agent operations
-  sendStartReview?: (reviewId: string, repoPath: string, branch: string, baseBranch: string) => void;
-  sendCancelReview?: (reviewId: string) => void;
-  reviewerEvents?: ReviewerEvent[];
-  reviewerRunning?: boolean;
-  reviewerError?: string;
-  agentComments?: ReviewComment[];
-  agentResolvedCommentIds?: string[];
   resolvedTheme?: ResolvedTheme;
   // Initial file to select when panel opens
   initialSelectedFile?: string;
 }
 
-export function ReviewPanel({
+export function DiffDetailPanel({
   isOpen,
   gitStatus,
   repoPath,
   branch,
-  baseBranch = 'main',
   onClose,
   fetchDiff,
   sendGetBranchDiffFiles,
   sendFetchRemotes,
   getReviewState,
   markFileViewed,
-  onSendToClaude,
   onOpenEditor,
   addComment,
   updateComment,
@@ -370,16 +224,9 @@ export function ReviewPanel({
   wontFixComment,
   deleteComment,
   getComments,
-  sendStartReview,
-  sendCancelReview,
-  reviewerEvents = [],
-  reviewerRunning = false,
-  reviewerError,
-  agentComments = [],
-  agentResolvedCommentIds = [],
   resolvedTheme = 'dark',
   initialSelectedFile,
-}: ReviewPanelProps) {
+}: DiffDetailPanelProps) {
   // Track selected file by path for stability across gitStatus updates
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
@@ -389,7 +236,6 @@ export function ReviewPanel({
   const [diffContent, setDiffContent] = useState<{ original: string; modified: string } | null>(null);
   const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks mode (uses 3 lines context), -1 = full file
   const [fontSize, setFontSize] = useState(13); // Default font size
-  const [reviewerPanelHeight, setReviewerPanelHeight] = useState(400); // Default reviewer panel height
   const [scrollToLine, setScrollToLine] = useState<number | undefined>(undefined);
 
   // Branch diff state - PR-like comparison against origin/main
@@ -400,9 +246,6 @@ export function ReviewPanel({
   const [remotesSyncWarning, setRemotesSyncWarning] = useState<string | null>(null);
   const branchDiffRequestIdRef = useRef(0);
   const branchDiffCacheRef = useRef<Map<string, { files: BranchDiffFile[]; baseRef: string }>>(new Map());
-  const [reviewerPanelCollapsed, setReviewerPanelCollapsed] = useState(false);
-  const reviewerResizeRef = useRef<{ startY: number; startHeight: number } | null>(null);
-  const reviewerOutputRef = useRef<HTMLDivElement>(null);
 
   // Comment state
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
@@ -417,30 +260,11 @@ export function ReviewPanel({
     }
   }, [commentError]);
 
-  // Auto-expand reviewer panel when review starts
-  useEffect(() => {
-    if (reviewerRunning) {
-      setReviewerPanelCollapsed(false);
-    }
-  }, [reviewerRunning]);
-
-  // Auto-scroll reviewer output to bottom as content streams
-  useEffect(() => {
-    if (reviewerOutputRef.current && !reviewerPanelCollapsed) {
-      reviewerOutputRef.current.scrollTop = reviewerOutputRef.current.scrollHeight;
-    }
-  }, [reviewerEvents, reviewerPanelCollapsed]);
-
   // Derive comments for current file
   const comments = useMemo(() => {
     if (!selectedFilePath) return [];
     return allReviewComments.filter(c => c.filepath === selectedFilePath);
   }, [allReviewComments, selectedFilePath]);
-
-  const unresolvedComments = useMemo(
-    () => allReviewComments.filter(c => !c.resolved && !c.wont_fix),
-    [allReviewComments]
-  );
 
   // Compute comment counts per file
   const fileCommentCounts = useMemo(() => {
@@ -494,7 +318,7 @@ export function ReviewPanel({
         })
         .catch((err) => {
           if (!isCurrentRequest() || remoteApplied) return;
-          console.error('[ReviewPanel] Failed to fetch local branch diff:', err);
+          console.error('[DiffDetailPanel] Failed to fetch local branch diff:', err);
         })
         .finally(() => {
           if (isCurrentRequest() && !remoteApplied) {
@@ -552,7 +376,7 @@ export function ReviewPanel({
       })
       .catch((err) => {
         if (!isCurrentRequest()) return;
-        console.error('[ReviewPanel] Failed to refresh remotes:', err);
+        console.error('[DiffDetailPanel] Failed to refresh remotes:', err);
         setRemotesSyncWarning('Could not refresh remotes; showing local refs');
         if (!localApplied && !localRequestStarted) {
           runLocalDiff();
@@ -669,38 +493,6 @@ export function ReviewPanel({
       })
       .catch(console.error);
   }, [reviewId, getComments]);
-
-  // Merge agent comments into local state as they arrive
-  useEffect(() => {
-    if (agentComments.length === 0) return;
-
-    setAllReviewComments(prev => {
-      // Get IDs of existing comments
-      const existingIds = new Set(prev.map(c => c.id));
-      // Filter to only new comments
-      const newComments = agentComments.filter(c => !existingIds.has(c.id));
-      if (newComments.length === 0) return prev;
-      return [...prev, ...newComments];
-    });
-  }, [agentComments]);
-
-  // Handle agent-resolved comments
-  useEffect(() => {
-    if (agentResolvedCommentIds.length === 0) return;
-
-    setAllReviewComments(prev => {
-      const resolvedSet = new Set(agentResolvedCommentIds);
-      let hasChanges = false;
-      const updated = prev.map(c => {
-        if (resolvedSet.has(c.id) && !c.resolved) {
-          hasChanges = true;
-          return { ...c, resolved: true, resolved_by: 'agent' as const };
-        }
-        return c;
-      });
-      return hasChanges ? updated : prev;
-    });
-  }, [agentResolvedCommentIds]);
 
   // Clear "changed" status when navigating away from a file
   useEffect(() => {
@@ -1124,12 +916,6 @@ export function ReviewPanel({
     }
   }, [deleteComment]);
 
-  // Wrap onSendToClaude to also close the review panel
-  const handleSendToClaude = useCallback((reference: string) => {
-    onSendToClaude?.(reference);
-    onClose();
-  }, [onSendToClaude, onClose]);
-
   const renderTree = useCallback((nodes: TreeNode[], depth: number, isAutoSkip: boolean) => {
     return nodes.map((node, index) => {
       if (node.type === 'dir') {
@@ -1179,31 +965,6 @@ export function ReviewPanel({
     });
   }, [selectedFilePath, viewedFiles, changedSinceViewed, getFileIcon, getStatusLabel, fileCommentCounts]);
 
-  const handleSendUnresolvedToClaude = useCallback(() => {
-    if (!onSendToClaude || unresolvedComments.length === 0) return;
-
-    const byFile = new Map<string, ReviewComment[]>();
-    for (const comment of unresolvedComments) {
-      const list = byFile.get(comment.filepath) || [];
-      list.push(comment);
-      byFile.set(comment.filepath, list);
-    }
-
-    const lines: string[] = ['Unresolved review comments:'];
-    for (const [filepath, fileComments] of byFile.entries()) {
-      lines.push(`\n${filepath}`);
-      for (const comment of fileComments) {
-        const lineStart = comment.line_start;
-        const lineEnd = Math.abs(comment.line_end);
-        const side = comment.line_end < 0 ? 'original' : 'modified';
-        const lineRef = lineStart === lineEnd ? `L${lineStart}` : `L${lineStart}-L${lineEnd}`;
-        lines.push(`- @${filepath}:${lineRef} (${side}) ${comment.content}`);
-      }
-    }
-
-    handleSendToClaude(lines.join('\n'));
-  }, [onSendToClaude, unresolvedComments, handleSendToClaude]);
-
   if (!isOpen) return null;
 
   const currentFileIndex = selectedFile ? allFiles.findIndex(f => f.path === selectedFile.path) : -1;
@@ -1212,7 +973,7 @@ export function ReviewPanel({
       <div className="review-panel">
         <div className="review-header">
           <span className="review-title">
-            Review: {gitStatus?.directory?.split('/').pop() || 'changes'}
+            Diff: {gitStatus?.directory?.split('/').pop() || 'changes'}
           </span>
           <span className="review-file-count">
             {currentFileIndex + 1}/{allFiles.length} files
@@ -1227,22 +988,6 @@ export function ReviewPanel({
             <span className="review-sync-status warning">{remotesSyncWarning}</span>
           )}
           <div className="review-header-actions">
-            {sendStartReview && reviewId && (
-              <button
-                className={`review-agent-btn ${reviewerRunning ? 'running' : ''}`}
-                onClick={() => {
-                  if (reviewerRunning) {
-                    sendCancelReview?.(reviewId);
-                  } else {
-                    const reviewBaseRef = baseRef || baseBranch;
-                    sendStartReview(reviewId, repoPath, branch, reviewBaseRef);
-                  }
-                }}
-                title={reviewerRunning ? 'Cancel review' : 'Run AI review'}
-              >
-                {reviewerRunning ? '⏹ Cancel' : '🤖 Review'}
-              </button>
-            )}
             {onOpenEditor && (
               <button
                 className="review-open-btn"
@@ -1253,17 +998,7 @@ export function ReviewPanel({
                 Open in Editor
               </button>
             )}
-            {onSendToClaude && (
-              <button
-                className="review-send-btn"
-                onClick={handleSendUnresolvedToClaude}
-                disabled={unresolvedComments.length === 0}
-                title="Send unresolved comments to Claude Code"
-              >
-                Send unresolved
-              </button>
-            )}
-            <button className="review-close" onClick={onClose} title="Hide review panel (Esc)">
+            <button className="review-close" onClick={onClose} title="Hide diff panel (Esc)">
               Hide <kbd>Esc</kbd>
             </button>
           </div>
@@ -1286,7 +1021,7 @@ export function ReviewPanel({
             )}
 
             {allFiles.length === 0 && (
-              <div className="file-list-empty">No changes to review</div>
+              <div className="file-list-empty">No changed files</div>
             )}
           </div>
 
@@ -1343,172 +1078,11 @@ export function ReviewPanel({
                   onResolveComment={handleEditorResolveComment}
                   onWontFixComment={handleEditorWontFixComment}
                   onDeleteComment={handleEditorDeleteComment}
-                  onSendToClaude={handleSendToClaude}
                 />
               )}
             </div>
           </div>
         </div>
-
-        {/* Reviewer Agent Output Panel */}
-        {(reviewerRunning || reviewerEvents.length > 0) && (
-          <div
-            className={`reviewer-output-panel ${reviewerPanelCollapsed ? 'collapsed' : ''}`}
-            style={{ height: reviewerPanelCollapsed ? 'auto' : reviewerPanelHeight }}
-          >
-            {!reviewerPanelCollapsed && (
-              <div
-                className="reviewer-resize-handle"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  reviewerResizeRef.current = {
-                    startY: e.clientY,
-                    startHeight: reviewerPanelHeight,
-                  };
-                  const handleMouseMove = (moveEvent: MouseEvent) => {
-                    if (!reviewerResizeRef.current) return;
-                    const delta = reviewerResizeRef.current.startY - moveEvent.clientY;
-                    const newHeight = Math.max(100, Math.min(800, reviewerResizeRef.current.startHeight + delta));
-                    setReviewerPanelHeight(newHeight);
-                  };
-                  const handleMouseUp = () => {
-                    reviewerResizeRef.current = null;
-                    document.removeEventListener('mousemove', handleMouseMove);
-                    document.removeEventListener('mouseup', handleMouseUp);
-                  };
-                  document.addEventListener('mousemove', handleMouseMove);
-                  document.addEventListener('mouseup', handleMouseUp);
-                }}
-              />
-            )}
-            <div
-              className="reviewer-output-header"
-              onClick={() => setReviewerPanelCollapsed(prev => !prev)}
-              style={{ cursor: 'pointer' }}
-            >
-              <span className="reviewer-collapse-icon">{reviewerPanelCollapsed ? '▸' : '▾'}</span>
-              <span>🤖 AI Review</span>
-              {reviewerError && <span className="reviewer-error">⚠ {reviewerError}</span>}
-              {reviewerRunning && <div className="reviewer-progress-line" />}
-            </div>
-            {!reviewerPanelCollapsed && (
-            <div ref={reviewerOutputRef} className="reviewer-output-content" style={{ fontSize }}>
-              {reviewerEvents.length === 0 && reviewerRunning && (
-                <div className="reviewer-loading">
-                  <div className="reviewer-loading-spinner">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10" strokeOpacity="0.2" />
-                      <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-                    </svg>
-                  </div>
-                  <div className="reviewer-loading-text">Analyzing your changes</div>
-                </div>
-              )}
-              {reviewerEvents.map((event, index) => {
-                if (event.type === 'chunk') {
-                  // Custom components that make file references clickable
-                  // Only files that uniquely match a changed file are clickable
-                  const availableFilePaths = allFiles.map(f => f.path);
-                  const handleFileClick = (filepath: string, line?: number) => {
-                    setSelectedFilePath(filepath);
-                    setScrollToLine(line);
-                  };
-
-                  // Process text children to find file references
-                  const processChildren = (children: React.ReactNode): React.ReactNode => {
-                    if (typeof children === 'string') {
-                      return parseFileReferences(children, availableFilePaths, handleFileClick);
-                    }
-                    if (Array.isArray(children)) {
-                      return children.map((child, i) => {
-                        if (typeof child === 'string') {
-                          const parsed = parseFileReferences(child, availableFilePaths, handleFileClick);
-                          return parsed.length === 1 && parsed[0] === child ? child : <span key={i}>{parsed}</span>;
-                        }
-                        return child;
-                      });
-                    }
-                    return children;
-                  };
-
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  const markdownComponents: any = {
-                    // Block elements
-                    p: ({ children, ...props }: { children?: React.ReactNode }) => (
-                      <p {...props}>{processChildren(children)}</p>
-                    ),
-                    li: ({ children, ...props }: { children?: React.ReactNode }) => (
-                      <li {...props}>{processChildren(children)}</li>
-                    ),
-                    td: ({ children, ...props }: { children?: React.ReactNode }) => (
-                      <td {...props}>{processChildren(children)}</td>
-                    ),
-                    th: ({ children, ...props }: { children?: React.ReactNode }) => (
-                      <th {...props}>{processChildren(children)}</th>
-                    ),
-                    blockquote: ({ children, ...props }: { children?: React.ReactNode }) => (
-                      <blockquote {...props}>{processChildren(children)}</blockquote>
-                    ),
-                    // Inline elements
-                    strong: ({ children, ...props }: { children?: React.ReactNode }) => (
-                      <strong {...props}>{processChildren(children)}</strong>
-                    ),
-                    em: ({ children, ...props }: { children?: React.ReactNode }) => (
-                      <em {...props}>{processChildren(children)}</em>
-                    ),
-                    code: ({ children, className, ...props }: { children?: React.ReactNode; className?: string }) => {
-                      // Only process inline code (not code blocks which have className)
-                      if (!className) {
-                        return <code {...props}>{processChildren(children)}</code>;
-                      }
-                      return <code className={className} {...props}>{children}</code>;
-                    },
-                  };
-
-                  return (
-                    <ReactMarkdown key={index} remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                      {event.content}
-                    </ReactMarkdown>
-                  );
-                } else {
-                  // tool_use - make add_comment calls clickable to navigate to file
-                  const isAddComment = event.name === 'add_comment';
-                  const filepath = isAddComment ? String(event.input.filepath || '') : '';
-                  // Use suffix matching to resolve filepath to a changed file
-                  const availableFilePaths = allFiles.map(f => f.path);
-                  const resolvedPath = filepath ? findMatchingFile(filepath, availableFilePaths) : null;
-                  const canNavigate = isAddComment && resolvedPath;
-
-                  return (
-                    <div
-                      key={index}
-                      className={`reviewer-tool-call ${canNavigate ? 'clickable' : ''}`}
-                      onClick={canNavigate ? () => {
-                        const lineStart = Number(event.input.line_start) || undefined;
-                        setSelectedFilePath(resolvedPath);
-                        setScrollToLine(lineStart);
-                      } : undefined}
-                      title={canNavigate ? `Click to open ${resolvedPath}` : undefined}
-                    >
-                      <div className="tool-call-header">
-                        <span className="tool-call-icon">⏺</span>
-                        <span className="tool-call-name">{event.name}</span>
-                        <span className="tool-call-input">
-                          ({Object.entries(event.input).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ')})
-                        </span>
-                      </div>
-                      <div className="tool-call-output">
-                        <span className="tool-call-output-icon">⎿</span>
-                        <pre>{event.output.length > 500 ? event.output.slice(0, 500) + '...' : event.output}</pre>
-                      </div>
-                    </div>
-                  );
-                }
-              })}
-            </div>
-            )}
-          </div>
-        )}
 
         <div className="review-footer">
           <span className="shortcut"><kbd>j</kbd>/<kbd>k</kbd> navigate</span>

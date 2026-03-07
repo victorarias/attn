@@ -5,11 +5,11 @@
  */
 import type { HarnessProps } from '../types';
 import { DashboardPRsHarness } from './DashboardPRsHarness';
-import { ReviewPanelHarness } from './ReviewPanelHarness';
+import { DiffDetailPanelHarness } from './DiffDetailPanelHarness';
 import { UnifiedDiffEditorHarness } from './UnifiedDiffEditorHarness';
 
 export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
   DashboardPRs: DashboardPRsHarness,
-  ReviewPanel: ReviewPanelHarness,
+  DiffDetailPanel: DiffDetailPanelHarness,
   UnifiedDiffEditor: UnifiedDiffEditorHarness,
 };

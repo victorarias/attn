@@ -13,7 +13,7 @@ import { BranchPicker } from './components/BranchPicker';
 import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
-import { ReviewPanel } from './components/ReviewPanel';
+import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
 import { RightDock } from './components/RightDock';
 import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
@@ -25,8 +25,7 @@ import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore } from './store/sessions';
-import { ptyWrite } from './pty/bridge';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { useDaemonStore } from './store/daemonSessions';
@@ -108,17 +107,7 @@ function App() {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [settingError, setSettingError] = useState<string | null>(null);
 
-  // Reviewer agent state (unified events for ordered rendering)
-  const [reviewerEvents, setReviewerEvents] = useState<ReviewerEvent[]>([]);
-  const [reviewerRunning, setReviewerRunning] = useState(false);
-  const [reviewerError, setReviewerError] = useState<string | undefined>();
   const [reviewLoopsBySessionId, setReviewLoopsBySessionId] = useState<Record<string, ReviewLoopState>>({});
-
-  // Comments added by reviewer agent (passed to ReviewPanel)
-  const [pendingAgentComments, setPendingAgentComments] = useState<import('./types/generated').ReviewComment[]>([]);
-
-  // Comment IDs resolved by reviewer agent (passed to ReviewPanel)
-  const [agentResolvedCommentIds, setAgentResolvedCommentIds] = useState<string[]>([]);
 
   // Worktrees state (used by WorktreeCleanupPrompt)
   const [, setWorktrees] = useState<DaemonWorktree[]>([]);
@@ -247,54 +236,6 @@ function App() {
     setUpdateAvailableVersion(null);
   }, [updateAvailableVersion]);
 
-  // Reviewer callbacks for streaming events
-  const reviewerCallbacks = useMemo(() => ({
-    onReviewStarted: () => {
-      setReviewerEvents([]);
-      setReviewerRunning(true);
-      setReviewerError(undefined);
-      setPendingAgentComments([]); // Clear pending comments when new review starts
-      setAgentResolvedCommentIds([]); // Clear resolved IDs when new review starts
-    },
-    onReviewChunk: (_reviewId: string, content: string) => {
-      // Consolidate consecutive chunks for efficient rendering
-      setReviewerEvents(prev => {
-        if (prev.length > 0 && prev[prev.length - 1].type === 'chunk') {
-          // Append to existing chunk
-          const updated = [...prev];
-          const lastChunk = updated[updated.length - 1] as { type: 'chunk'; content: string };
-          updated[updated.length - 1] = { type: 'chunk', content: lastChunk.content + content };
-          return updated;
-        }
-        // Create new chunk event
-        return [...prev, { type: 'chunk', content }];
-      });
-    },
-    onReviewFinding: (_reviewId: string, finding: { filepath: string; line_start: number; content: string }, comment?: import('./types/generated').ReviewComment) => {
-      console.log('[App] Review finding:', finding.filepath, finding.line_start);
-      // Add the comment to pending list so ReviewPanel can pick it up
-      if (comment) {
-        setPendingAgentComments(prev => [...prev, comment]);
-      }
-    },
-    onReviewCommentResolved: (_reviewId: string, commentId: string) => {
-      console.log('[App] Review comment resolved:', commentId);
-      setAgentResolvedCommentIds(prev => [...prev, commentId]);
-    },
-    onReviewToolUse: (_reviewId: string, toolUse: ReviewToolUse) => {
-      console.log('[App] Review tool use:', toolUse.name);
-      // Add tool use event - this breaks the chunk consolidation, creating a new text block after
-      setReviewerEvents(prev => [...prev, { type: 'tool_use', ...toolUse }]);
-    },
-    onReviewComplete: (_reviewId: string, success: boolean, error?: string) => {
-      setReviewerRunning(false);
-      setReviewerError(success ? undefined : error);
-    },
-    onReviewCancelled: () => {
-      setReviewerRunning(false);
-    },
-  }), []);
-
   // Connect to daemon WebSocket
   const {
     sendPRAction,
@@ -337,8 +278,6 @@ function App() {
     sendWontFixComment,
     sendDeleteComment,
     sendGetComments,
-    sendStartReview,
-    sendCancelReview,
     sendStartReviewLoop,
     sendStopReviewLoop,
     answerReviewLoop,
@@ -361,7 +300,6 @@ function App() {
       if (!state) return;
       setReviewLoopsBySessionId(prev => ({ ...prev, [state.source_session_id]: state }));
     },
-    reviewer: reviewerCallbacks,
   });
 
   const setReviewLoopStateForSession = useCallback((sessionId: string, state: ReviewLoopState | null) => {
@@ -386,12 +324,7 @@ function App() {
         prs={prs}
         settings={settings}
         gitStatus={gitStatus}
-        reviewerEvents={reviewerEvents}
-        reviewerRunning={reviewerRunning}
-        reviewerError={reviewerError}
         reviewLoopsBySessionId={reviewLoopsBySessionId}
-        pendingAgentComments={pendingAgentComments}
-        agentResolvedCommentIds={agentResolvedCommentIds}
         connectionError={connectionError}
         hasReceivedInitialState={hasReceivedInitialState}
         rateLimit={rateLimit}
@@ -443,8 +376,6 @@ function App() {
         sendWontFixComment={sendWontFixComment}
         sendDeleteComment={sendDeleteComment}
         sendGetComments={sendGetComments}
-        sendStartReview={sendStartReview}
-        sendCancelReview={sendCancelReview}
         sendStartReviewLoop={sendStartReviewLoop}
         sendStopReviewLoop={sendStopReviewLoop}
         answerReviewLoop={answerReviewLoop}
@@ -462,12 +393,7 @@ interface AppContentProps {
   prs: DaemonPR[];
   settings: Record<string, string>;
   gitStatus: GitStatusUpdate | null;
-  reviewerEvents: ReviewerEvent[];
-  reviewerRunning: boolean;
-  reviewerError: string | undefined;
   reviewLoopsBySessionId: Record<string, ReviewLoopState>;
-  pendingAgentComments: import('./types/generated').ReviewComment[];
-  agentResolvedCommentIds: string[];
   connectionError: string | null;
   hasReceivedInitialState: boolean;
   rateLimit: import('./hooks/useDaemonSocket').RateLimitState | null;
@@ -519,8 +445,6 @@ interface AppContentProps {
   sendWontFixComment: ReturnType<typeof useDaemonSocket>['sendWontFixComment'];
   sendDeleteComment: ReturnType<typeof useDaemonSocket>['sendDeleteComment'];
   sendGetComments: ReturnType<typeof useDaemonSocket>['sendGetComments'];
-  sendStartReview: ReturnType<typeof useDaemonSocket>['sendStartReview'];
-  sendCancelReview: ReturnType<typeof useDaemonSocket>['sendCancelReview'];
   sendStartReviewLoop: ReturnType<typeof useDaemonSocket>['sendStartReviewLoop'];
   sendStopReviewLoop: ReturnType<typeof useDaemonSocket>['sendStopReviewLoop'];
   answerReviewLoop: ReturnType<typeof useDaemonSocket>['answerReviewLoop'];
@@ -534,12 +458,7 @@ function AppContent({
   prs,
   settings,
   gitStatus,
-  reviewerEvents,
-  reviewerRunning,
-  reviewerError,
   reviewLoopsBySessionId,
-  pendingAgentComments,
-  agentResolvedCommentIds,
   connectionError,
   hasReceivedInitialState,
   rateLimit,
@@ -590,8 +509,6 @@ function AppContent({
   sendWontFixComment,
   sendDeleteComment,
   sendGetComments,
-  sendStartReview,
-  sendCancelReview,
   sendStartReviewLoop,
   sendStopReviewLoop,
   answerReviewLoop,
@@ -772,7 +689,7 @@ function AppContent({
 
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
-  type DockPanelId = 'diff' | 'reviewLoop' | 'attention' | 'review';
+  type DockPanelId = 'diff' | 'reviewLoop' | 'attention' | 'diffDetail';
 
   // View state management
   const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
@@ -781,10 +698,10 @@ function AppContent({
     stack: DockPanelId[];
   }>({
     openPanels: {
-      diff: true,
-      reviewLoop: false,
-      attention: false,
-      review: false,
+        diff: true,
+        reviewLoop: false,
+        attention: false,
+        diffDetail: false,
     },
     stack: ['diff'],
   });
@@ -1009,7 +926,7 @@ function AppContent({
   const diffPanelOpen = openDockPanels.diff;
   const reviewLoopPanelOpen = openDockPanels.reviewLoop;
   const attentionPanelOpen = openDockPanels.attention;
-  const reviewPanelOpen = openDockPanels.review;
+  const diffDetailPanelOpen = openDockPanels.diffDetail;
   const waitingReviewSessions = useMemo(
     () => sessions
       .map((session) => ({
@@ -1443,13 +1360,13 @@ function AppContent({
     void reloadSession(id);
   }, [reloadSession]);
 
-  // Open file in review panel
+  // Open file in diff detail panel
   const handleFileSelect = useCallback((path: string, _staged: boolean) => {
     setInitialReviewFile(path);
-    openDockPanel('review');
+    openDockPanel('diffDetail');
   }, [openDockPanel]);
 
-  // Fetch diff for ReviewPanel
+  // Fetch diff for diff detail panel
   // Options: staged (deprecated), baseRef (for PR-like branch diffs)
   const fetchDiffForReview = useCallback(async (path: string, options?: { staged?: boolean; baseRef?: string }) => {
     const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
@@ -1459,7 +1376,7 @@ function AppContent({
     return sendGetFileDiff(daemonSession.directory, path, options);
   }, [sessions, activeSessionId, daemonSessions, sendGetFileDiff]);
 
-  // Get active daemon session info for ReviewPanel
+  // Get active daemon session info for diff detail panel
   const activeDaemonSession = useMemo(() => {
     const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
     if (!activeLocalSession?.cwd) return null;
@@ -1520,30 +1437,30 @@ function AppContent({
     refreshBranchDiff(activeDaemonSession.directory);
   }, [gitStatus, activeDaemonSession?.directory, refreshBranchDiff]);
 
-  // Review panel handlers
-  const handleOpenReviewPanel = useCallback(() => {
-    setInitialReviewFile(null); // No specific file, let ReviewPanel pick first
-    openDockPanel('review');
+  // Diff detail panel handlers
+  const handleOpenDiffDetailPanel = useCallback(() => {
+    setInitialReviewFile(null); // No specific file, let the diff detail panel pick first
+    openDockPanel('diffDetail');
   }, [openDockPanel]);
 
-  const handleCloseReviewPanel = useCallback(() => {
-    closeDockPanel('review');
+  const handleCloseDiffDetailPanel = useCallback(() => {
+    closeDockPanel('diffDetail');
     setInitialReviewFile(null);
   }, [closeDockPanel]);
 
   useEffect(() => {
-    if (!reviewPanelOpen) return;
+    if (!diffDetailPanelOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        handleCloseReviewPanel();
+        handleCloseDiffDetailPanel();
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [reviewPanelOpen, handleCloseReviewPanel]);
+  }, [diffDetailPanelOpen, handleCloseDiffDetailPanel]);
 
   const handleOpenEditor = useCallback(async (cwd: string, filePath?: string) => {
     try {
@@ -1619,17 +1536,6 @@ function AppContent({
     reviewLoopPanelOpen,
     toggleDockPanel,
   ]);
-
-  // Send code reference to the active Claude terminal
-  const handleSendToClaude = useCallback((reference: string) => {
-    if (!activeSessionId) return;
-    ptyWrite({ id: activeSessionId, data: reference, source: 'system' }).catch(console.error);
-    // Focus the terminal so user can start typing
-    setTimeout(() => {
-      const handle = terminalRefs.current.get(activeSessionId);
-      handle?.focus();
-    }, 50);
-  }, [activeSessionId]);
 
   const handleStartReviewLoop = useCallback(async (prompt: string, iterationLimit: number, presetId?: string) => {
     if (!activeSessionId) return;
@@ -1734,7 +1640,7 @@ function AppContent({
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
-    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen && !forkDialogOpen && !reviewPanelOpen,
+    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen && !forkDialogOpen && !diffDetailPanelOpen,
   });
 
   return (
@@ -1860,7 +1766,7 @@ function AppContent({
             {
               id: 'diff',
               isOpen: diffPanelOpen,
-              width: 'clamp(220px, 24vw, 280px)',
+              width: 'clamp(280px, 30vw, 380px)',
               className: 'dock-panel dock-panel--diff',
               children: (
                 <ChangesPanel
@@ -1869,7 +1775,7 @@ function AppContent({
                   branchDiffError={branchDiffError}
                   selectedFile={null}
                   onFileSelect={handleFileSelect}
-                  onReviewClick={handleOpenReviewPanel}
+                  onOpenDiffClick={handleOpenDiffDetailPanel}
                 />
               ),
             },
@@ -1909,37 +1815,28 @@ function AppContent({
               ),
             },
             {
-              id: 'review',
-              isOpen: reviewPanelOpen,
-              width: 'clamp(680px, 72vw, 1100px)',
-              className: 'dock-panel dock-panel--review',
+              id: 'diffDetail',
+              isOpen: diffDetailPanelOpen,
+              width: 'clamp(60vw, 72vw, 100vw)',
+              className: 'dock-panel dock-panel--diff-detail',
               children: (
-                <ReviewPanel
-                  isOpen={reviewPanelOpen}
+                <DiffDetailPanel
+                  isOpen={diffDetailPanelOpen}
                   gitStatus={gitStatus}
                   repoPath={activeDaemonSession?.directory || ''}
                   branch={activeDaemonSession?.branch || ''}
-                  baseBranch={branchDiffBaseRef || undefined}
-                  onClose={handleCloseReviewPanel}
+                  onClose={handleCloseDiffDetailPanel}
                   fetchDiff={fetchDiffForReview}
                   sendGetBranchDiffFiles={sendGetBranchDiffFiles}
                   sendFetchRemotes={sendFetchRemotes}
                   getReviewState={getReviewState}
                   markFileViewed={markFileViewed}
-                  onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
                   addComment={sendAddComment}
                   updateComment={sendUpdateComment}
                   resolveComment={sendResolveComment}
                   wontFixComment={sendWontFixComment}
                   deleteComment={sendDeleteComment}
                   getComments={sendGetComments}
-                  sendStartReview={sendStartReview}
-                  sendCancelReview={sendCancelReview}
-                  reviewerEvents={reviewerEvents}
-                  reviewerRunning={reviewerRunning}
-                  reviewerError={reviewerError}
-                  agentComments={pendingAgentComments}
-                  agentResolvedCommentIds={agentResolvedCommentIds}
                   resolvedTheme={resolvedTheme}
                   initialSelectedFile={initialReviewFile || undefined}
                   onOpenEditor={handleOpenEditorForReview}

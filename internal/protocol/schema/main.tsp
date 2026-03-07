@@ -550,19 +550,6 @@ model GetCommentsMessage {
   filepath?: string;  // Optional: filter by file
 }
 
-model StartReviewMessage {
-  cmd: "start_review";
-  review_id: string;
-  repo_path: string;
-  branch: string;
-  base_branch: string;
-}
-
-model CancelReviewMessage {
-  cmd: "cancel_review";
-  review_id: string;
-}
-
 model SpawnSessionMessage {
   cmd: "spawn_session";
   id: string;
@@ -1045,62 +1032,6 @@ model GetCommentsResultMessage {
 }
 
 // Reviewer agent streaming events
-model ReviewFinding {
-  filepath: string;
-  line_start: int32;
-  line_end: int32;
-  content: string;
-  severity?: string;  // "error", "warning", "info"
-}
-
-model ReviewStartedMessage {
-  event: "review_started";
-  review_id: string;
-}
-
-model ReviewChunkMessage {
-  event: "review_chunk";
-  review_id: string;
-  content: string;  // Markdown chunk of the review output
-}
-
-model ReviewFindingMessage {
-  event: "review_finding";
-  review_id: string;
-  finding: ReviewFinding;
-  comment?: ReviewComment;
-}
-
-model ReviewCommentResolvedMessage {
-  event: "review_comment_resolved";
-  review_id: string;
-  comment_id: string;
-}
-
-model ReviewToolUse {
-  name: string;
-  input: Record<string>;
-  output: string;
-}
-
-model ReviewToolUseMessage {
-  event: "review_tool_use";
-  review_id: string;
-  tool_use: ReviewToolUse;
-}
-
-model ReviewCompleteMessage {
-  event: "review_complete";
-  review_id: string;
-  success: boolean;
-  error?: string;
-}
-
-model ReviewCancelledMessage {
-  event: "review_cancelled";
-  review_id: string;
-}
-
 model SpawnResultMessage {
   event: "spawn_result";
   id: string;
@@ -1250,14 +1181,7 @@ model WebSocketEvent {
   reason?: string;
   signal?: string;
 
-  // Review streaming payloads
-  review_id?: string;
   review_loop_run?: ReviewLoopRun;
-  content?: string;
-  finding?: ReviewFinding;
-  comment?: ReviewComment;
-  comment_id?: string;
-  tool_use?: ReviewToolUse;
 }
 
 alias DaemonEvent =
@@ -1309,13 +1233,6 @@ alias DaemonEvent =
   | WontFixCommentResultMessage
   | DeleteCommentResultMessage
   | GetCommentsResultMessage
-  | ReviewStartedMessage
-  | ReviewChunkMessage
-  | ReviewFindingMessage
-  | ReviewCommentResolvedMessage
-  | ReviewToolUseMessage
-  | ReviewCompleteMessage
-  | ReviewCancelledMessage
   | SpawnResultMessage
   | AttachResultMessage
   | PtyOutputMessage

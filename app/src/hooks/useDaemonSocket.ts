@@ -11,7 +11,6 @@ import type {
   RecentLocation as GeneratedRecentLocation,
   BranchElement as GeneratedBranch,
   Comment as GeneratedComment,
-  ReviewFinding as GeneratedReviewFinding,
   ReviewLoopRun as GeneratedReviewLoopRun,
   ReviewLoopInteraction as GeneratedReviewLoopInteraction,
   WarningElement as GeneratedWarning,
@@ -31,7 +30,6 @@ export type RepoState = GeneratedRepoState;
 export type AuthorState = GeneratedAuthorState;
 export type RecentLocation = GeneratedRecentLocation;
 export type Branch = GeneratedBranch;
-export type ReviewFinding = GeneratedReviewFinding;
 export type ReviewLoopState = GeneratedReviewLoopRun;
 export type ReviewLoopInteraction = GeneratedReviewLoopInteraction;
 export type DaemonSettings = Record<string, string>;
@@ -72,11 +70,10 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   path?: string;
   // Branch action result fields
   branch?: string;
-  // Reviewer streaming event fields
+  // Legacy review event fields
   review_id?: string;
   session_id?: string;
   content?: string;
-  finding?: ReviewFinding;
   review_loop_run?: ReviewLoopState;
   comment_id?: string;
   tool_use?: {
@@ -296,29 +293,6 @@ export interface BranchDiffFilesResult {
   error?: string;
 }
 
-// Tool use event data
-export interface ReviewToolUse {
-  name: string;
-  input: Record<string, unknown>;
-  output: string;
-}
-
-// Unified reviewer event type for ordered rendering
-export type ReviewerEvent =
-  | { type: 'chunk'; content: string }
-  | { type: 'tool_use'; name: string; input: Record<string, unknown>; output: string };
-
-// Reviewer event callbacks
-export interface ReviewerCallbacks {
-  onReviewStarted?: (reviewId: string) => void;
-  onReviewChunk?: (reviewId: string, content: string) => void;
-  onReviewFinding?: (reviewId: string, finding: ReviewFinding, comment?: ReviewComment) => void;
-  onReviewCommentResolved?: (reviewId: string, commentId: string) => void;
-  onReviewToolUse?: (reviewId: string, toolUse: ReviewToolUse) => void;
-  onReviewComplete?: (reviewId: string, success: boolean, error?: string) => void;
-  onReviewCancelled?: (reviewId: string) => void;
-}
-
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
@@ -329,7 +303,6 @@ interface UseDaemonSocketOptions {
   onSettingError?: (message: string) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
   onReviewLoopUpdate?: (state: ReviewLoopState | null) => void;
-  reviewer?: ReviewerCallbacks;
   wsUrl?: string;
 }
 
@@ -411,7 +384,6 @@ export function useDaemonSocket({
   onSettingError,
   onGitStatusUpdate,
   onReviewLoopUpdate,
-  reviewer,
   wsUrl = DEFAULT_WS_URL,
 }: UseDaemonSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -1345,49 +1317,6 @@ export function useDaemonSocket({
             }
             break;
           }
-
-          // Reviewer streaming events
-          case 'review_started':
-            if (data.review_id && reviewer?.onReviewStarted) {
-              reviewer.onReviewStarted(data.review_id);
-            }
-            break;
-
-          case 'review_chunk':
-            if (data.review_id && data.content && reviewer?.onReviewChunk) {
-              reviewer.onReviewChunk(data.review_id, data.content);
-            }
-            break;
-
-          case 'review_finding':
-            if (data.review_id && data.finding && reviewer?.onReviewFinding) {
-              reviewer.onReviewFinding(data.review_id, data.finding, data.comment);
-            }
-            break;
-
-          case 'review_comment_resolved':
-            if (data.review_id && data.comment_id && reviewer?.onReviewCommentResolved) {
-              reviewer.onReviewCommentResolved(data.review_id, data.comment_id);
-            }
-            break;
-
-          case 'review_tool_use':
-            if (data.review_id && data.tool_use && reviewer?.onReviewToolUse) {
-              reviewer.onReviewToolUse(data.review_id, data.tool_use);
-            }
-            break;
-
-          case 'review_complete':
-            if (data.review_id && reviewer?.onReviewComplete) {
-              reviewer.onReviewComplete(data.review_id, data.success ?? false, data.error);
-            }
-            break;
-
-          case 'review_cancelled':
-            if (data.review_id && reviewer?.onReviewCancelled) {
-              reviewer.onReviewCancelled(data.review_id);
-            }
-            break;
 
           case 'command_error':
             if (data.error === 'daemon_recovering') {
@@ -2746,41 +2675,6 @@ export function useDaemonSocket({
     });
   }, []);
 
-  // Reviewer agent methods
-  const sendStartReview = useCallback((
-    reviewId: string,
-    repoPath: string,
-    branch: string,
-    baseBranch: string
-  ): void => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.error('[Daemon] Cannot start review: WebSocket not connected');
-      return;
-    }
-
-    ws.send(JSON.stringify({
-      cmd: 'start_review',
-      review_id: reviewId,
-      repo_path: repoPath,
-      branch: branch,
-      base_branch: baseBranch,
-    }));
-  }, []);
-
-  const sendCancelReview = useCallback((reviewId: string): void => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.error('[Daemon] Cannot cancel review: WebSocket not connected');
-      return;
-    }
-
-    ws.send(JSON.stringify({
-      cmd: 'cancel_review',
-      review_id: reviewId,
-    }));
-  }, []);
-
   const clearWarnings = useCallback(() => {
     setWarnings([]);
     const ws = wsRef.current;
@@ -2842,8 +2736,6 @@ export function useDaemonSocket({
     sendWontFixComment,
     sendDeleteComment,
     sendGetComments,
-    sendStartReview,
-    sendCancelReview,
     sendStartReviewLoop,
     sendStopReviewLoop,
     answerReviewLoop,
