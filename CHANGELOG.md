@@ -6,6 +6,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-03-07]
+
+### Changed
+- **Session Sidebar Action Strip**: Move review-loop access into a new icon-based sidebar header tool row alongside editor, diff-panel, and PR-drawer controls, and let the diff panel be shown or hidden from that strip.
+- **Review Loop Session Overlay**: Remove the full-width review-loop bar above the active session and keep the review-loop drawer as an app-controlled overlay with its primary actions in the drawer header.
+- **Shared Sliding Side Panels**: Refactor the review-loop drawer and PR attention drawer onto one shared side-panel shell so they both anchor to the right edge, animate with the same slide-in/slide-out behavior, and stack beside the diff panel instead of overlapping it.
+- **Unified Session Right Dock**: Replace the old mix of fixed layout panels, one-off drawers, and separate review view with a single dock-managed panel system for diff, review loop, PR attention, and the in-app review/editor panel.
+
 ## [2026-03-06]
 
 ### Added

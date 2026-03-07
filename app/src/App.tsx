@@ -5,7 +5,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Terminal, TerminalHandle } from './components/Terminal';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, type SidebarHeaderAction, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
@@ -15,6 +15,7 @@ import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
 import { ReviewPanel } from './components/ReviewPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
+import { RightDock } from './components/RightDock';
 import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
 import { ThumbsModal } from './components/ThumbsModal';
 import { ForkDialog } from './components/ForkDialog';
@@ -86,6 +87,19 @@ function persistDismissedUpdateVersion(version: string): void {
     window.localStorage.setItem(UPDATE_BANNER_DISMISSED_STORAGE_KEY, version);
   } catch (err) {
     console.warn('[App] Failed to persist dismissed update version:', err);
+  }
+}
+
+function toneForDockPanel(status?: string): 'default' | 'idle' | 'running' | 'awaiting_user' | 'completed' | 'stopped' | 'error' {
+  switch (status) {
+    case 'running':
+    case 'awaiting_user':
+    case 'completed':
+    case 'stopped':
+    case 'error':
+      return status;
+    default:
+      return 'default';
   }
 }
 
@@ -643,8 +657,6 @@ function AppContent({
   const [closedWorktree, setClosedWorktree] = useState<{ path: string; branch?: string } | null>(null);
   const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(false);
 
-  // Review panel state
-  const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
   const [initialReviewFile, setInitialReviewFile] = useState<string | null>(null);
   const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
   const hasAvailableAgents = useMemo(
@@ -760,9 +772,22 @@ function AppContent({
 
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
+  type DockPanelId = 'diff' | 'reviewLoop' | 'attention' | 'review';
+
   // View state management
-  const [view, setView] = useState<'dashboard' | 'session' | 'review'>('dashboard');
-  const previousViewRef = useRef<'dashboard' | 'session'>('session');
+  const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
+  const [dockState, setDockState] = useState<{
+    openPanels: Record<DockPanelId, boolean>;
+    stack: DockPanelId[];
+  }>({
+    openPanels: {
+      diff: true,
+      reviewLoop: false,
+      attention: false,
+      review: false,
+    },
+    stack: ['diff'],
+  });
   const gitStatusSubscribedDirRef = useRef<string | null>(null);
   const activeSessionVisibleSinceRef = useRef<{ id: string; at: number } | null>(null);
   const pendingSessionVisualizedRef = useRef<{ key: string | null; timeoutId: number | null }>({
@@ -887,15 +912,49 @@ function AppContent({
     setView('dashboard');
   }, [setActiveSession]);
 
-  // Drawer state management
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const toggleDrawer = useCallback(() => {
-    setDrawerOpen((prev) => !prev);
+  const toggleDockPanel = useCallback((panelId: DockPanelId) => {
+    setDockState((prev) => {
+      const nextOpen = !prev.openPanels[panelId];
+      return {
+        openPanels: {
+          ...prev.openPanels,
+          [panelId]: nextOpen,
+        },
+        stack: nextOpen
+          ? [...prev.stack.filter((id) => id !== panelId), panelId]
+          : prev.stack.filter((id) => id !== panelId),
+      };
+    });
   }, []);
 
-  const closeDrawer = useCallback(() => {
-    setDrawerOpen(false);
+  const openDockPanel = useCallback((panelId: DockPanelId) => {
+    setDockState((prev) => {
+      if (prev.openPanels[panelId]) {
+        return prev;
+      }
+      return {
+        openPanels: {
+          ...prev.openPanels,
+          [panelId]: true,
+        },
+        stack: [...prev.stack.filter((id) => id !== panelId), panelId],
+      };
+    });
+  }, []);
+
+  const closeDockPanel = useCallback((panelId: DockPanelId) => {
+    setDockState((prev) => {
+      if (!prev.openPanels[panelId]) {
+        return prev;
+      }
+      return {
+        openPanels: {
+          ...prev.openPanels,
+          [panelId]: false,
+        },
+        stack: prev.stack.filter((id) => id !== panelId),
+      };
+    });
   }, []);
 
   // Sidebar collapse state
@@ -937,6 +996,44 @@ function AppContent({
     () => (activeSessionId ? reviewLoopsBySessionId[activeSessionId] ?? null : null),
     [activeSessionId, reviewLoopsBySessionId],
   );
+  const activeLocalSession = useMemo(
+    () => (activeSessionId ? sessions.find((s) => s.id === activeSessionId) ?? null : null),
+    [activeSessionId, sessions],
+  );
+  const activeReviewLoopAvailable = useMemo(
+    () => Boolean(activeLocalSession && daemonSessions.find((ds) => ds.id === activeLocalSession.id)?.agent === 'claude'),
+    [activeLocalSession, daemonSessions],
+  );
+  const openDockPanels = dockState.openPanels;
+  const dockPanelStack = dockState.stack;
+  const diffPanelOpen = openDockPanels.diff;
+  const reviewLoopPanelOpen = openDockPanels.reviewLoop;
+  const attentionPanelOpen = openDockPanels.attention;
+  const reviewPanelOpen = openDockPanels.review;
+  const waitingReviewSessions = useMemo(
+    () => sessions
+      .map((session) => ({
+        sessionId: session.id,
+        label: session.label,
+        loopState: reviewLoopsBySessionId[session.id],
+      }))
+      .filter((item): item is { sessionId: string; label: string; loopState: ReviewLoopState } =>
+        Boolean(item.loopState && item.loopState.status === 'awaiting_user')
+      ),
+    [reviewLoopsBySessionId, sessions],
+  );
+
+  useEffect(() => {
+    if (!activeReviewLoopAvailable) {
+      closeDockPanel('reviewLoop');
+    }
+  }, [activeReviewLoopAvailable, closeDockPanel]);
+
+  useEffect(() => {
+    if (activeReviewLoopState?.status === 'awaiting_user' && activeReviewLoopAvailable) {
+      openDockPanel('reviewLoop');
+    }
+  }, [activeReviewLoopAvailable, activeReviewLoopState?.status, openDockPanel]);
 
   useEffect(() => {
     if (!settingError) {
@@ -1349,12 +1446,8 @@ function AppContent({
   // Open file in review panel
   const handleFileSelect = useCallback((path: string, _staged: boolean) => {
     setInitialReviewFile(path);
-    setReviewPanelOpen(true);
-    if (view !== 'review') {
-      previousViewRef.current = view === 'dashboard' ? 'dashboard' : 'session';
-    }
-    setView('review');
-  }, [view]);
+    openDockPanel('review');
+  }, [openDockPanel]);
 
   // Fetch diff for ReviewPanel
   // Options: staged (deprecated), baseRef (for PR-like branch diffs)
@@ -1429,19 +1522,14 @@ function AppContent({
 
   // Review panel handlers
   const handleOpenReviewPanel = useCallback(() => {
-    if (view !== 'review') {
-      previousViewRef.current = view === 'dashboard' ? 'dashboard' : 'session';
-    }
     setInitialReviewFile(null); // No specific file, let ReviewPanel pick first
-    setReviewPanelOpen(true);
-    setView('review');
-  }, [view]);
+    openDockPanel('review');
+  }, [openDockPanel]);
 
   const handleCloseReviewPanel = useCallback(() => {
-    setReviewPanelOpen(false);
+    closeDockPanel('review');
     setInitialReviewFile(null);
-    setView(previousViewRef.current);
-  }, []);
+  }, [closeDockPanel]);
 
   useEffect(() => {
     if (!reviewPanelOpen) return;
@@ -1486,6 +1574,51 @@ function AppContent({
     }
     handleOpenEditor(activeDaemonSession.directory, filePath);
   }, [activeDaemonSession?.directory, handleOpenEditor, showError]);
+
+  const sidebarHeaderActions = useMemo<SidebarHeaderAction[]>(() => ([
+    {
+      id: 'editor',
+      title: activeSessionId ? 'Open in Editor' : 'Open in Editor (No active session)',
+      icon: <EditorIcon />,
+      disabled: !activeSessionId,
+      onClick: handleOpenEditorForSession,
+    },
+    {
+      id: 'reviewLoop',
+      title: activeReviewLoopAvailable ? 'Review Loop' : 'Review Loop (Claude only)',
+      icon: <ReviewLoopIcon />,
+      active: reviewLoopPanelOpen,
+      disabled: !activeReviewLoopAvailable,
+      toneClassName: activeReviewLoopState?.status ? `sidebar-tool-btn--loop-${activeReviewLoopState.status}` : undefined,
+      onClick: () => toggleDockPanel('reviewLoop'),
+    },
+    {
+      id: 'diff',
+      title: diffPanelOpen ? 'Hide Diff Panel' : 'Show Diff Panel',
+      icon: <DiffIcon />,
+      active: diffPanelOpen,
+      disabled: !activeSessionId,
+      onClick: () => toggleDockPanel('diff'),
+    },
+    {
+      id: 'attention',
+      title: attentionPanelOpen ? 'Hide PRs Drawer' : 'Show PRs Drawer',
+      icon: <PRsIcon />,
+      active: attentionPanelOpen,
+      badge: attentionCount > 0 ? attentionCount : undefined,
+      onClick: () => toggleDockPanel('attention'),
+    },
+  ]), [
+    activeReviewLoopAvailable,
+    activeReviewLoopState?.status,
+    activeSessionId,
+    attentionCount,
+    attentionPanelOpen,
+    diffPanelOpen,
+    handleOpenEditorForSession,
+    reviewLoopPanelOpen,
+    toggleDockPanel,
+  ]);
 
   // Send code reference to the active Claude terminal
   const handleSendToClaude = useCallback((reference: string) => {
@@ -1577,7 +1710,7 @@ function AppContent({
     onNewSession: handleNewSession,
     onNewWorktreeSession: handleNewWorktreeSession,
     onCloseSession: handleCloseCurrentSession,
-    onToggleDrawer: toggleDrawer,
+    onToggleDrawer: () => toggleDockPanel('attention'),
     onGoToDashboard: goToDashboard,
     onJumpToWaiting: handleJumpToWaiting,
     onSelectSession: handleSelectSessionByIndex,
@@ -1667,6 +1800,7 @@ function AppContent({
           visualIndexBySessionId={visualIndexBySessionId}
           selectedId={activeSessionId}
           collapsed={sidebarCollapsed}
+          headerActions={sidebarHeaderActions}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onCloseSession={handleCloseSession}
@@ -1675,16 +1809,6 @@ function AppContent({
           onToggleCollapse={toggleSidebarCollapse}
         />
         <div className="terminal-pane">
-          {activeSessionId && (
-            <SessionReviewLoopBar
-              sessionId={activeSessionId}
-              loopState={activeReviewLoopState}
-              onStart={handleStartReviewLoop}
-              onStop={handleStopReviewLoop}
-              onSetIterations={handleSetReviewLoopIterations}
-              onAnswer={handleAnswerReviewLoop}
-            />
-          )}
           <div className="terminal-main-area">
             {sessions.map((session) => (
               <div
@@ -1730,23 +1854,99 @@ function AppContent({
             );
           })()}
         </div>
-        <ChangesPanel
-          branchDiffFiles={branchDiffFiles}
-          branchDiffBaseRef={branchDiffBaseRef}
-          branchDiffError={branchDiffError}
-          attentionCount={attentionCount}
-          selectedFile={null}
-          onFileSelect={handleFileSelect}
-          onAttentionClick={toggleDrawer}
-          onReviewClick={handleOpenReviewPanel}
-          onOpenEditor={activeSessionId ? handleOpenEditorForSession : undefined}
-        />
-        <AttentionDrawer
-          isOpen={drawerOpen}
-          onClose={closeDrawer}
-          waitingSessions={waitingLocalSessions}
-          prs={prs}
-          onSelectSession={handleSelectSession}
+        <RightDock
+          panelOrder={dockPanelStack}
+          panels={[
+            {
+              id: 'diff',
+              isOpen: diffPanelOpen,
+              width: 'clamp(220px, 24vw, 280px)',
+              className: 'dock-panel dock-panel--diff',
+              children: (
+                <ChangesPanel
+                  branchDiffFiles={branchDiffFiles}
+                  branchDiffBaseRef={branchDiffBaseRef}
+                  branchDiffError={branchDiffError}
+                  selectedFile={null}
+                  onFileSelect={handleFileSelect}
+                  onReviewClick={handleOpenReviewPanel}
+                />
+              ),
+            },
+            {
+              id: 'reviewLoop',
+              isOpen: reviewLoopPanelOpen && Boolean(activeSessionId && activeReviewLoopAvailable && activeLocalSession),
+              width: 'clamp(320px, 42vw, 420px)',
+              tone: activeReviewLoopState ? toneForDockPanel(activeReviewLoopState.status) : 'default',
+              className: 'dock-panel dock-panel--review-loop',
+              children: activeSessionId && activeReviewLoopAvailable && activeLocalSession ? (
+                <SessionReviewLoopBar
+                  sessionId={activeSessionId}
+                  sessionLabel={activeLocalSession.label}
+                  loopState={activeReviewLoopState}
+                  onClose={() => closeDockPanel('reviewLoop')}
+                  waitingReviewSessions={waitingReviewSessions}
+                  onSelectSession={handleSelectSession}
+                  onStart={handleStartReviewLoop}
+                  onStop={handleStopReviewLoop}
+                  onSetIterations={handleSetReviewLoopIterations}
+                  onAnswer={handleAnswerReviewLoop}
+                />
+              ) : null,
+            },
+            {
+              id: 'attention',
+              isOpen: attentionPanelOpen,
+              width: 'clamp(360px, 48vw, 600px)',
+              className: 'dock-panel dock-panel--attention attention-drawer',
+              children: (
+                <AttentionDrawer
+                  onClose={() => closeDockPanel('attention')}
+                  waitingSessions={waitingLocalSessions}
+                  prs={prs}
+                  onSelectSession={handleSelectSession}
+                />
+              ),
+            },
+            {
+              id: 'review',
+              isOpen: reviewPanelOpen,
+              width: 'clamp(680px, 72vw, 1100px)',
+              className: 'dock-panel dock-panel--review',
+              children: (
+                <ReviewPanel
+                  isOpen={reviewPanelOpen}
+                  gitStatus={gitStatus}
+                  repoPath={activeDaemonSession?.directory || ''}
+                  branch={activeDaemonSession?.branch || ''}
+                  baseBranch={branchDiffBaseRef || undefined}
+                  onClose={handleCloseReviewPanel}
+                  fetchDiff={fetchDiffForReview}
+                  sendGetBranchDiffFiles={sendGetBranchDiffFiles}
+                  sendFetchRemotes={sendFetchRemotes}
+                  getReviewState={getReviewState}
+                  markFileViewed={markFileViewed}
+                  onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
+                  addComment={sendAddComment}
+                  updateComment={sendUpdateComment}
+                  resolveComment={sendResolveComment}
+                  wontFixComment={sendWontFixComment}
+                  deleteComment={sendDeleteComment}
+                  getComments={sendGetComments}
+                  sendStartReview={sendStartReview}
+                  sendCancelReview={sendCancelReview}
+                  reviewerEvents={reviewerEvents}
+                  reviewerRunning={reviewerRunning}
+                  reviewerError={reviewerError}
+                  agentComments={pendingAgentComments}
+                  agentResolvedCommentIds={agentResolvedCommentIds}
+                  resolvedTheme={resolvedTheme}
+                  initialSelectedFile={initialReviewFile || undefined}
+                  onOpenEditor={handleOpenEditorForReview}
+                />
+              ),
+            },
+          ]}
         />
       </div>
 
@@ -1791,38 +1991,6 @@ function AppContent({
         onDelete={handleWorktreeDelete}
         onAlwaysKeep={handleWorktreeAlwaysKeep}
       />
-      <div className={`view-container review-view ${view === 'review' ? 'visible' : 'hidden'}`}>
-        <ReviewPanel
-          isOpen={reviewPanelOpen}
-          gitStatus={gitStatus}
-          repoPath={activeDaemonSession?.directory || ''}
-          branch={activeDaemonSession?.branch || ''}
-          baseBranch={branchDiffBaseRef || undefined}
-          onClose={handleCloseReviewPanel}
-          fetchDiff={fetchDiffForReview}
-          sendGetBranchDiffFiles={sendGetBranchDiffFiles}
-          sendFetchRemotes={sendFetchRemotes}
-          getReviewState={getReviewState}
-          markFileViewed={markFileViewed}
-          onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
-          addComment={sendAddComment}
-          updateComment={sendUpdateComment}
-          resolveComment={sendResolveComment}
-          wontFixComment={sendWontFixComment}
-          deleteComment={sendDeleteComment}
-          getComments={sendGetComments}
-          sendStartReview={sendStartReview}
-          sendCancelReview={sendCancelReview}
-          reviewerEvents={reviewerEvents}
-          reviewerRunning={reviewerRunning}
-          reviewerError={reviewerError}
-          agentComments={pendingAgentComments}
-          agentResolvedCommentIds={agentResolvedCommentIds}
-          resolvedTheme={resolvedTheme}
-          initialSelectedFile={initialReviewFile || undefined}
-          onOpenEditor={handleOpenEditorForReview}
-        />
-      </div>
       <ThumbsModal
         isOpen={thumbsOpen}
         terminalText={thumbsText}

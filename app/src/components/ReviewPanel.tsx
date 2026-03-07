@@ -1263,8 +1263,8 @@ export function ReviewPanel({
                 Send unresolved
               </button>
             )}
-            <button className="review-close" onClick={onClose} title="Exit review (Esc)">
-              Exit <kbd>Esc</kbd>
+            <button className="review-close" onClick={onClose} title="Hide review panel (Esc)">
+              Hide <kbd>Esc</kbd>
             </button>
           </div>
         </div>

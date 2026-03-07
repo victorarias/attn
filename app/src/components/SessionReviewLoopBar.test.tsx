@@ -14,7 +14,11 @@ function renderBar(settings: Record<string, string> = {}) {
     <SettingsProvider settings={settings} setSetting={setSetting}>
       <SessionReviewLoopBar
         sessionId="s1"
+        sessionLabel="session one"
         loopState={null}
+        onClose={vi.fn()}
+        waitingReviewSessions={[]}
+        onSelectSession={vi.fn()}
         onStart={onStart}
         onStop={onStop}
         onSetIterations={onSetIterations}
@@ -34,7 +38,6 @@ describe('SessionReviewLoopBar', () => {
       ]),
     });
 
-    fireEvent.click(screen.getByText('Start Loop'));
     expect(screen.getByRole('option', { name: 'Architect Pass' })).toBeInTheDocument();
   });
 
@@ -48,8 +51,7 @@ describe('SessionReviewLoopBar', () => {
       review_loop_last_iterations: '4',
     });
 
-    fireEvent.click(screen.getByText('Start Loop'));
-    fireEvent.click(screen.getByText('Start Review Loop'));
+    fireEvent.click(screen.getByRole('button', { name: 'Start Review Loop' }));
 
     expect(onStart).toHaveBeenCalledWith('Review as architect', 4, 'custom-architect');
   });

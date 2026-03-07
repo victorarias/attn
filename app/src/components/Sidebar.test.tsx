@@ -27,6 +27,7 @@ function buildSidebarData(sessions: TestSession[]) {
 const baseProps = {
   selectedId: null,
   collapsed: false,
+  headerActions: [],
   onSelectSession: () => {},
   onNewSession: () => {},
   onCloseSession: () => {},
@@ -92,7 +93,7 @@ describe('Sidebar', () => {
     expect(onReloadSession).toHaveBeenCalledWith('s1');
   });
 
-  it('shows review loop badge for sessions with loop state', () => {
+  it('shows review loop state text for sessions with loop state', () => {
     const sessions: TestSession[] = [{
       id: 's1',
       label: 'claude',
@@ -107,7 +108,7 @@ describe('Sidebar', () => {
       />
     );
 
-    expect(screen.getByText('loop')).toBeInTheDocument();
+    expect(screen.getByText('review running')).toBeInTheDocument();
   });
 
   it('renders session shortcuts in grouped visual order', () => {
