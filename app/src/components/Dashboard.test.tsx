@@ -68,6 +68,6 @@ describe('Dashboard sessions', () => {
       />
     );
 
-    expect(screen.getByText('review running')).toBeInTheDocument();
+    expect(screen.getByLabelText('Review loop running')).toBeInTheDocument();
   });
 });
