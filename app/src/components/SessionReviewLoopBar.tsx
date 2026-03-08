@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { ReviewLoopState } from '../hooks/useDaemonSocket';
 import { useSettings } from '../contexts/SettingsContext';
 import {
@@ -17,10 +19,23 @@ interface WaitingReviewSession {
   loopState: ReviewLoopState;
 }
 
+interface ReviewLoopTraceEntry {
+  kind: 'text' | 'tool';
+  content?: string;
+  tool?: string;
+  command?: string;
+  paths?: string[];
+}
+
+interface ReviewLoopTracePayload {
+  entries: ReviewLoopTraceEntry[];
+}
+
 interface SessionReviewLoopBarProps {
   sessionId: string;
   sessionLabel: string;
   loopState: ReviewLoopState | null;
+  getReviewLoopRun: (loopId: string) => Promise<{ success: boolean; state: ReviewLoopState | null }>;
   onClose: () => void;
   waitingReviewSessions: WaitingReviewSession[];
   onSelectSession: (sessionId: string) => void;
@@ -73,10 +88,45 @@ function latestIterationLabel(loopState: ReviewLoopState | null): string {
   return `Round ${loopState.latest_iteration.iteration_number}/${loopState.iteration_limit}`;
 }
 
+function iterationStatusLabel(iteration?: ReviewLoopState['latest_iteration'] | null): string {
+  if (!iteration?.status) {
+    return 'pending';
+  }
+  return iteration.status.replace('_', ' ');
+}
+
+function renderBashCommand(command: string) {
+  const lines = command.split('\n');
+  return lines.map((line, lineIndex) => (
+    <div key={`${lineIndex}-${line}`} className="review-loop-bash-line">
+      {line.split(/(\s+|"[^"]*"|'[^']*'|\$\w+|--?[a-zA-Z0-9_-]+)/g).filter(Boolean).map((part, tokenIndex) => {
+        let className = 'review-loop-bash-token';
+        if (/^#/.test(part.trim())) {
+          className += ' review-loop-bash-token--comment';
+        } else if (/^--?[a-zA-Z0-9_-]+$/.test(part)) {
+          className += ' review-loop-bash-token--flag';
+        } else if (/^".*"$|^'.*'$/.test(part)) {
+          className += ' review-loop-bash-token--string';
+        } else if (/^\$\w+$/.test(part)) {
+          className += ' review-loop-bash-token--variable';
+        } else if (tokenIndex === 0 && part.trim() !== '') {
+          className += ' review-loop-bash-token--command';
+        }
+        return (
+          <span key={`${tokenIndex}-${part}`} className={className}>
+            {part}
+          </span>
+        );
+      })}
+    </div>
+  ));
+}
+
 export function SessionReviewLoopBar({
   sessionId,
   sessionLabel,
   loopState,
+  getReviewLoopRun,
   onClose,
   waitingReviewSessions,
   onSelectSession,
@@ -96,6 +146,9 @@ export function SessionReviewLoopBar({
   );
   const [logOpen, setLogOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [expandedToolEntries, setExpandedToolEntries] = useState<Record<number, boolean>>({});
+  const [runDetails, setRunDetails] = useState<ReviewLoopState | null>(null);
+  const [selectedIterationId, setSelectedIterationId] = useState<string | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState(settings[REVIEW_LOOP_SETTINGS_LAST_PRESET] || BUILTIN_REVIEW_LOOP_PRESETS[0].id);
   const selectedPreset = useMemo(
     () => presets.find((preset) => preset.id === selectedPresetId) ?? BUILTIN_REVIEW_LOOP_PRESETS[0],
@@ -109,17 +162,94 @@ export function SessionReviewLoopBar({
   const awaitingUser = loopState?.status === 'awaiting_user' && !!loopState.pending_interaction;
   const tone = toneForStatus(loopState?.status);
   const waitingSwitcherVisible = waitingReviewSessions.length > 1;
-  const filesTouched = loopState?.latest_iteration?.files_touched ?? [];
-  const latestSummary = loopState?.latest_iteration?.summary || loopState?.last_result_summary || '';
-  const latestResultText = loopState?.latest_iteration?.result_text || '';
-  const latestTrace = loopState?.latest_iteration?.assistant_trace_json || '';
   const reviewLoopModel = settings.review_loop_model || 'claude-sonnet-4-6';
+  const effectiveRun = runDetails ?? loopState;
+  const iterations = effectiveRun?.iterations ?? (loopState?.latest_iteration ? [loopState.latest_iteration] : []);
+  const selectedIteration = useMemo(() => {
+    if (iterations.length === 0) {
+      return loopState?.latest_iteration ?? null;
+    }
+    if (selectedIterationId) {
+      const found = iterations.find((iteration) => iteration.id === selectedIterationId);
+      if (found) return found;
+    }
+    return iterations[iterations.length - 1];
+  }, [iterations, loopState?.latest_iteration, selectedIterationId]);
+  const selectedIterationIndex = selectedIteration ? iterations.findIndex((iteration) => iteration.id === selectedIteration.id) : -1;
+  const filesTouched = selectedIteration?.files_touched ?? [];
+  const latestSummary = selectedIteration?.summary || effectiveRun?.last_result_summary || '';
+  const latestResultText = selectedIteration?.result_text || '';
+  const latestTrace = selectedIteration?.assistant_trace_json || '';
+  const selectedChangeStats = selectedIteration?.change_stats ?? [];
 
   useEffect(() => {
     if (!presets.some((preset) => preset.id === selectedPresetId)) {
       setSelectedPresetId(BUILTIN_REVIEW_LOOP_PRESETS[0].id);
     }
   }, [presets, selectedPresetId]);
+
+  useEffect(() => {
+    if (!loopState?.loop_id) {
+      setRunDetails(loopState);
+      setSelectedIterationId(loopState?.latest_iteration?.id ?? null);
+      return;
+    }
+    let cancelled = false;
+    getReviewLoopRun(loopState.loop_id)
+      .then((result) => {
+        if (cancelled) return;
+        setRunDetails(result.state ?? loopState);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRunDetails(loopState);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [getReviewLoopRun, loopState]);
+
+  useEffect(() => {
+    if (!loopState) {
+      setRunDetails(null);
+      return;
+    }
+    setRunDetails((prev) => {
+      if (!prev || prev.loop_id !== loopState.loop_id) {
+        return loopState;
+      }
+
+      const next: ReviewLoopState = { ...prev, ...loopState };
+      if (loopState.latest_iteration) {
+        const iterations = prev.iterations ? [...prev.iterations] : [];
+        const index = iterations.findIndex((iteration) => iteration.id === loopState.latest_iteration?.id);
+        if (index >= 0) {
+          iterations[index] = { ...iterations[index], ...loopState.latest_iteration };
+        } else {
+          iterations.push(loopState.latest_iteration);
+        }
+        iterations.sort((a, b) => a.iteration_number - b.iteration_number);
+        next.iterations = iterations;
+      }
+      return next;
+    });
+  }, [loopState]);
+
+  useEffect(() => {
+    if (!selectedIteration) {
+      setSelectedIterationId(loopState?.latest_iteration?.id ?? null);
+      return;
+    }
+    if (!selectedIterationId) {
+      setSelectedIterationId(selectedIteration.id);
+    }
+  }, [loopState?.latest_iteration?.id, selectedIteration, selectedIterationId]);
+
+  useEffect(() => {
+    if (loopState?.status === 'running') {
+      setLogOpen(true);
+    }
+  }, [loopState?.status]);
 
   useEffect(() => {
     if (!settings[REVIEW_LOOP_SETTINGS_LAST_PROMPT]) {
@@ -193,16 +323,28 @@ export function SessionReviewLoopBar({
   };
 
   const renderLogBody = () => {
-    if (latestTrace) {
-      return latestTrace;
+    return latestTrace || latestResultText || (loopState?.status === 'running'
+      ? 'Waiting for persisted reviewer output from the current round.'
+      : 'No reviewer log captured yet for this loop.');
+  };
+
+  const traceEntries = useMemo<ReviewLoopTraceEntry[] | null>(() => {
+    if (!latestTrace) {
+      return null;
     }
-    if (latestResultText) {
-      return latestResultText;
+    try {
+      const parsed = JSON.parse(latestTrace) as ReviewLoopTracePayload;
+      if (Array.isArray(parsed.entries)) {
+        return parsed.entries.filter((entry) => entry && (entry.kind === 'text' || entry.kind === 'tool'));
+      }
+    } catch {
+      // Fallback to plain-text log rendering below.
     }
-    if (loopState?.status === 'running') {
-      return 'Waiting for persisted reviewer output from the current round.';
-    }
-    return 'No reviewer log captured yet for this loop.';
+    return null;
+  }, [latestTrace]);
+
+  const toggleToolEntry = (index: number) => {
+    setExpandedToolEntries((prev) => ({ ...prev, [index]: !prev[index] }));
   };
 
   const showHeaderIterationControls = loopState?.status === 'running';
@@ -227,6 +369,28 @@ export function SessionReviewLoopBar({
               ? `${latestIterationLabel(loopState)} · model ${reviewLoopModel}`
               : `Configure and start an autonomous Claude review loop for this session.`}
           </p>
+
+          {iterations.length > 1 && selectedIteration && (
+            <div className="review-loop-iteration-nav">
+              <button
+                className="review-loop-iteration-nav-btn"
+                onClick={() => setSelectedIterationId(iterations[Math.max(0, selectedIterationIndex - 1)]?.id ?? null)}
+                disabled={selectedIterationIndex <= 0}
+              >
+                ‹
+              </button>
+              <span className="review-loop-iteration-nav-label">
+                Iteration {selectedIteration.iteration_number} of {iterations.length}
+              </span>
+              <button
+                className="review-loop-iteration-nav-btn"
+                onClick={() => setSelectedIterationId(iterations[Math.min(iterations.length - 1, selectedIterationIndex + 1)]?.id ?? null)}
+                disabled={selectedIterationIndex < 0 || selectedIterationIndex >= iterations.length - 1}
+              >
+                ›
+              </button>
+            </div>
+          )}
 
           <div className="review-loop-drawer-actions review-loop-drawer-actions--header">
             {showHeaderIterationControls && (
@@ -287,35 +451,51 @@ export function SessionReviewLoopBar({
                 <div className="review-loop-stat-card">
                   <span className="review-loop-stat-label">Iteration State</span>
                   <span className="review-loop-stat-value">
-                    {loopState.latest_iteration?.status?.replace('_', ' ') || 'pending'}
+                    {iterationStatusLabel(selectedIteration)}
                   </span>
                 </div>
                 <div className="review-loop-stat-card">
                   <span className="review-loop-stat-label">Pass Count</span>
-                  <span className="review-loop-stat-value">{loopState.iteration_count}/{loopState.iteration_limit}</span>
+                  <span className="review-loop-stat-value">
+                    {selectedIteration?.iteration_number ?? loopState.iteration_count}/{loopState.iteration_limit}
+                  </span>
                 </div>
               </div>
 
               {latestSummary && (
-                <section className="review-loop-panel-card">
+                <section className="review-loop-panel-card review-loop-panel-card--summary">
                   <div className="review-loop-panel-header">
                     <h4>Latest Summary</h4>
                   </div>
                   <div className="review-loop-panel-content review-loop-panel-content--summary">
-                    {latestSummary}
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {latestSummary}
+                    </ReactMarkdown>
                   </div>
                 </section>
               )}
 
-              <section className="review-loop-panel-card">
+              <section className="review-loop-panel-card review-loop-panel-card--files">
                 <div className="review-loop-panel-header">
-                  <h4>Files Touched This Round</h4>
+                  <h4>{selectedChangeStats.length > 0 ? 'Changed This Iteration' : 'Files Touched This Round'}</h4>
                   <span className="review-loop-panel-meta">
                     {filesTouched.length > 0 ? `${filesTouched.length} file${filesTouched.length === 1 ? '' : 's'}` : 'none yet'}
                   </span>
                 </div>
                 <div className="review-loop-panel-content">
-                  {filesTouched.length > 0 ? (
+                  {selectedChangeStats.length > 0 ? (
+                    <ul className="review-loop-change-list">
+                      {selectedChangeStats.map((file) => (
+                        <li key={file.path} className="review-loop-change-item">
+                          <span className="review-loop-change-path">{file.path}</span>
+                          <span className="review-loop-change-stats">
+                            <span className="review-loop-change-add">+{file.additions ?? 0}</span>
+                            <span className="review-loop-change-del">-{file.deletions ?? 0}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : filesTouched.length > 0 ? (
                     <ul className="review-loop-file-list">
                       {filesTouched.map((file) => (
                         <li key={file}>{file}</li>
@@ -350,7 +530,7 @@ export function SessionReviewLoopBar({
                 </section>
               )}
 
-              <section className="review-loop-panel-card">
+              <section className={`review-loop-panel-card review-loop-panel-card--log ${logOpen ? 'is-expanded' : 'is-collapsed'}`}>
                 <div className="review-loop-panel-header">
                   <h4>Reviewer Log</h4>
                   <button className="review-loop-panel-toggle" onClick={() => setLogOpen((open) => !open)}>
@@ -358,8 +538,59 @@ export function SessionReviewLoopBar({
                   </button>
                 </div>
                 {logOpen && (
-                  <div className="review-loop-panel-content">
-                    <pre className="review-loop-log-output">{renderLogBody()}</pre>
+                  <div className="review-loop-panel-content review-loop-panel-content--log">
+                    {traceEntries ? (
+                      <div className="review-loop-log-stream">
+                        {traceEntries.map((entry, index) => {
+                          if (entry.kind === 'tool') {
+                            const isExpanded = Boolean(expandedToolEntries[index]);
+                            return (
+                              <div key={`${entry.tool || 'tool'}-${index}`} className="review-loop-log-tool">
+                                <div className="review-loop-log-tool-header">
+                                  <span className="review-loop-log-tool-name">{entry.tool || 'Tool'}</span>
+                                  {entry.paths && entry.paths.length > 0 && (
+                                    <div className="review-loop-log-tool-paths">
+                                      {entry.paths.map((path) => (
+                                        <span key={path} className="review-loop-log-tool-path">
+                                          {path}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {entry.command && (
+                                    <button
+                                      className="review-loop-log-tool-toggle"
+                                      onClick={() => toggleToolEntry(index)}
+                                    >
+                                      {isExpanded ? 'Hide Command' : 'Show Command'}
+                                    </button>
+                                  )}
+                                </div>
+                                {entry.command && isExpanded && (
+                                  <div className="review-loop-log-command">
+                                    {renderBashCommand(entry.command)}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div key={`text-${index}`} className="review-loop-log-entry">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {entry.content || ''}
+                              </ReactMarkdown>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="review-loop-log-entry review-loop-log-entry--fallback">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {renderLogBody()}
+                        </ReactMarkdown>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>

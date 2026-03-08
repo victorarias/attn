@@ -22,6 +22,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Shared Sliding Side Panels**: Refactor the review-loop drawer and PR attention drawer onto one shared side-panel shell so they both anchor to the right edge, animate with the same slide-in/slide-out behavior, and stack beside the diff panel instead of overlapping it.
 - **Unified Session Right Dock**: Replace the old mix of fixed layout panels, one-off drawers, and separate review view with a single dock-managed panel system for diff, review loop, PR attention, and the in-app review/editor panel.
 - **Diff Detail Cleanup**: Rename the old review-oriented diff panel to a diff-detail surface, remove the legacy in-panel AI review workflow, and keep the main review loop as the only review automation path in the app UI.
+- **Live Review Loop Detail Updates**: The review-loop panel now widens further, renders the latest summary as markdown, auto-opens the log while running, and updates the visible log and touched-file list incrementally during a live iteration instead of only after completion.
 
 ## [2026-03-06]
 

@@ -1457,6 +1457,7 @@ export interface ReviewLoopRunObject {
     handoff_payload_json?:   string;
     iteration_count:         number;
     iteration_limit:         number;
+    iterations?:             Iteration[];
     last_decision?:          ReviewLoopDecision;
     last_error?:             string;
     last_result_summary?:    string;
@@ -1474,16 +1475,10 @@ export interface ReviewLoopRunObject {
     [property: string]: any;
 }
 
-export enum ReviewLoopDecision {
-    Continue = "continue",
-    Converged = "converged",
-    Error = "error",
-    NeedsUserInput = "needs_user_input",
-}
-
 export interface Iteration {
     assistant_trace_json?:   string;
     blocking_reason?:        string;
+    change_stats?:           FileElement[];
     changes_made?:           boolean;
     completed_at?:           string;
     decision?:               ReviewLoopDecision;
@@ -1499,6 +1494,13 @@ export interface Iteration {
     suggested_next_focus?:   string;
     summary?:                string;
     [property: string]: any;
+}
+
+export enum ReviewLoopDecision {
+    Continue = "continue",
+    Converged = "converged",
+    Error = "error",
+    NeedsUserInput = "needs_user_input",
 }
 
 export enum ReviewLoopIterationStatus {
@@ -1572,6 +1574,7 @@ export interface ReviewLoopInteraction {
 export interface ReviewLoopIteration {
     assistant_trace_json?:   string;
     blocking_reason?:        string;
+    change_stats?:           FileElement[];
     changes_made?:           boolean;
     completed_at?:           string;
     decision?:               ReviewLoopDecision;
@@ -1610,6 +1613,7 @@ export interface ReviewLoopRun {
     handoff_payload_json?:   string;
     iteration_count:         number;
     iteration_limit:         number;
+    iterations?:             Iteration[];
     last_decision?:          ReviewLoopDecision;
     last_error?:             string;
     last_result_summary?:    string;
@@ -4212,6 +4216,7 @@ const typeMap: any = {
         { json: "handoff_payload_json", js: "handoff_payload_json", typ: u(undefined, "") },
         { json: "iteration_count", js: "iteration_count", typ: 0 },
         { json: "iteration_limit", js: "iteration_limit", typ: 0 },
+        { json: "iterations", js: "iterations", typ: u(undefined, a(r("Iteration"))) },
         { json: "last_decision", js: "last_decision", typ: u(undefined, r("ReviewLoopDecision")) },
         { json: "last_error", js: "last_error", typ: u(undefined, "") },
         { json: "last_result_summary", js: "last_result_summary", typ: u(undefined, "") },
@@ -4230,6 +4235,7 @@ const typeMap: any = {
     "Iteration": o([
         { json: "assistant_trace_json", js: "assistant_trace_json", typ: u(undefined, "") },
         { json: "blocking_reason", js: "blocking_reason", typ: u(undefined, "") },
+        { json: "change_stats", js: "change_stats", typ: u(undefined, a(r("FileElement"))) },
         { json: "changes_made", js: "changes_made", typ: u(undefined, true) },
         { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
         { json: "decision", js: "decision", typ: u(undefined, r("ReviewLoopDecision")) },
@@ -4288,6 +4294,7 @@ const typeMap: any = {
     "ReviewLoopIteration": o([
         { json: "assistant_trace_json", js: "assistant_trace_json", typ: u(undefined, "") },
         { json: "blocking_reason", js: "blocking_reason", typ: u(undefined, "") },
+        { json: "change_stats", js: "change_stats", typ: u(undefined, a(r("FileElement"))) },
         { json: "changes_made", js: "changes_made", typ: u(undefined, true) },
         { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
         { json: "decision", js: "decision", typ: u(undefined, r("ReviewLoopDecision")) },
@@ -4318,6 +4325,7 @@ const typeMap: any = {
         { json: "handoff_payload_json", js: "handoff_payload_json", typ: u(undefined, "") },
         { json: "iteration_count", js: "iteration_count", typ: 0 },
         { json: "iteration_limit", js: "iteration_limit", typ: 0 },
+        { json: "iterations", js: "iterations", typ: u(undefined, a(r("Iteration"))) },
         { json: "last_decision", js: "last_decision", typ: u(undefined, r("ReviewLoopDecision")) },
         { json: "last_error", js: "last_error", typ: u(undefined, "") },
         { json: "last_result_summary", js: "last_result_summary", typ: u(undefined, "") },

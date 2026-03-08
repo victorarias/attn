@@ -17,6 +17,10 @@ interface KeyboardShortcutsConfig {
   onRefreshPRs?: () => void;
   onOpenBranchPicker?: () => void;
   onForkSession?: () => void;
+  onToggleDiffPanel?: () => void;
+  onToggleReviewLoopPanel?: () => void;
+  onToggleDiffDetailPanel?: () => void;
+  onToggleAttentionPanel?: () => void;
   onQuickFind?: () => void;
   onOpenSettings?: () => void;
   onIncreaseFontSize?: () => void;
@@ -39,6 +43,10 @@ export function useKeyboardShortcuts({
   onRefreshPRs,
   onOpenBranchPicker,
   onForkSession,
+  onToggleDiffPanel,
+  onToggleReviewLoopPanel,
+  onToggleDiffDetailPanel,
+  onToggleAttentionPanel,
   onQuickFind,
   onOpenSettings,
   onIncreaseFontSize,
@@ -58,6 +66,10 @@ export function useKeyboardShortcuts({
   useShortcut('session.openBranchPicker', onOpenBranchPicker ?? (() => {}), enabled && !!onOpenBranchPicker);
   useShortcut('session.refreshPRs', onRefreshPRs ?? (() => {}), enabled && !!onRefreshPRs);
   useShortcut('session.fork', onForkSession ?? (() => {}), enabled && !!onForkSession);
+  useShortcut('dock.diff', onToggleDiffPanel ?? (() => {}), enabled && !!onToggleDiffPanel);
+  useShortcut('dock.reviewLoop', onToggleReviewLoopPanel ?? (() => {}), enabled && !!onToggleReviewLoopPanel);
+  useShortcut('dock.diffDetail', onToggleDiffDetailPanel ?? (() => {}), enabled && !!onToggleDiffDetailPanel);
+  useShortcut('dock.attention', onToggleAttentionPanel ?? (() => {}), enabled && !!onToggleAttentionPanel);
 
   // Quick Find (thumbs)
   useShortcut('terminal.quickFind', onQuickFind ?? (() => {}), enabled && !!onQuickFind);

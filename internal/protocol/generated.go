@@ -1400,6 +1400,9 @@ type ReviewLoopIteration struct {
 	// BlockingReason corresponds to the JSON schema field "blocking_reason".
 	BlockingReason *string `json:"blocking_reason,omitempty"`
 
+	// ChangeStats corresponds to the JSON schema field "change_stats".
+	ChangeStats []BranchDiffFile `json:"change_stats,omitempty"`
+
 	// ChangesMade corresponds to the JSON schema field "changes_made".
 	ChangesMade *bool `json:"changes_made,omitempty"`
 
@@ -1490,6 +1493,9 @@ type ReviewLoopRun struct {
 
 	// IterationLimit corresponds to the JSON schema field "iteration_limit".
 	IterationLimit int `json:"iteration_limit"`
+
+	// Iterations corresponds to the JSON schema field "iterations".
+	Iterations []ReviewLoopIteration `json:"iterations,omitempty"`
 
 	// LastDecision corresponds to the JSON schema field "last_decision".
 	LastDecision *ReviewLoopDecision `json:"last_decision,omitempty"`

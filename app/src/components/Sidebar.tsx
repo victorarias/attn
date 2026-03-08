@@ -16,18 +16,18 @@ interface LocalSession {
   reviewLoopStatus?: string;
 }
 
-function reviewLoopBadge(status?: string): string | null {
+function reviewLoopIndicator(status?: string): { glyph: string; label: string } | null {
   switch (status) {
     case 'running':
-      return 'review running';
+      return { glyph: '⟳', label: 'Review loop running' };
     case 'awaiting_user':
-      return 'needs input';
+      return { glyph: '?', label: 'Review loop needs input' };
     case 'completed':
-      return 'all rounds done';
+      return { glyph: '✓', label: 'Review loop completed' };
     case 'stopped':
-      return 'review stopped';
+      return { glyph: '•', label: 'Review loop stopped' };
     case 'error':
-      return 'review error';
+      return { glyph: '!', label: 'Review loop error' };
     default:
       return null;
   }
@@ -56,6 +56,7 @@ export interface SidebarHeaderAction {
   active?: boolean;
   toneClassName?: string;
   badge?: string | number;
+  shortcutHint?: string;
   onClick: () => void;
 }
 
@@ -256,9 +257,13 @@ export function Sidebar({
                   {session.recoverable && (
                     <span className="session-recoverable">recoverable</span>
                   )}
-                  {reviewLoopBadge(session.reviewLoopStatus) && (
-                    <span className={`session-loop-state session-loop-state--${session.reviewLoopStatus}`}>
-                      {reviewLoopBadge(session.reviewLoopStatus)}
+                  {reviewLoopIndicator(session.reviewLoopStatus) && (
+                    <span
+                      className={`session-loop-indicator session-loop-indicator--${session.reviewLoopStatus}`}
+                      title={reviewLoopIndicator(session.reviewLoopStatus)?.label}
+                      aria-label={reviewLoopIndicator(session.reviewLoopStatus)?.label}
+                    >
+                      {reviewLoopIndicator(session.reviewLoopStatus)?.glyph}
                     </span>
                   )}
                 </div>
@@ -315,9 +320,13 @@ export function Sidebar({
                     {session.recoverable && (
                       <span className="session-recoverable">recoverable</span>
                     )}
-                    {reviewLoopBadge(session.reviewLoopStatus) && (
-                      <span className={`session-loop-state session-loop-state--${session.reviewLoopStatus}`}>
-                        {reviewLoopBadge(session.reviewLoopStatus)}
+                    {reviewLoopIndicator(session.reviewLoopStatus) && (
+                      <span
+                        className={`session-loop-indicator session-loop-indicator--${session.reviewLoopStatus}`}
+                        title={reviewLoopIndicator(session.reviewLoopStatus)?.label}
+                        aria-label={reviewLoopIndicator(session.reviewLoopStatus)?.label}
+                      >
+                        {reviewLoopIndicator(session.reviewLoopStatus)?.glyph}
                       </span>
                     )}
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
@@ -354,8 +363,12 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-footer">
-        <span className="shortcut-hint">⌘K drawer</span>
-        <span className="shortcut-hint">⌘B branch</span>
+        <span className="sidebar-footer-label">Dock</span>
+        {headerActions
+          .filter((action) => action.shortcutHint && !action.disabled)
+          .map((action) => (
+            <span key={action.id} className="shortcut-hint">{action.shortcutHint}</span>
+          ))}
         <span className="shortcut-hint">⌘⇧B sidebar</span>
       </div>
     </div>

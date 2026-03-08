@@ -285,22 +285,17 @@
 
 .session-row--loop-running::before,
 .session-row--loop-awaiting_user::before,
-.session-row--loop-completed::before,
 .session-row--loop-error::before,
 .session-row--loop-stopped::before {
   opacity: 1;
 }
 
 .session-row--loop-running::before {
-  background: #f97316;
+  background: rgba(245, 158, 11, 0.35);
 }
 
 .session-row--loop-awaiting_user::before {
   background: #f59e0b;
-}
-
-.session-row--loop-completed::before {
-  background: #22c55e;
 }
 
 .session-row--loop-error::before {
@@ -312,7 +307,7 @@
 }
 
 .session-row--loop-running {
-  background: linear-gradient(90deg, rgba(249, 115, 22, 0.14), rgba(249, 115, 22, 0.02));
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.06), rgba(245, 158, 11, 0.01));
 }
 
 .session-row--loop-awaiting_user {
@@ -320,7 +315,7 @@
 }
 
 .session-row--loop-completed {
-  background: linear-gradient(90deg, rgba(34, 197, 94, 0.14), rgba(34, 197, 94, 0.02));
+  background: transparent;
 }
 
 .session-row--loop-error {
@@ -353,26 +348,38 @@
   white-space: nowrap;
 }
 
-.session-loop-state {
+.session-loop-indicator {
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: var(--color-text-dimmed);
+  display: inline-flex;
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  height: 18px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 6px;
 }
 
-.session-loop-state--running {
-  color: #f97316;
+.session-loop-indicator--running {
+  border-color: rgba(245, 158, 11, 0.18);
+  color: rgba(245, 158, 11, 0.82);
 }
 
-.session-loop-state--awaiting_user {
+.session-loop-indicator--awaiting_user {
+  border-color: rgba(245, 158, 11, 0.35);
   color: #f59e0b;
 }
 
-.session-loop-state--completed {
-  color: #22c55e;
+.session-loop-indicator--completed,
+.session-loop-indicator--stopped {
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-dimmed);
 }
 
-.session-loop-state--error {
+.session-loop-indicator--error {
+  border-color: rgba(239, 68, 68, 0.28);
   color: #ef4444;
 }
 

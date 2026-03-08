@@ -16,6 +16,7 @@ function renderBar(settings: Record<string, string> = {}) {
         sessionId="s1"
         sessionLabel="session one"
         loopState={null}
+        getReviewLoopRun={vi.fn(async () => ({ success: true, state: null }))}
         onClose={vi.fn()}
         waitingReviewSessions={[]}
         onSelectSession={vi.fn()}

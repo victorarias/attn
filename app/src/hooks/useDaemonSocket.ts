@@ -90,7 +90,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '35';
+const PROTOCOL_VERSION = '37';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -2435,6 +2435,25 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const getReviewLoopRun = useCallback((loopId: string): Promise<ReviewLoopActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `show_review_loop_${loopId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'get_review_loop_run', loop_id: loopId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get review loop run timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
   const setReviewLoopIterationLimit = useCallback((sessionId: string, iterationLimit: number): Promise<ReviewLoopActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -2728,6 +2747,7 @@ export function useDaemonSocket({
     sendGetBranchDiffFiles,
     getRepoInfo,
     getReviewState,
+    getReviewLoopRun,
     getReviewLoopState,
     markFileViewed,
     sendAddComment,

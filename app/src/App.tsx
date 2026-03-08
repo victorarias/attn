@@ -270,6 +270,7 @@ function App() {
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,
+    getReviewLoopRun,
     getReviewLoopState,
     getReviewState,
     markFileViewed,
@@ -368,6 +369,7 @@ function App() {
         sendGetFileDiff={sendGetFileDiff}
         sendGetBranchDiffFiles={sendGetBranchDiffFiles}
         getRepoInfo={getRepoInfo}
+        getReviewLoopRun={getReviewLoopRun}
         getReviewLoopState={getReviewLoopState}
         getReviewState={getReviewState}
         markFileViewed={markFileViewed}
@@ -437,6 +439,7 @@ interface AppContentProps {
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
   sendGetBranchDiffFiles: ReturnType<typeof useDaemonSocket>['sendGetBranchDiffFiles'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
+  getReviewLoopRun: ReturnType<typeof useDaemonSocket>['getReviewLoopRun'];
   getReviewLoopState: ReturnType<typeof useDaemonSocket>['getReviewLoopState'];
   getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
   markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
@@ -501,6 +504,7 @@ function AppContent({
   sendGetFileDiff,
   sendGetBranchDiffFiles,
   getRepoInfo,
+  getReviewLoopRun,
   getReviewLoopState,
   getReviewState,
   markFileViewed,
@@ -1351,13 +1355,24 @@ function AppContent({
   );
 
   // Calculate attention count for drawer badge
-  const waitingLocalSessions = enrichedLocalSessions.filter((s) => isAttentionSessionState(s.state));
+  const waitingLocalSessions = enrichedLocalSessions
+    .filter((s) => isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error')
+    .map((s) => ({
+      ...s,
+      state: s.reviewLoopStatus === 'error'
+        ? 'unknown'
+        : s.reviewLoopStatus === 'awaiting_user'
+          ? 'waiting_input'
+          : s.state,
+    }));
   const { needsAttention: prsNeedingAttention } = usePRsNeedingAttention(prs);
   const attentionCount = waitingLocalSessions.length + prsNeedingAttention.length;
 
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
-    const waiting = enrichedLocalSessions.find((s) => isAttentionSessionState(s.state));
+    const waiting = enrichedLocalSessions.find((s) =>
+      isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error'
+    );
     if (waiting) {
       handleSelectSession(waiting.id);
     }
@@ -1545,6 +1560,7 @@ function AppContent({
       title: activeSessionId ? 'Open in Editor' : 'Open in Editor (No active session)',
       icon: <EditorIcon />,
       disabled: !activeSessionId,
+      shortcutHint: '⌘⇧E detail',
       onClick: handleOpenEditorForSession,
     },
     {
@@ -1554,6 +1570,7 @@ function AppContent({
       active: reviewLoopPanelOpen,
       disabled: !activeReviewLoopAvailable,
       toneClassName: activeReviewLoopState?.status ? `sidebar-tool-btn--loop-${activeReviewLoopState.status}` : undefined,
+      shortcutHint: '⌘⇧R loop',
       onClick: () => toggleDockPanel('reviewLoop'),
     },
     {
@@ -1562,6 +1579,7 @@ function AppContent({
       icon: <DiffIcon />,
       active: diffPanelOpen,
       disabled: !activeSessionId,
+      shortcutHint: '⌘⇧D diff',
       onClick: () => toggleDockPanel('diff'),
     },
     {
@@ -1570,6 +1588,7 @@ function AppContent({
       icon: <PRsIcon />,
       active: attentionPanelOpen,
       badge: attentionCount > 0 ? attentionCount : undefined,
+      shortcutHint: '⌘⇧P PRs',
       onClick: () => toggleDockPanel('attention'),
     },
   ]), [
@@ -1671,6 +1690,10 @@ function AppContent({
     onNextSession: handleNextSession,
     onToggleSidebar: toggleSidebarCollapse,
     onRefreshPRs: handleRefreshPRs,
+    onToggleDiffPanel: () => toggleDockPanel('diff'),
+    onToggleReviewLoopPanel: () => toggleDockPanel('reviewLoop'),
+    onToggleDiffDetailPanel: () => toggleDockPanel('diffDetail'),
+    onToggleAttentionPanel: () => toggleDockPanel('attention'),
     onOpenBranchPicker: () => {
       // Only open if we have an active session with git
       const localSession = sessions.find(s => s.id === activeSessionId);
@@ -1687,7 +1710,7 @@ function AppContent({
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
-    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen && !forkDialogOpen && !diffDetailPanelOpen,
+    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen && !forkDialogOpen,
   });
 
   return (
@@ -1829,7 +1852,7 @@ function AppContent({
             {
               id: 'reviewLoop',
               isOpen: reviewLoopPanelOpen && Boolean(activeSessionId && activeReviewLoopAvailable && activeLocalSession),
-              width: 'clamp(320px, 42vw, 420px)',
+              width: 'clamp(420px, 50vw, 680px)',
               tone: activeReviewLoopState ? toneForDockPanel(activeReviewLoopState.status) : 'default',
               className: 'dock-panel dock-panel--review-loop',
               children: activeSessionId && activeReviewLoopAvailable && activeLocalSession ? (
@@ -1837,6 +1860,7 @@ function AppContent({
                   sessionId={activeSessionId}
                   sessionLabel={activeLocalSession.label}
                   loopState={activeReviewLoopState}
+                  getReviewLoopRun={getReviewLoopRun}
                   onClose={() => closeDockPanel('reviewLoop')}
                   waitingReviewSessions={waitingReviewSessions}
                   onSelectSession={handleSelectSession}

@@ -911,6 +911,7 @@ model ReviewLoopRun {
   completed_at?: string;
   pending_interaction?: ReviewLoopInteraction;
   latest_iteration?: ReviewLoopIteration;
+  iterations?: ReviewLoopIteration[];
 }
 
 model ReviewLoopIteration {
@@ -923,6 +924,7 @@ model ReviewLoopIteration {
   result_text?: string;
   changes_made?: boolean;
   files_touched?: string[];
+  change_stats?: BranchDiffFile[];
   blocking_reason?: string;
   suggested_next_focus?: string;
   structured_output_json?: string;

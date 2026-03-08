@@ -41,7 +41,7 @@ export function AttentionDrawer({
         {waitingSessions.length > 0 && (
           <div className="drawer-section">
             <div className="section-title">
-              Sessions Waiting
+              Sessions Needing Attention
               <span className="section-count">{waitingSessions.length}</span>
             </div>
             {waitingSessions.map((s) => {

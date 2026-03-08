@@ -247,6 +247,7 @@ var migrations = []migration{
 	CREATE INDEX IF NOT EXISTS idx_review_loop_interactions_status
 		ON review_loop_interactions(status);`},
 	{28, "add result_text to review_loop_iterations", "ALTER TABLE review_loop_iterations ADD COLUMN result_text TEXT"},
+	{29, "add change_stats_json to review_loop_iterations", "ALTER TABLE review_loop_iterations ADD COLUMN change_stats_json TEXT"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -332,6 +333,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 28 {
 			if err := applyMigration28(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 29 {
+			if err := applyMigration29(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -433,6 +439,20 @@ func applyMigration28(tx *sql.Tx) error {
 		return nil
 	}
 	if _, err := tx.Exec("ALTER TABLE review_loop_iterations ADD COLUMN result_text TEXT"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyMigration29(tx *sql.Tx) error {
+	hasChangeStats, err := columnExists(tx, "review_loop_iterations", "change_stats_json")
+	if err != nil {
+		return err
+	}
+	if hasChangeStats {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE review_loop_iterations ADD COLUMN change_stats_json TEXT"); err != nil {
 		return err
 	}
 	return nil

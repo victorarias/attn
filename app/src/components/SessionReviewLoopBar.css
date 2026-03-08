@@ -9,6 +9,7 @@
   border-bottom: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: 12px;
   padding: 18px;
 }
@@ -78,6 +79,40 @@
   line-height: 1.5;
 }
 
+.review-loop-iteration-nav {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.review-loop-iteration-nav-btn {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.review-loop-iteration-nav-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.review-loop-iteration-nav-label {
+  color: var(--color-text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .review-loop-waiting-switcher {
   display: flex;
   gap: 8px;
@@ -138,7 +173,9 @@
   flex: 1;
   flex-direction: column;
   gap: 14px;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 18px;
 }
 
@@ -201,6 +238,7 @@
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
   line-height: 1.6;
+  min-height: 0;
   padding: 14px;
 }
 
@@ -208,7 +246,57 @@
   color: var(--color-text-primary);
 }
 
+.review-loop-panel-content--summary > :first-child {
+  margin-top: 0;
+}
+
+.review-loop-panel-content--summary > :last-child {
+  margin-bottom: 0;
+}
+
+.review-loop-panel-content--summary p,
+.review-loop-panel-content--summary ul,
+.review-loop-panel-content--summary ol,
+.review-loop-panel-content--summary pre,
+.review-loop-panel-content--summary blockquote {
+  margin: 0 0 10px;
+}
+
+.review-loop-panel-content--summary h1,
+.review-loop-panel-content--summary h2,
+.review-loop-panel-content--summary h3,
+.review-loop-panel-content--summary h4,
+.review-loop-panel-content--summary h5,
+.review-loop-panel-content--summary h6 {
+  color: var(--color-text-primary);
+  line-height: 1.2;
+  margin: 18px 0 12px;
+}
+
+.review-loop-panel-content--summary h1 { font-size: 1.45em; }
+.review-loop-panel-content--summary h2 { font-size: 1.28em; }
+.review-loop-panel-content--summary h3 { font-size: 1.14em; }
+
+.review-loop-panel-content--summary ul,
+.review-loop-panel-content--summary ol {
+  padding-left: 18px;
+}
+
+.review-loop-panel-content--summary code {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.92em;
+  padding: 2px 6px;
+}
+
 .review-loop-panel-content--form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.review-loop-panel-content--log {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -218,11 +306,83 @@
   color: var(--color-text-secondary);
 }
 
+.review-loop-panel-card--summary,
+.review-loop-panel-card--files,
+.review-loop-panel-card--log {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.review-loop-panel-card--summary {
+  max-height: min(30vh, 280px);
+}
+
+.review-loop-panel-card--files {
+  max-height: min(24vh, 240px);
+}
+
+.review-loop-panel-card--log.is-expanded {
+  min-height: 220px;
+  max-height: min(34vh, 340px);
+}
+
+.review-loop-panel-card--summary .review-loop-panel-content,
+.review-loop-panel-card--files .review-loop-panel-content,
+.review-loop-panel-card--log.is-expanded .review-loop-panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .review-loop-file-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
   list-style: none;
+}
+
+.review-loop-change-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+}
+
+.review-loop-change-item {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.review-loop-change-path {
+  color: var(--color-text-primary);
+  flex: 1;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-sm);
+  min-width: 0;
+  word-break: break-word;
+}
+
+.review-loop-change-stats {
+  display: inline-flex;
+  gap: 8px;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+}
+
+.review-loop-change-add {
+  color: #22c55e;
+}
+
+.review-loop-change-del {
+  color: #ef4444;
 }
 
 .review-loop-file-list li {
@@ -365,10 +525,166 @@
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-sm);
   line-height: 1.55;
-  max-height: 260px;
-  overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.review-loop-log-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.review-loop-log-entry > :first-child,
+.review-loop-log-entry--fallback > :first-child {
+  margin-top: 0;
+}
+
+.review-loop-log-entry > :last-child,
+.review-loop-log-entry--fallback > :last-child {
+  margin-bottom: 0;
+}
+
+.review-loop-log-entry p,
+.review-loop-log-entry ul,
+.review-loop-log-entry ol,
+.review-loop-log-entry pre,
+.review-loop-log-entry blockquote,
+.review-loop-log-entry--fallback p,
+.review-loop-log-entry--fallback ul,
+.review-loop-log-entry--fallback ol,
+.review-loop-log-entry--fallback pre,
+.review-loop-log-entry--fallback blockquote {
+  margin: 0 0 10px;
+}
+
+.review-loop-log-entry ul,
+.review-loop-log-entry ol,
+.review-loop-log-entry--fallback ul,
+.review-loop-log-entry--fallback ol {
+  padding-left: 18px;
+}
+
+.review-loop-log-entry h1,
+.review-loop-log-entry h2,
+.review-loop-log-entry h3,
+.review-loop-log-entry h4,
+.review-loop-log-entry h5,
+.review-loop-log-entry h6,
+.review-loop-log-entry--fallback h1,
+.review-loop-log-entry--fallback h2,
+.review-loop-log-entry--fallback h3,
+.review-loop-log-entry--fallback h4,
+.review-loop-log-entry--fallback h5,
+.review-loop-log-entry--fallback h6 {
+  color: var(--color-text-primary);
+  line-height: 1.2;
+  margin: 18px 0 12px;
+}
+
+.review-loop-log-entry h1,
+.review-loop-log-entry--fallback h1 { font-size: 1.4em; }
+.review-loop-log-entry h2,
+.review-loop-log-entry--fallback h2 { font-size: 1.24em; }
+.review-loop-log-entry h3,
+.review-loop-log-entry--fallback h3 { font-size: 1.12em; }
+
+.review-loop-log-entry code,
+.review-loop-log-entry--fallback code {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.92em;
+  padding: 2px 6px;
+}
+
+.review-loop-log-tool {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.review-loop-log-tool-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.review-loop-log-tool-name {
+  color: var(--color-text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.review-loop-log-tool-paths {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.review-loop-log-tool-path {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  padding: 3px 8px;
+}
+
+.review-loop-log-tool-toggle {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  padding: 5px 10px;
+}
+
+.review-loop-log-tool-toggle:hover {
+  color: var(--color-text-primary);
+}
+
+.review-loop-log-command {
+  background: rgba(0, 0, 0, 0.24);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-sm);
+  overflow-x: auto;
+  padding: 12px 14px;
+}
+
+.review-loop-bash-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.review-loop-bash-token--command {
+  color: #f97316;
+}
+
+.review-loop-bash-token--flag {
+  color: #7dd3fc;
+}
+
+.review-loop-bash-token--string {
+  color: #86efac;
+}
+
+.review-loop-bash-token--variable {
+  color: #facc15;
+}
+
+.review-loop-bash-token--comment {
+  color: #94a3b8;
 }
 
 @media (max-width: 1180px) {

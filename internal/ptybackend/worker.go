@@ -141,11 +141,15 @@ func NewWorker(cfg WorkerBackendConfig) (*WorkerBackend, error) {
 		return nil, fmt.Errorf("missing daemon instance id")
 	}
 	if strings.TrimSpace(cfg.BinaryPath) == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			return nil, fmt.Errorf("resolve worker executable: %w", err)
+		if wrapperPath := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); wrapperPath != "" {
+			cfg.BinaryPath = wrapperPath
+		} else {
+			exe, err := os.Executable()
+			if err != nil {
+				return nil, fmt.Errorf("resolve worker executable: %w", err)
+			}
+			cfg.BinaryPath = exe
 		}
-		cfg.BinaryPath = exe
 	}
 	if cfg.Logf == nil {
 		cfg.Logf = func(string, ...interface{}) {}

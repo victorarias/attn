@@ -222,13 +222,17 @@ func (s *Store) UpsertReviewLoopIteration(iteration *protocol.ReviewLoopIteratio
 	if err != nil {
 		return err
 	}
+	changeStatsJSON, err := marshalBranchDiffFiles(iteration.ChangeStats)
+	if err != nil {
+		return err
+	}
 
 	_, err = s.db.Exec(`
 		INSERT INTO review_loop_iterations (
 			id, loop_id, iteration_number, status, decision, summary, result_text, changes_made,
-			files_touched_json, blocking_reason, suggested_next_focus,
+			files_touched_json, change_stats_json, blocking_reason, suggested_next_focus,
 			structured_output_json, assistant_trace_json, error, started_at, completed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			loop_id = excluded.loop_id,
 			iteration_number = excluded.iteration_number,
@@ -238,6 +242,7 @@ func (s *Store) UpsertReviewLoopIteration(iteration *protocol.ReviewLoopIteratio
 			result_text = excluded.result_text,
 			changes_made = excluded.changes_made,
 			files_touched_json = excluded.files_touched_json,
+			change_stats_json = excluded.change_stats_json,
 			blocking_reason = excluded.blocking_reason,
 			suggested_next_focus = excluded.suggested_next_focus,
 			structured_output_json = excluded.structured_output_json,
@@ -255,6 +260,7 @@ func (s *Store) UpsertReviewLoopIteration(iteration *protocol.ReviewLoopIteratio
 		nullPtrString(iteration.ResultText),
 		nullBool(iteration.ChangesMade),
 		filesTouchedJSON,
+		changeStatsJSON,
 		nullPtrString(iteration.BlockingReason),
 		nullPtrString(iteration.SuggestedNextFocus),
 		nullPtrString(iteration.StructuredOutputJson),
@@ -277,7 +283,7 @@ func (s *Store) GetReviewLoopIteration(iterationID string) (*protocol.ReviewLoop
 
 	row := s.db.QueryRow(`
 		SELECT id, loop_id, iteration_number, status, decision, summary, result_text, changes_made,
-			files_touched_json, blocking_reason, suggested_next_focus,
+			files_touched_json, change_stats_json, blocking_reason, suggested_next_focus,
 			structured_output_json, assistant_trace_json, error, started_at, completed_at
 		FROM review_loop_iterations
 		WHERE id = ?
@@ -304,7 +310,7 @@ func (s *Store) ListReviewLoopIterations(loopID string) ([]*protocol.ReviewLoopI
 
 	rows, err := s.db.Query(`
 		SELECT id, loop_id, iteration_number, status, decision, summary, result_text, changes_made,
-			files_touched_json, blocking_reason, suggested_next_focus,
+			files_touched_json, change_stats_json, blocking_reason, suggested_next_focus,
 			structured_output_json, assistant_trace_json, error, started_at, completed_at
 		FROM review_loop_iterations
 		WHERE loop_id = ?
@@ -337,7 +343,7 @@ func (s *Store) GetLatestReviewLoopIteration(loopID string) (*protocol.ReviewLoo
 
 	row := s.db.QueryRow(`
 		SELECT id, loop_id, iteration_number, status, decision, summary, result_text, changes_made,
-			files_touched_json, blocking_reason, suggested_next_focus,
+			files_touched_json, change_stats_json, blocking_reason, suggested_next_focus,
 			structured_output_json, assistant_trace_json, error, started_at, completed_at
 		FROM review_loop_iterations
 		WHERE loop_id = ?
@@ -532,6 +538,7 @@ func scanReviewLoopIteration(scanner reviewLoopScanner) (*protocol.ReviewLoopIte
 		resultText           sql.NullString
 		changesMade          sql.NullInt64
 		filesTouchedJSON     sql.NullString
+		changeStatsJSON      sql.NullString
 		blockingReason       sql.NullString
 		suggestedNextFocus   sql.NullString
 		structuredOutputJSON sql.NullString
@@ -550,6 +557,7 @@ func scanReviewLoopIteration(scanner reviewLoopScanner) (*protocol.ReviewLoopIte
 		&resultText,
 		&changesMade,
 		&filesTouchedJSON,
+		&changeStatsJSON,
 		&blockingReason,
 		&suggestedNextFocus,
 		&structuredOutputJSON,
@@ -578,6 +586,11 @@ func scanReviewLoopIteration(scanner reviewLoopScanner) (*protocol.ReviewLoopIte
 	}
 	if filesTouchedJSON.Valid && filesTouchedJSON.String != "" {
 		if err := json.Unmarshal([]byte(filesTouchedJSON.String), &iteration.FilesTouched); err != nil {
+			return nil, err
+		}
+	}
+	if changeStatsJSON.Valid && changeStatsJSON.String != "" {
+		if err := json.Unmarshal([]byte(changeStatsJSON.String), &iteration.ChangeStats); err != nil {
 			return nil, err
 		}
 	}
@@ -646,6 +659,17 @@ func scanReviewLoopInteraction(scanner reviewLoopScanner) (*protocol.ReviewLoopI
 }
 
 func marshalStringSlice(values []string) (interface{}, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	data, err := json.Marshal(values)
+	if err != nil {
+		return nil, err
+	}
+	return string(data), nil
+}
+
+func marshalBranchDiffFiles(values []protocol.BranchDiffFile) (interface{}, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}

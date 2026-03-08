@@ -227,6 +227,7 @@ export function DiffDetailPanel({
   resolvedTheme = 'dark',
   initialSelectedFile,
 }: DiffDetailPanelProps) {
+  const [contentVisible, setContentVisible] = useState(isOpen);
   // Track selected file by path for stability across gitStatus updates
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
@@ -259,6 +260,17 @@ export function DiffDetailPanel({
       return () => clearTimeout(timer);
     }
   }, [commentError]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setContentVisible(true);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setContentVisible(false);
+    }, 260);
+    return () => window.clearTimeout(timer);
+  }, [isOpen]);
 
   // Derive comments for current file
   const comments = useMemo(() => {
@@ -511,7 +523,7 @@ export function DiffDetailPanel({
 
   // Reset state when closing
   useEffect(() => {
-    if (!isOpen) {
+    if (!contentVisible) {
       setSelectedFilePath(null);
       setDiffContent(null);
       setError(null);
@@ -524,7 +536,7 @@ export function DiffDetailPanel({
       viewedDiffHashesRef.current.clear();
       setChangedSinceViewed(new Set());
     }
-  }, [isOpen]);
+  }, [contentVisible]);
 
   const previousRepoPathRef = useRef<string | null>(null);
   useEffect(() => {
@@ -678,10 +690,6 @@ export function DiffDetailPanel({
       if (e.altKey) return;
 
       switch (e.key) {
-        case 'Escape':
-          e.preventDefault();
-          onClose();
-          break;
         case 'j':
         case 'ArrowDown':
           e.preventDefault();
@@ -965,8 +973,6 @@ export function DiffDetailPanel({
     });
   }, [selectedFilePath, viewedFiles, changedSinceViewed, getFileIcon, getStatusLabel, fileCommentCounts]);
 
-  if (!isOpen) return null;
-
   const currentFileIndex = selectedFile ? allFiles.findIndex(f => f.path === selectedFile.path) : -1;
 
   return (
@@ -998,7 +1004,7 @@ export function DiffDetailPanel({
                 Open in Editor
               </button>
             )}
-            <button className="review-close" onClick={onClose} title="Hide diff panel (Esc)">
+            <button className="review-close" onClick={onClose} title="Hide diff panel (Esc or ⌘⇧E)">
               Hide <kbd>Esc</kbd>
             </button>
           </div>

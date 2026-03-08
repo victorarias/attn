@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/claude-agent-sdk-go/sdk"
 	"github.com/victorarias/claude-agent-sdk-go/types"
@@ -57,7 +60,8 @@ var reviewLoopOutputFormat = map[string]any{
 				},
 			},
 			"summary": map[string]any{
-				"type": "string",
+				"type":        "string",
+				"description": "Markdown summary for the UI. Use short paragraphs and bullet lists when helpful. Preserve meaningful line breaks instead of collapsing everything into one paragraph.",
 			},
 			"changes_made": map[string]any{
 				"type": "boolean",
@@ -92,6 +96,18 @@ type reviewLoopOutcome struct {
 	QuestionsForUser   []string                    `json:"questions_for_user"`
 	BlockingReason     string                      `json:"blocking_reason"`
 	SuggestedNextFocus string                      `json:"suggested_next_focus"`
+}
+
+type reviewLoopTraceEntry struct {
+	Kind    string   `json:"kind"`
+	Content string   `json:"content,omitempty"`
+	Tool    string   `json:"tool,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Paths   []string `json:"paths,omitempty"`
+}
+
+type reviewLoopTracePayload struct {
+	Entries []reviewLoopTraceEntry `json:"entries"`
 }
 
 func (d *Daemon) handleStartReviewLoop(conn net.Conn, msg *protocol.StartReviewLoopMessage) {
@@ -136,7 +152,7 @@ func (d *Daemon) handleGetReviewLoopRun(conn net.Conn, msg *protocol.GetReviewLo
 		d.sendReviewLoopRun(conn, nil)
 		return
 	}
-	hydrated, err := d.hydrateReviewLoopRun(run)
+	hydrated, err := d.hydrateReviewLoopRunWithIterations(run)
 	if err != nil {
 		d.sendError(conn, err.Error())
 		return
@@ -411,6 +427,11 @@ func (d *Daemon) runReviewLoopIteration(loopID string) {
 		return
 	}
 
+	baselineStats, baseRef, baselineErr := d.captureReviewLoopSnapshot(run.RepoPath)
+	if baselineErr != nil {
+		d.logf("review loop iteration baseline snapshot failed for %s: %v", run.LoopID, baselineErr)
+	}
+
 	prompt, err := d.buildReviewLoopIterationPrompt(run, interaction)
 	if err != nil {
 		d.failReviewLoopIteration(run, iteration, err, protocol.ReviewLoopRunStatusError, protocol.ReviewLoopIterationStatusError)
@@ -420,7 +441,7 @@ func (d *Daemon) runReviewLoopIteration(loopID string) {
 	iterationCtx, cancelIteration := context.WithTimeout(ctx, reviewLoopIterationTimeout())
 	defer cancelIteration()
 
-	outcome, assistantTrace, structuredJSON, resultText, err := d.executeReviewLoopPrompt(iterationCtx, run, prompt)
+	outcome, assistantTrace, structuredJSON, resultText, err := d.executeReviewLoopPrompt(iterationCtx, run, iteration, prompt)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			d.markReviewLoopIterationCancelled(run, iteration)
@@ -452,7 +473,15 @@ func (d *Daemon) runReviewLoopIteration(loopID string) {
 	iteration.Decision = protocol.Ptr(outcome.LoopDecision)
 	iteration.Summary = protocol.Ptr(strings.TrimSpace(outcome.Summary))
 	iteration.ChangesMade = protocol.Ptr(outcome.ChangesMade)
-	iteration.FilesTouched = append([]string(nil), outcome.FilesTouched...)
+	iteration.FilesTouched = appendUniqueReviewLoopPaths(
+		iteration.FilesTouched,
+		normalizeReviewLoopPaths(run.RepoPath, outcome.FilesTouched...)...,
+	)
+	if changeStats, snapshotErr := d.computeReviewLoopIterationChangeStats(run.RepoPath, baseRef, baselineStats); snapshotErr != nil {
+		d.logf("review loop iteration end snapshot failed for %s: %v", run.LoopID, snapshotErr)
+	} else {
+		iteration.ChangeStats = changeStats
+	}
 	if trimmed := strings.TrimSpace(outcome.BlockingReason); trimmed != "" {
 		iteration.BlockingReason = &trimmed
 	}
@@ -545,7 +574,304 @@ func (d *Daemon) runReviewLoopIteration(loopID string) {
 	}
 }
 
-func (d *Daemon) executeReviewLoopPrompt(ctx context.Context, run *protocol.ReviewLoopRun, prompt string) (*reviewLoopOutcome, string, string, string, error) {
+func (d *Daemon) persistRunningReviewLoopIteration(run *protocol.ReviewLoopRun, iteration *protocol.ReviewLoopIteration, traceEntries []reviewLoopTraceEntry, filesTouched []string) {
+	if run == nil || iteration == nil || iteration.Status != protocol.ReviewLoopIterationStatusRunning {
+		return
+	}
+
+	changed := false
+	trace := serializeReviewLoopTrace(traceEntries)
+	if trace != "" && protocol.Deref(iteration.AssistantTraceJson) != trace {
+		iteration.AssistantTraceJson = protocol.Ptr(trace)
+		changed = true
+	}
+	if len(filesTouched) > 0 && !equalReviewLoopPaths(iteration.FilesTouched, filesTouched) {
+		iteration.FilesTouched = append([]string(nil), filesTouched...)
+		changed = true
+	}
+	if !changed {
+		return
+	}
+
+	run.UpdatedAt = string(protocol.TimestampNow())
+	if err := d.store.UpsertReviewLoopIteration(iteration); err != nil {
+		d.logf("review loop running iteration upsert failed for %s: %v", iteration.ID, err)
+		return
+	}
+	if err := d.store.UpsertReviewLoopRun(run); err != nil {
+		d.logf("review loop running run upsert failed for %s: %v", run.LoopID, err)
+		return
+	}
+	hydrated, err := d.hydrateReviewLoopRun(run)
+	if err != nil {
+		d.logf("review loop running hydrate failed for %s: %v", run.LoopID, err)
+		return
+	}
+	d.broadcastReviewLoopUpdated(hydrated)
+}
+
+func appendUniqueReviewLoopPaths(existing []string, candidates ...string) []string {
+	if len(candidates) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{}, len(existing))
+	result := append([]string(nil), existing...)
+	for _, path := range existing {
+		seen[path] = struct{}{}
+	}
+	for _, candidate := range candidates {
+		trimmed := strings.TrimSpace(candidate)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func normalizeReviewLoopPaths(repoPath string, candidates ...string) []string {
+	var normalized []string
+	repoPath = strings.TrimSpace(repoPath)
+	repoPath = filepath.Clean(repoPath)
+
+	for _, candidate := range candidates {
+		path := strings.TrimSpace(candidate)
+		if path == "" {
+			continue
+		}
+
+		path = filepath.Clean(path)
+		path = strings.ReplaceAll(path, "\\", "/")
+
+		if strings.HasPrefix(path, "/root/repo/") {
+			path = strings.TrimPrefix(path, "/root/repo/")
+		} else if path == "/root/repo" {
+			path = "."
+		} else if repoPath != "" {
+			if rel, err := filepath.Rel(repoPath, filepath.Clean(path)); err == nil {
+				rel = filepath.ToSlash(rel)
+				if rel == "." {
+					path = "."
+				} else if !strings.HasPrefix(rel, "../") && rel != ".." {
+					path = rel
+				}
+			}
+		}
+
+		if strings.HasPrefix(path, "./") {
+			path = strings.TrimPrefix(path, "./")
+		}
+		normalized = append(normalized, path)
+	}
+
+	return normalized
+}
+
+func (d *Daemon) captureReviewLoopSnapshot(repoPath string) (map[string]attngit.DiffFileInfo, string, error) {
+	defaultBranch, err := attngit.GetDefaultBranch(repoPath)
+	if err != nil {
+		return nil, "", err
+	}
+	baseRef := "origin/" + defaultBranch
+	files, err := attngit.GetBranchDiffFiles(repoPath, baseRef)
+	if err != nil {
+		return nil, baseRef, err
+	}
+	return mapDiffFileInfoByPath(files), baseRef, nil
+}
+
+func (d *Daemon) computeReviewLoopIterationChangeStats(repoPath, baseRef string, baseline map[string]attngit.DiffFileInfo) ([]protocol.BranchDiffFile, error) {
+	if baseRef == "" {
+		return nil, nil
+	}
+	files, err := attngit.GetBranchDiffFiles(repoPath, baseRef)
+	if err != nil {
+		return nil, err
+	}
+	current := mapDiffFileInfoByPath(files)
+	changedPaths := make(map[string]struct{})
+	for path := range baseline {
+		changedPaths[path] = struct{}{}
+	}
+	for path := range current {
+		changedPaths[path] = struct{}{}
+	}
+
+	var result []protocol.BranchDiffFile
+	for path := range changedPaths {
+		before, hadBefore := baseline[path]
+		after, hadAfter := current[path]
+
+		additions := 0
+		deletions := 0
+		status := "modified"
+		oldPath := ""
+
+		if hadAfter {
+			additions = after.Additions - before.Additions
+			deletions = after.Deletions - before.Deletions
+			status = after.Status
+			oldPath = after.OldPath
+		} else if hadBefore {
+			additions = -before.Additions
+			deletions = -before.Deletions
+			status = "deleted"
+			oldPath = before.OldPath
+		}
+
+		if additions == 0 && deletions == 0 && hadBefore == hadAfter && (!hadAfter || before.Status == after.Status) {
+			continue
+		}
+
+		normalizedPath := normalizeReviewLoopPaths(repoPath, path)
+		if len(normalizedPath) == 0 {
+			continue
+		}
+		change := protocol.BranchDiffFile{
+			Path:   normalizedPath[0],
+			Status: status,
+		}
+		if oldPath != "" {
+			normalizedOldPath := normalizeReviewLoopPaths(repoPath, oldPath)
+			if len(normalizedOldPath) > 0 {
+				change.OldPath = protocol.Ptr(normalizedOldPath[0])
+			}
+		}
+		change.Additions = protocol.Ptr(additions)
+		change.Deletions = protocol.Ptr(deletions)
+		result = append(result, change)
+	}
+
+	slices.SortFunc(result, func(a, b protocol.BranchDiffFile) int {
+		return strings.Compare(a.Path, b.Path)
+	})
+
+	return result, nil
+}
+
+func mapDiffFileInfoByPath(files []attngit.DiffFileInfo) map[string]attngit.DiffFileInfo {
+	result := make(map[string]attngit.DiffFileInfo, len(files))
+	for _, file := range files {
+		result[file.Path] = file
+	}
+	return result
+}
+
+func equalReviewLoopPaths(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func extractReviewLoopToolPaths(call *types.ToolUseBlock) []string {
+	if call == nil {
+		return nil
+	}
+
+	switch call.Name {
+	case "Write", "Edit", "Read":
+		return extractReviewLoopPathCandidates(call.ToolInput, "file_path", "path")
+	case "Grep":
+		return extractReviewLoopPathCandidates(call.ToolInput, "path")
+	default:
+		return extractReviewLoopPathCandidates(call.ToolInput, "file_path", "path", "paths", "old_path")
+	}
+}
+
+func extractReviewLoopPathCandidates(input map[string]any, keys ...string) []string {
+	if len(input) == 0 {
+		return nil
+	}
+
+	var paths []string
+	for _, key := range keys {
+		value, ok := input[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			paths = append(paths, typed)
+		case []string:
+			paths = append(paths, typed...)
+		case []any:
+			for _, item := range typed {
+				if path, ok := item.(string); ok {
+					paths = append(paths, path)
+				}
+			}
+		}
+	}
+	return paths
+}
+
+func reviewLoopToolTraceEntry(call *types.ToolUseBlock, paths []string) reviewLoopTraceEntry {
+	if call == nil {
+		return reviewLoopTraceEntry{}
+	}
+
+	entry := reviewLoopTraceEntry{
+		Kind: "tool",
+		Tool: call.Name,
+	}
+	if len(paths) > 0 {
+		entry.Paths = append([]string(nil), paths...)
+	}
+	if strings.EqualFold(call.Name, "Bash") {
+		if command, ok := call.ToolInput["command"].(string); ok {
+			entry.Command = strings.TrimSpace(command)
+		}
+	}
+	return entry
+}
+
+func serializeReviewLoopTrace(entries []reviewLoopTraceEntry) string {
+	filtered := make([]reviewLoopTraceEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Kind == "" {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	payload, err := json.Marshal(reviewLoopTracePayload{Entries: filtered})
+	if err != nil {
+		var plain []string
+		for _, entry := range filtered {
+			switch entry.Kind {
+			case "text":
+				if strings.TrimSpace(entry.Content) != "" {
+					plain = append(plain, entry.Content)
+				}
+			case "tool":
+				label := entry.Tool
+				if len(entry.Paths) > 0 {
+					label += " → " + strings.Join(entry.Paths, ", ")
+				}
+				if entry.Command != "" {
+					label += "\n" + entry.Command
+				}
+				plain = append(plain, label)
+			}
+		}
+		return strings.Join(plain, "\n\n")
+	}
+	return string(payload)
+}
+
+func (d *Daemon) executeReviewLoopPrompt(ctx context.Context, run *protocol.ReviewLoopRun, iteration *protocol.ReviewLoopIteration, prompt string) (*reviewLoopOutcome, string, string, string, error) {
 	if d.reviewLoopExec != nil {
 		return d.reviewLoopExec(ctx, run, prompt)
 	}
@@ -583,7 +909,8 @@ func (d *Daemon) executeReviewLoopPrompt(ctx context.Context, run *protocol.Revi
 
 	var (
 		outcome        reviewLoopOutcome
-		assistantText  []string
+		traceEntries   []reviewLoopTraceEntry
+		liveFiles      []string
 		resultText     string
 		structuredJSON string
 	)
@@ -591,11 +918,11 @@ func (d *Daemon) executeReviewLoopPrompt(ctx context.Context, run *protocol.Revi
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, strings.Join(assistantText, "\n\n"), structuredJSON, resultText, ctx.Err()
+			return nil, serializeReviewLoopTrace(traceEntries), structuredJSON, resultText, ctx.Err()
 		case err := <-client.Errors():
 			if err != nil {
 				d.logf("[review-loop] stream error loop=%s err=%v", run.LoopID, err)
-				return nil, strings.Join(assistantText, "\n\n"), structuredJSON, resultText, err
+				return nil, serializeReviewLoopTrace(traceEntries), structuredJSON, resultText, err
 			}
 		case msg, ok := <-client.Messages():
 			if !ok {
@@ -604,26 +931,27 @@ func (d *Daemon) executeReviewLoopPrompt(ctx context.Context, run *protocol.Revi
 					if result != nil && result.StructuredOutput != nil {
 						data, marshalErr := json.Marshal(result.StructuredOutput)
 						if marshalErr != nil {
-							return nil, strings.Join(assistantText, "\n\n"), structuredJSON, resultText, marshalErr
+							return nil, serializeReviewLoopTrace(traceEntries), structuredJSON, resultText, marshalErr
 						}
 						structuredJSON = string(data)
 						if err := json.Unmarshal(data, &outcome); err != nil {
 							d.logf("[review-loop] invalid structured output loop=%s payload=%s err=%v", run.LoopID, truncateReviewLoopLog(structuredJSON, 1200), err)
-							return nil, strings.Join(assistantText, "\n\n"), structuredJSON, resultText, fmt.Errorf("%s: %w", reviewLoopStopReasonInvalidStructured, err)
+							return nil, serializeReviewLoopTrace(traceEntries), structuredJSON, resultText, fmt.Errorf("%s: %w", reviewLoopStopReasonInvalidStructured, err)
 						}
 						d.logf("[review-loop] completed loop=%s decision=%s summary=%q structured=%s", run.LoopID, outcome.LoopDecision, truncateReviewLoopLog(outcome.Summary, 220), truncateReviewLoopLog(structuredJSON, 600))
-						return &outcome, strings.Join(assistantText, "\n\n"), structuredJSON, resultText, nil
+						return &outcome, serializeReviewLoopTrace(traceEntries), structuredJSON, resultText, nil
 					}
 				}
-				d.logf("[review-loop] missing structured output loop=%s assistant_chars=%d result_text=%q", run.LoopID, len(strings.Join(assistantText, "\n\n")), truncateReviewLoopLog(resultText, 500))
-				return nil, strings.Join(assistantText, "\n\n"), structuredJSON, resultText, errors.New(reviewLoopStopReasonMissingStructured)
+				serializedTrace := serializeReviewLoopTrace(traceEntries)
+				d.logf("[review-loop] missing structured output loop=%s assistant_chars=%d result_text=%q", run.LoopID, len(serializedTrace), truncateReviewLoopLog(resultText, 500))
+				return nil, serializedTrace, structuredJSON, resultText, errors.New(reviewLoopStopReasonMissingStructured)
 			}
 
 			switch typed := msg.(type) {
 			case *types.AssistantMessage:
 				text := strings.TrimSpace(typed.Text())
 				if text != "" {
-					assistantText = append(assistantText, text)
+					traceEntries = append(traceEntries, reviewLoopTraceEntry{Kind: "text", Content: text})
 					d.logf("[review-loop] assistant loop=%s chars=%d stop_reason=%q text=%q", run.LoopID, len(text), typed.StopReason, truncateReviewLoopLog(text, 320))
 				}
 				if typed.HasToolCalls() {
@@ -631,10 +959,14 @@ func (d *Daemon) executeReviewLoopPrompt(ctx context.Context, run *protocol.Revi
 					for _, call := range typed.ToolCalls() {
 						if call != nil {
 							toolNames = append(toolNames, call.Name)
+							toolPaths := normalizeReviewLoopPaths(run.RepoPath, extractReviewLoopToolPaths(call)...)
+							liveFiles = appendUniqueReviewLoopPaths(liveFiles, toolPaths...)
+							traceEntries = append(traceEntries, reviewLoopToolTraceEntry(call, toolPaths))
 						}
 					}
 					d.logf("[review-loop] tool calls loop=%s tools=%q", run.LoopID, toolNames)
 				}
+				d.persistRunningReviewLoopIteration(run, iteration, traceEntries, liveFiles)
 			case *types.ResultMessage:
 				if typed.Result != nil {
 					resultText = strings.TrimSpace(*typed.Result)
@@ -643,19 +975,19 @@ func (d *Daemon) executeReviewLoopPrompt(ctx context.Context, run *protocol.Revi
 				if typed.StructuredOutput == nil {
 					err := reviewLoopMissingStructuredError(typed)
 					d.logf("[review-loop] terminal result without structured output loop=%s err=%v", run.LoopID, err)
-					return nil, strings.Join(assistantText, "\n\n"), structuredJSON, resultText, err
+					return nil, serializeReviewLoopTrace(traceEntries), structuredJSON, resultText, err
 				}
 				data, marshalErr := json.Marshal(typed.StructuredOutput)
 				if marshalErr != nil {
-					return nil, strings.Join(assistantText, "\n\n"), structuredJSON, resultText, marshalErr
+					return nil, serializeReviewLoopTrace(traceEntries), structuredJSON, resultText, marshalErr
 				}
 				structuredJSON = string(data)
 				if err := json.Unmarshal(data, &outcome); err != nil {
 					d.logf("[review-loop] invalid structured output loop=%s payload=%s err=%v", run.LoopID, truncateReviewLoopLog(structuredJSON, 1200), err)
-					return nil, strings.Join(assistantText, "\n\n"), structuredJSON, resultText, fmt.Errorf("%s: %w", reviewLoopStopReasonInvalidStructured, err)
+					return nil, serializeReviewLoopTrace(traceEntries), structuredJSON, resultText, fmt.Errorf("%s: %w", reviewLoopStopReasonInvalidStructured, err)
 				}
 				d.logf("[review-loop] completed loop=%s decision=%s summary=%q structured=%s", run.LoopID, outcome.LoopDecision, truncateReviewLoopLog(outcome.Summary, 220), truncateReviewLoopLog(structuredJSON, 600))
-				return &outcome, strings.Join(assistantText, "\n\n"), structuredJSON, resultText, nil
+				return &outcome, serializeReviewLoopTrace(traceEntries), structuredJSON, resultText, nil
 			default:
 				d.logf("[review-loop] message loop=%s type=%T", run.LoopID, msg)
 			}
@@ -722,6 +1054,10 @@ func (d *Daemon) buildReviewLoopIterationPrompt(run *protocol.ReviewLoopRun, ans
 		"- use \"error\" only if the pass could not be completed reliably",
 		"The daemon owns overall iteration count. A \"converged\" result describes this pass; it does not necessarily end the full loop before the configured number of passes is reached.",
 		"If you need user input, fill questions_for_user with at least one specific question and explain the block in blocking_reason.",
+		"For summary, write readable markdown for the UI.",
+		"- use headings, bullet lists, and short paragraphs when useful",
+		"- keep explicit line breaks and blank lines where they improve readability",
+		"- do not compress a multi-point summary into one long paragraph",
 	)
 
 	return strings.Join(sections, "\n\n"), nil
@@ -766,6 +1102,24 @@ func (d *Daemon) hydrateReviewLoopRun(run *protocol.ReviewLoopRun) (*protocol.Re
 	}
 	copyRun.LatestIteration = latestIteration
 	return &copyRun, nil
+}
+
+func (d *Daemon) hydrateReviewLoopRunWithIterations(run *protocol.ReviewLoopRun) (*protocol.ReviewLoopRun, error) {
+	hydrated, err := d.hydrateReviewLoopRun(run)
+	if err != nil || hydrated == nil {
+		return hydrated, err
+	}
+	iterations, err := d.store.ListReviewLoopIterations(hydrated.LoopID)
+	if err != nil {
+		return nil, err
+	}
+	hydrated.Iterations = make([]protocol.ReviewLoopIteration, 0, len(iterations))
+	for _, iteration := range iterations {
+		if iteration != nil {
+			hydrated.Iterations = append(hydrated.Iterations, *iteration)
+		}
+	}
+	return hydrated, nil
 }
 
 func (d *Daemon) sendReviewLoopResult(client *wsClient, action, sessionID string, run *protocol.ReviewLoopRun, err error) {
