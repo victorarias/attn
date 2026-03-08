@@ -7,12 +7,9 @@ interface ChangesPanelProps {
   branchDiffFiles: BranchDiffFile[];
   branchDiffBaseRef?: string;
   branchDiffError?: string | null;
-  attentionCount: number;
   selectedFile: string | null;
   onFileSelect: (path: string, staged: boolean) => void;
-  onAttentionClick: () => void;
-  onReviewClick?: () => void;
-  onOpenEditor?: () => void;
+  onOpenDiffClick?: () => void;
 }
 
 type BranchChange = {
@@ -110,12 +107,9 @@ export const ChangesPanel = memo(function ChangesPanel({
   branchDiffFiles,
   branchDiffBaseRef,
   branchDiffError,
-  attentionCount,
   selectedFile,
   onFileSelect,
-  onAttentionClick,
-  onReviewClick,
-  onOpenEditor,
+  onOpenDiffClick,
 }: ChangesPanelProps) {
   const totalStats = useMemo(() => {
     const additions = branchDiffFiles.reduce((sum, f) => sum + (f.additions || 0), 0);
@@ -189,19 +183,9 @@ export const ChangesPanel = memo(function ChangesPanel({
       <div className="changes-header">
         <span className="changes-title">Changes</span>
         <div className="changes-header-actions">
-          {onOpenEditor && (
-            <button className="editor-btn" onClick={onOpenEditor} title="Open project in $EDITOR">
-              Open
-            </button>
-          )}
-          {totalStats.files > 0 && onReviewClick && (
-            <button className="review-btn" onClick={onReviewClick} title="Review changes (r)">
-              Review
-            </button>
-          )}
-          {attentionCount > 0 && (
-            <button className="attention-badge" onClick={onAttentionClick}>
-              ⚠ {attentionCount}
+          {totalStats.files > 0 && onOpenDiffClick && (
+            <button className="review-btn" onClick={onOpenDiffClick} title="Open diff detail">
+              Open Diff
             </button>
           )}
         </div>

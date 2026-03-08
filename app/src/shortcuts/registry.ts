@@ -24,6 +24,12 @@ export const SHORTCUTS = {
   'session.refreshPRs': { key: 'r', meta: true },
   'session.fork': { key: 'f', meta: true, shift: true },
 
+  // Dock panels
+  'dock.diff': { key: 'd', meta: true, shift: true },
+  'dock.reviewLoop': { key: 'r', meta: true, shift: true },
+  'dock.diffDetail': { key: 'e', meta: true, shift: true },
+  'dock.attention': { key: 'p', meta: true, shift: true },
+
   // Drawer
   'drawer.toggle': { key: 'k', meta: true },
 

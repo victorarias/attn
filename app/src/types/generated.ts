@@ -1,9 +1,10 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CancelReviewMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewCancelledMessage, ReviewChunkMessage, ReviewComment, ReviewCommentResolvedMessage, ReviewCompleteMessage, ReviewFinding, ReviewFindingMessage, ReviewStartedMessage, ReviewState, ReviewToolUse, ReviewToolUseMessage, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
+//   const answerReviewLoopMessage = Convert.toAnswerReviewLoopMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const attachResultMessage = Convert.toAttachResultMessage(json);
 //   const attachSessionMessage = Convert.toAttachSessionMessage(json);
@@ -14,7 +15,6 @@
 //   const branchDiffFile = Convert.toBranchDiffFile(json);
 //   const branchDiffFilesResultMessage = Convert.toBranchDiffFilesResultMessage(json);
 //   const branchesResultMessage = Convert.toBranchesResultMessage(json);
-//   const cancelReviewMessage = Convert.toCancelReviewMessage(json);
 //   const checkAttnStashMessage = Convert.toCheckAttnStashMessage(json);
 //   const checkAttnStashResultMessage = Convert.toCheckAttnStashResultMessage(json);
 //   const checkDirtyMessage = Convert.toCheckDirtyMessage(json);
@@ -54,6 +54,8 @@
 //   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
 //   const getRepoInfoMessage = Convert.toGetRepoInfoMessage(json);
 //   const getRepoInfoResultMessage = Convert.toGetRepoInfoResultMessage(json);
+//   const getReviewLoopRunMessage = Convert.toGetReviewLoopRunMessage(json);
+//   const getReviewLoopStateMessage = Convert.toGetReviewLoopStateMessage(json);
 //   const getReviewStateMessage = Convert.toGetReviewStateMessage(json);
 //   const getReviewStateResultMessage = Convert.toGetReviewStateResultMessage(json);
 //   const getSettingsMessage = Convert.toGetSettingsMessage(json);
@@ -101,17 +103,19 @@
 //   const resolveCommentMessage = Convert.toResolveCommentMessage(json);
 //   const resolveCommentResultMessage = Convert.toResolveCommentResultMessage(json);
 //   const response = Convert.toResponse(json);
-//   const reviewCancelledMessage = Convert.toReviewCancelledMessage(json);
-//   const reviewChunkMessage = Convert.toReviewChunkMessage(json);
 //   const reviewComment = Convert.toReviewComment(json);
-//   const reviewCommentResolvedMessage = Convert.toReviewCommentResolvedMessage(json);
-//   const reviewCompleteMessage = Convert.toReviewCompleteMessage(json);
-//   const reviewFinding = Convert.toReviewFinding(json);
-//   const reviewFindingMessage = Convert.toReviewFindingMessage(json);
-//   const reviewStartedMessage = Convert.toReviewStartedMessage(json);
+//   const reviewLoopDecision = Convert.toReviewLoopDecision(json);
+//   const reviewLoopInteraction = Convert.toReviewLoopInteraction(json);
+//   const reviewLoopInteractionStatus = Convert.toReviewLoopInteractionStatus(json);
+//   const reviewLoopIteration = Convert.toReviewLoopIteration(json);
+//   const reviewLoopIterationStatus = Convert.toReviewLoopIterationStatus(json);
+//   const reviewLoopResultMessage = Convert.toReviewLoopResultMessage(json);
+//   const reviewLoopRun = Convert.toReviewLoopRun(json);
+//   const reviewLoopRunStatus = Convert.toReviewLoopRunStatus(json);
+//   const reviewLoopState = Convert.toReviewLoopState(json);
+//   const reviewLoopStatus = Convert.toReviewLoopStatus(json);
+//   const reviewLoopUpdatedMessage = Convert.toReviewLoopUpdatedMessage(json);
 //   const reviewState = Convert.toReviewState(json);
-//   const reviewToolUse = Convert.toReviewToolUse(json);
-//   const reviewToolUseMessage = Convert.toReviewToolUseMessage(json);
 //   const session = Convert.toSession(json);
 //   const sessionAgent = Convert.toSessionAgent(json);
 //   const sessionExitedMessage = Convert.toSessionExitedMessage(json);
@@ -122,18 +126,20 @@
 //   const sessionUnregisteredMessage = Convert.toSessionUnregisteredMessage(json);
 //   const sessionVisualizedMessage = Convert.toSessionVisualizedMessage(json);
 //   const sessionsUpdatedMessage = Convert.toSessionsUpdatedMessage(json);
+//   const setReviewLoopIterationLimitMessage = Convert.toSetReviewLoopIterationLimitMessage(json);
 //   const setSessionResumeIDMessage = Convert.toSetSessionResumeIDMessage(json);
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
 //   const settingsUpdatedMessage = Convert.toSettingsUpdatedMessage(json);
 //   const spawnResultMessage = Convert.toSpawnResultMessage(json);
 //   const spawnSessionMessage = Convert.toSpawnSessionMessage(json);
-//   const startReviewMessage = Convert.toStartReviewMessage(json);
+//   const startReviewLoopMessage = Convert.toStartReviewLoopMessage(json);
 //   const stashMessage = Convert.toStashMessage(json);
 //   const stashPopMessage = Convert.toStashPopMessage(json);
 //   const stashPopResultMessage = Convert.toStashPopResultMessage(json);
 //   const stashResultMessage = Convert.toStashResultMessage(json);
 //   const stateMessage = Convert.toStateMessage(json);
 //   const stopMessage = Convert.toStopMessage(json);
+//   const stopReviewLoopMessage = Convert.toStopReviewLoopMessage(json);
 //   const subscribeGitStatusMessage = Convert.toSubscribeGitStatusMessage(json);
 //   const switchBranchMessage = Convert.toSwitchBranchMessage(json);
 //   const switchBranchResultMessage = Convert.toSwitchBranchResultMessage(json);
@@ -195,6 +201,18 @@ export interface Comment {
 
 export enum AddCommentResultMessageEvent {
     AddCommentResult = "add_comment_result",
+}
+
+export interface AnswerReviewLoopMessage {
+    answer:          string;
+    cmd:             AnswerReviewLoopMessageCmd;
+    interaction_id?: string;
+    loop_id:         string;
+    [property: string]: any;
+}
+
+export enum AnswerReviewLoopMessageCmd {
+    AnswerReviewLoop = "answer_review_loop",
 }
 
 export interface ApprovePRMessage {
@@ -370,16 +388,6 @@ export interface BranchElement {
 
 export enum BranchesResultMessageEvent {
     BranchesResult = "branches_result",
-}
-
-export interface CancelReviewMessage {
-    cmd:       CancelReviewMessageCmd;
-    review_id: string;
-    [property: string]: any;
-}
-
-export enum CancelReviewMessageCmd {
-    CancelReview = "cancel_review",
 }
 
 export interface CheckAttnStashMessage {
@@ -877,6 +885,26 @@ export interface WorktreeElement {
     [property: string]: any;
 }
 
+export interface GetReviewLoopRunMessage {
+    cmd:     GetReviewLoopRunMessageCmd;
+    loop_id: string;
+    [property: string]: any;
+}
+
+export enum GetReviewLoopRunMessageCmd {
+    GetReviewLoopRun = "get_review_loop_run",
+}
+
+export interface GetReviewLoopStateMessage {
+    cmd:        GetReviewLoopStateMessageCmd;
+    session_id: string;
+    [property: string]: any;
+}
+
+export enum GetReviewLoopStateMessageCmd {
+    GetReviewLoopState = "get_review_loop_state",
+}
+
 export interface GetReviewStateMessage {
     branch:    string;
     cmd:       GetReviewStateMessageCmd;
@@ -1214,9 +1242,10 @@ export enum PtyDesyncMessageEvent {
 }
 
 export interface PtyInputMessage {
-    cmd:  PtyInputMessageCmd;
-    data: string;
-    id:   string;
+    cmd:     PtyInputMessageCmd;
+    data:    string;
+    id:      string;
+    source?: string;
     [property: string]: any;
 }
 
@@ -1411,34 +1440,103 @@ export enum ResolveCommentResultMessageEvent {
 }
 
 export interface Response {
-    authors?:  AuthorElement[];
-    error?:    string;
-    ok:        boolean;
-    prs?:      PRElement[];
-    repos?:    RepoElement[];
-    sessions?: SessionElement[];
+    authors?:         AuthorElement[];
+    error?:           string;
+    ok:               boolean;
+    prs?:             PRElement[];
+    repos?:           RepoElement[];
+    review_loop_run?: ReviewLoopRunObject;
+    sessions?:        SessionElement[];
     [property: string]: any;
 }
 
-export interface ReviewCancelledMessage {
-    event:     ReviewCancelledMessageEvent;
-    review_id: string;
+export interface ReviewLoopRunObject {
+    completed_at?:           string;
+    created_at:              string;
+    custom_prompt?:          string;
+    handoff_payload_json?:   string;
+    iteration_count:         number;
+    iteration_limit:         number;
+    iterations?:             Iteration[];
+    last_decision?:          ReviewLoopDecision;
+    last_error?:             string;
+    last_result_summary?:    string;
+    latest_iteration?:       Iteration;
+    loop_id:                 string;
+    pending_interaction?:    Interaction;
+    pending_interaction_id?: string;
+    preset_id?:              string;
+    repo_path:               string;
+    resolved_prompt:         string;
+    source_session_id:       string;
+    status:                  ReviewLoopRunStatus;
+    stop_reason?:            string;
+    updated_at:              string;
     [property: string]: any;
 }
 
-export enum ReviewCancelledMessageEvent {
-    ReviewCancelled = "review_cancelled",
-}
-
-export interface ReviewChunkMessage {
-    content:   string;
-    event:     ReviewChunkMessageEvent;
-    review_id: string;
+export interface Iteration {
+    assistant_trace_json?:   string;
+    blocking_reason?:        string;
+    change_stats?:           FileElement[];
+    changes_made?:           boolean;
+    completed_at?:           string;
+    decision?:               ReviewLoopDecision;
+    error?:                  string;
+    files_touched?:          string[];
+    id:                      string;
+    iteration_number:        number;
+    loop_id:                 string;
+    result_text?:            string;
+    started_at:              string;
+    status:                  ReviewLoopIterationStatus;
+    structured_output_json?: string;
+    suggested_next_focus?:   string;
+    summary?:                string;
     [property: string]: any;
 }
 
-export enum ReviewChunkMessageEvent {
-    ReviewChunk = "review_chunk",
+export enum ReviewLoopDecision {
+    Continue = "continue",
+    Converged = "converged",
+    Error = "error",
+    NeedsUserInput = "needs_user_input",
+}
+
+export enum ReviewLoopIterationStatus {
+    AwaitingUser = "awaiting_user",
+    Cancelled = "cancelled",
+    Completed = "completed",
+    Error = "error",
+    Running = "running",
+}
+
+export interface Interaction {
+    answer?:       string;
+    answered_at?:  string;
+    consumed_at?:  string;
+    created_at:    string;
+    id:            string;
+    iteration_id?: string;
+    kind:          string;
+    loop_id:       string;
+    question:      string;
+    status:        ReviewLoopInteractionStatus;
+    [property: string]: any;
+}
+
+export enum ReviewLoopInteractionStatus {
+    Answered = "answered",
+    Consumed = "consumed",
+    Pending = "pending",
+}
+
+export enum ReviewLoopRunStatus {
+    AwaitingUser = "awaiting_user",
+    Completed = "completed",
+    Error = "error",
+    Running = "running",
+    Stopped = "stopped",
 }
 
 export interface ReviewComment {
@@ -1459,67 +1557,118 @@ export interface ReviewComment {
     [property: string]: any;
 }
 
-export interface ReviewCommentResolvedMessage {
-    comment_id: string;
-    event:      ReviewCommentResolvedMessageEvent;
-    review_id:  string;
+export interface ReviewLoopInteraction {
+    answer?:       string;
+    answered_at?:  string;
+    consumed_at?:  string;
+    created_at:    string;
+    id:            string;
+    iteration_id?: string;
+    kind:          string;
+    loop_id:       string;
+    question:      string;
+    status:        ReviewLoopInteractionStatus;
     [property: string]: any;
 }
 
-export enum ReviewCommentResolvedMessageEvent {
-    ReviewCommentResolved = "review_comment_resolved",
-}
-
-export interface ReviewCompleteMessage {
-    error?:    string;
-    event:     ReviewCompleteMessageEvent;
-    review_id: string;
-    success:   boolean;
+export interface ReviewLoopIteration {
+    assistant_trace_json?:   string;
+    blocking_reason?:        string;
+    change_stats?:           FileElement[];
+    changes_made?:           boolean;
+    completed_at?:           string;
+    decision?:               ReviewLoopDecision;
+    error?:                  string;
+    files_touched?:          string[];
+    id:                      string;
+    iteration_number:        number;
+    loop_id:                 string;
+    result_text?:            string;
+    started_at:              string;
+    status:                  ReviewLoopIterationStatus;
+    structured_output_json?: string;
+    suggested_next_focus?:   string;
+    summary?:                string;
     [property: string]: any;
 }
 
-export enum ReviewCompleteMessageEvent {
-    ReviewComplete = "review_complete",
-}
-
-export interface ReviewFinding {
-    content:    string;
-    filepath:   string;
-    line_end:   number;
-    line_start: number;
-    severity?:  string;
+export interface ReviewLoopResultMessage {
+    action:           string;
+    error?:           string;
+    event:            ReviewLoopResultMessageEvent;
+    loop_id?:         string;
+    review_loop_run?: ReviewLoopRunObject;
+    session_id:       string;
+    success:          boolean;
     [property: string]: any;
 }
 
-export interface ReviewFindingMessage {
-    comment?:  Comment;
-    event:     ReviewFindingMessageEvent;
-    finding:   Finding;
-    review_id: string;
+export enum ReviewLoopResultMessageEvent {
+    ReviewLoopResult = "review_loop_result",
+}
+
+export interface ReviewLoopRun {
+    completed_at?:           string;
+    created_at:              string;
+    custom_prompt?:          string;
+    handoff_payload_json?:   string;
+    iteration_count:         number;
+    iteration_limit:         number;
+    iterations?:             Iteration[];
+    last_decision?:          ReviewLoopDecision;
+    last_error?:             string;
+    last_result_summary?:    string;
+    latest_iteration?:       Iteration;
+    loop_id:                 string;
+    pending_interaction?:    Interaction;
+    pending_interaction_id?: string;
+    preset_id?:              string;
+    repo_path:               string;
+    resolved_prompt:         string;
+    source_session_id:       string;
+    status:                  ReviewLoopRunStatus;
+    stop_reason?:            string;
+    updated_at:              string;
     [property: string]: any;
 }
 
-export enum ReviewFindingMessageEvent {
-    ReviewFinding = "review_finding",
-}
-
-export interface Finding {
-    content:    string;
-    filepath:   string;
-    line_end:   number;
-    line_start: number;
-    severity?:  string;
+export interface ReviewLoopState {
+    advance_token:       string;
+    created_at:          string;
+    custom_prompt?:      string;
+    iteration_count:     number;
+    iteration_limit:     number;
+    last_advance_at?:    string;
+    last_prompt_at?:     string;
+    last_user_input_at?: string;
+    preset_id?:          string;
+    resolved_prompt:     string;
+    session_id:          string;
+    status:              ReviewLoopStatus;
+    stop_reason?:        string;
+    stop_requested:      boolean;
+    updated_at:          string;
     [property: string]: any;
 }
 
-export interface ReviewStartedMessage {
-    event:     ReviewStartedMessageEvent;
-    review_id: string;
+export enum ReviewLoopStatus {
+    AdvanceReceivedWaitingPrompt = "advance_received_waiting_prompt",
+    Completed = "completed",
+    Error = "error",
+    Running = "running",
+    Stopped = "stopped",
+    WaitingForAgentAdvance = "waiting_for_agent_advance",
+}
+
+export interface ReviewLoopUpdatedMessage {
+    event:            ReviewLoopUpdatedMessageEvent;
+    review_loop_run?: ReviewLoopRunObject;
+    session_id:       string;
     [property: string]: any;
 }
 
-export enum ReviewStartedMessageEvent {
-    ReviewStarted = "review_started",
+export enum ReviewLoopUpdatedMessageEvent {
+    ReviewLoopUpdated = "review_loop_updated",
 }
 
 export interface ReviewState {
@@ -1527,31 +1676,6 @@ export interface ReviewState {
     repo_path:    string;
     review_id:    string;
     viewed_files: string[];
-    [property: string]: any;
-}
-
-export interface ReviewToolUse {
-    input:  { [key: string]: any };
-    name:   string;
-    output: string;
-    [property: string]: any;
-}
-
-export interface ReviewToolUseMessage {
-    event:     ReviewToolUseMessageEvent;
-    review_id: string;
-    tool_use:  ToolUse;
-    [property: string]: any;
-}
-
-export enum ReviewToolUseMessageEvent {
-    ReviewToolUse = "review_tool_use",
-}
-
-export interface ToolUse {
-    input:  { [key: string]: any };
-    name:   string;
-    output: string;
     [property: string]: any;
 }
 
@@ -1646,6 +1770,17 @@ export enum SessionsUpdatedMessageEvent {
     SessionsUpdated = "sessions_updated",
 }
 
+export interface SetReviewLoopIterationLimitMessage {
+    cmd:             SetReviewLoopIterationLimitMessageCmd;
+    iteration_limit: number;
+    session_id:      string;
+    [property: string]: any;
+}
+
+export enum SetReviewLoopIterationLimitMessageCmd {
+    SetReviewLoopIterationLimit = "set_review_loop_iteration_limit",
+}
+
 export interface SetSessionResumeIDMessage {
     cmd:               SetSessionResumeIDMessageCmd;
     id:                string;
@@ -1715,17 +1850,18 @@ export enum SpawnSessionMessageCmd {
     SpawnSession = "spawn_session",
 }
 
-export interface StartReviewMessage {
-    base_branch: string;
-    branch:      string;
-    cmd:         StartReviewMessageCmd;
-    repo_path:   string;
-    review_id:   string;
+export interface StartReviewLoopMessage {
+    cmd:                   StartReviewLoopMessageCmd;
+    handoff_payload_json?: string;
+    iteration_limit:       number;
+    preset_id?:            string;
+    prompt:                string;
+    session_id:            string;
     [property: string]: any;
 }
 
-export enum StartReviewMessageCmd {
-    StartReview = "start_review",
+export enum StartReviewLoopMessageCmd {
+    StartReviewLoop = "start_review_loop",
 }
 
 export interface StashMessage {
@@ -1792,6 +1928,16 @@ export interface StopMessage {
 
 export enum StopMessageCmd {
     Stop = "stop",
+}
+
+export interface StopReviewLoopMessage {
+    cmd:        StopReviewLoopMessageCmd;
+    session_id: string;
+    [property: string]: any;
+}
+
+export enum StopReviewLoopMessageCmd {
+    StopReviewLoop = "stop_review_loop",
 }
 
 export interface SubscribeGitStatusMessage {
@@ -1888,10 +2034,7 @@ export interface WebSocketEvent {
     cloned?:                boolean;
     cmd?:                   string;
     cols?:                  number;
-    comment?:               Comment;
-    comment_id?:            string;
     conflict?:              boolean;
-    content?:               string;
     data?:                  string;
     directory?:             string;
     dirty?:                 boolean;
@@ -1899,7 +2042,6 @@ export interface WebSocketEvent {
     event:                  string;
     exit_code?:             number;
     files?:                 FileElement[];
-    finding?:               Finding;
     found?:                 boolean;
     id?:                    string;
     last_seq?:              number;
@@ -1914,7 +2056,7 @@ export interface WebSocketEvent {
     reason?:                string;
     recent_locations?:      RecentLocationElement[];
     repos?:                 RepoElement[];
-    review_id?:             string;
+    review_loop_run?:       ReviewLoopRunObject;
     rows?:                  number;
     running?:               boolean;
     screen_cols?:           number;
@@ -1928,6 +2070,7 @@ export interface WebSocketEvent {
     scrollback_truncated?:  boolean;
     seq?:                   number;
     session?:               SessionElement;
+    session_id?:            string;
     sessions?:              SessionElement[];
     settings?:              { [key: string]: any };
     signal?:                string;
@@ -1935,7 +2078,6 @@ export interface WebSocketEvent {
     stash_ref?:             string;
     success?:               boolean;
     target_path?:           string;
-    tool_use?:              ToolUse;
     unstaged?:              StagedElement[];
     untracked?:             StagedElement[];
     warnings?:              WarningElement[];
@@ -2022,6 +2164,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("AddCommentResultMessage")), null, 2);
     }
 
+    public static toAnswerReviewLoopMessage(json: string): AnswerReviewLoopMessage {
+        return cast(JSON.parse(json), r("AnswerReviewLoopMessage"));
+    }
+
+    public static answerReviewLoopMessageToJson(value: AnswerReviewLoopMessage): string {
+        return JSON.stringify(uncast(value, r("AnswerReviewLoopMessage")), null, 2);
+    }
+
     public static toApprovePRMessage(json: string): ApprovePRMessage {
         return cast(JSON.parse(json), r("ApprovePRMessage"));
     }
@@ -2100,14 +2250,6 @@ export class Convert {
 
     public static branchesResultMessageToJson(value: BranchesResultMessage): string {
         return JSON.stringify(uncast(value, r("BranchesResultMessage")), null, 2);
-    }
-
-    public static toCancelReviewMessage(json: string): CancelReviewMessage {
-        return cast(JSON.parse(json), r("CancelReviewMessage"));
-    }
-
-    public static cancelReviewMessageToJson(value: CancelReviewMessage): string {
-        return JSON.stringify(uncast(value, r("CancelReviewMessage")), null, 2);
     }
 
     public static toCheckAttnStashMessage(json: string): CheckAttnStashMessage {
@@ -2420,6 +2562,22 @@ export class Convert {
 
     public static getRepoInfoResultMessageToJson(value: GetRepoInfoResultMessage): string {
         return JSON.stringify(uncast(value, r("GetRepoInfoResultMessage")), null, 2);
+    }
+
+    public static toGetReviewLoopRunMessage(json: string): GetReviewLoopRunMessage {
+        return cast(JSON.parse(json), r("GetReviewLoopRunMessage"));
+    }
+
+    public static getReviewLoopRunMessageToJson(value: GetReviewLoopRunMessage): string {
+        return JSON.stringify(uncast(value, r("GetReviewLoopRunMessage")), null, 2);
+    }
+
+    public static toGetReviewLoopStateMessage(json: string): GetReviewLoopStateMessage {
+        return cast(JSON.parse(json), r("GetReviewLoopStateMessage"));
+    }
+
+    public static getReviewLoopStateMessageToJson(value: GetReviewLoopStateMessage): string {
+        return JSON.stringify(uncast(value, r("GetReviewLoopStateMessage")), null, 2);
     }
 
     public static toGetReviewStateMessage(json: string): GetReviewStateMessage {
@@ -2798,22 +2956,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("Response")), null, 2);
     }
 
-    public static toReviewCancelledMessage(json: string): ReviewCancelledMessage {
-        return cast(JSON.parse(json), r("ReviewCancelledMessage"));
-    }
-
-    public static reviewCancelledMessageToJson(value: ReviewCancelledMessage): string {
-        return JSON.stringify(uncast(value, r("ReviewCancelledMessage")), null, 2);
-    }
-
-    public static toReviewChunkMessage(json: string): ReviewChunkMessage {
-        return cast(JSON.parse(json), r("ReviewChunkMessage"));
-    }
-
-    public static reviewChunkMessageToJson(value: ReviewChunkMessage): string {
-        return JSON.stringify(uncast(value, r("ReviewChunkMessage")), null, 2);
-    }
-
     public static toReviewComment(json: string): ReviewComment {
         return cast(JSON.parse(json), r("ReviewComment"));
     }
@@ -2822,44 +2964,92 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ReviewComment")), null, 2);
     }
 
-    public static toReviewCommentResolvedMessage(json: string): ReviewCommentResolvedMessage {
-        return cast(JSON.parse(json), r("ReviewCommentResolvedMessage"));
+    public static toReviewLoopDecision(json: string): ReviewLoopDecision {
+        return cast(JSON.parse(json), r("ReviewLoopDecision"));
     }
 
-    public static reviewCommentResolvedMessageToJson(value: ReviewCommentResolvedMessage): string {
-        return JSON.stringify(uncast(value, r("ReviewCommentResolvedMessage")), null, 2);
+    public static reviewLoopDecisionToJson(value: ReviewLoopDecision): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopDecision")), null, 2);
     }
 
-    public static toReviewCompleteMessage(json: string): ReviewCompleteMessage {
-        return cast(JSON.parse(json), r("ReviewCompleteMessage"));
+    public static toReviewLoopInteraction(json: string): ReviewLoopInteraction {
+        return cast(JSON.parse(json), r("ReviewLoopInteraction"));
     }
 
-    public static reviewCompleteMessageToJson(value: ReviewCompleteMessage): string {
-        return JSON.stringify(uncast(value, r("ReviewCompleteMessage")), null, 2);
+    public static reviewLoopInteractionToJson(value: ReviewLoopInteraction): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopInteraction")), null, 2);
     }
 
-    public static toReviewFinding(json: string): ReviewFinding {
-        return cast(JSON.parse(json), r("ReviewFinding"));
+    public static toReviewLoopInteractionStatus(json: string): ReviewLoopInteractionStatus {
+        return cast(JSON.parse(json), r("ReviewLoopInteractionStatus"));
     }
 
-    public static reviewFindingToJson(value: ReviewFinding): string {
-        return JSON.stringify(uncast(value, r("ReviewFinding")), null, 2);
+    public static reviewLoopInteractionStatusToJson(value: ReviewLoopInteractionStatus): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopInteractionStatus")), null, 2);
     }
 
-    public static toReviewFindingMessage(json: string): ReviewFindingMessage {
-        return cast(JSON.parse(json), r("ReviewFindingMessage"));
+    public static toReviewLoopIteration(json: string): ReviewLoopIteration {
+        return cast(JSON.parse(json), r("ReviewLoopIteration"));
     }
 
-    public static reviewFindingMessageToJson(value: ReviewFindingMessage): string {
-        return JSON.stringify(uncast(value, r("ReviewFindingMessage")), null, 2);
+    public static reviewLoopIterationToJson(value: ReviewLoopIteration): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopIteration")), null, 2);
     }
 
-    public static toReviewStartedMessage(json: string): ReviewStartedMessage {
-        return cast(JSON.parse(json), r("ReviewStartedMessage"));
+    public static toReviewLoopIterationStatus(json: string): ReviewLoopIterationStatus {
+        return cast(JSON.parse(json), r("ReviewLoopIterationStatus"));
     }
 
-    public static reviewStartedMessageToJson(value: ReviewStartedMessage): string {
-        return JSON.stringify(uncast(value, r("ReviewStartedMessage")), null, 2);
+    public static reviewLoopIterationStatusToJson(value: ReviewLoopIterationStatus): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopIterationStatus")), null, 2);
+    }
+
+    public static toReviewLoopResultMessage(json: string): ReviewLoopResultMessage {
+        return cast(JSON.parse(json), r("ReviewLoopResultMessage"));
+    }
+
+    public static reviewLoopResultMessageToJson(value: ReviewLoopResultMessage): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopResultMessage")), null, 2);
+    }
+
+    public static toReviewLoopRun(json: string): ReviewLoopRun {
+        return cast(JSON.parse(json), r("ReviewLoopRun"));
+    }
+
+    public static reviewLoopRunToJson(value: ReviewLoopRun): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopRun")), null, 2);
+    }
+
+    public static toReviewLoopRunStatus(json: string): ReviewLoopRunStatus {
+        return cast(JSON.parse(json), r("ReviewLoopRunStatus"));
+    }
+
+    public static reviewLoopRunStatusToJson(value: ReviewLoopRunStatus): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopRunStatus")), null, 2);
+    }
+
+    public static toReviewLoopState(json: string): ReviewLoopState {
+        return cast(JSON.parse(json), r("ReviewLoopState"));
+    }
+
+    public static reviewLoopStateToJson(value: ReviewLoopState): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopState")), null, 2);
+    }
+
+    public static toReviewLoopStatus(json: string): ReviewLoopStatus {
+        return cast(JSON.parse(json), r("ReviewLoopStatus"));
+    }
+
+    public static reviewLoopStatusToJson(value: ReviewLoopStatus): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopStatus")), null, 2);
+    }
+
+    public static toReviewLoopUpdatedMessage(json: string): ReviewLoopUpdatedMessage {
+        return cast(JSON.parse(json), r("ReviewLoopUpdatedMessage"));
+    }
+
+    public static reviewLoopUpdatedMessageToJson(value: ReviewLoopUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("ReviewLoopUpdatedMessage")), null, 2);
     }
 
     public static toReviewState(json: string): ReviewState {
@@ -2868,22 +3058,6 @@ export class Convert {
 
     public static reviewStateToJson(value: ReviewState): string {
         return JSON.stringify(uncast(value, r("ReviewState")), null, 2);
-    }
-
-    public static toReviewToolUse(json: string): ReviewToolUse {
-        return cast(JSON.parse(json), r("ReviewToolUse"));
-    }
-
-    public static reviewToolUseToJson(value: ReviewToolUse): string {
-        return JSON.stringify(uncast(value, r("ReviewToolUse")), null, 2);
-    }
-
-    public static toReviewToolUseMessage(json: string): ReviewToolUseMessage {
-        return cast(JSON.parse(json), r("ReviewToolUseMessage"));
-    }
-
-    public static reviewToolUseMessageToJson(value: ReviewToolUseMessage): string {
-        return JSON.stringify(uncast(value, r("ReviewToolUseMessage")), null, 2);
     }
 
     public static toSession(json: string): Session {
@@ -2966,6 +3140,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SessionsUpdatedMessage")), null, 2);
     }
 
+    public static toSetReviewLoopIterationLimitMessage(json: string): SetReviewLoopIterationLimitMessage {
+        return cast(JSON.parse(json), r("SetReviewLoopIterationLimitMessage"));
+    }
+
+    public static setReviewLoopIterationLimitMessageToJson(value: SetReviewLoopIterationLimitMessage): string {
+        return JSON.stringify(uncast(value, r("SetReviewLoopIterationLimitMessage")), null, 2);
+    }
+
     public static toSetSessionResumeIDMessage(json: string): SetSessionResumeIDMessage {
         return cast(JSON.parse(json), r("SetSessionResumeIDMessage"));
     }
@@ -3006,12 +3188,12 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SpawnSessionMessage")), null, 2);
     }
 
-    public static toStartReviewMessage(json: string): StartReviewMessage {
-        return cast(JSON.parse(json), r("StartReviewMessage"));
+    public static toStartReviewLoopMessage(json: string): StartReviewLoopMessage {
+        return cast(JSON.parse(json), r("StartReviewLoopMessage"));
     }
 
-    public static startReviewMessageToJson(value: StartReviewMessage): string {
-        return JSON.stringify(uncast(value, r("StartReviewMessage")), null, 2);
+    public static startReviewLoopMessageToJson(value: StartReviewLoopMessage): string {
+        return JSON.stringify(uncast(value, r("StartReviewLoopMessage")), null, 2);
     }
 
     public static toStashMessage(json: string): StashMessage {
@@ -3060,6 +3242,14 @@ export class Convert {
 
     public static stopMessageToJson(value: StopMessage): string {
         return JSON.stringify(uncast(value, r("StopMessage")), null, 2);
+    }
+
+    public static toStopReviewLoopMessage(json: string): StopReviewLoopMessage {
+        return cast(JSON.parse(json), r("StopReviewLoopMessage"));
+    }
+
+    public static stopReviewLoopMessageToJson(value: StopReviewLoopMessage): string {
+        return JSON.stringify(uncast(value, r("StopReviewLoopMessage")), null, 2);
     }
 
     public static toSubscribeGitStatusMessage(json: string): SubscribeGitStatusMessage {
@@ -3366,6 +3556,12 @@ const typeMap: any = {
         { json: "wont_fix_at", js: "wont_fix_at", typ: u(undefined, "") },
         { json: "wont_fix_by", js: "wont_fix_by", typ: u(undefined, "") },
     ], "any"),
+    "AnswerReviewLoopMessage": o([
+        { json: "answer", js: "answer", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("AnswerReviewLoopMessageCmd") },
+        { json: "interaction_id", js: "interaction_id", typ: u(undefined, "") },
+        { json: "loop_id", js: "loop_id", typ: "" },
+    ], "any"),
     "ApprovePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -3468,10 +3664,6 @@ const typeMap: any = {
         { json: "commit_time", js: "commit_time", typ: u(undefined, "") },
         { json: "is_current", js: "is_current", typ: u(undefined, true) },
         { json: "name", js: "name", typ: "" },
-    ], "any"),
-    "CancelReviewMessage": o([
-        { json: "cmd", js: "cmd", typ: r("CancelReviewMessageCmd") },
-        { json: "review_id", js: "review_id", typ: "" },
     ], "any"),
     "CheckAttnStashMessage": o([
         { json: "branch", js: "branch", typ: "" },
@@ -3721,6 +3913,14 @@ const typeMap: any = {
         { json: "main_repo", js: "main_repo", typ: "" },
         { json: "path", js: "path", typ: "" },
     ], "any"),
+    "GetReviewLoopRunMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetReviewLoopRunMessageCmd") },
+        { json: "loop_id", js: "loop_id", typ: "" },
+    ], "any"),
+    "GetReviewLoopStateMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetReviewLoopStateMessageCmd") },
+        { json: "session_id", js: "session_id", typ: "" },
+    ], "any"),
     "GetReviewStateMessage": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "cmd", js: "cmd", typ: r("GetReviewStateMessageCmd") },
@@ -3905,6 +4105,7 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("PtyInputMessageCmd") },
         { json: "data", js: "data", typ: "" },
         { json: "id", js: "id", typ: "" },
+        { json: "source", js: "source", typ: u(undefined, "") },
     ], "any"),
     "PtyOutputMessage": o([
         { json: "data", js: "data", typ: "" },
@@ -4006,16 +4207,62 @@ const typeMap: any = {
         { json: "ok", js: "ok", typ: true },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
+        { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
     ], "any"),
-    "ReviewCancelledMessage": o([
-        { json: "event", js: "event", typ: r("ReviewCancelledMessageEvent") },
-        { json: "review_id", js: "review_id", typ: "" },
+    "ReviewLoopRunObject": o([
+        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "custom_prompt", js: "custom_prompt", typ: u(undefined, "") },
+        { json: "handoff_payload_json", js: "handoff_payload_json", typ: u(undefined, "") },
+        { json: "iteration_count", js: "iteration_count", typ: 0 },
+        { json: "iteration_limit", js: "iteration_limit", typ: 0 },
+        { json: "iterations", js: "iterations", typ: u(undefined, a(r("Iteration"))) },
+        { json: "last_decision", js: "last_decision", typ: u(undefined, r("ReviewLoopDecision")) },
+        { json: "last_error", js: "last_error", typ: u(undefined, "") },
+        { json: "last_result_summary", js: "last_result_summary", typ: u(undefined, "") },
+        { json: "latest_iteration", js: "latest_iteration", typ: u(undefined, r("Iteration")) },
+        { json: "loop_id", js: "loop_id", typ: "" },
+        { json: "pending_interaction", js: "pending_interaction", typ: u(undefined, r("Interaction")) },
+        { json: "pending_interaction_id", js: "pending_interaction_id", typ: u(undefined, "") },
+        { json: "preset_id", js: "preset_id", typ: u(undefined, "") },
+        { json: "repo_path", js: "repo_path", typ: "" },
+        { json: "resolved_prompt", js: "resolved_prompt", typ: "" },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
+        { json: "status", js: "status", typ: r("ReviewLoopRunStatus") },
+        { json: "stop_reason", js: "stop_reason", typ: u(undefined, "") },
+        { json: "updated_at", js: "updated_at", typ: "" },
     ], "any"),
-    "ReviewChunkMessage": o([
-        { json: "content", js: "content", typ: "" },
-        { json: "event", js: "event", typ: r("ReviewChunkMessageEvent") },
-        { json: "review_id", js: "review_id", typ: "" },
+    "Iteration": o([
+        { json: "assistant_trace_json", js: "assistant_trace_json", typ: u(undefined, "") },
+        { json: "blocking_reason", js: "blocking_reason", typ: u(undefined, "") },
+        { json: "change_stats", js: "change_stats", typ: u(undefined, a(r("FileElement"))) },
+        { json: "changes_made", js: "changes_made", typ: u(undefined, true) },
+        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
+        { json: "decision", js: "decision", typ: u(undefined, r("ReviewLoopDecision")) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "files_touched", js: "files_touched", typ: u(undefined, a("")) },
+        { json: "id", js: "id", typ: "" },
+        { json: "iteration_number", js: "iteration_number", typ: 0 },
+        { json: "loop_id", js: "loop_id", typ: "" },
+        { json: "result_text", js: "result_text", typ: u(undefined, "") },
+        { json: "started_at", js: "started_at", typ: "" },
+        { json: "status", js: "status", typ: r("ReviewLoopIterationStatus") },
+        { json: "structured_output_json", js: "structured_output_json", typ: u(undefined, "") },
+        { json: "suggested_next_focus", js: "suggested_next_focus", typ: u(undefined, "") },
+        { json: "summary", js: "summary", typ: u(undefined, "") },
+    ], "any"),
+    "Interaction": o([
+        { json: "answer", js: "answer", typ: u(undefined, "") },
+        { json: "answered_at", js: "answered_at", typ: u(undefined, "") },
+        { json: "consumed_at", js: "consumed_at", typ: u(undefined, "") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "iteration_id", js: "iteration_id", typ: u(undefined, "") },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "loop_id", js: "loop_id", typ: "" },
+        { json: "question", js: "question", typ: "" },
+        { json: "status", js: "status", typ: r("ReviewLoopInteractionStatus") },
     ], "any"),
     "ReviewComment": o([
         { json: "author", js: "author", typ: "" },
@@ -4033,61 +4280,96 @@ const typeMap: any = {
         { json: "wont_fix_at", js: "wont_fix_at", typ: u(undefined, "") },
         { json: "wont_fix_by", js: "wont_fix_by", typ: u(undefined, "") },
     ], "any"),
-    "ReviewCommentResolvedMessage": o([
-        { json: "comment_id", js: "comment_id", typ: "" },
-        { json: "event", js: "event", typ: r("ReviewCommentResolvedMessageEvent") },
-        { json: "review_id", js: "review_id", typ: "" },
+    "ReviewLoopInteraction": o([
+        { json: "answer", js: "answer", typ: u(undefined, "") },
+        { json: "answered_at", js: "answered_at", typ: u(undefined, "") },
+        { json: "consumed_at", js: "consumed_at", typ: u(undefined, "") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "iteration_id", js: "iteration_id", typ: u(undefined, "") },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "loop_id", js: "loop_id", typ: "" },
+        { json: "question", js: "question", typ: "" },
+        { json: "status", js: "status", typ: r("ReviewLoopInteractionStatus") },
     ], "any"),
-    "ReviewCompleteMessage": o([
+    "ReviewLoopIteration": o([
+        { json: "assistant_trace_json", js: "assistant_trace_json", typ: u(undefined, "") },
+        { json: "blocking_reason", js: "blocking_reason", typ: u(undefined, "") },
+        { json: "change_stats", js: "change_stats", typ: u(undefined, a(r("FileElement"))) },
+        { json: "changes_made", js: "changes_made", typ: u(undefined, true) },
+        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
+        { json: "decision", js: "decision", typ: u(undefined, r("ReviewLoopDecision")) },
         { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("ReviewCompleteMessageEvent") },
-        { json: "review_id", js: "review_id", typ: "" },
+        { json: "files_touched", js: "files_touched", typ: u(undefined, a("")) },
+        { json: "id", js: "id", typ: "" },
+        { json: "iteration_number", js: "iteration_number", typ: 0 },
+        { json: "loop_id", js: "loop_id", typ: "" },
+        { json: "result_text", js: "result_text", typ: u(undefined, "") },
+        { json: "started_at", js: "started_at", typ: "" },
+        { json: "status", js: "status", typ: r("ReviewLoopIterationStatus") },
+        { json: "structured_output_json", js: "structured_output_json", typ: u(undefined, "") },
+        { json: "suggested_next_focus", js: "suggested_next_focus", typ: u(undefined, "") },
+        { json: "summary", js: "summary", typ: u(undefined, "") },
+    ], "any"),
+    "ReviewLoopResultMessage": o([
+        { json: "action", js: "action", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("ReviewLoopResultMessageEvent") },
+        { json: "loop_id", js: "loop_id", typ: u(undefined, "") },
+        { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
+        { json: "session_id", js: "session_id", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
-    "ReviewFinding": o([
-        { json: "content", js: "content", typ: "" },
-        { json: "filepath", js: "filepath", typ: "" },
-        { json: "line_end", js: "line_end", typ: 0 },
-        { json: "line_start", js: "line_start", typ: 0 },
-        { json: "severity", js: "severity", typ: u(undefined, "") },
+    "ReviewLoopRun": o([
+        { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "custom_prompt", js: "custom_prompt", typ: u(undefined, "") },
+        { json: "handoff_payload_json", js: "handoff_payload_json", typ: u(undefined, "") },
+        { json: "iteration_count", js: "iteration_count", typ: 0 },
+        { json: "iteration_limit", js: "iteration_limit", typ: 0 },
+        { json: "iterations", js: "iterations", typ: u(undefined, a(r("Iteration"))) },
+        { json: "last_decision", js: "last_decision", typ: u(undefined, r("ReviewLoopDecision")) },
+        { json: "last_error", js: "last_error", typ: u(undefined, "") },
+        { json: "last_result_summary", js: "last_result_summary", typ: u(undefined, "") },
+        { json: "latest_iteration", js: "latest_iteration", typ: u(undefined, r("Iteration")) },
+        { json: "loop_id", js: "loop_id", typ: "" },
+        { json: "pending_interaction", js: "pending_interaction", typ: u(undefined, r("Interaction")) },
+        { json: "pending_interaction_id", js: "pending_interaction_id", typ: u(undefined, "") },
+        { json: "preset_id", js: "preset_id", typ: u(undefined, "") },
+        { json: "repo_path", js: "repo_path", typ: "" },
+        { json: "resolved_prompt", js: "resolved_prompt", typ: "" },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
+        { json: "status", js: "status", typ: r("ReviewLoopRunStatus") },
+        { json: "stop_reason", js: "stop_reason", typ: u(undefined, "") },
+        { json: "updated_at", js: "updated_at", typ: "" },
     ], "any"),
-    "ReviewFindingMessage": o([
-        { json: "comment", js: "comment", typ: u(undefined, r("Comment")) },
-        { json: "event", js: "event", typ: r("ReviewFindingMessageEvent") },
-        { json: "finding", js: "finding", typ: r("Finding") },
-        { json: "review_id", js: "review_id", typ: "" },
+    "ReviewLoopState": o([
+        { json: "advance_token", js: "advance_token", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "custom_prompt", js: "custom_prompt", typ: u(undefined, "") },
+        { json: "iteration_count", js: "iteration_count", typ: 0 },
+        { json: "iteration_limit", js: "iteration_limit", typ: 0 },
+        { json: "last_advance_at", js: "last_advance_at", typ: u(undefined, "") },
+        { json: "last_prompt_at", js: "last_prompt_at", typ: u(undefined, "") },
+        { json: "last_user_input_at", js: "last_user_input_at", typ: u(undefined, "") },
+        { json: "preset_id", js: "preset_id", typ: u(undefined, "") },
+        { json: "resolved_prompt", js: "resolved_prompt", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "status", js: "status", typ: r("ReviewLoopStatus") },
+        { json: "stop_reason", js: "stop_reason", typ: u(undefined, "") },
+        { json: "stop_requested", js: "stop_requested", typ: true },
+        { json: "updated_at", js: "updated_at", typ: "" },
     ], "any"),
-    "Finding": o([
-        { json: "content", js: "content", typ: "" },
-        { json: "filepath", js: "filepath", typ: "" },
-        { json: "line_end", js: "line_end", typ: 0 },
-        { json: "line_start", js: "line_start", typ: 0 },
-        { json: "severity", js: "severity", typ: u(undefined, "") },
-    ], "any"),
-    "ReviewStartedMessage": o([
-        { json: "event", js: "event", typ: r("ReviewStartedMessageEvent") },
-        { json: "review_id", js: "review_id", typ: "" },
+    "ReviewLoopUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("ReviewLoopUpdatedMessageEvent") },
+        { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
+        { json: "session_id", js: "session_id", typ: "" },
     ], "any"),
     "ReviewState": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "repo_path", js: "repo_path", typ: "" },
         { json: "review_id", js: "review_id", typ: "" },
         { json: "viewed_files", js: "viewed_files", typ: a("") },
-    ], "any"),
-    "ReviewToolUse": o([
-        { json: "input", js: "input", typ: m("any") },
-        { json: "name", js: "name", typ: "" },
-        { json: "output", js: "output", typ: "" },
-    ], "any"),
-    "ReviewToolUseMessage": o([
-        { json: "event", js: "event", typ: r("ReviewToolUseMessageEvent") },
-        { json: "review_id", js: "review_id", typ: "" },
-        { json: "tool_use", js: "tool_use", typ: r("ToolUse") },
-    ], "any"),
-    "ToolUse": o([
-        { json: "input", js: "input", typ: m("any") },
-        { json: "name", js: "name", typ: "" },
-        { json: "output", js: "output", typ: "" },
     ], "any"),
     "Session": o([
         { json: "agent", js: "agent", typ: r("SessionAgent") },
@@ -4136,6 +4418,11 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("SessionsUpdatedMessageEvent") },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
     ], "any"),
+    "SetReviewLoopIterationLimitMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SetReviewLoopIterationLimitMessageCmd") },
+        { json: "iteration_limit", js: "iteration_limit", typ: 0 },
+        { json: "session_id", js: "session_id", typ: "" },
+    ], "any"),
     "SetSessionResumeIDMessage": o([
         { json: "cmd", js: "cmd", typ: r("SetSessionResumeIDMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -4175,12 +4462,13 @@ const typeMap: any = {
         { json: "resume_session_id", js: "resume_session_id", typ: u(undefined, "") },
         { json: "rows", js: "rows", typ: 0 },
     ], "any"),
-    "StartReviewMessage": o([
-        { json: "base_branch", js: "base_branch", typ: "" },
-        { json: "branch", js: "branch", typ: "" },
-        { json: "cmd", js: "cmd", typ: r("StartReviewMessageCmd") },
-        { json: "repo_path", js: "repo_path", typ: "" },
-        { json: "review_id", js: "review_id", typ: "" },
+    "StartReviewLoopMessage": o([
+        { json: "cmd", js: "cmd", typ: r("StartReviewLoopMessageCmd") },
+        { json: "handoff_payload_json", js: "handoff_payload_json", typ: u(undefined, "") },
+        { json: "iteration_limit", js: "iteration_limit", typ: 0 },
+        { json: "preset_id", js: "preset_id", typ: u(undefined, "") },
+        { json: "prompt", js: "prompt", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
     ], "any"),
     "StashMessage": o([
         { json: "cmd", js: "cmd", typ: r("StashMessageCmd") },
@@ -4211,6 +4499,10 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("StopMessageCmd") },
         { json: "id", js: "id", typ: "" },
         { json: "transcript_path", js: "transcript_path", typ: "" },
+    ], "any"),
+    "StopReviewLoopMessage": o([
+        { json: "cmd", js: "cmd", typ: r("StopReviewLoopMessageCmd") },
+        { json: "session_id", js: "session_id", typ: "" },
     ], "any"),
     "SubscribeGitStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("SubscribeGitStatusMessageCmd") },
@@ -4258,10 +4550,7 @@ const typeMap: any = {
         { json: "cloned", js: "cloned", typ: u(undefined, true) },
         { json: "cmd", js: "cmd", typ: u(undefined, "") },
         { json: "cols", js: "cols", typ: u(undefined, 0) },
-        { json: "comment", js: "comment", typ: u(undefined, r("Comment")) },
-        { json: "comment_id", js: "comment_id", typ: u(undefined, "") },
         { json: "conflict", js: "conflict", typ: u(undefined, true) },
-        { json: "content", js: "content", typ: u(undefined, "") },
         { json: "data", js: "data", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: u(undefined, "") },
         { json: "dirty", js: "dirty", typ: u(undefined, true) },
@@ -4269,7 +4558,6 @@ const typeMap: any = {
         { json: "event", js: "event", typ: "" },
         { json: "exit_code", js: "exit_code", typ: u(undefined, 0) },
         { json: "files", js: "files", typ: u(undefined, a(r("FileElement"))) },
-        { json: "finding", js: "finding", typ: u(undefined, r("Finding")) },
         { json: "found", js: "found", typ: u(undefined, true) },
         { json: "id", js: "id", typ: u(undefined, "") },
         { json: "last_seq", js: "last_seq", typ: u(undefined, 0) },
@@ -4284,7 +4572,7 @@ const typeMap: any = {
         { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "recent_locations", js: "recent_locations", typ: u(undefined, a(r("RecentLocationElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
-        { json: "review_id", js: "review_id", typ: u(undefined, "") },
+        { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "rows", js: "rows", typ: u(undefined, 0) },
         { json: "running", js: "running", typ: u(undefined, true) },
         { json: "screen_cols", js: "screen_cols", typ: u(undefined, 0) },
@@ -4298,6 +4586,7 @@ const typeMap: any = {
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: u(undefined, true) },
         { json: "seq", js: "seq", typ: u(undefined, 0) },
         { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
+        { json: "session_id", js: "session_id", typ: u(undefined, "") },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
         { json: "signal", js: "signal", typ: u(undefined, "") },
@@ -4305,7 +4594,6 @@ const typeMap: any = {
         { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
         { json: "success", js: "success", typ: u(undefined, true) },
         { json: "target_path", js: "target_path", typ: u(undefined, "") },
-        { json: "tool_use", js: "tool_use", typ: u(undefined, r("ToolUse")) },
         { json: "unstaged", js: "unstaged", typ: u(undefined, a(r("StagedElement"))) },
         { json: "untracked", js: "untracked", typ: u(undefined, a(r("StagedElement"))) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
@@ -4345,6 +4633,9 @@ const typeMap: any = {
     "AddCommentResultMessageEvent": [
         "add_comment_result",
     ],
+    "AnswerReviewLoopMessageCmd": [
+        "answer_review_loop",
+    ],
     "ApprovePRMessageCmd": [
         "approve_pr",
     ],
@@ -4379,9 +4670,6 @@ const typeMap: any = {
     ],
     "BranchesResultMessageEvent": [
         "branches_result",
-    ],
-    "CancelReviewMessageCmd": [
-        "cancel_review",
     ],
     "CheckAttnStashMessageCmd": [
         "check_attn_stash",
@@ -4506,6 +4794,12 @@ const typeMap: any = {
     "GetRepoInfoResultMessageEvent": [
         "get_repo_info_result",
     ],
+    "GetReviewLoopRunMessageCmd": [
+        "get_review_loop_run",
+    ],
+    "GetReviewLoopStateMessageCmd": [
+        "get_review_loop_state",
+    ],
     "GetReviewStateMessageCmd": [
         "get_review_state",
     ],
@@ -4623,26 +4917,44 @@ const typeMap: any = {
     "ResolveCommentResultMessageEvent": [
         "resolve_comment_result",
     ],
-    "ReviewCancelledMessageEvent": [
-        "review_cancelled",
+    "ReviewLoopDecision": [
+        "continue",
+        "converged",
+        "error",
+        "needs_user_input",
     ],
-    "ReviewChunkMessageEvent": [
-        "review_chunk",
+    "ReviewLoopIterationStatus": [
+        "awaiting_user",
+        "cancelled",
+        "completed",
+        "error",
+        "running",
     ],
-    "ReviewCommentResolvedMessageEvent": [
-        "review_comment_resolved",
+    "ReviewLoopInteractionStatus": [
+        "answered",
+        "consumed",
+        "pending",
     ],
-    "ReviewCompleteMessageEvent": [
-        "review_complete",
+    "ReviewLoopRunStatus": [
+        "awaiting_user",
+        "completed",
+        "error",
+        "running",
+        "stopped",
     ],
-    "ReviewFindingMessageEvent": [
-        "review_finding",
+    "ReviewLoopResultMessageEvent": [
+        "review_loop_result",
     ],
-    "ReviewStartedMessageEvent": [
-        "review_started",
+    "ReviewLoopStatus": [
+        "advance_received_waiting_prompt",
+        "completed",
+        "error",
+        "running",
+        "stopped",
+        "waiting_for_agent_advance",
     ],
-    "ReviewToolUseMessageEvent": [
-        "review_tool_use",
+    "ReviewLoopUpdatedMessageEvent": [
+        "review_loop_updated",
     ],
     "SessionExitedMessageEvent": [
         "session_exited",
@@ -4665,6 +4977,9 @@ const typeMap: any = {
     "SessionsUpdatedMessageEvent": [
         "sessions_updated",
     ],
+    "SetReviewLoopIterationLimitMessageCmd": [
+        "set_review_loop_iteration_limit",
+    ],
     "SetSessionResumeIDMessageCmd": [
         "set_session_resume_id",
     ],
@@ -4680,8 +4995,8 @@ const typeMap: any = {
     "SpawnSessionMessageCmd": [
         "spawn_session",
     ],
-    "StartReviewMessageCmd": [
-        "start_review",
+    "StartReviewLoopMessageCmd": [
+        "start_review_loop",
     ],
     "StashMessageCmd": [
         "stash",
@@ -4700,6 +5015,9 @@ const typeMap: any = {
     ],
     "StopMessageCmd": [
         "stop",
+    ],
+    "StopReviewLoopMessageCmd": [
+        "stop_review_loop",
     ],
     "SubscribeGitStatusMessageCmd": [
         "subscribe_git_status",

@@ -17,6 +17,7 @@ interface DashboardProps {
     label: string;
     state: UISessionState;
     cwd: string;
+    reviewLoopStatus?: string;
   }>;
   prs: DaemonPR[];
   isLoading: boolean;
@@ -43,6 +44,23 @@ export function Dashboard({
   onOpenPR,
   onOpenSettings,
 }: DashboardProps) {
+  const reviewLoopIndicator = (status?: string): { glyph: string; label: string } | null => {
+    switch (status) {
+      case 'running':
+        return { glyph: '⟳', label: 'Review loop running' };
+      case 'awaiting_user':
+        return { glyph: '?', label: 'Review loop needs input' };
+      case 'completed':
+        return { glyph: '✓', label: 'Review loop completed' };
+      case 'stopped':
+        return { glyph: '•', label: 'Review loop stopped' };
+      case 'error':
+        return { glyph: '!', label: 'Review loop error' };
+      default:
+        return null;
+    }
+  };
+
   const waitingSessions = sessions.filter((s) => s.state === 'waiting_input');
   const pendingApprovalSessions = sessions.filter((s) => s.state === 'pending_approval');
   const launchingSessions = sessions.filter((s) => s.state === 'launching');
@@ -190,13 +208,22 @@ export function Dashboard({
                     {waitingSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
                         <StateIndicator state="waiting_input" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopIndicator(s.reviewLoopStatus) && (
+                          <span
+                            className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`}
+                            title={reviewLoopIndicator(s.reviewLoopStatus)?.label}
+                            aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}
+                          >
+                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -207,13 +234,18 @@ export function Dashboard({
                     {pendingApprovalSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
                         <StateIndicator state="pending_approval" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopIndicator(s.reviewLoopStatus) && (
+                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
+                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -224,13 +256,18 @@ export function Dashboard({
                     {launchingSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
                         <StateIndicator state="launching" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopIndicator(s.reviewLoopStatus) && (
+                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
+                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -241,13 +278,18 @@ export function Dashboard({
                     {workingSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
                         <StateIndicator state="working" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopIndicator(s.reviewLoopStatus) && (
+                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
+                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -258,13 +300,18 @@ export function Dashboard({
                     {idleSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
                         <StateIndicator state="idle" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopIndicator(s.reviewLoopStatus) && (
+                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
+                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -275,13 +322,18 @@ export function Dashboard({
                     {unknownSessions.map((s) => (
                       <div
                         key={s.id}
-                        className="session-row clickable"
+                        className={`session-row clickable ${s.reviewLoopStatus ? `session-row--loop-${s.reviewLoopStatus}` : ''}`}
                         data-testid={`session-${s.id}`}
                         data-state={s.state}
                         onClick={() => onSelectSession(s.id)}
                       >
                         <StateIndicator state="unknown" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {reviewLoopIndicator(s.reviewLoopStatus) && (
+                          <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
+                            {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>

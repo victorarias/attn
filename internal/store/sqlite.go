@@ -163,6 +163,91 @@ var migrations = []migration{
 	{21, "add agent to sessions", "ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'codex'"},
 	{22, "add recoverable to sessions", "ALTER TABLE sessions ADD COLUMN recoverable INTEGER NOT NULL DEFAULT 0"},
 	{23, "add resume_session_id to sessions", "ALTER TABLE sessions ADD COLUMN resume_session_id TEXT NOT NULL DEFAULT ''"},
+	{24, "create session_review_loops table", `CREATE TABLE IF NOT EXISTS session_review_loops (
+		session_id TEXT PRIMARY KEY,
+		status TEXT NOT NULL,
+		preset_id TEXT,
+		custom_prompt TEXT,
+		resolved_prompt TEXT NOT NULL,
+		iteration_count INTEGER NOT NULL DEFAULT 0,
+		iteration_limit INTEGER NOT NULL,
+		stop_requested INTEGER NOT NULL DEFAULT 0,
+		advance_token TEXT NOT NULL,
+		stop_reason TEXT,
+		last_prompt_at TEXT,
+		last_advance_at TEXT,
+		last_user_input_at TEXT,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+	)`},
+	{25, "create review_loop_runs table", `CREATE TABLE IF NOT EXISTS review_loop_runs (
+		id TEXT PRIMARY KEY,
+		source_session_id TEXT NOT NULL,
+		repo_path TEXT NOT NULL,
+		status TEXT NOT NULL,
+		preset_id TEXT,
+		custom_prompt TEXT,
+		resolved_prompt TEXT NOT NULL,
+		handoff_payload_json TEXT,
+		iteration_count INTEGER NOT NULL DEFAULT 0,
+		iteration_limit INTEGER NOT NULL,
+		pending_interaction_id TEXT,
+		last_decision TEXT,
+		last_result_summary TEXT,
+		last_error TEXT,
+		stop_reason TEXT,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		completed_at TEXT,
+		FOREIGN KEY (source_session_id) REFERENCES sessions(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_review_loop_runs_source_session_created_at
+		ON review_loop_runs(source_session_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_review_loop_runs_status
+		ON review_loop_runs(status);`},
+	{26, "create review_loop_iterations table", `CREATE TABLE IF NOT EXISTS review_loop_iterations (
+		id TEXT PRIMARY KEY,
+		loop_id TEXT NOT NULL,
+		iteration_number INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		decision TEXT,
+		summary TEXT,
+		result_text TEXT,
+		changes_made INTEGER,
+		files_touched_json TEXT,
+		blocking_reason TEXT,
+		suggested_next_focus TEXT,
+		structured_output_json TEXT,
+		assistant_trace_json TEXT,
+		error TEXT,
+		started_at TEXT NOT NULL,
+		completed_at TEXT,
+		UNIQUE(loop_id, iteration_number),
+		FOREIGN KEY (loop_id) REFERENCES review_loop_runs(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_review_loop_iterations_loop_id_iteration_number
+		ON review_loop_iterations(loop_id, iteration_number ASC);`},
+	{27, "create review_loop_interactions table", `CREATE TABLE IF NOT EXISTS review_loop_interactions (
+		id TEXT PRIMARY KEY,
+		loop_id TEXT NOT NULL,
+		iteration_id TEXT,
+		kind TEXT NOT NULL,
+		question TEXT NOT NULL,
+		answer TEXT,
+		status TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		answered_at TEXT,
+		consumed_at TEXT,
+		FOREIGN KEY (loop_id) REFERENCES review_loop_runs(id) ON DELETE CASCADE,
+		FOREIGN KEY (iteration_id) REFERENCES review_loop_iterations(id) ON DELETE SET NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_review_loop_interactions_loop_id_created_at
+		ON review_loop_interactions(loop_id, created_at ASC);
+	CREATE INDEX IF NOT EXISTS idx_review_loop_interactions_status
+		ON review_loop_interactions(status);`},
+	{28, "add result_text to review_loop_iterations", "ALTER TABLE review_loop_iterations ADD COLUMN result_text TEXT"},
+	{29, "add change_stats_json to review_loop_iterations", "ALTER TABLE review_loop_iterations ADD COLUMN change_stats_json TEXT"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -243,6 +328,16 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 23 {
 			if err := applyMigration23(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 28 {
+			if err := applyMigration28(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 29 {
+			if err := applyMigration29(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -330,6 +425,34 @@ func applyMigration23(tx *sql.Tx) error {
 		return nil
 	}
 	if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN resume_session_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyMigration28(tx *sql.Tx) error {
+	hasResultText, err := columnExists(tx, "review_loop_iterations", "result_text")
+	if err != nil {
+		return err
+	}
+	if hasResultText {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE review_loop_iterations ADD COLUMN result_text TEXT"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyMigration29(tx *sql.Tx) error {
+	hasChangeStats, err := columnExists(tx, "review_loop_iterations", "change_stats_json")
+	if err != nil {
+		return err
+	}
+	if hasChangeStats {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE review_loop_iterations ADD COLUMN change_stats_json TEXT"); err != nil {
 		return err
 	}
 	return nil

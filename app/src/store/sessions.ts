@@ -331,7 +331,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
       // Terminal input -> PTY
       const sendToPty = (data: string) => {
-        ptyWrite({ id, data }).catch(console.error);
+        ptyWrite({ id, data, source: 'user' }).catch(console.error);
       };
       terminal.onData(sendToPty);
 

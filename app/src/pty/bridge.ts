@@ -29,7 +29,7 @@ type PtyEventHandler = (event: { payload: PtyEventPayload }) => void;
 
 export interface PtyBackend {
   spawn: (args: PtySpawnArgs) => Promise<void>;
-  write: (id: string, data: string) => Promise<void>;
+  write: (id: string, data: string, source?: string) => Promise<void>;
   resize: (id: string, cols: number, rows: number) => Promise<void>;
   kill: (id: string) => Promise<void>;
 }
@@ -95,7 +95,7 @@ export async function ptySpawn(request: { args: PtySpawnArgs }) {
   await backend.spawn(request.args);
 }
 
-export async function ptyWrite(request: { id: string; data: string }) {
+export async function ptyWrite(request: { id: string; data: string; source?: string }) {
   if (mockEnabled()) {
     if (!mockSessions.has(request.id)) {
       return;
@@ -106,7 +106,7 @@ export async function ptyWrite(request: { id: string; data: string }) {
   if (!backend) {
     throw new Error('PTY backend is not configured');
   }
-  await backend.write(request.id, request.data);
+  await backend.write(request.id, request.data, request.source);
 }
 
 export async function ptyResize(request: { id: string; cols: number; rows: number }) {

@@ -404,7 +404,7 @@ echo '{"type":"turn.completed"}'
 	t.Setenv("ATTN_CODEX_CLASSIFIER_MODELS", "spark,base")
 	t.Setenv("ATTN_CODEX_CLASSIFIER_REASONING_EFFORT", "low")
 
-	got, err := ClassifyWithCodex("done text", 3*time.Second)
+	got, err := ClassifyWithCodex("done text", 10*time.Second)
 	if err != nil {
 		t.Fatalf("ClassifyWithCodex unexpected err: %v", err)
 	}

@@ -97,4 +97,99 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     unmount();
   });
+
+  it('resolves getReviewLoopRun from show result keyed by loop_id', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    const runPromise = result.current.getReviewLoopRun('loop-123');
+    await Promise.resolve();
+
+    ws.emit({
+      event: 'review_loop_result',
+      action: 'show',
+      loop_id: 'loop-123',
+      success: true,
+      review_loop_run: {
+        loop_id: 'loop-123',
+        source_session_id: 'sess-1',
+        repo_path: '/tmp/repo',
+        status: 'running',
+        resolved_prompt: 'Review this repo',
+        iteration_count: 2,
+        iteration_limit: 3,
+        iterations: [
+          {
+            id: 'iter-1',
+            loop_id: 'loop-123',
+            iteration_number: 1,
+            status: 'completed',
+            started_at: '2026-03-08T00:00:00Z',
+          },
+        ],
+        created_at: '2026-03-08T00:00:00Z',
+        updated_at: '2026-03-08T00:00:00Z',
+      },
+    });
+
+    await expect(runPromise).resolves.toMatchObject({
+      success: true,
+      state: {
+        loop_id: 'loop-123',
+        iterations: [{ id: 'iter-1' }],
+      },
+    });
+
+    unmount();
+  });
+
+  it('rejects answerReviewLoop immediately when error result only echoes loop_id', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    const answerPromise = result.current.answerReviewLoop('loop-123', 'interaction-1', 'Ship it');
+    await Promise.resolve();
+
+    ws.emit({
+      event: 'review_loop_result',
+      action: 'answer',
+      loop_id: 'loop-123',
+      success: false,
+      error: 'interaction not found',
+    });
+
+    await expect(answerPromise).rejects.toThrow('interaction not found');
+
+    unmount();
+  });
 });

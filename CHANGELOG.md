@@ -6,6 +6,51 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-03-08]
+
+### Changed
+- **Right Dock Default Layout**: Start the session view with the compact layout by leaving the diff dock closed until you explicitly open it with `Cmd+Shift+D`.
+- **Review Loop Summary Space**: Let the latest-summary card in the review-loop sidebar grow substantially taller before it starts scrolling, so longer round summaries are easier to read in place.
+
+### Fixed
+- **Diff Detail Panel Exit Animation**: Keep dock panels in the right-dock stack through their close transition, so the detailed diff/review panel now slides out smoothly on `Cmd+Shift+E` and `Esc` instead of disappearing abruptly.
+
+## [2026-03-07]
+
+### Changed
+- **Session Sidebar Action Strip**: Move review-loop access into a new icon-based sidebar header tool row alongside editor, diff-panel, and PR-drawer controls, and let the diff panel be shown or hidden from that strip.
+- **Review Loop Session Overlay**: Remove the full-width review-loop bar above the active session and keep the review-loop drawer as an app-controlled overlay with its primary actions in the drawer header.
+- **Shared Sliding Side Panels**: Refactor the review-loop drawer and PR attention drawer onto one shared side-panel shell so they both anchor to the right edge, animate with the same slide-in/slide-out behavior, and stack beside the diff panel instead of overlapping it.
+- **Unified Session Right Dock**: Replace the old mix of fixed layout panels, one-off drawers, and separate review view with a single dock-managed panel system for diff, review loop, PR attention, and the in-app review/editor panel.
+- **Diff Detail Cleanup**: Rename the old review-oriented diff panel to a diff-detail surface, remove the legacy in-panel AI review workflow, and keep the main review loop as the only review automation path in the app UI.
+- **Live Review Loop Detail Updates**: The review-loop panel now widens further, renders the latest summary as markdown, auto-opens the log while running, and updates the visible log and touched-file list incrementally during a live iteration instead of only after completion.
+
+## [2026-03-06]
+
+### Added
+- **SDK Review Loop Data Model**: Add dedicated review-loop run, iteration, and interaction types plus SQLite tables so the SDK-based loop can persist append-only history without reusing the old session-scoped PTY loop table.
+- **SDK Review Loop Execution Path**: Add daemon-side SDK review-loop orchestration with autonomous iteration, structured outcomes, `awaiting_user` pauses, and same-loop answer/resume handling.
+- **Review Loop Handoff CLI Path**: Add `attn review-loop answer` plus `--handoff-file` and `ATTN_SESSION_ID` inference support for `attn review-loop start`, so the main agent can trigger loops without the old `advance` callback model.
+- **Deterministic Review Loop Harness**: Add a scripted daemon-level review-loop harness with timeline capture so SDK loop scenarios can be exercised without real Claude or PTY automation.
+
+### Changed
+- **Review Loop Persistence Foundation**: Add store APIs and tests for run-oriented review-loop records, active-run lookup by source session, and same-loop question/answer interaction history to support the SDK pivot.
+- **Review Loop App Contract**: Replace the PTY-era review-loop UI/socket status flow with run-oriented `running`, `awaiting_user`, `stopped`, `completed`, and `error` states, and add an in-app answer flow for blocked loops.
+- **Claude attn Skill**: Update the installed Claude skill to use review-loop start and answer commands instead of the removed PTY-era `advance` instruction.
+
+## [2026-03-05]
+
+### Added
+- **Session Review Loop**: Add daemon/store/CLI support for session-level review loops, including persisted loop state, iteration limits, explicit `attn review-loop advance` handoff, and best-effort stop via PTY `ESC`.
+- **Session Review Loop Controls**: Add active-session UI for starting, stopping, inspecting, and editing review-loop iteration limits without using `ReviewPanel`.
+- **Saved Review Loop Prompts**: Add prompt preset persistence in settings so custom review-loop prompts can be saved and reused from the active-session loop UI.
+- **Review Loop Session Indicators**: Add loop-status badges in the session sidebar and dashboard so active/completed/stopped loops are visible without selecting the session.
+- **Review Loop Planning Docs**: Add an implementation plan in `docs/plans/2026-03-05-review-loop.md` and track the work in `TASKS.md`.
+
+### Changed
+- **Protocol Update**: Extend the protocol and generated types for review-loop commands, loop update/result events, PTY input source tagging, and persisted loop state, and bump protocol version to `34`.
+- **Manual User Takeover Handling**: Manual user prompt submission now stops active review loops instead of letting automation schedule another pass behind the user's back.
+
 ## [2026-02-26]
 
 ### Added

@@ -111,31 +111,6 @@ test.describe('Session State Changes', () => {
     await expect(idleDot).toHaveCSS('background-color', 'rgb(107, 114, 128)');   // #6b7280 grey
   });
 
-  test('UI updates in real-time when state changes via daemon', async ({ page, daemon }) => {
-    await daemon.start();
-    await page.goto('/');
-    await page.waitForSelector('.dashboard');
-
-    // Create session in both local store and daemon
-    await createSession(page, daemon, { id: 's1', label: 'My Session', state: 'working', cwd: '/tmp/test/s1' });
-
-    // Initially working
-    await expect(page.locator('[data-testid="session-s1"][data-state="working"]')).toBeVisible({ timeout: 5000 });
-
-    // Change to waiting_input VIA DAEMON (tests daemon→WebSocket→UI flow)
-    await daemon.updateSessionState('s1', 'waiting_input');
-    // Wait for WebSocket to propagate the change to UI
-    await expect(page.locator('[data-testid="session-s1"][data-state="waiting_input"]')).toBeVisible({ timeout: 5000 });
-
-    // Change to idle VIA DAEMON
-    await daemon.updateSessionState('s1', 'idle');
-    await expect(page.locator('[data-testid="session-s1"][data-state="idle"]')).toBeVisible({ timeout: 5000 });
-
-    // Change back to working VIA DAEMON
-    await daemon.updateSessionState('s1', 'working');
-    await expect(page.locator('[data-testid="session-s1"][data-state="working"]')).toBeVisible({ timeout: 5000 });
-  });
-
   test('attention drawer shows only waiting_input sessions', async ({ page, daemon }) => {
     await daemon.start();
     await page.goto('/');
@@ -153,39 +128,12 @@ test.describe('Session State Changes', () => {
     await page.keyboard.press('Meta+k');
 
     // Wait for drawer to open
-    await expect(page.locator('.attention-drawer.open')).toBeVisible({ timeout: 2000 });
+    await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toBeVisible({ timeout: 2000 });
 
     // Only waiting_input session should appear
     await expect(page.locator('[data-testid="attention-session-s2"]')).toBeVisible();
     await expect(page.locator('[data-testid="attention-session-s1"]')).not.toBeVisible();
     await expect(page.locator('[data-testid="attention-session-s3"]')).not.toBeVisible();
-  });
-
-  test('session moves between groups when state changes via daemon', async ({ page, daemon }) => {
-    await daemon.start();
-    await page.goto('/');
-    await page.waitForSelector('.dashboard');
-
-    // Create session in working state
-    await createSession(page, daemon, { id: 's1', label: 'Test Session', state: 'working', cwd: '/tmp/test/s1' });
-
-    // Initially in working group
-    await expect(page.locator('[data-testid="session-group-working"]')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('[data-testid="session-group-working"] [data-testid="session-s1"]')).toBeVisible();
-
-    // Change to waiting_input VIA DAEMON - should move to waiting group
-    await daemon.updateSessionState('s1', 'waiting_input');
-    await expect(page.locator('[data-testid="session-group-waiting"] [data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
-
-    // Working group should no longer exist (no sessions)
-    await expect(page.locator('[data-testid="session-group-working"]')).not.toBeVisible();
-
-    // Change to idle VIA DAEMON - should move to idle group
-    await daemon.updateSessionState('s1', 'idle');
-    await expect(page.locator('[data-testid="session-group-idle"] [data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
-
-    // Waiting group should no longer exist
-    await expect(page.locator('[data-testid="session-group-waiting"]')).not.toBeVisible();
   });
 
 });

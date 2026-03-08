@@ -131,7 +131,7 @@ func shortTempDir(t *testing.T) string {
 func TestDaemon_RegisterAndQuery(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19900")
 
-	tmpDir := t.TempDir()
+	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
 	d := NewForTesting(sockPath)
@@ -164,7 +164,7 @@ func TestDaemon_RegisterAndQuery(t *testing.T) {
 func TestDaemon_StateUpdate(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19901")
 
-	tmpDir := t.TempDir()
+	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
 	d := NewForTesting(sockPath)
@@ -197,7 +197,7 @@ func TestDaemon_StateUpdate(t *testing.T) {
 func TestDaemon_Unregister(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19902")
 
-	tmpDir := t.TempDir()
+	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
 	d := NewForTesting(sockPath)
@@ -220,7 +220,7 @@ func TestDaemon_Unregister(t *testing.T) {
 func TestDaemon_MultipleSessions(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19903")
 
-	tmpDir := t.TempDir()
+	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
 	d := NewForTesting(sockPath)
@@ -255,7 +255,7 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 func TestDaemon_SocketCleanup(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19904")
 
-	tmpDir := t.TempDir()
+	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
 	// Create stale socket file
@@ -1167,6 +1167,60 @@ func (b *fakeSpawnBackend) LastSpawn() (ptybackend.SpawnOptions, bool) {
 	return b.spawnOpts[len(b.spawnOpts)-1], true
 }
 
+type fakeReviewLoopBackend struct {
+	mu         sync.Mutex
+	inputs     map[string][][]byte
+	scrollback map[string][]byte
+}
+
+func (b *fakeReviewLoopBackend) Spawn(context.Context, ptybackend.SpawnOptions) error { return nil }
+func (b *fakeReviewLoopBackend) Attach(_ context.Context, sessionID string, _ string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	info := ptybackend.AttachInfo{Running: true}
+	if data, ok := b.scrollback[sessionID]; ok {
+		info.Scrollback = append([]byte(nil), data...)
+	}
+	return info, newFakeOutputStream(), nil
+}
+func (b *fakeReviewLoopBackend) Input(_ context.Context, sessionID string, data []byte) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.inputs == nil {
+		b.inputs = make(map[string][][]byte)
+	}
+	copied := append([]byte(nil), data...)
+	b.inputs[sessionID] = append(b.inputs[sessionID], copied)
+	return nil
+}
+func (b *fakeReviewLoopBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
+func (b *fakeReviewLoopBackend) Kill(context.Context, string, syscall.Signal) error   { return nil }
+func (b *fakeReviewLoopBackend) Remove(context.Context, string) error                 { return nil }
+func (b *fakeReviewLoopBackend) SessionIDs(context.Context) []string                  { return nil }
+func (b *fakeReviewLoopBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {
+	return ptybackend.RecoveryReport{}, nil
+}
+func (b *fakeReviewLoopBackend) Shutdown(context.Context) error { return nil }
+
+func (b *fakeReviewLoopBackend) Inputs(sessionID string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []string
+	for _, input := range b.inputs[sessionID] {
+		out = append(out, string(input))
+	}
+	return out
+}
+
+func (b *fakeReviewLoopBackend) SetScrollback(sessionID, text string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.scrollback == nil {
+		b.scrollback = make(map[string][]byte)
+	}
+	b.scrollback[sessionID] = []byte(text)
+}
+
 func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForRecoverableClaudeSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
@@ -1693,7 +1747,7 @@ func TestDaemon_RecoveryBarrier_DefersInitialState(t *testing.T) {
 }
 
 func TestDaemon_HealthEndpoint(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
 	// Use unique port
@@ -1772,6 +1826,10 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"empty codex_executable", "codex_executable", "", false},
 		{"empty copilot_executable", "copilot_executable", "", false},
 		{"empty pi_executable", "pi_executable", "", false},
+		{"empty review_loop_model", "review_loop_model", "", false},
+		{"custom review_loop_model", "review_loop_model", "claude-opus-4-6", false},
+		{"empty reviewer_model", "reviewer_model", "", false},
+		{"custom reviewer_model", "reviewer_model", "claude-sonnet-4-6", false},
 		{"dynamic executable key for known agent", "pi_executable", "not-a-real-binary-123", true},
 		{"invalid claude_executable", "claude_executable", "not-a-real-binary-123", true},
 		{"invalid new_session_agent", "new_session_agent", "gpt", true},
@@ -1865,6 +1923,29 @@ func TestDaemon_SettingsIncludePTYBackendMode(t *testing.T) {
 	settings = d.settingsWithAgentAvailability()
 	if got := settings[SettingPTYBackendMode]; got != "worker" {
 		t.Fatalf("settings[%s] = %v, want worker", SettingPTYBackendMode, got)
+	}
+}
+
+func TestDaemon_SettingsWithClaudeAvailability_InstallsClaudeSkill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	binDir := t.TempDir()
+	claudePath := filepath.Join(binDir, "claude")
+	if err := os.WriteFile(claudePath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude executable: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	d := &Daemon{store: store.New()}
+	settings := d.settingsWithAgentAvailability()
+	if got := settings[SettingClaudeAvailable]; got != "true" {
+		t.Fatalf("settings[%s] = %v, want true", SettingClaudeAvailable, got)
+	}
+
+	skillPath := filepath.Join(home, ".claude", "skills", "attn", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("expected Claude attn skill at %s: %v", skillPath, err)
 	}
 }
 

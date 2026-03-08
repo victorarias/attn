@@ -5,7 +5,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Terminal, TerminalHandle } from './components/Terminal';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, type SidebarHeaderAction, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
@@ -13,7 +13,9 @@ import { BranchPicker } from './components/BranchPicker';
 import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
-import { ReviewPanel } from './components/ReviewPanel';
+import { DiffDetailPanel } from './components/DiffDetailPanel';
+import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
+import { RightDock } from './components/RightDock';
 import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
 import { ThumbsModal } from './components/ThumbsModal';
 import { ForkDialog } from './components/ForkDialog';
@@ -23,8 +25,7 @@ import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { useSessionStore } from './store/sessions';
-import { ptyWrite } from './pty/bridge';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, ReviewerEvent, ReviewToolUse, BranchDiffFile, DaemonWarning } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { useDaemonStore } from './store/daemonSessions';
@@ -47,6 +48,7 @@ const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/relea
 const RELEASES_LATEST_WEB = 'https://github.com/victorarias/attn/releases/latest';
 const RELEASE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_BANNER_DISMISSED_STORAGE_KEY = 'attn.update_banner.dismissed_version';
+const DOCK_PANEL_EXIT_MS = 260;
 
 interface GitHubReleaseResponse {
   tag_name?: string;
@@ -88,21 +90,25 @@ function persistDismissedUpdateVersion(version: string): void {
   }
 }
 
+function toneForDockPanel(status?: string): 'default' | 'idle' | 'running' | 'awaiting_user' | 'completed' | 'stopped' | 'error' {
+  switch (status) {
+    case 'running':
+    case 'awaiting_user':
+    case 'completed':
+    case 'stopped':
+    case 'error':
+      return status;
+    default:
+      return 'default';
+  }
+}
+
 function App() {
   // Settings state (must be declared before useDaemonSocket to pass as callback)
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [settingError, setSettingError] = useState<string | null>(null);
 
-  // Reviewer agent state (unified events for ordered rendering)
-  const [reviewerEvents, setReviewerEvents] = useState<ReviewerEvent[]>([]);
-  const [reviewerRunning, setReviewerRunning] = useState(false);
-  const [reviewerError, setReviewerError] = useState<string | undefined>();
-
-  // Comments added by reviewer agent (passed to ReviewPanel)
-  const [pendingAgentComments, setPendingAgentComments] = useState<import('./types/generated').ReviewComment[]>([]);
-
-  // Comment IDs resolved by reviewer agent (passed to ReviewPanel)
-  const [agentResolvedCommentIds, setAgentResolvedCommentIds] = useState<string[]>([]);
+  const [reviewLoopsBySessionId, setReviewLoopsBySessionId] = useState<Record<string, ReviewLoopState>>({});
 
   // Worktrees state (used by WorktreeCleanupPrompt)
   const [, setWorktrees] = useState<DaemonWorktree[]>([]);
@@ -231,54 +237,6 @@ function App() {
     setUpdateAvailableVersion(null);
   }, [updateAvailableVersion]);
 
-  // Reviewer callbacks for streaming events
-  const reviewerCallbacks = useMemo(() => ({
-    onReviewStarted: () => {
-      setReviewerEvents([]);
-      setReviewerRunning(true);
-      setReviewerError(undefined);
-      setPendingAgentComments([]); // Clear pending comments when new review starts
-      setAgentResolvedCommentIds([]); // Clear resolved IDs when new review starts
-    },
-    onReviewChunk: (_reviewId: string, content: string) => {
-      // Consolidate consecutive chunks for efficient rendering
-      setReviewerEvents(prev => {
-        if (prev.length > 0 && prev[prev.length - 1].type === 'chunk') {
-          // Append to existing chunk
-          const updated = [...prev];
-          const lastChunk = updated[updated.length - 1] as { type: 'chunk'; content: string };
-          updated[updated.length - 1] = { type: 'chunk', content: lastChunk.content + content };
-          return updated;
-        }
-        // Create new chunk event
-        return [...prev, { type: 'chunk', content }];
-      });
-    },
-    onReviewFinding: (_reviewId: string, finding: { filepath: string; line_start: number; content: string }, comment?: import('./types/generated').ReviewComment) => {
-      console.log('[App] Review finding:', finding.filepath, finding.line_start);
-      // Add the comment to pending list so ReviewPanel can pick it up
-      if (comment) {
-        setPendingAgentComments(prev => [...prev, comment]);
-      }
-    },
-    onReviewCommentResolved: (_reviewId: string, commentId: string) => {
-      console.log('[App] Review comment resolved:', commentId);
-      setAgentResolvedCommentIds(prev => [...prev, commentId]);
-    },
-    onReviewToolUse: (_reviewId: string, toolUse: ReviewToolUse) => {
-      console.log('[App] Review tool use:', toolUse.name);
-      // Add tool use event - this breaks the chunk consolidation, creating a new text block after
-      setReviewerEvents(prev => [...prev, { type: 'tool_use', ...toolUse }]);
-    },
-    onReviewComplete: (_reviewId: string, success: boolean, error?: string) => {
-      setReviewerRunning(false);
-      setReviewerError(success ? undefined : error);
-    },
-    onReviewCancelled: () => {
-      setReviewerRunning(false);
-    },
-  }), []);
-
   // Connect to daemon WebSocket
   const {
     sendPRAction,
@@ -312,6 +270,8 @@ function App() {
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,
+    getReviewLoopRun,
+    getReviewLoopState,
     getReviewState,
     markFileViewed,
     sendAddComment,
@@ -320,8 +280,10 @@ function App() {
     sendWontFixComment,
     sendDeleteComment,
     sendGetComments,
-    sendStartReview,
-    sendCancelReview,
+    sendStartReviewLoop,
+    sendStopReviewLoop,
+    answerReviewLoop,
+    setReviewLoopIterationLimit,
     connectionError,
     hasReceivedInitialState,
     rateLimit,
@@ -336,8 +298,22 @@ function App() {
     onSettingError: setSettingError,
     onWorktreesUpdate: setWorktrees,
     onGitStatusUpdate: setGitStatus,
-    reviewer: reviewerCallbacks,
+    onReviewLoopUpdate: (state) => {
+      if (!state) return;
+      setReviewLoopsBySessionId(prev => ({ ...prev, [state.source_session_id]: state }));
+    },
   });
+
+  const setReviewLoopStateForSession = useCallback((sessionId: string, state: ReviewLoopState | null) => {
+    setReviewLoopsBySessionId(prev => {
+      if (!state) {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      }
+      return { ...prev, [sessionId]: state };
+    });
+  }, []);
 
   // Memoize clearGitStatus to prevent subscription effect from re-running
   const clearGitStatus = useCallback(() => setGitStatus(null), []);
@@ -350,11 +326,7 @@ function App() {
         prs={prs}
         settings={settings}
         gitStatus={gitStatus}
-        reviewerEvents={reviewerEvents}
-        reviewerRunning={reviewerRunning}
-        reviewerError={reviewerError}
-        pendingAgentComments={pendingAgentComments}
-        agentResolvedCommentIds={agentResolvedCommentIds}
+        reviewLoopsBySessionId={reviewLoopsBySessionId}
         connectionError={connectionError}
         hasReceivedInitialState={hasReceivedInitialState}
         rateLimit={rateLimit}
@@ -397,6 +369,8 @@ function App() {
         sendGetFileDiff={sendGetFileDiff}
         sendGetBranchDiffFiles={sendGetBranchDiffFiles}
         getRepoInfo={getRepoInfo}
+        getReviewLoopRun={getReviewLoopRun}
+        getReviewLoopState={getReviewLoopState}
         getReviewState={getReviewState}
         markFileViewed={markFileViewed}
         sendAddComment={sendAddComment}
@@ -405,8 +379,11 @@ function App() {
         sendWontFixComment={sendWontFixComment}
         sendDeleteComment={sendDeleteComment}
         sendGetComments={sendGetComments}
-        sendStartReview={sendStartReview}
-        sendCancelReview={sendCancelReview}
+        sendStartReviewLoop={sendStartReviewLoop}
+        sendStopReviewLoop={sendStopReviewLoop}
+        answerReviewLoop={answerReviewLoop}
+        setReviewLoopIterationLimit={setReviewLoopIterationLimit}
+        setReviewLoopStateForSession={setReviewLoopStateForSession}
         clearGitStatus={clearGitStatus}
       />
     </SettingsProvider>
@@ -419,11 +396,7 @@ interface AppContentProps {
   prs: DaemonPR[];
   settings: Record<string, string>;
   gitStatus: GitStatusUpdate | null;
-  reviewerEvents: ReviewerEvent[];
-  reviewerRunning: boolean;
-  reviewerError: string | undefined;
-  pendingAgentComments: import('./types/generated').ReviewComment[];
-  agentResolvedCommentIds: string[];
+  reviewLoopsBySessionId: Record<string, ReviewLoopState>;
   connectionError: string | null;
   hasReceivedInitialState: boolean;
   rateLimit: import('./hooks/useDaemonSocket').RateLimitState | null;
@@ -466,6 +439,8 @@ interface AppContentProps {
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
   sendGetBranchDiffFiles: ReturnType<typeof useDaemonSocket>['sendGetBranchDiffFiles'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
+  getReviewLoopRun: ReturnType<typeof useDaemonSocket>['getReviewLoopRun'];
+  getReviewLoopState: ReturnType<typeof useDaemonSocket>['getReviewLoopState'];
   getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
   markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
   sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
@@ -474,8 +449,11 @@ interface AppContentProps {
   sendWontFixComment: ReturnType<typeof useDaemonSocket>['sendWontFixComment'];
   sendDeleteComment: ReturnType<typeof useDaemonSocket>['sendDeleteComment'];
   sendGetComments: ReturnType<typeof useDaemonSocket>['sendGetComments'];
-  sendStartReview: ReturnType<typeof useDaemonSocket>['sendStartReview'];
-  sendCancelReview: ReturnType<typeof useDaemonSocket>['sendCancelReview'];
+  sendStartReviewLoop: ReturnType<typeof useDaemonSocket>['sendStartReviewLoop'];
+  sendStopReviewLoop: ReturnType<typeof useDaemonSocket>['sendStopReviewLoop'];
+  answerReviewLoop: ReturnType<typeof useDaemonSocket>['answerReviewLoop'];
+  setReviewLoopIterationLimit: ReturnType<typeof useDaemonSocket>['setReviewLoopIterationLimit'];
+  setReviewLoopStateForSession: (sessionId: string, state: ReviewLoopState | null) => void;
   clearGitStatus: () => void;
 }
 
@@ -484,11 +462,7 @@ function AppContent({
   prs,
   settings,
   gitStatus,
-  reviewerEvents,
-  reviewerRunning,
-  reviewerError,
-  pendingAgentComments,
-  agentResolvedCommentIds,
+  reviewLoopsBySessionId,
   connectionError,
   hasReceivedInitialState,
   rateLimit,
@@ -530,6 +504,8 @@ function AppContent({
   sendGetFileDiff,
   sendGetBranchDiffFiles,
   getRepoInfo,
+  getReviewLoopRun,
+  getReviewLoopState,
   getReviewState,
   markFileViewed,
   sendAddComment,
@@ -538,8 +514,11 @@ function AppContent({
   sendWontFixComment,
   sendDeleteComment,
   sendGetComments,
-  sendStartReview,
-  sendCancelReview,
+  sendStartReviewLoop,
+  sendStopReviewLoop,
+  answerReviewLoop,
+  setReviewLoopIterationLimit,
+  setReviewLoopStateForSession,
   clearGitStatus,
 }: AppContentProps) {
   const {
@@ -600,8 +579,6 @@ function AppContent({
   const [closedWorktree, setClosedWorktree] = useState<{ path: string; branch?: string } | null>(null);
   const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(false);
 
-  // Review panel state
-  const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
   const [initialReviewFile, setInitialReviewFile] = useState<string | null>(null);
   const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
   const hasAvailableAgents = useMemo(
@@ -704,20 +681,36 @@ function AppContent({
   const enrichedLocalSessions = sessions.map((s) => {
     const daemonSession = daemonSessions.find((ds) => ds.id === s.id);
     const rawState = daemonSession?.state ?? s.state;
+    const reviewLoop = reviewLoopsBySessionId[s.id];
     return {
       ...s,
       state: normalizeSessionState(rawState),
       branch: daemonSession?.branch ?? s.branch,
       isWorktree: daemonSession?.is_worktree ?? s.isWorktree,
       recoverable: daemonSession?.recoverable ?? false,
+      reviewLoopStatus: reviewLoop?.status,
     };
   });
 
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
+  type DockPanelId = 'diff' | 'reviewLoop' | 'attention' | 'diffDetail';
+
   // View state management
-  const [view, setView] = useState<'dashboard' | 'session' | 'review'>('dashboard');
-  const previousViewRef = useRef<'dashboard' | 'session'>('session');
+  const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
+  const [dockState, setDockState] = useState<{
+    openPanels: Record<DockPanelId, boolean>;
+    stack: DockPanelId[];
+  }>({
+    openPanels: {
+        diff: false,
+        reviewLoop: false,
+        attention: false,
+        diffDetail: false,
+    },
+    stack: ['diff'],
+  });
+  const dockPanelCloseTimersRef = useRef<Partial<Record<DockPanelId, number>>>({});
   const gitStatusSubscribedDirRef = useRef<string | null>(null);
   const activeSessionVisibleSinceRef = useRef<{ id: string; at: number } | null>(null);
   const pendingSessionVisualizedRef = useRef<{ key: string | null; timeoutId: number | null }>({
@@ -842,15 +835,94 @@ function AppContent({
     setView('dashboard');
   }, [setActiveSession]);
 
-  // Drawer state management
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const toggleDrawer = useCallback(() => {
-    setDrawerOpen((prev) => !prev);
+  const clearDockPanelCloseTimer = useCallback((panelId: DockPanelId) => {
+    const closeTimer = dockPanelCloseTimersRef.current[panelId];
+    if (closeTimer) {
+      window.clearTimeout(closeTimer);
+      delete dockPanelCloseTimersRef.current[panelId];
+    }
   }, []);
 
-  const closeDrawer = useCallback(() => {
-    setDrawerOpen(false);
+  const scheduleDockPanelStackRemoval = useCallback((panelId: DockPanelId) => {
+    clearDockPanelCloseTimer(panelId);
+    dockPanelCloseTimersRef.current[panelId] = window.setTimeout(() => {
+      setDockState((prev) => {
+        if (prev.openPanels[panelId]) {
+          return prev;
+        }
+        return {
+          openPanels: prev.openPanels,
+          stack: prev.stack.filter((id) => id !== panelId),
+        };
+      });
+      delete dockPanelCloseTimersRef.current[panelId];
+    }, DOCK_PANEL_EXIT_MS);
+  }, [clearDockPanelCloseTimer]);
+
+  const toggleDockPanel = useCallback((panelId: DockPanelId) => {
+    let nextOpen = false;
+    clearDockPanelCloseTimer(panelId);
+    setDockState((prev) => {
+      nextOpen = !prev.openPanels[panelId];
+      return {
+        openPanels: {
+          ...prev.openPanels,
+          [panelId]: nextOpen,
+        },
+        stack: nextOpen
+          ? [...prev.stack.filter((id) => id !== panelId), panelId]
+          : prev.stack.includes(panelId)
+            ? prev.stack
+            : [...prev.stack, panelId],
+      };
+    });
+    if (!nextOpen) {
+      scheduleDockPanelStackRemoval(panelId);
+    }
+  }, [clearDockPanelCloseTimer, scheduleDockPanelStackRemoval]);
+
+  const openDockPanel = useCallback((panelId: DockPanelId) => {
+    clearDockPanelCloseTimer(panelId);
+    setDockState((prev) => {
+      if (prev.openPanels[panelId]) {
+        return prev;
+      }
+      return {
+        openPanels: {
+          ...prev.openPanels,
+          [panelId]: true,
+        },
+        stack: [...prev.stack.filter((id) => id !== panelId), panelId],
+      };
+    });
+  }, [clearDockPanelCloseTimer]);
+
+  const closeDockPanel = useCallback((panelId: DockPanelId) => {
+    clearDockPanelCloseTimer(panelId);
+    setDockState((prev) => {
+      if (!prev.openPanels[panelId]) {
+        return prev;
+      }
+      return {
+        openPanels: {
+          ...prev.openPanels,
+          [panelId]: false,
+        },
+        stack: prev.stack.includes(panelId) ? prev.stack : [...prev.stack, panelId],
+      };
+    });
+    scheduleDockPanelStackRemoval(panelId);
+  }, [clearDockPanelCloseTimer, scheduleDockPanelStackRemoval]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(dockPanelCloseTimersRef.current).forEach((timerId) => {
+        if (timerId) {
+          window.clearTimeout(timerId);
+        }
+      });
+      dockPanelCloseTimersRef.current = {};
+    };
   }, []);
 
   // Sidebar collapse state
@@ -888,6 +960,48 @@ function AppContent({
   const [thumbsText, setThumbsText] = useState('');
   const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
   const { message: errorMessage, showError, clearError } = useErrorToast();
+  const activeReviewLoopState = useMemo(
+    () => (activeSessionId ? reviewLoopsBySessionId[activeSessionId] ?? null : null),
+    [activeSessionId, reviewLoopsBySessionId],
+  );
+  const activeLocalSession = useMemo(
+    () => (activeSessionId ? sessions.find((s) => s.id === activeSessionId) ?? null : null),
+    [activeSessionId, sessions],
+  );
+  const activeReviewLoopAvailable = useMemo(
+    () => Boolean(activeLocalSession && daemonSessions.find((ds) => ds.id === activeLocalSession.id)?.agent === 'claude'),
+    [activeLocalSession, daemonSessions],
+  );
+  const openDockPanels = dockState.openPanels;
+  const dockPanelStack = dockState.stack;
+  const diffPanelOpen = openDockPanels.diff;
+  const reviewLoopPanelOpen = openDockPanels.reviewLoop;
+  const attentionPanelOpen = openDockPanels.attention;
+  const diffDetailPanelOpen = openDockPanels.diffDetail;
+  const waitingReviewSessions = useMemo(
+    () => sessions
+      .map((session) => ({
+        sessionId: session.id,
+        label: session.label,
+        loopState: reviewLoopsBySessionId[session.id],
+      }))
+      .filter((item): item is { sessionId: string; label: string; loopState: ReviewLoopState } =>
+        Boolean(item.loopState && item.loopState.status === 'awaiting_user')
+      ),
+    [reviewLoopsBySessionId, sessions],
+  );
+
+  useEffect(() => {
+    if (!activeReviewLoopAvailable) {
+      closeDockPanel('reviewLoop');
+    }
+  }, [activeReviewLoopAvailable, closeDockPanel]);
+
+  useEffect(() => {
+    if (activeReviewLoopState?.status === 'awaiting_user' && activeReviewLoopAvailable) {
+      openDockPanel('reviewLoop');
+    }
+  }, [activeReviewLoopAvailable, activeReviewLoopState?.status, openDockPanel]);
 
   useEffect(() => {
     if (!settingError) {
@@ -896,6 +1010,25 @@ function AppContent({
     showError(settingError);
     clearSettingError();
   }, [clearSettingError, settingError, showError]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    let cancelled = false;
+    getReviewLoopState(activeSessionId)
+      .then((result) => {
+        if (cancelled) return;
+        setReviewLoopStateForSession(activeSessionId, result.state);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('[App] Failed to fetch review loop state:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, getReviewLoopState, setReviewLoopStateForSession]);
 
   // Fork dialog state
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
@@ -1222,13 +1355,24 @@ function AppContent({
   );
 
   // Calculate attention count for drawer badge
-  const waitingLocalSessions = enrichedLocalSessions.filter((s) => isAttentionSessionState(s.state));
+  const waitingLocalSessions = enrichedLocalSessions
+    .filter((s) => isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error')
+    .map((s) => ({
+      ...s,
+      state: s.reviewLoopStatus === 'error'
+        ? 'unknown'
+        : s.reviewLoopStatus === 'awaiting_user'
+          ? 'waiting_input'
+          : s.state,
+    }));
   const { needsAttention: prsNeedingAttention } = usePRsNeedingAttention(prs);
   const attentionCount = waitingLocalSessions.length + prsNeedingAttention.length;
 
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
-    const waiting = enrichedLocalSessions.find((s) => isAttentionSessionState(s.state));
+    const waiting = enrichedLocalSessions.find((s) =>
+      isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error'
+    );
     if (waiting) {
       handleSelectSession(waiting.id);
     }
@@ -1278,17 +1422,13 @@ function AppContent({
     void reloadSession(id);
   }, [reloadSession]);
 
-  // Open file in review panel
+  // Open file in diff detail panel
   const handleFileSelect = useCallback((path: string, _staged: boolean) => {
     setInitialReviewFile(path);
-    setReviewPanelOpen(true);
-    if (view !== 'review') {
-      previousViewRef.current = view === 'dashboard' ? 'dashboard' : 'session';
-    }
-    setView('review');
-  }, [view]);
+    openDockPanel('diffDetail');
+  }, [openDockPanel]);
 
-  // Fetch diff for ReviewPanel
+  // Fetch diff for diff detail panel
   // Options: staged (deprecated), baseRef (for PR-like branch diffs)
   const fetchDiffForReview = useCallback(async (path: string, options?: { staged?: boolean; baseRef?: string }) => {
     const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
@@ -1298,7 +1438,7 @@ function AppContent({
     return sendGetFileDiff(daemonSession.directory, path, options);
   }, [sessions, activeSessionId, daemonSessions, sendGetFileDiff]);
 
-  // Get active daemon session info for ReviewPanel
+  // Get active daemon session info for diff detail panel
   const activeDaemonSession = useMemo(() => {
     const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
     if (!activeLocalSession?.cwd) return null;
@@ -1359,35 +1499,30 @@ function AppContent({
     refreshBranchDiff(activeDaemonSession.directory);
   }, [gitStatus, activeDaemonSession?.directory, refreshBranchDiff]);
 
-  // Review panel handlers
-  const handleOpenReviewPanel = useCallback(() => {
-    if (view !== 'review') {
-      previousViewRef.current = view === 'dashboard' ? 'dashboard' : 'session';
-    }
-    setInitialReviewFile(null); // No specific file, let ReviewPanel pick first
-    setReviewPanelOpen(true);
-    setView('review');
-  }, [view]);
+  // Diff detail panel handlers
+  const handleOpenDiffDetailPanel = useCallback(() => {
+    setInitialReviewFile(null); // No specific file, let the diff detail panel pick first
+    openDockPanel('diffDetail');
+  }, [openDockPanel]);
 
-  const handleCloseReviewPanel = useCallback(() => {
-    setReviewPanelOpen(false);
+  const handleCloseDiffDetailPanel = useCallback(() => {
+    closeDockPanel('diffDetail');
     setInitialReviewFile(null);
-    setView(previousViewRef.current);
-  }, []);
+  }, [closeDockPanel]);
 
   useEffect(() => {
-    if (!reviewPanelOpen) return;
+    if (!diffDetailPanelOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        handleCloseReviewPanel();
+        handleCloseDiffDetailPanel();
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [reviewPanelOpen, handleCloseReviewPanel]);
+  }, [diffDetailPanelOpen, handleCloseDiffDetailPanel]);
 
   const handleOpenEditor = useCallback(async (cwd: string, filePath?: string) => {
     try {
@@ -1419,16 +1554,98 @@ function AppContent({
     handleOpenEditor(activeDaemonSession.directory, filePath);
   }, [activeDaemonSession?.directory, handleOpenEditor, showError]);
 
-  // Send code reference to the active Claude terminal
-  const handleSendToClaude = useCallback((reference: string) => {
+  const sidebarHeaderActions = useMemo<SidebarHeaderAction[]>(() => ([
+    {
+      id: 'editor',
+      title: activeSessionId ? 'Open in Editor' : 'Open in Editor (No active session)',
+      icon: <EditorIcon />,
+      disabled: !activeSessionId,
+      shortcutHint: '⌘⇧E detail',
+      onClick: handleOpenEditorForSession,
+    },
+    {
+      id: 'reviewLoop',
+      title: activeReviewLoopAvailable ? 'Review Loop' : 'Review Loop (Claude only)',
+      icon: <ReviewLoopIcon />,
+      active: reviewLoopPanelOpen,
+      disabled: !activeReviewLoopAvailable,
+      toneClassName: activeReviewLoopState?.status ? `sidebar-tool-btn--loop-${activeReviewLoopState.status}` : undefined,
+      shortcutHint: '⌘⇧R loop',
+      onClick: () => toggleDockPanel('reviewLoop'),
+    },
+    {
+      id: 'diff',
+      title: diffPanelOpen ? 'Hide Diff Panel' : 'Show Diff Panel',
+      icon: <DiffIcon />,
+      active: diffPanelOpen,
+      disabled: !activeSessionId,
+      shortcutHint: '⌘⇧D diff',
+      onClick: () => toggleDockPanel('diff'),
+    },
+    {
+      id: 'attention',
+      title: attentionPanelOpen ? 'Hide PRs Drawer' : 'Show PRs Drawer',
+      icon: <PRsIcon />,
+      active: attentionPanelOpen,
+      badge: attentionCount > 0 ? attentionCount : undefined,
+      shortcutHint: '⌘⇧P PRs',
+      onClick: () => toggleDockPanel('attention'),
+    },
+  ]), [
+    activeReviewLoopAvailable,
+    activeReviewLoopState?.status,
+    activeSessionId,
+    attentionCount,
+    attentionPanelOpen,
+    diffPanelOpen,
+    handleOpenEditorForSession,
+    reviewLoopPanelOpen,
+    toggleDockPanel,
+  ]);
+
+  const handleStartReviewLoop = useCallback(async (prompt: string, iterationLimit: number, presetId?: string) => {
     if (!activeSessionId) return;
-    ptyWrite({ id: activeSessionId, data: reference }).catch(console.error);
-    // Focus the terminal so user can start typing
-    setTimeout(() => {
-      const handle = terminalRefs.current.get(activeSessionId);
-      handle?.focus();
-    }, 50);
-  }, [activeSessionId]);
+    try {
+      const result = await sendStartReviewLoop(activeSessionId, prompt, iterationLimit, presetId);
+      setReviewLoopStateForSession(activeSessionId, result.state);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Failed to start review loop');
+      throw error;
+    }
+  }, [activeSessionId, sendStartReviewLoop, setReviewLoopStateForSession, showError]);
+
+  const handleStopReviewLoop = useCallback(async () => {
+    if (!activeSessionId) return;
+    try {
+      const result = await sendStopReviewLoop(activeSessionId);
+      setReviewLoopStateForSession(activeSessionId, result.state);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Failed to stop review loop');
+      throw error;
+    }
+  }, [activeSessionId, sendStopReviewLoop, setReviewLoopStateForSession, showError]);
+
+  const handleSetReviewLoopIterations = useCallback(async (iterationLimit: number) => {
+    if (!activeSessionId) return;
+    try {
+      const result = await setReviewLoopIterationLimit(activeSessionId, iterationLimit);
+      setReviewLoopStateForSession(activeSessionId, result.state);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Failed to update review loop iterations');
+      throw error;
+    }
+  }, [activeSessionId, setReviewLoopIterationLimit, setReviewLoopStateForSession, showError]);
+
+  const handleAnswerReviewLoop = useCallback(async (loopId: string, interactionId: string, answer: string) => {
+    if (!activeSessionId) return;
+    try {
+      const result = await answerReviewLoop(loopId, interactionId, answer);
+      setReviewLoopStateForSession(activeSessionId, result.state);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Failed to answer review loop question');
+      throw error;
+    }
+  }, [activeSessionId, answerReviewLoop, setReviewLoopStateForSession, showError]);
 
   // Terminal panel handlers for active session
   const handleOpenTerminalPanel = useCallback(() => {
@@ -1465,7 +1682,7 @@ function AppContent({
     onNewSession: handleNewSession,
     onNewWorktreeSession: handleNewWorktreeSession,
     onCloseSession: handleCloseCurrentSession,
-    onToggleDrawer: toggleDrawer,
+    onToggleDrawer: () => toggleDockPanel('attention'),
     onGoToDashboard: goToDashboard,
     onJumpToWaiting: handleJumpToWaiting,
     onSelectSession: handleSelectSessionByIndex,
@@ -1473,6 +1690,10 @@ function AppContent({
     onNextSession: handleNextSession,
     onToggleSidebar: toggleSidebarCollapse,
     onRefreshPRs: handleRefreshPRs,
+    onToggleDiffPanel: () => toggleDockPanel('diff'),
+    onToggleReviewLoopPanel: () => toggleDockPanel('reviewLoop'),
+    onToggleDiffDetailPanel: () => toggleDockPanel('diffDetail'),
+    onToggleAttentionPanel: () => toggleDockPanel('attention'),
     onOpenBranchPicker: () => {
       // Only open if we have an active session with git
       const localSession = sessions.find(s => s.id === activeSessionId);
@@ -1489,7 +1710,7 @@ function AppContent({
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
-    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen && !forkDialogOpen && !reviewPanelOpen,
+    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen && !forkDialogOpen,
   });
 
   return (
@@ -1555,6 +1776,7 @@ function AppContent({
           visualIndexBySessionId={visualIndexBySessionId}
           selectedId={activeSessionId}
           collapsed={sidebarCollapsed}
+          headerActions={sidebarHeaderActions}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onCloseSession={handleCloseSession}
@@ -1608,23 +1830,91 @@ function AppContent({
             );
           })()}
         </div>
-        <ChangesPanel
-          branchDiffFiles={branchDiffFiles}
-          branchDiffBaseRef={branchDiffBaseRef}
-          branchDiffError={branchDiffError}
-          attentionCount={attentionCount}
-          selectedFile={null}
-          onFileSelect={handleFileSelect}
-          onAttentionClick={toggleDrawer}
-          onReviewClick={handleOpenReviewPanel}
-          onOpenEditor={activeSessionId ? handleOpenEditorForSession : undefined}
-        />
-        <AttentionDrawer
-          isOpen={drawerOpen}
-          onClose={closeDrawer}
-          waitingSessions={waitingLocalSessions}
-          prs={prs}
-          onSelectSession={handleSelectSession}
+        <RightDock
+          panelOrder={dockPanelStack}
+          panels={[
+            {
+              id: 'diff',
+              isOpen: diffPanelOpen,
+              width: 'clamp(280px, 30vw, 380px)',
+              className: 'dock-panel dock-panel--diff',
+              children: (
+                <ChangesPanel
+                  branchDiffFiles={branchDiffFiles}
+                  branchDiffBaseRef={branchDiffBaseRef}
+                  branchDiffError={branchDiffError}
+                  selectedFile={null}
+                  onFileSelect={handleFileSelect}
+                  onOpenDiffClick={handleOpenDiffDetailPanel}
+                />
+              ),
+            },
+            {
+              id: 'reviewLoop',
+              isOpen: reviewLoopPanelOpen && Boolean(activeSessionId && activeReviewLoopAvailable && activeLocalSession),
+              width: 'clamp(420px, 50vw, 680px)',
+              tone: activeReviewLoopState ? toneForDockPanel(activeReviewLoopState.status) : 'default',
+              className: 'dock-panel dock-panel--review-loop',
+              children: activeSessionId && activeReviewLoopAvailable && activeLocalSession ? (
+                <SessionReviewLoopBar
+                  sessionId={activeSessionId}
+                  sessionLabel={activeLocalSession.label}
+                  loopState={activeReviewLoopState}
+                  getReviewLoopRun={getReviewLoopRun}
+                  onClose={() => closeDockPanel('reviewLoop')}
+                  waitingReviewSessions={waitingReviewSessions}
+                  onSelectSession={handleSelectSession}
+                  onStart={handleStartReviewLoop}
+                  onStop={handleStopReviewLoop}
+                  onSetIterations={handleSetReviewLoopIterations}
+                  onAnswer={handleAnswerReviewLoop}
+                />
+              ) : null,
+            },
+            {
+              id: 'attention',
+              isOpen: attentionPanelOpen,
+              width: 'clamp(360px, 48vw, 600px)',
+              className: 'dock-panel dock-panel--attention attention-drawer',
+              children: (
+                <AttentionDrawer
+                  onClose={() => closeDockPanel('attention')}
+                  waitingSessions={waitingLocalSessions}
+                  prs={prs}
+                  onSelectSession={handleSelectSession}
+                />
+              ),
+            },
+            {
+              id: 'diffDetail',
+              isOpen: diffDetailPanelOpen,
+              width: 'clamp(60vw, 72vw, 100vw)',
+              className: 'dock-panel dock-panel--diff-detail',
+              children: (
+                <DiffDetailPanel
+                  isOpen={diffDetailPanelOpen}
+                  gitStatus={gitStatus}
+                  repoPath={activeDaemonSession?.directory || ''}
+                  branch={activeDaemonSession?.branch || ''}
+                  onClose={handleCloseDiffDetailPanel}
+                  fetchDiff={fetchDiffForReview}
+                  sendGetBranchDiffFiles={sendGetBranchDiffFiles}
+                  sendFetchRemotes={sendFetchRemotes}
+                  getReviewState={getReviewState}
+                  markFileViewed={markFileViewed}
+                  addComment={sendAddComment}
+                  updateComment={sendUpdateComment}
+                  resolveComment={sendResolveComment}
+                  wontFixComment={sendWontFixComment}
+                  deleteComment={sendDeleteComment}
+                  getComments={sendGetComments}
+                  resolvedTheme={resolvedTheme}
+                  initialSelectedFile={initialReviewFile || undefined}
+                  onOpenEditor={handleOpenEditorForReview}
+                />
+              ),
+            },
+          ]}
         />
       </div>
 
@@ -1669,38 +1959,6 @@ function AppContent({
         onDelete={handleWorktreeDelete}
         onAlwaysKeep={handleWorktreeAlwaysKeep}
       />
-      <div className={`view-container review-view ${view === 'review' ? 'visible' : 'hidden'}`}>
-        <ReviewPanel
-          isOpen={reviewPanelOpen}
-          gitStatus={gitStatus}
-          repoPath={activeDaemonSession?.directory || ''}
-          branch={activeDaemonSession?.branch || ''}
-          baseBranch={branchDiffBaseRef || undefined}
-          onClose={handleCloseReviewPanel}
-          fetchDiff={fetchDiffForReview}
-          sendGetBranchDiffFiles={sendGetBranchDiffFiles}
-          sendFetchRemotes={sendFetchRemotes}
-          getReviewState={getReviewState}
-          markFileViewed={markFileViewed}
-          onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
-          addComment={sendAddComment}
-          updateComment={sendUpdateComment}
-          resolveComment={sendResolveComment}
-          wontFixComment={sendWontFixComment}
-          deleteComment={sendDeleteComment}
-          getComments={sendGetComments}
-          sendStartReview={sendStartReview}
-          sendCancelReview={sendCancelReview}
-          reviewerEvents={reviewerEvents}
-          reviewerRunning={reviewerRunning}
-          reviewerError={reviewerError}
-          agentComments={pendingAgentComments}
-          agentResolvedCommentIds={agentResolvedCommentIds}
-          resolvedTheme={resolvedTheme}
-          initialSelectedFile={initialReviewFile || undefined}
-          onOpenEditor={handleOpenEditorForReview}
-        />
-      </div>
       <ThumbsModal
         isOpen={thumbsOpen}
         terminalText={thumbsText}

@@ -28,20 +28,26 @@ import (
 
 // Valid setting keys
 const (
-	SettingProjectsDirectory = "projects_directory"
-	SettingUIScale           = "uiScale"
-	SettingClaudeExecutable  = "claude_executable"
-	SettingCodexExecutable   = "codex_executable"
-	SettingCopilotExecutable = "copilot_executable"
-	SettingPiExecutable      = "pi_executable"
-	SettingEditorExecutable  = "editor_executable"
-	SettingNewSessionAgent   = "new_session_agent"
-	SettingClaudeAvailable   = "claude_available"
-	SettingCodexAvailable    = "codex_available"
-	SettingCopilotAvailable  = "copilot_available"
-	SettingPiAvailable       = "pi_available"
-	SettingPTYBackendMode    = "pty_backend_mode"
-	SettingTheme             = "theme"
+	SettingProjectsDirectory        = "projects_directory"
+	SettingUIScale                  = "uiScale"
+	SettingClaudeExecutable         = "claude_executable"
+	SettingCodexExecutable          = "codex_executable"
+	SettingCopilotExecutable        = "copilot_executable"
+	SettingPiExecutable             = "pi_executable"
+	SettingEditorExecutable         = "editor_executable"
+	SettingNewSessionAgent          = "new_session_agent"
+	SettingClaudeAvailable          = "claude_available"
+	SettingCodexAvailable           = "codex_available"
+	SettingCopilotAvailable         = "copilot_available"
+	SettingPiAvailable              = "pi_available"
+	SettingPTYBackendMode           = "pty_backend_mode"
+	SettingTheme                    = "theme"
+	SettingReviewLoopPresets        = "review_loop_prompt_presets"
+	SettingReviewLoopLastPreset     = "review_loop_last_preset"
+	SettingReviewLoopLastPrompt     = "review_loop_last_prompt"
+	SettingReviewLoopLastIterations = "review_loop_last_iterations"
+	SettingReviewLoopModel          = "review_loop_model"
+	SettingReviewerModel            = "reviewer_model"
 )
 
 // wsClient represents a connected WebSocket client
@@ -737,6 +743,39 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.logf("Getting review state for %s branch %s", reviewMsg.RepoPath, reviewMsg.Branch)
 		d.handleGetReviewState(client, reviewMsg)
 
+	case protocol.CmdStartReviewLoop:
+		loopMsg := msg.(*protocol.StartReviewLoopMessage)
+		run, err := d.startReviewLoop(loopMsg)
+		d.sendReviewLoopResult(client, "start", loopMsg.SessionID, "", run, err)
+
+	case protocol.CmdStopReviewLoop:
+		loopMsg := msg.(*protocol.StopReviewLoopMessage)
+		run, err := d.stopReviewLoop(loopMsg.SessionID, reviewLoopStopReasonUserStopped)
+		d.sendReviewLoopResult(client, "stop", loopMsg.SessionID, "", run, err)
+
+	case protocol.CmdGetReviewLoopState:
+		loopMsg := msg.(*protocol.GetReviewLoopStateMessage)
+		run, err := d.getReviewLoopRunForSession(loopMsg.SessionID)
+		d.sendReviewLoopResult(client, "get", loopMsg.SessionID, "", run, err)
+
+	case protocol.CmdGetReviewLoopRun:
+		loopMsg := msg.(*protocol.GetReviewLoopRunMessage)
+		run, err := d.store.GetReviewLoopRun(loopMsg.LoopID)
+		if err == nil && run != nil {
+			run, err = d.hydrateReviewLoopRunWithIterations(run)
+		}
+		d.sendReviewLoopResult(client, "show", "", loopMsg.LoopID, run, err)
+
+	case protocol.CmdSetReviewLoopIterations:
+		loopMsg := msg.(*protocol.SetReviewLoopIterationLimitMessage)
+		run, err := d.setReviewLoopIterationLimit(loopMsg.SessionID, loopMsg.IterationLimit)
+		d.sendReviewLoopResult(client, "set_iterations", loopMsg.SessionID, "", run, err)
+
+	case protocol.CmdAnswerReviewLoop:
+		loopMsg := msg.(*protocol.AnswerReviewLoopMessage)
+		run, err := d.answerReviewLoop(loopMsg)
+		d.sendReviewLoopResult(client, "answer", "", loopMsg.LoopID, run, err)
+
 	case protocol.CmdMarkFileViewed:
 		viewedMsg := msg.(*protocol.MarkFileViewedMessage)
 		d.logf("Marking file %s viewed=%v in review %s", viewedMsg.Filepath, viewedMsg.Viewed, viewedMsg.ReviewID)
@@ -772,16 +811,6 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.logf("Getting comments for review %s", commentMsg.ReviewID)
 		d.handleGetComments(client, commentMsg)
 
-	case protocol.CmdStartReview:
-		reviewMsg := msg.(*protocol.StartReviewMessage)
-		d.logf("Starting review for %s branch %s", reviewMsg.RepoPath, reviewMsg.Branch)
-		d.handleStartReview(client, reviewMsg)
-
-	case protocol.CmdCancelReview:
-		cancelMsg := msg.(*protocol.CancelReviewMessage)
-		d.logf("Cancelling review %s", cancelMsg.ReviewID)
-		d.handleCancelReview(client, cancelMsg)
-
 	case protocol.CmdSpawnSession:
 		spawnMsg := msg.(*protocol.SpawnSessionMessage)
 		d.handleSpawnSession(client, spawnMsg)
@@ -796,6 +825,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 
 	case protocol.CmdPtyInput:
 		inputMsg := msg.(*protocol.PtyInputMessage)
+		if source := strings.TrimSpace(protocol.Deref(inputMsg.Source)); source != "" {
+			d.setPendingInputSource(inputMsg.ID, source)
+		}
 		if err := d.ptyBackend.Input(context.Background(), inputMsg.ID, []byte(inputMsg.Data)); err != nil {
 			if shouldLogPtyCommandError(err) {
 				d.logf("pty_input failed for %s: %v", inputMsg.ID, err)
@@ -1295,6 +1327,11 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		}
 		available := isAgentExecutableAvailable(configured, driver.DefaultExecutable())
 		settings[availabilitySettingKey(name)] = strconv.FormatBool(available)
+		if available && name == string(protocol.SessionAgentClaude) {
+			if err := agentdriver.EnsureClaudeSkillInstalled(); err != nil {
+				d.logf("failed to ensure Claude attn skill: %v", err)
+			}
+		}
 
 		caps := agentdriver.EffectiveCapabilities(driver)
 		settings[capabilitySettingKey(name, "hooks")] = strconv.FormatBool(caps.HasHooks)
@@ -1370,6 +1407,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
+	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:
+		return nil
 	default:
 		if _, ok := isAgentExecutableSettingKey(key); ok {
 			return validateExecutableSetting(value)

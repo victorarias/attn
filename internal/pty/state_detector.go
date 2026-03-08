@@ -46,6 +46,7 @@ type codexStateDetector struct {
 }
 
 type claudeWorkingDetector struct {
+	tail             string
 	lastState        string
 	lastWorkingPulse time.Time
 }
@@ -119,6 +120,29 @@ func (d *claudeWorkingDetector) Observe(chunk []byte) (string, bool) {
 		return "", false
 	}
 	raw := string(chunk)
+	cleaned := normalizeDetectorText(stripANSI(raw))
+	if strings.TrimSpace(cleaned) != "" {
+		d.tail += cleaned
+		const maxTail = 2000
+		if len(d.tail) > maxTail {
+			d.tail = trimToLastChars(d.tail, maxTail)
+		}
+		recent := strings.ToLower(tailLines(d.tail, 6))
+		if strings.Contains(recent, "interrupted") && strings.Contains(recent, "what should claude do instead?") {
+			if d.lastState != stateWaitingInput {
+				d.lastState = stateWaitingInput
+				return stateWaitingInput, true
+			}
+			return "", false
+		}
+		if desired := classifyState(tailLines(d.tail, 6), defaultStateHeuristics); desired == stateWaitingInput || desired == stateIdle || desired == statePendingApproval {
+			if d.lastState != desired {
+				d.lastState = desired
+				return desired, true
+			}
+			return "", false
+		}
+	}
 	if !looksLikeClaudeWorkingStatusFrame(raw) {
 		return "", false
 	}
@@ -134,6 +158,15 @@ func (d *claudeWorkingDetector) Observe(chunk []byte) (string, bool) {
 		return stateWorking, true
 	}
 	return "", false
+}
+
+func normalizeDetectorText(input string) string {
+	if input == "" {
+		return ""
+	}
+	replaced := strings.ReplaceAll(input, "\r", "\n")
+	replaced = strings.ReplaceAll(replaced, "\u00a0", " ")
+	return replaced
 }
 
 func looksLikeClaudeWorkingStatusFrame(raw string) bool {

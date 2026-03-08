@@ -8,7 +8,6 @@ import type { UISessionState } from '../types/sessionState';
 import './AttentionDrawer.css';
 
 interface AttentionDrawerProps {
-  isOpen: boolean;
   onClose: () => void;
   waitingSessions: Array<{
     id: string;
@@ -20,7 +19,6 @@ interface AttentionDrawerProps {
 }
 
 export function AttentionDrawer({
-  isOpen,
   onClose,
   waitingSessions,
   prs,
@@ -31,7 +29,7 @@ export function AttentionDrawer({
   const totalItems = waitingSessions.length + reviewPRs.length + authorPRs.length;
 
   return (
-    <div className={`attention-drawer ${isOpen ? 'open' : ''}`}>
+    <div className="attention-drawer-panel">
       <div className="drawer-header">
         <span className="drawer-title">Needs Attention</span>
         <span className="drawer-count">{totalItems}</span>
@@ -43,7 +41,7 @@ export function AttentionDrawer({
         {waitingSessions.length > 0 && (
           <div className="drawer-section">
             <div className="section-title">
-              Sessions Waiting
+              Sessions Needing Attention
               <span className="section-count">{waitingSessions.length}</span>
             </div>
             {waitingSessions.map((s) => {

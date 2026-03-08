@@ -2,7 +2,7 @@
  * Test Harness Entry Point
  *
  * Loads component harnesses based on ?component= URL parameter.
- * Usage: /test-harness/?component=ReviewPanel
+ * Usage: /test-harness/?component=DiffDetailPanel
  */
 import React from 'react';
 import { createRoot } from 'react-dom/client';

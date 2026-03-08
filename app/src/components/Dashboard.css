@@ -263,6 +263,7 @@
   border-radius: 6px;
   font-size: var(--font-size-md);
   color: var(--color-text-primary);
+  position: relative;
 }
 
 .session-row.clickable {
@@ -271,6 +272,54 @@
 
 .session-row.clickable:hover {
   background: var(--color-bg-elevated);
+}
+
+.session-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: 6px 0 0 6px;
+  opacity: 0;
+}
+
+.session-row--loop-running::before,
+.session-row--loop-awaiting_user::before,
+.session-row--loop-error::before,
+.session-row--loop-stopped::before {
+  opacity: 1;
+}
+
+.session-row--loop-running::before {
+  background: rgba(245, 158, 11, 0.35);
+}
+
+.session-row--loop-awaiting_user::before {
+  background: #f59e0b;
+}
+
+.session-row--loop-error::before {
+  background: #ef4444;
+}
+
+.session-row--loop-stopped::before {
+  background: #94a3b8;
+}
+
+.session-row--loop-running {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.06), rgba(245, 158, 11, 0.01));
+}
+
+.session-row--loop-awaiting_user {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.03));
+}
+
+.session-row--loop-completed {
+  background: transparent;
+}
+
+.session-row--loop-error {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.16), rgba(239, 68, 68, 0.03));
 }
 
 .state-dot {
@@ -297,6 +346,41 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-loop-indicator {
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: var(--color-text-dimmed);
+  display: inline-flex;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  height: 18px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 6px;
+}
+
+.session-loop-indicator--running {
+  border-color: rgba(245, 158, 11, 0.18);
+  color: rgba(245, 158, 11, 0.82);
+}
+
+.session-loop-indicator--awaiting_user {
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #f59e0b;
+}
+
+.session-loop-indicator--completed,
+.session-loop-indicator--stopped {
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-dimmed);
+}
+
+.session-loop-indicator--error {
+  border-color: rgba(239, 68, 68, 0.28);
+  color: #ef4444;
 }
 
 .dashboard-footer {

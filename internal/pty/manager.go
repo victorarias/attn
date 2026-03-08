@@ -77,6 +77,23 @@ type ExitInfo struct {
 	Signal   string
 }
 
+type SessionInfo struct {
+	SessionID string
+	Agent     string
+	CWD       string
+
+	Running bool
+	State   string
+
+	Cols    uint16
+	Rows    uint16
+	PID     int
+	LastSeq uint32
+
+	ExitCode   *int
+	ExitSignal *string
+}
+
 type Manager struct {
 	mu             sync.RWMutex
 	sessions       map[string]*Session
@@ -270,6 +287,28 @@ func (m *Manager) Kill(sessionID string, sig syscall.Signal) error {
 		return err
 	}
 	return session.kill(sig, defaultKillTimeout)
+}
+
+func (m *Manager) SessionInfo(sessionID string) (SessionInfo, error) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return SessionInfo{}, err
+	}
+
+	info := session.info()
+	return SessionInfo{
+		SessionID:  session.id,
+		Agent:      session.agent,
+		CWD:        session.cwd,
+		Running:    info.Running,
+		State:      session.state(),
+		Cols:       info.Cols,
+		Rows:       info.Rows,
+		PID:        info.PID,
+		LastSeq:    info.LastSeq,
+		ExitCode:   info.ExitCode,
+		ExitSignal: info.ExitSignal,
+	}, nil
 }
 
 func (m *Manager) Remove(sessionID string) {

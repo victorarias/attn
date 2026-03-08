@@ -1,5 +1,96 @@
 # Tasks
 
+## Session-level review loop automation
+
+- Status: `open`
+- Priority: `high`
+- Area: `daemon/session orchestration`, `protocol`, `cli`, `frontend`
+
+### Problem
+
+Users currently have to manually copy reviewer feedback or manually re-prompt the main session to do repeated review/fix passes.
+
+The existing `ReviewPanel` and reviewer-agent flow are human-in-the-loop tools. They do not automate the user's actual main-session workflow:
+
+1. prompt the main agent to do a full review/fix pass
+2. let it use subagents
+3. repeat that pass several times
+4. stop when the user decides the loop is done
+
+### Goal
+
+Add a session-level "review loop" feature that automates repeated review/fix passes in the main session PTY, with configurable presets, custom prompts, iteration limits, explicit agent handoff, and UI stop control.
+
+### Plan
+
+See [docs/plans/2026-03-05-review-loop.md](/Users/victor.arias/projects/victor/attn/docs/plans/2026-03-05-review-loop.md).
+
+### Decisions locked
+
+1. This feature is separate from `ReviewPanel`.
+2. The loop is session-level, not repo/branch review state.
+3. No separate `pause` state in MVP.
+4. No manual "advance now" action in MVP.
+5. Stop means:
+- do not schedule another pass
+- best-effort send `ESC` to the PTY
+6. Manual user interaction with the session should stop the loop.
+7. Agent completion is signaled by explicit `attn review-loop advance`, not transcript heuristics.
+8. Iteration limit must be configurable per run and editable while active.
+
+### Implementation checklist
+
+1. Protocol and schema:
+- Add review-loop protocol commands and result events in `internal/protocol/schema/main.tsp`
+- Regenerate protocol types
+- Add constants and parsing cases in `internal/protocol/constants.go`
+- Increment `ProtocolVersion`
+
+2. Store and migrations:
+- Add a new runtime loop table, e.g. `session_review_loops`
+- Add store methods for create/get/update/stop/complete loop state
+- Add tests for loop persistence and recovery-safe reads
+
+3. Daemon control plane:
+- Add daemon handlers for `start_review_loop`, `stop_review_loop`, `advance_review_loop`, `get_review_loop_state`, and iteration-limit updates
+- Add a daemon-owned loop manager/state machine
+- Ensure daemon restart does not duplicate prompt injection
+
+4. PTY input and source tagging:
+- Add a first-class daemon PTY input command usable outside the browser WebSocket-only path
+- Tag PTY writes with `source=user`, `source=review_loop`, or `source=system`
+- Use best-effort `ESC` on stop
+
+5. CLI:
+- Add `attn review-loop start|stop|advance|status|set-iterations`
+- Make `advance` validate session ownership and token freshness
+- Add CLI coverage for request encoding/response handling
+
+6. Hook and session integration:
+- Use prompt-submit hook signals as submission confirmation
+- Stop loops on manual user prompt submission
+- Keep loop-owned submissions distinct from manual user submissions
+
+7. Frontend:
+- Add session-level UI entry point, not `ReviewPanel` integration
+- Add preset picker, custom prompt input, and iteration-limit controls
+- Show active loop status, stop button, current iteration count, and stop reason
+- Support editing iteration limit while loop is active
+
+8. Validation:
+- Add daemon tests for start/advance/stop/recovery/session-exit behavior
+- Add frontend tests for loop UI and status handling
+- Add E2E coverage for prompt injection, agent advance, stop behavior, manual-input stop, and daemon restart
+
+### Acceptance criteria
+
+- A loop can run multiple review/fix passes without manual copy/paste.
+- The user can change the iteration limit while the loop is active.
+- Stop reliably prevents any further pass scheduling.
+- Manual user interaction cleanly stops the loop.
+- Daemon restart does not cause duplicate prompt injection.
+- The feature works independently of `ReviewPanel`.
+
 ## DB migration failure can silently drop persistence
 
 - Status: `open`

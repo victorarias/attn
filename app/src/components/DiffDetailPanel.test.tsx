@@ -11,7 +11,7 @@ import {
   sleep,
   MockDaemon,
 } from '../test/utils';
-import { ReviewPanel } from './ReviewPanel';
+import { DiffDetailPanel } from './DiffDetailPanel';
 
 // Mock UnifiedDiffEditor since it uses CodeMirror which requires DOM measurements
 vi.mock('./UnifiedDiffEditor', () => ({
@@ -25,7 +25,7 @@ vi.mock('./UnifiedDiffEditor', () => ({
   resolveAnchor: vi.fn(() => ({ docLine: 1, isOutdated: false, isOrphaned: false })),
 }));
 
-describe('ReviewPanel', () => {
+describe('DiffDetailPanel', () => {
   let mockDaemon: MockDaemon;
   let onClose: () => void;
 
@@ -45,7 +45,7 @@ describe('ReviewPanel', () => {
     const initialSelectedFile = overrides?.initialSelectedFile;
 
     return render(
-      <ReviewPanel
+      <DiffDetailPanel
         isOpen={isOpen}
         gitStatus={gitStatus}
         repoPath="/test/repo"

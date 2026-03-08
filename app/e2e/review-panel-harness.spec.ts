@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
 
 async function openReviewPanelHarness(page: Page, query: string) {
-  await page.goto(`/test-harness/?component=ReviewPanel&${query}`);
+  await page.goto(`/test-harness/?component=DiffDetailPanel&${query}`);
   await page.waitForFunction(() => Boolean(window.__HARNESS__?.ready), null, { timeout: 5000 });
   await expect(page.locator('.review-panel')).toBeVisible();
 }
@@ -12,7 +12,7 @@ function fileItem(page: Page, filePath: string): Locator {
   });
 }
 
-test.describe('ReviewPanel Harness', () => {
+test.describe('DiffDetailPanel Harness', () => {
   test('shows local refs immediately while remotes sync in background', async ({ page }) => {
     await openReviewPanelHarness(
       page,

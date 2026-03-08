@@ -12,6 +12,7 @@ interface TestSession {
   isWorktree?: boolean;
   cwd?: string;
   recoverable?: boolean;
+  reviewLoopStatus?: string;
 }
 
 function buildSidebarData(sessions: TestSession[]) {
@@ -26,6 +27,7 @@ function buildSidebarData(sessions: TestSession[]) {
 const baseProps = {
   selectedId: null,
   collapsed: false,
+  headerActions: [],
   onSelectSession: () => {},
   onNewSession: () => {},
   onCloseSession: () => {},
@@ -89,6 +91,24 @@ describe('Sidebar', () => {
 
     fireEvent.click(screen.getByTestId('reload-session-s1'));
     expect(onReloadSession).toHaveBeenCalledWith('s1');
+  });
+
+  it('shows review loop indicator for sessions with loop state', () => {
+    const sessions: TestSession[] = [{
+      id: 's1',
+      label: 'claude',
+      state: 'idle',
+      agent: 'claude',
+      reviewLoopStatus: 'running',
+    }];
+    render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData(sessions)}
+      />
+    );
+
+    expect(screen.getByLabelText('Review loop running')).toBeInTheDocument();
   });
 
   it('renders session shortcuts in grouped visual order', () => {

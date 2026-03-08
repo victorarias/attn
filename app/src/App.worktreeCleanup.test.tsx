@@ -27,6 +27,10 @@ vi.mock('./components/Terminal', async () => {
 });
 
 vi.mock('./components/Sidebar', () => ({
+  EditorIcon: () => null,
+  ReviewLoopIcon: () => null,
+  DiffIcon: () => null,
+  PRsIcon: () => null,
   Sidebar: ({ visualOrder, onCloseSession }: { visualOrder: Array<{ id: string }>; onCloseSession: (id: string) => void }) => (
     <button data-testid="close-session" onClick={() => onCloseSession(visualOrder[0].id)}>
       Close Session
@@ -40,7 +44,7 @@ vi.mock('./components/LocationPicker', () => ({ LocationPicker: () => null }));
 vi.mock('./components/BranchPicker', () => ({ BranchPicker: () => null }));
 vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
 vi.mock('./components/ChangesPanel', () => ({ ChangesPanel: () => null }));
-vi.mock('./components/ReviewPanel', () => ({ ReviewPanel: () => null }));
+vi.mock('./components/DiffDetailPanel', () => ({ DiffDetailPanel: () => null }));
 vi.mock('./components/UtilityTerminalPanel', () => ({ UtilityTerminalPanel: () => null }));
 vi.mock('./components/ThumbsModal', () => ({ ThumbsModal: () => null }));
 vi.mock('./components/ForkDialog', () => ({ ForkDialog: () => null }));
@@ -199,6 +203,8 @@ describe('worktree cleanup prompt', () => {
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
       sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
       getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
+      getReviewLoopRun: vi.fn(async () => ({ success: true, state: null })),
+      getReviewLoopState: vi.fn(async () => ({ success: true, state: null })),
       getReviewState: vi.fn(async () => ({ success: true })),
       markFileViewed: vi.fn(async () => ({ success: true })),
       sendAddComment: vi.fn(async () => ({ success: true })),
@@ -207,8 +213,9 @@ describe('worktree cleanup prompt', () => {
       sendWontFixComment: vi.fn(async () => ({ success: true })),
       sendDeleteComment: vi.fn(async () => ({ success: true })),
       sendGetComments: vi.fn(async () => ({ success: true, comments: [] })),
-      sendStartReview: vi.fn(async () => ({ success: true })),
-      sendCancelReview: vi.fn(async () => ({ success: true })),
+      sendStartReviewLoop: vi.fn(async () => ({ success: true, state: null })),
+      sendStopReviewLoop: vi.fn(async () => ({ success: true, state: null })),
+      setReviewLoopIterationLimit: vi.fn(async () => ({ success: true, state: null })),
       connectionError: null,
       hasReceivedInitialState: true,
       rateLimit: null,

@@ -53,4 +53,21 @@ describe('Dashboard sessions', () => {
     expect(screen.getByTestId('session-s2')).toBeInTheDocument();
     expect(screen.getByTestId('session-s3')).toBeInTheDocument();
   });
+
+  it('shows review loop state on session rows', () => {
+    render(
+      <Dashboard
+        sessions={[
+          { id: 's1', label: 'review-bot', state: 'working', cwd: '/repo/a', reviewLoopStatus: 'running' },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText('Review loop running')).toBeInTheDocument();
+  });
 });

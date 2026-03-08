@@ -1,23 +1,15 @@
 /* app/src/components/AttentionDrawer.css */
 
-/* Drawer container - wider to accommodate full titles */
-.attention-drawer {
-  position: fixed;
-  top: 0;
-  right: -600px;
-  bottom: 0;
-  width: 600px;
-  background: linear-gradient(180deg, var(--color-bg-app) 0%, var(--color-bg-panel) 100%);
-  border-left: 1px solid var(--color-border-subtle);
+.attention-drawer-panel {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 100;
-  box-shadow: -12px 0 48px rgba(0, 0, 0, 0.5);
+  min-height: 0;
 }
 
-.attention-drawer.open {
-  right: 0;
+.attention-drawer {
+  background: linear-gradient(180deg, var(--color-bg-app) 0%, var(--color-bg-panel) 100%);
+  box-shadow: -12px 0 48px rgba(0, 0, 0, 0.5);
 }
 
 /* Header */
@@ -72,7 +64,9 @@
 /* Scrollable body */
 .drawer-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 12px 16px;
 }
 

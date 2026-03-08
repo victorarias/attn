@@ -11,7 +11,8 @@ import type {
   RecentLocation as GeneratedRecentLocation,
   BranchElement as GeneratedBranch,
   Comment as GeneratedComment,
-  ReviewFinding as GeneratedReviewFinding,
+  ReviewLoopRun as GeneratedReviewLoopRun,
+  ReviewLoopInteraction as GeneratedReviewLoopInteraction,
   WarningElement as GeneratedWarning,
   SessionState,
   PRRole,
@@ -29,7 +30,8 @@ export type RepoState = GeneratedRepoState;
 export type AuthorState = GeneratedAuthorState;
 export type RecentLocation = GeneratedRecentLocation;
 export type Branch = GeneratedBranch;
-export type ReviewFinding = GeneratedReviewFinding;
+export type ReviewLoopState = GeneratedReviewLoopRun;
+export type ReviewLoopInteraction = GeneratedReviewLoopInteraction;
 export type DaemonSettings = Record<string, string>;
 export type DaemonWarning = GeneratedWarning;
 
@@ -68,10 +70,12 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   path?: string;
   // Branch action result fields
   branch?: string;
-  // Reviewer streaming event fields
+  // Legacy review event fields
   review_id?: string;
+  session_id?: string;
+  loop_id?: string;
   content?: string;
-  finding?: ReviewFinding;
+  review_loop_run?: ReviewLoopState;
   comment_id?: string;
   tool_use?: {
     name: string;
@@ -87,7 +91,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '32';
+const PROTOCOL_VERSION = '38';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -208,6 +212,11 @@ interface RepoInfoResult {
   error?: string;
 }
 
+interface ReviewLoopActionResult {
+  success: boolean;
+  state: ReviewLoopState | null;
+}
+
 export interface ReviewState {
   review_id: string;
   repo_path: string;
@@ -285,29 +294,6 @@ export interface BranchDiffFilesResult {
   error?: string;
 }
 
-// Tool use event data
-export interface ReviewToolUse {
-  name: string;
-  input: Record<string, unknown>;
-  output: string;
-}
-
-// Unified reviewer event type for ordered rendering
-export type ReviewerEvent =
-  | { type: 'chunk'; content: string }
-  | { type: 'tool_use'; name: string; input: Record<string, unknown>; output: string };
-
-// Reviewer event callbacks
-export interface ReviewerCallbacks {
-  onReviewStarted?: (reviewId: string) => void;
-  onReviewChunk?: (reviewId: string, content: string) => void;
-  onReviewFinding?: (reviewId: string, finding: ReviewFinding, comment?: ReviewComment) => void;
-  onReviewCommentResolved?: (reviewId: string, commentId: string) => void;
-  onReviewToolUse?: (reviewId: string, toolUse: ReviewToolUse) => void;
-  onReviewComplete?: (reviewId: string, success: boolean, error?: string) => void;
-  onReviewCancelled?: (reviewId: string) => void;
-}
-
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
@@ -317,7 +303,7 @@ interface UseDaemonSocketOptions {
   onSettingsUpdate?: (settings: DaemonSettings) => void;
   onSettingError?: (message: string) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
-  reviewer?: ReviewerCallbacks;
+  onReviewLoopUpdate?: (state: ReviewLoopState | null) => void;
   wsUrl?: string;
 }
 
@@ -398,7 +384,7 @@ export function useDaemonSocket({
   onSettingsUpdate,
   onSettingError,
   onGitStatusUpdate,
-  reviewer,
+  onReviewLoopUpdate,
   wsUrl = DEFAULT_WS_URL,
 }: UseDaemonSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -1214,6 +1200,34 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'review_loop_result': {
+            const action = (data as any).action || 'unknown';
+            const sessionId = (data as any).session_id || '';
+            const loopId = (data as any).loop_id || (data as any).review_loop_run?.loop_id || '';
+            const key = action === 'show' || action === 'answer'
+              ? `${action}_review_loop_${loopId}`
+              : `${action}_review_loop_${sessionId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (pending) {
+              pendingActionsRef.current.delete(key);
+              if ((data as any).success) {
+                pending.resolve({
+                  success: true,
+                  state: (data as any).review_loop_run ?? null,
+                });
+              } else {
+                pending.reject(new Error((data as any).error || 'Review loop command failed'));
+              }
+            }
+            break;
+          }
+
+          case 'review_loop_updated':
+            if (onReviewLoopUpdate) {
+              onReviewLoopUpdate((data as any).review_loop_run ?? null);
+            }
+            break;
+
           case 'mark_file_viewed_result': {
             const pending = pendingActionsRef.current.get('mark_file_viewed');
             if (pending) {
@@ -1304,49 +1318,6 @@ export function useDaemonSocket({
             }
             break;
           }
-
-          // Reviewer streaming events
-          case 'review_started':
-            if (data.review_id && reviewer?.onReviewStarted) {
-              reviewer.onReviewStarted(data.review_id);
-            }
-            break;
-
-          case 'review_chunk':
-            if (data.review_id && data.content && reviewer?.onReviewChunk) {
-              reviewer.onReviewChunk(data.review_id, data.content);
-            }
-            break;
-
-          case 'review_finding':
-            if (data.review_id && data.finding && reviewer?.onReviewFinding) {
-              reviewer.onReviewFinding(data.review_id, data.finding, data.comment);
-            }
-            break;
-
-          case 'review_comment_resolved':
-            if (data.review_id && data.comment_id && reviewer?.onReviewCommentResolved) {
-              reviewer.onReviewCommentResolved(data.review_id, data.comment_id);
-            }
-            break;
-
-          case 'review_tool_use':
-            if (data.review_id && data.tool_use && reviewer?.onReviewToolUse) {
-              reviewer.onReviewToolUse(data.review_id, data.tool_use);
-            }
-            break;
-
-          case 'review_complete':
-            if (data.review_id && reviewer?.onReviewComplete) {
-              reviewer.onReviewComplete(data.review_id, data.success ?? false, data.error);
-            }
-            break;
-
-          case 'review_cancelled':
-            if (data.review_id && reviewer?.onReviewCancelled) {
-              reviewer.onReviewCancelled(data.review_id);
-            }
-            break;
 
           case 'command_error':
             if (data.error === 'daemon_recovering') {
@@ -1500,10 +1471,10 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'detach_session', id }));
   }, []);
 
-  const sendPtyInput = useCallback((id: string, data: string) => {
+  const sendPtyInput = useCallback((id: string, data: string, source?: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ cmd: 'pty_input', id, data }));
+    ws.send(JSON.stringify({ cmd: 'pty_input', id, data, ...(source ? { source } : {}) }));
   }, []);
 
   const sendPtyResize = useCallback((id: string, cols: number, rows: number) => {
@@ -1611,8 +1582,8 @@ export function useDaemonSocket({
         }
         await sendAttachSession(args.id);
       },
-      write: async (id: string, data: string) => {
-        sendPtyInput(id, data);
+      write: async (id: string, data: string, source?: string) => {
+        sendPtyInput(id, data, source);
       },
       resize: async (id: string, cols: number, rows: number) => {
         sendPtyResize(id, cols, rows);
@@ -2397,6 +2368,140 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const sendStartReviewLoop = useCallback((
+    sessionId: string,
+    prompt: string,
+    iterationLimit: number,
+    presetId?: string
+  ): Promise<ReviewLoopActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `start_review_loop_${sessionId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({
+        cmd: 'start_review_loop',
+        session_id: sessionId,
+        prompt,
+        iteration_limit: iterationLimit,
+        ...(presetId ? { preset_id: presetId } : {}),
+      }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Start review loop timed out'));
+        }
+      }, 15000);
+    });
+  }, []);
+
+  const sendStopReviewLoop = useCallback((sessionId: string): Promise<ReviewLoopActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `stop_review_loop_${sessionId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'stop_review_loop', session_id: sessionId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Stop review loop timed out'));
+        }
+      }, 15000);
+    });
+  }, []);
+
+  const getReviewLoopState = useCallback((sessionId: string): Promise<ReviewLoopActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `get_review_loop_${sessionId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'get_review_loop_state', session_id: sessionId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get review loop state timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  const getReviewLoopRun = useCallback((loopId: string): Promise<ReviewLoopActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `show_review_loop_${loopId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'get_review_loop_run', loop_id: loopId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get review loop run timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  const setReviewLoopIterationLimit = useCallback((sessionId: string, iterationLimit: number): Promise<ReviewLoopActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `set_iterations_review_loop_${sessionId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({
+        cmd: 'set_review_loop_iteration_limit',
+        session_id: sessionId,
+        iteration_limit: iterationLimit,
+      }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Set review loop iteration limit timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  const answerReviewLoop = useCallback((loopId: string, interactionId: string, answer: string): Promise<ReviewLoopActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `answer_review_loop_${loopId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({
+        cmd: 'answer_review_loop',
+        loop_id: loopId,
+        interaction_id: interactionId,
+        answer,
+      }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Answer review loop timed out'));
+        }
+      }, 15000);
+    });
+  }, []);
+
   // Mark a file as viewed/unviewed in a review
   const markFileViewed = useCallback((reviewId: string, filepath: string, viewed: boolean): Promise<MarkFileViewedResult> => {
     return new Promise((resolve, reject) => {
@@ -2590,41 +2695,6 @@ export function useDaemonSocket({
     });
   }, []);
 
-  // Reviewer agent methods
-  const sendStartReview = useCallback((
-    reviewId: string,
-    repoPath: string,
-    branch: string,
-    baseBranch: string
-  ): void => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.error('[Daemon] Cannot start review: WebSocket not connected');
-      return;
-    }
-
-    ws.send(JSON.stringify({
-      cmd: 'start_review',
-      review_id: reviewId,
-      repo_path: repoPath,
-      branch: branch,
-      base_branch: baseBranch,
-    }));
-  }, []);
-
-  const sendCancelReview = useCallback((reviewId: string): void => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.error('[Daemon] Cannot cancel review: WebSocket not connected');
-      return;
-    }
-
-    ws.send(JSON.stringify({
-      cmd: 'cancel_review',
-      review_id: reviewId,
-    }));
-  }, []);
-
   const clearWarnings = useCallback(() => {
     setWarnings([]);
     const ws = wsRef.current;
@@ -2678,6 +2748,8 @@ export function useDaemonSocket({
     sendGetBranchDiffFiles,
     getRepoInfo,
     getReviewState,
+    getReviewLoopRun,
+    getReviewLoopState,
     markFileViewed,
     sendAddComment,
     sendUpdateComment,
@@ -2685,7 +2757,9 @@ export function useDaemonSocket({
     sendWontFixComment,
     sendDeleteComment,
     sendGetComments,
-    sendStartReview,
-    sendCancelReview,
+    sendStartReviewLoop,
+    sendStopReviewLoop,
+    answerReviewLoop,
+    setReviewLoopIterationLimit,
   };
 }
