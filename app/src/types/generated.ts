@@ -1596,6 +1596,7 @@ export interface ReviewLoopResultMessage {
     action:           string;
     error?:           string;
     event:            ReviewLoopResultMessageEvent;
+    loop_id?:         string;
     review_loop_run?: ReviewLoopRunObject;
     session_id:       string;
     success:          boolean;
@@ -4314,6 +4315,7 @@ const typeMap: any = {
         { json: "action", js: "action", typ: "" },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("ReviewLoopResultMessageEvent") },
+        { json: "loop_id", js: "loop_id", typ: u(undefined, "") },
         { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "session_id", js: "session_id", typ: "" },
         { json: "success", js: "success", typ: true },

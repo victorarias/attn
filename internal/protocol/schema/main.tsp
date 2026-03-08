@@ -975,6 +975,7 @@ model ReviewLoopResultMessage {
   event: "review_loop_result";
   action: string;
   session_id: string;
+  loop_id?: string;
   review_loop_run?: ReviewLoopRun;
   success: boolean;
   error?: string;

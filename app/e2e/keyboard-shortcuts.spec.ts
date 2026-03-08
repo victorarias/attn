@@ -67,15 +67,15 @@ test.describe('Keyboard Shortcuts', () => {
       await page.waitForSelector('.dashboard');
 
       // Drawer should be closed initially
-      await expect(page.locator('.attention-drawer.open')).not.toBeVisible();
+      await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toHaveCount(0);
 
       // Open with ⌘K
       await page.keyboard.press('Meta+k');
-      await expect(page.locator('.attention-drawer.open')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toBeVisible({ timeout: 2000 });
 
       // Close with ⌘K
       await page.keyboard.press('Meta+k');
-      await expect(page.locator('.attention-drawer.open')).not.toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toHaveCount(0, { timeout: 2000 });
     });
 
     // Removed ⌘. test - this shortcut was never implemented. Use ⌘K to toggle drawer.

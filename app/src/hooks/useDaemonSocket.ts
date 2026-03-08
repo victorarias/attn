@@ -73,6 +73,7 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   // Legacy review event fields
   review_id?: string;
   session_id?: string;
+  loop_id?: string;
   content?: string;
   review_loop_run?: ReviewLoopState;
   comment_id?: string;
@@ -90,7 +91,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '37';
+const PROTOCOL_VERSION = '38';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1202,8 +1203,8 @@ export function useDaemonSocket({
           case 'review_loop_result': {
             const action = (data as any).action || 'unknown';
             const sessionId = (data as any).session_id || '';
-            const loopId = (data as any).review_loop_run?.loop_id || '';
-            const key = action === 'answer'
+            const loopId = (data as any).loop_id || (data as any).review_loop_run?.loop_id || '';
+            const key = action === 'show' || action === 'answer'
               ? `${action}_review_loop_${loopId}`
               : `${action}_review_loop_${sessionId}`;
             const pending = pendingActionsRef.current.get(key);

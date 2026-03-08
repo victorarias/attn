@@ -1465,6 +1465,9 @@ type ReviewLoopResultMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
+	// LoopID corresponds to the JSON schema field "loop_id".
+	LoopID *string `json:"loop_id,omitempty"`
+
 	// ReviewLoopRun corresponds to the JSON schema field "review_loop_run".
 	ReviewLoopRun *ReviewLoopRun `json:"review_loop_run,omitempty"`
 

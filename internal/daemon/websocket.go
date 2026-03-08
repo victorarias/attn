@@ -746,35 +746,35 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdStartReviewLoop:
 		loopMsg := msg.(*protocol.StartReviewLoopMessage)
 		run, err := d.startReviewLoop(loopMsg)
-		d.sendReviewLoopResult(client, "start", loopMsg.SessionID, run, err)
+		d.sendReviewLoopResult(client, "start", loopMsg.SessionID, "", run, err)
 
 	case protocol.CmdStopReviewLoop:
 		loopMsg := msg.(*protocol.StopReviewLoopMessage)
 		run, err := d.stopReviewLoop(loopMsg.SessionID, reviewLoopStopReasonUserStopped)
-		d.sendReviewLoopResult(client, "stop", loopMsg.SessionID, run, err)
+		d.sendReviewLoopResult(client, "stop", loopMsg.SessionID, "", run, err)
 
 	case protocol.CmdGetReviewLoopState:
 		loopMsg := msg.(*protocol.GetReviewLoopStateMessage)
 		run, err := d.getReviewLoopRunForSession(loopMsg.SessionID)
-		d.sendReviewLoopResult(client, "get", loopMsg.SessionID, run, err)
+		d.sendReviewLoopResult(client, "get", loopMsg.SessionID, "", run, err)
 
 	case protocol.CmdGetReviewLoopRun:
 		loopMsg := msg.(*protocol.GetReviewLoopRunMessage)
 		run, err := d.store.GetReviewLoopRun(loopMsg.LoopID)
 		if err == nil && run != nil {
-			run, err = d.hydrateReviewLoopRun(run)
+			run, err = d.hydrateReviewLoopRunWithIterations(run)
 		}
-		d.sendReviewLoopResult(client, "show", "", run, err)
+		d.sendReviewLoopResult(client, "show", "", loopMsg.LoopID, run, err)
 
 	case protocol.CmdSetReviewLoopIterations:
 		loopMsg := msg.(*protocol.SetReviewLoopIterationLimitMessage)
 		run, err := d.setReviewLoopIterationLimit(loopMsg.SessionID, loopMsg.IterationLimit)
-		d.sendReviewLoopResult(client, "set_iterations", loopMsg.SessionID, run, err)
+		d.sendReviewLoopResult(client, "set_iterations", loopMsg.SessionID, "", run, err)
 
 	case protocol.CmdAnswerReviewLoop:
 		loopMsg := msg.(*protocol.AnswerReviewLoopMessage)
 		run, err := d.answerReviewLoop(loopMsg)
-		d.sendReviewLoopResult(client, "answer", "", run, err)
+		d.sendReviewLoopResult(client, "answer", "", loopMsg.LoopID, run, err)
 
 	case protocol.CmdMarkFileViewed:
 		viewedMsg := msg.(*protocol.MarkFileViewedMessage)

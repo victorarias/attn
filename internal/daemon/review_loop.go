@@ -1122,14 +1122,18 @@ func (d *Daemon) hydrateReviewLoopRunWithIterations(run *protocol.ReviewLoopRun)
 	return hydrated, nil
 }
 
-func (d *Daemon) sendReviewLoopResult(client *wsClient, action, sessionID string, run *protocol.ReviewLoopRun, err error) {
+func (d *Daemon) sendReviewLoopResult(client *wsClient, action, sessionID, loopID string, run *protocol.ReviewLoopRun, err error) {
 	if strings.TrimSpace(sessionID) == "" && run != nil {
 		sessionID = run.SourceSessionID
+	}
+	if strings.TrimSpace(loopID) == "" && run != nil {
+		loopID = run.LoopID
 	}
 	result := protocol.ReviewLoopResultMessage{
 		Event:     protocol.EventReviewLoopResult,
 		Action:    action,
 		SessionID: sessionID,
+		LoopID:    protocol.Ptr(loopID),
 		Success:   err == nil,
 	}
 	if run != nil {
