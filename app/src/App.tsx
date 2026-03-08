@@ -48,6 +48,7 @@ const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/relea
 const RELEASES_LATEST_WEB = 'https://github.com/victorarias/attn/releases/latest';
 const RELEASE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_BANNER_DISMISSED_STORAGE_KEY = 'attn.update_banner.dismissed_version';
+const DOCK_PANEL_EXIT_MS = 260;
 
 interface GitHubReleaseResponse {
   tag_name?: string;
@@ -698,13 +699,14 @@ function AppContent({
     stack: DockPanelId[];
   }>({
     openPanels: {
-        diff: true,
+        diff: false,
         reviewLoop: false,
         attention: false,
         diffDetail: false,
     },
     stack: ['diff'],
   });
+  const dockPanelCloseTimersRef = useRef<Partial<Record<DockPanelId, number>>>({});
   const gitStatusSubscribedDirRef = useRef<string | null>(null);
   const activeSessionVisibleSinceRef = useRef<{ id: string; at: number } | null>(null);
   const pendingSessionVisualizedRef = useRef<{ key: string | null; timeoutId: number | null }>({
@@ -829,9 +831,35 @@ function AppContent({
     setView('dashboard');
   }, [setActiveSession]);
 
+  const clearDockPanelCloseTimer = useCallback((panelId: DockPanelId) => {
+    const closeTimer = dockPanelCloseTimersRef.current[panelId];
+    if (closeTimer) {
+      window.clearTimeout(closeTimer);
+      delete dockPanelCloseTimersRef.current[panelId];
+    }
+  }, []);
+
+  const scheduleDockPanelStackRemoval = useCallback((panelId: DockPanelId) => {
+    clearDockPanelCloseTimer(panelId);
+    dockPanelCloseTimersRef.current[panelId] = window.setTimeout(() => {
+      setDockState((prev) => {
+        if (prev.openPanels[panelId]) {
+          return prev;
+        }
+        return {
+          openPanels: prev.openPanels,
+          stack: prev.stack.filter((id) => id !== panelId),
+        };
+      });
+      delete dockPanelCloseTimersRef.current[panelId];
+    }, DOCK_PANEL_EXIT_MS);
+  }, [clearDockPanelCloseTimer]);
+
   const toggleDockPanel = useCallback((panelId: DockPanelId) => {
+    let nextOpen = false;
+    clearDockPanelCloseTimer(panelId);
     setDockState((prev) => {
-      const nextOpen = !prev.openPanels[panelId];
+      nextOpen = !prev.openPanels[panelId];
       return {
         openPanels: {
           ...prev.openPanels,
@@ -839,12 +867,18 @@ function AppContent({
         },
         stack: nextOpen
           ? [...prev.stack.filter((id) => id !== panelId), panelId]
-          : prev.stack.filter((id) => id !== panelId),
+          : prev.stack.includes(panelId)
+            ? prev.stack
+            : [...prev.stack, panelId],
       };
     });
-  }, []);
+    if (!nextOpen) {
+      scheduleDockPanelStackRemoval(panelId);
+    }
+  }, [clearDockPanelCloseTimer, scheduleDockPanelStackRemoval]);
 
   const openDockPanel = useCallback((panelId: DockPanelId) => {
+    clearDockPanelCloseTimer(panelId);
     setDockState((prev) => {
       if (prev.openPanels[panelId]) {
         return prev;
@@ -857,9 +891,10 @@ function AppContent({
         stack: [...prev.stack.filter((id) => id !== panelId), panelId],
       };
     });
-  }, []);
+  }, [clearDockPanelCloseTimer]);
 
   const closeDockPanel = useCallback((panelId: DockPanelId) => {
+    clearDockPanelCloseTimer(panelId);
     setDockState((prev) => {
       if (!prev.openPanels[panelId]) {
         return prev;
@@ -869,9 +904,21 @@ function AppContent({
           ...prev.openPanels,
           [panelId]: false,
         },
-        stack: prev.stack.filter((id) => id !== panelId),
+        stack: prev.stack.includes(panelId) ? prev.stack : [...prev.stack, panelId],
       };
     });
+    scheduleDockPanelStackRemoval(panelId);
+  }, [clearDockPanelCloseTimer, scheduleDockPanelStackRemoval]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(dockPanelCloseTimersRef.current).forEach((timerId) => {
+        if (timerId) {
+          window.clearTimeout(timerId);
+        }
+      });
+      dockPanelCloseTimersRef.current = {};
+    };
   }, []);
 
   // Sidebar collapse state
