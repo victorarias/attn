@@ -216,6 +216,66 @@ func TestDaemon_GetReviewLoopRunByLoopID(t *testing.T) {
 	}
 }
 
+func TestDaemon_StopReviewLoopDoesNotRewriteCompletedRun(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19959")
+
+	tmpDir := shortTempDir(t)
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	d := NewForTesting(sockPath)
+	go d.Start()
+	defer d.Stop()
+
+	waitForSocket(t, sockPath, 5*time.Second)
+
+	session := &protocol.Session{
+		ID:        "loop-sess",
+		Label:     "Loop",
+		Directory: "/tmp/loop",
+		State:     protocol.StateIdle,
+	}
+	d.store.Add(session)
+
+	run := &protocol.ReviewLoopRun{
+		LoopID:          "loop-completed",
+		SourceSessionID: "loop-sess",
+		RepoPath:        "/tmp/loop",
+		Status:          protocol.ReviewLoopRunStatusCompleted,
+		ResolvedPrompt:  "Review this repo",
+		IterationCount:  2,
+		IterationLimit:  2,
+		StopReason:      protocol.Ptr(reviewLoopStopReasonIterationLimitReached),
+		CreatedAt:       "2026-03-08T10:00:00Z",
+		UpdatedAt:       "2026-03-08T10:05:00Z",
+		CompletedAt:     protocol.Ptr("2026-03-08T10:05:00Z"),
+	}
+	if err := d.store.UpsertReviewLoopRun(run); err != nil {
+		t.Fatalf("UpsertReviewLoopRun() error = %v", err)
+	}
+
+	stopped, err := d.stopReviewLoop("loop-sess", reviewLoopStopReasonUserStopped)
+	if err == nil {
+		t.Fatalf("stopReviewLoop() error = nil, want active review loop not found")
+	}
+	if stopped != nil {
+		t.Fatalf("stopReviewLoop() run = %#v, want nil", stopped)
+	}
+
+	got, err := d.store.GetReviewLoopRun("loop-completed")
+	if err != nil {
+		t.Fatalf("GetReviewLoopRun() error = %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetReviewLoopRun() = nil, want completed run")
+	}
+	if got.Status != protocol.ReviewLoopRunStatusCompleted {
+		t.Fatalf("status = %q, want %q", got.Status, protocol.ReviewLoopRunStatusCompleted)
+	}
+	if protocol.Deref(got.StopReason) != reviewLoopStopReasonIterationLimitReached {
+		t.Fatalf("stop_reason = %q, want %q", protocol.Deref(got.StopReason), reviewLoopStopReasonIterationLimitReached)
+	}
+}
+
 func TestDaemon_ReviewLoopConvergedBeforeLimitStillRunsNextPass(t *testing.T) {
 	t.Setenv("ATTN_WS_PORT", "19951")
 

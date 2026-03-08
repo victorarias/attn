@@ -248,13 +248,7 @@ func (d *Daemon) stopReviewLoop(sessionID, reason string) (*protocol.ReviewLoopR
 		return nil, err
 	}
 	if run == nil {
-		run, err = d.store.GetLatestReviewLoopRunForSession(sessionID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if run == nil {
-		return nil, errors.New("review loop not found")
+		return nil, errors.New("active review loop not found")
 	}
 
 	now := string(protocol.TimestampNow())
