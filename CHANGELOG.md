@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Right Dock Default Layout**: Start the session view with the compact layout by leaving the diff dock closed until you explicitly open it with `Cmd+Shift+D`.
+- **Review Loop Summary Space**: Let the latest-summary card in the review-loop sidebar grow substantially taller before it starts scrolling, so longer round summaries are easier to read in place.
 
 ### Fixed
 - **Diff Detail Panel Exit Animation**: Keep dock panels in the right-dock stack through their close transition, so the detailed diff/review panel now slides out smoothly on `Cmd+Shift+E` and `Esc` instead of disappearing abruptly.

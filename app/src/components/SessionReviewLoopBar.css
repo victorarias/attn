@@ -315,7 +315,7 @@
 }
 
 .review-loop-panel-card--summary {
-  max-height: min(30vh, 280px);
+  max-height: min(48vh, 520px);
 }
 
 .review-loop-panel-card--files {
