@@ -39,11 +39,11 @@ const (
 	watchResponseTimeout    = 5 * time.Second
 	pollerFailureThreshold  = 3
 	pollerUnreachableAfter  = 30 * time.Second
-	spawnReadyTimeout       = 15 * time.Second
+	spawnReadyTimeout       = 25 * time.Second
 	spawnReadyPollInterval  = 100 * time.Millisecond
 	spawnKillGracePeriod    = 1 * time.Second
 	spawnWaitTimeout        = 500 * time.Millisecond
-	probeTimeout            = 15 * time.Second
+	probeTimeout            = 25 * time.Second
 	streamEventBufferSize   = 256
 	streamPreEventBufferCap = 8
 	workingStatePulseWindow = 2 * time.Second
