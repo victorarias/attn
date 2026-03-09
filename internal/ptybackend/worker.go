@@ -36,9 +36,12 @@ const (
 	// We intentionally do not use conn deadlines here because they have caused
 	// spurious immediate timeouts on some systems; instead we close the conn on
 	// timeout to unblock the read.
-	watchResponseTimeout    = 5 * time.Second
-	pollerFailureThreshold  = 3
-	pollerUnreachableAfter  = 30 * time.Second
+	watchResponseTimeout   = 5 * time.Second
+	pollerFailureThreshold = 3
+	pollerUnreachableAfter = 30 * time.Second
+	// Worker startup includes binary launch, socket bind, PTY spawn, and registry
+	// write. Slow CI machines can take well beyond the nominal "binary is up"
+	// time, so keep the ready budget comfortably above the slow-start test case.
 	spawnReadyTimeout       = 25 * time.Second
 	spawnReadyPollInterval  = 100 * time.Millisecond
 	spawnKillGracePeriod    = 1 * time.Second
