@@ -1428,11 +1428,30 @@ function AppContent({
     handleSelectSession(visualSessions[nextIndex].id);
   }, [activeSessionId, visualSessions, visualIndexBySessionId, handleSelectSession]);
 
-  const handleCloseCurrentSession = useCallback(() => {
-    if (activeSessionId) {
-      handleCloseSession(activeSessionId);
+  const handleCloseCurrentSessionShortcut = useCallback(() => {
+    if (!activeSessionId) {
+      return;
     }
-  }, [activeSessionId, handleCloseSession]);
+
+    const activeSession = sessions.find((session) => session.id === activeSessionId);
+    if (!activeSession) {
+      return;
+    }
+
+    if (activeSession.terminalPanel.terminals.length > 0) {
+      if (activeSession.terminalPanel.activePaneId !== MAIN_TERMINAL_PANE_ID) {
+        void sendWorkspaceClosePane(activeSessionId, activeSession.terminalPanel.activePaneId).catch((error) => {
+          showError(error instanceof Error ? error.message : 'Failed to close split pane');
+        });
+        return;
+      }
+
+      showError('Use the sidebar close button to close a session with split panes.');
+      return;
+    }
+
+    handleCloseSession(activeSessionId);
+  }, [activeSessionId, handleCloseSession, sendWorkspaceClosePane, sessions, showError]);
 
   const handleReloadSession = useCallback((id: string) => {
     void reloadSession(id);
@@ -1668,7 +1687,7 @@ function AppContent({
   useKeyboardShortcuts({
     onNewSession: handleNewSession,
     onNewWorktreeSession: handleNewWorktreeSession,
-    onCloseSession: handleCloseCurrentSession,
+    onCloseSession: handleCloseCurrentSessionShortcut,
     onToggleDrawer: () => toggleDockPanel('attention'),
     onGoToDashboard: goToDashboard,
     onJumpToWaiting: handleJumpToWaiting,
