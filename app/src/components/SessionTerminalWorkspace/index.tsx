@@ -5,6 +5,8 @@ import { useShortcut } from '../../shortcuts';
 import { triggerShortcut } from '../../shortcuts/useShortcut';
 import {
   MAIN_TERMINAL_PANE_ID,
+  findPaneInDirection,
+  type TerminalNavigationDirection,
   type TerminalLayoutNode,
   type TerminalSplitDirection,
   type TerminalPanelState,
@@ -24,7 +26,7 @@ interface SessionTerminalWorkspaceProps {
   panel: TerminalPanelState;
   fontSize: number;
   mainPane: React.ReactNode;
-  focusMainPane: () => void;
+  focusMainPane: () => boolean;
   resolvedTheme?: ResolvedTheme;
   focusRequestToken?: number;
   enabled: boolean;
@@ -32,6 +34,7 @@ interface SessionTerminalWorkspaceProps {
   onSplitPane: (targetPaneId: string, direction: TerminalSplitDirection) => void;
   onClosePane: (paneId: string) => void;
   onFocusPane: (paneId: string) => void;
+  onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
 }
 
 export function SessionTerminalWorkspace({
@@ -48,6 +51,7 @@ export function SessionTerminalWorkspace({
   onSplitPane,
   onClosePane,
   onFocusPane,
+  onNavigateOutOfSession,
 }: SessionTerminalWorkspaceProps) {
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
   const xtermRefs = useRef<Map<string, XTerm>>(new Map());
@@ -103,13 +107,26 @@ export function SessionTerminalWorkspace({
     tryFocus(retries);
   }, []);
 
+  const focusMainPaneWithRetry = useCallback((retries = 20) => {
+    const tryFocus = (remaining: number) => {
+      if (focusMainPane()) {
+        return;
+      }
+      if (remaining <= 0) {
+        return;
+      }
+      window.setTimeout(() => tryFocus(remaining - 1), 50);
+    };
+    tryFocus(retries);
+  }, [focusMainPane]);
+
   const focusActivePane = useCallback(() => {
     if (panel.activePaneId === MAIN_TERMINAL_PANE_ID) {
-      focusMainPane();
+      focusMainPaneWithRetry(40);
       return;
     }
     focusTerminalWithRetry(panel.activePaneId, 40);
-  }, [focusMainPane, focusTerminalWithRetry, panel.activePaneId]);
+  }, [focusMainPaneWithRetry, focusTerminalWithRetry, panel.activePaneId]);
 
   useEffect(() => {
     const activeTerminalIds = new Set(panel.terminals.map((terminal) => terminal.id));
@@ -237,15 +254,22 @@ export function SessionTerminalWorkspace({
     };
   }, [flushPendingEvents, handleCloseTerminal, queueTerminalEvent, writeToTerminal]);
 
-  const handleMovePane = useCallback((direction: -1 | 1) => {
-    if (paneIds.length < 2) {
+  const handleMovePane = useCallback((direction: TerminalNavigationDirection) => {
+    const visibleLayout: TerminalLayoutNode = effectivePaneId
+      ? { type: 'pane', paneId: effectivePaneId }
+      : panel.layoutTree;
+    const nextPaneId = findPaneInDirection(visibleLayout, panel.activePaneId, direction);
+    if (nextPaneId) {
+      onFocusPane(nextPaneId);
       return;
     }
-    const currentIndex = paneIds.indexOf(panel.activePaneId);
-    const nextIndex = (currentIndex + direction + paneIds.length) % paneIds.length;
-    const nextPaneId = paneIds[nextIndex];
-    onFocusPane(nextPaneId);
-  }, [onFocusPane, paneIds, panel.activePaneId]);
+    onNavigateOutOfSession(direction);
+  }, [effectivePaneId, onFocusPane, onNavigateOutOfSession, panel.activePaneId, panel.layoutTree]);
+
+  const handleMainPaneMouseDown = useCallback(() => {
+    onFocusPane(MAIN_TERMINAL_PANE_ID);
+    focusMainPaneWithRetry();
+  }, [focusMainPaneWithRetry, onFocusPane]);
 
   const wireTerminal = useCallback((terminalId: string, ptyId: string, xterm: XTerm) => {
     xtermRefs.current.set(terminalId, xterm);
@@ -325,8 +349,10 @@ export function SessionTerminalWorkspace({
   useShortcut('terminal.splitHorizontal', () => { handleSplit('horizontal'); }, enabled && isActiveSession);
   useShortcut('terminal.toggleMaximize', toggleMaximizeActivePane, enabled && isActiveSession);
   useShortcut('terminal.close', handleCloseActiveTerminal, enabled && isActiveSession && splitLayoutActive);
-  useShortcut('terminal.prevTab', () => handleMovePane(-1), enabled && isActiveSession && splitLayoutActive);
-  useShortcut('terminal.nextTab', () => handleMovePane(1), enabled && isActiveSession && splitLayoutActive);
+  useShortcut('terminal.focusLeft', () => handleMovePane('left'), enabled && isActiveSession);
+  useShortcut('terminal.focusRight', () => handleMovePane('right'), enabled && isActiveSession);
+  useShortcut('terminal.focusUp', () => handleMovePane('up'), enabled && isActiveSession);
+  useShortcut('terminal.focusDown', () => handleMovePane('down'), enabled && isActiveSession);
 
   const renderPane = useCallback((node: TerminalLayoutNode): React.ReactNode => {
     if (node.type === 'split') {
@@ -343,7 +369,7 @@ export function SessionTerminalWorkspace({
         <div
           key={node.paneId}
           className={`workspace-pane main-pane ${panel.activePaneId === MAIN_TERMINAL_PANE_ID ? 'active' : ''}`}
-          onMouseDown={() => onFocusPane(MAIN_TERMINAL_PANE_ID)}
+          onMouseDown={handleMainPaneMouseDown}
         >
           {showMainHeader && (
             <div className="workspace-pane-header">
@@ -405,6 +431,7 @@ export function SessionTerminalWorkspace({
     handleTerminalReady,
     handleTerminalResize,
     mainPane,
+    handleMainPaneMouseDown,
     onFocusPane,
     panel.activePaneId,
     panel.terminals,

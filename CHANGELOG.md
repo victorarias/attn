@@ -22,6 +22,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **Daemon-Owned Workspace Control Plane**: Move split-pane creation, close, focus, and rename authority into the daemon with dedicated workspace protocol messages and snapshot/update events, while the frontend now renders daemon snapshots instead of mutating the canonical split tree locally.
 - **Attached Shell Runtime Recovery**: Reconcile recovered shell-pane PTY runtimes against persisted workspace metadata at startup, prune missing panes from saved layouts, and clean up orphaned shell runtimes that no longer belong to any workspace.
+- **Spatial Pane Navigation**: `Cmd+Alt+Arrow` now moves focus by panel geometry instead of creation order, with `Up/Down` respecting stacked panes and `Left/Right` respecting side-by-side panes; when there is no pane in that direction, focus falls through to the previous or next session.
+
+### Fixed
+- **Main Session Focus After Split Return**: Clicking back into the main Claude/Codex pane after working in a split now reclaims keyboard focus immediately, without needing a session refresh or waiting on the daemon workspace round-trip.
 
 ## [2026-03-08]
 

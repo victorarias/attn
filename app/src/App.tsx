@@ -1428,6 +1428,14 @@ function AppContent({
     handleSelectSession(visualSessions[nextIndex].id);
   }, [activeSessionId, visualSessions, visualIndexBySessionId, handleSelectSession]);
 
+  const handleNavigateOutOfSession = useCallback((direction: 'left' | 'right' | 'up' | 'down') => {
+    if (direction === 'left' || direction === 'up') {
+      handlePrevSession();
+      return;
+    }
+    handleNextSession();
+  }, [handleNextSession, handlePrevSession]);
+
   const handleCloseCurrentSessionShortcut = useCallback(() => {
     if (!activeSessionId) {
       return;
@@ -1806,7 +1814,14 @@ function AppContent({
                   focusRequestToken={utilityFocusRequestToken}
                   enabled={!locationPickerOpen && !branchPickerOpen}
                   isActiveSession={session.id === activeSessionId}
-                  focusMainPane={() => terminalRefs.current.get(session.id)?.focus()}
+                  focusMainPane={() => {
+                    const handle = terminalRefs.current.get(session.id);
+                    if (!handle?.terminal) {
+                      return false;
+                    }
+                    handle.focus();
+                    return true;
+                  }}
                   onSplitPane={(targetPaneId, direction) => {
                     void sendWorkspaceSplitPane(session.id, targetPaneId, direction).catch(console.error);
                   }}
@@ -1816,6 +1831,7 @@ function AppContent({
                   onFocusPane={(paneId) => {
                     void sendWorkspaceFocusPane(session.id, paneId).catch(console.error);
                   }}
+                  onNavigateOutOfSession={handleNavigateOutOfSession}
                   mainPane={(
                     <Terminal
                       ref={setTerminalRef(session.id)}

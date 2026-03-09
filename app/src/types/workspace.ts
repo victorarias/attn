@@ -3,6 +3,7 @@ import type { WorkspaceSnapshot as DaemonWorkspaceSnapshot, PaneElement } from '
 export const MAIN_TERMINAL_PANE_ID = 'main';
 
 export type TerminalSplitDirection = 'vertical' | 'horizontal';
+export type TerminalNavigationDirection = 'left' | 'right' | 'up' | 'down';
 
 export interface TerminalPaneLeaf {
   type: 'pane';
@@ -31,6 +32,15 @@ export interface TerminalPanelState {
   layoutTree: TerminalLayoutNode;
 }
 
+interface PaneBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  centerX: number;
+  centerY: number;
+}
+
 export function createDefaultPanelState(): TerminalPanelState {
   return {
     activePaneId: MAIN_TERMINAL_PANE_ID,
@@ -44,6 +54,109 @@ export function hasPane(node: TerminalLayoutNode, paneId: string): boolean {
     return node.paneId === paneId;
   }
   return hasPane(node.children[0], paneId) || hasPane(node.children[1], paneId);
+}
+
+function paneBounds(
+  left: number,
+  top: number,
+  right: number,
+  bottom: number
+): PaneBounds {
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    centerX: (left + right) / 2,
+    centerY: (top + bottom) / 2,
+  };
+}
+
+function collectPaneBounds(
+  node: TerminalLayoutNode,
+  bounds: PaneBounds,
+  result: Map<string, PaneBounds>
+): void {
+  if (node.type === 'pane') {
+    result.set(node.paneId, bounds);
+    return;
+  }
+
+  const ratio = node.ratio > 0 && node.ratio < 1 ? node.ratio : 0.5;
+  if (node.direction === 'vertical') {
+    const splitX = bounds.left + (bounds.right - bounds.left) * ratio;
+    collectPaneBounds(node.children[0], paneBounds(bounds.left, bounds.top, splitX, bounds.bottom), result);
+    collectPaneBounds(node.children[1], paneBounds(splitX, bounds.top, bounds.right, bounds.bottom), result);
+    return;
+  }
+
+  const splitY = bounds.top + (bounds.bottom - bounds.top) * ratio;
+  collectPaneBounds(node.children[0], paneBounds(bounds.left, bounds.top, bounds.right, splitY), result);
+  collectPaneBounds(node.children[1], paneBounds(bounds.left, splitY, bounds.right, bounds.bottom), result);
+}
+
+function overlapSize(aStart: number, aEnd: number, bStart: number, bEnd: number): number {
+  return Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
+}
+
+export function findPaneInDirection(
+  node: TerminalLayoutNode,
+  fromPaneId: string,
+  direction: TerminalNavigationDirection
+): string | null {
+  const rects = new Map<string, PaneBounds>();
+  collectPaneBounds(node, paneBounds(0, 0, 1, 1), rects);
+  const current = rects.get(fromPaneId);
+  if (!current) {
+    return null;
+  }
+
+  const candidates = Array.from(rects.entries())
+    .filter(([paneId]) => paneId !== fromPaneId)
+    .map(([paneId, candidate]) => {
+      switch (direction) {
+        case 'left': {
+          const primary = current.left - candidate.right;
+          if (primary < -1e-6) return null;
+          const overlap = overlapSize(current.top, current.bottom, candidate.top, candidate.bottom);
+          if (overlap <= 0) return null;
+          return { paneId, primary, secondary: Math.abs(current.centerY - candidate.centerY) };
+        }
+        case 'right': {
+          const primary = candidate.left - current.right;
+          if (primary < -1e-6) return null;
+          const overlap = overlapSize(current.top, current.bottom, candidate.top, candidate.bottom);
+          if (overlap <= 0) return null;
+          return { paneId, primary, secondary: Math.abs(current.centerY - candidate.centerY) };
+        }
+        case 'up': {
+          const primary = current.top - candidate.bottom;
+          if (primary < -1e-6) return null;
+          const overlap = overlapSize(current.left, current.right, candidate.left, candidate.right);
+          if (overlap <= 0) return null;
+          return { paneId, primary, secondary: Math.abs(current.centerX - candidate.centerX) };
+        }
+        case 'down': {
+          const primary = candidate.top - current.bottom;
+          if (primary < -1e-6) return null;
+          const overlap = overlapSize(current.left, current.right, candidate.left, candidate.right);
+          if (overlap <= 0) return null;
+          return { paneId, primary, secondary: Math.abs(current.centerX - candidate.centerX) };
+        }
+      }
+    })
+    .filter((value): value is { paneId: string; primary: number; secondary: number } => Boolean(value))
+    .sort((a, b) => {
+      if (a.primary !== b.primary) {
+        return a.primary - b.primary;
+      }
+      if (a.secondary !== b.secondary) {
+        return a.secondary - b.secondary;
+      }
+      return a.paneId.localeCompare(b.paneId);
+    });
+
+  return candidates[0]?.paneId ?? null;
 }
 
 function parseLayoutNode(raw: unknown): TerminalLayoutNode | null {

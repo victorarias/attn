@@ -52,8 +52,10 @@ export const SHORTCUTS = {
   'terminal.splitHorizontal': { key: 'd', meta: true, shift: true },
   'terminal.toggleMaximize': { key: 'Enter', meta: true, shift: true },
   'terminal.close': { key: 'w', meta: true },
-  'terminal.prevTab': { key: '{', meta: true, shift: true },  // Shift+[ produces {
-  'terminal.nextTab': { key: '}', meta: true, shift: true },  // Shift+] produces }
+  'terminal.focusLeft': { key: 'ArrowLeft', meta: true, alt: true },
+  'terminal.focusRight': { key: 'ArrowRight', meta: true, alt: true },
+  'terminal.focusUp': { key: 'ArrowUp', meta: true, alt: true },
+  'terminal.focusDown': { key: 'ArrowDown', meta: true, alt: true },
 } as const;
 
 export type ShortcutId = keyof typeof SHORTCUTS;

@@ -146,6 +146,18 @@ describe('shortcut registry', () => {
         expect(matchesShortcut(event, def)).toBe(true);
       });
     });
+
+    it('matches cmd+alt+arrow shortcut on macOS', () => {
+      withNavigatorPlatform('MacIntel', () => {
+        const def: ShortcutDef = { key: 'ArrowLeft', meta: true, alt: true };
+        const event = new KeyboardEvent('keydown', {
+          key: 'ArrowLeft',
+          metaKey: true,
+          altKey: true,
+        });
+        expect(matchesShortcut(event, def)).toBe(true);
+      });
+    });
   });
 
   describe('SHORTCUTS registry', () => {
@@ -177,8 +189,10 @@ describe('shortcut registry', () => {
       expect(SHORTCUTS['terminal.splitHorizontal']).toEqual({ key: 'd', meta: true, shift: true });
       expect(SHORTCUTS['terminal.toggleMaximize']).toEqual({ key: 'Enter', meta: true, shift: true });
       expect(SHORTCUTS['terminal.close']).toEqual({ key: 'w', meta: true });
-      expect(SHORTCUTS['terminal.prevTab']).toEqual({ key: '{', meta: true, shift: true });
-      expect(SHORTCUTS['terminal.nextTab']).toEqual({ key: '}', meta: true, shift: true });
+      expect(SHORTCUTS['terminal.focusLeft']).toEqual({ key: 'ArrowLeft', meta: true, alt: true });
+      expect(SHORTCUTS['terminal.focusRight']).toEqual({ key: 'ArrowRight', meta: true, alt: true });
+      expect(SHORTCUTS['terminal.focusUp']).toEqual({ key: 'ArrowUp', meta: true, alt: true });
+      expect(SHORTCUTS['terminal.focusDown']).toEqual({ key: 'ArrowDown', meta: true, alt: true });
     });
 
     it('has expected session shortcuts defined', () => {
