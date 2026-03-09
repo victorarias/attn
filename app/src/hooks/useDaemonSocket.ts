@@ -220,6 +220,11 @@ interface ReviewLoopActionResult {
   state: ReviewLoopState | null;
 }
 
+interface WorkspaceActionResult {
+  success: boolean;
+  error?: string;
+}
+
 export interface ReviewState {
   review_id: string;
   repo_path: string;
@@ -339,6 +344,22 @@ function upsertSessionByID(sessions: DaemonSession[], session: DaemonSession): D
   return updated;
 }
 
+function workspaceRuntimeIDs(workspaces: DaemonWorkspace[]): Set<string> {
+  const ids = new Set<string>();
+  for (const workspace of workspaces) {
+    for (const pane of workspace.panes || []) {
+      if (typeof pane.runtime_id === 'string' && pane.runtime_id.length > 0) {
+        ids.add(pane.runtime_id);
+      }
+    }
+  }
+  return ids;
+}
+
+function workspaceActionKey(action: string, sessionId: string, paneId?: string): string {
+  return `workspace:${action}:${sessionId}:${paneId || ''}`;
+}
+
 function isSessionNotFoundError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.toLowerCase().includes('session not found');
@@ -450,6 +471,21 @@ export function useDaemonSocket({
       setConnectionError((prev) => (prev === RECOVERY_NOTICE ? null : prev));
       recoveryNoticeTimeoutRef.current = null;
     }, 2000);
+  }, []);
+
+  const pruneAttachedPtySessions = useCallback((sessions: DaemonSession[], workspaces: DaemonWorkspace[]) => {
+    const attachableIDs = new Set<string>(sessions.map((session) => session.id));
+    for (const runtimeID of workspaceRuntimeIDs(workspaces)) {
+      attachableIDs.add(runtimeID);
+    }
+    for (const sessionId of Array.from(attachedPtySessionsRef.current)) {
+      if (attachableIDs.has(sessionId)) {
+        continue;
+      }
+      attachedPtySessionsRef.current.delete(sessionId);
+      ptySeqRef.current.delete(sessionId);
+      pendingAttachOutputsRef.current.delete(sessionId);
+    }
   }, []);
 
   const rejectPendingByPredicate = useCallback((predicate: (key: string) => boolean, error: Error) => {
@@ -616,14 +652,7 @@ export function useDaemonSocket({
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             onWorkspacesUpdate(nextWorkspaces);
-            const activeIDs = new Set(nextSessions.map((session) => session.id));
-            for (const sessionId of attachedPtySessionsRef.current) {
-              if (activeIDs.has(sessionId)) {
-                continue;
-              }
-              attachedPtySessionsRef.current.delete(sessionId);
-              ptySeqRef.current.delete(sessionId);
-            }
+            pruneAttachedPtySessions(nextSessions, nextWorkspaces);
             const nextPRs = data.prs || [];
             prsRef.current = nextPRs;
             onPRsUpdate(nextPRs);
@@ -665,8 +694,26 @@ export function useDaemonSocket({
               ];
               workspacesRef.current = nextWorkspaces;
               onWorkspacesUpdate(nextWorkspaces);
+              pruneAttachedPtySessions(sessionsRef.current, nextWorkspaces);
             }
             break;
+
+          case 'workspace_action_result': {
+            const action = data.action || '';
+            const sessionId = data.session_id || '';
+            const paneId = data.pane_id;
+            const key = workspaceActionKey(action, sessionId, paneId);
+            const pending = pendingActionsRef.current.get(key);
+            if (pending) {
+              pendingActionsRef.current.delete(key);
+              if (data.success) {
+                pending.resolve({ success: true });
+              } else {
+                pending.reject(new Error(data.error || 'Workspace action failed'));
+              }
+            }
+            break;
+          }
 
           case 'workspace_runtime_exited':
             // The canonical pane removal arrives via workspace_updated.
@@ -845,6 +892,7 @@ export function useDaemonSocket({
                 (s) => s.id !== data.session!.id
               );
               onSessionsUpdate(sessionsRef.current);
+              pruneAttachedPtySessions(sessionsRef.current, workspacesRef.current);
             }
             break;
 
@@ -861,14 +909,7 @@ export function useDaemonSocket({
               const dedupedSessions = dedupeSessionsByID(data.sessions || []);
               sessionsRef.current = dedupedSessions;
               onSessionsUpdate(dedupedSessions);
-              const activeIDs = new Set(dedupedSessions.map((session) => session.id));
-              for (const sessionId of attachedPtySessionsRef.current) {
-                if (activeIDs.has(sessionId)) {
-                  continue;
-                }
-                attachedPtySessionsRef.current.delete(sessionId);
-                ptySeqRef.current.delete(sessionId);
-              }
+              pruneAttachedPtySessions(dedupedSessions, workspacesRef.current);
             }
             break;
 
@@ -1423,7 +1464,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands]);
+  }, [wsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
 
   useEffect(() => {
     void connect();
@@ -1573,39 +1614,79 @@ export function useDaemonSocket({
     sendOrQueueCommand({ cmd: 'workspace_get', session_id: sessionId }, { waitForInitialState: true });
   }, [sendOrQueueCommand]);
 
-  const sendWorkspaceSplitPane = useCallback((sessionId: string, targetPaneId: string, direction: 'vertical' | 'horizontal') => {
-    sendOrQueueCommand({
-      cmd: 'workspace_split_pane',
-      session_id: sessionId,
-      target_pane_id: targetPaneId,
-      direction,
-    }, { waitForInitialState: true });
+  const sendWorkspaceCommand = useCallback((
+    action: string,
+    sessionId: string,
+    payload: Record<string, unknown>,
+    paneId?: string,
+  ): Promise<WorkspaceActionResult> => {
+    return new Promise((resolve, reject) => {
+      const key = workspaceActionKey(action, sessionId, paneId);
+      pendingActionsRef.current.set(key, { resolve, reject });
+      sendOrQueueCommand(payload, { waitForInitialState: true });
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Workspace action timed out'));
+        }
+      }, 30000);
+    });
   }, [sendOrQueueCommand]);
+
+  const sendWorkspaceSplitPane = useCallback((sessionId: string, targetPaneId: string, direction: 'vertical' | 'horizontal') => {
+    return sendWorkspaceCommand(
+      'workspace_split_pane',
+      sessionId,
+      {
+        cmd: 'workspace_split_pane',
+        session_id: sessionId,
+        target_pane_id: targetPaneId,
+        direction,
+      },
+      targetPaneId,
+    );
+  }, [sendWorkspaceCommand]);
 
   const sendWorkspaceClosePane = useCallback((sessionId: string, paneId: string) => {
-    sendOrQueueCommand({
-      cmd: 'workspace_close_pane',
-      session_id: sessionId,
-      pane_id: paneId,
-    }, { waitForInitialState: true });
-  }, [sendOrQueueCommand]);
+    return sendWorkspaceCommand(
+      'workspace_close_pane',
+      sessionId,
+      {
+        cmd: 'workspace_close_pane',
+        session_id: sessionId,
+        pane_id: paneId,
+      },
+      paneId,
+    );
+  }, [sendWorkspaceCommand]);
 
   const sendWorkspaceFocusPane = useCallback((sessionId: string, paneId: string) => {
-    sendOrQueueCommand({
-      cmd: 'workspace_focus_pane',
-      session_id: sessionId,
-      pane_id: paneId,
-    }, { waitForInitialState: true });
-  }, [sendOrQueueCommand]);
+    return sendWorkspaceCommand(
+      'workspace_focus_pane',
+      sessionId,
+      {
+        cmd: 'workspace_focus_pane',
+        session_id: sessionId,
+        pane_id: paneId,
+      },
+      paneId,
+    );
+  }, [sendWorkspaceCommand]);
 
   const sendWorkspaceRenamePane = useCallback((sessionId: string, paneId: string, title: string) => {
-    sendOrQueueCommand({
-      cmd: 'workspace_rename_pane',
-      session_id: sessionId,
-      pane_id: paneId,
-      title,
-    }, { waitForInitialState: true });
-  }, [sendOrQueueCommand]);
+    return sendWorkspaceCommand(
+      'workspace_rename_pane',
+      sessionId,
+      {
+        cmd: 'workspace_rename_pane',
+        session_id: sessionId,
+        pane_id: paneId,
+        title,
+      },
+      paneId,
+    );
+  }, [sendWorkspaceCommand]);
 
   useEffect(() => {
     setPtyBackend({

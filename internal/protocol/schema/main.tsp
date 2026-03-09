@@ -706,6 +706,15 @@ model WorkspaceUpdatedMessage {
   workspace: WorkspaceSnapshot;
 }
 
+model WorkspaceActionResultMessage {
+  event: "workspace_action_result";
+  action: string;
+  session_id: string;
+  pane_id?: string;
+  success: boolean;
+  error?: string;
+}
+
 model WorkspaceRuntimeExitedMessage {
   event: "workspace_runtime_exited";
   session_id: string;
@@ -1277,6 +1286,7 @@ alias DaemonEvent =
   | SessionsUpdatedMessage
   | WorkspaceSnapshotMessage
   | WorkspaceUpdatedMessage
+  | WorkspaceActionResultMessage
   | WorkspaceRuntimeExitedMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage

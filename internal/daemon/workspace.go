@@ -108,6 +108,22 @@ func (d *Daemon) sendWorkspaceSnapshot(client *wsClient, sessionID string) {
 	})
 }
 
+func (d *Daemon) sendWorkspaceActionResult(client *wsClient, action, sessionID string, paneID *string, err error) {
+	result := protocol.WorkspaceActionResultMessage{
+		Event:     protocol.EventWorkspaceActionResult,
+		Action:    action,
+		SessionID: sessionID,
+		Success:   err == nil,
+	}
+	if paneID != nil && strings.TrimSpace(*paneID) != "" {
+		result.PaneID = protocol.Ptr(strings.TrimSpace(*paneID))
+	}
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, result)
+}
+
 func (d *Daemon) broadcastWorkspaceUpdated(sessionID string) {
 	snapshot, err := d.protocolWorkspaceSnapshot(sessionID)
 	if err != nil {
@@ -170,38 +186,40 @@ func (d *Daemon) handleWorkspaceGet(client *wsClient, msg *protocol.WorkspaceGet
 func (d *Daemon) handleWorkspaceFocusPane(client *wsClient, msg *protocol.WorkspaceFocusPaneMessage) {
 	snapshot, err := d.ensureWorkspaceSnapshot(msg.SessionID)
 	if err != nil {
-		d.sendCommandError(client, protocol.CmdWorkspaceFocusPane, err.Error())
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceFocusPane, msg.SessionID, protocol.Ptr(msg.PaneID), err)
 		return
 	}
 	if !workspace.HasPane(snapshot.Layout, msg.PaneID) {
-		d.sendCommandError(client, protocol.CmdWorkspaceFocusPane, fmt.Sprintf("pane not found: %s", msg.PaneID))
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceFocusPane, msg.SessionID, protocol.Ptr(msg.PaneID), fmt.Errorf("pane not found: %s", msg.PaneID))
 		return
 	}
 	if snapshot.ActivePaneID == msg.PaneID {
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceFocusPane, msg.SessionID, protocol.Ptr(msg.PaneID), nil)
 		return
 	}
 	snapshot.ActivePaneID = msg.PaneID
 	if err := d.store.SaveWorkspace(*snapshot); err != nil {
-		d.sendCommandError(client, protocol.CmdWorkspaceFocusPane, err.Error())
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceFocusPane, msg.SessionID, protocol.Ptr(msg.PaneID), err)
 		return
 	}
 	d.broadcastWorkspaceUpdated(msg.SessionID)
+	d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceFocusPane, msg.SessionID, protocol.Ptr(msg.PaneID), nil)
 }
 
 func (d *Daemon) handleWorkspaceRenamePane(client *wsClient, msg *protocol.WorkspaceRenamePaneMessage) {
 	if msg.PaneID == workspace.MainPaneID {
-		d.sendCommandError(client, protocol.CmdWorkspaceRenamePane, "main pane title is fixed")
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceRenamePane, msg.SessionID, protocol.Ptr(msg.PaneID), fmt.Errorf("main pane title is fixed"))
 		return
 	}
 
 	snapshot, err := d.ensureWorkspaceSnapshot(msg.SessionID)
 	if err != nil {
-		d.sendCommandError(client, protocol.CmdWorkspaceRenamePane, err.Error())
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceRenamePane, msg.SessionID, protocol.Ptr(msg.PaneID), err)
 		return
 	}
 	title := strings.TrimSpace(msg.Title)
 	if title == "" {
-		d.sendCommandError(client, protocol.CmdWorkspaceRenamePane, "title cannot be empty")
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceRenamePane, msg.SessionID, protocol.Ptr(msg.PaneID), fmt.Errorf("title cannot be empty"))
 		return
 	}
 	updated := false
@@ -214,33 +232,34 @@ func (d *Daemon) handleWorkspaceRenamePane(client *wsClient, msg *protocol.Works
 		break
 	}
 	if !updated {
-		d.sendCommandError(client, protocol.CmdWorkspaceRenamePane, fmt.Sprintf("pane not found: %s", msg.PaneID))
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceRenamePane, msg.SessionID, protocol.Ptr(msg.PaneID), fmt.Errorf("pane not found: %s", msg.PaneID))
 		return
 	}
 	if err := d.store.SaveWorkspace(*snapshot); err != nil {
-		d.sendCommandError(client, protocol.CmdWorkspaceRenamePane, err.Error())
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceRenamePane, msg.SessionID, protocol.Ptr(msg.PaneID), err)
 		return
 	}
 	d.broadcastWorkspaceUpdated(msg.SessionID)
+	d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceRenamePane, msg.SessionID, protocol.Ptr(msg.PaneID), nil)
 }
 
 func (d *Daemon) handleWorkspaceSplitPane(client *wsClient, msg *protocol.WorkspaceSplitPaneMessage) {
 	if d.ptyBackend == nil {
-		d.sendCommandError(client, protocol.CmdWorkspaceSplitPane, "pty backend unavailable")
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceSplitPane, msg.SessionID, protocol.Ptr(msg.TargetPaneID), fmt.Errorf("pty backend unavailable"))
 		return
 	}
 	snapshot, err := d.ensureWorkspaceSnapshot(msg.SessionID)
 	if err != nil {
-		d.sendCommandError(client, protocol.CmdWorkspaceSplitPane, err.Error())
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceSplitPane, msg.SessionID, protocol.Ptr(msg.TargetPaneID), err)
 		return
 	}
 	session := d.store.Get(msg.SessionID)
 	if session == nil {
-		d.sendCommandError(client, protocol.CmdWorkspaceSplitPane, fmt.Sprintf("session not found: %s", msg.SessionID))
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceSplitPane, msg.SessionID, protocol.Ptr(msg.TargetPaneID), fmt.Errorf("session not found: %s", msg.SessionID))
 		return
 	}
 	if !workspace.HasPane(snapshot.Layout, msg.TargetPaneID) {
-		d.sendCommandError(client, protocol.CmdWorkspaceSplitPane, fmt.Sprintf("pane not found: %s", msg.TargetPaneID))
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceSplitPane, msg.SessionID, protocol.Ptr(msg.TargetPaneID), fmt.Errorf("pane not found: %s", msg.TargetPaneID))
 		return
 	}
 
@@ -250,7 +269,7 @@ func (d *Daemon) handleWorkspaceSplitPane(client *wsClient, msg *protocol.Worksp
 	title := nextShellTitle(*snapshot)
 
 	if err := d.ptyBackend.Spawn(context.Background(), ptySpawnShellOptions(runtimeID, session.Directory, title)); err != nil {
-		d.sendCommandError(client, protocol.CmdWorkspaceSplitPane, err.Error())
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceSplitPane, msg.SessionID, protocol.Ptr(msg.TargetPaneID), err)
 		return
 	}
 
@@ -264,7 +283,7 @@ func (d *Daemon) handleWorkspaceSplitPane(client *wsClient, msg *protocol.Worksp
 	)
 	if !changed {
 		_ = d.removePTYSession(runtimeID)
-		d.sendCommandError(client, protocol.CmdWorkspaceSplitPane, fmt.Sprintf("pane not found: %s", msg.TargetPaneID))
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceSplitPane, msg.SessionID, protocol.Ptr(msg.TargetPaneID), fmt.Errorf("pane not found: %s", msg.TargetPaneID))
 		return
 	}
 
@@ -279,10 +298,11 @@ func (d *Daemon) handleWorkspaceSplitPane(client *wsClient, msg *protocol.Worksp
 	normalized := workspace.NormalizeSnapshot(*snapshot, msg.SessionID)
 	if err := d.store.SaveWorkspace(normalized); err != nil {
 		_ = d.removePTYSession(runtimeID)
-		d.sendCommandError(client, protocol.CmdWorkspaceSplitPane, err.Error())
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceSplitPane, msg.SessionID, protocol.Ptr(msg.TargetPaneID), err)
 		return
 	}
 	d.broadcastWorkspaceUpdated(msg.SessionID)
+	d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceSplitPane, msg.SessionID, protocol.Ptr(msg.TargetPaneID), nil)
 }
 
 func ptySpawnShellOptions(runtimeID, cwd, label string) ptybackend.SpawnOptions {
@@ -298,13 +318,13 @@ func ptySpawnShellOptions(runtimeID, cwd, label string) ptybackend.SpawnOptions 
 
 func (d *Daemon) handleWorkspaceClosePane(client *wsClient, msg *protocol.WorkspaceClosePaneMessage) {
 	if msg.PaneID == workspace.MainPaneID {
-		d.sendCommandError(client, protocol.CmdWorkspaceClosePane, "main pane cannot be closed")
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceClosePane, msg.SessionID, protocol.Ptr(msg.PaneID), fmt.Errorf("main pane cannot be closed"))
 		return
 	}
 
 	snapshot, err := d.ensureWorkspaceSnapshot(msg.SessionID)
 	if err != nil {
-		d.sendCommandError(client, protocol.CmdWorkspaceClosePane, err.Error())
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceClosePane, msg.SessionID, protocol.Ptr(msg.PaneID), err)
 		return
 	}
 
@@ -320,7 +340,7 @@ func (d *Daemon) handleWorkspaceClosePane(client *wsClient, msg *protocol.Worksp
 		nextPanes = append(nextPanes, pane)
 	}
 	if !found {
-		d.sendCommandError(client, protocol.CmdWorkspaceClosePane, fmt.Sprintf("pane not found: %s", msg.PaneID))
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceClosePane, msg.SessionID, protocol.Ptr(msg.PaneID), fmt.Errorf("pane not found: %s", msg.PaneID))
 		return
 	}
 
@@ -329,10 +349,11 @@ func (d *Daemon) handleWorkspaceClosePane(client *wsClient, msg *protocol.Worksp
 	snapshot.Panes = nextPanes
 	normalized := workspace.NormalizeSnapshot(*snapshot, msg.SessionID)
 	if err := d.store.SaveWorkspace(normalized); err != nil {
-		d.sendCommandError(client, protocol.CmdWorkspaceClosePane, err.Error())
+		d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceClosePane, msg.SessionID, protocol.Ptr(msg.PaneID), err)
 		return
 	}
 	d.broadcastWorkspaceUpdated(msg.SessionID)
+	d.sendWorkspaceActionResult(client, protocol.CmdWorkspaceClosePane, msg.SessionID, protocol.Ptr(msg.PaneID), nil)
 
 	if strings.TrimSpace(runtimeID) != "" {
 		d.terminateSession(runtimeID, syscall.SIGTERM)

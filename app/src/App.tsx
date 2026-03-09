@@ -1788,9 +1788,15 @@ function AppContent({
                   enabled={!locationPickerOpen && !branchPickerOpen}
                   isActiveSession={session.id === activeSessionId}
                   focusMainPane={() => terminalRefs.current.get(session.id)?.focus()}
-                  onSplitPane={(targetPaneId, direction) => sendWorkspaceSplitPane(session.id, targetPaneId, direction)}
-                  onClosePane={(paneId) => sendWorkspaceClosePane(session.id, paneId)}
-                  onFocusPane={(paneId) => sendWorkspaceFocusPane(session.id, paneId)}
+                  onSplitPane={(targetPaneId, direction) => {
+                    void sendWorkspaceSplitPane(session.id, targetPaneId, direction).catch(console.error);
+                  }}
+                  onClosePane={(paneId) => {
+                    void sendWorkspaceClosePane(session.id, paneId).catch(console.error);
+                  }}
+                  onFocusPane={(paneId) => {
+                    void sendWorkspaceFocusPane(session.id, paneId).catch(console.error);
+                  }}
                   mainPane={(
                     <Terminal
                       ref={setTerminalRef(session.id)}

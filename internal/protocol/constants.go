@@ -149,6 +149,7 @@ const (
 	EventPtyDesync                = "pty_desync"
 	EventWorkspaceSnapshot        = "workspace_snapshot"
 	EventWorkspaceUpdated         = "workspace_updated"
+	EventWorkspaceActionResult    = "workspace_action_result"
 	EventWorkspaceRuntimeExited   = "workspace_runtime_exited"
 	EventCommandError             = "command_error"
 )
