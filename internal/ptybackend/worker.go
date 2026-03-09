@@ -36,9 +36,9 @@ const (
 	// We intentionally do not use conn deadlines here because they have caused
 	// spurious immediate timeouts on some systems; instead we close the conn on
 	// timeout to unblock the read.
-	watchResponseTimeout   = 5 * time.Second
-	pollerFailureThreshold = 3
-	pollerUnreachableAfter = 30 * time.Second
+	watchResponseTimeout    = 5 * time.Second
+	pollerFailureThreshold  = 3
+	pollerUnreachableAfter  = 30 * time.Second
 	spawnReadyPollInterval  = 100 * time.Millisecond
 	spawnKillGracePeriod    = 1 * time.Second
 	spawnWaitTimeout        = 500 * time.Millisecond
