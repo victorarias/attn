@@ -1001,6 +1001,10 @@ func TestWorkerBackend_Spawn_CleansUpUnreadyWorkerProcess(t *testing.T) {
 }
 
 func TestWorkerBackend_Spawn_ToleratesSlowWorkerBinaryStartup(t *testing.T) {
+	if os.Getenv("ATTN_RUN_WORKER_INTEGRATION") == "" {
+		t.Skip("set ATTN_RUN_WORKER_INTEGRATION=1 to run worker integration test")
+	}
+
 	root := newWorkerBackendTestRoot(t)
 	realBinary := buildAttnBinaryForWorkerTest(t)
 	prevSpawnReadyTimeout := spawnReadyTimeout
