@@ -7,6 +7,17 @@ type Handler = () => void;
 // Global registry of active handlers
 const handlers = new Map<ShortcutId, Set<Handler>>();
 
+export function triggerShortcut(id: ShortcutId): boolean {
+  const shortcutHandlers = handlers.get(id);
+  if (!shortcutHandlers || shortcutHandlers.size === 0) {
+    return false;
+  }
+  for (const handler of shortcutHandlers) {
+    handler();
+  }
+  return true;
+}
+
 // Single global listener (installed once)
 let listenerInstalled = false;
 
@@ -24,10 +35,7 @@ function installGlobalListener() {
           }
           e.preventDefault();
           e.stopPropagation(); // Prevent event from reaching xterm
-          // Call all registered handlers for this shortcut
-          for (const handler of shortcutHandlers) {
-            handler();
-          }
+          triggerShortcut(id as ShortcutId);
           return;
         }
       }
@@ -37,7 +45,7 @@ function installGlobalListener() {
 
 function isTerminalTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.closest('.xterm, .terminal-container, .utility-terminal-panel') !== null;
+  return target.closest('.xterm, .terminal-container, .session-terminal-workspace') !== null;
 }
 
 /**

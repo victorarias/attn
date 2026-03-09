@@ -62,6 +62,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     const { unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
         onPRsUpdate: vi.fn(),
         onReposUpdate: vi.fn(),
         onAuthorsUpdate: vi.fn(),
@@ -102,6 +103,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
         onPRsUpdate: vi.fn(),
         onReposUpdate: vi.fn(),
         onAuthorsUpdate: vi.fn(),
@@ -162,6 +164,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
         onPRsUpdate: vi.fn(),
         onReposUpdate: vi.fn(),
         onAuthorsUpdate: vi.fn(),

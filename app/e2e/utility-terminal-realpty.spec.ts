@@ -143,7 +143,7 @@ test.describe('Utility Terminal Real PTY', () => {
     if (!utilityPtyID) {
       throw new Error('Utility PTY ID was not captured');
     }
-    await expect(page.locator('.utility-terminal-panel')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.session-terminal-workspace')).toBeVisible({ timeout: 5000 });
 
     // Important regression check: Cmd+T should focus the utility terminal
     // immediately so typing appears without requiring an extra click.
@@ -328,7 +328,7 @@ test.describe('Utility Terminal Real PTY', () => {
 
     await page.locator('[data-testid="session-s-real-pty-d"]').click();
     await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('.utility-terminal-panel')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.session-terminal-workspace')).toBeVisible({ timeout: 5000 });
 
     // Output shown before dashboard switch should be restored in the
     // remounted utility xterm buffer without typing anything new.

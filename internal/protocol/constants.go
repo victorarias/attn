@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "38"
+const ProtocolVersion = "39"
 
 // Commands
 const (
@@ -85,6 +85,11 @@ const (
 	CmdPtyInput                 = "pty_input"
 	CmdPtyResize                = "pty_resize"
 	CmdKillSession              = "kill_session"
+	CmdWorkspaceGet             = "workspace_get"
+	CmdWorkspaceSplitPane       = "workspace_split_pane"
+	CmdWorkspaceClosePane       = "workspace_close_pane"
+	CmdWorkspaceFocusPane       = "workspace_focus_pane"
+	CmdWorkspaceRenamePane      = "workspace_rename_pane"
 )
 
 // WebSocket Events (daemon -> client)
@@ -142,6 +147,9 @@ const (
 	EventAttachResult             = "attach_result"
 	EventSessionExited            = "session_exited"
 	EventPtyDesync                = "pty_desync"
+	EventWorkspaceSnapshot        = "workspace_snapshot"
+	EventWorkspaceUpdated         = "workspace_updated"
+	EventWorkspaceRuntimeExited   = "workspace_runtime_exited"
 	EventCommandError             = "command_error"
 )
 
@@ -711,6 +719,41 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg KillSessionMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal kill_session: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceGet:
+		var msg WorkspaceGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_get: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceSplitPane:
+		var msg WorkspaceSplitPaneMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_split_pane: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceClosePane:
+		var msg WorkspaceClosePaneMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_close_pane: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceFocusPane:
+		var msg WorkspaceFocusPaneMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_focus_pane: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdWorkspaceRenamePane:
+		var msg WorkspaceRenamePaneMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal workspace_rename_pane: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

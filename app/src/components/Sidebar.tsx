@@ -152,7 +152,7 @@ export function Sidebar({
     return (
       <div className="sidebar collapsed">
         <div className="icon-rail">
-          <button className="icon-btn" onClick={onGoToDashboard} title="Dashboard (⌘D)">
+          <button className="icon-btn" onClick={onGoToDashboard} title="Dashboard (⌘G)">
             <HomeIcon />
           </button>
           <div className="icon-divider" />
@@ -218,11 +218,11 @@ export function Sidebar({
           ))}
         </div>
         <div className="sidebar-header-row">
-          <button className="home-btn" onClick={onGoToDashboard} title="Dashboard (⌘D)" aria-label="Dashboard">
+          <button className="home-btn" onClick={onGoToDashboard} title="Dashboard (⌘G)" aria-label="Dashboard">
             <HomeIcon />
           </button>
           <span className="sidebar-title">Sessions</span>
-          <span className="home-shortcut">⌘D</span>
+          <span className="home-shortcut">⌘G</span>
           <button className="new-session-btn" onClick={onNewSession} title="New Session (⌘N)" aria-label="New Session">
             <PlusIcon />
           </button>
@@ -276,7 +276,7 @@ export function Sidebar({
                       e.stopPropagation();
                       onCloseSession(session.id);
                     }}
-                    title="Close session (⌘W)"
+                    title="Close session (⌘⇧W)"
                   >
                     ×
                   </button>
@@ -338,7 +338,7 @@ export function Sidebar({
                           e.stopPropagation();
                           onCloseSession(session.id);
                         }}
-                        title="Close session (⌘W)"
+                        title="Close session (⌘⇧W)"
                       >
                         ×
                       </button>

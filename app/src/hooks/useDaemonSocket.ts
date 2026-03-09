@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@tauri-apps/api/core';
 import type {
   Session as GeneratedSession,
+  WorkspaceSnapshot as GeneratedWorkspaceSnapshot,
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
   RepoState as GeneratedRepoState,
@@ -24,6 +25,7 @@ import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/termi
 // Re-export types from generated for consumers
 // Use type aliases to maintain backward compatibility
 export type DaemonSession = GeneratedSession;
+export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
 export type RepoState = GeneratedRepoState;
@@ -41,6 +43,7 @@ export { SessionState, PRRole, HeatState };
 // Extended WebSocketEvent with action result fields (generated allows extra properties)
 type WebSocketEvent = GeneratedWebSocketEvent & {
   id?: string;
+  workspace?: GeneratedWorkspaceSnapshot;
   data?: string;
   seq?: number;
   scrollback?: string;
@@ -91,7 +94,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '38';
+const PROTOCOL_VERSION = '39';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -296,6 +299,7 @@ export interface BranchDiffFilesResult {
 
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
+  onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
   onAuthorsUpdate: (authors: AuthorState[]) => void;
@@ -377,6 +381,7 @@ function isSessionNotFoundError(error: unknown): boolean {
 
 export function useDaemonSocket({
   onSessionsUpdate,
+  onWorkspacesUpdate,
   onPRsUpdate,
   onReposUpdate,
   onAuthorsUpdate,
@@ -389,6 +394,7 @@ export function useDaemonSocket({
 }: UseDaemonSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const sessionsRef = useRef<DaemonSession[]>([]);
+  const workspacesRef = useRef<DaemonWorkspace[]>([]);
   const prsRef = useRef<DaemonPR[]>([]);
   const reposRef = useRef<RepoState[]>([]);
   const authorsRef = useRef<AuthorState[]>([]);
@@ -396,6 +402,7 @@ export function useDaemonSocket({
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
   const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
+  const pendingOutboundCommandsRef = useRef<string[]>([]);
   const recoveryNoticeTimeoutRef = useRef<number | null>(null);
   const gitStatusSubscriptionRef = useRef<string | null>(null);
   const branchDiffInFlightRef = useRef<Map<string, Promise<BranchDiffFilesResult>>>(new Map());
@@ -404,6 +411,7 @@ export function useDaemonSocket({
   const pendingAttachOutputsRef = useRef<Map<string, Array<{ data: string; seq?: number }>>>(new Map());
   const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
   const daemonInstanceIDRef = useRef<string>('');
+  const hasReceivedInitialStateRef = useRef(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
@@ -511,6 +519,30 @@ export function useDaemonSocket({
     }
   }, []);
 
+  const flushQueuedCommands = useCallback((ws: WebSocket | null) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN || pendingOutboundCommandsRef.current.length === 0) {
+      return;
+    }
+    for (const serialized of pendingOutboundCommandsRef.current) {
+      ws.send(serialized);
+    }
+    pendingOutboundCommandsRef.current = [];
+  }, []);
+
+  const sendOrQueueCommand = useCallback((payload: Record<string, unknown>, options?: { waitForInitialState?: boolean }) => {
+    const serialized = JSON.stringify(payload);
+    if (options?.waitForInitialState && !hasReceivedInitialStateRef.current) {
+      pendingOutboundCommandsRef.current.push(serialized);
+      return;
+    }
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(serialized);
+      return;
+    }
+    pendingOutboundCommandsRef.current.push(serialized);
+  }, []);
+
   const connect = useCallback(async () => {
     if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
@@ -581,6 +613,9 @@ export function useDaemonSocket({
             const nextSessions = dedupeSessionsByID(data.sessions || []);
             sessionsRef.current = nextSessions;
             onSessionsUpdate(nextSessions);
+            const nextWorkspaces = data.workspaces || [];
+            workspacesRef.current = nextWorkspaces;
+            onWorkspacesUpdate(nextWorkspaces);
             const activeIDs = new Set(nextSessions.map((session) => session.id));
             for (const sessionId of attachedPtySessionsRef.current) {
               if (activeIDs.has(sessionId)) {
@@ -609,7 +644,9 @@ export function useDaemonSocket({
             if (nextWarnings.length > 0 && ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({ cmd: 'clear_warnings' }));
             }
+            hasReceivedInitialStateRef.current = true;
             setHasReceivedInitialState(true);
+            flushQueuedCommands(ws);
             if (ws.readyState === WebSocket.OPEN) {
               // Re-attach PTY streams only after recovery barrier has lifted and
               // initial_state has arrived.
@@ -617,6 +654,22 @@ export function useDaemonSocket({
                 ws.send(JSON.stringify({ cmd: 'attach_session', id: sessionId }));
               }
             }
+            break;
+
+          case 'workspace_snapshot':
+          case 'workspace_updated':
+            if (data.workspace) {
+              const nextWorkspaces = [
+                ...workspacesRef.current.filter((entry) => entry.session_id !== data.workspace!.session_id),
+                data.workspace,
+              ];
+              workspacesRef.current = nextWorkspaces;
+              onWorkspacesUpdate(nextWorkspaces);
+            }
+            break;
+
+          case 'workspace_runtime_exited':
+            // The canonical pane removal arrives via workspace_updated.
             break;
 
           case 'spawn_result': {
@@ -1337,6 +1390,7 @@ export function useDaemonSocket({
 
     ws.onclose = () => {
       wsRef.current = null;
+      hasReceivedInitialStateRef.current = false;
 
       // Circuit breaker: if open, don't retry
       if (circuitOpenRef.current) {
@@ -1369,7 +1423,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand]);
+  }, [wsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands]);
 
   useEffect(() => {
     void connect();
@@ -1514,6 +1568,44 @@ export function useDaemonSocket({
       }, 3000);
     });
   }, []);
+
+  const sendWorkspaceGet = useCallback((sessionId: string) => {
+    sendOrQueueCommand({ cmd: 'workspace_get', session_id: sessionId }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
+
+  const sendWorkspaceSplitPane = useCallback((sessionId: string, targetPaneId: string, direction: 'vertical' | 'horizontal') => {
+    sendOrQueueCommand({
+      cmd: 'workspace_split_pane',
+      session_id: sessionId,
+      target_pane_id: targetPaneId,
+      direction,
+    }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
+
+  const sendWorkspaceClosePane = useCallback((sessionId: string, paneId: string) => {
+    sendOrQueueCommand({
+      cmd: 'workspace_close_pane',
+      session_id: sessionId,
+      pane_id: paneId,
+    }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
+
+  const sendWorkspaceFocusPane = useCallback((sessionId: string, paneId: string) => {
+    sendOrQueueCommand({
+      cmd: 'workspace_focus_pane',
+      session_id: sessionId,
+      pane_id: paneId,
+    }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
+
+  const sendWorkspaceRenamePane = useCallback((sessionId: string, paneId: string, title: string) => {
+    sendOrQueueCommand({
+      cmd: 'workspace_rename_pane',
+      session_id: sessionId,
+      pane_id: paneId,
+      title,
+    }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
 
   useEffect(() => {
     setPtyBackend({
@@ -2744,6 +2836,11 @@ export function useDaemonSocket({
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendSessionVisualized,
+    sendWorkspaceGet,
+    sendWorkspaceSplitPane,
+    sendWorkspaceClosePane,
+    sendWorkspaceFocusPane,
+    sendWorkspaceRenamePane,
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,

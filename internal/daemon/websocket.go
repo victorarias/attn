@@ -306,6 +306,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		ProtocolVersion:  protocol.Ptr(protocol.ProtocolVersion),
 		DaemonInstanceID: protocol.Ptr(d.daemonInstanceID),
 		Sessions:         d.sessionsForBroadcast(d.store.List("")),
+		Workspaces:       d.listWorkspaceSnapshots(d.store.List("")),
 		Prs:              protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:            protocol.RepoStatesToValues(d.store.ListRepoStates()),
 		Authors:          protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
@@ -842,6 +843,26 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		killMsg := msg.(*protocol.KillSessionMessage)
 		d.handleKillSession(client, killMsg)
 
+	case protocol.CmdWorkspaceGet:
+		workspaceMsg := msg.(*protocol.WorkspaceGetMessage)
+		d.handleWorkspaceGet(client, workspaceMsg)
+
+	case protocol.CmdWorkspaceSplitPane:
+		workspaceMsg := msg.(*protocol.WorkspaceSplitPaneMessage)
+		d.handleWorkspaceSplitPane(client, workspaceMsg)
+
+	case protocol.CmdWorkspaceClosePane:
+		workspaceMsg := msg.(*protocol.WorkspaceClosePaneMessage)
+		d.handleWorkspaceClosePane(client, workspaceMsg)
+
+	case protocol.CmdWorkspaceFocusPane:
+		workspaceMsg := msg.(*protocol.WorkspaceFocusPaneMessage)
+		d.handleWorkspaceFocusPane(client, workspaceMsg)
+
+	case protocol.CmdWorkspaceRenamePane:
+		workspaceMsg := msg.(*protocol.WorkspaceRenamePaneMessage)
+		d.handleWorkspaceRenamePane(client, workspaceMsg)
+
 	default:
 		d.sendCommandError(client, cmd, "unsupported command")
 	}
@@ -1033,6 +1054,9 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			}
 		}
 		d.store.Add(session)
+		if _, err := d.ensureWorkspaceSnapshot(session.ID); err != nil {
+			d.logf("workspace bootstrap failed for session %s: %v", session.ID, err)
+		}
 		if persistResumeID := agentdriver.SpawnResumeSessionID(
 			driver,
 			session.ID,
@@ -1051,6 +1075,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			Event:   eventType,
 			Session: d.sessionForBroadcast(session),
 		})
+		d.broadcastWorkspaceSnapshot(session.ID)
 	}
 
 	d.sendToClient(client, protocol.SpawnResultMessage{
@@ -1230,6 +1255,16 @@ func blocksDuringRecovery(cmd string) bool {
 	case protocol.CmdPtyResize:
 		return true
 	case protocol.CmdKillSession:
+		return true
+	case protocol.CmdWorkspaceGet:
+		return true
+	case protocol.CmdWorkspaceSplitPane:
+		return true
+	case protocol.CmdWorkspaceClosePane:
+		return true
+	case protocol.CmdWorkspaceFocusPane:
+		return true
+	case protocol.CmdWorkspaceRenamePane:
 		return true
 	case protocol.CmdClearSessions:
 		return true

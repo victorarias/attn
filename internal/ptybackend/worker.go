@@ -39,11 +39,11 @@ const (
 	watchResponseTimeout    = 5 * time.Second
 	pollerFailureThreshold  = 3
 	pollerUnreachableAfter  = 30 * time.Second
-	spawnReadyTimeout       = 8 * time.Second
+	spawnReadyTimeout       = 15 * time.Second
 	spawnReadyPollInterval  = 100 * time.Millisecond
 	spawnKillGracePeriod    = 1 * time.Second
 	spawnWaitTimeout        = 500 * time.Millisecond
-	probeTimeout            = 8 * time.Second
+	probeTimeout            = 15 * time.Second
 	streamEventBufferSize   = 256
 	streamPreEventBufferCap = 8
 	workingStatePulseWindow = 2 * time.Second
@@ -334,6 +334,7 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	}
 
 	cmd := exec.CommandContext(ctx, b.cfg.BinaryPath, args...)
+	b.cfg.Logf("worker backend spawn: session=%s binary=%s socket=%s", sessionID, b.cfg.BinaryPath, session.SocketPath)
 	workerLogPath := filepath.Join(b.logDir(), sessionID+".log")
 	workerLogFile, logErr := os.OpenFile(workerLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if logErr != nil {

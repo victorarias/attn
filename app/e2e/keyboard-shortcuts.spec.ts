@@ -82,7 +82,7 @@ test.describe('Keyboard Shortcuts', () => {
   });
 
   test.describe('Dashboard Navigation', () => {
-    test('⌘D goes to dashboard from terminal', async ({ page, daemon }) => {
+    test('⌘G goes to dashboard from terminal', async ({ page, daemon }) => {
       await daemon.start();
       await page.goto('/');
       await page.waitForSelector('.dashboard');
@@ -97,8 +97,8 @@ test.describe('Keyboard Shortcuts', () => {
       // Should show terminal area
       await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
 
-      // ⌘D should return to dashboard
-      await page.keyboard.press('Meta+d');
+      // ⌘G should return to dashboard
+      await page.keyboard.press('Meta+g');
 
       // Dashboard should be visible, no active session
       await expect(page.locator('.dashboard')).toBeVisible({ timeout: 2000 });
@@ -210,7 +210,7 @@ test.describe('Keyboard Shortcuts', () => {
       await page.locator('[data-testid="session-s1"]').click();
       await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
 
-      await page.keyboard.press('Meta+w');
+      await page.keyboard.press('Meta+Shift+w');
 
       const dialog = page.locator('.worktree-cleanup-prompt .cleanup-content');
       await expect(dialog).toBeVisible({ timeout: 2000 });

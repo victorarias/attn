@@ -30,6 +30,16 @@ enum SessionAgent {
   pi,
 }
 
+enum WorkspacePaneKind {
+  main,
+  shell,
+}
+
+enum WorkspaceSplitDirection {
+  vertical,
+  horizontal,
+}
+
 enum HeatState {
   cold,
   warm,
@@ -171,6 +181,21 @@ model GitFileChange {
   additions?: int32;     // Line additions (not available for untracked)
   deletions?: int32;     // Line deletions (not available for untracked)
   old_path?: string;     // For renames
+}
+
+model WorkspacePane {
+  pane_id: string;
+  runtime_id?: string;
+  kind: WorkspacePaneKind;
+  title: string;
+}
+
+model WorkspaceSnapshot {
+  session_id: string;
+  active_pane_id: string;
+  layout_json: string;
+  panes: WorkspacePane[];
+  updated_at?: string;
 }
 
 // ============================================================================
@@ -598,6 +623,37 @@ model KillSessionMessage {
   signal?: string; // "SIGTERM", "SIGINT", ...
 }
 
+model WorkspaceGetMessage {
+  cmd: "workspace_get";
+  session_id: string;
+}
+
+model WorkspaceSplitPaneMessage {
+  cmd: "workspace_split_pane";
+  session_id: string;
+  target_pane_id: string;
+  direction: WorkspaceSplitDirection;
+}
+
+model WorkspaceClosePaneMessage {
+  cmd: "workspace_close_pane";
+  session_id: string;
+  pane_id: string;
+}
+
+model WorkspaceFocusPaneMessage {
+  cmd: "workspace_focus_pane";
+  session_id: string;
+  pane_id: string;
+}
+
+model WorkspaceRenamePaneMessage {
+  cmd: "workspace_rename_pane";
+  session_id: string;
+  pane_id: string;
+  title: string;
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -607,6 +663,7 @@ model InitialStateMessage {
   protocol_version?: string;
   daemon_instance_id?: string;
   sessions?: Session[];
+  workspaces?: WorkspaceSnapshot[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
@@ -637,6 +694,25 @@ model SessionTodosUpdatedMessage {
 model SessionsUpdatedMessage {
   event: "sessions_updated";
   sessions?: Session[];
+}
+
+model WorkspaceSnapshotMessage {
+  event: "workspace_snapshot";
+  workspace: WorkspaceSnapshot;
+}
+
+model WorkspaceUpdatedMessage {
+  event: "workspace_updated";
+  workspace: WorkspaceSnapshot;
+}
+
+model WorkspaceRuntimeExitedMessage {
+  event: "workspace_runtime_exited";
+  session_id: string;
+  pane_id: string;
+  runtime_id: string;
+  exit_code: int32;
+  signal?: string;
 }
 
 model PRsUpdatedMessage {
@@ -1098,6 +1174,7 @@ model Response {
   ok: boolean;
   error?: string;
   sessions?: Session[];
+  workspaces?: WorkspaceSnapshot[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
@@ -1118,9 +1195,13 @@ model WebSocketEvent {
 
   // Session/PR/repo state payloads
   id?: string;
+  pane_id?: string;
+  runtime_id?: string;
   session_id?: string;
   session?: Session;
   sessions?: Session[];
+  workspace?: WorkspaceSnapshot;
+  workspaces?: WorkspaceSnapshot[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
@@ -1194,6 +1275,9 @@ alias DaemonEvent =
   | SessionStateChangedMessage
   | SessionTodosUpdatedMessage
   | SessionsUpdatedMessage
+  | WorkspaceSnapshotMessage
+  | WorkspaceUpdatedMessage
+  | WorkspaceRuntimeExitedMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage
   | AuthorsUpdatedMessage

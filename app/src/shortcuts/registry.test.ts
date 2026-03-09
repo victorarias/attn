@@ -173,15 +173,19 @@ describe('shortcut registry', () => {
       expect(SHORTCUTS['terminal.open']).toEqual({ key: '`', meta: true });
       expect(SHORTCUTS['terminal.collapse']).toEqual({ key: '~', shift: true });
       expect(SHORTCUTS['terminal.new']).toEqual({ key: 't', meta: true });
-      expect(SHORTCUTS['terminal.close']).toEqual({ key: 'w', meta: true, shift: true });
+      expect(SHORTCUTS['terminal.splitVertical']).toEqual({ key: 'd', meta: true });
+      expect(SHORTCUTS['terminal.splitHorizontal']).toEqual({ key: 'd', meta: true, shift: true });
+      expect(SHORTCUTS['terminal.toggleMaximize']).toEqual({ key: 'Enter', meta: true, shift: true });
+      expect(SHORTCUTS['terminal.close']).toEqual({ key: 'w', meta: true });
       expect(SHORTCUTS['terminal.prevTab']).toEqual({ key: '{', meta: true, shift: true });
       expect(SHORTCUTS['terminal.nextTab']).toEqual({ key: '}', meta: true, shift: true });
     });
 
     it('has expected session shortcuts defined', () => {
       expect(SHORTCUTS['session.new']).toEqual({ key: 'n', meta: true });
-      expect(SHORTCUTS['session.close']).toEqual({ key: 'w', meta: true });
-      expect(SHORTCUTS['session.goToDashboard']).toEqual({ key: 'd', meta: true });
+      expect(SHORTCUTS['session.close']).toEqual({ key: 'w', meta: true, shift: true });
+      expect(SHORTCUTS['session.goToDashboard']).toEqual({ key: 'g', meta: true });
+      expect(SHORTCUTS['dock.diff']).toEqual({ key: 'g', meta: true, shift: true });
     });
   });
 });

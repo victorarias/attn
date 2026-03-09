@@ -14,13 +14,28 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Hodor Review Guidance**: Added a repository-specific Hodor skill and maintainer docs for the PR review workflow, including the local patch required for Google/Vertex model parsing in upstream Hodor `v0.3.4`.
 
+## [2026-03-09]
+
+### Added
+- **Persistent Split Workspaces**: Persist each session’s split-pane workspace in the daemon/store so nested layouts, active panes, pane titles, and shell-pane runtime mappings survive app relaunches and daemon recovery.
+
+### Changed
+- **Daemon-Owned Workspace Control Plane**: Move split-pane creation, close, focus, and rename authority into the daemon with dedicated workspace protocol messages and snapshot/update events, while the frontend now renders daemon snapshots instead of mutating the canonical split tree locally.
+- **Attached Shell Runtime Recovery**: Reconcile recovered shell-pane PTY runtimes against persisted workspace metadata at startup, prune missing panes from saved layouts, and clean up orphaned shell runtimes that no longer belong to any workspace.
+
 ## [2026-03-08]
 
 ### Changed
-- **Right Dock Default Layout**: Start the session view with the compact layout by leaving the diff dock closed until you explicitly open it with `Cmd+Shift+D`.
+- **Split Session Workspace**: Let attached session terminals open directly inside the main session area as split panes beside the primary session terminal, with `Cmd+D` and `Cmd+Shift+D` creating new vertical or horizontal splits in the active session.
+- **Shortcut Remap for Split Workflow**: Move dashboard navigation to `Cmd+Option+D` and the diff dock to `Cmd+Shift+G` so the split-terminal shortcuts can own the `D` key family in session view.
+- **Right Dock Default Layout**: Start the session view with the compact layout by leaving the diff dock closed until you explicitly open it with `Cmd+Shift+G`.
 - **Review Loop Summary Space**: Let the latest-summary card in the review-loop sidebar grow substantially taller before it starts scrolling, so longer round summaries are easier to read in place.
 
 ### Fixed
+- **`install-all` Daemon Startup Race**: Stop restarting the local `~/.local/bin/attn daemon` as part of `make install-all`, so opening the packaged app no longer races between a transient local daemon and the bundled app daemon during worker-backend startup.
+- **App Bundle Install Corruption**: Stop replacing `/Applications/attn.app` with a plain `cp -r` while the packaged app may still be running; `install-app` now shuts down the existing app/daemon first and uses `ditto` so the bundled `attn` sidecar is preserved in the installed app.
+- **Source Install Binary Stability**: Source-based installs now symlink both `~/.local/bin/attn` and the packaged app’s `Contents/MacOS/attn` sidecar to the stable Tauri release binary, avoiding the disappearing or invalid copied binaries seen in direct install locations on this machine.
+- **Worker PTY Startup Probe Flakiness**: Give worker-sidecar startup more time during daemon boot and add clearer worker startup logs so slow post-install launches are less likely to fall back to embedded mode and mark live sessions only as recoverable.
 - **Diff Detail Panel Exit Animation**: Keep dock panels in the right-dock stack through their close transition, so the detailed diff/review panel now slides out smoothly on `Cmd+Shift+E` and `Esc` instead of disappearing abruptly.
 
 ## [2026-03-07]

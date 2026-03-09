@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, WorkspaceClosePaneMessage, WorkspaceFocusPaneMessage, WorkspaceGetMessage, WorkspacePane, WorkspacePaneKind, WorkspaceRenamePaneMessage, WorkspaceRuntimeExitedMessage, WorkspaceSnapshot, WorkspaceSnapshotMessage, WorkspaceSplitDirection, WorkspaceSplitPaneMessage, WorkspaceUpdatedMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -151,6 +151,18 @@
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
 //   const wontFixCommentMessage = Convert.toWontFixCommentMessage(json);
 //   const wontFixCommentResultMessage = Convert.toWontFixCommentResultMessage(json);
+//   const workspaceClosePaneMessage = Convert.toWorkspaceClosePaneMessage(json);
+//   const workspaceFocusPaneMessage = Convert.toWorkspaceFocusPaneMessage(json);
+//   const workspaceGetMessage = Convert.toWorkspaceGetMessage(json);
+//   const workspacePane = Convert.toWorkspacePane(json);
+//   const workspacePaneKind = Convert.toWorkspacePaneKind(json);
+//   const workspaceRenamePaneMessage = Convert.toWorkspaceRenamePaneMessage(json);
+//   const workspaceRuntimeExitedMessage = Convert.toWorkspaceRuntimeExitedMessage(json);
+//   const workspaceSnapshot = Convert.toWorkspaceSnapshot(json);
+//   const workspaceSnapshotMessage = Convert.toWorkspaceSnapshotMessage(json);
+//   const workspaceSplitDirection = Convert.toWorkspaceSplitDirection(json);
+//   const workspaceSplitPaneMessage = Convert.toWorkspaceSplitPaneMessage(json);
+//   const workspaceUpdatedMessage = Convert.toWorkspaceUpdatedMessage(json);
 //   const worktree = Convert.toWorktree(json);
 //   const worktreeCreatedEvent = Convert.toWorktreeCreatedEvent(json);
 //   const worktreeDeletedEvent = Convert.toWorktreeDeletedEvent(json);
@@ -997,6 +1009,7 @@ export interface InitialStateMessage {
     sessions?:           SessionElement[];
     settings?:           { [key: string]: any };
     warnings?:           WarningElement[];
+    workspaces?:         Workspace[];
     [property: string]: any;
 }
 
@@ -1015,6 +1028,28 @@ export interface WarningElement {
     code:    string;
     message: string;
     [property: string]: any;
+}
+
+export interface Workspace {
+    active_pane_id: string;
+    layout_json:    string;
+    panes:          PaneElement[];
+    session_id:     string;
+    updated_at?:    string;
+    [property: string]: any;
+}
+
+export interface PaneElement {
+    kind:        WorkspacePaneKind;
+    pane_id:     string;
+    runtime_id?: string;
+    title:       string;
+    [property: string]: any;
+}
+
+export enum WorkspacePaneKind {
+    Main = "main",
+    Shell = "shell",
 }
 
 export interface InjectTestPRMessage {
@@ -1447,6 +1482,7 @@ export interface Response {
     repos?:           RepoElement[];
     review_loop_run?: ReviewLoopRunObject;
     sessions?:        SessionElement[];
+    workspaces?:      Workspace[];
     [property: string]: any;
 }
 
@@ -2047,6 +2083,7 @@ export interface WebSocketEvent {
     last_seq?:              number;
     modified?:              string;
     original?:              string;
+    pane_id?:               string;
     path?:                  string;
     pid?:                   number;
     protocol_version?:      string;
@@ -2059,6 +2096,7 @@ export interface WebSocketEvent {
     review_loop_run?:       ReviewLoopRunObject;
     rows?:                  number;
     running?:               boolean;
+    runtime_id?:            string;
     screen_cols?:           number;
     screen_cursor_visible?: boolean;
     screen_cursor_x?:       number;
@@ -2081,6 +2119,8 @@ export interface WebSocketEvent {
     unstaged?:              StagedElement[];
     untracked?:             StagedElement[];
     warnings?:              WarningElement[];
+    workspace?:             Workspace;
+    workspaces?:            Workspace[];
     worktrees?:             WorktreeElement[];
     [property: string]: any;
 }
@@ -2105,6 +2145,118 @@ export interface WontFixCommentResultMessage {
 
 export enum WontFixCommentResultMessageEvent {
     WontFixCommentResult = "wont_fix_comment_result",
+}
+
+export interface WorkspaceClosePaneMessage {
+    cmd:        WorkspaceClosePaneMessageCmd;
+    pane_id:    string;
+    session_id: string;
+    [property: string]: any;
+}
+
+export enum WorkspaceClosePaneMessageCmd {
+    WorkspaceClosePane = "workspace_close_pane",
+}
+
+export interface WorkspaceFocusPaneMessage {
+    cmd:        WorkspaceFocusPaneMessageCmd;
+    pane_id:    string;
+    session_id: string;
+    [property: string]: any;
+}
+
+export enum WorkspaceFocusPaneMessageCmd {
+    WorkspaceFocusPane = "workspace_focus_pane",
+}
+
+export interface WorkspaceGetMessage {
+    cmd:        WorkspaceGetMessageCmd;
+    session_id: string;
+    [property: string]: any;
+}
+
+export enum WorkspaceGetMessageCmd {
+    WorkspaceGet = "workspace_get",
+}
+
+export interface WorkspacePane {
+    kind:        WorkspacePaneKind;
+    pane_id:     string;
+    runtime_id?: string;
+    title:       string;
+    [property: string]: any;
+}
+
+export interface WorkspaceRenamePaneMessage {
+    cmd:        WorkspaceRenamePaneMessageCmd;
+    pane_id:    string;
+    session_id: string;
+    title:      string;
+    [property: string]: any;
+}
+
+export enum WorkspaceRenamePaneMessageCmd {
+    WorkspaceRenamePane = "workspace_rename_pane",
+}
+
+export interface WorkspaceRuntimeExitedMessage {
+    event:      WorkspaceRuntimeExitedMessageEvent;
+    exit_code:  number;
+    pane_id:    string;
+    runtime_id: string;
+    session_id: string;
+    signal?:    string;
+    [property: string]: any;
+}
+
+export enum WorkspaceRuntimeExitedMessageEvent {
+    WorkspaceRuntimeExited = "workspace_runtime_exited",
+}
+
+export interface WorkspaceSnapshot {
+    active_pane_id: string;
+    layout_json:    string;
+    panes:          PaneElement[];
+    session_id:     string;
+    updated_at?:    string;
+    [property: string]: any;
+}
+
+export interface WorkspaceSnapshotMessage {
+    event:     WorkspaceSnapshotMessageEvent;
+    workspace: Workspace;
+    [property: string]: any;
+}
+
+export enum WorkspaceSnapshotMessageEvent {
+    WorkspaceSnapshot = "workspace_snapshot",
+}
+
+export interface WorkspaceSplitPaneMessage {
+    cmd:            WorkspaceSplitPaneMessageCmd;
+    direction:      WorkspaceSplitDirection;
+    session_id:     string;
+    target_pane_id: string;
+    [property: string]: any;
+}
+
+export enum WorkspaceSplitPaneMessageCmd {
+    WorkspaceSplitPane = "workspace_split_pane",
+}
+
+export enum WorkspaceSplitDirection {
+    Horizontal = "horizontal",
+    Vertical = "vertical",
+}
+
+export interface WorkspaceUpdatedMessage {
+    event:     WorkspaceUpdatedMessageEvent;
+    workspace: Workspace;
+    [property: string]: any;
+}
+
+export enum WorkspaceUpdatedMessageEvent {
+    WorkspaceUpdated = "workspace_updated",
 }
 
 export interface Worktree {
@@ -3340,6 +3492,102 @@ export class Convert {
         return JSON.stringify(uncast(value, r("WontFixCommentResultMessage")), null, 2);
     }
 
+    public static toWorkspaceClosePaneMessage(json: string): WorkspaceClosePaneMessage {
+        return cast(JSON.parse(json), r("WorkspaceClosePaneMessage"));
+    }
+
+    public static workspaceClosePaneMessageToJson(value: WorkspaceClosePaneMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceClosePaneMessage")), null, 2);
+    }
+
+    public static toWorkspaceFocusPaneMessage(json: string): WorkspaceFocusPaneMessage {
+        return cast(JSON.parse(json), r("WorkspaceFocusPaneMessage"));
+    }
+
+    public static workspaceFocusPaneMessageToJson(value: WorkspaceFocusPaneMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceFocusPaneMessage")), null, 2);
+    }
+
+    public static toWorkspaceGetMessage(json: string): WorkspaceGetMessage {
+        return cast(JSON.parse(json), r("WorkspaceGetMessage"));
+    }
+
+    public static workspaceGetMessageToJson(value: WorkspaceGetMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceGetMessage")), null, 2);
+    }
+
+    public static toWorkspacePane(json: string): WorkspacePane {
+        return cast(JSON.parse(json), r("WorkspacePane"));
+    }
+
+    public static workspacePaneToJson(value: WorkspacePane): string {
+        return JSON.stringify(uncast(value, r("WorkspacePane")), null, 2);
+    }
+
+    public static toWorkspacePaneKind(json: string): WorkspacePaneKind {
+        return cast(JSON.parse(json), r("WorkspacePaneKind"));
+    }
+
+    public static workspacePaneKindToJson(value: WorkspacePaneKind): string {
+        return JSON.stringify(uncast(value, r("WorkspacePaneKind")), null, 2);
+    }
+
+    public static toWorkspaceRenamePaneMessage(json: string): WorkspaceRenamePaneMessage {
+        return cast(JSON.parse(json), r("WorkspaceRenamePaneMessage"));
+    }
+
+    public static workspaceRenamePaneMessageToJson(value: WorkspaceRenamePaneMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceRenamePaneMessage")), null, 2);
+    }
+
+    public static toWorkspaceRuntimeExitedMessage(json: string): WorkspaceRuntimeExitedMessage {
+        return cast(JSON.parse(json), r("WorkspaceRuntimeExitedMessage"));
+    }
+
+    public static workspaceRuntimeExitedMessageToJson(value: WorkspaceRuntimeExitedMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceRuntimeExitedMessage")), null, 2);
+    }
+
+    public static toWorkspaceSnapshot(json: string): WorkspaceSnapshot {
+        return cast(JSON.parse(json), r("WorkspaceSnapshot"));
+    }
+
+    public static workspaceSnapshotToJson(value: WorkspaceSnapshot): string {
+        return JSON.stringify(uncast(value, r("WorkspaceSnapshot")), null, 2);
+    }
+
+    public static toWorkspaceSnapshotMessage(json: string): WorkspaceSnapshotMessage {
+        return cast(JSON.parse(json), r("WorkspaceSnapshotMessage"));
+    }
+
+    public static workspaceSnapshotMessageToJson(value: WorkspaceSnapshotMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceSnapshotMessage")), null, 2);
+    }
+
+    public static toWorkspaceSplitDirection(json: string): WorkspaceSplitDirection {
+        return cast(JSON.parse(json), r("WorkspaceSplitDirection"));
+    }
+
+    public static workspaceSplitDirectionToJson(value: WorkspaceSplitDirection): string {
+        return JSON.stringify(uncast(value, r("WorkspaceSplitDirection")), null, 2);
+    }
+
+    public static toWorkspaceSplitPaneMessage(json: string): WorkspaceSplitPaneMessage {
+        return cast(JSON.parse(json), r("WorkspaceSplitPaneMessage"));
+    }
+
+    public static workspaceSplitPaneMessageToJson(value: WorkspaceSplitPaneMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceSplitPaneMessage")), null, 2);
+    }
+
+    public static toWorkspaceUpdatedMessage(json: string): WorkspaceUpdatedMessage {
+        return cast(JSON.parse(json), r("WorkspaceUpdatedMessage"));
+    }
+
+    public static workspaceUpdatedMessageToJson(value: WorkspaceUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceUpdatedMessage")), null, 2);
+    }
+
     public static toWorktree(json: string): Worktree {
         return cast(JSON.parse(json), r("Worktree"));
     }
@@ -3977,6 +4225,7 @@ const typeMap: any = {
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
+        { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("Workspace"))) },
     ], "any"),
     "RepoElement": o([
         { json: "collapsed", js: "collapsed", typ: true },
@@ -3986,6 +4235,19 @@ const typeMap: any = {
     "WarningElement": o([
         { json: "code", js: "code", typ: "" },
         { json: "message", js: "message", typ: "" },
+    ], "any"),
+    "Workspace": o([
+        { json: "active_pane_id", js: "active_pane_id", typ: "" },
+        { json: "layout_json", js: "layout_json", typ: "" },
+        { json: "panes", js: "panes", typ: a(r("PaneElement")) },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: u(undefined, "") },
+    ], "any"),
+    "PaneElement": o([
+        { json: "kind", js: "kind", typ: r("WorkspacePaneKind") },
+        { json: "pane_id", js: "pane_id", typ: "" },
+        { json: "runtime_id", js: "runtime_id", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
     ], "any"),
     "InjectTestPRMessage": o([
         { json: "cmd", js: "cmd", typ: r("InjectTestPRMessageCmd") },
@@ -4209,6 +4471,7 @@ const typeMap: any = {
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+        { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("Workspace"))) },
     ], "any"),
     "ReviewLoopRunObject": o([
         { json: "completed_at", js: "completed_at", typ: u(undefined, "") },
@@ -4563,6 +4826,7 @@ const typeMap: any = {
         { json: "last_seq", js: "last_seq", typ: u(undefined, 0) },
         { json: "modified", js: "modified", typ: u(undefined, "") },
         { json: "original", js: "original", typ: u(undefined, "") },
+        { json: "pane_id", js: "pane_id", typ: u(undefined, "") },
         { json: "path", js: "path", typ: u(undefined, "") },
         { json: "pid", js: "pid", typ: u(undefined, 0) },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
@@ -4575,6 +4839,7 @@ const typeMap: any = {
         { json: "review_loop_run", js: "review_loop_run", typ: u(undefined, r("ReviewLoopRunObject")) },
         { json: "rows", js: "rows", typ: u(undefined, 0) },
         { json: "running", js: "running", typ: u(undefined, true) },
+        { json: "runtime_id", js: "runtime_id", typ: u(undefined, "") },
         { json: "screen_cols", js: "screen_cols", typ: u(undefined, 0) },
         { json: "screen_cursor_visible", js: "screen_cursor_visible", typ: u(undefined, true) },
         { json: "screen_cursor_x", js: "screen_cursor_x", typ: u(undefined, 0) },
@@ -4597,6 +4862,8 @@ const typeMap: any = {
         { json: "unstaged", js: "unstaged", typ: u(undefined, a(r("StagedElement"))) },
         { json: "untracked", js: "untracked", typ: u(undefined, a(r("StagedElement"))) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
+        { json: "workspace", js: "workspace", typ: u(undefined, r("Workspace")) },
+        { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("Workspace"))) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
     ], "any"),
     "WontFixCommentMessage": o([
@@ -4608,6 +4875,61 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("WontFixCommentResultMessageEvent") },
         { json: "success", js: "success", typ: true },
+    ], "any"),
+    "WorkspaceClosePaneMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkspaceClosePaneMessageCmd") },
+        { json: "pane_id", js: "pane_id", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+    ], "any"),
+    "WorkspaceFocusPaneMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkspaceFocusPaneMessageCmd") },
+        { json: "pane_id", js: "pane_id", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+    ], "any"),
+    "WorkspaceGetMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkspaceGetMessageCmd") },
+        { json: "session_id", js: "session_id", typ: "" },
+    ], "any"),
+    "WorkspacePane": o([
+        { json: "kind", js: "kind", typ: r("WorkspacePaneKind") },
+        { json: "pane_id", js: "pane_id", typ: "" },
+        { json: "runtime_id", js: "runtime_id", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "WorkspaceRenamePaneMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkspaceRenamePaneMessageCmd") },
+        { json: "pane_id", js: "pane_id", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "WorkspaceRuntimeExitedMessage": o([
+        { json: "event", js: "event", typ: r("WorkspaceRuntimeExitedMessageEvent") },
+        { json: "exit_code", js: "exit_code", typ: 0 },
+        { json: "pane_id", js: "pane_id", typ: "" },
+        { json: "runtime_id", js: "runtime_id", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "signal", js: "signal", typ: u(undefined, "") },
+    ], "any"),
+    "WorkspaceSnapshot": o([
+        { json: "active_pane_id", js: "active_pane_id", typ: "" },
+        { json: "layout_json", js: "layout_json", typ: "" },
+        { json: "panes", js: "panes", typ: a(r("PaneElement")) },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: u(undefined, "") },
+    ], "any"),
+    "WorkspaceSnapshotMessage": o([
+        { json: "event", js: "event", typ: r("WorkspaceSnapshotMessageEvent") },
+        { json: "workspace", js: "workspace", typ: r("Workspace") },
+    ], "any"),
+    "WorkspaceSplitPaneMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorkspaceSplitPaneMessageCmd") },
+        { json: "direction", js: "direction", typ: r("WorkspaceSplitDirection") },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "target_pane_id", js: "target_pane_id", typ: "" },
+    ], "any"),
+    "WorkspaceUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("WorkspaceUpdatedMessageEvent") },
+        { json: "workspace", js: "workspace", typ: r("Workspace") },
     ], "any"),
     "Worktree": o([
         { json: "branch", js: "branch", typ: "" },
@@ -4817,6 +5139,10 @@ const typeMap: any = {
     ],
     "InitialStateMessageEvent": [
         "initial_state",
+    ],
+    "WorkspacePaneKind": [
+        "main",
+        "shell",
     ],
     "InjectTestPRMessageCmd": [
         "inject_test_pr",
@@ -5048,6 +5374,34 @@ const typeMap: any = {
     ],
     "WontFixCommentResultMessageEvent": [
         "wont_fix_comment_result",
+    ],
+    "WorkspaceClosePaneMessageCmd": [
+        "workspace_close_pane",
+    ],
+    "WorkspaceFocusPaneMessageCmd": [
+        "workspace_focus_pane",
+    ],
+    "WorkspaceGetMessageCmd": [
+        "workspace_get",
+    ],
+    "WorkspaceRenamePaneMessageCmd": [
+        "workspace_rename_pane",
+    ],
+    "WorkspaceRuntimeExitedMessageEvent": [
+        "workspace_runtime_exited",
+    ],
+    "WorkspaceSnapshotMessageEvent": [
+        "workspace_snapshot",
+    ],
+    "WorkspaceSplitPaneMessageCmd": [
+        "workspace_split_pane",
+    ],
+    "WorkspaceSplitDirection": [
+        "horizontal",
+        "vertical",
+    ],
+    "WorkspaceUpdatedMessageEvent": [
+        "workspace_updated",
     ],
     "WorktreeCreatedEventEvent": [
         "worktree_created",

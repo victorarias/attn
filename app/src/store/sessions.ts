@@ -4,33 +4,18 @@ import type { UISessionState } from '../types/sessionState';
 import { normalizeSessionState } from '../types/sessionState';
 import type { SessionAgent } from '../types/sessionAgent';
 import { normalizeSessionAgent } from '../types/sessionAgent';
+import type { DaemonWorkspace } from '../hooks/useDaemonSocket';
 import { listenPtyEvents, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEventPayload } from '../pty/bridge';
+import { triggerShortcut } from '../shortcuts/useShortcut';
+import {
+  MAIN_TERMINAL_PANE_ID,
+  createDefaultPanelState,
+  panelStateFromDaemonWorkspace,
+  type TerminalPanelState,
+} from '../types/workspace';
 
-export interface UtilityTerminal {
-  id: string;
-  ptyId: string;
-  title: string;
-}
-
-export interface TerminalPanelState {
-  isOpen: boolean;
-  height: number;
-  activeTabId: string | null;
-  terminals: UtilityTerminal[];
-  nextTerminalNumber: number;
-}
-
-const DEFAULT_PANEL_HEIGHT = 200;
-
-function createDefaultPanelState(): TerminalPanelState {
-  return {
-    isOpen: false,
-    height: DEFAULT_PANEL_HEIGHT,
-    activeTabId: null,
-    terminals: [],
-    nextTerminalNumber: 1,
-  };
-}
+export { MAIN_TERMINAL_PANE_ID };
+export type { TerminalPanelState };
 
 export interface Session {
   id: string;
@@ -76,15 +61,7 @@ interface SessionStore {
   setForkParams: (sessionId: string, resumeSessionId: string) => void;
   setLauncherConfig: (config: LauncherConfig) => void;
   syncFromDaemonSessions: (daemonSessions: DaemonSessionSnapshot[]) => void;
-
-  // Terminal panel actions
-  openTerminalPanel: (sessionId: string) => void;
-  collapseTerminalPanel: (sessionId: string) => void;
-  setTerminalPanelHeight: (sessionId: string, height: number) => void;
-  addUtilityTerminal: (sessionId: string, ptyId: string) => string;
-  removeUtilityTerminal: (sessionId: string, terminalId: string) => void;
-  setActiveUtilityTerminal: (sessionId: string, terminalId: string) => void;
-  renameUtilityTerminal: (sessionId: string, terminalId: string, title: string) => void;
+  syncFromDaemonWorkspaces: (daemonWorkspaces: DaemonWorkspace[]) => void;
 }
 
 const pendingConnections = new Set<string>();
@@ -240,12 +217,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       ptyKill({ id }).catch(console.error);
       session.terminal?.dispose();
       pendingTerminalEvents.delete(id);
-
-      // Kill all utility terminal PTYs
-      for (const utilTerminal of session.terminalPanel.terminals) {
-        ptyKill({ id: utilTerminal.ptyId }).catch(console.error);
-        pendingTerminalEvents.delete(utilTerminal.ptyId);
-      }
     }
 
     const newSessions = sessions.filter((s) => s.id !== id);
@@ -338,6 +309,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       // Shift+Enter sends newline for line breaks in Claude Code
       // Source: https://github.com/anthropics/claude-code/issues/1282
       terminal.attachCustomKeyEventHandler((ev) => {
+        const accel = ev.metaKey || ev.ctrlKey;
+        if (ev.type === 'keydown' && accel && !ev.altKey) {
+          if (!ev.shiftKey && ev.key.toLowerCase() === 't') {
+            return !triggerShortcut('terminal.new');
+          }
+          if (!ev.shiftKey && ev.key.toLowerCase() === 'd') {
+            return !triggerShortcut('terminal.splitVertical');
+          }
+          if (ev.shiftKey && ev.key.toLowerCase() === 'd') {
+            return !triggerShortcut('terminal.splitHorizontal');
+          }
+          if (ev.shiftKey && ev.key === 'Enter') {
+            return !triggerShortcut('terminal.toggleMaximize');
+          }
+          if (!ev.shiftKey && ev.key.toLowerCase() === 'w') {
+            return !triggerShortcut('terminal.close');
+          }
+        }
         if (ev.key === 'Enter' && ev.shiftKey && !ev.ctrlKey && !ev.altKey) {
           if (ev.type === 'keydown') {
             sendToPty('\n');
@@ -470,120 +459,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     });
   },
 
-  openTerminalPanel: (sessionId: string) => {
+  syncFromDaemonWorkspaces: (daemonWorkspaces: DaemonWorkspace[]) => {
+    const panelBySessionID = new Map(daemonWorkspaces.map((workspace) => [
+      workspace.session_id,
+      panelStateFromDaemonWorkspace(workspace),
+    ]));
+
     set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId ? { ...s, terminalPanel: { ...s.terminalPanel, isOpen: true } } : s
-      ),
-    }));
-  },
-
-  collapseTerminalPanel: (sessionId: string) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId ? { ...s, terminalPanel: { ...s.terminalPanel, isOpen: false } } : s
-      ),
-    }));
-  },
-
-  setTerminalPanelHeight: (sessionId: string, height: number) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId ? { ...s, terminalPanel: { ...s.terminalPanel, height } } : s
-      ),
-    }));
-  },
-
-  addUtilityTerminal: (sessionId: string, ptyId: string) => {
-    const terminalId = `util-${Date.now()}`;
-    set((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        const title = `Shell ${s.terminalPanel.nextTerminalNumber}`;
-        const newTerminal: UtilityTerminal = { id: terminalId, ptyId, title };
-        return {
-          ...s,
-          terminalPanel: {
-            ...s.terminalPanel,
-            terminals: [...s.terminalPanel.terminals, newTerminal],
-            activeTabId: terminalId,
-            nextTerminalNumber: s.terminalPanel.nextTerminalNumber + 1,
-          },
-        };
-      }),
-    }));
-    return terminalId;
-  },
-
-  removeUtilityTerminal: (sessionId: string, terminalId: string) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        const terminals = s.terminalPanel.terminals.filter((t) => t.id !== terminalId);
-        let activeTabId = s.terminalPanel.activeTabId;
-
-        // If we removed the active tab, select another
-        if (activeTabId === terminalId) {
-          const removedIndex = s.terminalPanel.terminals.findIndex((t) => t.id === terminalId);
-          if (terminals.length > 0) {
-            // Select next tab, or previous if we removed the last
-            activeTabId = terminals[Math.min(removedIndex, terminals.length - 1)].id;
-          } else {
-            activeTabId = null;
-          }
-        }
-
-        return {
-          ...s,
-          terminalPanel: {
-            ...s.terminalPanel,
-            terminals,
-            activeTabId,
-            // If no more terminals, close the panel
-            isOpen: terminals.length > 0 ? s.terminalPanel.isOpen : false,
-          },
-        };
-      }),
-    }));
-  },
-
-  setActiveUtilityTerminal: (sessionId: string, terminalId: string) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId
-          ? { ...s, terminalPanel: { ...s.terminalPanel, activeTabId: terminalId } }
-          : s
-      ),
-    }));
-  },
-
-  renameUtilityTerminal: (sessionId: string, terminalId: string, title: string) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId
-          ? {
-              ...s,
-              terminalPanel: {
-                ...s.terminalPanel,
-                terminals: s.terminalPanel.terminals.map((t) =>
-                  t.id === terminalId ? { ...t, title: title || t.title } : t
-                ),
-              },
-            }
-          : s
-      ),
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        terminalPanel: panelBySessionID.get(session.id) ?? session.terminalPanel,
+      })),
     }));
   },
 }));
 
 declare global {
   interface Window {
-    __TEST_OPEN_TERMINAL_PANEL?: (sessionId: string) => void;
-    __TEST_ADD_UTILITY_TERMINAL?: (sessionId: string, terminalId: string, title: string) => void;
-    __TEST_COLLAPSE_TERMINAL_PANEL?: (sessionId: string) => void;
-    __TEST_SET_ACTIVE_TERMINAL?: (sessionId: string, terminalId: string) => void;
-    __TEST_REMOVE_TERMINAL?: (sessionId: string, terminalId: string) => void;
-    __TEST_RENAME_TERMINAL?: (sessionId: string, terminalId: string, title: string) => void;
     __TEST_GET_ACTIVE_UTILITY_PTY?: (sessionId: string) => string | null;
   }
 }
@@ -613,50 +505,12 @@ if (import.meta.env.DEV) {
     }));
   };
 
-  window.__TEST_OPEN_TERMINAL_PANEL = (sessionId: string) => {
-    useSessionStore.getState().openTerminalPanel(sessionId);
-  };
-
-  window.__TEST_COLLAPSE_TERMINAL_PANEL = (sessionId: string) => {
-    useSessionStore.getState().collapseTerminalPanel(sessionId);
-  };
-
-  window.__TEST_ADD_UTILITY_TERMINAL = (sessionId: string, terminalId: string, title: string) => {
-    useSessionStore.setState((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        const newTerminal = { id: terminalId, ptyId: `mock-pty-${terminalId}`, title };
-        return {
-          ...s,
-          terminalPanel: {
-            ...s.terminalPanel,
-            terminals: [...s.terminalPanel.terminals, newTerminal],
-            activeTabId: terminalId,
-            isOpen: true,
-          },
-        };
-      }),
-    }));
-  };
-
-  window.__TEST_SET_ACTIVE_TERMINAL = (sessionId: string, terminalId: string) => {
-    useSessionStore.getState().setActiveUtilityTerminal(sessionId, terminalId);
-  };
-
-  window.__TEST_REMOVE_TERMINAL = (sessionId: string, terminalId: string) => {
-    useSessionStore.getState().removeUtilityTerminal(sessionId, terminalId);
-  };
-
-  window.__TEST_RENAME_TERMINAL = (sessionId: string, terminalId: string, title: string) => {
-    useSessionStore.getState().renameUtilityTerminal(sessionId, terminalId, title);
-  };
-
   window.__TEST_GET_ACTIVE_UTILITY_PTY = (sessionId: string) => {
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
-    if (!session || !session.terminalPanel.activeTabId) {
+    if (!session || session.terminalPanel.activePaneId === MAIN_TERMINAL_PANE_ID) {
       return null;
     }
-    const active = session.terminalPanel.terminals.find((terminal) => terminal.id === session.terminalPanel.activeTabId);
+    const active = session.terminalPanel.terminals.find((terminal) => terminal.id === session.terminalPanel.activePaneId);
     return active?.ptyId ?? null;
   };
 }

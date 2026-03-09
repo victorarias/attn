@@ -248,6 +248,24 @@ var migrations = []migration{
 		ON review_loop_interactions(status);`},
 	{28, "add result_text to review_loop_iterations", "ALTER TABLE review_loop_iterations ADD COLUMN result_text TEXT"},
 	{29, "add change_stats_json to review_loop_iterations", "ALTER TABLE review_loop_iterations ADD COLUMN change_stats_json TEXT"},
+	{30, "create workspace persistence tables", `CREATE TABLE IF NOT EXISTS session_workspaces (
+		session_id TEXT PRIMARY KEY,
+		active_pane_id TEXT NOT NULL,
+		layout_json TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS workspace_panes (
+		session_id TEXT NOT NULL,
+		pane_id TEXT NOT NULL,
+		runtime_id TEXT NOT NULL DEFAULT '',
+		kind TEXT NOT NULL,
+		title TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY (session_id, pane_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_workspace_panes_runtime_id
+		ON workspace_panes(runtime_id);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

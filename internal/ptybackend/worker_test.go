@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,6 +41,23 @@ func mustWorkerSocketPath(t *testing.T, backend *WorkerBackend, sessionID string
 		t.Fatalf("expectedSocketPath(%q) error: %v", sessionID, err)
 	}
 	return path
+}
+
+func buildAttnBinaryForWorkerTest(t *testing.T) string {
+	t.Helper()
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
+	binary := filepath.Join(t.TempDir(), "attn-test-bin")
+	cmd := exec.Command("go", "build", "-o", binary, "./cmd/attn")
+	cmd.Dir = repoRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build attn binary: %v\n%s", err, string(output))
+	}
+	return binary
 }
 
 func TestShouldForwardStateLocked(t *testing.T) {
@@ -979,6 +998,46 @@ func TestWorkerBackend_Spawn_CleansUpUnreadyWorkerProcess(t *testing.T) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("worker pid %d still alive after spawn failure cleanup", pid)
+}
+
+func TestWorkerBackend_Spawn_ToleratesSlowWorkerBinaryStartup(t *testing.T) {
+	root := newWorkerBackendTestRoot(t)
+	realBinary := buildAttnBinaryForWorkerTest(t)
+	scriptPath := filepath.Join(root, "slow-worker.sh")
+	script := "#!/bin/sh\n" +
+		"sleep 9\n" +
+		"exec \"" + realBinary + "\" \"$@\"\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil {
+		t.Fatalf("WriteFile(slow worker script) error: %v", err)
+	}
+
+	backend, err := NewWorker(WorkerBackendConfig{
+		DataRoot:         root,
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BinaryPath:       scriptPath,
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+
+	start := time.Now()
+	sessionID := "sess-slow-start"
+	if err := backend.Spawn(context.Background(), SpawnOptions{
+		ID:    sessionID,
+		Agent: "shell",
+		CWD:   root,
+		Cols:  80,
+		Rows:  24,
+	}); err != nil {
+		t.Fatalf("Spawn() error after slow worker startup: %v", err)
+	}
+	defer func() {
+		_ = backend.Remove(context.Background(), sessionID)
+	}()
+
+	if elapsed := time.Since(start); elapsed < 9*time.Second {
+		t.Fatalf("Spawn() returned too quickly after slow worker startup: %s", elapsed)
+	}
 }
 
 func startWatchStallWorkerRPCServer(

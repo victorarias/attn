@@ -65,7 +65,7 @@ const (
 	deferredRecoveryMaxAttempts   = 3
 	deferredRecoveryRetryInterval = 10 * time.Second
 	deferredRecoveryRPCTimeout    = 5 * time.Second
-	workerStartupProbeTimeout     = 10 * time.Second
+	workerStartupProbeTimeout     = 20 * time.Second
 
 	warnPersistenceDegraded       = "persistence_degraded"
 	warnWorkerRecoveryPartial     = "worker_recovery_partial"
@@ -582,6 +582,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 
 	if _, ok := d.ptyBackend.(ptybackend.RecoverableRuntime); ok {
 		d.reconcileStartupWorkerSessions(recoveryReport, recoverErr, recoveryStartedAt)
+		d.reconcileWorkspacesWithPTYBackend(context.Background())
 		return
 	}
 
@@ -593,6 +594,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 			fmt.Sprintf("Removed %d stale sessions from a previous daemon run because no live PTY was found.", removedSessions),
 		)
 	}
+	d.reconcileWorkspacesWithPTYBackend(context.Background())
 }
 
 func (d *Daemon) recoverPTYBackend(timeout time.Duration) (ptybackend.RecoveryReport, error) {
@@ -995,6 +997,8 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 				Session: updated,
 			})
 		}
+	} else {
+		d.handleWorkspaceRuntimeExit(info.ID, info.ExitCode, info.Signal)
 	}
 
 	event := &protocol.WebSocketEvent{
@@ -1425,6 +1429,9 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		}
 	}
 	d.store.Add(session)
+	if _, err := d.ensureWorkspaceSnapshot(session.ID); err != nil {
+		d.logf("workspace bootstrap failed for session %s: %v", session.ID, err)
+	}
 
 	// Track this location in recent locations
 	label := filepath.Base(msg.Dir)
@@ -1441,6 +1448,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		Event:   eventType,
 		Session: d.sessionForBroadcast(session),
 	})
+	d.broadcastWorkspaceSnapshot(session.ID)
 }
 
 func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage) {
@@ -1454,6 +1462,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 		}
 	}
 
+	d.killWorkspaceRuntimesForSession(msg.ID)
 	d.terminateSession(msg.ID, syscall.SIGTERM)
 	d.handleReviewLoopSourceSessionExit(msg.ID)
 	d.setPendingInputSource(msg.ID, "")

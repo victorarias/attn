@@ -16,7 +16,7 @@ import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
 import { RightDock } from './components/RightDock';
-import { UtilityTerminalPanel } from './components/UtilityTerminalPanel';
+import { SessionTerminalWorkspace } from './components/SessionTerminalWorkspace';
 import { ThumbsModal } from './components/ThumbsModal';
 import { ForkDialog } from './components/ForkDialog';
 import { SettingsModal } from './components/SettingsModal';
@@ -24,8 +24,8 @@ import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
-import { useSessionStore } from './store/sessions';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonPR, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
+import { MAIN_TERMINAL_PANE_ID, useSessionStore } from './store/sessions';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { useDaemonStore } from './store/daemonSessions';
@@ -109,6 +109,7 @@ function App() {
   const [settingError, setSettingError] = useState<string | null>(null);
 
   const [reviewLoopsBySessionId, setReviewLoopsBySessionId] = useState<Record<string, ReviewLoopState>>({});
+  const [daemonWorkspaces, setDaemonWorkspaces] = useState<DaemonWorkspace[]>([]);
 
   // Worktrees state (used by WorktreeCleanupPrompt)
   const [, setWorktrees] = useState<DaemonWorktree[]>([]);
@@ -267,6 +268,9 @@ function App() {
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendSessionVisualized,
+    sendWorkspaceSplitPane,
+    sendWorkspaceClosePane,
+    sendWorkspaceFocusPane,
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,
@@ -291,6 +295,7 @@ function App() {
     clearWarnings,
   } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
+    onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
     onReposUpdate: setRepoStates,
     onAuthorsUpdate: setAuthorStates,
@@ -323,6 +328,7 @@ function App() {
     <SettingsProvider settings={settings} setSetting={sendSetSetting}>
       <AppContent
         daemonSessions={daemonSessions}
+        daemonWorkspaces={daemonWorkspaces}
         prs={prs}
         settings={settings}
         gitStatus={gitStatus}
@@ -366,6 +372,9 @@ function App() {
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
         sendSessionVisualized={sendSessionVisualized}
+        sendWorkspaceSplitPane={sendWorkspaceSplitPane}
+        sendWorkspaceClosePane={sendWorkspaceClosePane}
+        sendWorkspaceFocusPane={sendWorkspaceFocusPane}
         sendGetFileDiff={sendGetFileDiff}
         sendGetBranchDiffFiles={sendGetBranchDiffFiles}
         getRepoInfo={getRepoInfo}
@@ -393,6 +402,7 @@ function App() {
 // Props interface for AppContent - receives daemon state and functions from App
 interface AppContentProps {
   daemonSessions: DaemonSession[];
+  daemonWorkspaces: DaemonWorkspace[];
   prs: DaemonPR[];
   settings: Record<string, string>;
   gitStatus: GitStatusUpdate | null;
@@ -436,6 +446,9 @@ interface AppContentProps {
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
   sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
+  sendWorkspaceSplitPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceSplitPane'];
+  sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
+  sendWorkspaceFocusPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceFocusPane'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
   sendGetBranchDiffFiles: ReturnType<typeof useDaemonSocket>['sendGetBranchDiffFiles'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
@@ -459,6 +472,7 @@ interface AppContentProps {
 
 function AppContent({
   daemonSessions,
+  daemonWorkspaces,
   prs,
   settings,
   gitStatus,
@@ -501,6 +515,9 @@ function AppContent({
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
   sendSessionVisualized,
+  sendWorkspaceSplitPane,
+  sendWorkspaceClosePane,
+  sendWorkspaceFocusPane,
   sendGetFileDiff,
   sendGetBranchDiffFiles,
   getRepoInfo,
@@ -530,16 +547,10 @@ function AppContent({
     connectTerminal,
     resizeSession,
     reloadSession,
-    openTerminalPanel,
-    collapseTerminalPanel,
-    setTerminalPanelHeight,
-    addUtilityTerminal,
-    removeUtilityTerminal,
-    setActiveUtilityTerminal,
-    renameUtilityTerminal,
     setForkParams,
     setLauncherConfig,
     syncFromDaemonSessions,
+    syncFromDaemonWorkspaces,
   } = useSessionStore();
 
   // UI scale for font sizing (Cmd+/Cmd-) - now uses SettingsContext
@@ -599,6 +610,13 @@ function AppContent({
     }
     syncFromDaemonSessions(daemonSessions);
   }, [daemonSessions, hasReceivedInitialState, syncFromDaemonSessions]);
+
+  useEffect(() => {
+    if (!hasReceivedInitialState) {
+      return;
+    }
+    syncFromDaemonWorkspaces(daemonWorkspaces);
+  }, [daemonWorkspaces, hasReceivedInitialState, syncFromDaemonWorkspaces]);
 
   // Refresh PRs with proper async handling
   const handleRefreshPRs = useCallback(async () => {
@@ -1218,21 +1236,19 @@ function AppContent({
   const handleSelectSession = useCallback(
     (id: string) => {
       const nextSession = sessions.find((session) => session.id === id);
-      const utilityOpen =
-        nextSession?.terminalPanel.isOpen === true &&
-        nextSession.terminalPanel.terminals.length > 0 &&
-        nextSession.terminalPanel.activeTabId !== null;
+      const utilityFocused =
+        nextSession?.terminalPanel.terminals.length &&
+        nextSession.terminalPanel.activePaneId !== MAIN_TERMINAL_PANE_ID;
 
       setActiveSession(id);
-      if (utilityOpen) {
+      if (utilityFocused) {
         setUtilityFocusRequestToken((token) => token + 1);
       }
       // Fit and focus the terminal after a short delay (allows CSS to apply)
       setTimeout(() => {
         const handle = terminalRefs.current.get(id);
         handle?.fit();
-        // Keep utility terminal focus when an existing utility tab is open.
-        if (!utilityOpen) {
+        if (!utilityFocused) {
           handle?.focus();
         }
       }, 50);
@@ -1579,7 +1595,7 @@ function AppContent({
       icon: <DiffIcon />,
       active: diffPanelOpen,
       disabled: !activeSessionId,
-      shortcutHint: '⌘⇧D diff',
+      shortcutHint: '⌘⇧G diff',
       onClick: () => toggleDockPanel('diff'),
     },
     {
@@ -1648,35 +1664,6 @@ function AppContent({
   }, [activeSessionId, answerReviewLoop, setReviewLoopStateForSession, showError]);
 
   // Terminal panel handlers for active session
-  const handleOpenTerminalPanel = useCallback(() => {
-    if (activeSessionId) openTerminalPanel(activeSessionId);
-  }, [activeSessionId, openTerminalPanel]);
-
-  const handleCollapseTerminalPanel = useCallback(() => {
-    if (activeSessionId) collapseTerminalPanel(activeSessionId);
-  }, [activeSessionId, collapseTerminalPanel]);
-
-  const handleSetTerminalPanelHeight = useCallback((height: number) => {
-    if (activeSessionId) setTerminalPanelHeight(activeSessionId, height);
-  }, [activeSessionId, setTerminalPanelHeight]);
-
-  const handleAddUtilityTerminal = useCallback((ptyId: string) => {
-    if (activeSessionId) return addUtilityTerminal(activeSessionId, ptyId);
-    return '';
-  }, [activeSessionId, addUtilityTerminal]);
-
-  const handleRemoveUtilityTerminal = useCallback((terminalId: string) => {
-    if (activeSessionId) removeUtilityTerminal(activeSessionId, terminalId);
-  }, [activeSessionId, removeUtilityTerminal]);
-
-  const handleSetActiveUtilityTerminal = useCallback((terminalId: string) => {
-    if (activeSessionId) setActiveUtilityTerminal(activeSessionId, terminalId);
-  }, [activeSessionId, setActiveUtilityTerminal]);
-
-  const handleRenameUtilityTerminal = useCallback((terminalId: string, title: string) => {
-    if (activeSessionId) renameUtilityTerminal(activeSessionId, terminalId, title);
-  }, [activeSessionId, renameUtilityTerminal]);
-
   // Use keyboard shortcuts hook
   useKeyboardShortcuts({
     onNewSession: handleNewSession,
@@ -1791,13 +1778,29 @@ function AppContent({
                 key={session.id}
                 className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
               >
-                <Terminal
-                  ref={setTerminalRef(session.id)}
+                <SessionTerminalWorkspace
+                  sessionId={session.id}
+                  cwd={session.cwd}
+                  panel={session.terminalPanel}
                   fontSize={terminalFontSize}
                   resolvedTheme={resolvedTheme}
-                  debugName={`main:${session.label}:${session.id}`}
-                  onReady={handleTerminalReady(session.id)}
-                  onResize={handleResize(session.id)}
+                  focusRequestToken={utilityFocusRequestToken}
+                  enabled={!locationPickerOpen && !branchPickerOpen}
+                  isActiveSession={session.id === activeSessionId}
+                  focusMainPane={() => terminalRefs.current.get(session.id)?.focus()}
+                  onSplitPane={(targetPaneId, direction) => sendWorkspaceSplitPane(session.id, targetPaneId, direction)}
+                  onClosePane={(paneId) => sendWorkspaceClosePane(session.id, paneId)}
+                  onFocusPane={(paneId) => sendWorkspaceFocusPane(session.id, paneId)}
+                  mainPane={(
+                    <Terminal
+                      ref={setTerminalRef(session.id)}
+                      fontSize={terminalFontSize}
+                      resolvedTheme={resolvedTheme}
+                      debugName={`main:${session.label}:${session.id}`}
+                      onReady={handleTerminalReady(session.id)}
+                      onResize={handleResize(session.id)}
+                    />
+                  )}
                 />
               </div>
             ))}
@@ -1808,27 +1811,6 @@ function AppContent({
               </div>
             )}
           </div>
-          {activeSessionId && (() => {
-            const activeSession = sessions.find(s => s.id === activeSessionId);
-            if (!activeSession) return null;
-            return (
-              <UtilityTerminalPanel
-                cwd={activeSession.cwd}
-                panel={activeSession.terminalPanel}
-                fontSize={terminalFontSize}
-                resolvedTheme={resolvedTheme}
-                onOpen={handleOpenTerminalPanel}
-                onCollapse={handleCollapseTerminalPanel}
-                onSetHeight={handleSetTerminalPanelHeight}
-                onAddTerminal={handleAddUtilityTerminal}
-                onRemoveTerminal={handleRemoveUtilityTerminal}
-                onSetActiveTerminal={handleSetActiveUtilityTerminal}
-                onRenameTerminal={handleRenameUtilityTerminal}
-                focusRequestToken={utilityFocusRequestToken}
-                enabled={!locationPickerOpen && !branchPickerOpen}
-              />
-            );
-          })()}
         </div>
         <RightDock
           panelOrder={dockPanelStack}

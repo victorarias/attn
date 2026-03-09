@@ -45,7 +45,7 @@ vi.mock('./components/BranchPicker', () => ({ BranchPicker: () => null }));
 vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
 vi.mock('./components/ChangesPanel', () => ({ ChangesPanel: () => null }));
 vi.mock('./components/DiffDetailPanel', () => ({ DiffDetailPanel: () => null }));
-vi.mock('./components/UtilityTerminalPanel', () => ({ UtilityTerminalPanel: () => null }));
+vi.mock('./components/SessionTerminalWorkspace', () => ({ SessionTerminalWorkspace: () => null }));
 vi.mock('./components/ThumbsModal', () => ({ ThumbsModal: () => null }));
 vi.mock('./components/ForkDialog', () => ({ ForkDialog: () => null }));
 
@@ -123,11 +123,9 @@ describe('worktree cleanup prompt', () => {
           branch: 'feature-a',
           isWorktree: true,
           terminalPanel: {
-            isOpen: false,
-            height: 200,
-            activeTabId: null,
+            activePaneId: 'main',
             terminals: [],
-            nextTerminalNumber: 1,
+            layoutTree: { type: 'pane', paneId: 'main' },
           },
         },
       ],
@@ -138,16 +136,10 @@ describe('worktree cleanup prompt', () => {
       connectTerminal: vi.fn(),
       resizeSession: vi.fn(),
       reloadSession: vi.fn(async () => {}),
-      openTerminalPanel: vi.fn(),
-      collapseTerminalPanel: vi.fn(),
-      setTerminalPanelHeight: vi.fn(),
-      addUtilityTerminal: vi.fn(),
-      removeUtilityTerminal: vi.fn(),
-      setActiveUtilityTerminal: vi.fn(),
-      renameUtilityTerminal: vi.fn(),
       setForkParams: vi.fn(),
       setLauncherConfig: vi.fn(),
       syncFromDaemonSessions: vi.fn(),
+      syncFromDaemonWorkspaces: vi.fn(),
     });
 
     mockUseDaemonStore.mockReturnValue({

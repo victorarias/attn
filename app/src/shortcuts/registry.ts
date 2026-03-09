@@ -14,10 +14,10 @@ export const SHORTCUTS = {
   // Session management (existing)
   'session.new': { key: 'n', meta: true },
   'session.newWorktree': { key: 'n', meta: true, shift: true },
-  'session.close': { key: 'w', meta: true },
+  'session.close': { key: 'w', meta: true, shift: true },
   'session.prev': { key: 'ArrowUp', meta: true },
   'session.next': { key: 'ArrowDown', meta: true },
-  'session.goToDashboard': { key: 'd', meta: true },
+  'session.goToDashboard': { key: 'g', meta: true },
   'session.jumpToWaiting': { key: 'j', meta: true },
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
   'session.openBranchPicker': { key: 'b', meta: true },
@@ -25,7 +25,7 @@ export const SHORTCUTS = {
   'session.fork': { key: 'f', meta: true, shift: true },
 
   // Dock panels
-  'dock.diff': { key: 'd', meta: true, shift: true },
+  'dock.diff': { key: 'g', meta: true, shift: true },
   'dock.reviewLoop': { key: 'r', meta: true, shift: true },
   'dock.diffDetail': { key: 'e', meta: true, shift: true },
   'dock.attention': { key: 'p', meta: true, shift: true },
@@ -48,7 +48,10 @@ export const SHORTCUTS = {
   'terminal.open': { key: '`', meta: true },
   'terminal.collapse': { key: '~', shift: true },  // Shift+` produces ~ on US keyboards
   'terminal.new': { key: 't', meta: true },
-  'terminal.close': { key: 'w', meta: true, shift: true },
+  'terminal.splitVertical': { key: 'd', meta: true },
+  'terminal.splitHorizontal': { key: 'd', meta: true, shift: true },
+  'terminal.toggleMaximize': { key: 'Enter', meta: true, shift: true },
+  'terminal.close': { key: 'w', meta: true },
   'terminal.prevTab': { key: '{', meta: true, shift: true },  // Shift+[ produces {
   'terminal.nextTab': { key: '}', meta: true, shift: true },  // Shift+] produces }
 } as const;
