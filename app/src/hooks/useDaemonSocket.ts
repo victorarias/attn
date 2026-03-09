@@ -514,6 +514,12 @@ export function useDaemonSocket({
       case 'kill_session':
         rejectPendingByPredicate((key) => key.startsWith('pty_kill_'), error);
         return;
+      case 'workspace_split_pane':
+      case 'workspace_close_pane':
+      case 'workspace_focus_pane':
+      case 'workspace_rename_pane':
+        rejectPendingByPredicate((key) => key.startsWith(`workspace:${cmd}:`), error);
+        return;
       case 'approve_pr':
         rejectPendingByPredicate((key) => key.endsWith(':approve'), error);
         return;
