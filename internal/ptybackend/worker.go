@@ -39,17 +39,20 @@ const (
 	watchResponseTimeout   = 5 * time.Second
 	pollerFailureThreshold = 3
 	pollerUnreachableAfter = 30 * time.Second
-	// Worker startup includes binary launch, socket bind, PTY spawn, and registry
-	// write. Slow CI machines can take well beyond the nominal "binary is up"
-	// time, so keep the ready budget comfortably above the slow-start test case.
-	spawnReadyTimeout       = 45 * time.Second
 	spawnReadyPollInterval  = 100 * time.Millisecond
 	spawnKillGracePeriod    = 1 * time.Second
 	spawnWaitTimeout        = 500 * time.Millisecond
-	probeTimeout            = 45 * time.Second
 	streamEventBufferSize   = 256
 	streamPreEventBufferCap = 8
 	workingStatePulseWindow = 2 * time.Second
+)
+
+var (
+	// Worker startup includes binary launch, socket bind, PTY spawn, and registry
+	// write. Slow CI machines can take well beyond the nominal "binary is up"
+	// time, so keep the ready budget comfortably above the slow-start test case.
+	spawnReadyTimeout = 45 * time.Second
+	probeTimeout      = 45 * time.Second
 )
 
 type WorkerBackendConfig struct {

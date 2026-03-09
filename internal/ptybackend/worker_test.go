@@ -1003,6 +1003,14 @@ func TestWorkerBackend_Spawn_CleansUpUnreadyWorkerProcess(t *testing.T) {
 func TestWorkerBackend_Spawn_ToleratesSlowWorkerBinaryStartup(t *testing.T) {
 	root := newWorkerBackendTestRoot(t)
 	realBinary := buildAttnBinaryForWorkerTest(t)
+	prevSpawnReadyTimeout := spawnReadyTimeout
+	prevProbeTimeout := probeTimeout
+	spawnReadyTimeout = 60 * time.Second
+	probeTimeout = 60 * time.Second
+	defer func() {
+		spawnReadyTimeout = prevSpawnReadyTimeout
+		probeTimeout = prevProbeTimeout
+	}()
 	scriptPath := filepath.Join(root, "slow-worker.sh")
 	script := "#!/bin/sh\n" +
 		"sleep 9\n" +
