@@ -15,6 +15,8 @@
     "real-app:smoke": "node scripts/real-app-harness/smoke.mjs",
     "real-app:repro-panes": "node scripts/real-app-harness/repro-older-pane-writability.mjs",
     "real-app:bridge-smoke": "node scripts/real-app-harness/bridge-smoke.mjs",
+    "real-app:bridge-repro-shells": "node scripts/real-app-harness/bridge-repro-shell-return.mjs",
+    "real-app:bridge-repro-existing-shells": "node scripts/real-app-harness/bridge-repro-existing-shells.mjs",
     "real-app:bridge-repro-main": "node scripts/real-app-harness/bridge-repro-main-return.mjs",
     "real-app:bridge-cli": "node scripts/real-app-harness/ui-automation-cli.mjs",
     "e2e": "playwright test",

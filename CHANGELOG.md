@@ -17,6 +17,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Older-Pane Writability Repro Harness**: Add a second packaged-app automation scenario that creates two split utility panes, refocuses the older pane with a real window click, and checks whether it still accepts shell input after the newer pane exists.
 - **Dev-Only UI Automation Bridge**: Add a build-gated localhost automation bridge for the Tauri app so packaged-app tests can create sessions, split/focus panes, write to runtimes, and inspect workspace state without taking over the user’s keyboard and mouse.
 
+### Changed
+- **Bridge Repro Stability**: The packaged-app UI automation bridge now supports fresh app relaunches, server-side request logging, frontend responsiveness checks, pre-launch daemon cleanup of stale full-flow sessions, and diff-based shell-pane selection so the main-pane return repro fails much more consistently in the real bug region instead of drifting during bootstrap.
+
 ## [2026-03-09]
 
 ### Added

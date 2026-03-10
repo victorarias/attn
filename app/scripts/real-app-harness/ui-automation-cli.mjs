@@ -7,6 +7,7 @@ function printHelp() {
 
 Options:
   --launch         Launch /Applications/attn.app before connecting
+  --fresh-launch   Quit and relaunch /Applications/attn.app before connecting
   --wait-ready     Wait for the frontend automation hook before sending the action
 
 Examples:
@@ -22,11 +23,13 @@ async function main() {
     args.shift();
   }
   let launch = false;
+  let freshLaunch = false;
   let waitReady = false;
 
   while (args[0]?.startsWith('--')) {
     const flag = args.shift();
     if (flag === '--launch') launch = true;
+    else if (flag === '--fresh-launch') freshLaunch = true;
     else if (flag === '--wait-ready') waitReady = true;
     else if (flag === '--help' || flag === '-h') {
       printHelp();
@@ -47,12 +50,15 @@ async function main() {
   const payload = payloadArg ? JSON.parse(payloadArg) : {};
 
   const client = new UiAutomationClient();
-  if (launch) {
+  if (freshLaunch) {
+    await client.launchFreshApp();
+  } else if (launch) {
     await client.launchApp();
   }
   await client.waitForManifest(20_000);
   if (waitReady) {
     await client.waitForReady(20_000);
+    await client.waitForFrontendResponsive(20_000);
   }
   const result = await client.request(action, payload);
   console.log(JSON.stringify(result, null, 2));

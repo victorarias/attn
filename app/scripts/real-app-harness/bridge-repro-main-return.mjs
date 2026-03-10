@@ -14,45 +14,148 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForPaneText(client, sessionId, paneId, needle, timeoutMs = 8_000) {
+function compact(text) {
+  return text.replace(/\s+/g, '');
+}
+
+function createTracer(runDir) {
+  const tracePath = path.join(runDir, 'trace.log');
+  return {
+    log(message, details) {
+      const line = `[${new Date().toISOString()}] ${message}${details ? ` ${JSON.stringify(details)}` : ''}\n`;
+      fs.appendFileSync(tracePath, line, 'utf8');
+      process.stdout.write(line);
+    },
+  };
+}
+
+async function waitForPaneText(request, sessionId, paneId, predicate, timeoutMs = 15_000) {
   const startedAt = Date.now();
   let lastText = '';
   let lastPayload = null;
 
   while (Date.now() - startedAt < timeoutMs) {
-    lastPayload = await client.request('read_pane_text', { sessionId, paneId });
+    lastPayload = await request('read_pane_text', { sessionId, paneId });
     lastText = lastPayload?.text || '';
-    if (lastText.includes(needle)) {
+    if (predicate(lastText)) {
       return lastPayload;
     }
     await sleep(250);
   }
 
   throw new Error(
-    `Timed out waiting for pane text in ${paneId} to contain ${JSON.stringify(needle)}. Last pane text tail:\n${lastText.slice(-400)}`
+    `Timed out waiting for pane text in ${paneId}. Last pane text tail:\n${lastText.slice(-600)}`
   );
 }
 
-async function captureBridgeDebugArtifacts(client, runDir, suffix = 'failure') {
+async function waitForUiSessionVisible(request, sessionId, timeoutMs = 15_000) {
+  const startedAt = Date.now();
+  let lastState = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastState = await request('get_pane_state', { sessionId, paneId: 'main' }).catch(() => null);
+    if (lastState?.pane?.bounds) {
+      return lastState;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(
+    `Timed out waiting for UI session ${sessionId} to be visible. Last pane state:\n${JSON.stringify(lastState, null, 2)}`
+  );
+}
+
+async function waitForNewShellPane(request, sessionId, existingPaneIds, timeoutMs = 12_000) {
+  const startedAt = Date.now();
+  let lastWorkspace = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastWorkspace = await request('get_workspace', { sessionId });
+    const newShells = (lastWorkspace.panes || []).filter(
+      (pane) => pane.kind === 'shell' && !existingPaneIds.has(pane.paneId)
+    );
+    if (newShells.length === 1) {
+      return newShells[0];
+    }
+    if (newShells.length > 1) {
+      const activeShell = newShells.find((pane) => pane.paneId === lastWorkspace.activePaneId);
+      if (activeShell) {
+        return activeShell;
+      }
+    }
+    await sleep(250);
+  }
+
+  throw new Error(
+    `Timed out waiting for new shell pane. Existing pane ids=${JSON.stringify([...existingPaneIds])}. Last workspace:\n${JSON.stringify(lastWorkspace, null, 2)}`
+  );
+}
+
+async function waitForPaneState(request, sessionId, paneId, predicate, timeoutMs = 12_000) {
+  const startedAt = Date.now();
+  let lastState = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastState = await request('get_pane_state', { sessionId, paneId });
+    if (predicate(lastState)) {
+      return lastState;
+    }
+    await sleep(150);
+  }
+
+  throw new Error(
+    `Timed out waiting for pane state ${paneId}. Last state:\n${JSON.stringify(lastState, null, 2)}`
+  );
+}
+
+async function waitForPaneVisible(request, sessionId, paneId, timeoutMs = 12_000) {
+  return waitForPaneState(
+    request,
+    sessionId,
+    paneId,
+    (state) => Boolean(state?.pane?.bounds && state.pane.bounds.width > 0 && state.pane.bounds.height > 0),
+    timeoutMs,
+  );
+}
+
+async function cleanupPreviousRuns(observer, trace) {
   try {
-    const debugDump = await client.request('dump_pane_debug');
-    saveJson(path.join(runDir, `pane-debug-${suffix}.json`), debugDump);
+    await observer.connect();
+    const removed = await observer.unregisterMatchingSessions(
+      (session) => typeof session.label === 'string' && session.label.startsWith('full-flow-'),
+      15_000,
+    );
+    trace.log('daemon:cleanup', {
+      removedSessionIds: removed.map((session) => session.id),
+      removedLabels: removed.map((session) => session.label),
+    });
+  } catch (error) {
+    trace.log('daemon:cleanup-skipped', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    await observer.close();
+  }
+}
+
+async function captureArtifacts(request, runDir, prefix) {
+  try {
+    const snapshot = await request('capture_structured_snapshot');
+    saveJson(path.join(runDir, `${prefix}-structured-snapshot.json`), snapshot);
   } catch (error) {
     fs.writeFileSync(
-      path.join(runDir, `pane-debug-${suffix}.txt`),
+      path.join(runDir, `${prefix}-structured-snapshot.txt`),
       error instanceof Error ? error.stack || error.message : String(error),
       'utf8'
     );
   }
 
   try {
-    const screenshot = await client.request('capture_screenshot', {
-      path: path.join(runDir, `ui-${suffix}.png`),
-    });
-    saveJson(path.join(runDir, `screenshot-${suffix}.json`), screenshot);
+    const debugDump = await request('dump_pane_debug');
+    saveJson(path.join(runDir, `${prefix}-pane-debug.json`), debugDump);
   } catch (error) {
     fs.writeFileSync(
-      path.join(runDir, `screenshot-${suffix}.txt`),
+      path.join(runDir, `${prefix}-pane-debug.txt`),
       error instanceof Error ? error.stack || error.message : String(error),
       'utf8'
     );
@@ -67,136 +170,167 @@ async function main() {
   }
 
   const { runId, runDir, sessionDir } = createRunContext(options, 'bridge-repro-main-return');
-  const sessionLabel = `attn-bridge-${runId}`;
-  const utilityToken = `__ATTN_BRIDGE_UTILITY_${Date.now()}__`;
-  const mainToken = `__ATTN_BRIDGE_MAIN_${Date.now()}__`;
+  const sessionLabel = `full-flow-${Date.now()}`;
+  const trustToken = '1';
+  const mainToken1 = `__FLOW_MAIN_ONE_${Date.now()}__`;
+  const shellToken = `__FLOW_SHELL_${Date.now()}__`;
+  const mainToken2 = `__FLOW_MAIN_TWO_${Date.now()}__`;
 
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
+  const trace = createTracer(runDir);
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+  trace.log('runDir', { runDir });
+  trace.log('sessionDir', { sessionDir });
+
+  const request = async (action, payload = {}, reqOptions = {}) => {
+    trace.log('request:start', { action, payload });
+    try {
+      const result = await client.request(action, payload, reqOptions);
+      trace.log('request:ok', { action, result });
+      return result;
+    } catch (error) {
+      trace.log('request:error', {
+        action,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  };
 
   try {
-    await client.launchApp();
+    await cleanupPreviousRuns(observer, trace);
+
+    await client.launchFreshApp();
     await client.waitForManifest(20_000);
     await client.waitForReady(20_000);
-    await observer.connect();
+    await client.waitForFrontendResponsive(20_000);
+    await request('set_pane_debug', { enabled: true });
 
-    await client.request('set_pane_debug', { enabled: true });
-    await client.request('capture_screenshot', {
-      path: path.join(runDir, '01-app-launched.png'),
-    });
-
-    const createResult = await client.request('create_session', {
+    const created = await request('create_session', {
       cwd: sessionDir,
       label: sessionLabel,
       agent: 'claude',
     });
-    const sessionId = createResult.sessionId;
-    const session = await observer.waitForSession({
-      label: sessionLabel,
-      directory: sessionDir,
-      timeoutMs: 30_000,
-    });
-    if (session.id !== sessionId) {
-      throw new Error(`Created session mismatch: bridge=${sessionId} daemon=${session.id}`);
-    }
+    const sessionId = created.sessionId;
+    trace.log('session:created', { sessionId, label: sessionLabel, cwd: sessionDir });
 
-    await client.request('capture_screenshot', {
-      path: path.join(runDir, '02-session-created.png'),
-    });
+    await waitForUiSessionVisible(request, sessionId, 20_000);
+    await request('get_pane_state', { sessionId, paneId: 'main' });
+    await request('read_pane_text', { sessionId, paneId: 'main' });
 
-    const initialWorkspace = await client.request('get_workspace', { sessionId });
-    await client.request('split_pane', {
+    await waitForPaneVisible(request, sessionId, 'main', 20_000);
+
+    const trustPrompt = await waitForPaneText(
+      request,
       sessionId,
-      targetPaneId: initialWorkspace.activePaneId || 'main',
-      direction: 'vertical',
-    });
-
-    const splitWorkspace = await observer.waitForWorkspace(
-      sessionId,
-      (entry) => (entry.panes || []).some((pane) => pane.kind === 'shell' && pane.runtime_id),
-      `utility workspace for session ${sessionId}`,
-      20_000
+      'main',
+      (text) => text.includes('Do you trust this folder?') || text.includes('Security guide'),
+      30_000
     );
-    const utilityPane = (splitWorkspace.panes || []).find((pane) => pane.kind === 'shell' && pane.runtime_id);
-    if (!utilityPane?.runtime_id) {
-      throw new Error('Utility pane runtime not found');
-    }
+    fs.writeFileSync(path.join(runDir, '02-trust-prompt.txt'), trustPrompt.text || '', 'utf8');
 
-    await client.request('focus_pane', {
+    await request('select_session', { sessionId });
+    await waitForPaneState(request, sessionId, 'main', (state) => state.activePaneId === 'main');
+    await request('click_pane', { sessionId, paneId: 'main' });
+    await waitForPaneState(request, sessionId, 'main', (state) => state.activePaneId === 'main' && state.inputFocused);
+    await request('type_pane_via_ui', { sessionId, paneId: 'main', text: trustToken });
+
+    const trustSelection = await waitForPaneText(
+      request,
       sessionId,
-      paneId: utilityPane.pane_id,
-    });
-    await client.request('capture_screenshot', {
-      path: path.join(runDir, '03-utility-focused.png'),
-    });
-    await client.request('write_pane', {
-      sessionId,
-      paneId: utilityPane.pane_id,
-      text: `echo ${utilityToken}`,
-      submit: true,
-    });
-    const utilityScrollback = await observer.waitForScrollbackContains(
-      utilityPane.runtime_id,
-      utilityToken,
-      15_000
+      'main',
+      (text) => compact(text).includes('1yesitrustthisfolder') || compact(text).includes('1.Yes,Itrustthisfolder'),
+      10_000
     );
-    fs.writeFileSync(path.join(runDir, 'utility-scrollback.txt'), utilityScrollback, 'utf8');
+    fs.writeFileSync(path.join(runDir, '03-trust-selected.txt'), trustSelection.text || '', 'utf8');
 
-    await client.request('focus_pane', {
+    await request('write_pane', {
       sessionId,
       paneId: 'main',
-    });
-    await client.request('capture_screenshot', {
-      path: path.join(runDir, '04-main-refocused.png'),
-    });
-    await client.request('write_pane', {
-      sessionId,
-      paneId: 'main',
-      text: mainToken,
+      text: '\r',
       submit: false,
     });
 
-    const [mainScrollback, mainPaneText] = await Promise.all([
-      observer.waitForScrollbackContains(sessionId, mainToken, 10_000),
-      waitForPaneText(client, sessionId, 'main', mainToken, 10_000),
-    ]);
+    const trustedMain = await waitForPaneText(
+      request,
+      sessionId,
+      'main',
+      (text) => !text.includes('Do you trust this folder?') && compact(text).includes('❯'),
+      30_000
+    );
+    fs.writeFileSync(path.join(runDir, '04-main-ready.txt'), trustedMain.text || '', 'utf8');
+    await waitForPaneVisible(request, sessionId, 'main', 10_000);
 
-    fs.writeFileSync(path.join(runDir, 'main-scrollback.txt'), mainScrollback, 'utf8');
-    fs.writeFileSync(path.join(runDir, 'main-pane-text.txt'), mainPaneText.text || '', 'utf8');
-    await client.request('capture_screenshot', {
-      path: path.join(runDir, '05-main-token-visible.png'),
-    });
+    await request('click_pane', { sessionId, paneId: 'main' });
+    await waitForPaneState(request, sessionId, 'main', (state) => state.activePaneId === 'main' && state.inputFocused);
+    await request('type_pane_via_ui', { sessionId, paneId: 'main', text: mainToken1 });
+    const mainVisible1 = await waitForPaneText(
+      request,
+      sessionId,
+      'main',
+      (text) => compact(text).includes(compact(mainToken1)),
+      15_000
+    );
+    fs.writeFileSync(path.join(runDir, '05-main-token-1.txt'), mainVisible1.text || '', 'utf8');
 
-    const debugDump = await client.request('dump_pane_debug');
-    saveJson(path.join(runDir, 'pane-debug.json'), debugDump);
+    const workspaceBeforeSplit = await request('get_workspace', { sessionId });
+    const existingPaneIds = new Set((workspaceBeforeSplit.panes || []).map((pane) => pane.paneId));
+
+    await request('dispatch_shortcut', { shortcutId: 'terminal.splitVertical' });
+    const shellPane = await waitForNewShellPane(request, sessionId, existingPaneIds, 15_000);
+    saveJson(path.join(runDir, '06-shell-pane.json'), shellPane);
+    await waitForPaneVisible(request, sessionId, shellPane.paneId, 10_000);
+
+    await request('click_pane', { sessionId, paneId: shellPane.paneId });
+    await waitForPaneState(request, sessionId, shellPane.paneId, (state) => state.activePaneId === shellPane.paneId && state.inputFocused);
+    await request('type_pane_via_ui', { sessionId, paneId: shellPane.paneId, text: shellToken });
+    const shellVisible = await waitForPaneText(
+      request,
+      sessionId,
+      shellPane.paneId,
+      (text) => compact(text).includes(compact(shellToken)),
+      15_000
+    );
+    fs.writeFileSync(path.join(runDir, '07-shell-token.txt'), shellVisible.text || '', 'utf8');
+
+    await request('click_pane', { sessionId, paneId: 'main' });
+    await waitForPaneState(request, sessionId, 'main', (state) => state.activePaneId === 'main' && state.inputFocused);
+    await request('type_pane_via_ui', { sessionId, paneId: 'main', text: mainToken2 });
+
+    const mainVisible2 = await waitForPaneText(
+      request,
+      sessionId,
+      'main',
+      (text) => compact(text).includes(compact(mainToken2)),
+      15_000
+    );
+    fs.writeFileSync(path.join(runDir, '08-main-token-2.txt'), mainVisible2.text || '', 'utf8');
+
+    await captureArtifacts(request, runDir, '09-success');
 
     const summary = {
       ok: true,
       runId,
       sessionId,
-      utilityPane,
+      shellPane,
       tokens: {
-        utilityToken,
-        mainToken,
+        mainToken1,
+        shellToken,
+        mainToken2,
       },
       artifacts: {
         runDir,
-        screenshots: [
-          '01-app-launched.png',
-          '02-session-created.png',
-          '03-utility-focused.png',
-          '04-main-refocused.png',
-          '05-main-token-visible.png',
-        ],
-        logs: [
-          'utility-scrollback.txt',
-          'main-scrollback.txt',
-          'main-pane-text.txt',
-          'pane-debug.json',
+        files: [
+          '02-trust-prompt.txt',
+          '03-trust-selected.txt',
+          '04-main-ready.txt',
+          '05-main-token-1.txt',
+          '06-shell-pane.json',
+          '07-shell-token.txt',
+          '08-main-token-2.txt',
+          '09-success-structured-snapshot.json',
+          '09-success-pane-debug.json',
         ],
       },
     };
@@ -204,10 +338,8 @@ async function main() {
     console.log('[RealAppHarness] Bridge main-return repro passed.');
     console.log(JSON.stringify(summary, null, 2));
   } catch (error) {
-    await captureBridgeDebugArtifacts(client, runDir);
+    await captureArtifacts(request, runDir, 'failure');
     throw error;
-  } finally {
-    await observer.close();
   }
 }
 

@@ -717,6 +717,8 @@ function AppContent({
     setWorkspaceRef,
     removeWorkspaceRef,
     focusSessionPane,
+    typeInSessionPaneViaUI,
+    isSessionPaneInputFocused,
     fitSessionActivePane,
     getPaneText,
     getPaneSize,
@@ -1250,6 +1252,7 @@ function AppContent({
     getActivePaneIdForSession,
     createSession,
     selectSession: handleSelectSession,
+    closeSession: handleCloseSession,
     splitPane: sendWorkspaceSplitPane,
     closePane: sendWorkspaceClosePane,
     focusPane: (sessionId: string, paneId: string) => {
@@ -1258,6 +1261,8 @@ function AppContent({
       setActivePane(sessionId, paneId);
       focusSessionPane(sessionId, paneId, 40);
     },
+    typeInSessionPaneViaUI,
+    isSessionPaneInputFocused,
     getPaneText,
     getPaneSize,
     fitSessionActivePane,

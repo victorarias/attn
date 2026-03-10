@@ -26,6 +26,7 @@ export class DaemonObserver {
     this.sessionsById = new Map();
     this.workspacesBySessionId = new Map();
     this.connected = false;
+    this.initialStateReceived = false;
   }
 
   async connect() {
@@ -36,7 +37,13 @@ export class DaemonObserver {
     const startedAt = Date.now();
     while (Date.now() - startedAt < this.connectTimeoutMs) {
       try {
+        this.initialStateReceived = false;
         await this.#connectOnce();
+        await this.waitFor(
+          () => this.initialStateReceived,
+          'daemon initial_state',
+          Math.min(5_000, this.connectTimeoutMs),
+        );
         return;
       } catch (error) {
         await delay(250);
@@ -53,6 +60,7 @@ export class DaemonObserver {
     const ws = this.ws;
     this.ws = null;
     this.connected = false;
+    this.initialStateReceived = false;
     if (!ws) {
       return;
     }
@@ -61,6 +69,36 @@ export class DaemonObserver {
       ws.close();
       setTimeout(resolve, 500);
     });
+  }
+
+  send(message) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('Daemon websocket is not connected');
+    }
+    this.ws.send(JSON.stringify(message));
+  }
+
+  unregisterSession(sessionId) {
+    this.send({ cmd: 'unregister', id: sessionId });
+  }
+
+  async unregisterMatchingSessions(predicate, timeoutMs = 15_000) {
+    const matches = [...this.sessionsById.values()].filter(predicate);
+    if (matches.length === 0) {
+      return [];
+    }
+
+    for (const session of matches) {
+      this.unregisterSession(session.id);
+    }
+
+    const targetIds = new Set(matches.map((session) => session.id));
+    await this.waitFor(() => {
+      const remaining = [...this.sessionsById.values()].filter((session) => targetIds.has(session.id));
+      return remaining.length === 0 ? true : null;
+    }, `daemon unregister for sessions ${[...targetIds].join(', ')}`, timeoutMs);
+
+    return matches;
   }
 
   getWorkspace(sessionId) {
@@ -227,6 +265,7 @@ export class DaemonObserver {
   #handleMessage(data) {
     switch (data.event) {
       case 'initial_state':
+        this.initialStateReceived = true;
         this.sessionsById.clear();
         for (const session of data.sessions || []) {
           this.sessionsById.set(session.id, session);

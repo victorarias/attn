@@ -28,6 +28,8 @@ export interface PaneRuntimeBinder {
   focusPaneWithRetry: (paneId: string, retries?: number) => void;
   fitPane: (paneId: string) => void;
   fitActivePane: () => void;
+  typeTextViaPaneInput: (paneId: string, text: string) => boolean;
+  isPaneInputFocused: (paneId: string) => boolean;
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => PaneRuntimeSize | null;
 }
@@ -515,6 +517,16 @@ export function usePaneRuntimeBinder(
     fitPane(activePaneId);
   }, [activePaneId, fitPane]);
 
+  const typeTextViaPaneInput = useCallback((paneId: string, text: string) => {
+    const handle = terminalHandlesRef.current.get(paneId);
+    return handle?.typeTextViaInput(text) || false;
+  }, []);
+
+  const isPaneInputFocused = useCallback((paneId: string) => {
+    const handle = terminalHandlesRef.current.get(paneId);
+    return handle?.isInputFocused() || false;
+  }, []);
+
   const getPaneText = useCallback((paneId: string) => {
     return snapshotTerminalText(xtermsRef.current.get(paneId) || null);
   }, []);
@@ -535,6 +547,8 @@ export function usePaneRuntimeBinder(
     focusPaneWithRetry,
     fitPane,
     fitActivePane,
+    typeTextViaPaneInput,
+    isPaneInputFocused,
     getPaneText,
     getPaneSize,
   };

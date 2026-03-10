@@ -60,6 +60,7 @@ Useful bridge actions:
 - `read_pane_text`
 - `set_pane_debug`
 - `dump_pane_debug`
+- `capture_structured_snapshot`
 - `get_window_bounds`
 - `capture_screenshot`
 

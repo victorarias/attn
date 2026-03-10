@@ -42,6 +42,8 @@ describe('useSessionWorkspaceController', () => {
         fitActivePane,
         focusPane: vi.fn(),
         focusActivePane: vi.fn(),
+        typePaneTextViaUI: vi.fn(() => true),
+        isPaneInputFocused: vi.fn(() => true),
         getPaneText,
         getPaneSize,
       });
@@ -66,6 +68,8 @@ describe('useSessionWorkspaceController', () => {
         fitActivePane: vi.fn(),
         focusPane: vi.fn(),
         focusActivePane: vi.fn(),
+        typePaneTextViaUI: vi.fn(() => true),
+        isPaneInputFocused: vi.fn(() => true),
         getPaneText: vi.fn(() => 'text'),
         getPaneSize: vi.fn(() => ({ cols: 80, rows: 24 })),
       });

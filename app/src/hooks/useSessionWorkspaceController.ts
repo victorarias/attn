@@ -12,6 +12,8 @@ interface SessionWorkspaceController {
   setWorkspaceRef: (sessionId: string) => (ref: SessionTerminalWorkspaceHandle | null) => void;
   removeWorkspaceRef: (sessionId: string) => void;
   focusSessionPane: (sessionId: string, paneId: string, retries?: number) => void;
+  typeInSessionPaneViaUI: (sessionId: string, paneId: string, text: string) => boolean;
+  isSessionPaneInputFocused: (sessionId: string, paneId: string) => boolean;
   fitSessionActivePane: (sessionId: string) => void;
   getPaneText: (sessionId: string, paneId: string) => string;
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null;
@@ -51,6 +53,14 @@ export function useSessionWorkspaceController(
     workspaceRefs.current.get(sessionId)?.focusPane(paneId, retries);
   }, []);
 
+  const typeInSessionPaneViaUI = useCallback((sessionId: string, paneId: string, text: string) => {
+    return workspaceRefs.current.get(sessionId)?.typePaneTextViaUI(paneId, text) || false;
+  }, []);
+
+  const isSessionPaneInputFocused = useCallback((sessionId: string, paneId: string) => {
+    return workspaceRefs.current.get(sessionId)?.isPaneInputFocused(paneId) || false;
+  }, []);
+
   const fitSessionActivePane = useCallback((sessionId: string) => {
     workspaceRefs.current.get(sessionId)?.fitActivePane();
   }, []);
@@ -70,6 +80,8 @@ export function useSessionWorkspaceController(
     setWorkspaceRef,
     removeWorkspaceRef,
     focusSessionPane,
+    typeInSessionPaneViaUI,
+    isSessionPaneInputFocused,
     fitSessionActivePane,
     getPaneText,
     getPaneSize,

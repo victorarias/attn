@@ -22,6 +22,8 @@ export interface SessionTerminalWorkspaceHandle {
   fitActivePane: () => void;
   focusPane: (paneId: string, retries?: number) => void;
   focusActivePane: (retries?: number) => void;
+  typePaneTextViaUI: (paneId: string, text: string) => boolean;
+  isPaneInputFocused: (paneId: string) => boolean;
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => { cols: number; rows: number } | null;
 }
@@ -117,6 +119,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       fitActivePane: binder.fitActivePane,
       focusPane: binder.focusPaneWithRetry,
       focusActivePane: binder.focusPaneWithRetry.bind(null, activePaneId),
+      typePaneTextViaUI: binder.typeTextViaPaneInput,
+      isPaneInputFocused: binder.isPaneInputFocused,
       getPaneText: binder.getPaneText,
       getPaneSize: binder.getPaneSize,
     }), [activePaneId, binder]);
@@ -278,6 +282,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
             key={node.paneId}
             className={`workspace-pane main-pane ${activePaneId === MAIN_TERMINAL_PANE_ID ? 'active' : ''}`}
             onMouseDown={handleMainPaneMouseDown}
+            data-pane-session-id={sessionId}
+            data-pane-id={MAIN_TERMINAL_PANE_ID}
+            data-pane-kind="main"
           >
             {showMainHeader && (
               <div className="workspace-pane-header">
@@ -308,6 +315,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           key={terminal.id}
           className={`workspace-pane utility-pane ${activePaneId === terminal.id ? 'active' : ''}`}
           onMouseDown={() => handleUtilityPaneMouseDown(terminal.id)}
+          data-pane-session-id={sessionId}
+          data-pane-id={terminal.id}
+          data-pane-kind="shell"
         >
           <div className="workspace-pane-header">
             <span className="workspace-pane-title">{terminal.title}</span>
@@ -364,7 +374,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [effectivePaneId, workspace.terminals]);
 
     return (
-      <div className={`session-terminal-workspace ${effectivePaneId ? 'focus-mode' : ''}`}>
+      <div
+        className={`session-terminal-workspace ${effectivePaneId ? 'focus-mode' : ''}`}
+        data-session-terminal-workspace={sessionId}
+      >
         {effectivePaneId && (
           <div className="workspace-focus-bar">
             <div className="workspace-focus-label">

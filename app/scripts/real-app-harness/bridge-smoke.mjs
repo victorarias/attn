@@ -25,9 +25,10 @@ async function main() {
   console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
 
   try {
-    await client.launchApp();
+    await client.launchFreshApp();
     await client.waitForManifest(20_000);
     await client.waitForReady(20_000);
+    await client.waitForFrontendResponsive(20_000);
     await observer.connect();
 
     const createResult = await client.request('create_session', {

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -18,6 +18,7 @@ const RESPONSE_EVENT: &str = "attn://ui-automation/response";
 const READY_EVENT: &str = "attn://ui-automation/ready";
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const MANIFEST_RELATIVE_PATH: &str = "debug/ui-automation.json";
+const LOG_RELATIVE_PATH: &str = "debug/ui-automation-server.log";
 
 #[derive(Clone)]
 struct PendingAutomationResponses {
@@ -143,6 +144,37 @@ fn write_manifest<R: Runtime>(app: &AppHandle<R>, manifest: &AutomationManifest)
     }
 }
 
+fn log_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    app.path()
+        .app_local_data_dir()
+        .ok()
+        .map(|dir| dir.join(LOG_RELATIVE_PATH))
+}
+
+fn append_log<R: Runtime>(app: &AppHandle<R>, message: &str) {
+    let Some(path) = log_path(app) else {
+        eprintln!("[UIAutomation] {message}");
+        return;
+    };
+
+    if let Some(parent) = path.parent() {
+        if let Err(error) = fs::create_dir_all(parent) {
+            eprintln!("[UIAutomation] Failed to create log dir: {error}");
+            return;
+        }
+    }
+
+    let timestamp = chrono_like_now();
+    match OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(mut file) => {
+            let _ = writeln!(file, "[{timestamp}] {message}");
+        }
+        Err(error) => {
+            eprintln!("[UIAutomation] Failed to open log {}: {error}", path.display());
+        }
+    }
+}
+
 fn next_request_id(counter: &AtomicU64) -> String {
     format!("ui-automation-{}", counter.fetch_add(1, Ordering::Relaxed))
 }
@@ -156,8 +188,19 @@ fn handle_request<R: Runtime>(
     request: AutomationSocketRequest,
 ) -> AutomationSocketResponse {
     let request_id = request.id.unwrap_or_else(|| next_request_id(request_counter));
+    let started_at = SystemTime::now();
+    append_log(
+        app,
+        &format!(
+            "request start id={} action={} frontend_ready={}",
+            request_id,
+            request.action,
+            frontend_ready.load(Ordering::Relaxed)
+        ),
+    );
 
     if request.token != expected_token {
+        append_log(app, &format!("request reject id={} action={} invalid-token", request_id, request.action));
         return AutomationSocketResponse {
             id: request_id,
             ok: false,
@@ -167,6 +210,7 @@ fn handle_request<R: Runtime>(
     }
 
     if request.action == "ping" {
+        append_log(app, &format!("request ok id={} action=ping", request_id));
         return AutomationSocketResponse {
             id: request_id,
             ok: true,
@@ -180,35 +224,53 @@ fn handle_request<R: Runtime>(
 
     if request.action == "get_window_bounds" {
         return match window_bounds(app) {
-            Ok(result) => AutomationSocketResponse {
-                id: request_id,
-                ok: true,
-                result: Some(result),
-                error: None,
-            },
-            Err(error) => AutomationSocketResponse {
-                id: request_id,
-                ok: false,
-                result: None,
-                error: Some(error),
-            },
+            Ok(result) => {
+                append_log(app, &format!("request ok id={} action=get_window_bounds", request_id));
+                AutomationSocketResponse {
+                    id: request_id,
+                    ok: true,
+                    result: Some(result),
+                    error: None,
+                }
+            }
+            Err(error) => {
+                append_log(
+                    app,
+                    &format!("request err id={} action=get_window_bounds error={}", request_id, error),
+                );
+                AutomationSocketResponse {
+                    id: request_id,
+                    ok: false,
+                    result: None,
+                    error: Some(error),
+                }
+            }
         };
     }
 
     if request.action == "capture_screenshot" {
         return match capture_screenshot(app, request.payload.as_ref()) {
-            Ok(result) => AutomationSocketResponse {
-                id: request_id,
-                ok: true,
-                result: Some(result),
-                error: None,
-            },
-            Err(error) => AutomationSocketResponse {
-                id: request_id,
-                ok: false,
-                result: None,
-                error: Some(error),
-            },
+            Ok(result) => {
+                append_log(app, &format!("request ok id={} action=capture_screenshot", request_id));
+                AutomationSocketResponse {
+                    id: request_id,
+                    ok: true,
+                    result: Some(result),
+                    error: None,
+                }
+            }
+            Err(error) => {
+                append_log(
+                    app,
+                    &format!("request err id={} action=capture_screenshot error={}", request_id, error),
+                );
+                AutomationSocketResponse {
+                    id: request_id,
+                    ok: false,
+                    result: None,
+                    error: Some(error),
+                }
+            }
         };
     }
 
@@ -224,6 +286,10 @@ fn handle_request<R: Runtime>(
 
     if let Err(error) = app.emit(REQUEST_EVENT, &bridge_request) {
         pending.remove(&request_id);
+        append_log(
+            app,
+            &format!("request err id={} action={} emit={}", request_id, bridge_request.action, error),
+        );
         return AutomationSocketResponse {
             id: request_id,
             ok: false,
@@ -233,14 +299,35 @@ fn handle_request<R: Runtime>(
     }
 
     match receiver.recv_timeout(Duration::from_millis(DEFAULT_TIMEOUT_MS)) {
-        Ok(response) => AutomationSocketResponse {
-            id: response.request_id,
-            ok: response.ok,
-            result: response.result,
-            error: response.error,
-        },
+        Ok(response) => {
+            let elapsed_ms = started_at.elapsed().unwrap_or_default().as_millis();
+            append_log(
+                app,
+                &format!(
+                    "request done id={} action={} ok={} elapsed_ms={}",
+                    response.request_id,
+                    bridge_request.action,
+                    response.ok,
+                    elapsed_ms
+                ),
+            );
+            AutomationSocketResponse {
+                id: response.request_id,
+                ok: response.ok,
+                result: response.result,
+                error: response.error,
+            }
+        }
         Err(_) => {
             pending.remove(&request_id);
+            let elapsed_ms = started_at.elapsed().unwrap_or_default().as_millis();
+            append_log(
+                app,
+                &format!(
+                    "request timeout id={} action={} elapsed_ms={}",
+                    request_id, bridge_request.action, elapsed_ms
+                ),
+            );
             AutomationSocketResponse {
                 id: request_id,
                 ok: false,
@@ -346,6 +433,12 @@ pub fn maybe_start<R: Runtime>(app: &AppHandle<R>) {
     };
 
     let token = generate_token();
+    if let Some(path) = log_path(app) {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(&path, "");
+    }
     let manifest = AutomationManifest {
         enabled: true,
         port,
@@ -354,6 +447,10 @@ pub fn maybe_start<R: Runtime>(app: &AppHandle<R>) {
         started_at: chrono_like_now(),
     };
     write_manifest(app, &manifest);
+    append_log(
+        app,
+        &format!("server start pid={} port={} enabled={}", std::process::id(), port, UI_AUTOMATION_ENABLED),
+    );
 
     let pending = PendingAutomationResponses::new();
     let frontend_ready = Arc::new(AtomicBool::new(false));
@@ -365,8 +462,10 @@ pub fn maybe_start<R: Runtime>(app: &AppHandle<R>) {
         }
     });
     let ready_state = frontend_ready.clone();
+    let app_for_ready = app.clone();
     let _ready_event_id = app.listen_any(READY_EVENT, move |_event| {
         ready_state.store(true, Ordering::Relaxed);
+        append_log(&app_for_ready, "frontend ready");
     });
 
     let app_handle = app.clone();

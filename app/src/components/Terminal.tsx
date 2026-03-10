@@ -110,6 +110,8 @@ export interface TerminalHandle {
   terminal: XTerm | null;
   fit: () => void;
   focus: () => boolean;
+  typeTextViaInput: (text: string) => boolean;
+  isInputFocused: () => boolean;
 }
 
 interface TerminalProps {
@@ -252,6 +254,42 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       return container.contains(document.activeElement);
     }, []);
 
+    const typeTextViaInput = useCallback((text: string): boolean => {
+      const container = containerRef.current;
+      if (!container) {
+        return false;
+      }
+
+      const textarea = container.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null;
+      if (!textarea || document.activeElement !== textarea) {
+        return false;
+      }
+
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+      const setValue = descriptor?.set;
+
+      for (const char of text) {
+        if (setValue) {
+          setValue.call(textarea, char);
+        } else {
+          textarea.value = char;
+        }
+        textarea.dispatchEvent(new InputEvent('input', {
+          bubbles: true,
+          composed: true,
+          data: char,
+          inputType: 'insertText',
+        }));
+        if (setValue) {
+          setValue.call(textarea, '');
+        } else {
+          textarea.value = '';
+        }
+      }
+
+      return true;
+    }, [focusTerminal]);
+
     // Helper to resize terminal and notify PTY
     const resizeTerminal = useCallback((term: XTerm, cols: number, rows: number, reason: string) => {
       const suspiciousResize = isSuspiciousTerminalSize(cols, rows);
@@ -314,7 +352,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       focus: () => {
         return focusTerminal();
       },
-    }), [focusTerminal, logTerminal, resizeTerminal]);
+      typeTextViaInput: (text: string) => {
+        return typeTextViaInput(text);
+      },
+      isInputFocused: () => {
+        const container = containerRef.current;
+        const textarea = container?.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null;
+        return !!textarea && document.activeElement === textarea;
+      },
+    }), [focusTerminal, logTerminal, resizeTerminal, typeTextViaInput]);
 
     useEffect(() => {
       if (!containerRef.current) return;
