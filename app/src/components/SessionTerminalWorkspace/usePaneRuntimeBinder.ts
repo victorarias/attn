@@ -82,7 +82,7 @@ function snapshotTerminalText(terminal: XTerm | null): string {
   return lines.join('\n');
 }
 
-function installTerminalKeyHandler(sendToPty: (data: string) => void) {
+export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
   return (ev: KeyboardEvent) => {
     const accel = isMacLikePlatform() ? ev.metaKey : (ev.metaKey || ev.ctrlKey);
     if (ev.type === 'keydown' && accel && !ev.altKey) {
@@ -99,7 +99,8 @@ function installTerminalKeyHandler(sendToPty: (data: string) => void) {
         return !triggerShortcut('terminal.toggleMaximize');
       }
       if (!ev.shiftKey && ev.key.toLowerCase() === 'w') {
-        return !triggerShortcut('terminal.close');
+        triggerShortcut('terminal.close');
+        return false;
       }
     }
     if (ev.key === 'Enter' && ev.shiftKey && !ev.ctrlKey && !ev.altKey) {
