@@ -1767,6 +1767,12 @@ export function useDaemonSocket({
       spawn: async (args: PtySpawnArgs) => {
         const existingSession = sessionsRef.current.find((session) => session.id === args.id);
         const sessionKnownToDaemon = !!existingSession;
+        const alreadyAttached = attachedPtySessionsRef.current.has(args.id);
+
+        if (alreadyAttached) {
+          sendPtyResize(args.id, args.cols, args.rows);
+          return;
+        }
 
         // For new spawns, prime PTY size before attach.
         // For existing daemon sessions, avoid transient bootstrap resizes

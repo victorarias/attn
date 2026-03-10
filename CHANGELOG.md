@@ -20,6 +20,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **Bridge Repro Stability**: The packaged-app UI automation bridge now supports fresh app relaunches, server-side request logging, frontend responsiveness checks, pre-launch daemon cleanup of stale full-flow sessions, and diff-based shell-pane selection so the main-pane return repro fails much more consistently in the real bug region instead of drifting during bootstrap.
 
+### Fixed
+- **Main Pane Return After Split**: Returning from a split shell to the main Claude pane no longer forces a fresh PTY reattach on every remount, so typing in the main pane continues to render after the split instead of going visually dead until another reconnect.
+
 ## [2026-03-09]
 
 ### Added

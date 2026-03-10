@@ -123,6 +123,7 @@ export function usePaneRuntimeBinder(
   const pendingTerminalEventsRef = useRef<Map<string, PtyEventPayload[]>>(new Map());
   const pendingEnsuresRef = useRef<Map<string, Promise<void>>>(new Map());
   const cachedSpawnArgsRef = useRef<Map<string, PtySpawnArgs | null>>(new Map());
+  const cachedTerminalTextRef = useRef<Map<string, string>>(new Map());
   const pendingUnmountCleanupRef = useRef<Map<string, number>>(new Map());
   const runtimeBindingDisposersRef = useRef<Map<string, { paneId: string; testSessionId?: string; dispose: () => void }>>(new Map());
 
@@ -171,6 +172,11 @@ export function usePaneRuntimeBinder(
     for (const paneId of Array.from(cachedSpawnArgsRef.current.keys())) {
       if (!activePaneIds.has(paneId)) {
         cachedSpawnArgsRef.current.delete(paneId);
+      }
+    }
+    for (const paneId of Array.from(cachedTerminalTextRef.current.keys())) {
+      if (!activePaneIds.has(paneId)) {
+        cachedTerminalTextRef.current.delete(paneId);
       }
     }
   }, [panes]);
@@ -269,6 +275,11 @@ export function usePaneRuntimeBinder(
         paneId,
         message: 'terminal ref cleared',
       });
+      const currentXterm = xtermsRef.current.get(paneId);
+      const currentText = snapshotTerminalText(currentXterm || null);
+      if (currentText) {
+        cachedTerminalTextRef.current.set(paneId, currentText);
+      }
       terminalHandlesRef.current.delete(paneId);
       const timeoutId = window.setTimeout(() => {
         recordPaneRuntimeDebugEvent({
@@ -409,6 +420,19 @@ export function usePaneRuntimeBinder(
     inputSubscriptionsRef.current.get(paneId)?.dispose();
     inputSubscriptionsRef.current.set(paneId, xterm.onData(sendToPty));
     xterm.attachCustomKeyEventHandler(installTerminalKeyHandler(sendToPty));
+
+    const cachedText = cachedTerminalTextRef.current.get(paneId);
+    if (cachedText && snapshotTerminalText(xterm).trim().length === 0) {
+      recordPaneRuntimeDebugEvent({
+        scope: 'binder',
+        sessionId: pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: 'hydrate terminal from cached text',
+        details: { textLength: cachedText.length },
+      });
+      xterm.write(cachedText.replace(/\n/g, '\r\n'));
+    }
   }, []);
 
   const handleTerminalInit = useCallback((paneId: string) => (xterm: XTerm) => {
