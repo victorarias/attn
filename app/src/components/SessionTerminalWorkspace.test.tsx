@@ -1,11 +1,17 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { forwardRef, useImperativeHandle } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionTerminalWorkspace } from './SessionTerminalWorkspace';
-import { MAIN_TERMINAL_PANE_ID, createDefaultPanelState } from '../types/workspace';
+import type { PaneRuntimeEventRouter } from './SessionTerminalWorkspace/paneRuntimeEventRouter';
+import { MAIN_TERMINAL_PANE_ID, createDefaultWorkspaceState } from '../types/workspace';
 
 const { registeredShortcuts } = vi.hoisted(() => ({
   registeredShortcuts: new Map<string, () => void>(),
 }));
+
+const mockEventRouter: PaneRuntimeEventRouter = {
+  registerBinding: vi.fn(() => () => {}),
+};
 
 vi.mock('../pty/bridge', () => ({
   listenPtyEvents: vi.fn(() => Promise.resolve(() => {})),
@@ -14,8 +20,19 @@ vi.mock('../pty/bridge', () => ({
   ptyWrite: vi.fn(() => Promise.resolve()),
 }));
 
+const { mockTerminalFocus } = vi.hoisted(() => ({
+  mockTerminalFocus: vi.fn(() => true),
+}));
+
 vi.mock('./Terminal', () => ({
-  Terminal: () => <div data-testid="mock-terminal" />,
+  Terminal: forwardRef((_props, ref) => {
+    useImperativeHandle(ref, () => ({
+      terminal: {} as any,
+      fit: vi.fn(),
+      focus: mockTerminalFocus,
+    }));
+    return <div data-testid="mock-terminal">Main terminal</div>;
+  }),
 }));
 
 vi.mock('../shortcuts', () => ({
@@ -35,13 +52,14 @@ vi.mock('../shortcuts/useShortcut', () => ({
 describe('SessionTerminalWorkspace', () => {
   afterEach(() => {
     registeredShortcuts.clear();
+    vi.mocked(mockEventRouter.registerBinding).mockClear();
     vi.useRealTimers();
   });
 
   it('retries focus for the main pane until the terminal handle is ready', () => {
     vi.useFakeTimers();
-    const focusMainPane = vi
-      .fn<() => boolean>()
+    mockTerminalFocus
+      .mockReset()
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValue(true);
@@ -49,13 +67,16 @@ describe('SessionTerminalWorkspace', () => {
     render(
       <SessionTerminalWorkspace
         sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
         cwd="/tmp/repo"
-        panel={createDefaultPanelState()}
+        workspace={createDefaultWorkspaceState()}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
         fontSize={14}
-        mainPane={<div>Main terminal</div>}
-        focusMainPane={focusMainPane}
         enabled
         isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
@@ -63,25 +84,27 @@ describe('SessionTerminalWorkspace', () => {
       />
     );
 
-    expect(focusMainPane).toHaveBeenCalledTimes(1);
+    expect(mockTerminalFocus).toHaveBeenCalledTimes(1);
 
     vi.advanceTimersByTime(50);
-    expect(focusMainPane).toHaveBeenCalledTimes(2);
+    expect(mockTerminalFocus).toHaveBeenCalledTimes(2);
 
     vi.advanceTimersByTime(50);
-    expect(focusMainPane).toHaveBeenCalledTimes(3);
+    expect(mockTerminalFocus).toHaveBeenCalledTimes(3);
   });
 
   it('focuses the main Claude pane immediately on mouse down', () => {
-    const focusMainPane = vi.fn<() => boolean>(() => true);
+    mockTerminalFocus.mockReset().mockReturnValue(true);
     const onFocusPane = vi.fn();
 
     render(
       <SessionTerminalWorkspace
         sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
         cwd="/tmp/repo"
-        panel={{
-          ...createDefaultPanelState(),
+        workspace={{
+          ...createDefaultWorkspaceState(),
           layoutTree: {
             type: 'split',
             splitId: 'root',
@@ -92,13 +115,13 @@ describe('SessionTerminalWorkspace', () => {
               { type: 'pane', paneId: 'pane-shell-1' },
             ],
           },
-          activePaneId: MAIN_TERMINAL_PANE_ID,
         }}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
         fontSize={14}
-        mainPane={<div>Main terminal</div>}
-        focusMainPane={focusMainPane}
         enabled
         isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={onFocusPane}
@@ -109,7 +132,49 @@ describe('SessionTerminalWorkspace', () => {
     fireEvent.mouseDown(screen.getByText('Main terminal'));
 
     expect(onFocusPane).toHaveBeenCalledWith(MAIN_TERMINAL_PANE_ID);
-    expect(focusMainPane).toHaveBeenCalled();
+    expect(mockTerminalFocus).toHaveBeenCalled();
+  });
+
+  it('focuses a utility pane immediately on mouse down', () => {
+    mockTerminalFocus.mockReset().mockReturnValue(true);
+    const onFocusPane = vi.fn();
+
+    render(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={{
+          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+              { type: 'pane', paneId: 'pane-shell-1' },
+            ],
+          },
+        }}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={onFocusPane}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByText('Shell 1'));
+
+    expect(onFocusPane).toHaveBeenCalledWith('pane-shell-1');
+    expect(mockTerminalFocus).toHaveBeenCalled();
   });
 
   it('moves focus to the pane below on cmd+alt+down', () => {
@@ -118,9 +183,10 @@ describe('SessionTerminalWorkspace', () => {
     render(
       <SessionTerminalWorkspace
         sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
         cwd="/tmp/repo"
-        panel={{
-          activePaneId: 'top-right',
+        workspace={{
           terminals: [],
           layoutTree: {
             type: 'split',
@@ -142,11 +208,12 @@ describe('SessionTerminalWorkspace', () => {
             ],
           },
         }}
+        activePaneId="top-right"
         fontSize={14}
-        mainPane={<div>Main terminal</div>}
-        focusMainPane={vi.fn(() => true)}
         enabled
         isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={onFocusPane}
@@ -165,9 +232,10 @@ describe('SessionTerminalWorkspace', () => {
     render(
       <SessionTerminalWorkspace
         sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
         cwd="/tmp/repo"
-        panel={{
-          activePaneId: 'right',
+        workspace={{
           terminals: [],
           layoutTree: {
             type: 'split',
@@ -180,11 +248,12 @@ describe('SessionTerminalWorkspace', () => {
             ],
           },
         }}
+        activePaneId="right"
         fontSize={14}
-        mainPane={<div>Main terminal</div>}
-        focusMainPane={vi.fn(() => true)}
         enabled
         isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
         onSplitPane={vi.fn()}
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}

@@ -26,10 +26,14 @@ export interface UtilityTerminal {
   title: string;
 }
 
-export interface TerminalPanelState {
-  activePaneId: string;
+export interface TerminalWorkspaceState {
   terminals: UtilityTerminal[];
   layoutTree: TerminalLayoutNode;
+}
+
+export interface TerminalWorkspaceSnapshot {
+  workspace: TerminalWorkspaceState;
+  daemonActivePaneId: string;
 }
 
 interface PaneBounds {
@@ -41,9 +45,8 @@ interface PaneBounds {
   centerY: number;
 }
 
-export function createDefaultPanelState(): TerminalPanelState {
+export function createDefaultWorkspaceState(): TerminalWorkspaceState {
   return {
-    activePaneId: MAIN_TERMINAL_PANE_ID,
     terminals: [],
     layoutTree: { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
   };
@@ -196,13 +199,13 @@ function parseLayoutNode(raw: unknown): TerminalLayoutNode | null {
 
 function parseLayoutJSON(layoutJSON: string): TerminalLayoutNode {
   if (!layoutJSON.trim()) {
-    return createDefaultPanelState().layoutTree;
+    return createDefaultWorkspaceState().layoutTree;
   }
   try {
     const parsed = JSON.parse(layoutJSON);
-    return parseLayoutNode(parsed) ?? createDefaultPanelState().layoutTree;
+    return parseLayoutNode(parsed) ?? createDefaultWorkspaceState().layoutTree;
   } catch {
-    return createDefaultPanelState().layoutTree;
+    return createDefaultWorkspaceState().layoutTree;
   }
 }
 
@@ -216,15 +219,17 @@ function shellTerminalsFromPanes(panes: PaneElement[]): UtilityTerminal[] {
     }));
 }
 
-export function panelStateFromDaemonWorkspace(workspace: DaemonWorkspaceSnapshot): TerminalPanelState {
-  const panel: TerminalPanelState = {
-    activePaneId: workspace.active_pane_id || MAIN_TERMINAL_PANE_ID,
+export function workspaceSnapshotFromDaemonWorkspace(workspace: DaemonWorkspaceSnapshot): TerminalWorkspaceSnapshot {
+  const nextWorkspace: TerminalWorkspaceState = {
     terminals: shellTerminalsFromPanes(workspace.panes || []),
     layoutTree: parseLayoutJSON(workspace.layout_json || ''),
   };
+  const daemonActivePaneId = workspace.active_pane_id || MAIN_TERMINAL_PANE_ID;
 
-  if (!hasPane(panel.layoutTree, panel.activePaneId)) {
-    panel.activePaneId = MAIN_TERMINAL_PANE_ID;
-  }
-  return panel;
+  return {
+    workspace: nextWorkspace,
+    daemonActivePaneId: hasPane(nextWorkspace.layoutTree, daemonActivePaneId)
+      ? daemonActivePaneId
+      : MAIN_TERMINAL_PANE_ID,
+  };
 }

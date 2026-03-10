@@ -24,27 +24,25 @@ describe('sessions store', () => {
     const sessionId = await useSessionStore.getState().createSession('test', '/tmp/test');
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
 
-    expect(session?.terminalPanel).toEqual({
-      activePaneId: 'main',
+    expect(session?.workspace).toEqual({
       terminals: [],
       layoutTree: { type: 'pane', paneId: 'main' },
     });
+    expect(session?.daemonActivePaneId).toBe('main');
   });
 
-  it('syncFromDaemonSessions hydrates canonical session data and preserves local terminal refs', () => {
-    const fakeTerminal = {} as any;
+  it('syncFromDaemonSessions hydrates canonical session data and preserves local workspace state', () => {
     useSessionStore.setState({
       sessions: [
         {
           id: 'sess-1',
           label: 'Old Label',
           state: 'working',
-          terminal: fakeTerminal,
           cwd: '/tmp/old',
           agent: 'codex',
           transcriptMatched: false,
-          terminalPanel: {
-            activePaneId: 'pane-a',
+          daemonActivePaneId: 'pane-a',
+          workspace: {
             terminals: [{ id: 'pane-a', ptyId: 'runtime-a', title: 'Shell 1' }],
             layoutTree: {
               type: 'split',
@@ -82,11 +80,40 @@ describe('sessions store', () => {
       agent: 'claude',
       branch: 'feature/workspace',
       isWorktree: true,
-      terminalPanel: {
-        activePaneId: 'pane-a',
-      },
+      daemonActivePaneId: 'pane-a',
     });
-    expect(session.terminal).toBe(fakeTerminal);
+    expect(session.workspace).toMatchObject({
+      terminals: [{ id: 'pane-a', ptyId: 'runtime-a', title: 'Shell 1' }],
+    });
+  });
+
+  it('takeSessionSpawnArgs consumes pending fork params once and applies launcher overrides', async () => {
+    const sessionId = await useSessionStore.getState().createSession('Spawn Test', '/tmp/workspace', 'sess-spawn', 'claude');
+    useSessionStore.getState().setLauncherConfig({
+      executables: { claude: '/opt/bin/claude-custom' },
+    });
+    useSessionStore.getState().setForkParams(sessionId, 'resume-123');
+
+    const first = useSessionStore.getState().takeSessionSpawnArgs(sessionId, 120, 40);
+    const second = useSessionStore.getState().takeSessionSpawnArgs(sessionId, 120, 40);
+
+    expect(first).toMatchObject({
+      id: sessionId,
+      cwd: '/tmp/workspace',
+      label: 'Spawn Test',
+      cols: 120,
+      rows: 40,
+      agent: 'claude',
+      executable: '/opt/bin/claude-custom',
+      claude_executable: '/opt/bin/claude-custom',
+      resume_session_id: 'resume-123',
+      fork_session: true,
+    });
+    expect(second).toMatchObject({
+      id: sessionId,
+      resume_session_id: null,
+      fork_session: null,
+    });
   });
 
   it('syncFromDaemonWorkspaces replaces the local split workspace from daemon snapshots', async () => {
@@ -114,8 +141,7 @@ describe('sessions store', () => {
     ]);
 
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
-    expect(session?.terminalPanel).toEqual({
-      activePaneId: 'pane-shell',
+    expect(session?.workspace).toEqual({
       terminals: [
         { id: 'pane-shell', ptyId: 'runtime-shell', title: 'Shell 1' },
       ],
@@ -130,6 +156,7 @@ describe('sessions store', () => {
         ],
       },
     });
+    expect(session?.daemonActivePaneId).toBe('pane-shell');
   });
 
   it('syncFromDaemonWorkspaces ignores unknown sessions and keeps defaults on invalid layout payloads', async () => {
@@ -155,10 +182,10 @@ describe('sessions store', () => {
     ]);
 
     const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
-    expect(session?.terminalPanel).toEqual({
-      activePaneId: 'main',
+    expect(session?.workspace).toEqual({
       terminals: [],
       layoutTree: { type: 'pane', paneId: 'main' },
     });
+    expect(session?.daemonActivePaneId).toBe('main');
   });
 });

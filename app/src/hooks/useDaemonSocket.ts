@@ -21,6 +21,7 @@ import type {
 } from '../types/generated';
 import { emitPtyEvent, setPtyBackend, type PtySpawnArgs } from '../pty/bridge';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
+import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
 
 // Re-export types from generated for consumers
 // Use type aliases to maintain backward compatibility
@@ -106,6 +107,18 @@ interface FetchPRDetailsResult {
   success: boolean;
   prs?: DaemonPR[];
   error?: string;
+}
+
+function previewBase64Payload(encoded: string): string {
+  try {
+    return atob(encoded)
+      .slice(0, 32)
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
+  } catch {
+    return '';
+  }
 }
 
 interface WorktreeActionResult {
@@ -694,6 +707,15 @@ export function useDaemonSocket({
           case 'workspace_snapshot':
           case 'workspace_updated':
             if (data.workspace) {
+              recordPaneRuntimeDebugEvent({
+                scope: 'daemon',
+                sessionId: data.workspace.session_id,
+                paneId: data.workspace.active_pane_id,
+                message: data.event === 'workspace_snapshot' ? 'workspace snapshot received' : 'workspace updated received',
+                details: {
+                  paneIds: (data.workspace.panes || []).map((pane) => pane.pane_id),
+                },
+              });
               const nextWorkspaces = [
                 ...workspacesRef.current.filter((entry) => entry.session_id !== data.workspace!.session_id),
                 data.workspace,
@@ -708,6 +730,17 @@ export function useDaemonSocket({
             const action = data.action || '';
             const sessionId = data.session_id || '';
             const paneId = data.pane_id;
+            recordPaneRuntimeDebugEvent({
+              scope: 'daemon',
+              sessionId,
+              paneId: paneId || undefined,
+              message: 'workspace action result',
+              details: {
+                action,
+                success: data.success ?? false,
+                error: data.error,
+              },
+            });
             const key = workspaceActionKey(action, sessionId, paneId);
             const pending = pendingActionsRef.current.get(key);
             if (pending) {
@@ -833,6 +866,16 @@ export function useDaemonSocket({
 
           case 'pty_output': {
             if (data.id && data.data) {
+              recordPaneRuntimeDebugEvent({
+                scope: 'daemon',
+                runtimeId: data.id,
+                message: 'received pty_output event',
+                details: {
+                  seq: data.seq,
+                  bytes: data.data.length,
+                  preview: previewBase64Payload(data.data),
+                },
+              });
               const attachKey = `pty_attach_${data.id}`;
               if (pendingActionsRef.current.has(attachKey)) {
                 const queued = pendingAttachOutputsRef.current.get(data.id) || [];
@@ -841,15 +884,33 @@ export function useDaemonSocket({
                 }
                 queued.push({ data: data.data, seq: data.seq });
                 pendingAttachOutputsRef.current.set(data.id, queued);
+                recordPaneRuntimeDebugEvent({
+                  scope: 'daemon',
+                  runtimeId: data.id,
+                  message: 'queue pty_output during pending attach',
+                  details: { seq: data.seq, queued: queued.length },
+                });
                 break;
               }
               if (typeof data.seq === 'number') {
                 const lastSeq = ptySeqRef.current.get(data.id);
                 if (typeof lastSeq === 'number' && data.seq <= lastSeq) {
+                  recordPaneRuntimeDebugEvent({
+                    scope: 'daemon',
+                    runtimeId: data.id,
+                    message: 'drop stale pty_output event',
+                    details: { seq: data.seq, lastSeq },
+                  });
                   break;
                 }
                 ptySeqRef.current.set(data.id, data.seq);
               }
+              recordPaneRuntimeDebugEvent({
+                scope: 'daemon',
+                runtimeId: data.id,
+                message: 'emit pty_output to bridge',
+                details: { seq: data.seq },
+              });
               emitPtyEvent({ event: 'data', id: data.id, data: data.data });
             }
             break;
@@ -1629,6 +1690,13 @@ export function useDaemonSocket({
     return new Promise((resolve, reject) => {
       const key = workspaceActionKey(action, sessionId, paneId);
       pendingActionsRef.current.set(key, { resolve, reject });
+      recordPaneRuntimeDebugEvent({
+        scope: 'daemon',
+        sessionId,
+        paneId,
+        message: 'send workspace command',
+        details: { action, payload },
+      });
       sendOrQueueCommand(payload, { waitForInitialState: true });
 
       setTimeout(() => {
@@ -2928,6 +2996,7 @@ export function useDaemonSocket({
     sendWorkspaceClosePane,
     sendWorkspaceFocusPane,
     sendWorkspaceRenamePane,
+    sendRuntimeInput: sendPtyInput,
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,

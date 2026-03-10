@@ -109,7 +109,7 @@ const LIGHT_TERMINAL_THEME = {
 export interface TerminalHandle {
   terminal: XTerm | null;
   fit: () => void;
-  focus: () => void;
+  focus: () => boolean;
 }
 
 interface TerminalProps {
@@ -241,6 +241,17 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
     }, []);
 
+    const focusTerminal = useCallback((): boolean => {
+      const term = xtermRef.current;
+      const container = containerRef.current;
+      if (!term || !container || !container.isConnected) {
+        return false;
+      }
+
+      term.focus();
+      return container.contains(document.activeElement);
+    }, []);
+
     // Helper to resize terminal and notify PTY
     const resizeTerminal = useCallback((term: XTerm, cols: number, rows: number, reason: string) => {
       const suspiciousResize = isSuspiciousTerminalSize(cols, rows);
@@ -272,7 +283,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     }, [logTerminal]);
 
     useImperativeHandle(ref, () => ({
-      terminal: xtermRef.current,
+      get terminal() {
+        return xtermRef.current;
+      },
       fit: () => {
         const term = xtermRef.current;
         const container = containerRef.current;
@@ -299,9 +312,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         resizeTerminal(term, dims.cols, dims.rows, 'fit');
       },
       focus: () => {
-        xtermRef.current?.focus();
+        return focusTerminal();
       },
-    }));
+    }), [focusTerminal, logTerminal, resizeTerminal]);
 
     useEffect(() => {
       if (!containerRef.current) return;
@@ -627,6 +640,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         clearTimeout(xResizeTimeout);
         dprMediaQuery.removeEventListener('change', handleDprChange);
         webglAddon?.dispose();
+        webglAddonRef.current = null;
+        xtermRef.current = null;
         term.dispose();
       };
     }, [logTerminal, resizeTerminal]);

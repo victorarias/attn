@@ -19,6 +19,21 @@ import (
 	"github.com/victorarias/attn/internal/pty"
 )
 
+func previewWorkerBytesForLog(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	const maxPreview = 32
+	preview := string(data)
+	if len(preview) > maxPreview {
+		preview = preview[:maxPreview]
+	}
+	preview = strings.ReplaceAll(preview, "\n", "\\n")
+	preview = strings.ReplaceAll(preview, "\r", "\\r")
+	preview = strings.ReplaceAll(preview, "\t", "\\t")
+	return preview
+}
+
 var exitedSessionCleanupTTL = 45 * time.Second
 
 const (
@@ -622,6 +637,15 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			c.runtime.cfg.SessionID,
 			subID,
 			func(data []byte, seq uint32) bool {
+				c.runtime.logf(
+					"worker output event: session=%s conn=%s sub=%s seq=%d bytes=%d preview=%q",
+					c.runtime.cfg.SessionID,
+					c.connID,
+					subID,
+					seq,
+					len(data),
+					previewWorkerBytesForLog(data),
+				)
 				encoded := base64.StdEncoding.EncodeToString(data)
 				return c.sendEvent(EventEnvelope{
 					Type:      "evt",
@@ -632,6 +656,13 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 				})
 			},
 			func(reason string) {
+				c.runtime.logf(
+					"worker output desync: session=%s conn=%s sub=%s reason=%s",
+					c.runtime.cfg.SessionID,
+					c.connID,
+					subID,
+					reason,
+				)
 				_ = c.sendEvent(EventEnvelope{
 					Type:      "evt",
 					Event:     EventDesync,

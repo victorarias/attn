@@ -12,6 +12,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
+    "real-app:smoke": "node scripts/real-app-harness/smoke.mjs",
+    "real-app:repro-panes": "node scripts/real-app-harness/repro-older-pane-writability.mjs",
+    "real-app:bridge-smoke": "node scripts/real-app-harness/bridge-smoke.mjs",
+    "real-app:bridge-repro-main": "node scripts/real-app-harness/bridge-repro-main-return.mjs",
+    "real-app:bridge-cli": "node scripts/real-app-harness/ui-automation-cli.mjs",
     "e2e": "playwright test",
     "e2e:headed": "playwright test --headed"
   },

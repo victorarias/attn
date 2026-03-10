@@ -55,6 +55,21 @@ var (
 	probeTimeout      = 45 * time.Second
 )
 
+func previewBytesForLog(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	const maxPreview = 32
+	preview := string(data)
+	if len(preview) > maxPreview {
+		preview = preview[:maxPreview]
+	}
+	preview = strings.ReplaceAll(preview, "\n", "\\n")
+	preview = strings.ReplaceAll(preview, "\r", "\\r")
+	preview = strings.ReplaceAll(preview, "\t", "\\t")
+	return preview
+}
+
 type WorkerBackendConfig struct {
 	DataRoot         string
 	DaemonInstanceID string
@@ -498,8 +513,19 @@ func (b *WorkerBackend) Input(ctx context.Context, sessionID string, data []byte
 	if err != nil {
 		return err
 	}
+	if b.cfg.Logf != nil {
+		b.cfg.Logf("worker backend input: session=%s bytes=%d preview=%q", sessionID, len(data), previewBytesForLog(data))
+	}
 	payload := ptyworker.InputParams{Data: base64.StdEncoding.EncodeToString(data)}
-	return b.callSimple(ctx, session, ptyworker.MethodInput, payload)
+	err = b.callSimple(ctx, session, ptyworker.MethodInput, payload)
+	if b.cfg.Logf != nil {
+		if err != nil {
+			b.cfg.Logf("worker backend input failed: session=%s err=%v", sessionID, err)
+		} else {
+			b.cfg.Logf("worker backend input ok: session=%s bytes=%d", sessionID, len(data))
+		}
+	}
+	return err
 }
 
 func (b *WorkerBackend) Resize(ctx context.Context, sessionID string, cols, rows uint16) error {

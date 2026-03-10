@@ -1,4 +1,5 @@
 mod thumbs;
+mod ui_automation;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -122,16 +123,15 @@ fn start_daemon(_app: tauri::AppHandle, prefer_local: Option<bool>) -> Result<()
         .spawn()
         .map_err(|e| format!("Failed to start daemon: {}", e))?;
 
-    // Wait for live socket. Daemon startup can legitimately take longer now that
-    // worker-backend probing is more tolerant.
-    for _ in 0..250 {
+    // Wait for live socket (up to 3 seconds)
+    for _ in 0..30 {
         if daemon_is_running_at(&socket_path) {
             return Ok(());
         }
         thread::sleep(Duration::from_millis(100));
     }
 
-    Err("Daemon did not start within 25 seconds".to_string())
+    Err("Daemon did not start within 3 seconds".to_string())
 }
 
 #[tauri::command]
@@ -287,6 +287,10 @@ pub fn run() {
             thumbs::extract_patterns,
             thumbs::reveal_in_finder,
         ])
+        .setup(|app| {
+            ui_automation::maybe_start(&app.handle().clone());
+            Ok(())
+        })
         .on_page_load(|webview, _payload| {
             // Show window as soon as page content is loaded (loading screen visible)
             let _ = webview.window().show();

@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Terminal, TerminalHandle } from './components/Terminal';
 import { Sidebar, type SidebarHeaderAction, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
@@ -26,6 +24,7 @@ import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { MAIN_TERMINAL_PANE_ID, useSessionStore } from './store/sessions';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
+import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { useDaemonStore } from './store/daemonSessions';
@@ -34,6 +33,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useUIScale } from './hooks/useUIScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR } from './hooks/useOpenPR';
+import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
 import {
   getAgentAvailability,
   getAgentExecutableSettings,
@@ -270,7 +270,7 @@ function App() {
     sendSessionVisualized,
     sendWorkspaceSplitPane,
     sendWorkspaceClosePane,
-    sendWorkspaceFocusPane,
+    sendRuntimeInput,
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,
@@ -374,7 +374,7 @@ function App() {
         sendSessionVisualized={sendSessionVisualized}
         sendWorkspaceSplitPane={sendWorkspaceSplitPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
-        sendWorkspaceFocusPane={sendWorkspaceFocusPane}
+        sendRuntimeInput={sendRuntimeInput}
         sendGetFileDiff={sendGetFileDiff}
         sendGetBranchDiffFiles={sendGetBranchDiffFiles}
         getRepoInfo={getRepoInfo}
@@ -448,7 +448,7 @@ interface AppContentProps {
   sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
   sendWorkspaceSplitPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceSplitPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
-  sendWorkspaceFocusPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceFocusPane'];
+  sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
   sendGetBranchDiffFiles: ReturnType<typeof useDaemonSocket>['sendGetBranchDiffFiles'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
@@ -517,7 +517,7 @@ function AppContent({
   sendSessionVisualized,
   sendWorkspaceSplitPane,
   sendWorkspaceClosePane,
-  sendWorkspaceFocusPane,
+  sendRuntimeInput,
   sendGetFileDiff,
   sendGetBranchDiffFiles,
   getRepoInfo,
@@ -539,13 +539,13 @@ function AppContent({
   clearGitStatus,
 }: AppContentProps) {
   const {
+    connect,
     sessions,
     activeSessionId,
     createSession,
     closeSession,
     setActiveSession,
-    connectTerminal,
-    resizeSession,
+    takeSessionSpawnArgs,
     reloadSession,
     setForkParams,
     setLauncherConfig,
@@ -710,7 +710,21 @@ function AppContent({
     };
   });
 
-  const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
+  const {
+    eventRouter: paneRuntimeEventRouter,
+    getActivePaneIdForSession,
+    setActivePane,
+    setWorkspaceRef,
+    removeWorkspaceRef,
+    focusSessionPane,
+    fitSessionActivePane,
+    getPaneText,
+    getPaneSize,
+  } = useSessionWorkspaceController(sessions, activeSessionId);
+
+  useEffect(() => {
+    void connect();
+  }, [connect]);
 
   type DockPanelId = 'diff' | 'reviewLoop' | 'attention' | 'diffDetail';
 
@@ -1082,12 +1096,10 @@ function AppContent({
       const sessionId = await createSession(folderName, path, undefined, selectedAgent);
       // Fit terminal after view becomes visible
       setTimeout(() => {
-        const handle = terminalRefs.current.get(sessionId);
-        handle?.fit();
-        handle?.focus();
+        fitSessionActivePane(sessionId);
       }, 100);
     },
-    [agentAvailability, createSession, hasAvailableAgents, showError]
+    [agentAvailability, createSession, fitSessionActivePane, hasAvailableAgents, showError]
   );
 
   const closeLocationPicker = useCallback(() => {
@@ -1097,25 +1109,15 @@ function AppContent({
   // Quick Find (thumbs) handlers
   const handleOpenQuickFind = useCallback(() => {
     if (!activeSessionId) return;
-    const handle = terminalRefs.current.get(activeSessionId);
-    const terminal = handle?.terminal;
-    if (!terminal) return;
-
-    // Extract last 1000 lines from terminal buffer
-    const buffer = terminal.buffer.active;
-    if (!buffer) return;
-    const lines = 1000;
-    const startLine = Math.max(0, buffer.length - lines);
-    const textLines: string[] = [];
-
-    for (let i = startLine; i < buffer.length; i++) {
-      const line = buffer.getLine(i);
-      if (line) textLines.push(line.translateToString(true));
-    }
-
-    setThumbsText(textLines.join('\n'));
+    const session = sessions.find((entry) => entry.id === activeSessionId);
+    if (!session) return;
+    const activePaneId = getActivePaneIdForSession(session);
+    const paneText = getPaneText(activeSessionId, activePaneId);
+    if (!paneText) return;
+    const textLines = paneText.split('\n');
+    setThumbsText(textLines.slice(-1000).join('\n'));
     setThumbsOpen(true);
-  }, [activeSessionId]);
+  }, [activeSessionId, getActivePaneIdForSession, getPaneText, sessions]);
 
   const handleThumbsClose = useCallback(() => {
     setThumbsOpen(false);
@@ -1169,8 +1171,7 @@ function AppContent({
         worktreePath = result.path!;
       }
 
-      // Pre-generate session ID so we can set fork params BEFORE creating session
-      // (createSession triggers re-render which mounts Terminal and calls connectTerminal)
+      // Pre-generate session ID so we can set fork params before the pane binder asks for spawn args.
       const sessionId = crypto.randomUUID();
 
       // Store fork params BEFORE creating session to avoid race condition
@@ -1185,9 +1186,7 @@ function AppContent({
 
       // Fit terminal after view becomes visible
       setTimeout(() => {
-        const handle = terminalRefs.current.get(sessionId);
-        handle?.fit();
-        handle?.focus();
+        fitSessionActivePane(sessionId);
       }, 100);
     } catch (err) {
       console.error('[App] Fork failed:', err);
@@ -1199,7 +1198,7 @@ function AppContent({
       }
       setForkError(err instanceof Error ? err.message : 'Fork failed');
     }
-  }, [forkTargetSession, sendCreateWorktree, sendDeleteWorktree, createSession, setForkParams]);
+  }, [createSession, fitSessionActivePane, forkTargetSession, sendCreateWorktree, sendDeleteWorktree, setForkParams]);
 
   const handleForkClose = useCallback(() => {
     setForkDialogOpen(false);
@@ -1227,34 +1226,43 @@ function AppContent({
         sendUnregisterSession(daemonSession.id);
       }
 
-      terminalRefs.current.delete(id);
+      removeWorkspaceRef(id);
       closeSession(id);
     },
-    [closeSession, enrichedLocalSessions, alwaysKeepWorktrees, daemonSessions, sendUnregisterSession]
+    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession]
   );
 
   const handleSelectSession = useCallback(
     (id: string) => {
-      const nextSession = sessions.find((session) => session.id === id);
-      const utilityFocused =
-        nextSession?.terminalPanel.terminals.length &&
-        nextSession.terminalPanel.activePaneId !== MAIN_TERMINAL_PANE_ID;
-
       setActiveSession(id);
-      if (utilityFocused) {
-        setUtilityFocusRequestToken((token) => token + 1);
-      }
-      // Fit and focus the terminal after a short delay (allows CSS to apply)
+      setUtilityFocusRequestToken((token) => token + 1);
+      // Fit after a short delay so the selected workspace has visible dimensions.
       setTimeout(() => {
-        const handle = terminalRefs.current.get(id);
-        handle?.fit();
-        if (!utilityFocused) {
-          handle?.focus();
-        }
+        fitSessionActivePane(id);
       }, 50);
     },
-    [sessions, setActiveSession]
+    [fitSessionActivePane, setActiveSession]
   );
+
+  useUiAutomationBridge({
+    sessions,
+    activeSessionId,
+    getActivePaneIdForSession,
+    createSession,
+    selectSession: handleSelectSession,
+    splitPane: sendWorkspaceSplitPane,
+    closePane: sendWorkspaceClosePane,
+    focusPane: (sessionId: string, paneId: string) => {
+      setActiveSession(sessionId);
+      setUtilityFocusRequestToken((token) => token + 1);
+      setActivePane(sessionId, paneId);
+      focusSessionPane(sessionId, paneId, 40);
+    },
+    getPaneText,
+    getPaneSize,
+    fitSessionActivePane,
+    sendRuntimeInput,
+  });
 
   const openPR = useOpenPR({
     settings,
@@ -1280,9 +1288,7 @@ function AppContent({
         console.log(`[App] Worktree created at ${result.worktreePath}`);
         // Fit terminal after view becomes visible
         setTimeout(() => {
-          const handle = terminalRefs.current.get(result.sessionId);
-          handle?.fit();
-          handle?.focus();
+          fitSessionActivePane(result.sessionId);
         }, 100);
         return;
       }
@@ -1313,7 +1319,7 @@ function AppContent({
         }
       }
     },
-    [agentAvailability, hasAvailableAgents, openPR, settings.new_session_agent]
+    [agentAvailability, fitSessionActivePane, hasAvailableAgents, openPR, settings.new_session_agent]
   );
 
   // Worktree cleanup prompt handlers
@@ -1337,38 +1343,6 @@ function AppContent({
     setAlwaysKeepWorktrees(true);
     setClosedWorktree(null);
   }, []);
-
-  const handleTerminalReady = useCallback(
-    (sessionId: string) => (terminal: XTerm) => {
-      connectTerminal(sessionId, terminal);
-    },
-    [connectTerminal]
-  );
-
-  const handleResize = useCallback(
-    (sessionId: string) => (cols: number, rows: number) => {
-      // Ignore resize callbacks from hidden/non-active terminals.
-      // Hidden terminals can transiently report invalid dimensions while unmounted.
-      if (sessionId !== activeSessionId || view !== 'session') {
-        return;
-      }
-      // Allow legitimately small visible terminals (narrow windows / large fonts).
-      if (cols <= 0 || rows <= 0) {
-        return;
-      }
-      resizeSession(sessionId, cols, rows);
-    },
-    [activeSessionId, resizeSession, view]
-  );
-
-  const setTerminalRef = useCallback(
-    (sessionId: string) => (ref: TerminalHandle | null) => {
-      if (ref) {
-        terminalRefs.current.set(sessionId, ref);
-      }
-    },
-    []
-  );
 
   // Calculate attention count for drawer badge
   const waitingLocalSessions = enrichedLocalSessions
@@ -1446,9 +1420,10 @@ function AppContent({
       return;
     }
 
-    if (activeSession.terminalPanel.terminals.length > 0) {
-      if (activeSession.terminalPanel.activePaneId !== MAIN_TERMINAL_PANE_ID) {
-        void sendWorkspaceClosePane(activeSessionId, activeSession.terminalPanel.activePaneId).catch((error) => {
+    if (activeSession.workspace.terminals.length > 0) {
+      const activePaneId = getActivePaneIdForSession(activeSession);
+      if (activePaneId !== MAIN_TERMINAL_PANE_ID) {
+        void sendWorkspaceClosePane(activeSessionId, activePaneId).catch((error) => {
           showError(error instanceof Error ? error.message : 'Failed to close split pane');
         });
         return;
@@ -1459,11 +1434,12 @@ function AppContent({
     }
 
     handleCloseSession(activeSessionId);
-  }, [activeSessionId, handleCloseSession, sendWorkspaceClosePane, sessions, showError]);
+  }, [activeSessionId, getActivePaneIdForSession, handleCloseSession, sendWorkspaceClosePane, sessions, showError]);
 
   const handleReloadSession = useCallback((id: string) => {
-    void reloadSession(id);
-  }, [reloadSession]);
+    const size = getPaneSize(id, MAIN_TERMINAL_PANE_ID) || undefined;
+    void reloadSession(id, size);
+  }, [getPaneSize, reloadSession]);
 
   // Open file in diff detail panel
   const handleFileSelect = useCallback((path: string, _staged: boolean) => {
@@ -1806,22 +1782,20 @@ function AppContent({
                 className={`terminal-wrapper ${session.id === activeSessionId ? 'active' : ''}`}
               >
                 <SessionTerminalWorkspace
+                  ref={setWorkspaceRef(session.id)}
                   sessionId={session.id}
+                  sessionLabel={session.label}
+                  sessionAgent={session.agent}
                   cwd={session.cwd}
-                  panel={session.terminalPanel}
+                  workspace={session.workspace}
+                  activePaneId={getActivePaneIdForSession(session)}
                   fontSize={terminalFontSize}
                   resolvedTheme={resolvedTheme}
                   focusRequestToken={utilityFocusRequestToken}
                   enabled={!locationPickerOpen && !branchPickerOpen}
                   isActiveSession={session.id === activeSessionId}
-                  focusMainPane={() => {
-                    const handle = terminalRefs.current.get(session.id);
-                    if (!handle?.terminal) {
-                      return false;
-                    }
-                    handle.focus();
-                    return true;
-                  }}
+                  eventRouter={paneRuntimeEventRouter}
+                  getMainPaneSpawnArgs={(cols, rows) => takeSessionSpawnArgs(session.id, cols, rows)}
                   onSplitPane={(targetPaneId, direction) => {
                     void sendWorkspaceSplitPane(session.id, targetPaneId, direction).catch(console.error);
                   }}
@@ -1829,19 +1803,9 @@ function AppContent({
                     void sendWorkspaceClosePane(session.id, paneId).catch(console.error);
                   }}
                   onFocusPane={(paneId) => {
-                    void sendWorkspaceFocusPane(session.id, paneId).catch(console.error);
+                    setActivePane(session.id, paneId);
                   }}
                   onNavigateOutOfSession={handleNavigateOutOfSession}
-                  mainPane={(
-                    <Terminal
-                      ref={setTerminalRef(session.id)}
-                      fontSize={terminalFontSize}
-                      resolvedTheme={resolvedTheme}
-                      debugName={`main:${session.label}:${session.id}`}
-                      onReady={handleTerminalReady(session.id)}
-                      onResize={handleResize(session.id)}
-                    />
-                  )}
                 />
               </div>
             ))}
