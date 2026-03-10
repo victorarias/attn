@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { ptyResize, ptySpawn, ptyWrite, type PtyEventPayload, type PtySpawnArgs } from '../../pty/bridge';
 import { triggerShortcut } from '../../shortcuts/useShortcut';
+import { isMacLikePlatform } from '../../shortcuts/platform';
 import type { TerminalHandle } from '../Terminal';
 import { activeElementSummary, recordPaneRuntimeDebugEvent } from '../../utils/paneRuntimeDebug';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
@@ -83,7 +84,7 @@ function snapshotTerminalText(terminal: XTerm | null): string {
 
 function installTerminalKeyHandler(sendToPty: (data: string) => void) {
   return (ev: KeyboardEvent) => {
-    const accel = ev.metaKey || ev.ctrlKey;
+    const accel = isMacLikePlatform() ? ev.metaKey : (ev.metaKey || ev.ctrlKey);
     if (ev.type === 'keydown' && accel && !ev.altKey) {
       if (!ev.shiftKey && ev.key.toLowerCase() === 't') {
         return !triggerShortcut('terminal.new');
