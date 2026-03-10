@@ -6,6 +6,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-03-10]
+
+### Changed
+- **GitHub PR Review Automation**: Replaced the `victorarias/shitty-reviewing-agent` PR review workflow with Hodor on Vertex AI using `google-vertex/gemini-3-flash-preview`, while keeping the workflow advisory and fork-safe.
+
+### Added
+- **Hodor Review Guidance**: Added a repository-specific Hodor skill and maintainer docs for the PR review workflow, including the local patch required for Google/Vertex model parsing in upstream Hodor `v0.3.4`.
+
 ## [2026-03-08]
 
 ### Changed

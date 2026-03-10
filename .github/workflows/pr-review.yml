@@ -1,43 +1,125 @@
-name: PR Review
+name: Hodor PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, ready_for_review, reopened]
 
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 concurrency:
-  group: pr-review-${{ github.event.pull_request.number }}
+  group: hodor-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   review:
+    if: ${{ !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       VERTEX_AI_SA: ${{ secrets.VERTEX_AI_SA }}
       GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+      HODOR_VERSION: v0.3.4
+      HODOR_MODEL: google-vertex/gemini-3-flash-preview
+      GOOGLE_CLOUD_LOCATION: global
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
 
       - name: Authenticate to Google Cloud
-        if: ${{ !github.event.pull_request.head.repo.fork && env.VERTEX_AI_SA != '' && env.GOOGLE_CLOUD_PROJECT != '' }}
+        if: ${{ env.VERTEX_AI_SA != '' && env.GOOGLE_CLOUD_PROJECT != '' }}
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ env.VERTEX_AI_SA }}
+          create_credentials_file: true
+          export_environment_variables: true
 
-      - name: Run automated PR review
-        if: ${{ !github.event.pull_request.head.repo.fork && env.VERTEX_AI_SA != '' && env.GOOGLE_CLOUD_PROJECT != '' }}
-        uses: victorarias/shitty-reviewing-agent@main
+      - name: Validate review configuration
+        if: ${{ env.VERTEX_AI_SA != '' && env.GOOGLE_CLOUD_PROJECT != '' }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GOOGLE_CLOUD_PROJECT:-}" ]]; then
+            echo "GOOGLE_CLOUD_PROJECT secret is required." >&2
+            exit 1
+          fi
+
+          if [[ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]]; then
+            echo "VERTEX_AI_SA secret is required." >&2
+            exit 1
+          fi
+
+          gh --version
+          echo "Using Hodor ${HODOR_VERSION} with model ${HODOR_MODEL}"
+          echo "Vertex project: ${GOOGLE_CLOUD_PROJECT}"
+          echo "Vertex location: ${GOOGLE_CLOUD_LOCATION}"
+
+      - name: Install patched Hodor
+        if: ${{ env.VERTEX_AI_SA != '' && env.GOOGLE_CLOUD_PROJECT != '' }}
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch "${HODOR_VERSION}" https://github.com/mr-karan/hodor /tmp/hodor
+          cd /tmp/hodor
+          git apply "${GITHUB_WORKSPACE}/.github/hodor/v0.3.4-google-vertex.patch"
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Run Hodor review
+        id: hodor
+        if: ${{ env.VERTEX_AI_SA != '' && env.GOOGLE_CLOUD_PROJECT != '' }}
+        continue-on-error: true
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GOOGLE_CLOUD_PROJECT: ${{ env.GOOGLE_CLOUD_PROJECT }}
-          GOOGLE_CLOUD_LOCATION: global
-        with:
-          provider: vertex
-          model: gemini-3-flash-preview
+        run: |
+          set -euo pipefail
+          PR_URL="https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          cd /tmp/hodor
+          bun run dist/cli.js "$PR_URL" \
+            --model "${HODOR_MODEL}" \
+            --reasoning-effort high \
+            --post \
+            --verbose | tee /tmp/hodor-review.log
 
-      - name: Skip automated PR review
-        if: ${{ github.event.pull_request.head.repo.fork || env.VERTEX_AI_SA == '' || env.GOOGLE_CLOUD_PROJECT == '' }}
-        run: echo "Skipping PR Review for forked PRs or when Vertex credentials are unavailable."
+      - name: Upload Hodor logs
+        if: ${{ always() && env.VERTEX_AI_SA != '' && env.GOOGLE_CLOUD_PROJECT != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hodor-review-${{ github.run_id }}
+          path: /tmp/hodor-review.log
+          retention-days: 7
+
+      - name: Skip Hodor review
+        if: ${{ env.VERTEX_AI_SA == '' || env.GOOGLE_CLOUD_PROJECT == '' }}
+        run: echo "Skipping Hodor review because required Vertex secrets are unavailable."
+
+      - name: Summarize Hodor review outcome
+        if: ${{ always() && env.VERTEX_AI_SA != '' && env.GOOGLE_CLOUD_PROJECT != '' }}
+        run: |
+          outcome='${{ steps.hodor.outcome }}'
+          {
+            echo "### Hodor review status: ${outcome}"
+            echo
+            echo "- Model: \`${HODOR_MODEL}\`"
+            echo "- Hodor version: \`${HODOR_VERSION}\`"
+            echo
+            if [[ "$outcome" == "success" ]]; then
+              echo "Hodor completed successfully and posted an advisory review comment to the PR."
+            elif [[ "$outcome" == "failure" ]]; then
+              echo "The Hodor run failed. This workflow remains advisory; inspect the uploaded log artifact for details."
+            elif [[ "$outcome" == "cancelled" ]]; then
+              echo "The Hodor run was cancelled."
+            else
+              echo "Hodor step outcome: $outcome"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
