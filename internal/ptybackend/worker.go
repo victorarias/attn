@@ -213,6 +213,57 @@ func NewWorker(cfg WorkerBackendConfig) (*WorkerBackend, error) {
 	return b, nil
 }
 
+// resolveBinaryPath returns the path to the attn binary for spawning workers.
+// If the configured BinaryPath still exists, it is returned directly. Otherwise,
+// we re-resolve from well-known locations (the binary may have been deleted by
+// security software or replaced during an app update while the daemon was running).
+func (b *WorkerBackend) resolveBinaryPath() string {
+	if isExecutableFile(b.cfg.BinaryPath) {
+		return b.cfg.BinaryPath
+	}
+	b.cfg.Logf("worker binary missing at %s, re-resolving", b.cfg.BinaryPath)
+
+	// Only check well-known attn locations.  os.Executable() is excluded
+	// because if the original BinaryPath came from it, it would return the
+	// same stale path; and in other contexts (e.g. tests) it returns an
+	// unrelated binary that happens to be executable.
+	candidates := make([]string, 0, 4)
+	if wrapperPath := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); wrapperPath != "" {
+		candidates = append(candidates, wrapperPath)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".local", "bin", "attn"))
+	}
+	if runtime.GOOS == "darwin" {
+		// Bundled binary inside the macOS app bundle.
+		candidates = append(candidates, "/Applications/attn.app/Contents/MacOS/attn")
+	}
+	if path, err := exec.LookPath("attn"); err == nil && path != "" {
+		candidates = append(candidates, path)
+	}
+
+	for _, c := range candidates {
+		if isExecutableFile(c) {
+			b.cfg.Logf("worker binary re-resolved to %s", c)
+			b.cfg.BinaryPath = c
+			return c
+		}
+	}
+	b.cfg.Logf("worker binary re-resolve failed, using original %s; candidates=%v", b.cfg.BinaryPath, candidates)
+	return b.cfg.BinaryPath
+}
+
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		return false
+	}
+	return true
+}
+
 func (b *WorkerBackend) SetExitHandler(handler func(ExitInfo)) {
 	b.hooksMu.Lock()
 	defer b.hooksMu.Unlock()
@@ -354,8 +405,9 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		args = append(args, "--pi-executable", opts.PiExecutable)
 	}
 
-	cmd := exec.CommandContext(ctx, b.cfg.BinaryPath, args...)
-	b.cfg.Logf("worker backend spawn: session=%s binary=%s socket=%s", sessionID, b.cfg.BinaryPath, session.SocketPath)
+	binaryPath := b.resolveBinaryPath()
+	cmd := exec.CommandContext(ctx, binaryPath, args...)
+	b.cfg.Logf("worker backend spawn: session=%s binary=%s socket=%s", sessionID, binaryPath, session.SocketPath)
 	workerLogPath := filepath.Join(b.logDir(), sessionID+".log")
 	workerLogFile, logErr := os.OpenFile(workerLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if logErr != nil {
