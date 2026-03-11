@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -214,6 +215,7 @@ func NewWorker(cfg WorkerBackendConfig) (*WorkerBackend, error) {
 	if err := os.MkdirAll(b.logDir(), 0700); err != nil {
 		return nil, fmt.Errorf("create worker log dir: %w", err)
 	}
+	b.cacheBinary()
 	return b, nil
 }
 
@@ -231,10 +233,11 @@ func (b *WorkerBackend) resolveBinaryPath() string {
 	// because if the original BinaryPath came from it, it would return the
 	// same stale path; and in other contexts (e.g. tests) it returns an
 	// unrelated binary that happens to be executable.
-	candidates := make([]string, 0, 4)
+	candidates := make([]string, 0, 6)
 	if wrapperPath := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); wrapperPath != "" {
 		candidates = append(candidates, wrapperPath)
 	}
+	candidates = append(candidates, b.cachedBinaryPath())
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates, filepath.Join(home, ".local", "bin", "attn"))
 	}
@@ -254,6 +257,60 @@ func (b *WorkerBackend) resolveBinaryPath() string {
 	}
 	b.cfg.Logf("worker binary re-resolve failed, using original %s; candidates=%v", b.cfg.BinaryPath, candidates)
 	return b.cfg.BinaryPath
+}
+
+// cacheBinary copies the current binary to ~/.attn/cache/attn so that if the
+// original is deleted (e.g. by CrowdStrike) the daemon can still spawn workers.
+func (b *WorkerBackend) cacheBinary() {
+	src := b.cfg.BinaryPath
+	if !isExecutableFile(src) {
+		return
+	}
+	dst := b.cachedBinaryPath()
+	dir := filepath.Dir(dst)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		b.cfg.Logf("cache binary: mkdir %s: %v", dir, err)
+		return
+	}
+	// Skip if cache is already up-to-date (same size and mod time >= source).
+	srcInfo, _ := os.Stat(src)
+	dstInfo, dstErr := os.Stat(dst)
+	if dstErr == nil && srcInfo != nil && dstInfo.Size() == srcInfo.Size() && !dstInfo.ModTime().Before(srcInfo.ModTime()) {
+		return
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		b.cfg.Logf("cache binary: open %s: %v", src, err)
+		return
+	}
+	defer in.Close()
+	tmp := dst + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		b.cfg.Logf("cache binary: create %s: %v", tmp, err)
+		return
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(tmp)
+		b.cfg.Logf("cache binary: copy: %v", err)
+		return
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(tmp)
+		b.cfg.Logf("cache binary: close: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		os.Remove(tmp)
+		b.cfg.Logf("cache binary: rename: %v", err)
+		return
+	}
+	b.cfg.Logf("cached binary to %s", dst)
+}
+
+func (b *WorkerBackend) cachedBinaryPath() string {
+	return filepath.Join(b.cfg.DataRoot, "cache", "attn")
 }
 
 func isExecutableFile(path string) bool {

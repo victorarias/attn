@@ -585,7 +585,7 @@ func shouldSetpgidForPTY() bool {
 }
 
 func resolveAttnPath() string {
-	candidates := make([]string, 0, 4)
+	candidates := make([]string, 0, 6)
 	if wrapperPath := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); wrapperPath != "" {
 		candidates = append(candidates, wrapperPath)
 	}
@@ -593,6 +593,7 @@ func resolveAttnPath() string {
 		candidates = append(candidates, exe)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".attn", "cache", "attn"))
 		candidates = append(candidates, filepath.Join(home, ".local", "bin", "attn"))
 	}
 	if runtime.GOOS == "darwin" {
