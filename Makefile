@@ -5,7 +5,7 @@ INSTALL_DIR=$(HOME)/.local/bin
 BUILD_DIR=./cmd/attn
 
 build:
-	go build -o $(BINARY_NAME) $(BUILD_DIR)
+	go build -ldflags "-s -w" -o $(BINARY_NAME) $(BUILD_DIR)
 
 GOTESTSUM=$(HOME)/go/bin/gotestsum
 
@@ -57,8 +57,6 @@ install: build
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
 		xattr -d com.apple.quarantine $(INSTALL_DIR)/$(BINARY_NAME) 2>/dev/null || true; \
 		codesign -s - -f $(INSTALL_DIR)/$(BINARY_NAME); \
-	else \
-		echo "Skipping macOS quarantine removal and codesign on $(UNAME_S)"; \
 	fi
 	@# Kill running daemon and restart with new local code.
 	-pkill -f "$(BINARY_NAME) daemon" 2>/dev/null || true
