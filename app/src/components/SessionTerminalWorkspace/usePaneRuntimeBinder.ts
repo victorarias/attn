@@ -82,6 +82,12 @@ function snapshotTerminalText(terminal: XTerm | null): string {
   return lines.join('\n');
 }
 
+function replayPendingTerminalEvents(terminal: XTerm, events: PtyEventPayload[]) {
+  for (const event of events) {
+    writePtyEventToTerminal(terminal, event);
+  }
+}
+
 export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
   return (ev: KeyboardEvent) => {
     const accel = isMacLikePlatform() ? ev.metaKey : (ev.metaKey || ev.ctrlKey);
@@ -365,7 +371,6 @@ export function usePaneRuntimeBinder(
         },
       });
       await ptySpawn({ args: spawnArgs });
-      pendingTerminalEventsRef.current.delete(paneId);
       recordPaneRuntimeDebugEvent({
         scope: 'binder',
         sessionId: pane.testSessionId,
@@ -434,6 +439,20 @@ export function usePaneRuntimeBinder(
         details: { textLength: cachedText.length },
       });
       xterm.write(cachedText.replace(/\n/g, '\r\n'));
+    }
+
+    const pendingEvents = pendingTerminalEventsRef.current.get(paneId);
+    if (pendingEvents?.length) {
+      recordPaneRuntimeDebugEvent({
+        scope: 'binder',
+        sessionId: pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: 'replay queued pty events',
+        details: { count: pendingEvents.length },
+      });
+      replayPendingTerminalEvents(xterm, pendingEvents);
+      pendingTerminalEventsRef.current.delete(paneId);
     }
   }, []);
 
