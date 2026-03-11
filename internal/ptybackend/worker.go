@@ -377,7 +377,13 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 			_ = workerLogFile.Close()
 		}()
 	}
-	cmd.Env = append(os.Environ(), "ATTN_PTY_WORKER=1")
+	workerEnv := append(os.Environ(), "ATTN_PTY_WORKER=1")
+	// Ensure the worker always knows where the attn binary is, even if the
+	// daemon was started without ATTN_WRAPPER_PATH (e.g. CLI path) or the
+	// original path became stale.  The worker backend has already resolved a
+	// valid BinaryPath, so propagate it explicitly.
+	workerEnv = append(workerEnv, "ATTN_WRAPPER_PATH="+b.cfg.BinaryPath)
+	cmd.Env = workerEnv
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start pty worker: %w", err)

@@ -133,7 +133,7 @@ func TestResolveAttnPath_PrefersEnvWrapperPath(t *testing.T) {
 		_ = os.Setenv("ATTN_WRAPPER_PATH", old)
 	})
 
-	got := resolveAttnPath()
+	got := resolveAttnPath(nil)
 	if got != wrapperPath {
 		t.Fatalf("resolveAttnPath() = %q, want %q", got, wrapperPath)
 	}

@@ -146,7 +146,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	agent := normalizeAgent(opts.Agent)
 	attnPath := ""
 	if agent != "shell" {
-		attnPath = resolveAttnPath()
+		attnPath = resolveAttnPath(m.logf)
 	}
 
 	m.mu.Lock()
@@ -584,7 +584,7 @@ func shouldSetpgidForPTY() bool {
 	return runtime.GOOS != "darwin"
 }
 
-func resolveAttnPath() string {
+func resolveAttnPath(logf LogFunc) string {
 	candidates := make([]string, 0, 4)
 	if wrapperPath := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); wrapperPath != "" {
 		candidates = append(candidates, wrapperPath)
@@ -600,6 +600,9 @@ func resolveAttnPath() string {
 	}
 	if resolved, ok := firstExecutablePath(candidates); ok {
 		return resolved
+	}
+	if logf != nil {
+		logf("resolveAttnPath: all candidates failed, falling back to bare \"attn\"; candidates=%v", candidates)
 	}
 	return "attn"
 }

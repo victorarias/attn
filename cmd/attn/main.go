@@ -583,6 +583,7 @@ func startDaemonBackground() error {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
+	cmd.Env = append(os.Environ(), "ATTN_WRAPPER_PATH="+executable)
 
 	// Detach from parent process
 	cmd.SysProcAttr = &syscall.SysProcAttr{
