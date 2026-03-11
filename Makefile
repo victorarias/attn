@@ -1,4 +1,4 @@
-.PHONY: build install test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app install-app install-all dist release release-skip-tests
+.PHONY: build install test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-ui-automation install-app install-app-ui-automation install-all install-all-ui-automation dist release release-skip-tests
 
 BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
@@ -99,14 +99,26 @@ build-app: build
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
 	cd app && VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles app
 
+build-app-ui-automation: build
+	@mkdir -p app/src-tauri/binaries
+	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
+	cd app && ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles app
+
 # Install Tauri app to /Applications
 install-app: build-app
 	@rm -rf /Applications/attn.app
 	cp -r app/src-tauri/target/release/bundle/macos/attn.app /Applications/
 	@echo "Installed attn.app to /Applications"
 
+install-app-ui-automation: build-app-ui-automation
+	@rm -rf /Applications/attn.app
+	cp -r app/src-tauri/target/release/bundle/macos/attn.app /Applications/
+	@echo "Installed attn.app to /Applications with UI automation bridge enabled"
+
 # Install daemon and app
 install-all: install install-app
+
+install-all-ui-automation: install install-app-ui-automation
 
 # Create distributable DMG
 dist: build-app

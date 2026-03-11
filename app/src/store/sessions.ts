@@ -1,48 +1,31 @@
 import { create } from 'zustand';
-import { Terminal } from '@xterm/xterm';
 import type { UISessionState } from '../types/sessionState';
 import { normalizeSessionState } from '../types/sessionState';
 import type { SessionAgent } from '../types/sessionAgent';
 import { normalizeSessionAgent } from '../types/sessionAgent';
-import { listenPtyEvents, ptyKill, ptyResize, ptySpawn, ptyWrite, type PtyEventPayload } from '../pty/bridge';
+import type { DaemonWorkspace } from '../hooks/useDaemonSocket';
+import { listenPtyEvents, ptyKill, ptySpawn, type PtySpawnArgs } from '../pty/bridge';
+import {
+  MAIN_TERMINAL_PANE_ID,
+  createDefaultWorkspaceState,
+  workspaceSnapshotFromDaemonWorkspace,
+  type TerminalWorkspaceState,
+} from '../types/workspace';
 
-export interface UtilityTerminal {
-  id: string;
-  ptyId: string;
-  title: string;
-}
-
-export interface TerminalPanelState {
-  isOpen: boolean;
-  height: number;
-  activeTabId: string | null;
-  terminals: UtilityTerminal[];
-  nextTerminalNumber: number;
-}
-
-const DEFAULT_PANEL_HEIGHT = 200;
-
-function createDefaultPanelState(): TerminalPanelState {
-  return {
-    isOpen: false,
-    height: DEFAULT_PANEL_HEIGHT,
-    activeTabId: null,
-    terminals: [],
-    nextTerminalNumber: 1,
-  };
-}
+export { MAIN_TERMINAL_PANE_ID };
+export type { TerminalWorkspaceState };
 
 export interface Session {
   id: string;
   label: string;
   state: UISessionState;
-  terminal: Terminal | null;
   cwd: string;
   agent: SessionAgent;
   transcriptMatched: boolean;
   branch?: string;
   isWorktree?: boolean;
-  terminalPanel: TerminalPanelState;
+  workspace: TerminalWorkspaceState;
+  daemonActivePaneId: string;
 }
 
 export interface DaemonSessionSnapshot {
@@ -70,80 +53,17 @@ interface SessionStore {
   createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent) => Promise<string>;
   closeSession: (id: string) => void;
   setActiveSession: (id: string | null) => void;
-  connectTerminal: (id: string, terminal: Terminal) => Promise<void>;
-  resizeSession: (id: string, cols: number, rows: number) => void;
-  reloadSession: (id: string) => Promise<void>;
+  takeSessionSpawnArgs: (id: string, cols: number, rows: number) => PtySpawnArgs | null;
+  reloadSession: (id: string, size?: { cols: number; rows: number }) => Promise<void>;
   setForkParams: (sessionId: string, resumeSessionId: string) => void;
   setLauncherConfig: (config: LauncherConfig) => void;
   syncFromDaemonSessions: (daemonSessions: DaemonSessionSnapshot[]) => void;
-
-  // Terminal panel actions
-  openTerminalPanel: (sessionId: string) => void;
-  collapseTerminalPanel: (sessionId: string) => void;
-  setTerminalPanelHeight: (sessionId: string, height: number) => void;
-  addUtilityTerminal: (sessionId: string, ptyId: string) => string;
-  removeUtilityTerminal: (sessionId: string, terminalId: string) => void;
-  setActiveUtilityTerminal: (sessionId: string, terminalId: string) => void;
-  renameUtilityTerminal: (sessionId: string, terminalId: string, title: string) => void;
+  syncFromDaemonWorkspaces: (daemonWorkspaces: DaemonWorkspace[]) => void;
 }
 
-const pendingConnections = new Set<string>();
 const pendingForkParams = new Map<string, { resumeSessionId?: string; forkSession?: boolean }>();
-const pendingTerminalEvents = new Map<string, PtyEventPayload[]>();
-const MAX_PENDING_TERMINAL_EVENTS = 256;
 const MIN_STABLE_COLS = 20;
 const MIN_STABLE_ROWS = 8;
-
-function decodePtyBytes(payload: string): Uint8Array {
-  const binaryStr = atob(payload);
-  return Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
-}
-
-function writePtyEventToTerminal(terminal: Terminal, msg: PtyEventPayload) {
-  switch (msg.event) {
-    case 'data': {
-      const bytes = decodePtyBytes(msg.data);
-      const termWithUtf8 = terminal as Terminal & { writeUtf8?: (data: Uint8Array) => void };
-      if (typeof termWithUtf8.writeUtf8 === 'function') {
-        termWithUtf8.writeUtf8(bytes);
-      } else {
-        terminal.write(new TextDecoder('utf-8').decode(bytes));
-      }
-      break;
-    }
-    case 'reset':
-      terminal.reset();
-      break;
-    case 'exit':
-      terminal.write(`\r\n[Process exited with code ${msg.code}]\r\n`);
-      break;
-    case 'error':
-      terminal.write(`\r\n[Error: ${msg.error}]\r\n`);
-      break;
-    default:
-      break;
-  }
-}
-
-function queuePendingTerminalEvent(id: string, msg: PtyEventPayload) {
-  const events = pendingTerminalEvents.get(id) || [];
-  if (events.length >= MAX_PENDING_TERMINAL_EVENTS) {
-    events.shift();
-  }
-  events.push(msg);
-  pendingTerminalEvents.set(id, events);
-}
-
-function flushPendingTerminalEvents(id: string, terminal: Terminal) {
-  const events = pendingTerminalEvents.get(id);
-  if (!events || events.length === 0) {
-    return;
-  }
-  for (const event of events) {
-    writePtyEventToTerminal(terminal, event);
-  }
-  pendingTerminalEvents.delete(id);
-}
 
 // Test helper for E2E - allows injecting sessions without PTY
 interface TestSession {
@@ -179,7 +99,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       await listenPtyEvents((event) => {
         const msg = event.payload;
         const { sessions } = get();
-        const session = sessions.find((s) => s.id === msg.id);
 
         if (msg.event === 'transcript') {
           if (typeof msg.matched === 'boolean') {
@@ -190,16 +109,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           }
           return;
         }
-
-        if (!session) {
-          return;
-        }
-        if (!session.terminal) {
-          queuePendingTerminalEvent(session.id, msg);
-          return;
-        }
-        flushPendingTerminalEvents(session.id, session.terminal);
-        writePtyEventToTerminal(session.terminal, msg);
       });
 
       set({ connected: true });
@@ -216,11 +125,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       id,
       label,
       state: 'launching',
-      terminal: null,
       cwd,
       agent: resolvedAgent,
       transcriptMatched: resolvedAgent !== 'codex',
-      terminalPanel: createDefaultPanelState(),
+      workspace: createDefaultWorkspaceState(),
+      daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
     };
 
     set((state) => ({
@@ -238,14 +147,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (session) {
       // Kill main session PTY
       ptyKill({ id }).catch(console.error);
-      session.terminal?.dispose();
-      pendingTerminalEvents.delete(id);
-
-      // Kill all utility terminal PTYs
-      for (const utilTerminal of session.terminalPanel.terminals) {
-        ptyKill({ id: utilTerminal.ptyId }).catch(console.error);
-        pendingTerminalEvents.delete(utilTerminal.ptyId);
-      }
     }
 
     const newSessions = sessions.filter((s) => s.id !== id);
@@ -265,111 +166,53 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ activeSessionId: id });
   },
 
-  connectTerminal: async (id: string, terminal: Terminal) => {
-    const { sessions, connected, launcherConfig } = get();
-    const session = sessions.find((s) => s.id === id);
-    if (!session) return;
-
-    // Prevent double-connection
-    if (pendingConnections.has(id)) return;
-    pendingConnections.add(id);
-
-    // Ensure connected to pty-server
-    if (!connected) {
-      await get().connect();
+  takeSessionSpawnArgs: (id: string, cols: number, rows: number) => {
+    const { sessions, launcherConfig } = get();
+    const session = sessions.find((entry) => entry.id === id);
+    if (!session) {
+      return null;
     }
-
-    // Set terminal ref before spawn/attach to avoid dropping early output.
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === id ? { ...s, terminal } : s
-      ),
-    }));
-
-    let cols = terminal.cols > 0 ? terminal.cols : 80;
-    let rows = terminal.rows > 0 ? terminal.rows : 24;
-    // Hidden terminals can report very small bootstrap sizes (e.g. 9x5).
-    // Use sane defaults until a stable onResize arrives.
-    if (cols < MIN_STABLE_COLS || rows < MIN_STABLE_ROWS) {
-      cols = 80;
-      rows = 24;
+    let resolvedCols = cols > 0 ? cols : 80;
+    let resolvedRows = rows > 0 ? rows : 24;
+    if (resolvedCols < MIN_STABLE_COLS || resolvedRows < MIN_STABLE_ROWS) {
+      resolvedCols = 80;
+      resolvedRows = 24;
     }
-
-    try {
-      // Check for pending fork params
-      const forkParams = pendingForkParams.get(id);
-      pendingForkParams.delete(id);
-
-      const selectedExecutable = launcherConfig.executables[session.agent] || '';
-      await ptySpawn({
-        args: {
-          id,
-          cwd: session.cwd,
-          label: session.label,
-          cols,
-          rows,
-          shell: false,
-          agent: session.agent,
-          resume_session_id: forkParams?.resumeSessionId ?? null,
-          fork_session: forkParams?.forkSession ?? null,
-          ...(selectedExecutable ? { executable: selectedExecutable } : {}),
-          // Backward compatibility fields for older daemons.
-          ...(session.agent === 'claude' && selectedExecutable
-            ? { claude_executable: selectedExecutable }
-            : {}),
-          ...(session.agent === 'codex' && selectedExecutable
-            ? { codex_executable: selectedExecutable }
-            : {}),
-          ...(session.agent === 'copilot' && selectedExecutable
-            ? { copilot_executable: selectedExecutable }
-            : {}),
-          ...(session.agent === 'pi' && selectedExecutable
-            ? { pi_executable: selectedExecutable }
-            : {}),
-        },
-      });
-
-      // Terminal input -> PTY
-      const sendToPty = (data: string) => {
-        ptyWrite({ id, data, source: 'user' }).catch(console.error);
-      };
-      terminal.onData(sendToPty);
-
-      // Shift+Enter sends newline for line breaks in Claude Code
-      // Source: https://github.com/anthropics/claude-code/issues/1282
-      terminal.attachCustomKeyEventHandler((ev) => {
-        if (ev.key === 'Enter' && ev.shiftKey && !ev.ctrlKey && !ev.altKey) {
-          if (ev.type === 'keydown') {
-            sendToPty('\n');
-          }
-          // Block both keydown and keyup to prevent any leakage
-          return false;
-        }
-        return true;
-      });
-
-      flushPendingTerminalEvents(id, terminal);
-
-      pendingConnections.delete(id);
-    } catch (e) {
-      console.error('[Session] Spawn failed:', e);
-      terminal.write(`\r\n[Failed to spawn PTY: ${e}]\r\n`);
-      pendingConnections.delete(id);
-    }
+    const forkParams = pendingForkParams.get(id);
+    pendingForkParams.delete(id);
+    const selectedExecutable = launcherConfig.executables[session.agent] || '';
+    return {
+      id,
+      cwd: session.cwd,
+      label: session.label,
+      cols: resolvedCols,
+      rows: resolvedRows,
+      shell: false,
+      agent: session.agent,
+      resume_session_id: forkParams?.resumeSessionId ?? null,
+      fork_session: forkParams?.forkSession ?? null,
+      ...(selectedExecutable ? { executable: selectedExecutable } : {}),
+      ...(session.agent === 'claude' && selectedExecutable
+        ? { claude_executable: selectedExecutable }
+        : {}),
+      ...(session.agent === 'codex' && selectedExecutable
+        ? { codex_executable: selectedExecutable }
+        : {}),
+      ...(session.agent === 'copilot' && selectedExecutable
+        ? { copilot_executable: selectedExecutable }
+        : {}),
+      ...(session.agent === 'pi' && selectedExecutable
+        ? { pi_executable: selectedExecutable }
+        : {}),
+    };
   },
 
-  resizeSession: (id: string, cols: number, rows: number) => {
-    ptyResize({ id, cols, rows }).catch(console.error);
-  },
-
-  reloadSession: async (id: string) => {
+  reloadSession: async (id: string, size?: { cols: number; rows: number }) => {
     const { sessions, launcherConfig } = get();
     const session = sessions.find((s) => s.id === id);
     if (!session) return;
-
-    const terminal = session.terminal;
-    let cols = terminal?.cols && terminal.cols > 0 ? terminal.cols : 80;
-    let rows = terminal?.rows && terminal.rows > 0 ? terminal.rows : 24;
+    let cols = size?.cols && size.cols > 0 ? size.cols : 80;
+    let rows = size?.rows && size.rows > 0 ? size.rows : 24;
     if (cols < MIN_STABLE_COLS || rows < MIN_STABLE_ROWS) {
       cols = 80;
       rows = 24;
@@ -409,7 +252,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       });
     } catch (e) {
       console.error('[Session] Reload spawn failed:', e);
-      terminal?.write(`\r\n[Failed to reload PTY: ${e}]\r\n`);
     }
   },
 
@@ -448,13 +290,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           id: daemonSession.id,
           label: daemonSession.label,
           state: normalizedState,
-          terminal: existing?.terminal ?? null,
           cwd: daemonSession.directory,
           agent: nextAgent,
           transcriptMatched: existing?.transcriptMatched ?? nextAgent !== 'codex',
           branch: nextBranch,
           isWorktree: nextIsWorktree,
-          terminalPanel: existing?.terminalPanel ?? createDefaultPanelState(),
+          workspace: existing?.workspace ?? createDefaultWorkspaceState(),
+          daemonActivePaneId: existing?.daemonActivePaneId ?? MAIN_TERMINAL_PANE_ID,
         } satisfies Session;
       });
 
@@ -470,121 +312,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     });
   },
 
-  openTerminalPanel: (sessionId: string) => {
+  syncFromDaemonWorkspaces: (daemonWorkspaces: DaemonWorkspace[]) => {
+    const workspaceBySessionID = new Map(daemonWorkspaces.map((workspace) => [
+      workspace.session_id,
+      workspaceSnapshotFromDaemonWorkspace(workspace),
+    ]));
+
     set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId ? { ...s, terminalPanel: { ...s.terminalPanel, isOpen: true } } : s
-      ),
-    }));
-  },
-
-  collapseTerminalPanel: (sessionId: string) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId ? { ...s, terminalPanel: { ...s.terminalPanel, isOpen: false } } : s
-      ),
-    }));
-  },
-
-  setTerminalPanelHeight: (sessionId: string, height: number) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId ? { ...s, terminalPanel: { ...s.terminalPanel, height } } : s
-      ),
-    }));
-  },
-
-  addUtilityTerminal: (sessionId: string, ptyId: string) => {
-    const terminalId = `util-${Date.now()}`;
-    set((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        const title = `Shell ${s.terminalPanel.nextTerminalNumber}`;
-        const newTerminal: UtilityTerminal = { id: terminalId, ptyId, title };
-        return {
-          ...s,
-          terminalPanel: {
-            ...s.terminalPanel,
-            terminals: [...s.terminalPanel.terminals, newTerminal],
-            activeTabId: terminalId,
-            nextTerminalNumber: s.terminalPanel.nextTerminalNumber + 1,
-          },
-        };
-      }),
-    }));
-    return terminalId;
-  },
-
-  removeUtilityTerminal: (sessionId: string, terminalId: string) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        const terminals = s.terminalPanel.terminals.filter((t) => t.id !== terminalId);
-        let activeTabId = s.terminalPanel.activeTabId;
-
-        // If we removed the active tab, select another
-        if (activeTabId === terminalId) {
-          const removedIndex = s.terminalPanel.terminals.findIndex((t) => t.id === terminalId);
-          if (terminals.length > 0) {
-            // Select next tab, or previous if we removed the last
-            activeTabId = terminals[Math.min(removedIndex, terminals.length - 1)].id;
-          } else {
-            activeTabId = null;
-          }
-        }
-
-        return {
-          ...s,
-          terminalPanel: {
-            ...s.terminalPanel,
-            terminals,
-            activeTabId,
-            // If no more terminals, close the panel
-            isOpen: terminals.length > 0 ? s.terminalPanel.isOpen : false,
-          },
-        };
-      }),
-    }));
-  },
-
-  setActiveUtilityTerminal: (sessionId: string, terminalId: string) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId
-          ? { ...s, terminalPanel: { ...s.terminalPanel, activeTabId: terminalId } }
-          : s
-      ),
-    }));
-  },
-
-  renameUtilityTerminal: (sessionId: string, terminalId: string, title: string) => {
-    set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId
-          ? {
-              ...s,
-              terminalPanel: {
-                ...s.terminalPanel,
-                terminals: s.terminalPanel.terminals.map((t) =>
-                  t.id === terminalId ? { ...t, title: title || t.title } : t
-                ),
-              },
-            }
-          : s
-      ),
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        workspace: workspaceBySessionID.get(session.id)?.workspace ?? session.workspace,
+        daemonActivePaneId: workspaceBySessionID.get(session.id)?.daemonActivePaneId ?? session.daemonActivePaneId,
+      })),
     }));
   },
 }));
 
 declare global {
   interface Window {
-    __TEST_OPEN_TERMINAL_PANEL?: (sessionId: string) => void;
-    __TEST_ADD_UTILITY_TERMINAL?: (sessionId: string, terminalId: string, title: string) => void;
-    __TEST_COLLAPSE_TERMINAL_PANEL?: (sessionId: string) => void;
-    __TEST_SET_ACTIVE_TERMINAL?: (sessionId: string, terminalId: string) => void;
-    __TEST_REMOVE_TERMINAL?: (sessionId: string, terminalId: string) => void;
-    __TEST_RENAME_TERMINAL?: (sessionId: string, terminalId: string, title: string) => void;
-    __TEST_GET_ACTIVE_UTILITY_PTY?: (sessionId: string) => string | null;
+    __TEST_GET_SESSION_INPUT_EVENTS?: (sessionId: string) => Array<{ event: 'connect_terminal' | 'send_to_pty'; data?: string }>;
   }
 }
 
@@ -598,8 +344,8 @@ if (import.meta.env.DEV) {
           ...session,
           agent: session.agent ?? 'codex',
           transcriptMatched: (session.agent ?? 'codex') !== 'codex',
-          terminal: null,
-          terminalPanel: createDefaultPanelState(),
+          workspace: createDefaultWorkspaceState(),
+          daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
         },
       ],
     }));
@@ -613,50 +359,10 @@ if (import.meta.env.DEV) {
     }));
   };
 
-  window.__TEST_OPEN_TERMINAL_PANEL = (sessionId: string) => {
-    useSessionStore.getState().openTerminalPanel(sessionId);
-  };
-
-  window.__TEST_COLLAPSE_TERMINAL_PANEL = (sessionId: string) => {
-    useSessionStore.getState().collapseTerminalPanel(sessionId);
-  };
-
-  window.__TEST_ADD_UTILITY_TERMINAL = (sessionId: string, terminalId: string, title: string) => {
-    useSessionStore.setState((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        const newTerminal = { id: terminalId, ptyId: `mock-pty-${terminalId}`, title };
-        return {
-          ...s,
-          terminalPanel: {
-            ...s.terminalPanel,
-            terminals: [...s.terminalPanel.terminals, newTerminal],
-            activeTabId: terminalId,
-            isOpen: true,
-          },
-        };
-      }),
-    }));
-  };
-
-  window.__TEST_SET_ACTIVE_TERMINAL = (sessionId: string, terminalId: string) => {
-    useSessionStore.getState().setActiveUtilityTerminal(sessionId, terminalId);
-  };
-
-  window.__TEST_REMOVE_TERMINAL = (sessionId: string, terminalId: string) => {
-    useSessionStore.getState().removeUtilityTerminal(sessionId, terminalId);
-  };
-
-  window.__TEST_RENAME_TERMINAL = (sessionId: string, terminalId: string, title: string) => {
-    useSessionStore.getState().renameUtilityTerminal(sessionId, terminalId, title);
-  };
-
-  window.__TEST_GET_ACTIVE_UTILITY_PTY = (sessionId: string) => {
-    const session = useSessionStore.getState().sessions.find((entry) => entry.id === sessionId);
-    if (!session || !session.terminalPanel.activeTabId) {
-      return null;
-    }
-    const active = session.terminalPanel.terminals.find((terminal) => terminal.id === session.terminalPanel.activeTabId);
-    return active?.ptyId ?? null;
-  };
+  window.__TEST_GET_SESSION_INPUT_EVENTS = (sessionId: string) =>
+    ((window as Window & {
+      __TEST_SESSION_INPUT_EVENTS?: Array<{ sessionId: string; event: 'connect_terminal' | 'send_to_pty'; data?: string }>;
+    }).__TEST_SESSION_INPUT_EVENTS || [])
+      .filter((entry) => entry.sessionId === sessionId)
+      .map(({ event, data }) => ({ event, data }));
 }

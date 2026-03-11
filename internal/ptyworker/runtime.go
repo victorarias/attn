@@ -19,6 +19,21 @@ import (
 	"github.com/victorarias/attn/internal/pty"
 )
 
+func previewWorkerBytesForLog(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	const maxPreview = 32
+	preview := string(data)
+	if len(preview) > maxPreview {
+		preview = preview[:maxPreview]
+	}
+	preview = strings.ReplaceAll(preview, "\n", "\\n")
+	preview = strings.ReplaceAll(preview, "\r", "\\r")
+	preview = strings.ReplaceAll(preview, "\t", "\\t")
+	return preview
+}
+
 var exitedSessionCleanupTTL = 45 * time.Second
 
 const (
@@ -168,12 +183,14 @@ func (r *Runtime) run(ctx context.Context) error {
 	}
 
 	_ = os.Remove(r.cfg.SocketPath)
+	r.logf("worker startup: session=%s socket=%s registry=%s", r.cfg.SessionID, r.cfg.SocketPath, r.cfg.RegistryPath)
 	listener, err := net.Listen("unix", r.cfg.SocketPath)
 	if err != nil {
 		return fmt.Errorf("listen unix socket: %w", err)
 	}
 	r.listener = listener
 	_ = os.Chmod(r.cfg.SocketPath, 0600)
+	r.logf("worker startup: listener ready session=%s socket=%s", r.cfg.SessionID, r.cfg.SocketPath)
 
 	defer func() {
 		r.requestStop()
@@ -212,6 +229,7 @@ func (r *Runtime) run(ctx context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("spawn PTY session: %w", err)
 	}
+	r.logf("worker startup: pty session ready session=%s", r.cfg.SessionID)
 	r.capture = newDebugCapture(r.cfg, r.logf)
 	if r.capture != nil {
 		r.capture.recordNote("capture enabled")
@@ -259,6 +277,7 @@ func (r *Runtime) run(ctx context.Context) error {
 	if err := WriteRegistryAtomic(r.cfg.RegistryPath, entry); err != nil {
 		return err
 	}
+	r.logf("worker startup: registry ready session=%s pid=%d child_pid=%d", r.cfg.SessionID, os.Getpid(), info.PID)
 
 	go func() {
 		<-ctx.Done()
@@ -618,6 +637,15 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			c.runtime.cfg.SessionID,
 			subID,
 			func(data []byte, seq uint32) bool {
+				c.runtime.logf(
+					"worker output event: session=%s conn=%s sub=%s seq=%d bytes=%d preview=%q",
+					c.runtime.cfg.SessionID,
+					c.connID,
+					subID,
+					seq,
+					len(data),
+					previewWorkerBytesForLog(data),
+				)
 				encoded := base64.StdEncoding.EncodeToString(data)
 				return c.sendEvent(EventEnvelope{
 					Type:      "evt",
@@ -628,6 +656,13 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 				})
 			},
 			func(reason string) {
+				c.runtime.logf(
+					"worker output desync: session=%s conn=%s sub=%s reason=%s",
+					c.runtime.cfg.SessionID,
+					c.connID,
+					subID,
+					reason,
+				)
 				_ = c.sendEvent(EventEnvelope{
 					Type:      "evt",
 					Event:     EventDesync,

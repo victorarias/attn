@@ -1,4 +1,5 @@
 mod thumbs;
+mod ui_automation;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -286,6 +287,10 @@ pub fn run() {
             thumbs::extract_patterns,
             thumbs::reveal_in_finder,
         ])
+        .setup(|app| {
+            ui_automation::maybe_start(&app.handle().clone());
+            Ok(())
+        })
         .on_page_load(|webview, _payload| {
             // Show window as soon as page content is loaded (loading screen visible)
             let _ = webview.window().show();

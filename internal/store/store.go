@@ -194,6 +194,12 @@ func (s *Store) Remove(id string) {
 		return
 	}
 
+	if _, err := s.db.Exec("DELETE FROM workspace_panes WHERE session_id = ?", id); err != nil {
+		log.Printf("[store] Remove: failed to delete workspace panes for session %s: %v", id, err)
+	}
+	if _, err := s.db.Exec("DELETE FROM session_workspaces WHERE session_id = ?", id); err != nil {
+		log.Printf("[store] Remove: failed to delete workspace for session %s: %v", id, err)
+	}
 	_, err := s.db.Exec("DELETE FROM sessions WHERE id = ?", id)
 	if err != nil {
 		log.Printf("[store] Remove: failed for session %s: %v", id, err)
@@ -209,6 +215,12 @@ func (s *Store) ClearSessions() {
 		return
 	}
 
+	if _, err := s.db.Exec("DELETE FROM workspace_panes"); err != nil {
+		log.Printf("[store] ClearSessions: failed to clear workspace panes: %v", err)
+	}
+	if _, err := s.db.Exec("DELETE FROM session_workspaces"); err != nil {
+		log.Printf("[store] ClearSessions: failed to clear workspaces: %v", err)
+	}
 	_, err := s.db.Exec("DELETE FROM sessions")
 	if err != nil {
 		log.Printf("[store] ClearSessions: failed: %v", err)
@@ -324,6 +336,12 @@ func (s *Store) RemoveSessionsInDirectory(directory string) {
 		return
 	}
 
+	if _, err := s.db.Exec(`DELETE FROM workspace_panes WHERE session_id IN (SELECT id FROM sessions WHERE directory = ?)`, directory); err != nil {
+		log.Printf("[store] RemoveSessionsInDirectory: failed to delete workspace panes for directory %s: %v", directory, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM session_workspaces WHERE session_id IN (SELECT id FROM sessions WHERE directory = ?)`, directory); err != nil {
+		log.Printf("[store] RemoveSessionsInDirectory: failed to delete workspaces for directory %s: %v", directory, err)
+	}
 	_, err := s.db.Exec(`DELETE FROM sessions WHERE directory = ?`, directory)
 	if err != nil {
 		log.Printf("[store] RemoveSessionsInDirectory: failed for directory %s: %v", directory, err)

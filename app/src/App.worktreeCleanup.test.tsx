@@ -45,7 +45,7 @@ vi.mock('./components/BranchPicker', () => ({ BranchPicker: () => null }));
 vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
 vi.mock('./components/ChangesPanel', () => ({ ChangesPanel: () => null }));
 vi.mock('./components/DiffDetailPanel', () => ({ DiffDetailPanel: () => null }));
-vi.mock('./components/UtilityTerminalPanel', () => ({ UtilityTerminalPanel: () => null }));
+vi.mock('./components/SessionTerminalWorkspace', () => ({ SessionTerminalWorkspace: () => null }));
 vi.mock('./components/ThumbsModal', () => ({ ThumbsModal: () => null }));
 vi.mock('./components/ForkDialog', () => ({ ForkDialog: () => null }));
 
@@ -116,38 +116,31 @@ describe('worktree cleanup prompt', () => {
           id: 's1',
           label: 'worktree-session',
           state: 'working',
-          terminal: null,
           cwd: '/tmp/repo/.worktrees/feature-a',
           agent: 'claude',
           transcriptMatched: true,
           branch: 'feature-a',
           isWorktree: true,
-          terminalPanel: {
-            isOpen: false,
-            height: 200,
-            activeTabId: null,
+          daemonActivePaneId: 'main',
+          workspace: {
             terminals: [],
-            nextTerminalNumber: 1,
+            layoutTree: { type: 'pane', paneId: 'main' },
           },
         },
       ],
       activeSessionId: 's1',
+      connect: vi.fn(async () => {}),
+      connected: true,
+      launcherConfig: { executables: {} },
       createSession: vi.fn(async () => 's1'),
       closeSession: vi.fn(),
       setActiveSession: vi.fn(),
-      connectTerminal: vi.fn(),
-      resizeSession: vi.fn(),
+      takeSessionSpawnArgs: vi.fn(() => null),
       reloadSession: vi.fn(async () => {}),
-      openTerminalPanel: vi.fn(),
-      collapseTerminalPanel: vi.fn(),
-      setTerminalPanelHeight: vi.fn(),
-      addUtilityTerminal: vi.fn(),
-      removeUtilityTerminal: vi.fn(),
-      setActiveUtilityTerminal: vi.fn(),
-      renameUtilityTerminal: vi.fn(),
       setForkParams: vi.fn(),
       setLauncherConfig: vi.fn(),
       syncFromDaemonSessions: vi.fn(),
+      syncFromDaemonWorkspaces: vi.fn(),
     });
 
     mockUseDaemonStore.mockReturnValue({

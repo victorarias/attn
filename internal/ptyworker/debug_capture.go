@@ -89,10 +89,11 @@ func shouldEnableDebugCapture(agent string) bool {
 	case "copilot":
 		return normalized == "copilot"
 	case "":
-		// Temporary debugging default: capture codex sessions without extra setup.
-		return normalized == "codex"
+		// Temporary debugging default: capture the interactive agent runtimes we
+		// are actively debugging without extra environment setup.
+		return normalized == "codex" || normalized == "claude"
 	default:
-		return normalized == "codex"
+		return normalized == "codex" || normalized == "claude"
 	}
 }
 

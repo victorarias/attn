@@ -13,14 +13,52 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Hodor Review Guidance**: Added a repository-specific Hodor skill and maintainer docs for the PR review workflow, including the local patch required for Google/Vertex model parsing in upstream Hodor `v0.3.4`.
+- **Real App Smoke Harness**: Add a packaged-macOS automation harness that launches `/Applications/attn.app`, creates a real session through the deep-link path, splits panes with `Cmd+D`, types into the utility shell, and verifies PTY scrollback through the production daemon websocket.
+- **Older-Pane Writability Repro Harness**: Add a second packaged-app automation scenario that creates two split utility panes, refocuses the older pane with a real window click, and checks whether it still accepts shell input after the newer pane exists.
+- **Dev-Only UI Automation Bridge**: Add a build-gated localhost automation bridge for the Tauri app so packaged-app tests can create sessions, split/focus panes, write to runtimes, and inspect workspace state without taking over the user’s keyboard and mouse.
+
+### Changed
+- **Bridge Repro Stability**: The packaged-app UI automation bridge now supports fresh app relaunches, server-side request logging, frontend responsiveness checks, pre-launch daemon cleanup of stale full-flow sessions, and diff-based shell-pane selection so the main-pane return repro fails much more consistently in the real bug region instead of drifting during bootstrap.
+
+### Fixed
+- **Main Pane Return After Split**: Returning from a split shell to the main Claude pane no longer forces a fresh PTY reattach on every remount, so typing in the main pane continues to render after the split instead of going visually dead until another reconnect.
+- **Queued Pane Output on Remount**: Split panes now replay PTY data that arrived while their terminal view was temporarily unmounted, so output generated during layout switches or session hops is not silently dropped before the pane reattaches.
+- **`Ctrl+W` Terminal Editing**: Terminal panes no longer treat `Ctrl+W` like the macOS close-panel shortcut, so shells and line editors can use it to delete the previous word as expected.
+
+## [2026-03-09]
+
+### Added
+- **Persistent Split Workspaces**: Persist each session’s split-pane workspace in the daemon/store so nested layouts, active panes, pane titles, and shell-pane runtime mappings survive app relaunches and daemon recovery.
+
+### Changed
+- **Daemon-Owned Workspace Control Plane**: Move split-pane creation, close, focus, and rename authority into the daemon with dedicated workspace protocol messages and snapshot/update events, while the frontend now renders daemon snapshots instead of mutating the canonical split tree locally.
+- **Attached Shell Runtime Recovery**: Reconcile recovered shell-pane PTY runtimes against persisted workspace metadata at startup, prune missing panes from saved layouts, and clean up orphaned shell runtimes that no longer belong to any workspace.
+- **Spatial Pane Navigation**: `Cmd+Alt+Arrow` now moves focus by panel geometry instead of creation order, with `Up/Down` respecting stacked panes and `Left/Right` respecting side-by-side panes; when there is no pane in that direction, focus falls through to the previous or next session.
+- **Unified Pane Runtime Binding**: Main session panes and split shell panes now bind xterm instances through the same workspace-level runtime binder, so remount, restore, resize, and keyboard wiring follow one terminal lifecycle path instead of separate store and UI implementations.
+- **Centralized PTY Event Routing**: The session workspace UI now routes PTY output through one app-level runtime registry instead of letting every mounted workspace subscribe to the PTY event bus independently, which makes pane/runtime delivery a single explicit ownership graph.
+- **Explicit Workspace vs View-State Model**: Frontend sessions now store daemon-owned workspace topology separately from the daemon’s last-active-pane hint, while live pane selection stays client-local in `App`, which makes the UI ownership boundary clearer for future remote or multi-client work.
+- **Dedicated Workspace View Controller**: The client-side pane-selection and topology-reconciliation logic now lives in a dedicated frontend hook instead of being embedded inline in `App`, which gives the workspace UI a cleaner controller boundary and direct unit coverage.
+- **Dedicated Workspace Debug Harness**: The workspace-specific test helpers and pane debug globals now live in their own hook instead of inside `App`, which keeps the top-level app component focused on orchestration rather than dev-only terminal diagnostics.
+- **Composed Workspace Controller**: The frontend workspace layer now exposes one composed controller hook for pane selection, workspace handle registration, PTY event routing, fit/text/size access, and debug wiring, so `App` consumes the workspace system instead of owning its internals.
+
+### Fixed
+- **Main Session Focus After Split Return**: Clicking back into the main Claude/Codex pane after working in a split now reclaims keyboard focus immediately, without needing a session refresh or waiting on the daemon workspace round-trip.
+- **Workspace Quick-Find and Reload Pane Context**: Session-level quick find and reload sizing now read from the active workspace pane/runtime instead of a store-owned main-terminal ref, keeping those actions aligned with split-pane focus.
+- **Source Install Daemon Startup Path**: `make install` and `make install-app` now point both the local CLI and the packaged app sidecar at a stable installed daemon binary instead of a transient Tauri release artifact path that could disappear after rebuilds and leave the daemon unable to start.
 
 ## [2026-03-08]
 
 ### Changed
-- **Right Dock Default Layout**: Start the session view with the compact layout by leaving the diff dock closed until you explicitly open it with `Cmd+Shift+D`.
+- **Split Session Workspace**: Let attached session terminals open directly inside the main session area as split panes beside the primary session terminal, with `Cmd+D` and `Cmd+Shift+D` creating new vertical or horizontal splits in the active session.
+- **Shortcut Remap for Split Workflow**: Move dashboard navigation to `Cmd+Option+D` and the diff dock to `Cmd+Shift+G` so the split-terminal shortcuts can own the `D` key family in session view.
+- **Right Dock Default Layout**: Start the session view with the compact layout by leaving the diff dock closed until you explicitly open it with `Cmd+Shift+G`.
 - **Review Loop Summary Space**: Let the latest-summary card in the review-loop sidebar grow substantially taller before it starts scrolling, so longer round summaries are easier to read in place.
 
 ### Fixed
+- **`install-all` Daemon Startup Race**: Stop restarting the local `~/.local/bin/attn daemon` as part of `make install-all`, so opening the packaged app no longer races between a transient local daemon and the bundled app daemon during worker-backend startup.
+- **App Bundle Install Corruption**: Stop replacing `/Applications/attn.app` with a plain `cp -r` while the packaged app may still be running; `install-app` now shuts down the existing app/daemon first and uses `ditto` so the bundled `attn` sidecar is preserved in the installed app.
+- **Source Install Binary Stability**: Source-based installs now symlink both `~/.local/bin/attn` and the packaged app’s `Contents/MacOS/attn` sidecar to the stable Tauri release binary, avoiding the disappearing or invalid copied binaries seen in direct install locations on this machine.
+- **Worker PTY Startup Probe Flakiness**: Give worker-sidecar startup more time during daemon boot and add clearer worker startup logs so slow post-install launches are less likely to fall back to embedded mode and mark live sessions only as recoverable.
 - **Diff Detail Panel Exit Animation**: Keep dock panels in the right-dock stack through their close transition, so the detailed diff/review panel now slides out smoothly on `Cmd+Shift+E` and `Esc` instead of disappearing abruptly.
 
 ## [2026-03-07]

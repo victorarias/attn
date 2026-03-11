@@ -222,6 +222,19 @@ func BranchesToValues(branches []*Branch) []Branch {
 	return result
 }
 
+func WorkspacesToValues(workspaces []*WorkspaceSnapshot) []WorkspaceSnapshot {
+	if workspaces == nil {
+		return nil
+	}
+	result := make([]WorkspaceSnapshot, len(workspaces))
+	for i, ws := range workspaces {
+		if ws != nil {
+			result[i] = *ws
+		}
+	}
+	return result
+}
+
 // ParsePRID parses a PR id in either old or new format.
 // Old: "owner/repo#123" (defaults to github.com)
 // New: "host:owner/repo#123"

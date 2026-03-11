@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@tauri-apps/api/core';
 import type {
   Session as GeneratedSession,
+  WorkspaceSnapshot as GeneratedWorkspaceSnapshot,
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
   RepoState as GeneratedRepoState,
@@ -20,10 +21,12 @@ import type {
 } from '../types/generated';
 import { emitPtyEvent, setPtyBackend, type PtySpawnArgs } from '../pty/bridge';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
+import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
 
 // Re-export types from generated for consumers
 // Use type aliases to maintain backward compatibility
 export type DaemonSession = GeneratedSession;
+export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
 export type RepoState = GeneratedRepoState;
@@ -41,6 +44,7 @@ export { SessionState, PRRole, HeatState };
 // Extended WebSocketEvent with action result fields (generated allows extra properties)
 type WebSocketEvent = GeneratedWebSocketEvent & {
   id?: string;
+  workspace?: GeneratedWorkspaceSnapshot;
   data?: string;
   seq?: number;
   scrollback?: string;
@@ -91,7 +95,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '38';
+const PROTOCOL_VERSION = '39';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -103,6 +107,18 @@ interface FetchPRDetailsResult {
   success: boolean;
   prs?: DaemonPR[];
   error?: string;
+}
+
+function previewBase64Payload(encoded: string): string {
+  try {
+    return atob(encoded)
+      .slice(0, 32)
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
+  } catch {
+    return '';
+  }
 }
 
 interface WorktreeActionResult {
@@ -217,6 +233,11 @@ interface ReviewLoopActionResult {
   state: ReviewLoopState | null;
 }
 
+interface WorkspaceActionResult {
+  success: boolean;
+  error?: string;
+}
+
 export interface ReviewState {
   review_id: string;
   repo_path: string;
@@ -296,6 +317,7 @@ export interface BranchDiffFilesResult {
 
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
+  onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
   onAuthorsUpdate: (authors: AuthorState[]) => void;
@@ -333,6 +355,22 @@ function upsertSessionByID(sessions: DaemonSession[], session: DaemonSession): D
   const updated = [...sessions];
   updated[index] = session;
   return updated;
+}
+
+function workspaceRuntimeIDs(workspaces: DaemonWorkspace[]): Set<string> {
+  const ids = new Set<string>();
+  for (const workspace of workspaces) {
+    for (const pane of workspace.panes || []) {
+      if (typeof pane.runtime_id === 'string' && pane.runtime_id.length > 0) {
+        ids.add(pane.runtime_id);
+      }
+    }
+  }
+  return ids;
+}
+
+function workspaceActionKey(action: string, sessionId: string, paneId?: string): string {
+  return `workspace:${action}:${sessionId}:${paneId || ''}`;
 }
 
 function isSessionNotFoundError(error: unknown): boolean {
@@ -377,6 +415,7 @@ function isSessionNotFoundError(error: unknown): boolean {
 
 export function useDaemonSocket({
   onSessionsUpdate,
+  onWorkspacesUpdate,
   onPRsUpdate,
   onReposUpdate,
   onAuthorsUpdate,
@@ -389,6 +428,7 @@ export function useDaemonSocket({
 }: UseDaemonSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const sessionsRef = useRef<DaemonSession[]>([]);
+  const workspacesRef = useRef<DaemonWorkspace[]>([]);
   const prsRef = useRef<DaemonPR[]>([]);
   const reposRef = useRef<RepoState[]>([]);
   const authorsRef = useRef<AuthorState[]>([]);
@@ -396,6 +436,7 @@ export function useDaemonSocket({
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
   const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
+  const pendingOutboundCommandsRef = useRef<string[]>([]);
   const recoveryNoticeTimeoutRef = useRef<number | null>(null);
   const gitStatusSubscriptionRef = useRef<string | null>(null);
   const branchDiffInFlightRef = useRef<Map<string, Promise<BranchDiffFilesResult>>>(new Map());
@@ -404,6 +445,7 @@ export function useDaemonSocket({
   const pendingAttachOutputsRef = useRef<Map<string, Array<{ data: string; seq?: number }>>>(new Map());
   const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
   const daemonInstanceIDRef = useRef<string>('');
+  const hasReceivedInitialStateRef = useRef(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
@@ -444,6 +486,21 @@ export function useDaemonSocket({
     }, 2000);
   }, []);
 
+  const pruneAttachedPtySessions = useCallback((sessions: DaemonSession[], workspaces: DaemonWorkspace[]) => {
+    const attachableIDs = new Set<string>(sessions.map((session) => session.id));
+    for (const runtimeID of workspaceRuntimeIDs(workspaces)) {
+      attachableIDs.add(runtimeID);
+    }
+    for (const sessionId of Array.from(attachedPtySessionsRef.current)) {
+      if (attachableIDs.has(sessionId)) {
+        continue;
+      }
+      attachedPtySessionsRef.current.delete(sessionId);
+      ptySeqRef.current.delete(sessionId);
+      pendingAttachOutputsRef.current.delete(sessionId);
+    }
+  }, []);
+
   const rejectPendingByPredicate = useCallback((predicate: (key: string) => boolean, error: Error) => {
     for (const [key, pending] of pendingActionsRef.current.entries()) {
       if (!predicate(key)) {
@@ -469,6 +526,12 @@ export function useDaemonSocket({
         return;
       case 'kill_session':
         rejectPendingByPredicate((key) => key.startsWith('pty_kill_'), error);
+        return;
+      case 'workspace_split_pane':
+      case 'workspace_close_pane':
+      case 'workspace_focus_pane':
+      case 'workspace_rename_pane':
+        rejectPendingByPredicate((key) => key.startsWith(`workspace:${cmd}:`), error);
         return;
       case 'approve_pr':
         rejectPendingByPredicate((key) => key.endsWith(':approve'), error);
@@ -509,6 +572,30 @@ export function useDaemonSocket({
     } catch (err) {
       console.error('[Daemon] Failed to ensure daemon is running:', err);
     }
+  }, []);
+
+  const flushQueuedCommands = useCallback((ws: WebSocket | null) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN || pendingOutboundCommandsRef.current.length === 0) {
+      return;
+    }
+    for (const serialized of pendingOutboundCommandsRef.current) {
+      ws.send(serialized);
+    }
+    pendingOutboundCommandsRef.current = [];
+  }, []);
+
+  const sendOrQueueCommand = useCallback((payload: Record<string, unknown>, options?: { waitForInitialState?: boolean }) => {
+    const serialized = JSON.stringify(payload);
+    if (options?.waitForInitialState && !hasReceivedInitialStateRef.current) {
+      pendingOutboundCommandsRef.current.push(serialized);
+      return;
+    }
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(serialized);
+      return;
+    }
+    pendingOutboundCommandsRef.current.push(serialized);
   }, []);
 
   const connect = useCallback(async () => {
@@ -581,14 +668,10 @@ export function useDaemonSocket({
             const nextSessions = dedupeSessionsByID(data.sessions || []);
             sessionsRef.current = nextSessions;
             onSessionsUpdate(nextSessions);
-            const activeIDs = new Set(nextSessions.map((session) => session.id));
-            for (const sessionId of attachedPtySessionsRef.current) {
-              if (activeIDs.has(sessionId)) {
-                continue;
-              }
-              attachedPtySessionsRef.current.delete(sessionId);
-              ptySeqRef.current.delete(sessionId);
-            }
+            const nextWorkspaces = data.workspaces || [];
+            workspacesRef.current = nextWorkspaces;
+            onWorkspacesUpdate(nextWorkspaces);
+            pruneAttachedPtySessions(nextSessions, nextWorkspaces);
             const nextPRs = data.prs || [];
             prsRef.current = nextPRs;
             onPRsUpdate(nextPRs);
@@ -609,7 +692,9 @@ export function useDaemonSocket({
             if (nextWarnings.length > 0 && ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({ cmd: 'clear_warnings' }));
             }
+            hasReceivedInitialStateRef.current = true;
             setHasReceivedInitialState(true);
+            flushQueuedCommands(ws);
             if (ws.readyState === WebSocket.OPEN) {
               // Re-attach PTY streams only after recovery barrier has lifted and
               // initial_state has arrived.
@@ -617,6 +702,60 @@ export function useDaemonSocket({
                 ws.send(JSON.stringify({ cmd: 'attach_session', id: sessionId }));
               }
             }
+            break;
+
+          case 'workspace_snapshot':
+          case 'workspace_updated':
+            if (data.workspace) {
+              recordPaneRuntimeDebugEvent({
+                scope: 'daemon',
+                sessionId: data.workspace.session_id,
+                paneId: data.workspace.active_pane_id,
+                message: data.event === 'workspace_snapshot' ? 'workspace snapshot received' : 'workspace updated received',
+                details: {
+                  paneIds: (data.workspace.panes || []).map((pane) => pane.pane_id),
+                },
+              });
+              const nextWorkspaces = [
+                ...workspacesRef.current.filter((entry) => entry.session_id !== data.workspace!.session_id),
+                data.workspace,
+              ];
+              workspacesRef.current = nextWorkspaces;
+              onWorkspacesUpdate(nextWorkspaces);
+              pruneAttachedPtySessions(sessionsRef.current, nextWorkspaces);
+            }
+            break;
+
+          case 'workspace_action_result': {
+            const action = data.action || '';
+            const sessionId = data.session_id || '';
+            const paneId = data.pane_id;
+            recordPaneRuntimeDebugEvent({
+              scope: 'daemon',
+              sessionId,
+              paneId: paneId || undefined,
+              message: 'workspace action result',
+              details: {
+                action,
+                success: data.success ?? false,
+                error: data.error,
+              },
+            });
+            const key = workspaceActionKey(action, sessionId, paneId);
+            const pending = pendingActionsRef.current.get(key);
+            if (pending) {
+              pendingActionsRef.current.delete(key);
+              if (data.success) {
+                pending.resolve({ success: true });
+              } else {
+                pending.reject(new Error(data.error || 'Workspace action failed'));
+              }
+            }
+            break;
+          }
+
+          case 'workspace_runtime_exited':
+            // The canonical pane removal arrives via workspace_updated.
             break;
 
           case 'spawn_result': {
@@ -727,6 +866,16 @@ export function useDaemonSocket({
 
           case 'pty_output': {
             if (data.id && data.data) {
+              recordPaneRuntimeDebugEvent({
+                scope: 'daemon',
+                runtimeId: data.id,
+                message: 'received pty_output event',
+                details: {
+                  seq: data.seq,
+                  bytes: data.data.length,
+                  preview: previewBase64Payload(data.data),
+                },
+              });
               const attachKey = `pty_attach_${data.id}`;
               if (pendingActionsRef.current.has(attachKey)) {
                 const queued = pendingAttachOutputsRef.current.get(data.id) || [];
@@ -735,15 +884,33 @@ export function useDaemonSocket({
                 }
                 queued.push({ data: data.data, seq: data.seq });
                 pendingAttachOutputsRef.current.set(data.id, queued);
+                recordPaneRuntimeDebugEvent({
+                  scope: 'daemon',
+                  runtimeId: data.id,
+                  message: 'queue pty_output during pending attach',
+                  details: { seq: data.seq, queued: queued.length },
+                });
                 break;
               }
               if (typeof data.seq === 'number') {
                 const lastSeq = ptySeqRef.current.get(data.id);
                 if (typeof lastSeq === 'number' && data.seq <= lastSeq) {
+                  recordPaneRuntimeDebugEvent({
+                    scope: 'daemon',
+                    runtimeId: data.id,
+                    message: 'drop stale pty_output event',
+                    details: { seq: data.seq, lastSeq },
+                  });
                   break;
                 }
                 ptySeqRef.current.set(data.id, data.seq);
               }
+              recordPaneRuntimeDebugEvent({
+                scope: 'daemon',
+                runtimeId: data.id,
+                message: 'emit pty_output to bridge',
+                details: { seq: data.seq },
+              });
               emitPtyEvent({ event: 'data', id: data.id, data: data.data });
             }
             break;
@@ -792,6 +959,7 @@ export function useDaemonSocket({
                 (s) => s.id !== data.session!.id
               );
               onSessionsUpdate(sessionsRef.current);
+              pruneAttachedPtySessions(sessionsRef.current, workspacesRef.current);
             }
             break;
 
@@ -808,14 +976,7 @@ export function useDaemonSocket({
               const dedupedSessions = dedupeSessionsByID(data.sessions || []);
               sessionsRef.current = dedupedSessions;
               onSessionsUpdate(dedupedSessions);
-              const activeIDs = new Set(dedupedSessions.map((session) => session.id));
-              for (const sessionId of attachedPtySessionsRef.current) {
-                if (activeIDs.has(sessionId)) {
-                  continue;
-                }
-                attachedPtySessionsRef.current.delete(sessionId);
-                ptySeqRef.current.delete(sessionId);
-              }
+              pruneAttachedPtySessions(dedupedSessions, workspacesRef.current);
             }
             break;
 
@@ -1337,6 +1498,7 @@ export function useDaemonSocket({
 
     ws.onclose = () => {
       wsRef.current = null;
+      hasReceivedInitialStateRef.current = false;
 
       // Circuit breaker: if open, don't retry
       if (circuitOpenRef.current) {
@@ -1369,7 +1531,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand]);
+  }, [wsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
 
   useEffect(() => {
     void connect();
@@ -1515,11 +1677,102 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const sendWorkspaceGet = useCallback((sessionId: string) => {
+    sendOrQueueCommand({ cmd: 'workspace_get', session_id: sessionId }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
+
+  const sendWorkspaceCommand = useCallback((
+    action: string,
+    sessionId: string,
+    payload: Record<string, unknown>,
+    paneId?: string,
+  ): Promise<WorkspaceActionResult> => {
+    return new Promise((resolve, reject) => {
+      const key = workspaceActionKey(action, sessionId, paneId);
+      pendingActionsRef.current.set(key, { resolve, reject });
+      recordPaneRuntimeDebugEvent({
+        scope: 'daemon',
+        sessionId,
+        paneId,
+        message: 'send workspace command',
+        details: { action, payload },
+      });
+      sendOrQueueCommand(payload, { waitForInitialState: true });
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Workspace action timed out'));
+        }
+      }, 30000);
+    });
+  }, [sendOrQueueCommand]);
+
+  const sendWorkspaceSplitPane = useCallback((sessionId: string, targetPaneId: string, direction: 'vertical' | 'horizontal') => {
+    return sendWorkspaceCommand(
+      'workspace_split_pane',
+      sessionId,
+      {
+        cmd: 'workspace_split_pane',
+        session_id: sessionId,
+        target_pane_id: targetPaneId,
+        direction,
+      },
+      targetPaneId,
+    );
+  }, [sendWorkspaceCommand]);
+
+  const sendWorkspaceClosePane = useCallback((sessionId: string, paneId: string) => {
+    return sendWorkspaceCommand(
+      'workspace_close_pane',
+      sessionId,
+      {
+        cmd: 'workspace_close_pane',
+        session_id: sessionId,
+        pane_id: paneId,
+      },
+      paneId,
+    );
+  }, [sendWorkspaceCommand]);
+
+  const sendWorkspaceFocusPane = useCallback((sessionId: string, paneId: string) => {
+    return sendWorkspaceCommand(
+      'workspace_focus_pane',
+      sessionId,
+      {
+        cmd: 'workspace_focus_pane',
+        session_id: sessionId,
+        pane_id: paneId,
+      },
+      paneId,
+    );
+  }, [sendWorkspaceCommand]);
+
+  const sendWorkspaceRenamePane = useCallback((sessionId: string, paneId: string, title: string) => {
+    return sendWorkspaceCommand(
+      'workspace_rename_pane',
+      sessionId,
+      {
+        cmd: 'workspace_rename_pane',
+        session_id: sessionId,
+        pane_id: paneId,
+        title,
+      },
+      paneId,
+    );
+  }, [sendWorkspaceCommand]);
+
   useEffect(() => {
     setPtyBackend({
       spawn: async (args: PtySpawnArgs) => {
         const existingSession = sessionsRef.current.find((session) => session.id === args.id);
         const sessionKnownToDaemon = !!existingSession;
+        const alreadyAttached = attachedPtySessionsRef.current.has(args.id);
+
+        if (alreadyAttached) {
+          sendPtyResize(args.id, args.cols, args.rows);
+          return;
+        }
 
         // For new spawns, prime PTY size before attach.
         // For existing daemon sessions, avoid transient bootstrap resizes
@@ -2744,6 +2997,12 @@ export function useDaemonSocket({
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendSessionVisualized,
+    sendWorkspaceGet,
+    sendWorkspaceSplitPane,
+    sendWorkspaceClosePane,
+    sendWorkspaceFocusPane,
+    sendWorkspaceRenamePane,
+    sendRuntimeInput: sendPtyInput,
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,

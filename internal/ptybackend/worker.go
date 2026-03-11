@@ -39,15 +39,36 @@ const (
 	watchResponseTimeout    = 5 * time.Second
 	pollerFailureThreshold  = 3
 	pollerUnreachableAfter  = 30 * time.Second
-	spawnReadyTimeout       = 8 * time.Second
 	spawnReadyPollInterval  = 100 * time.Millisecond
 	spawnKillGracePeriod    = 1 * time.Second
 	spawnWaitTimeout        = 500 * time.Millisecond
-	probeTimeout            = 8 * time.Second
 	streamEventBufferSize   = 256
 	streamPreEventBufferCap = 8
 	workingStatePulseWindow = 2 * time.Second
 )
+
+var (
+	// Worker startup includes binary launch, socket bind, PTY spawn, and registry
+	// write. Slow CI machines can take well beyond the nominal "binary is up"
+	// time, so keep the ready budget comfortably above the slow-start test case.
+	spawnReadyTimeout = 45 * time.Second
+	probeTimeout      = 45 * time.Second
+)
+
+func previewBytesForLog(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	const maxPreview = 32
+	preview := string(data)
+	if len(preview) > maxPreview {
+		preview = preview[:maxPreview]
+	}
+	preview = strings.ReplaceAll(preview, "\n", "\\n")
+	preview = strings.ReplaceAll(preview, "\r", "\\r")
+	preview = strings.ReplaceAll(preview, "\t", "\\t")
+	return preview
+}
 
 type WorkerBackendConfig struct {
 	DataRoot         string
@@ -334,6 +355,7 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	}
 
 	cmd := exec.CommandContext(ctx, b.cfg.BinaryPath, args...)
+	b.cfg.Logf("worker backend spawn: session=%s binary=%s socket=%s", sessionID, b.cfg.BinaryPath, session.SocketPath)
 	workerLogPath := filepath.Join(b.logDir(), sessionID+".log")
 	workerLogFile, logErr := os.OpenFile(workerLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if logErr != nil {
@@ -491,8 +513,19 @@ func (b *WorkerBackend) Input(ctx context.Context, sessionID string, data []byte
 	if err != nil {
 		return err
 	}
+	if b.cfg.Logf != nil {
+		b.cfg.Logf("worker backend input: session=%s bytes=%d preview=%q", sessionID, len(data), previewBytesForLog(data))
+	}
 	payload := ptyworker.InputParams{Data: base64.StdEncoding.EncodeToString(data)}
-	return b.callSimple(ctx, session, ptyworker.MethodInput, payload)
+	err = b.callSimple(ctx, session, ptyworker.MethodInput, payload)
+	if b.cfg.Logf != nil {
+		if err != nil {
+			b.cfg.Logf("worker backend input failed: session=%s err=%v", sessionID, err)
+		} else {
+			b.cfg.Logf("worker backend input ok: session=%s bytes=%d", sessionID, len(data))
+		}
+	}
+	return err
 }
 
 func (b *WorkerBackend) Resize(ctx context.Context, sessionID string, cols, rows uint16) error {

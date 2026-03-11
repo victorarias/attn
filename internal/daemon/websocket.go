@@ -152,6 +152,21 @@ func newWSHub() *wsHub {
 	}
 }
 
+func previewBinaryForLog(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	const maxPreview = 32
+	preview := string(data)
+	if len(preview) > maxPreview {
+		preview = preview[:maxPreview]
+	}
+	preview = strings.ReplaceAll(preview, "\n", "\\n")
+	preview = strings.ReplaceAll(preview, "\r", "\\r")
+	preview = strings.ReplaceAll(preview, "\t", "\\t")
+	return preview
+}
+
 func (h *wsHub) run() {
 	for {
 		select {
@@ -306,6 +321,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		ProtocolVersion:  protocol.Ptr(protocol.ProtocolVersion),
 		DaemonInstanceID: protocol.Ptr(d.daemonInstanceID),
 		Sessions:         d.sessionsForBroadcast(d.store.List("")),
+		Workspaces:       d.listWorkspaceSnapshots(d.store.List("")),
 		Prs:              protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:            protocol.RepoStatesToValues(d.store.ListRepoStates()),
 		Authors:          protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
@@ -828,10 +844,19 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		if source := strings.TrimSpace(protocol.Deref(inputMsg.Source)); source != "" {
 			d.setPendingInputSource(inputMsg.ID, source)
 		}
+		d.logf(
+			"pty_input: id=%s bytes=%d preview=%q source=%s",
+			inputMsg.ID,
+			len(inputMsg.Data),
+			previewBinaryForLog([]byte(inputMsg.Data)),
+			strings.TrimSpace(protocol.Deref(inputMsg.Source)),
+		)
 		if err := d.ptyBackend.Input(context.Background(), inputMsg.ID, []byte(inputMsg.Data)); err != nil {
 			if shouldLogPtyCommandError(err) {
 				d.logf("pty_input failed for %s: %v", inputMsg.ID, err)
 			}
+		} else {
+			d.logf("pty_input ok: id=%s bytes=%d", inputMsg.ID, len(inputMsg.Data))
 		}
 
 	case protocol.CmdPtyResize:
@@ -841,6 +866,26 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdKillSession:
 		killMsg := msg.(*protocol.KillSessionMessage)
 		d.handleKillSession(client, killMsg)
+
+	case protocol.CmdWorkspaceGet:
+		workspaceMsg := msg.(*protocol.WorkspaceGetMessage)
+		d.handleWorkspaceGet(client, workspaceMsg)
+
+	case protocol.CmdWorkspaceSplitPane:
+		workspaceMsg := msg.(*protocol.WorkspaceSplitPaneMessage)
+		d.handleWorkspaceSplitPane(client, workspaceMsg)
+
+	case protocol.CmdWorkspaceClosePane:
+		workspaceMsg := msg.(*protocol.WorkspaceClosePaneMessage)
+		d.handleWorkspaceClosePane(client, workspaceMsg)
+
+	case protocol.CmdWorkspaceFocusPane:
+		workspaceMsg := msg.(*protocol.WorkspaceFocusPaneMessage)
+		d.handleWorkspaceFocusPane(client, workspaceMsg)
+
+	case protocol.CmdWorkspaceRenamePane:
+		workspaceMsg := msg.(*protocol.WorkspaceRenamePaneMessage)
+		d.handleWorkspaceRenamePane(client, workspaceMsg)
 
 	default:
 		d.sendCommandError(client, cmd, "unsupported command")
@@ -1033,6 +1078,9 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			}
 		}
 		d.store.Add(session)
+		if _, err := d.ensureWorkspaceSnapshot(session.ID); err != nil {
+			d.logf("workspace bootstrap failed for session %s: %v", session.ID, err)
+		}
 		if persistResumeID := agentdriver.SpawnResumeSessionID(
 			driver,
 			session.ID,
@@ -1051,6 +1099,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			Event:   eventType,
 			Session: d.sessionForBroadcast(session),
 		})
+		d.broadcastWorkspaceSnapshot(session.ID)
 	}
 
 	d.sendToClient(client, protocol.SpawnResultMessage{
@@ -1137,6 +1186,13 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 	for event := range stream.Events() {
 		switch event.Kind {
 		case ptybackend.OutputEventKindOutput:
+			d.logf(
+				"pty_output forward: id=%s seq=%d bytes=%d preview=%q",
+				sessionID,
+				event.Seq,
+				len(event.Data),
+				previewBinaryForLog(event.Data),
+			)
 			encoded := base64.StdEncoding.EncodeToString(event.Data)
 			wsEvent := &protocol.WebSocketEvent{
 				Event: protocol.EventPtyOutput,
@@ -1146,13 +1202,16 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 			}
 			payload, err := json.Marshal(wsEvent)
 			if err != nil {
+				d.logf("pty_output marshal failed: id=%s seq=%d err=%v", sessionID, event.Seq, err)
 				continue
 			}
 			if !d.sendOutbound(client, outboundMessage{kind: messageKindText, payload: payload}) {
+				d.logf("pty_output send failed, closing stream: id=%s seq=%d", sessionID, event.Seq)
 				_ = stream.Close()
 				return
 			}
 		case ptybackend.OutputEventKindDesync:
+			d.logf("pty_desync forward: id=%s reason=%s", sessionID, event.Reason)
 			wsEvent := &protocol.WebSocketEvent{
 				Event:  protocol.EventPtyDesync,
 				ID:     protocol.Ptr(sessionID),
@@ -1230,6 +1289,16 @@ func blocksDuringRecovery(cmd string) bool {
 	case protocol.CmdPtyResize:
 		return true
 	case protocol.CmdKillSession:
+		return true
+	case protocol.CmdWorkspaceGet:
+		return true
+	case protocol.CmdWorkspaceSplitPane:
+		return true
+	case protocol.CmdWorkspaceClosePane:
+		return true
+	case protocol.CmdWorkspaceFocusPane:
+		return true
+	case protocol.CmdWorkspaceRenamePane:
 		return true
 	case protocol.CmdClearSessions:
 		return true

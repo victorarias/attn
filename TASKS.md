@@ -1,5 +1,37 @@
 # Tasks
 
+## Persistent split workspaces and attached pane recovery
+
+- Status: `open`
+- Priority: `high`
+- Area: `daemon/workspace`, `pty recovery`, `protocol`, `frontend workspace`
+
+### Problem
+
+Main sessions survive restart, but split-pane workspaces do not.
+
+Today:
+
+1. the daemon/store recovers the top-level Claude/Codex session runtime
+2. the app-owned split tree and attached shell pane metadata are lost on restart
+3. attached shell panes are not restored like first-class session runtimes
+
+### Goal
+
+Make split-pane session workspaces durable across app close/reopen and daemon restart, with attached shell panes recovered through daemon-owned runtime infrastructure instead of frontend-local state.
+
+### Plan
+
+See [docs/plans/2026-03-09-persistent-split-workspaces.md](/Users/victor.arias/projects/victor/attn/docs/plans/2026-03-09-persistent-split-workspaces.md).
+
+### Decisions locked
+
+1. Daemon owns canonical workspace state.
+2. Frontend renders workspace snapshots and sends mutation intents.
+3. Split-tree mutation logic should not be duplicated in TS and Go.
+4. Attached shell panes should be recoverable runtimes, not just recreated UI artifacts.
+5. Top-level sidebar sessions remain one row per user session, not one row per pane.
+
 ## Session-level review loop automation
 
 - Status: `open`
