@@ -53,6 +53,10 @@ var (
 	// time, so keep the ready budget comfortably above the slow-start test case.
 	spawnReadyTimeout = 45 * time.Second
 	probeTimeout      = 45 * time.Second
+
+	// MacOSAppBundleBinary is the well-known path to the bundled binary
+	// inside the macOS app bundle. Tests may override to disable.
+	MacOSAppBundleBinary = "/Applications/attn.app/Contents/MacOS/attn"
 )
 
 func previewBytesForLog(data []byte) string {
@@ -234,9 +238,8 @@ func (b *WorkerBackend) resolveBinaryPath() string {
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates, filepath.Join(home, ".local", "bin", "attn"))
 	}
-	if runtime.GOOS == "darwin" {
-		// Bundled binary inside the macOS app bundle.
-		candidates = append(candidates, "/Applications/attn.app/Contents/MacOS/attn")
+	if runtime.GOOS == "darwin" && MacOSAppBundleBinary != "" {
+		candidates = append(candidates, MacOSAppBundleBinary)
 	}
 	if path, err := exec.LookPath("attn"); err == nil && path != "" {
 		candidates = append(candidates, path)
@@ -429,7 +432,7 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 			_ = workerLogFile.Close()
 		}()
 	}
-	cmd.Env = append(os.Environ(), "ATTN_PTY_WORKER=1")
+	cmd.Env = append(os.Environ(), "ATTN_PTY_WORKER=1", "ATTN_WRAPPER_PATH="+binaryPath)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start pty worker: %w", err)

@@ -595,6 +595,9 @@ func resolveAttnPath() string {
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates, filepath.Join(home, ".local", "bin", "attn"))
 	}
+	if runtime.GOOS == "darwin" {
+		candidates = append(candidates, "/Applications/attn.app/Contents/MacOS/attn")
+	}
 	if path, err := exec.LookPath("attn"); err == nil && path != "" {
 		candidates = append(candidates, path)
 	}

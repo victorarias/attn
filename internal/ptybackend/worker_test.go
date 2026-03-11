@@ -254,6 +254,13 @@ func TestWorkerBackend_Recover_PreservesLiveOwnerMismatch(t *testing.T) {
 
 func TestWorkerBackend_Probe_FailsWhenBinaryUnavailable(t *testing.T) {
 	root := newWorkerBackendTestRoot(t)
+	// Isolate env so resolveBinaryPath re-resolution also fails.
+	t.Setenv("ATTN_WRAPPER_PATH", "")
+	t.Setenv("HOME", root)
+	t.Setenv("PATH", root)
+	old := MacOSAppBundleBinary
+	MacOSAppBundleBinary = ""
+	t.Cleanup(func() { MacOSAppBundleBinary = old })
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

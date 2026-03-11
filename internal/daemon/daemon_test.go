@@ -364,10 +364,18 @@ func TestDaemon_Start_SelectsWorkerBackendWhenRequested(t *testing.T) {
 }
 
 func TestDaemon_Start_WorkerProbeFailureFallsBackToEmbedded(t *testing.T) {
+	tmpDir := t.TempDir()
 	t.Setenv("ATTN_PTY_BACKEND", "worker")
 	t.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "0")
-	t.Setenv("ATTN_PTY_WORKER_BINARY", filepath.Join(t.TempDir(), "missing-attn-binary"))
+	t.Setenv("ATTN_PTY_WORKER_BINARY", filepath.Join(tmpDir, "missing-attn-binary"))
 	t.Setenv("ATTN_WS_PORT", "19936")
+	// Isolate env so worker binary re-resolution also fails.
+	t.Setenv("ATTN_WRAPPER_PATH", "")
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("PATH", tmpDir)
+	old := ptybackend.MacOSAppBundleBinary
+	ptybackend.MacOSAppBundleBinary = ""
+	t.Cleanup(func() { ptybackend.MacOSAppBundleBinary = old })
 
 	sockPath := filepath.Join(shortTempDir(t), "worker-probe-fallback.sock")
 	d := NewForTesting(sockPath)
