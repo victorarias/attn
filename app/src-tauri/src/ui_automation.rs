@@ -135,7 +135,10 @@ fn write_manifest<R: Runtime>(app: &AppHandle<R>, manifest: &AutomationManifest)
     match serde_json::to_string_pretty(manifest) {
         Ok(contents) => {
             if let Err(error) = fs::write(&path, format!("{contents}\n")) {
-                eprintln!("[UIAutomation] Failed to write manifest {}: {error}", path.display());
+                eprintln!(
+                    "[UIAutomation] Failed to write manifest {}: {error}",
+                    path.display()
+                );
             }
         }
         Err(error) => {
@@ -170,7 +173,10 @@ fn append_log<R: Runtime>(app: &AppHandle<R>, message: &str) {
             let _ = writeln!(file, "[{timestamp}] {message}");
         }
         Err(error) => {
-            eprintln!("[UIAutomation] Failed to open log {}: {error}", path.display());
+            eprintln!(
+                "[UIAutomation] Failed to open log {}: {error}",
+                path.display()
+            );
         }
     }
 }
@@ -187,7 +193,9 @@ fn handle_request<R: Runtime>(
     frontend_ready: &AtomicBool,
     request: AutomationSocketRequest,
 ) -> AutomationSocketResponse {
-    let request_id = request.id.unwrap_or_else(|| next_request_id(request_counter));
+    let request_id = request
+        .id
+        .unwrap_or_else(|| next_request_id(request_counter));
     let started_at = SystemTime::now();
     append_log(
         app,
@@ -200,7 +208,13 @@ fn handle_request<R: Runtime>(
     );
 
     if request.token != expected_token {
-        append_log(app, &format!("request reject id={} action={} invalid-token", request_id, request.action));
+        append_log(
+            app,
+            &format!(
+                "request reject id={} action={} invalid-token",
+                request_id, request.action
+            ),
+        );
         return AutomationSocketResponse {
             id: request_id,
             ok: false,
@@ -225,7 +239,10 @@ fn handle_request<R: Runtime>(
     if request.action == "get_window_bounds" {
         return match window_bounds(app) {
             Ok(result) => {
-                append_log(app, &format!("request ok id={} action=get_window_bounds", request_id));
+                append_log(
+                    app,
+                    &format!("request ok id={} action=get_window_bounds", request_id),
+                );
                 AutomationSocketResponse {
                     id: request_id,
                     ok: true,
@@ -236,7 +253,10 @@ fn handle_request<R: Runtime>(
             Err(error) => {
                 append_log(
                     app,
-                    &format!("request err id={} action=get_window_bounds error={}", request_id, error),
+                    &format!(
+                        "request err id={} action=get_window_bounds error={}",
+                        request_id, error
+                    ),
                 );
                 AutomationSocketResponse {
                     id: request_id,
@@ -251,7 +271,10 @@ fn handle_request<R: Runtime>(
     if request.action == "capture_screenshot" {
         return match capture_screenshot(app, request.payload.as_ref()) {
             Ok(result) => {
-                append_log(app, &format!("request ok id={} action=capture_screenshot", request_id));
+                append_log(
+                    app,
+                    &format!("request ok id={} action=capture_screenshot", request_id),
+                );
                 AutomationSocketResponse {
                     id: request_id,
                     ok: true,
@@ -262,7 +285,10 @@ fn handle_request<R: Runtime>(
             Err(error) => {
                 append_log(
                     app,
-                    &format!("request err id={} action=capture_screenshot error={}", request_id, error),
+                    &format!(
+                        "request err id={} action=capture_screenshot error={}",
+                        request_id, error
+                    ),
                 );
                 AutomationSocketResponse {
                     id: request_id,
@@ -288,7 +314,10 @@ fn handle_request<R: Runtime>(
         pending.remove(&request_id);
         append_log(
             app,
-            &format!("request err id={} action={} emit={}", request_id, bridge_request.action, error),
+            &format!(
+                "request err id={} action={} emit={}",
+                request_id, bridge_request.action, error
+            ),
         );
         return AutomationSocketResponse {
             id: request_id,
@@ -305,10 +334,7 @@ fn handle_request<R: Runtime>(
                 app,
                 &format!(
                     "request done id={} action={} ok={} elapsed_ms={}",
-                    response.request_id,
-                    bridge_request.action,
-                    response.ok,
-                    elapsed_ms
+                    response.request_id, bridge_request.action, response.ok, elapsed_ms
                 ),
             );
             AutomationSocketResponse {
@@ -365,15 +391,15 @@ fn serve_connection<R: Runtime>(
                     continue;
                 }
 
-                    let response = match serde_json::from_str::<AutomationSocketRequest>(trimmed) {
-                        Ok(request) => handle_request(
-                            &app,
-                            &pending,
-                            request_counter.as_ref(),
-                            &expected_token,
-                            frontend_ready.as_ref(),
-                            request,
-                        ),
+                let response = match serde_json::from_str::<AutomationSocketRequest>(trimmed) {
+                    Ok(request) => handle_request(
+                        &app,
+                        &pending,
+                        request_counter.as_ref(),
+                        &expected_token,
+                        frontend_ready.as_ref(),
+                        request,
+                    ),
                     Err(error) => AutomationSocketResponse {
                         id: "invalid".into(),
                         ok: false,
@@ -449,7 +475,12 @@ pub fn maybe_start<R: Runtime>(app: &AppHandle<R>) {
     write_manifest(app, &manifest);
     append_log(
         app,
-        &format!("server start pid={} port={} enabled={}", std::process::id(), port, UI_AUTOMATION_ENABLED),
+        &format!(
+            "server start pid={} port={} enabled={}",
+            std::process::id(),
+            port,
+            UI_AUTOMATION_ENABLED
+        ),
     );
 
     let pending = PendingAutomationResponses::new();
@@ -481,7 +512,14 @@ pub fn maybe_start<R: Runtime>(app: &AppHandle<R>) {
                     let token = token.clone();
                     let frontend_ready = frontend_ready.clone();
                     thread::spawn(move || {
-                        serve_connection(stream, app, pending, request_counter, token, frontend_ready);
+                        serve_connection(
+                            stream,
+                            app,
+                            pending,
+                            request_counter,
+                            token,
+                            frontend_ready,
+                        );
                     });
                 }
                 Err(error) => {
@@ -524,7 +562,8 @@ fn default_screenshot_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, St
         .app_local_data_dir()
         .map_err(|error| format!("failed to resolve app local data dir: {error}"))?;
     let dir = base.join("debug").join("ui-automation-screenshots");
-    fs::create_dir_all(&dir).map_err(|error| format!("failed to create screenshot dir: {error}"))?;
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("failed to create screenshot dir: {error}"))?;
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -532,7 +571,10 @@ fn default_screenshot_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, St
     Ok(dir.join(format!("screenshot-{timestamp}.png")))
 }
 
-fn capture_screenshot<R: Runtime>(app: &AppHandle<R>, payload: Option<&Value>) -> Result<Value, String> {
+fn capture_screenshot<R: Runtime>(
+    app: &AppHandle<R>,
+    payload: Option<&Value>,
+) -> Result<Value, String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
@@ -543,8 +585,14 @@ fn capture_screenshot<R: Runtime>(app: &AppHandle<R>, payload: Option<&Value>) -
     #[cfg(target_os = "macos")]
     {
         let bounds = window_bounds(app)?;
-        let x = bounds.get("x").and_then(Value::as_i64).ok_or_else(|| "invalid x bound".to_string())?;
-        let y = bounds.get("y").and_then(Value::as_i64).ok_or_else(|| "invalid y bound".to_string())?;
+        let x = bounds
+            .get("x")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| "invalid x bound".to_string())?;
+        let y = bounds
+            .get("y")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| "invalid y bound".to_string())?;
         let width = bounds
             .get("width")
             .and_then(Value::as_u64)
