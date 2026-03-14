@@ -317,7 +317,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       if (cols !== term.cols || rows !== term.rows) {
         term.resize(cols, rows);
         onResizeRef.current?.(cols, rows);
+        return;
       }
+
+      // Layout changes can still leave xterm visually stale even when the computed
+      // cols/rows land on the same values. Force a repaint so the buffer redraws.
+      term.refresh(0, Math.max(term.rows - 1, 0));
     }, [logTerminal]);
 
     useImperativeHandle(ref, () => ({
