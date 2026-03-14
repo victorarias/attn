@@ -12,6 +12,7 @@ This repository uses [Hodor](https://github.com/mr-karan/hodor) for advisory pul
 - clones Hodor `v0.3.4`
 - applies `.github/hodor/v0.3.4-openrouter.patch`
 - writes `~/.pi/agent/models.json` to force OpenRouter routing to `inceptron/fp8`
+- installs `pnpm` plus the checked-in frontend dependencies under `app/` so Hodor can run repo-native frontend checks without burning turns on missing tooling
 - runs Hodor on OpenRouter with `openrouter/minimax/minimax-m2.5`
 - posts the review back to the PR as an advisory review comment
 
@@ -35,4 +36,5 @@ That skill tells Hodor to focus on protocol safety, generated files, session-sta
 
 - The workflow is advisory.
 - The workflow currently targets the OpenRouter MiniMax route `openrouter/minimax/minimax-m2.5` with provider routing pinned to `inceptron/fp8`.
+- The workflow uses `--reasoning-effort medium` to keep review latency and token usage under control for small PRs.
 - The first PR run after any workflow changes is the real end-to-end validation.

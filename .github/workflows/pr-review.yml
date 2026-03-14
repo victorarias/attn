@@ -34,6 +34,11 @@ jobs:
         with:
           bun-version: 1.3.10
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+
       - name: Validate review configuration
         if: ${{ env.OPENROUTER_API_KEY != '' }}
         run: |
@@ -79,6 +84,13 @@ jobs:
           }
           EOF
 
+      - name: Install app dependencies
+        if: ${{ env.OPENROUTER_API_KEY != '' }}
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/app"
+          pnpm install --frozen-lockfile
+
       - name: Run Hodor review
         id: hodor
         if: ${{ env.OPENROUTER_API_KEY != '' }}
@@ -92,9 +104,8 @@ jobs:
           cd /tmp/hodor
           bun run dist/cli.js "$PR_URL" \
             --model "${HODOR_MODEL}" \
-            --reasoning-effort high \
-            --post \
-            --verbose | tee /tmp/hodor-review.log
+            --reasoning-effort medium \
+            --post | tee /tmp/hodor-review.log
 
       - name: Upload Hodor logs
         if: ${{ always() && env.OPENROUTER_API_KEY != '' }}
