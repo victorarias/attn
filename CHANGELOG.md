@@ -16,6 +16,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Worker Binary Override Semantics**: Keep `ATTN_PTY_WORKER_BINARY` authoritative when explicitly configured, so a missing override now fails closed instead of silently spawning some other `attn` binary from fallback search paths.
 - **Worker Binary Re-Resolution Safety**: Cache implicitly discovered worker binary paths behind a dedicated lock and keep the recovery path for daemon-owned installs covered by a unit test.
+- **Claude Repaint After Closing Splits**: Closing the active split pane now re-fits the surviving session terminal after the workspace collapses, so the main Claude pane redraws immediately instead of staying visually stale until a window resize or focus-mode change.
 
 ## [2026-03-10]
 

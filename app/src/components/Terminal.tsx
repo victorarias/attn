@@ -317,7 +317,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       if (cols !== term.cols || rows !== term.rows) {
         term.resize(cols, rows);
         onResizeRef.current?.(cols, rows);
+        return;
       }
+
+      // Layout changes can still leave xterm visually stale even when the computed
+      // cols/rows land on the same values. Force a repaint so the buffer redraws.
+      term.refresh(0, Math.max(term.rows - 1, 0));
     }, [logTerminal]);
 
     useImperativeHandle(ref, () => ({
@@ -347,7 +352,21 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             container: getContainerDebugInfo(container),
           });
         }
+        const sizeChanged = dims.cols !== term.cols || dims.rows !== term.rows;
         resizeTerminal(term, dims.cols, dims.rows, 'fit');
+        if (!sizeChanged) {
+          // Full-screen TUIs like Claude can stay visually stale unless the PTY
+          // receives a real size transition and emits SIGWINCH. Bounce through a
+          // nearby size, then restore the actual one on the next tick.
+          if (dims.rows > 1) {
+            onResizeRef.current?.(dims.cols, dims.rows - 1);
+          } else if (dims.cols > 1) {
+            onResizeRef.current?.(dims.cols - 1, dims.rows);
+          }
+          window.setTimeout(() => {
+            onResizeRef.current?.(dims.cols, dims.rows);
+          }, 0);
+        }
       },
       focus: () => {
         return focusTerminal();
