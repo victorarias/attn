@@ -107,6 +107,10 @@ type WorkerBackend struct {
 	ownerStartedAt string
 	ownerNonce     string
 
+	binaryPathMu       sync.RWMutex
+	binaryPath         string
+	binaryPathExplicit bool
+
 	mu       sync.RWMutex
 	sessions map[string]*workerSession
 
@@ -161,7 +165,8 @@ func NewWorker(cfg WorkerBackendConfig) (*WorkerBackend, error) {
 	if strings.TrimSpace(cfg.DaemonInstanceID) == "" {
 		return nil, fmt.Errorf("missing daemon instance id")
 	}
-	if strings.TrimSpace(cfg.BinaryPath) == "" {
+	binaryPathExplicit := strings.TrimSpace(cfg.BinaryPath) != ""
+	if !binaryPathExplicit {
 		if wrapperPath := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); wrapperPath != "" {
 			cfg.BinaryPath = wrapperPath
 		} else {
@@ -192,11 +197,13 @@ func NewWorker(cfg WorkerBackendConfig) (*WorkerBackend, error) {
 	}
 
 	b := &WorkerBackend{
-		cfg:            cfg,
-		ownerPID:       cfg.OwnerPID,
-		ownerStartedAt: cfg.OwnerStartedAt,
-		ownerNonce:     cfg.OwnerNonce,
-		sessions:       make(map[string]*workerSession),
+		cfg:                cfg,
+		ownerPID:           cfg.OwnerPID,
+		ownerStartedAt:     cfg.OwnerStartedAt,
+		ownerNonce:         cfg.OwnerNonce,
+		binaryPath:         cfg.BinaryPath,
+		binaryPathExplicit: binaryPathExplicit,
+		sessions:           make(map[string]*workerSession),
 	}
 	if err := os.MkdirAll(b.registryDir(), 0700); err != nil {
 		return nil, fmt.Errorf("create worker registry dir: %w", err)
@@ -218,10 +225,19 @@ func NewWorker(cfg WorkerBackendConfig) (*WorkerBackend, error) {
 // we re-resolve from well-known locations (the binary may have been deleted by
 // security software or replaced during an app update while the daemon was running).
 func (b *WorkerBackend) resolveBinaryPath() string {
-	if isExecutableFile(b.cfg.BinaryPath) {
-		return b.cfg.BinaryPath
+	b.binaryPathMu.RLock()
+	binaryPath := b.binaryPath
+	explicit := b.binaryPathExplicit
+	b.binaryPathMu.RUnlock()
+
+	if isExecutableFile(binaryPath) {
+		return binaryPath
 	}
-	b.cfg.Logf("worker binary missing at %s, re-resolving", b.cfg.BinaryPath)
+	if explicit {
+		b.cfg.Logf("worker binary missing at %s, not re-resolving explicit path", binaryPath)
+		return binaryPath
+	}
+	b.cfg.Logf("worker binary missing at %s, re-resolving", binaryPath)
 
 	// Only check well-known attn locations.  os.Executable() is excluded
 	// because if the original BinaryPath came from it, it would return the
@@ -245,12 +261,14 @@ func (b *WorkerBackend) resolveBinaryPath() string {
 	for _, c := range candidates {
 		if isExecutableFile(c) {
 			b.cfg.Logf("worker binary re-resolved to %s", c)
-			b.cfg.BinaryPath = c
+			b.binaryPathMu.Lock()
+			b.binaryPath = c
+			b.binaryPathMu.Unlock()
 			return c
 		}
 	}
-	b.cfg.Logf("worker binary re-resolve failed, using original %s; candidates=%v", b.cfg.BinaryPath, candidates)
-	return b.cfg.BinaryPath
+	b.cfg.Logf("worker binary re-resolve failed, using original %s; candidates=%v", binaryPath, candidates)
+	return binaryPath
 }
 
 func isExecutableFile(path string) bool {

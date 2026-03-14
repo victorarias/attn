@@ -269,6 +269,31 @@ func TestWorkerBackend_Probe_FailsWhenBinaryUnavailable(t *testing.T) {
 	}
 }
 
+func TestWorkerBackend_ResolveBinaryPath_ReResolvesImplicitPath(t *testing.T) {
+	root := newWorkerBackendTestRoot(t)
+	backend, err := NewWorker(WorkerBackendConfig{
+		DataRoot:         root,
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+
+	recoveredPath := filepath.Join(root, "recovered-attn")
+	if err := os.WriteFile(recoveredPath, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatalf("WriteFile(recoveredPath) error: %v", err)
+	}
+
+	backend.binaryPathMu.Lock()
+	backend.binaryPath = filepath.Join(root, "missing-binary")
+	backend.binaryPathMu.Unlock()
+	t.Setenv("ATTN_WRAPPER_PATH", recoveredPath)
+
+	if got := backend.resolveBinaryPath(); got != recoveredPath {
+		t.Fatalf("resolveBinaryPath() = %q, want %q", got, recoveredPath)
+	}
+}
+
 func TestWorkerBackend_Remove_RetainsTrackedSessionOnTransientError(t *testing.T) {
 	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{
