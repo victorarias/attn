@@ -24,11 +24,15 @@ const { mockTerminalFocus } = vi.hoisted(() => ({
   mockTerminalFocus: vi.fn(() => true),
 }));
 
+const { mockTerminalFit } = vi.hoisted(() => ({
+  mockTerminalFit: vi.fn(),
+}));
+
 vi.mock('./Terminal', () => ({
   Terminal: forwardRef((_props, ref) => {
     useImperativeHandle(ref, () => ({
       terminal: {} as any,
-      fit: vi.fn(),
+      fit: mockTerminalFit,
       focus: mockTerminalFocus,
     }));
     return <div data-testid="mock-terminal">Main terminal</div>;
@@ -53,6 +57,7 @@ describe('SessionTerminalWorkspace', () => {
   afterEach(() => {
     registeredShortcuts.clear();
     vi.mocked(mockEventRouter.registerBinding).mockClear();
+    mockTerminalFit.mockReset();
     vi.useRealTimers();
   });
 
@@ -264,5 +269,69 @@ describe('SessionTerminalWorkspace', () => {
     registeredShortcuts.get('terminal.focusRight')?.();
 
     expect(onNavigateOutOfSession).toHaveBeenCalledWith('right');
+  });
+
+  it('re-fits the active pane when the workspace topology changes after closing a split', () => {
+    vi.useFakeTimers();
+    mockTerminalFit.mockReset();
+
+    const { rerender } = render(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={{
+          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+              { type: 'pane', paneId: 'pane-shell-1' },
+            ],
+          },
+        }}
+        activePaneId="pane-shell-1"
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    vi.runAllTimers();
+    mockTerminalFit.mockClear();
+
+    rerender(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={createDefaultWorkspaceState()}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    vi.runAllTimers();
+
+    expect(mockTerminalFit).toHaveBeenCalled();
   });
 });
