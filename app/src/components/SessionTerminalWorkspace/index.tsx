@@ -110,6 +110,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     ]), [cwd, getMainPaneSpawnArgs, sessionId, workspace.terminals]);
 
     const binder = usePaneRuntimeBinder(runtimePanes, activePaneId, eventRouter);
+    const fitPane = binder.fitPane;
     const splitLayoutActive = workspace.layoutTree.type === 'split';
     const showMainHeader = paneIds.length > 1;
     const effectivePaneId = maximizedPaneId && paneIds.includes(maximizedPaneId) ? maximizedPaneId : null;
@@ -169,16 +170,16 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       // Closing a split can leave the surviving main terminal visually stale until
       // a later resize. Re-fit after the topology change commits to flush xterm's renderer.
       const fitSoon = window.setTimeout(() => {
-        binder.fitPane(activePaneId);
+        fitPane(activePaneId);
       }, 0);
       const fitAfterLayoutSettles = window.setTimeout(() => {
-        binder.fitPane(activePaneId);
+        fitPane(activePaneId);
       }, 75);
       return () => {
         window.clearTimeout(fitSoon);
         window.clearTimeout(fitAfterLayoutSettles);
       };
-    }, [activePaneId, binder, enabled, isActiveSession, workspaceTopologyKey]);
+    }, [activePaneId, enabled, fitPane, isActiveSession, workspaceTopologyKey]);
 
     const handleSplit = useCallback((direction: TerminalSplitDirection) => {
       onSplitPane(activePaneId, direction);
