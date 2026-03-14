@@ -1,0 +1,54 @@
+diff --git a/src/agent.ts b/src/agent.ts
+index 93cccd1..ebff071 100644
+--- a/src/agent.ts
++++ b/src/agent.ts
+@@ -208,6 +208,7 @@ export async function reviewPr(opts: {
+   const envSnapshot: Record<string, string | undefined> = {
+     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
++    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+     AWS_REGION: process.env.AWS_REGION,
+   };
+ 
+@@ -217,6 +218,8 @@ export async function reviewPr(opts: {
+       process.env.ANTHROPIC_API_KEY = apiKey;
+     } else if (parsed.provider === "openai") {
+       process.env.OPENAI_API_KEY = apiKey;
++    } else if (parsed.provider === "openrouter") {
++      process.env.OPENROUTER_API_KEY = apiKey;
+     }
+   }
+ 
+diff --git a/src/model.ts b/src/model.ts
+index e0812e1..99dd4cc 100644
+--- a/src/model.ts
++++ b/src/model.ts
+@@ -25,7 +25,7 @@ export function parseModelString(model: string): ParsedModel {
+       }
+       return { provider: "amazon-bedrock", modelId };
+     }
+-    if (["anthropic", "openai"].includes(first)) {
++    if (["anthropic", "openai", "openrouter"].includes(first)) {
+       return { provider: first, modelId: parts.slice(1).join("/") };
+     }
+   }
+@@ -97,13 +97,18 @@ export function getApiKey(model?: string): string | null {
+       const key = process.env.OPENAI_API_KEY;
+       if (key) return key;
+     }
++    if (provider === "openrouter") {
++      const key = process.env.OPENROUTER_API_KEY;
++      if (key) return key;
++    }
+   }
+ 
+   // Priority 3: Fallback
+   if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
+   if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
++  if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY;
+ 
+   throw new Error(
+-    "No LLM API key found. Please set one of: LLM_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY",
++    "No LLM API key found. Please set one of: LLM_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY",
+   );
+ }

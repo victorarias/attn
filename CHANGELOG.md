@@ -6,6 +6,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-03-14]
+
+### Changed
+- **PR Review Provider**: Switch the advisory Hodor GitHub workflow from Vertex Gemini to OpenRouter MiniMax M2.5, using the `open_router_api_key` secret and pinning OpenRouter routing to `inceptron/fp8`.
+
+### Fixed
+- **Worker Binary Override Semantics**: Keep `ATTN_PTY_WORKER_BINARY` authoritative when explicitly configured, so a missing override now fails closed instead of silently spawning some other `attn` binary from fallback search paths.
+- **Worker Binary Re-Resolution Safety**: Cache implicitly discovered worker binary paths behind a dedicated lock and keep the recovery path for daemon-owned installs covered by a unit test.
+
 ## [2026-03-10]
 
 ### Changed
