@@ -355,9 +355,17 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const sizeChanged = dims.cols !== term.cols || dims.rows !== term.rows;
         resizeTerminal(term, dims.cols, dims.rows, 'fit');
         if (!sizeChanged) {
-          // Full-screen TUIs like Claude can require a fresh PTY resize signal to
-          // repaint after layout changes, even when the terminal grid stays equal.
-          onResizeRef.current?.(dims.cols, dims.rows);
+          // Full-screen TUIs like Claude can stay visually stale unless the PTY
+          // receives a real size transition and emits SIGWINCH. Bounce through a
+          // nearby size, then restore the actual one on the next tick.
+          if (dims.rows > 1) {
+            onResizeRef.current?.(dims.cols, dims.rows - 1);
+          } else if (dims.cols > 1) {
+            onResizeRef.current?.(dims.cols - 1, dims.rows);
+          }
+          window.setTimeout(() => {
+            onResizeRef.current?.(dims.cols, dims.rows);
+          }, 0);
         }
       },
       focus: () => {
