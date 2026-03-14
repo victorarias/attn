@@ -149,6 +149,12 @@ export function Sidebar({
   onToggleCollapse,
 }: SidebarProps) {
   const visualIndexOf = (id: string) => visualIndexBySessionId.get(id) ?? -1;
+  const dockShortcutHints = Array.from(new Set([
+    ...headerActions
+      .filter((action) => action.shortcutHint && !action.disabled)
+      .map((action) => action.shortcutHint as string),
+    ...(footerShortcuts ?? []),
+  ]));
 
   if (collapsed) {
     return (
@@ -366,12 +372,9 @@ export function Sidebar({
 
       <div className="sidebar-footer">
         <span className="sidebar-footer-label">Dock</span>
-        {(footerShortcuts ?? headerActions
-          .filter((action) => action.shortcutHint && !action.disabled)
-          .map((action) => action.shortcutHint as string))
-          .map((shortcutHint) => (
-            <span key={shortcutHint} className="shortcut-hint">{shortcutHint}</span>
-          ))}
+        {dockShortcutHints.map((shortcutHint) => (
+          <span key={shortcutHint} className="shortcut-hint">{shortcutHint}</span>
+        ))}
         <span className="shortcut-hint">⌘⇧B sidebar</span>
       </div>
     </div>
