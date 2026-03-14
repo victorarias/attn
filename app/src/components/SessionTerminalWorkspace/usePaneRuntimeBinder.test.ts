@@ -82,6 +82,17 @@ describe('installTerminalKeyHandler', () => {
     expect(mockTriggerShortcut).not.toHaveBeenCalled();
     expect(sendToPty).not.toHaveBeenCalled();
   });
+
+  it('routes cmd+shift+z to the zoom shortcut', () => {
+    const sendToPty = vi.fn();
+    const handler = installTerminalKeyHandler(sendToPty);
+    const event = new KeyboardEvent('keydown', { key: 'z', metaKey: true, shiftKey: true });
+
+    handler(event);
+
+    expect(mockTriggerShortcut).toHaveBeenCalledWith('terminal.toggleZoom');
+    expect(sendToPty).not.toHaveBeenCalled();
+  });
 });
 
 describe('usePaneRuntimeBinder', () => {

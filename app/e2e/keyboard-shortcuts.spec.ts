@@ -59,6 +59,86 @@ async function createSession(
 }
 
 test.describe('Keyboard Shortcuts', () => {
+  test.describe('Terminal Workspace', () => {
+    test('⌘⇧Z zooms toward the active pane without hiding the others', async ({ page, daemon }) => {
+      await daemon.start();
+      await page.goto('/');
+      await page.waitForSelector('.dashboard');
+
+      await createSession(page, daemon, { id: 's-zoom', label: 'Zoom', state: 'working', cwd: '/tmp/test/zoom' });
+      await expect(page.locator('[data-testid="session-s-zoom"]')).toBeVisible({ timeout: 5000 });
+
+      await page.locator('[data-testid="session-s-zoom"]').click();
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+
+      await page.evaluate(() => {
+        window.__TEST_SET_SESSION_WORKSPACE?.('s-zoom', {
+          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'pane', paneId: 'main' },
+              { type: 'pane', paneId: 'pane-shell-1' },
+            ],
+          },
+        }, 'pane-shell-1');
+      });
+      await expect(page.locator('[data-pane-session-id="s-zoom"][data-pane-kind="shell"]')).toBeVisible({ timeout: 5000 });
+
+      const workspace = page.locator('[data-session-terminal-workspace="s-zoom"]');
+      const mainPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-id="main"]');
+      const utilityPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-kind="shell"]').first();
+      const rootSplit = page.locator('[data-split-id="root"]');
+      const zoomHint = page.getByText('⌘⇧Z zoom');
+
+      await expect(zoomHint).toHaveAttribute('data-active', 'false');
+
+      const mainBefore = await mainPane.boundingBox();
+      const utilityBefore = await utilityPane.boundingBox();
+      expect(mainBefore?.width).toBeTruthy();
+      expect(utilityBefore?.width).toBeTruthy();
+
+      await utilityPane.click();
+      await page.keyboard.press('Meta+Shift+z');
+      await expect(workspace).toHaveAttribute('data-zoomed-pane-id', 'pane-shell-1', { timeout: 2000 });
+      await expect(rootSplit).toHaveAttribute('data-split-ratio', '0.240', { timeout: 2000 });
+      await expect(zoomHint).toHaveAttribute('data-active', 'true');
+
+      await expect.poll(async () => (await utilityPane.boundingBox())?.width ?? 0, { timeout: 2000 })
+        .toBeGreaterThan(utilityBefore!.width);
+      await expect.poll(async () => (await mainPane.boundingBox())?.width ?? 0, { timeout: 2000 })
+        .toBeLessThan(mainBefore!.width);
+
+      const mainAfterZoom = await mainPane.boundingBox();
+      const utilityAfterZoom = await utilityPane.boundingBox();
+      expect(mainAfterZoom).not.toBeNull();
+      expect(utilityAfterZoom).not.toBeNull();
+      expect(utilityAfterZoom!.width).toBeGreaterThan(utilityBefore!.width);
+      expect(mainAfterZoom!.width).toBeLessThan(mainBefore!.width);
+      await expect(mainPane).toBeVisible();
+      await expect(utilityPane).toBeVisible();
+
+      await mainPane.click();
+      await expect(workspace).toHaveAttribute('data-zoomed-pane-id', 'main', { timeout: 2000 });
+      await expect(rootSplit).toHaveAttribute('data-split-ratio', '0.760', { timeout: 2000 });
+      await expect(zoomHint).toHaveAttribute('data-active', 'true');
+
+      await expect.poll(async () => (await mainPane.boundingBox())?.width ?? 0, { timeout: 2000 })
+        .toBeGreaterThan(mainAfterZoom!.width);
+      await expect.poll(async () => (await utilityPane.boundingBox())?.width ?? 0, { timeout: 2000 })
+        .toBeLessThan(utilityAfterZoom!.width);
+
+      const mainRetargeted = await mainPane.boundingBox();
+      const utilityRetargeted = await utilityPane.boundingBox();
+      expect(mainRetargeted).not.toBeNull();
+      expect(utilityRetargeted).not.toBeNull();
+      expect(mainRetargeted!.width).toBeGreaterThan(mainAfterZoom!.width);
+      expect(utilityRetargeted!.width).toBeLessThan(utilityAfterZoom!.width);
+    });
+  });
 
   test.describe('Attention Drawer', () => {
     test('⌘K toggles attention drawer', async ({ page, daemon }) => {

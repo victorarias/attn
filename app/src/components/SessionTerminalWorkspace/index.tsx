@@ -4,6 +4,7 @@ import { Terminal, type ResolvedTheme } from '../Terminal';
 import { useShortcut } from '../../shortcuts';
 import {
   MAIN_TERMINAL_PANE_ID,
+  hasPane,
   findPaneInDirection,
   type TerminalNavigationDirection,
   type TerminalLayoutNode,
@@ -16,6 +17,41 @@ import { usePaneRuntimeBinder } from './usePaneRuntimeBinder';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { activeElementSummary, recordPaneRuntimeDebugEvent } from '../../utils/paneRuntimeDebug';
 import './SessionTerminalWorkspace.css';
+
+const ZOOM_PATH_RATIO = 0.76;
+
+function clampSplitRatio(ratio: number): number {
+  if (ratio > 0 && ratio < 1) {
+    return ratio;
+  }
+  return 0.5;
+}
+
+function zoomLayoutTowardPane(node: TerminalLayoutNode, paneId: string): TerminalLayoutNode {
+  if (node.type === 'pane') {
+    return node;
+  }
+
+  const firstContainsPane = hasPane(node.children[0], paneId);
+  const secondContainsPane = hasPane(node.children[1], paneId);
+  const nextChildren: [TerminalLayoutNode, TerminalLayoutNode] = [
+    zoomLayoutTowardPane(node.children[0], paneId),
+    zoomLayoutTowardPane(node.children[1], paneId),
+  ];
+
+  if (!firstContainsPane && !secondContainsPane) {
+    return {
+      ...node,
+      children: nextChildren,
+    };
+  }
+
+  return {
+    ...node,
+    ratio: firstContainsPane ? ZOOM_PATH_RATIO : 1 - ZOOM_PATH_RATIO,
+    children: nextChildren,
+  };
+}
 
 export interface SessionTerminalWorkspaceHandle {
   fitPane: (paneId: string) => void;
@@ -45,6 +81,7 @@ interface SessionTerminalWorkspaceProps {
   onSplitPane: (targetPaneId: string, direction: TerminalSplitDirection) => void;
   onClosePane: (paneId: string) => void;
   onFocusPane: (paneId: string) => void;
+  onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
 }
 
@@ -66,9 +103,11 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onSplitPane,
     onClosePane,
     onFocusPane,
+    onZoomModeChange,
     onNavigateOutOfSession,
   }, ref) {
     const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
+    const [zoomedPaneId, setZoomedPaneId] = useState<string | null>(null);
     const activePaneIdRef = useRef(activePaneId);
     const isActiveSessionRef = useRef(isActiveSession);
 
@@ -114,10 +153,22 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     const splitLayoutActive = workspace.layoutTree.type === 'split';
     const showMainHeader = paneIds.length > 1;
     const effectivePaneId = maximizedPaneId && paneIds.includes(maximizedPaneId) ? maximizedPaneId : null;
+    const effectiveZoomedPaneId = zoomedPaneId && paneIds.includes(zoomedPaneId) ? zoomedPaneId : null;
+    const renderedLayoutTree = useMemo(() => {
+      if (effectivePaneId) {
+        return { type: 'pane', paneId: effectivePaneId } satisfies TerminalLayoutNode;
+      }
+      if (!effectiveZoomedPaneId) {
+        return workspace.layoutTree;
+      }
+      return zoomLayoutTowardPane(workspace.layoutTree, effectiveZoomedPaneId);
+    }, [effectivePaneId, effectiveZoomedPaneId, workspace.layoutTree]);
     const workspaceTopologyKey = JSON.stringify({
-      layoutTree: workspace.layoutTree,
+      layoutTree: renderedLayoutTree,
       terminalIds: workspace.terminals.map((terminal) => terminal.id),
       activePaneId,
+      effectivePaneId,
+      effectiveZoomedPaneId,
     });
 
     useImperativeHandle(ref, () => ({
@@ -139,6 +190,28 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         setMaximizedPaneId(null);
       }
     }, [maximizedPaneId, paneIds]);
+
+    useEffect(() => {
+      if (!zoomedPaneId) {
+        return;
+      }
+      if (!paneIds.includes(zoomedPaneId)) {
+        setZoomedPaneId(null);
+      }
+    }, [paneIds, zoomedPaneId]);
+
+    useEffect(() => {
+      if (!effectiveZoomedPaneId || effectivePaneId) {
+        return;
+      }
+      if (effectiveZoomedPaneId !== activePaneId) {
+        setZoomedPaneId(activePaneId);
+      }
+    }, [activePaneId, effectivePaneId, effectiveZoomedPaneId]);
+
+    useEffect(() => {
+      onZoomModeChange?.(Boolean(effectiveZoomedPaneId));
+    }, [effectiveZoomedPaneId, onZoomModeChange]);
 
     const focusActivePane = useCallback(() => {
       binder.focusPaneWithRetry(activePaneId, 40);
@@ -201,13 +274,19 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [activePaneId, handleCloseTerminal]);
 
     const toggleMaximizeActivePane = useCallback(() => {
+      setZoomedPaneId(null);
       setMaximizedPaneId((current) => (current ? null : activePaneId));
+    }, [activePaneId]);
+
+    const toggleZoomActivePane = useCallback(() => {
+      setMaximizedPaneId(null);
+      setZoomedPaneId((current) => (current === activePaneId ? null : activePaneId));
     }, [activePaneId]);
 
     const handleMovePane = useCallback((direction: TerminalNavigationDirection) => {
       const visibleLayout: TerminalLayoutNode = effectivePaneId
         ? { type: 'pane', paneId: effectivePaneId }
-        : workspace.layoutTree;
+        : renderedLayoutTree;
       const nextPaneId = findPaneInDirection(visibleLayout, activePaneId, direction);
       if (nextPaneId) {
         recordPaneRuntimeDebugEvent({
@@ -229,7 +308,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         details: { direction },
       });
       onNavigateOutOfSession(direction);
-    }, [activePaneId, binder, effectivePaneId, onFocusPane, onNavigateOutOfSession, sessionId, workspace.layoutTree]);
+    }, [activePaneId, binder, effectivePaneId, onFocusPane, onNavigateOutOfSession, renderedLayoutTree, sessionId]);
 
     const handleMainPaneMouseDown = useCallback(() => {
       recordPaneRuntimeDebugEvent({
@@ -283,6 +362,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     useShortcut('terminal.new', () => { void handleNewTerminal(); }, enabled && isActiveSession);
     useShortcut('terminal.splitVertical', () => { handleSplit('vertical'); }, enabled && isActiveSession);
     useShortcut('terminal.splitHorizontal', () => { handleSplit('horizontal'); }, enabled && isActiveSession);
+    useShortcut('terminal.toggleZoom', toggleZoomActivePane, enabled && isActiveSession);
     useShortcut('terminal.toggleMaximize', toggleMaximizeActivePane, enabled && isActiveSession);
     useShortcut('terminal.close', handleCloseActiveTerminal, enabled && isActiveSession && splitLayoutActive);
     useShortcut('terminal.focusLeft', () => handleMovePane('left'), enabled && isActiveSession);
@@ -292,10 +372,30 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
 
     const renderPane = useCallback((node: TerminalLayoutNode): React.ReactNode => {
       if (node.type === 'split') {
+        const firstRatio = clampSplitRatio(node.ratio);
+        const secondRatio = clampSplitRatio(1 - firstRatio);
         return (
-          <div key={node.splitId} className={`workspace-split split-${node.direction}`}>
-            {renderPane(node.children[0])}
-            {renderPane(node.children[1])}
+          <div
+            key={node.splitId}
+            className={`workspace-split split-${node.direction}`}
+            data-split-id={node.splitId}
+            data-split-direction={node.direction}
+            data-split-ratio={firstRatio.toFixed(3)}
+          >
+            <div
+              className="workspace-split-child"
+              data-split-child-index="0"
+              style={{ flexGrow: firstRatio }}
+            >
+              {renderPane(node.children[0])}
+            </div>
+            <div
+              className="workspace-split-child"
+              data-split-child-index="1"
+              style={{ flexGrow: secondRatio }}
+            >
+              {renderPane(node.children[1])}
+            </div>
           </div>
         );
       }
@@ -399,8 +499,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
 
     return (
       <div
-        className={`session-terminal-workspace ${effectivePaneId ? 'focus-mode' : ''}`}
+        className={`session-terminal-workspace ${effectivePaneId ? 'focus-mode' : ''} ${effectiveZoomedPaneId && !effectivePaneId ? 'zoom-mode' : ''}`.trim()}
         data-session-terminal-workspace={sessionId}
+        data-zoomed-pane-id={effectiveZoomedPaneId || ''}
       >
         {effectivePaneId && (
           <div className="workspace-focus-bar">
@@ -419,7 +520,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           </div>
         )}
         <div className="session-terminal-panes">
-          {renderPane(effectivePaneId ? { type: 'pane', paneId: effectivePaneId } : workspace.layoutTree)}
+          {renderPane(renderedLayoutTree)}
         </div>
       </div>
     );

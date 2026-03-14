@@ -3,7 +3,7 @@ import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sidebar, type SidebarHeaderAction, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
+import { Sidebar, type SidebarHeaderAction, type FooterShortcut, ReviewLoopIcon, EditorIcon, DiffIcon, PRsIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
@@ -992,6 +992,7 @@ function AppContent({
   // Thumbs (Quick Find) state
   const [thumbsOpen, setThumbsOpen] = useState(false);
   const [thumbsText, setThumbsText] = useState('');
+  const [zoomModeBySessionId, setZoomModeBySessionId] = useState<Record<string, boolean>>({});
   const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
   const { message: errorMessage, showError, clearError } = useErrorToast();
   const activeReviewLoopState = useMemo(
@@ -1627,11 +1628,18 @@ function AppContent({
     toggleDockPanel,
   ]);
 
-  const sidebarFooterShortcuts = useMemo(() => (
+  const activeSessionZoomed = activeSessionId ? Boolean(zoomModeBySessionId[activeSessionId]) : false;
+
+  const sidebarFooterShortcuts = useMemo<FooterShortcut[]>(() => (
     activeSessionId
-      ? ['⌘D split v', '⌘⇧D split h', '⌘⌥←↑→↓ pane']
+      ? [
+          { label: '⌘D split v' },
+          { label: '⌘⇧D split h' },
+          { label: '⌘⇧Z zoom', active: activeSessionZoomed },
+          { label: '⌘⌥←↑→↓ pane' },
+        ]
       : []
-  ), [activeSessionId]);
+  ), [activeSessionId, activeSessionZoomed]);
 
   const handleStartReviewLoop = useCallback(async (prompt: string, iterationLimit: number, presetId?: string) => {
     if (!activeSessionId) return;
@@ -1816,6 +1824,13 @@ function AppContent({
                   }}
                   onFocusPane={(paneId) => {
                     setActivePane(session.id, paneId);
+                  }}
+                  onZoomModeChange={(zoomed) => {
+                    setZoomModeBySessionId((prev) => (
+                      prev[session.id] === zoomed
+                        ? prev
+                        : { ...prev, [session.id]: zoomed }
+                    ));
                   }}
                   onNavigateOutOfSession={handleNavigateOutOfSession}
                 />

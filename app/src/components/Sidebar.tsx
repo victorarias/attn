@@ -40,7 +40,7 @@ interface SidebarProps {
   selectedId: string | null;
   collapsed: boolean;
   headerActions: SidebarHeaderAction[];
-  footerShortcuts?: string[];
+  footerShortcuts?: FooterShortcut[];
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onCloseSession: (id: string) => void;
@@ -59,6 +59,11 @@ export interface SidebarHeaderAction {
   badge?: string | number;
   shortcutHint?: string;
   onClick: () => void;
+}
+
+export interface FooterShortcut {
+  label: string;
+  active?: boolean;
 }
 
 function HomeIcon() {
@@ -149,12 +154,12 @@ export function Sidebar({
   onToggleCollapse,
 }: SidebarProps) {
   const visualIndexOf = (id: string) => visualIndexBySessionId.get(id) ?? -1;
-  const dockShortcutHints = Array.from(new Set([
+  const dockShortcutHints = Array.from(new Map([
     ...headerActions
       .filter((action) => action.shortcutHint && !action.disabled)
-      .map((action) => action.shortcutHint as string),
-    ...(footerShortcuts ?? []),
-  ]));
+      .map((action) => [action.shortcutHint as string, { label: action.shortcutHint as string, active: false }] as const),
+    ...(footerShortcuts ?? []).map((shortcut) => [shortcut.label, shortcut] as const),
+  ]).values());
 
   if (collapsed) {
     return (
@@ -372,8 +377,14 @@ export function Sidebar({
 
       <div className="sidebar-footer">
         <span className="sidebar-footer-label">Dock</span>
-        {dockShortcutHints.map((shortcutHint) => (
-          <span key={shortcutHint} className="shortcut-hint">{shortcutHint}</span>
+        {dockShortcutHints.map((shortcut) => (
+          <span
+            key={shortcut.label}
+            className={`shortcut-hint ${shortcut.active ? 'active' : ''}`.trim()}
+            data-active={shortcut.active ? 'true' : 'false'}
+          >
+            {shortcut.label}
+          </span>
         ))}
         <span className="shortcut-hint">⌘⇧B sidebar</span>
       </div>

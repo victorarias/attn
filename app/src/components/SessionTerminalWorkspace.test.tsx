@@ -1,9 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { forwardRef, useImperativeHandle } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionTerminalWorkspace } from './SessionTerminalWorkspace';
 import type { PaneRuntimeEventRouter } from './SessionTerminalWorkspace/paneRuntimeEventRouter';
-import { MAIN_TERMINAL_PANE_ID, createDefaultWorkspaceState } from '../types/workspace';
+import { MAIN_TERMINAL_PANE_ID, createDefaultWorkspaceState, type TerminalWorkspaceState } from '../types/workspace';
 
 const { registeredShortcuts } = vi.hoisted(() => ({
   registeredShortcuts: new Map<string, () => void>(),
@@ -269,6 +269,194 @@ describe('SessionTerminalWorkspace', () => {
     registeredShortcuts.get('terminal.focusRight')?.();
 
     expect(onNavigateOutOfSession).toHaveBeenCalledWith('right');
+  });
+
+  it('applies stored split ratios in the rendered layout', () => {
+    const { container } = render(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={{
+          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root',
+            direction: 'vertical',
+            ratio: 0.3,
+            children: [
+              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+              { type: 'pane', paneId: 'pane-shell-1' },
+            ],
+          },
+        }}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    const split = container.querySelector('[data-split-id="root"]');
+    const firstChild = container.querySelector('[data-split-id="root"] [data-split-child-index="0"]') as HTMLElement | null;
+    const secondChild = container.querySelector('[data-split-id="root"] [data-split-child-index="1"]') as HTMLElement | null;
+
+    expect(split).toHaveAttribute('data-split-ratio', '0.300');
+    expect(firstChild?.style.flexGrow).toBe('0.3');
+    expect(secondChild?.style.flexGrow).toBe('0.7');
+  });
+
+  it('lets zoom arm before splitting and applies once a split exists', () => {
+    const { container, rerender } = render(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={createDefaultWorkspaceState()}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    act(() => {
+      registeredShortcuts.get('terminal.toggleZoom')?.();
+    });
+
+    expect(container.querySelector('[data-session-terminal-workspace="session-1"]')).toHaveAttribute('data-zoomed-pane-id', MAIN_TERMINAL_PANE_ID);
+    expect(container.querySelector('[data-split-id="root"]')).toBeNull();
+
+    rerender(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={{
+          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+              { type: 'pane', paneId: 'pane-shell-1' },
+            ],
+          },
+        }}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    expect(container.querySelector('[data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.760');
+  });
+
+  it('zooms the active pane across nested splits and retargets when focus changes', () => {
+    const workspace: TerminalWorkspaceState = {
+      terminals: [
+        { id: 'top-right', ptyId: 'runtime-top-right', title: 'Top Right' },
+        { id: 'bottom-right', ptyId: 'runtime-bottom-right', title: 'Bottom Right' },
+      ],
+      layoutTree: {
+        type: 'split' as const,
+        splitId: 'root',
+        direction: 'vertical' as const,
+        ratio: 0.5,
+        children: [
+          { type: 'pane' as const, paneId: MAIN_TERMINAL_PANE_ID },
+          {
+            type: 'split' as const,
+            splitId: 'right',
+            direction: 'horizontal' as const,
+            ratio: 0.5,
+            children: [
+              { type: 'pane' as const, paneId: 'top-right' },
+              { type: 'pane' as const, paneId: 'bottom-right' },
+            ] as const,
+          },
+        ] as const,
+      },
+    };
+
+    const { container, rerender } = render(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={workspace}
+        activePaneId="bottom-right"
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    expect(container.querySelector('[data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.500');
+    expect(container.querySelector('[data-split-id="right"]')).toHaveAttribute('data-split-ratio', '0.500');
+
+    act(() => {
+      registeredShortcuts.get('terminal.toggleZoom')?.();
+    });
+
+    expect(container.querySelector('[data-session-terminal-workspace="session-1"]')).toHaveAttribute('data-zoomed-pane-id', 'bottom-right');
+    expect(container.querySelector('[data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.240');
+    expect(container.querySelector('[data-split-id="right"]')).toHaveAttribute('data-split-ratio', '0.240');
+
+    rerender(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={workspace}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    expect(container.querySelector('[data-session-terminal-workspace="session-1"]')).toHaveAttribute('data-zoomed-pane-id', MAIN_TERMINAL_PANE_ID);
+    expect(container.querySelector('[data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.760');
+    expect(container.querySelector('[data-split-id="right"]')).toHaveAttribute('data-split-ratio', '0.500');
   });
 
   it('re-fits the active pane when the workspace topology changes after closing a split', () => {

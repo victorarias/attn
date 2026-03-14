@@ -80,6 +80,7 @@ declare global {
   interface Window {
     __TEST_INJECT_SESSION?: (session: TestSession) => void;
     __TEST_UPDATE_SESSION_STATE?: (id: string, state: UISessionState) => void;
+    __TEST_SET_SESSION_WORKSPACE?: (sessionId: string, workspace: TerminalWorkspaceState, daemonActivePaneId?: string) => void;
   }
 }
 
@@ -355,6 +356,16 @@ if (import.meta.env.DEV) {
     useSessionStore.setState((s) => ({
       sessions: s.sessions.map((session) =>
         session.id === id ? { ...session, state } : session
+      ),
+    }));
+  };
+
+  window.__TEST_SET_SESSION_WORKSPACE = (sessionId: string, workspace: TerminalWorkspaceState, daemonActivePaneId = MAIN_TERMINAL_PANE_ID) => {
+    useSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId
+          ? { ...session, workspace, daemonActivePaneId }
+          : session
       ),
     }));
   };

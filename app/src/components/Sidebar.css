@@ -427,6 +427,14 @@
   font-family: 'JetBrains Mono', monospace;
 }
 
+.shortcut-hint.active {
+  color: var(--color-text-primary);
+  background: rgba(255, 107, 53, 0.12);
+  border: 1px solid rgba(255, 107, 53, 0.35);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
 /* Collapse button */
 .collapse-btn {
   background: transparent;
