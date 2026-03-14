@@ -9,7 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-03-14]
 
 ### Changed
-- **PR Review Provider**: Switch the advisory Hodor GitHub workflow from Vertex Gemini to OpenRouter MiniMax M2.5, using the `open_router_api_key` secret and pinning OpenRouter routing to `inceptron/fp8`.
+- **PR Review Provider**: Switch the advisory Hodor GitHub workflow from Vertex Gemini to OpenRouter, now targeting `qwen/qwen3-coder-next` with the `open_router_api_key` secret.
 - **Sidebar Dock Shortcut Hints**: Show the split-pane and pane-navigation shortcuts (`Cmd+D`, `Cmd+Shift+D`, `Cmd+Alt+Arrow`) in the left sidebar’s Dock footer so the new session workspace controls are visible where you browse sessions.
 - **Hodor Review Runtime Budget**: Install `pnpm` and the app dependencies before Hodor runs, remove verbose logging, and lower review reasoning effort to medium so PR reviews spend fewer turns on missing-tooling dead ends.
 

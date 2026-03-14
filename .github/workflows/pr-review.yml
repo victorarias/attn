@@ -21,7 +21,7 @@ jobs:
     env:
       OPENROUTER_API_KEY: ${{ secrets.open_router_api_key }}
       HODOR_VERSION: v0.3.4
-      HODOR_MODEL: openrouter/minimax/minimax-m2.5
+      HODOR_MODEL: qwen/qwen3-coder-next
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -69,17 +69,7 @@ jobs:
           cat > "${HOME}/.pi/agent/models.json" <<'EOF'
           {
             "providers": {
-              "openrouter": {
-                "modelOverrides": {
-                  "minimax/minimax-m2.5": {
-                    "compat": {
-                      "openRouterRouting": {
-                        "only": ["inceptron/fp8"]
-                      }
-                    }
-                  }
-                }
-              }
+              "openrouter": {}
             }
           }
           EOF
@@ -127,7 +117,6 @@ jobs:
             echo "### Hodor review status: ${outcome}"
             echo
             echo "- Model: \`${HODOR_MODEL}\`"
-            echo "- OpenRouter route: \`inceptron/fp8\`"
             echo "- Hodor version: \`${HODOR_VERSION}\`"
             echo
             if [[ "$outcome" == "success" ]]; then
