@@ -1627,6 +1627,12 @@ function AppContent({
     toggleDockPanel,
   ]);
 
+  const sidebarFooterShortcuts = useMemo(() => (
+    activeSessionId
+      ? ['⌘D split v', '⌘⇧D split h', '⌘⌥←↑→↓ pane']
+      : []
+  ), [activeSessionId]);
+
   const handleStartReviewLoop = useCallback(async (prompt: string, iterationLimit: number, presetId?: string) => {
     if (!activeSessionId) return;
     try {
@@ -1772,6 +1778,7 @@ function AppContent({
           selectedId={activeSessionId}
           collapsed={sidebarCollapsed}
           headerActions={sidebarHeaderActions}
+          footerShortcuts={sidebarFooterShortcuts}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onCloseSession={handleCloseSession}

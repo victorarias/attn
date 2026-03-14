@@ -28,6 +28,7 @@ const baseProps = {
   selectedId: null,
   collapsed: false,
   headerActions: [],
+  footerShortcuts: undefined,
   onSelectSession: () => {},
   onNewSession: () => {},
   onCloseSession: () => {},
@@ -127,5 +128,28 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('sidebar-session-a1')).toHaveTextContent('⌘1');
     expect(screen.getByTestId('sidebar-session-a2')).toHaveTextContent('⌘2');
     expect(screen.getByTestId('sidebar-session-b1')).toHaveTextContent('⌘3');
+  });
+
+  it('renders dock action hints alongside custom footer shortcuts when provided', () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        headerActions={[{
+          id: 'diff',
+          title: 'Diff',
+          shortcutHint: '⌘⇧G diff',
+          onClick: () => {},
+          icon: null,
+        }]}
+        footerShortcuts={['⌘D split v', '⌘⇧D split h', '⌘⌥←↑→↓ pane']}
+        {...buildSidebarData([])}
+      />
+    );
+
+    expect(screen.getByText('⌘⇧G diff')).toBeInTheDocument();
+    expect(screen.getByText('⌘D split v')).toBeInTheDocument();
+    expect(screen.getByText('⌘⇧D split h')).toBeInTheDocument();
+    expect(screen.getByText('⌘⌥←↑→↓ pane')).toBeInTheDocument();
+    expect(screen.getByText('⌘⇧B sidebar')).toBeInTheDocument();
   });
 });
