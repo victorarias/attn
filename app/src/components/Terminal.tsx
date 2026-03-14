@@ -352,7 +352,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             container: getContainerDebugInfo(container),
           });
         }
+        const sizeChanged = dims.cols !== term.cols || dims.rows !== term.rows;
         resizeTerminal(term, dims.cols, dims.rows, 'fit');
+        if (!sizeChanged) {
+          // Full-screen TUIs like Claude can require a fresh PTY resize signal to
+          // repaint after layout changes, even when the terminal grid stays equal.
+          onResizeRef.current?.(dims.cols, dims.rows);
+        }
       },
       focus: () => {
         return focusTerminal();
