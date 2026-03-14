@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **PR Review Provider**: Switch the advisory Hodor GitHub workflow from Vertex Gemini to OpenRouter MiniMax M2.5, using the `open_router_api_key` secret and pinning OpenRouter routing to `inceptron/fp8`.
+- **Sidebar Dock Shortcut Hints**: Show the split-pane and pane-navigation shortcuts (`Cmd+D`, `Cmd+Shift+D`, `Cmd+Alt+Arrow`) in the left sidebar’s Dock footer so the new session workspace controls are visible where you browse sessions.
 
 ### Fixed
 - **Worker Binary Override Semantics**: Keep `ATTN_PTY_WORKER_BINARY` authoritative when explicitly configured, so a missing override now fails closed instead of silently spawning some other `attn` binary from fallback search paths.
