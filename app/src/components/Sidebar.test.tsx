@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { Sidebar } from './Sidebar';
+import { Sidebar, type FooterShortcut } from './Sidebar';
 import { getVisualSessionOrder, groupSessionsByDirectory } from '../utils/sessionGrouping';
 
 interface TestSession {
@@ -28,7 +28,7 @@ const baseProps = {
   selectedId: null,
   collapsed: false,
   headerActions: [],
-  footerShortcuts: undefined,
+  footerShortcuts: undefined as FooterShortcut[] | undefined,
   onSelectSession: () => {},
   onNewSession: () => {},
   onCloseSession: () => {},
@@ -141,7 +141,12 @@ describe('Sidebar', () => {
           onClick: () => {},
           icon: null,
         }]}
-        footerShortcuts={['⌘D split v', '⌘⇧D split h', '⌘⌥←↑→↓ pane']}
+        footerShortcuts={[
+          { label: '⌘D split v' },
+          { label: '⌘⇧D split h' },
+          { label: '⌘⇧Z zoom', active: true },
+          { label: '⌘⌥←↑→↓ pane' },
+        ]}
         {...buildSidebarData([])}
       />
     );
@@ -149,6 +154,8 @@ describe('Sidebar', () => {
     expect(screen.getByText('⌘⇧G diff')).toBeInTheDocument();
     expect(screen.getByText('⌘D split v')).toBeInTheDocument();
     expect(screen.getByText('⌘⇧D split h')).toBeInTheDocument();
+    expect(screen.getByText('⌘⇧Z zoom')).toBeInTheDocument();
+    expect(screen.getByText('⌘⇧Z zoom')).toHaveAttribute('data-active', 'true');
     expect(screen.getByText('⌘⌥←↑→↓ pane')).toBeInTheDocument();
     expect(screen.getByText('⌘⇧B sidebar')).toBeInTheDocument();
   });

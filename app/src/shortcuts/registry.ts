@@ -50,6 +50,7 @@ export const SHORTCUTS = {
   'terminal.new': { key: 't', meta: true },
   'terminal.splitVertical': { key: 'd', meta: true },
   'terminal.splitHorizontal': { key: 'd', meta: true, shift: true },
+  'terminal.toggleZoom': { key: 'z', meta: true, shift: true },
   'terminal.toggleMaximize': { key: 'Enter', meta: true, shift: true },
   'terminal.close': { key: 'w', meta: true },
   'terminal.focusLeft': { key: 'ArrowLeft', meta: true, alt: true },

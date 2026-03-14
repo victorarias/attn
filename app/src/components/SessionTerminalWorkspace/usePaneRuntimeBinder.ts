@@ -101,6 +101,9 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
       if (ev.shiftKey && ev.key.toLowerCase() === 'd') {
         return !triggerShortcut('terminal.splitHorizontal');
       }
+      if (ev.shiftKey && ev.key.toLowerCase() === 'z') {
+        return !triggerShortcut('terminal.toggleZoom');
+      }
       if (ev.shiftKey && ev.key === 'Enter') {
         return !triggerShortcut('terminal.toggleMaximize');
       }
