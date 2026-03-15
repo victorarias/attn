@@ -421,6 +421,12 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 		})
 		if wrapperPath != "" {
 			env = mergeEnvironment(env, []string{"ATTN_WRAPPER_PATH=" + wrapperPath})
+			// Ensure the directory containing attn is in PATH so that
+			// tools (e.g. Claude Code skills) can find it as a bare command
+			// even when installed only inside the .app bundle.
+			if dir := filepath.Dir(wrapperPath); dir != "" && dir != "." {
+				env = prependPath(env, dir)
+			}
 		}
 
 		executable := configuredExecutableForAgent(opts, agent)
@@ -524,6 +530,24 @@ func mergeEnvironment(base, overlay []string) []string {
 		add(entry)
 	}
 	return merged
+}
+
+// prependPath adds dir to the front of the PATH variable in env,
+// avoiding duplicates.
+func prependPath(env []string, dir string) []string {
+	for i, entry := range env {
+		if strings.HasPrefix(entry, "PATH=") {
+			existing := entry[5:]
+			for _, p := range strings.Split(existing, string(os.PathListSeparator)) {
+				if p == dir {
+					return env // already present
+				}
+			}
+			env[i] = "PATH=" + dir + string(os.PathListSeparator) + existing
+			return env
+		}
+	}
+	return append(env, "PATH="+dir)
 }
 
 func filterEnvKeys(env []string, keys ...string) []string {
