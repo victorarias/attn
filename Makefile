@@ -53,12 +53,9 @@ install: build
 	@# Use cat to avoid copying extended attributes that trigger Gatekeeper
 	cat $(BINARY_NAME) > $(INSTALL_DIR)/$(BINARY_NAME)
 	chmod +x $(INSTALL_DIR)/$(BINARY_NAME)
-	@# macOS: remove quarantine attribute and ad-hoc sign binary
+	@# macOS: remove quarantine attribute
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
 		xattr -d com.apple.quarantine $(INSTALL_DIR)/$(BINARY_NAME) 2>/dev/null || true; \
-		codesign -s - -f $(INSTALL_DIR)/$(BINARY_NAME); \
-	else \
-		echo "Skipping macOS quarantine removal and codesign on $(UNAME_S)"; \
 	fi
 	@# Kill running daemon and restart with new local code.
 	-pkill -f "$(BINARY_NAME) daemon" 2>/dev/null || true
@@ -98,11 +95,17 @@ build-app: build
 	@mkdir -p app/src-tauri/binaries
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
 	cd app && VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles app
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		codesign --remove-signature app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn 2>/dev/null || true; \
+	fi
 
 build-app-ui-automation: build
 	@mkdir -p app/src-tauri/binaries
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
 	cd app && ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles app
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		codesign --remove-signature app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn 2>/dev/null || true; \
+	fi
 
 # Install Tauri app to /Applications
 install-app: build-app

@@ -171,6 +171,22 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       effectiveZoomedPaneId,
     });
 
+    // Track each pane's tree path so we can detect which panes moved after a topology change.
+    const panePaths = useMemo(() => {
+      const paths = new Map<string, string>();
+      const walk = (node: TerminalLayoutNode, path: string) => {
+        if (node.type === 'pane') {
+          paths.set(node.paneId, path);
+          return;
+        }
+        walk(node.children[0], path + '/0');
+        walk(node.children[1], path + '/1');
+      };
+      walk(renderedLayoutTree, '');
+      return paths;
+    }, [renderedLayoutTree]);
+    const prevPanePathsRef = useRef(panePaths);
+
     useImperativeHandle(ref, () => ({
       fitPane: binder.fitPane,
       fitActivePane: binder.fitActivePane,
@@ -238,21 +254,37 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
 
     useEffect(() => {
       if (!isActiveSession || !enabled) {
+        prevPanePathsRef.current = panePaths;
         return;
       }
-      // Closing a split can leave the surviving main terminal visually stale until
-      // a later resize. Re-fit after the topology change commits to flush xterm's renderer.
+      // Find panes whose tree position changed — only those need re-fitting
+      // after a topology change (e.g. closing a split sibling).
+      const prev = prevPanePathsRef.current;
+      prevPanePathsRef.current = panePaths;
+      const movedPanes: string[] = [];
+      for (const [paneId, path] of panePaths) {
+        if (prev.get(paneId) !== path) {
+          movedPanes.push(paneId);
+        }
+      }
+      if (movedPanes.length === 0) {
+        return;
+      }
       const fitSoon = window.setTimeout(() => {
-        fitPane(activePaneId);
+        for (const paneId of movedPanes) {
+          fitPane(paneId);
+        }
       }, 0);
       const fitAfterLayoutSettles = window.setTimeout(() => {
-        fitPane(activePaneId);
+        for (const paneId of movedPanes) {
+          fitPane(paneId);
+        }
       }, 75);
       return () => {
         window.clearTimeout(fitSoon);
         window.clearTimeout(fitAfterLayoutSettles);
       };
-    }, [activePaneId, enabled, fitPane, isActiveSession, workspaceTopologyKey]);
+    }, [activePaneId, enabled, fitPane, isActiveSession, panePaths, workspaceTopologyKey]);
 
     const handleSplit = useCallback((direction: TerminalSplitDirection) => {
       onSplitPane(activePaneId, direction);

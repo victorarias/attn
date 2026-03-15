@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-03-15]
+
+### Removed
+- **Ad-hoc code signing**: Remove `codesign -s -` from `make install` and always strip the bundled sidecar signature in app builds. Quarantine removal (`xattr -d`) is still applied.
+
 ## [2026-03-14]
 
 ### Changed
