@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-03-16]
+
+### Fixed
+- **`attn` in PATH for cask-only installs**: Prepend the wrapper binary's directory to PATH when spawning agent sessions so Claude Code skills can find `attn` as a bare command even when installed only via the Homebrew cask.
+
 ## [2026-03-15]
 
 ### Removed
