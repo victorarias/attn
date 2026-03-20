@@ -118,6 +118,8 @@ interface TerminalProps {
   fontSize?: number;
   resolvedTheme?: ResolvedTheme;
   debugName?: string;
+  /** TUI apps (Ink) render their own cursor; hide xterm's after resize to prevent ghost cursor. */
+  tuiCursor?: boolean;
   onInit?: (terminal: XTerm) => void;
   onReady?: (terminal: XTerm) => void;
   onResize?: (cols: number, rows: number) => void;
@@ -188,7 +190,7 @@ function getScaledDimensions(
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
-  function Terminal({ fontSize = DEFAULT_FONT_SIZE, resolvedTheme = 'dark', debugName, onInit, onReady, onResize }, ref) {
+  function Terminal({ fontSize = DEFAULT_FONT_SIZE, resolvedTheme = 'dark', debugName, tuiCursor, onInit, onReady, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
     const webglAddonRef = useRef<WebglAddon | null>(null);
@@ -201,6 +203,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const onResizeRef = useRef(onResize);
     const fontSizeRef = useRef(fontSize);
     const resolvedThemeRef = useRef(resolvedTheme);
+    const tuiCursorRef = useRef(tuiCursor);
 
     useEffect(() => {
       onReadyRef.current = onReady;
@@ -209,6 +212,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       fontSizeRef.current = fontSize;
       resolvedThemeRef.current = resolvedTheme;
       debugNameRef.current = debugName || 'unknown';
+      tuiCursorRef.current = tuiCursor;
     });
 
     // Update xterm theme at runtime when resolved theme changes
@@ -315,33 +319,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         });
       }
 
-      // Capture cursor hidden state before resize. TUI apps like Claude Code's
-      // Ink hide the cursor (DECTCEM OFF) and render their own. During resize,
-      // Ink redraws and may briefly show the cursor or send a soft reset (DECSTR)
-      // which sets isCursorHidden=false. If the WebGL renderer captures that
-      // intermediate state, a ghost cursor persists. After the next write batch
-      // (Ink's redraw), we re-hide the cursor if it was hidden before.
-      const coreService = (term as any)._core?._coreService;
-      const wasHidden = coreService?.isCursorHidden ?? false;
-
       if (cols !== term.cols || rows !== term.rows) {
         term.resize(cols, rows);
         onResizeRef.current?.(cols, rows);
-      } else {
-        // Layout changes can still leave xterm visually stale even when the computed
-        // cols/rows land on the same values. Force a repaint so the buffer redraws.
-        term.refresh(0, Math.max(term.rows - 1, 0));
       }
+      // Same-size case: no refresh needed. The fit() bounce sends SIGWINCH
+      // which triggers the app to redraw. A term.refresh() here would reveal
+      // xterm's cursor at the wrong buffer position, creating a ghost cursor
+      // in TUI apps like Ink that render their own cursor.
 
-      if (wasHidden && coreService) {
-        const disposable = term.onWriteParsed(() => {
-          disposable.dispose();
-          if (!coreService.isCursorHidden) {
-            term.write('\x1b[?25l');
-          }
-        });
-        // Don't leak if no write arrives (e.g. idle session)
-        window.setTimeout(() => disposable.dispose(), 2000);
+      // TUI apps (Ink) render their own visual cursor and don't use DECTCEM.
+      // After resize, xterm's cursor appears at the wrong buffer position as
+      // a ghost. Force-hide it; the app's next redraw covers the position.
+      if (tuiCursorRef.current) {
+        const coreService = (term as any)._core?.coreService;
+        if (coreService) {
+          coreService.isCursorHidden = true;
+        }
       }
     }, [logTerminal]);
 
@@ -506,49 +500,110 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       xtermRef.current = term;
       onInitRef.current?.(term);
 
-      // Scroll pinning: prevent viewport from jumping to the top when the
-      // user is scrolled up during fast TUI output (e.g. Claude Code's Ink
-      // redraws). Uses wheel events to capture user scroll intent and
-      // onWriteParsed (new in v6) to restore position after write-induced
-      // displacement.
-      const viewportEl = containerRef.current.querySelector('.xterm-viewport') as HTMLElement | null;
-      let pinnedLine: number | null = null; // null = anchored to bottom
+      // Write-buffering scroll pin (tmux copy-mode approach).
+      //
+      // When the user scrolls up, we stop feeding data to xterm and queue
+      // writes in memory. The terminal freezes — no escape sequences can
+      // displace the viewport. When they scroll back to the bottom, the
+      // queue flushes and output resumes.
+      //
+      // Pin activation uses two layers to eliminate the race window:
+      //   1. Wheel handler: immediately pins if already scrolled up
+      //   2. Scroll handler: pins/unpins based on post-scroll viewportY
+      //      (fires synchronously after scroll effect, before next task)
+      //
+      // CSI 3J safety net covers the single first-scroll-from-bottom case
+      // where the wheel handler can't pre-pin (viewportY == baseY before
+      // the scroll effect is applied).
+      {
+        const core = (term as any)._core;
+        const disposables: Array<{ dispose(): void }> = [];
+        const writeQueue: Uint8Array[] = [];
+        let pinned = false;
+        let lastUserInteraction = 0;
 
-      if (viewportEl) {
-        // Capture user scroll intent via wheel events (trackpad/mouse).
-        // We use wheel instead of onScroll because onScroll also fires for
-        // write-induced scrolls and we can't distinguish the two.
-        const onWheel = () => {
-          requestAnimationFrame(() => {
+        // Override term.write to buffer when pinned
+        const originalWrite = term.write.bind(term);
+        term.write = ((data: string | Uint8Array, callback?: () => void) => {
+          if (pinned) {
+            if (typeof data === 'string') {
+              writeQueue.push(new TextEncoder().encode(data));
+            } else {
+              writeQueue.push(new Uint8Array(data));
+            }
+            callback?.();
+            return;
+          }
+          originalWrite(data, callback);
+        }) as typeof term.write;
+
+        function flushQueue() {
+          if (writeQueue.length === 0) return;
+          const total = writeQueue.reduce((sum, buf) => sum + buf.length, 0);
+          const combined = new Uint8Array(total);
+          let offset = 0;
+          for (const buf of writeQueue) {
+            combined.set(buf, offset);
+            offset += buf.length;
+          }
+          writeQueue.length = 0;
+          originalWrite(combined);
+        }
+
+        // In xterm.js v6, wheel events land on .xterm-screen (z-index 31,
+        // above .xterm-viewport at 30) and scrolling is handled internally
+        // via a custom scrollbar — DOM scroll events don't fire on viewport.
+        // Use capture-phase wheel on our container + term.onScroll() instead.
+        {
+          const container = containerRef.current!;
+
+          // Wheel on container (capture phase): mark user interaction and
+          // immediately pin if already scrolled up (no race window).
+          const onWheel = () => {
+            lastUserInteraction = performance.now();
+            if (!pinned && term.buffer.active.viewportY < term.buffer.active.baseY) {
+              pinned = true;
+            }
+          };
+          container.addEventListener('wheel', onWheel, { passive: true, capture: true });
+
+          // term.onScroll fires after xterm processes the scroll (both user
+          // and programmatic). Use the interaction timestamp to distinguish.
+          disposables.push(term.onScroll(() => {
+            const isUser = performance.now() - lastUserInteraction < 300;
+            if (!isUser) return;
+
             const buf = term.buffer.active;
-            pinnedLine = buf.viewportY >= buf.baseY ? null : buf.viewportY;
-          });
-        };
-        viewportEl.addEventListener('wheel', onWheel, { passive: true });
+            const atBottom = buf.viewportY >= buf.baseY;
 
-        // Re-anchor when viewport reaches the bottom (from any source:
-        // user scroll, programmatic scrollToBottom, etc.)
-        const scrollDisposable = term.onScroll((viewportY) => {
-          if (viewportY >= term.buffer.active.baseY) {
-            pinnedLine = null;
-          }
-        });
+            if (!pinned && !atBottom) {
+              pinned = true;
+            } else if (pinned && atBottom) {
+              pinned = false;
+              flushQueue();
+            }
+          }));
 
-        // After each write batch, restore viewport if user was scrolled up.
-        // Writes can displace the viewport (e.g. cursor-home sequences in
-        // TUI redraws). onWriteParsed fires at most once per frame after
-        // all pending data is parsed.
-        const writeParsedDisposable = term.onWriteParsed(() => {
-          if (pinnedLine !== null && pinnedLine < term.buffer.active.baseY) {
-            term.scrollToLine(pinnedLine);
-          }
-        });
+          disposables.push({ dispose: () => {
+            container.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions);
+          }});
+        }
 
-        // Stash disposables for cleanup
+        // Safety net: suppress CSI 3J for the first scroll-from-bottom case
+        if (core?.registerCsiHandler) {
+          disposables.push(core.registerCsiHandler({ final: 'J' }, (params: any) => {
+            const ps = params?.params?.[0] ?? params?.[0] ?? 0;
+            if (ps === 3 && term.buffer.active.viewportY < term.buffer.active.baseY) {
+              return true;
+            }
+            return false;
+          }));
+        }
+
         (term as any)._scrollPinCleanup = () => {
-          viewportEl.removeEventListener('wheel', onWheel);
-          scrollDisposable.dispose();
-          writeParsedDisposable.dispose();
+          disposables.forEach(d => d.dispose());
+          term.write = originalWrite;
+          flushQueue();
         };
       }
 

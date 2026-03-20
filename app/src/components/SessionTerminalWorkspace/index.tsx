@@ -452,6 +452,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 ref={(handle) => binder.setTerminalHandle(MAIN_TERMINAL_PANE_ID, handle)}
                 fontSize={fontSize}
                 resolvedTheme={resolvedTheme}
+                tuiCursor
                 debugName={`main:${sessionLabel}:${sessionAgent}:${sessionId}`}
                 onInit={handleTerminalInit(MAIN_TERMINAL_PANE_ID)}
                 onReady={handleTerminalReady(MAIN_TERMINAL_PANE_ID)}
