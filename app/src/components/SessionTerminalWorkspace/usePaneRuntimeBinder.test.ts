@@ -132,7 +132,7 @@ describe('usePaneRuntimeBinder', () => {
       await Promise.resolve();
     });
 
-    expect(xterm.write).toHaveBeenCalledWith('queued output');
+    expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode('queued output'));
     expect(mockPtySpawn).toHaveBeenCalledWith({
       args: {
         id: 'runtime-1',
@@ -147,6 +147,6 @@ describe('usePaneRuntimeBinder', () => {
       bindings.get('runtime-1')?.onEvent({ event: 'data', id: 'runtime-1', data: btoa(' live output') });
     });
 
-    expect(xterm.write).toHaveBeenNthCalledWith(2, ' live output');
+    expect(xterm.write).toHaveBeenNthCalledWith(2, new TextEncoder().encode(' live output'));
   });
 });

@@ -422,8 +422,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         fontSize: initialFontSize,
         fontFamily: FONT_FAMILY,
         scrollback: TERMINAL_SCROLLBACK_LINES,
-        // VS Code options
-        fastScrollModifier: 'alt',
         windowOptions: {
           getWinSizePixels: true,
           getCellSizePixels: true,

@@ -42,16 +42,9 @@ function decodePtyBytes(payload: string): Uint8Array {
 
 function writePtyEventToTerminal(terminal: XTerm, msg: PtyEventPayload) {
   switch (msg.event) {
-    case 'data': {
-      const bytes = decodePtyBytes(msg.data);
-      const termWithUtf8 = terminal as XTerm & { writeUtf8?: (data: Uint8Array) => void };
-      if (typeof termWithUtf8.writeUtf8 === 'function') {
-        termWithUtf8.writeUtf8(bytes);
-      } else {
-        terminal.write(new TextDecoder('utf-8').decode(bytes));
-      }
+    case 'data':
+      terminal.write(decodePtyBytes(msg.data));
       break;
-    }
     case 'reset':
       terminal.reset();
       // Hide cursor immediately after reset to prevent a ghost cursor.
