@@ -36,6 +36,13 @@
   outline: none;
 }
 
+/* Prevent the hidden textarea's caret from bleeding through in WebKit/Tauri.
+   xterm.js positions this offscreen (left: -9999em) but WebKit can still
+   render the caret with opacity: 0 in some configurations. */
+.terminal-container .xterm .xterm-helper-textarea {
+  caret-color: transparent;
+}
+
 /* VS Code: xterm-viewport positioning (terminal.css line 107-110, 152-155) */
 .terminal-container .xterm-viewport {
   /* VS Code: higher z-index for scroll events */
