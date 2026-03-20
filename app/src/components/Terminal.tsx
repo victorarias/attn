@@ -486,6 +486,52 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       xtermRef.current = term;
       onInitRef.current?.(term);
 
+      // Scroll pinning: prevent viewport from jumping to the top when the
+      // user is scrolled up during fast TUI output (e.g. Claude Code's Ink
+      // redraws). Uses wheel events to capture user scroll intent and
+      // onWriteParsed (new in v6) to restore position after write-induced
+      // displacement.
+      const viewportEl = containerRef.current.querySelector('.xterm-viewport') as HTMLElement | null;
+      let pinnedLine: number | null = null; // null = anchored to bottom
+
+      if (viewportEl) {
+        // Capture user scroll intent via wheel events (trackpad/mouse).
+        // We use wheel instead of onScroll because onScroll also fires for
+        // write-induced scrolls and we can't distinguish the two.
+        const onWheel = () => {
+          requestAnimationFrame(() => {
+            const buf = term.buffer.active;
+            pinnedLine = buf.viewportY >= buf.baseY ? null : buf.viewportY;
+          });
+        };
+        viewportEl.addEventListener('wheel', onWheel, { passive: true });
+
+        // Re-anchor when viewport reaches the bottom (from any source:
+        // user scroll, programmatic scrollToBottom, etc.)
+        const scrollDisposable = term.onScroll((viewportY) => {
+          if (viewportY >= term.buffer.active.baseY) {
+            pinnedLine = null;
+          }
+        });
+
+        // After each write batch, restore viewport if user was scrolled up.
+        // Writes can displace the viewport (e.g. cursor-home sequences in
+        // TUI redraws). onWriteParsed fires at most once per frame after
+        // all pending data is parsed.
+        const writeParsedDisposable = term.onWriteParsed(() => {
+          if (pinnedLine !== null && pinnedLine < term.buffer.active.baseY) {
+            term.scrollToLine(pinnedLine);
+          }
+        });
+
+        // Stash disposables for cleanup
+        (term as any)._scrollPinCleanup = () => {
+          viewportEl.removeEventListener('wheel', onWheel);
+          scrollDisposable.dispose();
+          writeParsedDisposable.dispose();
+        };
+      }
+
       // Resize strategy from VS Code's TerminalResizeDebouncer:
       // - Y-axis (rows): immediate (cheap operation)
       // - X-axis (cols): 100ms debounce (expensive text reflow)
@@ -702,6 +748,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         visibilityObserver.disconnect();
         clearTimeout(xResizeTimeout);
         dprMediaQuery.removeEventListener('change', handleDprChange);
+        (term as any)._scrollPinCleanup?.();
         webglAddon?.dispose();
         webglAddonRef.current = null;
         xtermRef.current = null;
