@@ -47,12 +47,6 @@ function writePtyEventToTerminal(terminal: XTerm, msg: PtyEventPayload) {
       break;
     case 'reset':
       terminal.reset();
-      // Hide cursor immediately after reset to prevent a ghost cursor.
-      // reset() synchronously sets DECTCEM ON (cursor visible) at (0,0).
-      // The snapshot/scrollback data that follows will restore correct cursor
-      // state, but write() is async — if a render frame fires in between,
-      // the cursor flashes at (0,0). Hiding it here closes that window.
-      terminal.write('\x1b[?25l');
       break;
     case 'exit':
       terminal.write(`\r\n[Process exited with code ${msg.code}]\r\n`);
