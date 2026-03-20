@@ -314,15 +314,35 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           isVisible: visibleRef.current,
         });
       }
+
+      // Capture cursor hidden state before resize. TUI apps like Claude Code's
+      // Ink hide the cursor (DECTCEM OFF) and render their own. During resize,
+      // Ink redraws and may briefly show the cursor or send a soft reset (DECSTR)
+      // which sets isCursorHidden=false. If the WebGL renderer captures that
+      // intermediate state, a ghost cursor persists. After the next write batch
+      // (Ink's redraw), we re-hide the cursor if it was hidden before.
+      const coreService = (term as any)._core?._coreService;
+      const wasHidden = coreService?.isCursorHidden ?? false;
+
       if (cols !== term.cols || rows !== term.rows) {
         term.resize(cols, rows);
         onResizeRef.current?.(cols, rows);
-        return;
+      } else {
+        // Layout changes can still leave xterm visually stale even when the computed
+        // cols/rows land on the same values. Force a repaint so the buffer redraws.
+        term.refresh(0, Math.max(term.rows - 1, 0));
       }
 
-      // Layout changes can still leave xterm visually stale even when the computed
-      // cols/rows land on the same values. Force a repaint so the buffer redraws.
-      term.refresh(0, Math.max(term.rows - 1, 0));
+      if (wasHidden && coreService) {
+        const disposable = term.onWriteParsed(() => {
+          disposable.dispose();
+          if (!coreService.isCursorHidden) {
+            term.write('\x1b[?25l');
+          }
+        });
+        // Don't leak if no write arrives (e.g. idle session)
+        window.setTimeout(() => disposable.dispose(), 2000);
+      }
     }, [logTerminal]);
 
     useImperativeHandle(ref, () => ({
