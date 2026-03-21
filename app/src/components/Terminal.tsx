@@ -510,17 +510,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       });
 
       // Cmd+Shift+C: copy selection as markdown (bold → **text**, etc.)
-      term.attachCustomKeyEventHandler((e) => {
-        if (e.type === 'keydown' && e.key.toLowerCase() === 'c' && e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey) {
+      // Uses window capture listener because xterm.js v6 doesn't invoke
+      // attachCustomKeyEventHandler for meta-key combos.
+      const handleMdCopy = (e: KeyboardEvent) => {
+        if (e.key.toLowerCase() === 'c' && e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey) {
           if (term.hasSelection()) {
             mdCopyUntil = performance.now() + 200;
             navigator.clipboard.writeText(bufferSelectionToMarkdown(term));
             e.preventDefault();
-            return false;
+            e.stopPropagation();
           }
         }
-        return true;
-      });
+      };
+      window.addEventListener('keydown', handleMdCopy, true);
 
       // Store ref immediately
       xtermRef.current = term;
@@ -849,6 +851,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         visibilityObserver.disconnect();
         clearTimeout(xResizeTimeout);
         dprMediaQuery.removeEventListener('change', handleDprChange);
+        window.removeEventListener('keydown', handleMdCopy, true);
         (term as any)._scrollPinCleanup?.();
         webglAddon?.dispose();
         webglAddonRef.current = null;
