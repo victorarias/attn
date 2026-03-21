@@ -7,6 +7,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
+import { cleanTerminalLines, bufferSelectionToMarkdown } from '../utils/terminalMarkdown';
 
 // Terminal font configuration (matches xterm options)
 const FONT_FAMILY = 'Iosevka, Menlo, Monaco, "Courier New", monospace';
@@ -501,32 +502,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const selection = term.getSelection();
         if (selection) {
           const lines = selection.split('\n').map(line => line.trimEnd());
-          // Dedent: strip common leading whitespace (terminal pads lines with spaces).
-          // Two cases: (1) all lines share indent → standard dedent, or
-          // (2) lines 2+ are offset by the cursor column where line 1 started.
-          if (lines.length > 1) {
-            const nonEmpty = lines.filter(l => l.length > 0);
-            if (nonEmpty.length > 0) {
-              const overallMin = Math.min(...nonEmpty.map(l => l.search(/\S|$/)));
-              if (overallMin > 0) {
-                for (let i = 0; i < lines.length; i++) {
-                  if (lines[i].length > 0) lines[i] = lines[i].substring(overallMin);
-                }
-              } else {
-                const restNonEmpty = lines.slice(1).filter(l => l.length > 0);
-                if (restNonEmpty.length > 0) {
-                  const restMin = Math.min(...restNonEmpty.map(l => l.search(/\S|$/)));
-                  if (restMin > 0) {
-                    for (let i = 1; i < lines.length; i++) {
-                      if (lines[i].length > 0) lines[i] = lines[i].substring(restMin);
-                    }
-                  }
-                }
-              }
-            }
-          }
-          navigator.clipboard.writeText(lines.join('\n'));
+          navigator.clipboard.writeText(cleanTerminalLines(lines).join('\n'));
         }
+      });
+
+      // Cmd+Shift+C: copy selection as markdown (bold → **text**, etc.)
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type === 'keydown' && e.key.toLowerCase() === 'c' && e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey) {
+          if (term.hasSelection()) {
+            navigator.clipboard.writeText(bufferSelectionToMarkdown(term));
+            e.preventDefault();
+            return false;
+          }
+        }
+        return true;
       });
 
       // Store ref immediately
