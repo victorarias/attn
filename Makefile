@@ -123,6 +123,16 @@ install-all: install install-app
 
 install-all-ui-automation: install install-app-ui-automation
 
+# Ad-hoc sign the installed app binary so macOS doesn't SIGKILL it
+# when invoked as a CLI subprocess (e.g. Claude Code hooks)
+sign-app:
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		codesign -s - /Applications/attn.app/Contents/MacOS/attn; \
+		echo "Ad-hoc signed /Applications/attn.app/Contents/MacOS/attn"; \
+	else \
+		echo "sign-app is only needed on macOS"; \
+	fi
+
 # Create distributable DMG
 dist: build-app
 	cd app && VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles dmg
