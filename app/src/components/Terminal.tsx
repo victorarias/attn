@@ -497,8 +497,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         console.warn('[Terminal] WebGL addon failed:', e);
       }
 
-      // Copy-on-select: copy selected text to clipboard automatically
+      // Copy-on-select: copy selected text to clipboard automatically.
+      // Markdown copy (Cmd+Shift+C) suppresses plain copy briefly to prevent races.
+      let mdCopyUntil = 0;
       term.onSelectionChange(() => {
+        if (performance.now() < mdCopyUntil) return;
         const selection = term.getSelection();
         if (selection) {
           const lines = selection.split('\n').map(line => line.trimEnd());
@@ -510,6 +513,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       term.attachCustomKeyEventHandler((e) => {
         if (e.type === 'keydown' && e.key.toLowerCase() === 'c' && e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey) {
           if (term.hasSelection()) {
+            mdCopyUntil = performance.now() + 200;
             navigator.clipboard.writeText(bufferSelectionToMarkdown(term));
             e.preventDefault();
             return false;
