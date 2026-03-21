@@ -1,41 +1,12 @@
 import type { Terminal } from '@xterm/xterm';
 
-interface Formatting {
+interface TextRun {
+  text: string;
   bold: boolean;
   italic: boolean;
   strikethrough: boolean;
   underline: boolean;
-}
-
-const NO_FMT: Formatting = { bold: false, italic: false, strikethrough: false, underline: false };
-
-function fmtEqual(a: Formatting, b: Formatting): boolean {
-  return a.bold === b.bold && a.italic === b.italic &&
-    a.strikethrough === b.strikethrough && a.underline === b.underline;
-}
-
-/**
- * Wrap a text segment with markdown markers based on its formatting.
- * Leading/trailing whitespace is kept outside the markers so they render correctly.
- */
-function wrapMarkdown(text: string, fmt: Formatting): string {
-  if (!text) return '';
-  if (!fmt.bold && !fmt.italic && !fmt.strikethrough && !fmt.underline) return text;
-
-  // Markdown markers must touch non-whitespace to render
-  const match = text.match(/^(\s*)(.*?)(\s*)$/s);
-  if (!match) return text;
-  const [, leading, inner, trailing] = match;
-  if (!inner) return text;
-
-  let result = inner;
-  if (fmt.underline) result = `<u>${result}</u>`;
-  if (fmt.strikethrough) result = `~~${result}~~`;
-  if (fmt.bold && fmt.italic) result = `***${result}***`;
-  else if (fmt.bold) result = `**${result}**`;
-  else if (fmt.italic) result = `*${result}*`;
-
-  return leading + result + trailing;
+  colored: boolean; // non-default foreground color
 }
 
 /**
@@ -69,14 +40,67 @@ export function cleanTerminalLines(lines: string[]): string[] {
 }
 
 /**
- * Read selected region of terminal buffer and convert ANSI formatting to markdown.
+ * Determine if colored segments in this line should be treated as inline code.
  *
- * Mappings:
- *   Bold        -> **text**
- *   Italic      -> *text*
- *   Bold+Italic -> ***text***
- *   Strikethrough -> ~~text~~
- *   Underline   -> <u>text</u>
+ * Heuristic: if >= 30% of non-whitespace characters use the default foreground
+ * color, the line is prose with inline code references. Otherwise it's a
+ * code/diff block where every token is colored — backticking would be noisy.
+ */
+function shouldAllowInlineCode(runs: TextRun[]): boolean {
+  let defaultNonSpace = 0;
+  let totalNonSpace = 0;
+  for (const run of runs) {
+    const n = run.text.replace(/\s/g, '').length;
+    totalNonSpace += n;
+    if (!run.colored) defaultNonSpace += n;
+  }
+  return totalNonSpace > 0 && (defaultNonSpace / totalNonSpace) >= 0.3;
+}
+
+/**
+ * Convert a text run to its markdown representation.
+ *
+ * Priority:
+ *   bold/italic/strikethrough → markdown attribute markers
+ *   colored (no semantic attrs) → `inline code` (when line allows it)
+ *   underline (non-colored)    → <u>text</u>
+ */
+function runToMarkdown(run: TextRun, allowInlineCode: boolean): string {
+  const { text, bold, italic, strikethrough, underline, colored } = run;
+  if (!text) return '';
+
+  const hasSemanticAttr = bold || italic || strikethrough;
+  const useCode = allowInlineCode && colored && !hasSemanticAttr;
+  if (!hasSemanticAttr && !underline && !useCode) return text;
+
+  // Markdown markers must touch non-whitespace to render
+  const match = text.match(/^(\s*)(.*?)(\s*)$/s);
+  if (!match) return text;
+  const [, leading, inner, trailing] = match;
+  if (!inner) return text;
+
+  let result = inner;
+
+  if (useCode) {
+    result = inner.includes('`') ? `\`\` ${inner} \`\`` : `\`${inner}\``;
+  } else {
+    if (underline && !colored) result = `<u>${result}</u>`;
+    if (strikethrough) result = `~~${result}~~`;
+    if (bold && italic) result = `***${result}***`;
+    else if (bold) result = `**${result}**`;
+    else if (italic) result = `*${result}*`;
+  }
+
+  return leading + result + trailing;
+}
+
+/**
+ * Read selected region of terminal buffer and convert formatting to markdown.
+ *
+ * Two-pass per line:
+ *   1. Build text runs from buffer cells (tracking bold, italic, color, etc.)
+ *   2. Decide per-line whether colored segments are inline code (prose) or
+ *      syntax highlighting (code block), then apply markdown markers.
  */
 export function bufferSelectionToMarkdown(term: Terminal): string {
   const range = term.getSelectionPosition();
@@ -96,37 +120,39 @@ export function bufferSelectionToMarkdown(term: Terminal): string {
       continue;
     }
 
-    // Cell range for this line (0-based, exclusive end)
     const cellStart = (y === startRow) ? range.start.x - 1 : 0;
     const cellEnd = (y === endRow) ? range.end.x : Math.min(line.length, term.cols);
 
-    let lineResult = '';
-    let currentFmt: Formatting = { ...NO_FMT };
-    let currentText = '';
+    // Pass 1: build text runs with formatting attributes
+    const runs: TextRun[] = [];
+    let cur: TextRun | null = null;
 
     for (let x = cellStart; x < cellEnd; x++) {
       const cell = line.getCell(x, reusableCell);
-      if (!cell) continue;
-      if (cell.getWidth() === 0) continue; // wide char continuation
+      if (!cell || cell.getWidth() === 0) continue;
 
-      const cellFmt: Formatting = {
-        bold: !!cell.isBold(),
-        italic: !!cell.isItalic(),
-        strikethrough: !!cell.isStrikethrough(),
-        underline: !!cell.isUnderline(),
-      };
-
+      const b = !!cell.isBold();
+      const i = !!cell.isItalic();
+      const s = !!cell.isStrikethrough();
+      const u = !!cell.isUnderline();
+      const c = !cell.isFgDefault();
       const ch = cell.getChars() || ' ';
 
-      if (fmtEqual(cellFmt, currentFmt)) {
-        currentText += ch;
+      if (cur && cur.bold === b && cur.italic === i && cur.strikethrough === s && cur.underline === u && cur.colored === c) {
+        cur.text += ch;
       } else {
-        lineResult += wrapMarkdown(currentText, currentFmt);
-        currentText = ch;
-        currentFmt = { ...cellFmt };
+        if (cur) runs.push(cur);
+        cur = { text: ch, bold: b, italic: i, strikethrough: s, underline: u, colored: c };
       }
     }
-    lineResult += wrapMarkdown(currentText, currentFmt);
+    if (cur) runs.push(cur);
+
+    // Pass 2: convert runs to markdown
+    const allowCode = shouldAllowInlineCode(runs);
+    let lineResult = '';
+    for (const run of runs) {
+      lineResult += runToMarkdown(run, allowCode);
+    }
 
     // Soft-wrapped lines are continuations of the previous line
     if (line.isWrapped && rawLines.length > 0) {
