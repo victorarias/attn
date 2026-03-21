@@ -496,6 +496,39 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         console.warn('[Terminal] WebGL addon failed:', e);
       }
 
+      // Copy-on-select: copy selected text to clipboard automatically
+      term.onSelectionChange(() => {
+        const selection = term.getSelection();
+        if (selection) {
+          const lines = selection.split('\n').map(line => line.trimEnd());
+          // Dedent: strip common leading whitespace (terminal pads lines with spaces).
+          // Two cases: (1) all lines share indent → standard dedent, or
+          // (2) lines 2+ are offset by the cursor column where line 1 started.
+          if (lines.length > 1) {
+            const nonEmpty = lines.filter(l => l.length > 0);
+            if (nonEmpty.length > 0) {
+              const overallMin = Math.min(...nonEmpty.map(l => l.search(/\S|$/)));
+              if (overallMin > 0) {
+                for (let i = 0; i < lines.length; i++) {
+                  if (lines[i].length > 0) lines[i] = lines[i].substring(overallMin);
+                }
+              } else {
+                const restNonEmpty = lines.slice(1).filter(l => l.length > 0);
+                if (restNonEmpty.length > 0) {
+                  const restMin = Math.min(...restNonEmpty.map(l => l.search(/\S|$/)));
+                  if (restMin > 0) {
+                    for (let i = 1; i < lines.length; i++) {
+                      if (lines[i].length > 0) lines[i] = lines[i].substring(restMin);
+                    }
+                  }
+                }
+              }
+            }
+          }
+          navigator.clipboard.writeText(lines.join('\n'));
+        }
+      });
+
       // Store ref immediately
       xtermRef.current = term;
       onInitRef.current?.(term);
