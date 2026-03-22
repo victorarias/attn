@@ -274,6 +274,15 @@ fn open_in_editor(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Disable macOS "press and hold for accents" popup so that holding
+    // a key in the terminal produces key repeat instead.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("defaults")
+            .args(["write", "com.attn.manager", "ApplePressAndHoldEnabled", "-bool", "false"])
+            .output();
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
