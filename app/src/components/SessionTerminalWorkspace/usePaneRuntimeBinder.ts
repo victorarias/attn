@@ -46,6 +46,9 @@ function writePtyEventToTerminal(terminal: XTerm, msg: PtyEventPayload) {
       terminal.write(decodePtyBytes(msg.data));
       break;
     case 'reset':
+      // Reset scroll pin BEFORE terminal.reset() so the pin doesn't
+      // intercept output that arrives immediately after the reset.
+      (terminal as any)._scrollPinReset?.();
       terminal.reset();
       break;
     case 'exit':

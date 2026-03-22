@@ -113,6 +113,7 @@ export interface TerminalHandle {
   focus: () => boolean;
   typeTextViaInput: (text: string) => boolean;
   isInputFocused: () => boolean;
+  resetScrollPin: () => void;
 }
 
 interface TerminalProps {
@@ -394,6 +395,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const textarea = container?.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null;
         return !!textarea && document.activeElement === textarea;
       },
+      resetScrollPin: () => {
+        const term = xtermRef.current;
+        if (term) {
+          (term as any)._scrollPinReset?.();
+        }
+      },
     }), [focusTerminal, logTerminal, resizeTerminal, typeTextViaInput]);
 
     useEffect(() => {
@@ -554,6 +561,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const originalWrite = term.write.bind(term);
         term.write = ((data: string | Uint8Array, callback?: () => void) => {
           if (pinned) {
+            // Safety net: auto-unpin if the buffer is at bottom (e.g. after
+            // terminal.reset() cleared the scrollback). Without this, the pin
+            // stays stuck forever because onScroll never fires on an empty buffer.
+            const buf = term.buffer.active;
+            if (buf.viewportY >= buf.baseY) {
+              pinned = false;
+              flushQueue();
+              originalWrite(data, callback);
+              return;
+            }
             if (typeof data === 'string') {
               writeQueue.push(new TextEncoder().encode(data));
             } else {
@@ -627,6 +644,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             return false;
           }));
         }
+
+        (term as any)._scrollPinReset = () => {
+          pinned = false;
+          flushQueue();
+        };
 
         (term as any)._scrollPinCleanup = () => {
           disposables.forEach(d => d.dispose());
