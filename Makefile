@@ -50,13 +50,8 @@ UNAME_S := $(shell uname -s)
 
 install: build
 	@mkdir -p $(INSTALL_DIR)
-	@# Use cat to avoid copying extended attributes that trigger Gatekeeper
-	cat $(BINARY_NAME) > $(INSTALL_DIR)/$(BINARY_NAME)
-	chmod +x $(INSTALL_DIR)/$(BINARY_NAME)
-	@# macOS: remove quarantine attribute
-	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		xattr -d com.apple.quarantine $(INSTALL_DIR)/$(BINARY_NAME) 2>/dev/null || true; \
-	fi
+	cp $(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
+	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(INSTALL_DIR)/$(BINARY_NAME); fi
 	@# Kill running daemon and restart with new local code.
 	-pkill -f "$(BINARY_NAME) daemon" 2>/dev/null || true
 	@sleep 0.2
@@ -107,16 +102,18 @@ build-app-ui-automation: build
 		codesign --remove-signature app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn 2>/dev/null || true; \
 	fi
 
-# Install Tauri app to /Applications
+# Install Tauri app to ~/Applications
 install-app: build-app
-	@rm -rf /Applications/attn.app
-	cp -r app/src-tauri/target/release/bundle/macos/attn.app /Applications/
-	@echo "Installed attn.app to /Applications"
+	@mkdir -p ~/Applications
+	@rm -rf ~/Applications/attn.app
+	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
+	@echo "Installed attn.app to ~/Applications"
 
 install-app-ui-automation: build-app-ui-automation
-	@rm -rf /Applications/attn.app
-	cp -r app/src-tauri/target/release/bundle/macos/attn.app /Applications/
-	@echo "Installed attn.app to /Applications with UI automation bridge enabled"
+	@mkdir -p ~/Applications
+	@rm -rf ~/Applications/attn.app
+	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
+	@echo "Installed attn.app to ~/Applications with UI automation bridge enabled"
 
 # Install daemon and app
 install-all: install install-app
@@ -127,8 +124,8 @@ install-all-ui-automation: install install-app-ui-automation
 # when invoked as a CLI subprocess (e.g. Claude Code hooks)
 sign-app:
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign -s - /Applications/attn.app/Contents/MacOS/attn; \
-		echo "Ad-hoc signed /Applications/attn.app/Contents/MacOS/attn"; \
+		codesign -s - ~/Applications/attn.app/Contents/MacOS/attn; \
+		echo "Ad-hoc signed ~/Applications/attn.app/Contents/MacOS/attn"; \
 	else \
 		echo "sign-app is only needed on macOS"; \
 	fi

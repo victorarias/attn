@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -17,7 +18,7 @@ function delay(ms) {
 export class MacOSDriver {
   constructor({
     bundleId = 'com.attn.manager',
-    appPath = '/Applications/attn.app',
+    appPath = path.join(os.homedir(), 'Applications', 'attn.app'),
     actionDelayMs = 250,
   } = {}) {
     this.bundleId = bundleId;

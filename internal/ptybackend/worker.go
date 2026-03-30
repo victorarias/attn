@@ -247,12 +247,13 @@ func (b *WorkerBackend) resolveBinaryPath() string {
 	if wrapperPath := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); wrapperPath != "" {
 		candidates = append(candidates, wrapperPath)
 	}
-	if home, err := os.UserHomeDir(); err == nil {
+	home, _ := os.UserHomeDir()
+	if home != "" {
 		candidates = append(candidates, filepath.Join(home, ".local", "bin", "attn"))
 	}
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == "darwin" && home != "" {
 		// Bundled binary inside the macOS app bundle.
-		candidates = append(candidates, "/Applications/attn.app/Contents/MacOS/attn")
+		candidates = append(candidates, filepath.Join(home, "Applications", "attn.app", "Contents", "MacOS", "attn"))
 	}
 	if path, err := exec.LookPath("attn"); err == nil && path != "" {
 		candidates = append(candidates, path)

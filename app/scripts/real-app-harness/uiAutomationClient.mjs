@@ -24,7 +24,7 @@ function defaultManifestPath() {
 
 export class UiAutomationClient {
   constructor({
-    appPath = '/Applications/attn.app',
+    appPath = path.join(os.homedir(), 'Applications', 'attn.app'),
     manifestPath = defaultManifestPath(),
   } = {}) {
     this.appPath = appPath;

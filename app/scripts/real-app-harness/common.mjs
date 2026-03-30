@@ -5,7 +5,7 @@ import path from 'node:path';
 export function parseCommonArgs(argv) {
   const options = {
     wsUrl: process.env.ATTN_REAL_APP_WS_URL || 'ws://127.0.0.1:9849/ws',
-    appPath: process.env.ATTN_REAL_APP_PATH || '/Applications/attn.app',
+    appPath: process.env.ATTN_REAL_APP_PATH || path.join(os.homedir(), 'Applications', 'attn.app'),
     artifactsDir: process.env.ATTN_REAL_APP_ARTIFACTS_DIR || path.join(os.tmpdir(), 'attn-real-app-harness'),
     sessionRootDir: process.env.ATTN_REAL_APP_SESSION_ROOT || path.join(os.tmpdir(), 'attn-real-app-sessions'),
   };
@@ -28,7 +28,7 @@ export function printCommonHelp(scriptName) {
 
 Options:
   --ws-url <url>             Daemon websocket URL (default: ws://127.0.0.1:9849/ws)
-  --app-path <path>          Packaged app path (default: /Applications/attn.app)
+  --app-path <path>          Packaged app path (default: ~/Applications/attn.app)
   --artifacts-dir <path>     Directory for screenshots and summary output
   --session-root-dir <path>  Directory where harness-created session cwd roots are created
 `);

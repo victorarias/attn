@@ -1,4 +1,4 @@
-import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -6,7 +6,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
-import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
+import { isSuspiciousTerminalSize, isTerminalDebugEnabled, recordResizeEvent, formatResizeLog, type ResizeDiagnostics } from '../utils/terminalDebug';
 import { cleanTerminalLines, bufferSelectionToMarkdown } from '../utils/terminalMarkdown';
 
 // Terminal font configuration (matches xterm options)
@@ -137,11 +137,13 @@ function getScaledDimensions(
   fontSize: number,
   letterSpacing = 0,
   lineHeight = 1
-): { cols: number; rows: number } | null {
+): { cols: number; rows: number; diagnostics: ResizeDiagnostics } | null {
   // Get container dimensions
   const containerStyle = getComputedStyle(container);
-  let width = Math.min(parseFloat(containerStyle.width), MAX_CANVAS_WIDTH);
-  let height = parseFloat(containerStyle.height);
+  const containerWidth = Math.min(parseFloat(containerStyle.width), MAX_CANVAS_WIDTH);
+  const containerHeight = parseFloat(containerStyle.height);
+  let width = containerWidth;
+  let height = containerHeight;
 
   if (width <= 0 || height <= 0) return null;
 
@@ -166,14 +168,17 @@ function getScaledDimensions(
 
   let charWidth: number;
   let charHeight: number;
+  let cellSource: 'renderer' | 'measured';
 
   if (cellDims?.width && cellDims?.height) {
     charWidth = cellDims.width - Math.round(letterSpacing) / dpr;
     charHeight = cellDims.height / lineHeight;
+    cellSource = 'renderer';
   } else {
     const measured = measureFont(FONT_FAMILY, fontSize);
     charWidth = measured.charWidth;
     charHeight = measured.charHeight;
+    cellSource = 'measured';
   }
 
   if (charWidth <= 0 || charHeight <= 0) return null;
@@ -188,7 +193,20 @@ function getScaledDimensions(
   const scaledLineHeight = Math.floor(scaledCharHeight * lineHeight);
   const rows = Math.max(Math.floor(scaledHeightAvailable / scaledLineHeight), 1);
 
-  return { cols, rows };
+  return {
+    cols,
+    rows,
+    diagnostics: {
+      containerWidth,
+      containerHeight,
+      availableWidth: width,
+      availableHeight: height,
+      cellWidth: charWidth,
+      cellHeight: charHeight,
+      cellSource,
+      dpr,
+    },
+  };
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
@@ -224,6 +242,56 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const themeObj = resolvedTheme === 'light' ? LIGHT_TERMINAL_THEME : DARK_TERMINAL_THEME;
       term.options.theme = themeObj;
     }, [resolvedTheme]);
+
+    // Debug overlay state — always record to ring buffer, only render overlay when debug enabled
+    const [debugDisplay, setDebugDisplay] = useState<{
+      cols: number;
+      rows: number;
+      containerWidth: number;
+      containerHeight: number;
+      cellWidth: number;
+      cellHeight: number;
+      cellSource: 'renderer' | 'measured';
+      fontSize: number;
+      dpr: number;
+      trigger: string;
+    } | null>(null);
+
+    const recordDiags = useCallback((
+      trigger: string,
+      cols: number,
+      rows: number,
+      prevCols: number,
+      prevRows: number,
+      diagnostics: ResizeDiagnostics,
+    ) => {
+      recordResizeEvent({
+        timestamp: Date.now(),
+        terminalName: debugNameRef.current,
+        trigger,
+        fontSize: fontSizeRef.current,
+        cols,
+        rows,
+        prevCols,
+        prevRows,
+        isVisible: visibleRef.current,
+        diagnostics,
+      });
+      if (isTerminalDebugEnabled()) {
+        setDebugDisplay({
+          cols,
+          rows,
+          containerWidth: diagnostics.containerWidth,
+          containerHeight: diagnostics.containerHeight,
+          cellWidth: diagnostics.cellWidth,
+          cellHeight: diagnostics.cellHeight,
+          cellSource: diagnostics.cellSource,
+          fontSize: fontSizeRef.current,
+          dpr: diagnostics.dpr,
+          trigger,
+        });
+      }
+    }, []);
 
     const logTerminal = useCallback((
       level: 'log' | 'warn',
@@ -297,7 +365,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     }, [focusTerminal]);
 
     // Helper to resize terminal and notify PTY
-    const resizeTerminal = useCallback((term: XTerm, cols: number, rows: number, reason: string) => {
+    const resizeTerminal = useCallback((term: XTerm, cols: number, rows: number, reason: string, diagnostics?: ResizeDiagnostics | null) => {
       const suspiciousResize = isSuspiciousTerminalSize(cols, rows);
       if (suspiciousResize) {
         const container = containerRef.current;
@@ -321,6 +389,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         });
       }
 
+      // Record to ring buffer before resize (captures prevCols/prevRows)
+      if (diagnostics) {
+        recordDiags(reason, cols, rows, term.cols, term.rows, diagnostics);
+      }
+
       if (cols !== term.cols || rows !== term.rows) {
         term.resize(cols, rows);
         onResizeRef.current?.(cols, rows);
@@ -339,7 +412,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           coreService.isCursorHidden = true;
         }
       }
-    }, [logTerminal]);
+    }, [logTerminal, recordDiags]);
 
     useImperativeHandle(ref, () => ({
       get terminal() {
@@ -369,7 +442,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           });
         }
         const sizeChanged = dims.cols !== term.cols || dims.rows !== term.rows;
-        resizeTerminal(term, dims.cols, dims.rows, 'fit');
+        resizeTerminal(term, dims.cols, dims.rows, 'fit', dims.diagnostics);
         if (!sizeChanged) {
           // Full-screen TUIs like Claude can stay visually stale unless the PTY
           // receives a real size transition and emits SIGWINCH. Bounce through a
@@ -667,6 +740,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // Store latest requested values (VS Code pattern)
       let latestX = term.cols;
       let latestY = term.rows;
+      let latestDiagnostics: ResizeDiagnostics | null = null;
       let xResizeTimeout: number;
       let isVisible = true;
       let readyFired = false;
@@ -679,19 +753,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const resizeBoth = (cols: number, rows: number) => {
         lastCols = cols;
         lastRows = rows;
-        resizeTerminal(term, cols, rows, 'resize_both');
+        resizeTerminal(term, cols, rows, 'resize_both', latestDiagnostics);
       };
 
       // Resize X only (debounced)
       const resizeX = (cols: number) => {
         lastCols = cols;
-        resizeTerminal(term, cols, term.rows, 'resize_x');
+        resizeTerminal(term, cols, term.rows, 'resize_x', latestDiagnostics);
       };
 
       // Resize Y only (immediate)
       const resizeY = (rows: number) => {
         lastRows = rows;
-        resizeTerminal(term, term.cols, rows, 'resize_y');
+        resizeTerminal(term, term.cols, rows, 'resize_y', latestDiagnostics);
       };
 
       const handleResize = () => {
@@ -707,9 +781,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           return;
         }
 
-        const { cols, rows } = dims;
+        const { cols, rows, diagnostics } = dims;
         latestX = cols;
         latestY = rows;
+        latestDiagnostics = diagnostics;
 
         if (isSuspiciousTerminalSize(cols, rows)) {
           logTerminal('warn', 'handleResize: suspicious dimensions detected', {
@@ -798,6 +873,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
                   isVisible: visibleRef.current,
                 });
               }
+
+              // Record to ring buffer
+              recordDiags('ready', dims.cols, dims.rows, term.cols, term.rows, dims.diagnostics);
 
               // Resize to calculated dimensions
               term.resize(dims.cols, dims.rows);
@@ -903,11 +981,37 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             container: getContainerDebugInfo(container),
           });
         }
+        recordDiags('font-change', dims.cols, dims.rows, term.cols, term.rows, dims.diagnostics);
         term.resize(dims.cols, dims.rows);
         onResizeRef.current?.(dims.cols, dims.rows);
       }
-    }, [fontSize]);
+    }, [fontSize, recordDiags]);
 
-    return <div ref={containerRef} className="terminal-container" />;
+    const handleCopyDebugLog = useCallback(() => {
+      const log = formatResizeLog();
+      navigator.clipboard.writeText(log).then(
+        () => logTerminal('log', 'Resize log copied to clipboard'),
+        (err) => logTerminal('warn', 'Failed to copy resize log', { error: String(err) }),
+      );
+    }, [logTerminal]);
+
+    return (
+      <div ref={containerRef} className="terminal-container">
+        {debugDisplay && (
+          <div className="terminal-debug-badge">
+            <span className="terminal-debug-dims">{debugDisplay.cols}×{debugDisplay.rows}</span>
+            <span className="terminal-debug-sep">|</span>
+            <span>ctr:{Math.round(debugDisplay.containerWidth)}×{Math.round(debugDisplay.containerHeight)}</span>
+            <span className="terminal-debug-sep">|</span>
+            <span>cell:{debugDisplay.cellWidth.toFixed(1)} ({debugDisplay.cellSource})</span>
+            <span className="terminal-debug-sep">|</span>
+            <span>font:{debugDisplay.fontSize}</span>
+            <span className="terminal-debug-sep">|</span>
+            <span className="terminal-debug-trigger">{debugDisplay.trigger}</span>
+            <button className="terminal-debug-copy" onClick={handleCopyDebugLog}>Copy</button>
+          </div>
+        )}
+      </div>
+    );
   }
 );

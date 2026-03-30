@@ -103,3 +103,56 @@
 .terminal-container .xterm .xterm-scrollable-element > .scrollbar.vertical {
   background: transparent;
 }
+
+/* Debug overlay badge */
+.terminal-debug-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  font-family: 'Iosevka', monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.8);
+  pointer-events: auto;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.terminal-debug-dims {
+  color: #4ec9b0;
+  font-weight: 600;
+}
+
+.terminal-debug-sep {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.terminal-debug-trigger {
+  color: #dcdcaa;
+}
+
+.terminal-debug-copy {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  font-family: inherit;
+  font-size: 9px;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+
+.terminal-debug-copy:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+}
