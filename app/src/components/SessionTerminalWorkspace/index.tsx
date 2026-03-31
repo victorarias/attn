@@ -62,6 +62,10 @@ export interface SessionTerminalWorkspaceHandle {
   isPaneInputFocused: (paneId: string) => boolean;
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => { cols: number; rows: number } | null;
+  resetPaneTerminal: (paneId: string) => boolean;
+  injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
+  injectPaneBase64: (paneId: string, payload: string) => Promise<boolean>;
+  drainPaneTerminal: (paneId: string) => Promise<boolean>;
 }
 
 interface SessionTerminalWorkspaceProps {
@@ -81,6 +85,7 @@ interface SessionTerminalWorkspaceProps {
   onSplitPane: (targetPaneId: string, direction: TerminalSplitDirection) => void;
   onClosePane: (paneId: string) => void;
   onFocusPane: (paneId: string) => void;
+  onPtyOutputProcessed?: (runtimeId: string, seq: number) => void;
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
 }
@@ -103,6 +108,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onSplitPane,
     onClosePane,
     onFocusPane,
+    onPtyOutputProcessed,
     onZoomModeChange,
     onNavigateOutOfSession,
   }, ref) {
@@ -148,7 +154,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       })),
     ]), [cwd, getMainPaneSpawnArgs, sessionId, workspace.terminals]);
 
-    const binder = usePaneRuntimeBinder(runtimePanes, activePaneId, eventRouter);
+    const binder = usePaneRuntimeBinder(runtimePanes, activePaneId, eventRouter, onPtyOutputProcessed);
     const fitPane = binder.fitPane;
     const splitLayoutActive = workspace.layoutTree.type === 'split';
     const showMainHeader = paneIds.length > 1;
@@ -196,6 +202,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       isPaneInputFocused: binder.isPaneInputFocused,
       getPaneText: binder.getPaneText,
       getPaneSize: binder.getPaneSize,
+      resetPaneTerminal: binder.resetPaneTerminal,
+      injectPaneBytes: binder.injectPaneBytes,
+      injectPaneBase64: binder.injectPaneBase64,
+      drainPaneTerminal: binder.drainPaneTerminal,
     }), [activePaneId, binder]);
 
     useEffect(() => {

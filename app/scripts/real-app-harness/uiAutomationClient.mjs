@@ -32,7 +32,7 @@ export class UiAutomationClient {
   }
 
   async launchApp() {
-    await execFileAsync('open', ['-a', this.appPath]);
+    await execFileAsync('open', [this.appPath]);
   }
 
   async quitApp(timeoutMs = 10_000) {

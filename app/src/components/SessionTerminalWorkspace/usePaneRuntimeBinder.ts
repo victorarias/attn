@@ -6,8 +6,11 @@ import { isMacLikePlatform } from '../../shortcuts/platform';
 import type { TerminalHandle } from '../Terminal';
 import { activeElementSummary, recordPaneRuntimeDebugEvent } from '../../utils/paneRuntimeDebug';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
+import { recordPtyDecode, recordTerminalWrite } from '../../utils/ptyPerf';
+import { resetTerminalScrollPin } from '../../utils/terminalScrollPin';
 
 const MAX_PENDING_TERMINAL_EVENTS = 256;
+const terminalTextEncoder = new TextEncoder();
 
 interface PaneRuntimeSize {
   cols: number;
@@ -33,33 +36,32 @@ export interface PaneRuntimeBinder {
   isPaneInputFocused: (paneId: string) => boolean;
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => PaneRuntimeSize | null;
+  resetPaneTerminal: (paneId: string) => boolean;
+  injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
+  injectPaneBase64: (paneId: string, payload: string) => Promise<boolean>;
+  drainPaneTerminal: (paneId: string) => Promise<boolean>;
+}
+
+interface PaneTerminalWriteState {
+  writeChain: Promise<void>;
 }
 
 function decodePtyBytes(payload: string): Uint8Array {
+  const startedAt = performance.now();
   const binaryStr = atob(payload);
-  return Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
+  const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
+  recordPtyDecode(bytes.length, performance.now() - startedAt);
+  return bytes;
 }
 
-function writePtyEventToTerminal(terminal: XTerm, msg: PtyEventPayload) {
-  switch (msg.event) {
-    case 'data':
-      terminal.write(decodePtyBytes(msg.data));
-      break;
-    case 'reset':
-      // Reset scroll pin BEFORE terminal.reset() so the pin doesn't
-      // intercept output that arrives immediately after the reset.
-      (terminal as any)._scrollPinReset?.();
-      terminal.reset();
-      break;
-    case 'exit':
-      terminal.write(`\r\n[Process exited with code ${msg.code}]\r\n`);
-      break;
-    case 'error':
-      terminal.write(`\r\n[Error: ${msg.error}]\r\n`);
-      break;
-    default:
-      break;
+function encodePtyBytes(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
   }
+  return btoa(binary);
 }
 
 function snapshotTerminalText(terminal: XTerm | null): string {
@@ -78,10 +80,14 @@ function snapshotTerminalText(terminal: XTerm | null): string {
   return lines.join('\n');
 }
 
-function replayPendingTerminalEvents(terminal: XTerm, events: PtyEventPayload[]) {
-  for (const event of events) {
-    writePtyEventToTerminal(terminal, event);
-  }
+function writeBytesToTerminalAsync(terminal: XTerm, bytes: Uint8Array): Promise<void> {
+  const startedAt = performance.now();
+  return new Promise<void>((resolve) => {
+    terminal.write(bytes, () => {
+      recordTerminalWrite(bytes.length, performance.now() - startedAt);
+      resolve();
+    });
+  });
 }
 
 export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
@@ -121,7 +127,8 @@ export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
 export function usePaneRuntimeBinder(
   panes: PaneRuntimeSpec[],
   activePaneId: string,
-  eventRouter: PaneRuntimeEventRouter
+  eventRouter: PaneRuntimeEventRouter,
+  onPtyOutputProcessed?: (runtimeId: string, seq: number) => void,
 ): PaneRuntimeBinder {
   const paneByIdRef = useRef<Map<string, PaneRuntimeSpec>>(new Map());
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
@@ -133,6 +140,119 @@ export function usePaneRuntimeBinder(
   const cachedTerminalTextRef = useRef<Map<string, string>>(new Map());
   const pendingUnmountCleanupRef = useRef<Map<string, number>>(new Map());
   const runtimeBindingDisposersRef = useRef<Map<string, { paneId: string; testSessionId?: string; dispose: () => void }>>(new Map());
+  const paneWriteStatesRef = useRef<Map<string, PaneTerminalWriteState>>(new Map());
+
+  const appendPendingTerminalEvent = useCallback((paneId: string, event: PtyEventPayload) => {
+    const events = pendingTerminalEventsRef.current.get(paneId) || [];
+    if (events.length >= MAX_PENDING_TERMINAL_EVENTS) {
+      events.shift();
+    }
+    events.push(event);
+    pendingTerminalEventsRef.current.set(paneId, events);
+  }, []);
+
+  const getPaneWriteState = useCallback((paneId: string): PaneTerminalWriteState => {
+    let state = paneWriteStatesRef.current.get(paneId);
+    if (!state) {
+      state = {
+        writeChain: Promise.resolve(),
+      };
+      paneWriteStatesRef.current.set(paneId, state);
+    }
+    return state;
+  }, []);
+
+  const queuePaneWriteTask = useCallback((
+    paneId: string,
+    task: () => Promise<void> | void,
+  ) => {
+    const state = getPaneWriteState(paneId);
+    const next = state.writeChain.then(
+      () => task(),
+      () => task(),
+    );
+    state.writeChain = next.catch((error) => {
+      console.error('[PaneRuntimeBinder] Terminal write task failed:', error);
+    });
+    return next;
+  }, [getPaneWriteState]);
+
+  const queueBufferedBytesForReplay = useCallback((paneId: string, bytes: Uint8Array, seq?: number) => {
+    const pane = paneByIdRef.current.get(paneId);
+    if (!pane || bytes.length === 0) {
+      return;
+    }
+    appendPendingTerminalEvent(paneId, {
+      event: 'data',
+      id: pane.runtimeId,
+      data: encodePtyBytes(bytes),
+      ...(typeof seq === 'number' ? { seq } : {}),
+    });
+  }, [appendPendingTerminalEvent]);
+
+  const enqueuePaneBytes = useCallback((paneId: string, xterm: XTerm, bytes: Uint8Array, seq?: number) => {
+    void queuePaneWriteTask(paneId, async () => {
+      const liveXterm = xtermsRef.current.get(paneId);
+      if (!liveXterm || liveXterm !== xterm) {
+        queueBufferedBytesForReplay(paneId, bytes, seq);
+        return;
+      }
+      await writeBytesToTerminalAsync(liveXterm, bytes);
+      if (typeof seq === 'number') {
+        const runtimeId = paneByIdRef.current.get(paneId)?.runtimeId;
+        if (runtimeId) {
+          onPtyOutputProcessed?.(runtimeId, seq);
+        }
+      }
+    });
+  }, [onPtyOutputProcessed, queueBufferedBytesForReplay, queuePaneWriteTask]);
+
+  const replayPendingTerminalEvent = useCallback((paneId: string, xterm: XTerm, event: PtyEventPayload) => {
+    switch (event.event) {
+      case 'data':
+        enqueuePaneBytes(paneId, xterm, decodePtyBytes(event.data), event.seq);
+        break;
+      case 'reset':
+        void queuePaneWriteTask(paneId, async () => {
+          const liveXterm = xtermsRef.current.get(paneId);
+          if (!liveXterm || liveXterm !== xterm) {
+            appendPendingTerminalEvent(paneId, event);
+            return;
+          }
+          // Reset scroll pin BEFORE terminal.reset() so the pin doesn't
+          // intercept output that arrives immediately after the reset.
+          resetTerminalScrollPin(liveXterm);
+          liveXterm.reset();
+        });
+        break;
+      case 'exit': {
+        const exitBytes = terminalTextEncoder.encode(`\r\n[Process exited with code ${event.code}]\r\n`);
+        void queuePaneWriteTask(paneId, async () => {
+          const liveXterm = xtermsRef.current.get(paneId);
+          if (!liveXterm || liveXterm !== xterm) {
+            appendPendingTerminalEvent(paneId, event);
+            return;
+          }
+          await writeBytesToTerminalAsync(liveXterm, exitBytes);
+        });
+        break;
+      }
+      case 'error': {
+        const errorBytes = terminalTextEncoder.encode(`\r\n[Error: ${event.error}]\r\n`);
+        void queuePaneWriteTask(paneId, async () => {
+          const liveXterm = xtermsRef.current.get(paneId);
+          if (!liveXterm || liveXterm !== xterm) {
+            appendPendingTerminalEvent(paneId, event);
+            return;
+          }
+          await writeBytesToTerminalAsync(liveXterm, errorBytes);
+        });
+        break;
+      }
+      default:
+        break;
+    }
+  }, [appendPendingTerminalEvent, enqueuePaneBytes, queuePaneWriteTask]);
 
   useEffect(() => {
     paneByIdRef.current = new Map(panes.map((pane) => [pane.paneId, pane]));
@@ -186,6 +306,12 @@ export function usePaneRuntimeBinder(
         cachedTerminalTextRef.current.delete(paneId);
       }
     }
+    for (const paneId of Array.from(paneWriteStatesRef.current.keys())) {
+      if (activePaneIds.has(paneId)) {
+        continue;
+      }
+      paneWriteStatesRef.current.delete(paneId);
+    }
   }, [panes]);
 
   useEffect(() => {
@@ -221,12 +347,7 @@ export function usePaneRuntimeBinder(
               message: 'queue pty event for unmounted pane',
               details: { event: msg.event },
             });
-            const events = pendingTerminalEventsRef.current.get(pane.paneId) || [];
-            if (events.length >= MAX_PENDING_TERMINAL_EVENTS) {
-              events.shift();
-            }
-            events.push(msg);
-            pendingTerminalEventsRef.current.set(pane.paneId, events);
+            appendPendingTerminalEvent(pane.paneId, msg);
             return;
           }
 
@@ -238,7 +359,7 @@ export function usePaneRuntimeBinder(
             message: 'deliver pty event to pane',
             details: { event: msg.event },
           });
-          writePtyEventToTerminal(xterm, msg);
+          replayPendingTerminalEvent(pane.paneId, xterm, msg);
         },
       });
 
@@ -248,7 +369,7 @@ export function usePaneRuntimeBinder(
         dispose,
       });
     }
-  }, [eventRouter, panes]);
+  }, [appendPendingTerminalEvent, eventRouter, panes, replayPendingTerminalEvent]);
 
   useEffect(() => {
     return () => {
@@ -266,6 +387,7 @@ export function usePaneRuntimeBinder(
       inputSubscriptionsRef.current.clear();
       terminalHandlesRef.current.clear();
       xtermsRef.current.clear();
+      paneWriteStatesRef.current.clear();
     };
   }, []);
 
@@ -450,10 +572,12 @@ export function usePaneRuntimeBinder(
         message: 'replay queued pty events',
         details: { count: pendingEvents.length },
       });
-      replayPendingTerminalEvents(xterm, pendingEvents);
+      for (const event of pendingEvents) {
+        replayPendingTerminalEvent(paneId, xterm, event);
+      }
       pendingTerminalEventsRef.current.delete(paneId);
     }
-  }, []);
+  }, [replayPendingTerminalEvent]);
 
   const handleTerminalInit = useCallback((paneId: string) => (xterm: XTerm) => {
     const pane = paneByIdRef.current.get(paneId);
@@ -583,6 +707,46 @@ export function usePaneRuntimeBinder(
     return { cols: xterm.cols, rows: xterm.rows };
   }, []);
 
+  const resetPaneTerminal = useCallback((paneId: string) => {
+    const xterm = xtermsRef.current.get(paneId);
+    if (!xterm) {
+      return false;
+    }
+    resetTerminalScrollPin(xterm);
+    xterm.reset();
+    cachedTerminalTextRef.current.delete(paneId);
+    pendingTerminalEventsRef.current.delete(paneId);
+    return true;
+  }, []);
+
+  const injectPaneBytes = useCallback(async (paneId: string, bytes: Uint8Array) => {
+    const xterm = xtermsRef.current.get(paneId);
+    if (!xterm) {
+      return false;
+    }
+    enqueuePaneBytes(paneId, xterm, bytes);
+    return true;
+  }, [enqueuePaneBytes]);
+
+  const injectPaneBase64 = useCallback(async (paneId: string, payload: string) => {
+    const xterm = xtermsRef.current.get(paneId);
+    if (!xterm) {
+      return false;
+    }
+    const bytes = decodePtyBytes(payload);
+    enqueuePaneBytes(paneId, xterm, bytes);
+    return true;
+  }, [enqueuePaneBytes]);
+
+  const drainPaneTerminal = useCallback(async (paneId: string) => {
+    const xterm = xtermsRef.current.get(paneId);
+    if (!xterm) {
+      return false;
+    }
+    await paneWriteStatesRef.current.get(paneId)?.writeChain;
+    return true;
+  }, []);
+
   return {
     setTerminalHandle,
     handleTerminalInit,
@@ -595,5 +759,9 @@ export function usePaneRuntimeBinder(
     isPaneInputFocused,
     getPaneText,
     getPaneSize,
+    resetPaneTerminal,
+    injectPaneBytes,
+    injectPaneBase64,
+    drainPaneTerminal,
   };
 }

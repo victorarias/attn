@@ -144,7 +144,7 @@ git clone https://github.com/victorarias/attn.git && cd attn
 | `make install` | Install daemon CLI (~2s iteration) |
 | `make build-app` | Build daemon + Tauri app |
 | `make install-app` | Install app to /Applications |
-| `make install-all` | Both |
+| `make install-all` | Both, with the source app build’s local automation bridge enabled |
 | `make dist` | Create DMG |
 | `make test` | Go tests |
 | `make test-frontend` | Frontend tests (vitest) |

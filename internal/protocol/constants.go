@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "39"
+const ProtocolVersion = "40"
 
 // Commands
 const (
@@ -83,6 +83,7 @@ const (
 	CmdAttachSession            = "attach_session"
 	CmdDetachSession            = "detach_session"
 	CmdPtyInput                 = "pty_input"
+	CmdPtyOutputAck             = "pty_output_ack"
 	CmdPtyResize                = "pty_resize"
 	CmdKillSession              = "kill_session"
 	CmdWorkspaceGet             = "workspace_get"
@@ -706,6 +707,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg PtyInputMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal pty_input: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdPtyOutputAck:
+		var msg PtyOutputAckMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal pty_output_ack: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

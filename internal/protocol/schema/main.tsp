@@ -610,6 +610,12 @@ model PtyInputMessage {
   source?: string;
 }
 
+model PtyOutputAckMessage {
+  cmd: "pty_output_ack";
+  id: string;
+  seq: int32;
+}
+
 model PtyResizeMessage {
   cmd: "pty_resize";
   id: string;

@@ -6,6 +6,41 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-03-31]
+
+### Changed
+- **PTY output backpressure**: Pace live terminal output with xterm write callbacks and websocket acknowledgements so the daemon stops flooding visible terminals ahead of what the frontend has actually rendered.
+- **Terminal debug overlay cleanup**: Remove the coalescing-specific debug toggles from the terminal size badge after the experiment proved unstable in the visible terminal path.
+- **Perf harness baseline**: Remove the old runtime coalescing toggle from the packaged-app perf harness so the baseline measurements reflect the restored direct terminal write path.
+- **Terminal rendering structure**: Move terminal sizing and theme helpers out of the main terminal component and clean up a few small rendering-path footguns without changing scroll-pin behavior.
+- **Scroll-pin structure**: Move the scroll-pin write interception, wheel tracking, and CSI suppression into a dedicated helper so the live terminal component stops owning that behavior inline and the remaining private xterm usage is easier to audit.
+
+### Removed
+- **Visible-terminal coalescing experiment**: Remove the frontend terminal coalescing config and debug plumbing after it repeatedly caused rendering artifacts in both DOM and WebGL renderers.
+
+## [2026-03-30]
+
+### Added
+- **Packaged-app UI perf harness**: Add a real-app bridge scenario that samples `attn` plus child WebKit processes for CPU and RSS while also capturing frontend terminal and diff/review perf snapshots at repeatable checkpoints.
+- **PTY transport perf counters**: Track frontend websocket PTY message volume, base64 decode work, and terminal write activity so terminal profiling can distinguish transport overhead from rendering and compositor work.
+- **PTY delivery A/B benchmark**: Add a packaged-app benchmark that replays terminal payloads through `json_base64`, `base64`, and raw `bytes` delivery modes so transport overhead can be measured directly before attempting a MsgPack migration.
+
+### Changed
+- **Coalesced PTY terminal writes**: Batch live pane output into short per-pane write buffers with ordered flush barriers for resets and process status lines, so xterm sees far fewer writes during bursty terminal output while remount safety keeps queued bytes replayable.
+- **Backpressure-aware coalesced terminal drain**: Make coalesced terminal flushes wait for xterm's write callback between emitted chunks instead of front-loading the whole burst into xterm at once, so the experiment tests paced writes rather than blind queueing.
+- **Perf harness terminal comparisons**: Record terminal command completion time plus delivered scrollback bytes/lines in the packaged-app perf harness, and add a runtime coalescing toggle so the same build can compare coalesced and uncoalesced terminal behavior.
+- **Terminal debug overlay controls**: Add live renderer and write-coalescing toggles beside the terminal sizing badge so source installs can isolate xterm/WebGL artifacts without swapping builds.
+- **Source `install-all` automation default**: Make `make install-all` install the source app with the local automation bridge enabled by default, while Homebrew and release builds stay unchanged.
+- **Coalescing debug controls**: Add a `Strict barriers` terminal debug toggle plus coalescing flush telemetry to help isolate ordering bugs where batched writes might interact badly with resets, exits, or remounts.
+- **Coalesced repaint experiment**: Add a `Refresh after flush` terminal debug toggle so coalesced writes can force an explicit xterm repaint after parsing, which helps test whether the remaining artifacts are render invalidation rather than buffer corruption.
+- **Chunked coalesced writes**: Add a `Chunked flushes` terminal debug toggle so one coalesced batch can be emitted as smaller terminal writes, helping isolate whether the artifacts are caused by large single-write bursts.
+
+### Removed
+- **Unused Monaco frontend dependencies**: Remove stale Monaco editor packages from the Tauri app after the review UI fully moved to the CodeMirror-based unified diff editor.
+
+### Fixed
+- **Frontend architecture docs**: Update the app component map so diff/review docs point to `DiffDetailPanel` and `UnifiedDiffEditor` instead of the old Monaco-era overlay.
+
 ## [2026-03-16]
 
 ### Fixed

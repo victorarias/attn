@@ -8,15 +8,29 @@ import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled, recordResizeEvent, formatResizeLog, type ResizeDiagnostics } from '../utils/terminalDebug';
 import { cleanTerminalLines, bufferSelectionToMarkdown } from '../utils/terminalMarkdown';
-
-// Terminal font configuration (matches xterm options)
-const FONT_FAMILY = 'Iosevka, Menlo, Monaco, "Courier New", monospace';
-const DEFAULT_FONT_SIZE = 14;
-const TERMINAL_SCROLLBACK_LINES = 50000;
-
-// VS Code limits canvas width to prevent performance issues with very wide terminals
-// Source: Constants.MaxCanvasWidth in terminalInstance.ts (line 103)
-const MAX_CANVAS_WIDTH = 4096;
+import { registerTerminalPerfGetter } from '../utils/terminalPerf';
+import {
+  DEFAULT_FONT_SIZE,
+  FONT_FAMILY,
+  getScaledDimensions,
+  getTerminalTheme,
+  MAX_CANVAS_WIDTH,
+  measureTerminalFont,
+  TERMINAL_SCROLLBACK_LINES,
+  type ResolvedTheme,
+} from '../utils/terminalSizing';
+import {
+  cleanupTerminalScrollPin,
+  installTerminalScrollPin,
+  resetTerminalScrollPin,
+} from '../utils/terminalScrollPin';
+import {
+  getTerminalRendererConfig,
+  setTerminalRendererConfig,
+  subscribeTerminalRendererConfig,
+  type TerminalRendererMode,
+} from '../utils/terminalRenderer';
+export type { ResolvedTheme } from '../utils/terminalSizing';
 
 function getContainerDebugInfo(container: HTMLElement) {
   const rect = container.getBoundingClientRect();
@@ -44,69 +58,6 @@ async function openExternalUri(uri: string): Promise<void> {
   }
 }
 
-/**
- * Measure font dimensions using DOM measurement.
- * This is VS Code's fallback when xterm renderer isn't ready.
- * Source: terminalConfigurationService.ts _measureFont()
- */
-function measureFont(
-  fontFamily: string,
-  fontSize: number
-): { charWidth: number; charHeight: number } {
-  const span = document.createElement('span');
-  span.style.fontFamily = fontFamily;
-  span.style.fontSize = `${fontSize}px`;
-  span.style.position = 'absolute';
-  span.style.visibility = 'hidden';
-  span.style.whiteSpace = 'pre';
-  // Use a string of characters to get average width
-  span.textContent = 'W'.repeat(50);
-
-  document.body.appendChild(span);
-  const rect = span.getBoundingClientRect();
-  document.body.removeChild(span);
-
-  return {
-    charWidth: rect.width / 50,
-    charHeight: rect.height,
-  };
-}
-
-export type ResolvedTheme = 'dark' | 'light';
-
-const DARK_TERMINAL_THEME = {
-  background: '#1e1e1e',
-  foreground: '#d4d4d4',
-  cursor: '#d4d4d4',
-  cursorAccent: '#1e1e1e',
-  selectionBackground: '#264f78',
-};
-
-const LIGHT_TERMINAL_THEME = {
-  background: '#ffffff',
-  foreground: '#3b3b3b',
-  cursor: '#3b3b3b',
-  cursorAccent: '#ffffff',
-  selectionBackground: '#add6ff',
-  // ANSI colors tuned for white background contrast (VS Code light theme)
-  black: '#000000',
-  red: '#cd3131',
-  green: '#00bc00',
-  yellow: '#949800',
-  blue: '#0451a5',
-  magenta: '#bc05bc',
-  cyan: '#0598bc',
-  white: '#555555',
-  brightBlack: '#666666',
-  brightRed: '#cd3131',
-  brightGreen: '#14ce14',
-  brightYellow: '#b5ba00',
-  brightBlue: '#0451a5',
-  brightMagenta: '#bc05bc',
-  brightCyan: '#0598bc',
-  brightWhite: '#a5a5a5',
-};
-
 export interface TerminalHandle {
   terminal: XTerm | null;
   fit: () => void;
@@ -127,88 +78,6 @@ interface TerminalProps {
   onResize?: (cols: number, rows: number) => void;
 }
 
-/**
- * Calculate terminal dimensions exactly like VS Code does.
- * Source: vscode/src/vs/workbench/contrib/terminal/browser/terminalInstance.ts
- */
-function getScaledDimensions(
-  container: HTMLElement,
-  term: XTerm,
-  fontSize: number,
-  letterSpacing = 0,
-  lineHeight = 1
-): { cols: number; rows: number; diagnostics: ResizeDiagnostics } | null {
-  // Get container dimensions
-  const containerStyle = getComputedStyle(container);
-  const containerWidth = Math.min(parseFloat(containerStyle.width), MAX_CANVAS_WIDTH);
-  const containerHeight = parseFloat(containerStyle.height);
-  let width = containerWidth;
-  let height = containerHeight;
-
-  if (width <= 0 || height <= 0) return null;
-
-  // Subtract padding (VS Code uses 14px for scrollbar)
-  const xtermElement = term.element;
-  const scrollbarWidth = 14;
-
-  if (xtermElement) {
-    const xtermStyle = getComputedStyle(xtermElement);
-    width -= parseFloat(xtermStyle.paddingLeft || '0') + parseFloat(xtermStyle.paddingRight || '0') + scrollbarWidth;
-    height -= parseFloat(xtermStyle.paddingTop || '0') + parseFloat(xtermStyle.paddingBottom || '0');
-  } else {
-    width -= scrollbarWidth;
-  }
-
-  if (width <= 0 || height <= 0) return null;
-
-  // Get char dimensions from xterm renderer or fallback to DOM measurement
-  const core = (term as any)._core;
-  const cellDims = core?._renderService?.dimensions?.css?.cell;
-  const dpr = window.devicePixelRatio;
-
-  let charWidth: number;
-  let charHeight: number;
-  let cellSource: 'renderer' | 'measured';
-
-  if (cellDims?.width && cellDims?.height) {
-    charWidth = cellDims.width - Math.round(letterSpacing) / dpr;
-    charHeight = cellDims.height / lineHeight;
-    cellSource = 'renderer';
-  } else {
-    const measured = measureFont(FONT_FAMILY, fontSize);
-    charWidth = measured.charWidth;
-    charHeight = measured.charHeight;
-    cellSource = 'measured';
-  }
-
-  if (charWidth <= 0 || charHeight <= 0) return null;
-
-  // Calculate cols/rows with VS Code's formula
-  const scaledWidthAvailable = width * dpr;
-  const scaledCharWidth = charWidth * dpr + letterSpacing;
-  const cols = Math.max(Math.floor(scaledWidthAvailable / scaledCharWidth), 1);
-
-  const scaledHeightAvailable = height * dpr;
-  const scaledCharHeight = Math.ceil(charHeight * dpr);
-  const scaledLineHeight = Math.floor(scaledCharHeight * lineHeight);
-  const rows = Math.max(Math.floor(scaledHeightAvailable / scaledLineHeight), 1);
-
-  return {
-    cols,
-    rows,
-    diagnostics: {
-      containerWidth,
-      containerHeight,
-      availableWidth: width,
-      availableHeight: height,
-      cellWidth: charWidth,
-      cellHeight: charHeight,
-      cellSource,
-      dpr,
-    },
-  };
-}
-
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
   function Terminal({ fontSize = DEFAULT_FONT_SIZE, resolvedTheme = 'dark', debugName, tuiCursor, onInit, onReady, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -216,6 +85,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const webglAddonRef = useRef<WebglAddon | null>(null);
     const debugNameRef = useRef(debugName || 'unknown');
     const visibleRef = useRef(true);
+    const rendererModeRef = useRef<'webgl' | 'dom'>('dom');
+    const writeQueueChunksRef = useRef(0);
+    const writeQueueBytesRef = useRef(0);
+	    const perfRegistryIdRef = useRef(`terminal-${Math.random().toString(16).slice(2)}`);
 
     // Store callbacks and values in refs to avoid re-running effect when they change
     const onReadyRef = useRef(onReady);
@@ -239,12 +112,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     useEffect(() => {
       const term = xtermRef.current;
       if (!term) return;
-      const themeObj = resolvedTheme === 'light' ? LIGHT_TERMINAL_THEME : DARK_TERMINAL_THEME;
-      term.options.theme = themeObj;
+      term.options.theme = getTerminalTheme(resolvedTheme);
     }, [resolvedTheme]);
 
     // Debug overlay state — always record to ring buffer, only render overlay when debug enabled
-    const [debugDisplay, setDebugDisplay] = useState<{
+	    const [debugDisplay, setDebugDisplay] = useState<{
       cols: number;
       rows: number;
       containerWidth: number;
@@ -255,7 +127,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       fontSize: number;
       dpr: number;
       trigger: string;
-    } | null>(null);
+	    } | null>(null);
+    const [rendererConfig, setRendererConfigState] = useState(() => getTerminalRendererConfig());
+    const [rendererDisplayMode, setRendererDisplayMode] = useState<TerminalRendererMode>('dom');
 
     const recordDiags = useCallback((
       trigger: string,
@@ -293,7 +167,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
     }, []);
 
-    const logTerminal = useCallback((
+	    const logTerminal = useCallback((
       level: 'log' | 'warn',
       message: string,
       details?: Record<string, unknown>
@@ -315,6 +189,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       } else {
         console.log(prefix);
       }
+	    }, []);
+
+    useEffect(() => {
+      return subscribeTerminalRendererConfig(() => {
+        setRendererConfigState(getTerminalRendererConfig());
+      });
     }, []);
 
     const focusTerminal = useCallback((): boolean => {
@@ -362,7 +242,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
 
       return true;
-    }, [focusTerminal]);
+    }, []);
 
     // Helper to resize terminal and notify PTY
     const resizeTerminal = useCallback((term: XTerm, cols: number, rows: number, reason: string, diagnostics?: ResizeDiagnostics | null) => {
@@ -471,7 +351,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       resetScrollPin: () => {
         const term = xtermRef.current;
         if (term) {
-          (term as any)._scrollPinReset?.();
+          resetTerminalScrollPin(term);
         }
       },
     }), [focusTerminal, logTerminal, resizeTerminal, typeTextViaInput]);
@@ -486,7 +366,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const containerWidth = parseFloat(containerStyle.width);
       const containerHeight = parseFloat(containerStyle.height);
       const initialFontSize = fontSizeRef.current;
-      const measured = measureFont(FONT_FAMILY, initialFontSize);
+      const measured = measureTerminalFont(FONT_FAMILY, initialFontSize);
       const dpr = window.devicePixelRatio;
 
       // Calculate initial cols/rows using same logic as getScaledDimensions
@@ -526,7 +406,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           width: 14,
           showTopBorder: true,
         },
-        theme: resolvedTheme === 'light' ? LIGHT_TERMINAL_THEME : DARK_TERMINAL_THEME,
+        theme: getTerminalTheme(resolvedTheme),
         // Handle OSC 8 hyperlinks without the default confirm prompt + window.open fallback.
         linkHandler: {
           activate: (event, text) => {
@@ -552,30 +432,48 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // Source: xtermTerminal.ts attachToElement() - WebGL is loaded AFTER raw.open()
       term.open(containerRef.current);
 
-      // Load WebGL addon for better performance (after open, like VS Code)
-      let webglAddon: WebglAddon | null = null;
-      try {
-        webglAddon = new WebglAddon();
-        webglAddon.onContextLoss(() => {
-          console.info('[Terminal] WebGL context lost, disposing and falling back to DOM');
-          webglAddon?.dispose();
-          webglAddonRef.current = null;
-          // VS Code: trigger dimension refresh since DOM renderer has different cell dimensions
-          const container = containerRef.current;
-          if (container && term) {
-            requestAnimationFrame(() => {
-              const dims = getScaledDimensions(container, term, fontSizeRef.current);
-              if (dims) {
-                resizeTerminal(term, dims.cols, dims.rows, 'webgl_context_loss');
-              }
-            });
+	      const detachWebglRenderer = () => {
+	        webglAddonRef.current?.dispose();
+	        webglAddonRef.current = null;
+	        rendererModeRef.current = 'dom';
+          setRendererDisplayMode('dom');
+	      };
+
+	      const attachWebglRenderer = () => {
+          if (webglAddonRef.current) {
+            return;
           }
-        });
-        term.loadAddon(webglAddon);
-        webglAddonRef.current = webglAddon;
-      } catch (e) {
-        console.warn('[Terminal] WebGL addon failed:', e);
-      }
+	        try {
+	          const nextWebglAddon = new WebglAddon();
+	          nextWebglAddon.onContextLoss(() => {
+	            console.info('[Terminal] WebGL context lost, disposing and falling back to DOM');
+              detachWebglRenderer();
+	          // VS Code: trigger dimension refresh since DOM renderer has different cell dimensions
+	          const container = containerRef.current;
+	          if (container && term) {
+	            requestAnimationFrame(() => {
+	              const dims = getScaledDimensions(container, term, fontSizeRef.current);
+	              if (dims) {
+	                resizeTerminal(term, dims.cols, dims.rows, 'webgl_context_loss');
+	              }
+	            });
+	          }
+	          });
+	          term.loadAddon(nextWebglAddon);
+	          webglAddonRef.current = nextWebglAddon;
+	          rendererModeRef.current = 'webgl';
+            setRendererDisplayMode('webgl');
+	        } catch (e) {
+	          console.warn('[Terminal] WebGL addon failed:', e);
+            detachWebglRenderer();
+	        }
+	      };
+
+        if (getTerminalRendererConfig().mode === 'webgl') {
+          attachWebglRenderer();
+        } else {
+          detachWebglRenderer();
+        }
 
       // Copy-on-select: copy selected text to clipboard automatically.
       // Markdown copy (Cmd+Shift+C) suppresses plain copy briefly to prevent races.
@@ -606,129 +504,34 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
       // Store ref immediately
       xtermRef.current = term;
+      const unregisterTerminalPerf = registerTerminalPerfGetter(perfRegistryIdRef.current, () => {
+        const currentTerm = xtermRef.current;
+        if (!currentTerm) {
+          return null;
+        }
+        const buffer = currentTerm.buffer.active;
+        return {
+          terminalName: debugNameRef.current,
+          cols: currentTerm.cols,
+          rows: currentTerm.rows,
+          bufferLength: buffer.length,
+          baseY: buffer.baseY,
+          viewportY: buffer.viewportY,
+          scrollbackLimit: TERMINAL_SCROLLBACK_LINES,
+          renderer: rendererModeRef.current,
+          visible: visibleRef.current,
+          writeQueueChunks: writeQueueChunksRef.current,
+          writeQueueBytes: writeQueueBytesRef.current,
+        };
+      });
       onInitRef.current?.(term);
 
-      // Write-buffering scroll pin (tmux copy-mode approach).
-      //
-      // When the user scrolls up, we stop feeding data to xterm and queue
-      // writes in memory. The terminal freezes — no escape sequences can
-      // displace the viewport. When they scroll back to the bottom, the
-      // queue flushes and output resumes.
-      //
-      // Pin activation uses two layers to eliminate the race window:
-      //   1. Wheel handler: immediately pins if already scrolled up
-      //   2. Scroll handler: pins/unpins based on post-scroll viewportY
-      //      (fires synchronously after scroll effect, before next task)
-      //
-      // CSI 3J safety net covers the single first-scroll-from-bottom case
-      // where the wheel handler can't pre-pin (viewportY == baseY before
-      // the scroll effect is applied).
-      {
-        const core = (term as any)._core;
-        const disposables: Array<{ dispose(): void }> = [];
-        const writeQueue: Uint8Array[] = [];
-        let pinned = false;
-        let lastUserInteraction = 0;
-
-        // Override term.write to buffer when pinned
-        const originalWrite = term.write.bind(term);
-        term.write = ((data: string | Uint8Array, callback?: () => void) => {
-          if (pinned) {
-            // Safety net: auto-unpin if the buffer is at bottom (e.g. after
-            // terminal.reset() cleared the scrollback). Without this, the pin
-            // stays stuck forever because onScroll never fires on an empty buffer.
-            const buf = term.buffer.active;
-            if (buf.viewportY >= buf.baseY) {
-              pinned = false;
-              flushQueue();
-              originalWrite(data, callback);
-              return;
-            }
-            if (typeof data === 'string') {
-              writeQueue.push(new TextEncoder().encode(data));
-            } else {
-              writeQueue.push(new Uint8Array(data));
-            }
-            callback?.();
-            return;
-          }
-          originalWrite(data, callback);
-        }) as typeof term.write;
-
-        function flushQueue() {
-          if (writeQueue.length === 0) return;
-          const total = writeQueue.reduce((sum, buf) => sum + buf.length, 0);
-          const combined = new Uint8Array(total);
-          let offset = 0;
-          for (const buf of writeQueue) {
-            combined.set(buf, offset);
-            offset += buf.length;
-          }
-          writeQueue.length = 0;
-          originalWrite(combined);
-        }
-
-        // In xterm.js v6, wheel events land on .xterm-screen (z-index 31,
-        // above .xterm-viewport at 30) and scrolling is handled internally
-        // via a custom scrollbar — DOM scroll events don't fire on viewport.
-        // Use capture-phase wheel on our container + term.onScroll() instead.
-        {
-          const container = containerRef.current!;
-
-          // Wheel on container (capture phase): mark user interaction and
-          // immediately pin if already scrolled up (no race window).
-          const onWheel = () => {
-            lastUserInteraction = performance.now();
-            if (!pinned && term.buffer.active.viewportY < term.buffer.active.baseY) {
-              pinned = true;
-            }
-          };
-          container.addEventListener('wheel', onWheel, { passive: true, capture: true });
-
-          // term.onScroll fires after xterm processes the scroll (both user
-          // and programmatic). Use the interaction timestamp to distinguish.
-          disposables.push(term.onScroll(() => {
-            const isUser = performance.now() - lastUserInteraction < 300;
-            if (!isUser) return;
-
-            const buf = term.buffer.active;
-            const atBottom = buf.viewportY >= buf.baseY;
-
-            if (!pinned && !atBottom) {
-              pinned = true;
-            } else if (pinned && atBottom) {
-              pinned = false;
-              flushQueue();
-            }
-          }));
-
-          disposables.push({ dispose: () => {
-            container.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions);
-          }});
-        }
-
-        // Safety net: suppress CSI 3J for the first scroll-from-bottom case
-        if (core?.registerCsiHandler) {
-          disposables.push(core.registerCsiHandler({ final: 'J' }, (params: any) => {
-            const ps = params?.params?.[0] ?? params?.[0] ?? 0;
-            if (ps === 3 && term.buffer.active.viewportY < term.buffer.active.baseY) {
-              return true;
-            }
-            return false;
-          }));
-        }
-
-        (term as any)._scrollPinReset = () => {
-          pinned = false;
-          flushQueue();
-        };
-
-        (term as any)._scrollPinCleanup = () => {
-          disposables.forEach(d => d.dispose());
-          term.write = originalWrite;
-          flushQueue();
-        };
-      }
+      installTerminalScrollPin(term, containerRef.current, {
+        onQueueStatsChange: ({ chunks, bytes }) => {
+          writeQueueChunksRef.current = chunks;
+          writeQueueBytesRef.current = bytes;
+        },
+      });
 
       // Resize strategy from VS Code's TerminalResizeDebouncer:
       // - Y-axis (rows): immediate (cheap operation)
@@ -945,16 +748,28 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const dprMediaQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
       dprMediaQuery.addEventListener('change', handleDprChange);
 
-      // Cleanup
-      return () => {
-        resizeObserver.disconnect();
+        const unsubscribeRendererConfig = subscribeTerminalRendererConfig(() => {
+          const nextMode = getTerminalRendererConfig().mode;
+          if (nextMode === 'webgl') {
+            attachWebglRenderer();
+            return;
+          }
+          detachWebglRenderer();
+        });
+
+	      // Cleanup
+	      return () => {
+          unsubscribeRendererConfig();
+	        resizeObserver.disconnect();
         visibilityObserver.disconnect();
         clearTimeout(xResizeTimeout);
         dprMediaQuery.removeEventListener('change', handleDprChange);
         window.removeEventListener('keydown', handleMdCopy, true);
-        (term as any)._scrollPinCleanup?.();
-        webglAddon?.dispose();
-        webglAddonRef.current = null;
+        cleanupTerminalScrollPin(term);
+        unregisterTerminalPerf();
+          detachWebglRenderer();
+	        writeQueueChunksRef.current = 0;
+        writeQueueBytesRef.current = 0;
         xtermRef.current = null;
         term.dispose();
       };
@@ -987,31 +802,41 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
     }, [fontSize, recordDiags]);
 
-    const handleCopyDebugLog = useCallback(() => {
+	    const handleCopyDebugLog = useCallback(() => {
       const log = formatResizeLog();
       navigator.clipboard.writeText(log).then(
-        () => logTerminal('log', 'Resize log copied to clipboard'),
+        () => logTerminal('log', 'Terminal debug log copied to clipboard'),
         (err) => logTerminal('warn', 'Failed to copy resize log', { error: String(err) }),
       );
-    }, [logTerminal]);
+	    }, [logTerminal]);
 
-    return (
-      <div ref={containerRef} className="terminal-container">
-        {debugDisplay && (
-          <div className="terminal-debug-badge">
+    const handleToggleRenderer = useCallback(() => {
+      const nextMode = getTerminalRendererConfig().mode === 'webgl' ? 'dom' : 'webgl';
+      setTerminalRendererConfig(nextMode);
+    }, []);
+
+	    return (
+	      <div ref={containerRef} className="terminal-container">
+	        {debugDisplay && (
+	          <div className="terminal-debug-badge">
             <span className="terminal-debug-dims">{debugDisplay.cols}×{debugDisplay.rows}</span>
             <span className="terminal-debug-sep">|</span>
             <span>ctr:{Math.round(debugDisplay.containerWidth)}×{Math.round(debugDisplay.containerHeight)}</span>
             <span className="terminal-debug-sep">|</span>
             <span>cell:{debugDisplay.cellWidth.toFixed(1)} ({debugDisplay.cellSource})</span>
             <span className="terminal-debug-sep">|</span>
-            <span>font:{debugDisplay.fontSize}</span>
-            <span className="terminal-debug-sep">|</span>
-            <span className="terminal-debug-trigger">{debugDisplay.trigger}</span>
-            <button className="terminal-debug-copy" onClick={handleCopyDebugLog}>Copy</button>
-          </div>
-        )}
-      </div>
-    );
+	            <span>font:{debugDisplay.fontSize}</span>
+	            <span className="terminal-debug-sep">|</span>
+	            <span>rend:{rendererDisplayMode}</span>
+	            <span className="terminal-debug-sep">|</span>
+	            <span className="terminal-debug-trigger">{debugDisplay.trigger}</span>
+	            <button className="terminal-debug-toggle" onClick={handleToggleRenderer}>
+                Renderer {rendererConfig.mode === 'webgl' ? 'WebGL' : 'DOM'}
+              </button>
+	            <button className="terminal-debug-copy" onClick={handleCopyDebugLog}>Copy</button>
+	          </div>
+	        )}
+	      </div>
+	    );
   }
 );

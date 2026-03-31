@@ -12,6 +12,8 @@ pnpm run real-app:smoke
 pnpm run real-app:repro-panes
 pnpm run real-app:bridge-smoke
 pnpm run real-app:bridge-repro-main
+pnpm run real-app:bridge-perf
+pnpm run real-app:bridge-pty-bench
 pnpm run real-app:bridge-cli -- --wait-ready get_state
 ```
 
@@ -61,6 +63,9 @@ Useful bridge actions:
 - `set_pane_debug`
 - `dump_pane_debug`
 - `capture_structured_snapshot`
+- `capture_perf_snapshot`
+- `clear_perf_counters`
+- `benchmark_pty_transport`
 - `get_window_bounds`
 - `capture_screenshot`
 
@@ -80,3 +85,7 @@ Current scenarios:
   Uses the dev-only UI automation bridge instead of macOS input injection to create a session, split a pane, focus it, type into it, and verify shell output.
 - `real-app:bridge-repro-main`
   Uses the bridge to split to a utility pane, verify utility output, return to `main`, type a unique token without submitting, and assert that the token appears in both main-runtime scrollback and visible main-pane text.
+- `real-app:bridge-perf`
+  Uses the bridge to create a feature-branch session in a synthetic git repo, sample the packaged app, daemon, and child WebKit processes for CPU/RSS, then capture frontend terminal, PTY transport, and diff/review perf snapshots across app-ready, session-open, split-pane, terminal-output, and diff-detail checkpoints. The terminal stage records command-completion time plus delivered scrollback bytes/lines.
+- `real-app:bridge-pty-bench`
+  Creates a throwaway session and utility pane, then benchmarks three frontend terminal delivery modes on the same payload: `json_base64` (current JSON parse + base64 decode + write path), `base64` (skip JSON parse), and `bytes` (skip JSON parse and base64). The script also samples app, daemon, and WebKit process CPU/RSS while each mode is running.

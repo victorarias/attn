@@ -42,6 +42,7 @@ const (
 	spawnReadyPollInterval  = 100 * time.Millisecond
 	spawnKillGracePeriod    = 1 * time.Second
 	spawnWaitTimeout        = 500 * time.Millisecond
+	streamPublishWait       = 250 * time.Millisecond
 	streamEventBufferSize   = 256
 	streamPreEventBufferCap = 8
 	workingStatePulseWindow = 2 * time.Second
@@ -1950,13 +1951,15 @@ func (s *workerStream) readLoop(pre []OutputEvent) {
 }
 
 func (s *workerStream) publish(evt OutputEvent) bool {
+	timer := time.NewTimer(streamPublishWait)
+	defer timer.Stop()
 	select {
 	case <-s.done:
 		return false
 	case s.events <- evt:
 		return true
-	default:
-		// Signal desync on overflow once, then terminate stream.
+	case <-timer.C:
+		// Signal desync on sustained overflow once, then terminate stream.
 		select {
 		case s.events <- OutputEvent{Kind: OutputEventKindDesync, Reason: "buffer_overflow"}:
 		default:

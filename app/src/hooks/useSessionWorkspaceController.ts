@@ -17,6 +17,10 @@ interface SessionWorkspaceController {
   fitSessionActivePane: (sessionId: string) => void;
   getPaneText: (sessionId: string, paneId: string) => string;
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null;
+  resetSessionPaneTerminal: (sessionId: string, paneId: string) => boolean;
+  injectSessionPaneBytes: (sessionId: string, paneId: string, bytes: Uint8Array) => Promise<boolean>;
+  injectSessionPaneBase64: (sessionId: string, paneId: string, payload: string) => Promise<boolean>;
+  drainSessionPaneTerminal: (sessionId: string, paneId: string) => Promise<boolean>;
 }
 
 export function useSessionWorkspaceController(
@@ -73,6 +77,22 @@ export function useSessionWorkspaceController(
     return workspaceRefs.current.get(sessionId)?.getPaneSize(paneId) || null;
   }, []);
 
+  const resetSessionPaneTerminal = useCallback((sessionId: string, paneId: string) => {
+    return workspaceRefs.current.get(sessionId)?.resetPaneTerminal(paneId) || false;
+  }, []);
+
+  const injectSessionPaneBytes = useCallback((sessionId: string, paneId: string, bytes: Uint8Array) => {
+    return workspaceRefs.current.get(sessionId)?.injectPaneBytes(paneId, bytes) || Promise.resolve(false);
+  }, []);
+
+  const injectSessionPaneBase64 = useCallback((sessionId: string, paneId: string, payload: string) => {
+    return workspaceRefs.current.get(sessionId)?.injectPaneBase64(paneId, payload) || Promise.resolve(false);
+  }, []);
+
+  const drainSessionPaneTerminal = useCallback((sessionId: string, paneId: string) => {
+    return workspaceRefs.current.get(sessionId)?.drainPaneTerminal(paneId) || Promise.resolve(false);
+  }, []);
+
   return {
     eventRouter,
     getActivePaneIdForSession,
@@ -85,5 +105,9 @@ export function useSessionWorkspaceController(
     fitSessionActivePane,
     getPaneText,
     getPaneSize,
+    resetSessionPaneTerminal,
+    injectSessionPaneBytes,
+    injectSessionPaneBase64,
+    drainSessionPaneTerminal,
   };
 }

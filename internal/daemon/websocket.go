@@ -62,6 +62,8 @@ type wsClient struct {
 	// PTY subscriptions keyed by session ID
 	attachedStreams map[string]ptybackend.Stream // session -> stream
 	attachMu        sync.Mutex
+	ptyFlow         map[string]*ptyFlowState
+	ptyFlowMu       sync.Mutex
 
 	// Git status subscription state
 	gitStatusDir    string
@@ -69,6 +71,61 @@ type wsClient struct {
 	gitStatusStop   chan struct{}
 	gitStatusHash   string // hash of last sent status for dedup
 	gitStatusMu     sync.Mutex
+}
+
+type ptyFlowState struct {
+	mu       sync.Mutex
+	cond     *sync.Cond
+	credits  int
+	ackedSeq uint32
+	closed   bool
+}
+
+func newPTYFlowState(lastAckedSeq uint32) *ptyFlowState {
+	state := &ptyFlowState{
+		credits:  maxPTYInFlightMessages,
+		ackedSeq: lastAckedSeq,
+	}
+	state.cond = sync.NewCond(&state.mu)
+	return state
+}
+
+func (s *ptyFlowState) acquire() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for !s.closed && s.credits <= 0 {
+		s.cond.Wait()
+	}
+	if s.closed {
+		return false
+	}
+	s.credits--
+	return true
+}
+
+func (s *ptyFlowState) ack(seq uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || seq <= s.ackedSeq {
+		return
+	}
+	delta := int(seq - s.ackedSeq)
+	s.ackedSeq = seq
+	s.credits += delta
+	if s.credits > maxPTYInFlightMessages {
+		s.credits = maxPTYInFlightMessages
+	}
+	s.cond.Broadcast()
+}
+
+func (s *ptyFlowState) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	s.cond.Broadcast()
 }
 
 func (c *wsClient) closeSendChannel() {
@@ -93,6 +150,80 @@ func (c *wsClient) trySend(message outboundMessage) bool {
 	default:
 		return false
 	}
+}
+
+func (c *wsClient) sendWithWait(message outboundMessage, wait time.Duration) bool {
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+	if c.sendClosed {
+		return false
+	}
+	if wait <= 0 {
+		select {
+		case c.send <- message:
+			return true
+		default:
+			return false
+		}
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case c.send <- message:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+func (c *wsClient) ensurePTYFlowState(sessionID string, lastAckedSeq uint32) *ptyFlowState {
+	c.ptyFlowMu.Lock()
+	defer c.ptyFlowMu.Unlock()
+	if c.ptyFlow == nil {
+		c.ptyFlow = make(map[string]*ptyFlowState)
+	}
+	if state, ok := c.ptyFlow[sessionID]; ok {
+		return state
+	}
+	state := newPTYFlowState(lastAckedSeq)
+	c.ptyFlow[sessionID] = state
+	return state
+}
+
+func (c *wsClient) resetPTYFlowState(sessionID string, lastAckedSeq uint32) {
+	c.ptyFlowMu.Lock()
+	if c.ptyFlow == nil {
+		c.ptyFlow = make(map[string]*ptyFlowState)
+	}
+	previous := c.ptyFlow[sessionID]
+	c.ptyFlow[sessionID] = newPTYFlowState(lastAckedSeq)
+	c.ptyFlowMu.Unlock()
+	if previous != nil {
+		previous.close()
+	}
+}
+
+func (c *wsClient) removePTYFlowState(sessionID string) {
+	c.ptyFlowMu.Lock()
+	var previous *ptyFlowState
+	if c.ptyFlow != nil {
+		previous = c.ptyFlow[sessionID]
+		delete(c.ptyFlow, sessionID)
+	}
+	c.ptyFlowMu.Unlock()
+	if previous != nil {
+		previous.close()
+	}
+}
+
+func (c *wsClient) ackPTYFlow(sessionID string, seq uint32) {
+	c.ptyFlowMu.Lock()
+	state := c.ptyFlow[sessionID]
+	c.ptyFlowMu.Unlock()
+	if state == nil {
+		return
+	}
+	state.ack(seq)
 }
 
 // stopGitStatusPoll stops any active git status polling for this client
@@ -138,8 +269,10 @@ type wsHub struct {
 }
 
 const (
-	maxSlowCount   = 3 // disconnect after this many consecutive failed sends
-	maxPTYDimValue = 65535
+	maxSlowCount           = 3 // disconnect after this many consecutive failed sends
+	maxPTYDimValue         = 65535
+	maxPTYInFlightMessages = 4
+	ptyOutputSendWait      = 1 * time.Second
 )
 
 func newWSHub() *wsHub {
@@ -294,6 +427,7 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 		send:            make(chan outboundMessage, 256),
 		recv:            make(chan []byte, 256), // buffer for incoming messages
 		attachedStreams: make(map[string]ptybackend.Stream),
+		ptyFlow:         make(map[string]*ptyFlowState),
 	}
 
 	d.wsHub.register <- client
@@ -359,6 +493,10 @@ func (d *Daemon) wsWritePump(client *wsClient) {
 
 func (d *Daemon) sendOutbound(client *wsClient, message outboundMessage) bool {
 	return client.trySend(message)
+}
+
+func (d *Daemon) sendOutboundBlocking(client *wsClient, message outboundMessage, wait time.Duration) bool {
+	return client.sendWithWait(message, wait)
 }
 
 // wsMsgPump processes incoming messages in FIFO order
@@ -859,6 +997,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			d.logf("pty_input ok: id=%s bytes=%d", inputMsg.ID, len(inputMsg.Data))
 		}
 
+	case protocol.CmdPtyOutputAck:
+		ackMsg := msg.(*protocol.PtyOutputAckMessage)
+		if ackMsg.Seq >= 0 {
+			client.ackPTYFlow(ackMsg.ID, uint32(ackMsg.Seq))
+		}
+
 	case protocol.CmdPtyResize:
 		resizeMsg := msg.(*protocol.PtyResizeMessage)
 		d.handlePtyResize(client, resizeMsg)
@@ -947,6 +1091,7 @@ func (d *Daemon) detachSession(client *wsClient, sessionID string) {
 		delete(client.attachedStreams, sessionID)
 	}
 	client.attachMu.Unlock()
+	client.removePTYFlowState(sessionID)
 	if hasStream {
 		_ = stream.Close()
 	}
@@ -955,12 +1100,17 @@ func (d *Daemon) detachSession(client *wsClient, sessionID string) {
 func (d *Daemon) detachAllSessions(client *wsClient) {
 	client.attachMu.Lock()
 	streams := make([]ptybackend.Stream, 0, len(client.attachedStreams))
-	for _, stream := range client.attachedStreams {
+	sessionIDs := make([]string, 0, len(client.attachedStreams))
+	for sessionID, stream := range client.attachedStreams {
 		streams = append(streams, stream)
+		sessionIDs = append(sessionIDs, sessionID)
 	}
 	client.attachedStreams = make(map[string]ptybackend.Stream)
 	client.attachMu.Unlock()
 
+	for _, sessionID := range sessionIDs {
+		client.removePTYFlowState(sessionID)
+	}
 	for _, stream := range streams {
 		_ = stream.Close()
 	}
@@ -1140,6 +1290,7 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 	previous := client.attachedStreams[msg.ID]
 	client.attachedStreams[msg.ID] = stream
 	client.attachMu.Unlock()
+	client.resetPTYFlowState(msg.ID, info.LastSeq)
 	if previous != nil && previous != stream {
 		_ = previous.Close()
 	}
@@ -1174,6 +1325,7 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 }
 
 func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stream ptybackend.Stream) {
+	flow := client.ensurePTYFlowState(sessionID, 0)
 	defer func() {
 		client.attachMu.Lock()
 		current, ok := client.attachedStreams[sessionID]
@@ -1181,11 +1333,17 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 			delete(client.attachedStreams, sessionID)
 		}
 		client.attachMu.Unlock()
+		if ok && current == stream {
+			client.removePTYFlowState(sessionID)
+		}
 	}()
 
 	for event := range stream.Events() {
 		switch event.Kind {
 		case ptybackend.OutputEventKindOutput:
+			if !flow.acquire() {
+				return
+			}
 			d.logf(
 				"pty_output forward: id=%s seq=%d bytes=%d preview=%q",
 				sessionID,
@@ -1203,9 +1361,10 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 			payload, err := json.Marshal(wsEvent)
 			if err != nil {
 				d.logf("pty_output marshal failed: id=%s seq=%d err=%v", sessionID, event.Seq, err)
+				flow.ack(event.Seq)
 				continue
 			}
-			if !d.sendOutbound(client, outboundMessage{kind: messageKindText, payload: payload}) {
+			if !d.sendOutboundBlocking(client, outboundMessage{kind: messageKindText, payload: payload}, ptyOutputSendWait) {
 				d.logf("pty_output send failed, closing stream: id=%s seq=%d", sessionID, event.Seq)
 				_ = stream.Close()
 				return
@@ -1270,6 +1429,8 @@ func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMe
 func shouldLogWSCommand(cmd string) bool {
 	switch cmd {
 	case protocol.CmdPtyInput:
+		return false
+	case protocol.CmdPtyOutputAck:
 		return false
 	default:
 		return true

@@ -1088,6 +1088,17 @@ type PtyInputMessage struct {
 	Source *string `json:"source,omitempty"`
 }
 
+type PtyOutputAckMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq int `json:"seq"`
+}
+
 type PtyOutputMessage struct {
 	// Data corresponds to the JSON schema field "data".
 	Data string `json:"data"`

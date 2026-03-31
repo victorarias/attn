@@ -705,7 +705,7 @@ func TestWorkerBackend_GetSession_PrunesDeadRegistryEntry(t *testing.T) {
 	}
 }
 
-func TestWorkerStream_PublishOverflowDoesNotBlock(t *testing.T) {
+func TestWorkerStream_PublishOverflowWaitsBrieflyBeforeFailing(t *testing.T) {
 	stream := &workerStream{
 		events: make(chan OutputEvent, 1),
 		done:   make(chan struct{}),
@@ -719,8 +719,12 @@ func TestWorkerStream_PublishOverflowDoesNotBlock(t *testing.T) {
 	if ok {
 		t.Fatal("second publish should fail when buffer is full")
 	}
-	if time.Since(start) > 100*time.Millisecond {
-		t.Fatal("publish on full buffer should return quickly")
+	elapsed := time.Since(start)
+	if elapsed < streamPublishWait-(50*time.Millisecond) {
+		t.Fatalf("publish on full buffer returned too quickly: %v", elapsed)
+	}
+	if elapsed > streamPublishWait+(200*time.Millisecond) {
+		t.Fatalf("publish on full buffer waited too long: %v", elapsed)
 	}
 }
 

@@ -852,7 +852,7 @@ func (c *connCtx) sendError(reqID, code, msg string) bool {
 }
 
 func (c *connCtx) sendEvent(evt EventEnvelope) bool {
-	return c.enqueue(evt, 0)
+	return c.enqueue(evt, connWriteTimeout)
 }
 
 func (c *connCtx) send(v any) bool {

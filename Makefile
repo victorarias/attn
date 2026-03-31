@@ -116,7 +116,7 @@ install-app-ui-automation: build-app-ui-automation
 	@echo "Installed attn.app to ~/Applications with UI automation bridge enabled"
 
 # Install daemon and app
-install-all: install install-app
+install-all: install install-app-ui-automation
 
 install-all-ui-automation: install install-app-ui-automation
 

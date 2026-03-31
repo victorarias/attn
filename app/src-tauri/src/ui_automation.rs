@@ -16,7 +16,8 @@ pub const UI_AUTOMATION_ENABLED: bool = option_env!("ATTN_UI_AUTOMATION").is_som
 const REQUEST_EVENT: &str = "attn://ui-automation/request";
 const RESPONSE_EVENT: &str = "attn://ui-automation/response";
 const READY_EVENT: &str = "attn://ui-automation/ready";
-const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+// The perf harness can intentionally keep the frontend busy for tens of seconds.
+const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MANIFEST_RELATIVE_PATH: &str = "debug/ui-automation.json";
 const LOG_RELATIVE_PATH: &str = "debug/ui-automation-server.log";
 
