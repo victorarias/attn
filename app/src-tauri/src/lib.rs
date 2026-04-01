@@ -279,7 +279,13 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("defaults")
-            .args(["write", "com.attn.manager", "ApplePressAndHoldEnabled", "-bool", "false"])
+            .args([
+                "write",
+                "com.attn.manager",
+                "ApplePressAndHoldEnabled",
+                "-bool",
+                "false",
+            ])
             .output();
     }
 
