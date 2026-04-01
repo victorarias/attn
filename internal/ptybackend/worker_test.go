@@ -705,7 +705,7 @@ func TestWorkerBackend_GetSession_PrunesDeadRegistryEntry(t *testing.T) {
 	}
 }
 
-func TestWorkerStream_PublishOverflowWaitsBrieflyBeforeFailing(t *testing.T) {
+func TestWorkerStream_PublishOverflowWaitsForBufferSpace(t *testing.T) {
 	stream := &workerStream{
 		events: make(chan OutputEvent, 1),
 		done:   make(chan struct{}),
@@ -714,17 +714,35 @@ func TestWorkerStream_PublishOverflowWaitsBrieflyBeforeFailing(t *testing.T) {
 		t.Fatal("first publish should succeed")
 	}
 
+	resultCh := make(chan bool, 1)
 	start := time.Now()
-	ok := stream.publish(OutputEvent{Kind: OutputEventKindOutput, Data: []byte("b"), Seq: 2})
-	if ok {
-		t.Fatal("second publish should fail when buffer is full")
+	go func() {
+		resultCh <- stream.publish(OutputEvent{Kind: OutputEventKindOutput, Data: []byte("b"), Seq: 2})
+	}()
+
+	select {
+	case ok := <-resultCh:
+		t.Fatalf("publish returned early with ok=%v", ok)
+	case <-time.After(streamPublishWait + 50*time.Millisecond):
 	}
-	elapsed := time.Since(start)
-	if elapsed < streamPublishWait-(50*time.Millisecond) {
-		t.Fatalf("publish on full buffer returned too quickly: %v", elapsed)
+
+	select {
+	case <-stream.events:
+	case <-time.After(time.Second):
+		t.Fatal("timed out draining first buffered event")
 	}
-	if elapsed > streamPublishWait+(200*time.Millisecond) {
-		t.Fatalf("publish on full buffer waited too long: %v", elapsed)
+
+	select {
+	case ok := <-resultCh:
+		if !ok {
+			t.Fatal("second publish should succeed after buffer space is available")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second publish did not resume after draining buffer")
+	}
+
+	if elapsed := time.Since(start); elapsed < streamPublishWait {
+		t.Fatalf("publish on full buffer resumed too quickly: %v", elapsed)
 	}
 }
 
@@ -792,6 +810,7 @@ func TestWorkerStream_CloseBoundedWhenPeerStalled(t *testing.T) {
 		json.NewDecoder(clientConn),
 		"sess-1",
 		"detach-1",
+		nil,
 		nil,
 	)
 

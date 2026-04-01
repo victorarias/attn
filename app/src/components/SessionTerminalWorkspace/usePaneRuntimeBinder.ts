@@ -8,6 +8,7 @@ import { activeElementSummary, recordPaneRuntimeDebugEvent } from '../../utils/p
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { recordPtyDecode, recordTerminalWrite } from '../../utils/ptyPerf';
 import { resetTerminalScrollPin } from '../../utils/terminalScrollPin';
+import { recordTerminalRuntimeLog } from '../../utils/terminalRuntimeLog';
 
 const MAX_PENDING_TERMINAL_EVENTS = 256;
 const terminalTextEncoder = new TextEncoder();
@@ -20,6 +21,7 @@ interface PaneRuntimeSize {
 export interface PaneRuntimeSpec {
   paneId: string;
   runtimeId: string;
+  sessionId?: string;
   testSessionId?: string;
   getSpawnArgs: (size: PaneRuntimeSize) => PtySpawnArgs | null;
 }
@@ -44,6 +46,13 @@ export interface PaneRuntimeBinder {
 
 interface PaneTerminalWriteState {
   writeChain: Promise<void>;
+}
+
+interface PaneWriteLogState {
+  lastLoggedAt: number;
+  writeCount: number;
+  bytes: number;
+  lastSeq?: number;
 }
 
 function decodePtyBytes(payload: string): Uint8Array {
@@ -141,6 +150,7 @@ export function usePaneRuntimeBinder(
   const pendingUnmountCleanupRef = useRef<Map<string, number>>(new Map());
   const runtimeBindingDisposersRef = useRef<Map<string, { paneId: string; testSessionId?: string; dispose: () => void }>>(new Map());
   const paneWriteStatesRef = useRef<Map<string, PaneTerminalWriteState>>(new Map());
+  const paneWriteLogStatesRef = useRef<Map<string, PaneWriteLogState>>(new Map());
 
   const appendPendingTerminalEvent = useCallback((paneId: string, event: PtyEventPayload) => {
     const events = pendingTerminalEventsRef.current.get(paneId) || [];
@@ -182,6 +192,17 @@ export function usePaneRuntimeBinder(
     if (!pane || bytes.length === 0) {
       return;
     }
+    recordTerminalRuntimeLog({
+      category: 'binding',
+      sessionId: pane.sessionId ?? pane.testSessionId,
+      paneId,
+      runtimeId: pane.runtimeId,
+      message: 'defer terminal bytes to replay queue',
+      details: {
+        bytes: bytes.length,
+        seq: typeof seq === 'number' ? seq : null,
+      },
+    });
     appendPendingTerminalEvent(paneId, {
       event: 'data',
       id: pane.runtimeId,
@@ -189,6 +210,46 @@ export function usePaneRuntimeBinder(
       ...(typeof seq === 'number' ? { seq } : {}),
     });
   }, [appendPendingTerminalEvent]);
+
+  const recordPaneWriteActivity = useCallback((paneId: string, bytes: number, seq?: number) => {
+    const pane = paneByIdRef.current.get(paneId);
+    if (!pane) {
+      return;
+    }
+    const now = performance.now();
+    let state = paneWriteLogStatesRef.current.get(paneId);
+    if (!state) {
+      state = {
+        lastLoggedAt: now,
+        writeCount: 0,
+        bytes: 0,
+      };
+      paneWriteLogStatesRef.current.set(paneId, state);
+    }
+    state.writeCount += 1;
+    state.bytes += bytes;
+    if (typeof seq === 'number') {
+      state.lastSeq = seq;
+    }
+    if (now - state.lastLoggedAt < 2000) {
+      return;
+    }
+    recordTerminalRuntimeLog({
+      category: 'activity',
+      sessionId: pane.sessionId ?? pane.testSessionId,
+      paneId,
+      runtimeId: pane.runtimeId,
+      message: 'terminal write pipeline heartbeat',
+      details: {
+        writeCount: state.writeCount,
+        bytes: state.bytes,
+        lastSeq: state.lastSeq ?? null,
+      },
+    });
+    state.lastLoggedAt = now;
+    state.writeCount = 0;
+    state.bytes = 0;
+  }, []);
 
   const enqueuePaneBytes = useCallback((paneId: string, xterm: XTerm, bytes: Uint8Array, seq?: number) => {
     void queuePaneWriteTask(paneId, async () => {
@@ -198,6 +259,7 @@ export function usePaneRuntimeBinder(
         return;
       }
       await writeBytesToTerminalAsync(liveXterm, bytes);
+      recordPaneWriteActivity(paneId, bytes.length, seq);
       if (typeof seq === 'number') {
         const runtimeId = paneByIdRef.current.get(paneId)?.runtimeId;
         if (runtimeId) {
@@ -205,7 +267,7 @@ export function usePaneRuntimeBinder(
         }
       }
     });
-  }, [onPtyOutputProcessed, queueBufferedBytesForReplay, queuePaneWriteTask]);
+  }, [onPtyOutputProcessed, queueBufferedBytesForReplay, queuePaneWriteTask, recordPaneWriteActivity]);
 
   const replayPendingTerminalEvent = useCallback((paneId: string, xterm: XTerm, event: PtyEventPayload) => {
     switch (event.event) {
@@ -323,6 +385,13 @@ export function usePaneRuntimeBinder(
       }
       registration.dispose();
       runtimeBindingDisposersRef.current.delete(runtimeId);
+      recordTerminalRuntimeLog({
+        category: 'binding',
+        sessionId: registration.testSessionId,
+        paneId: registration.paneId,
+        runtimeId,
+        message: 'dispose stale runtime binding',
+      });
     }
 
     for (const pane of panes) {
@@ -368,6 +437,13 @@ export function usePaneRuntimeBinder(
         testSessionId: pane.testSessionId,
         dispose,
       });
+      recordTerminalRuntimeLog({
+        category: 'binding',
+        sessionId: pane.sessionId ?? pane.testSessionId,
+        paneId: pane.paneId,
+        runtimeId: pane.runtimeId,
+        message: 'register pane runtime binding',
+      });
     }
   }, [appendPendingTerminalEvent, eventRouter, panes, replayPendingTerminalEvent]);
 
@@ -388,6 +464,7 @@ export function usePaneRuntimeBinder(
       terminalHandlesRef.current.clear();
       xtermsRef.current.clear();
       paneWriteStatesRef.current.clear();
+      paneWriteLogStatesRef.current.clear();
     };
   }, []);
 
@@ -404,6 +481,16 @@ export function usePaneRuntimeBinder(
         paneId,
         message: 'terminal ref cleared',
       });
+      const pane = paneByIdRef.current.get(paneId);
+      if (pane) {
+        recordTerminalRuntimeLog({
+          category: 'binding',
+          sessionId: pane.sessionId ?? pane.testSessionId,
+          paneId,
+          runtimeId: pane.runtimeId,
+          message: 'terminal handle cleared',
+        });
+      }
       const currentXterm = xtermsRef.current.get(paneId);
       const currentText = snapshotTerminalText(currentXterm || null);
       if (currentText) {
@@ -420,6 +507,7 @@ export function usePaneRuntimeBinder(
         xtermsRef.current.delete(paneId);
         inputSubscriptionsRef.current.get(paneId)?.dispose();
         inputSubscriptionsRef.current.delete(paneId);
+        paneWriteLogStatesRef.current.delete(paneId);
       }, 0);
       pendingUnmountCleanupRef.current.set(paneId, timeoutId);
       return;
@@ -430,6 +518,16 @@ export function usePaneRuntimeBinder(
       message: 'terminal ref set',
     });
     terminalHandlesRef.current.set(paneId, handle);
+    const pane = paneByIdRef.current.get(paneId);
+    if (pane) {
+      recordTerminalRuntimeLog({
+        category: 'binding',
+        sessionId: pane.sessionId ?? pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: 'terminal handle attached',
+      });
+    }
   }, []);
 
   const ensurePaneRuntime = useCallback(async (paneId: string, xterm: XTerm) => {
@@ -463,7 +561,7 @@ export function usePaneRuntimeBinder(
       if (!spawnArgs) {
         recordPaneRuntimeDebugEvent({
           scope: 'binder',
-          sessionId: pane.testSessionId,
+          sessionId: pane.sessionId ?? pane.testSessionId,
           paneId,
           runtimeId: pane.runtimeId,
           message: 'runtime ensure skipped',
@@ -481,7 +579,7 @@ export function usePaneRuntimeBinder(
 
       recordPaneRuntimeDebugEvent({
         scope: 'binder',
-        sessionId: pane.testSessionId,
+        sessionId: pane.sessionId ?? pane.testSessionId,
         paneId,
         runtimeId: pane.runtimeId,
         message: 'spawn/attach runtime',
@@ -494,7 +592,7 @@ export function usePaneRuntimeBinder(
       await ptySpawn({ args: spawnArgs });
       recordPaneRuntimeDebugEvent({
         scope: 'binder',
-        sessionId: pane.testSessionId,
+        sessionId: pane.sessionId ?? pane.testSessionId,
         paneId,
         runtimeId: pane.runtimeId,
         message: 'runtime ensured',
@@ -515,10 +613,18 @@ export function usePaneRuntimeBinder(
     }
     recordPaneRuntimeDebugEvent({
       scope: 'binder',
-      sessionId: pane.testSessionId,
+      sessionId: pane.sessionId ?? pane.testSessionId,
       paneId,
       runtimeId: pane.runtimeId,
       message: 'wire terminal',
+      details: { cols: xterm.cols, rows: xterm.rows },
+    });
+    recordTerminalRuntimeLog({
+      category: 'binding',
+      sessionId: pane.sessionId ?? pane.testSessionId,
+      paneId,
+      runtimeId: pane.runtimeId,
+      message: 'wire xterm to pane runtime',
       details: { cols: xterm.cols, rows: xterm.rows },
     });
 

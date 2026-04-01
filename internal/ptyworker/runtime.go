@@ -539,6 +539,7 @@ func (c *connCtx) enqueue(v any, wait time.Duration) bool {
 	c.sendMu.RLock()
 	defer c.sendMu.RUnlock()
 	if c.closed {
+		c.runtime.logf("worker conn enqueue rejected: conn=%s closed=true type=%T", c.connID, v)
 		return false
 	}
 	if wait <= 0 {
@@ -546,6 +547,7 @@ func (c *connCtx) enqueue(v any, wait time.Duration) bool {
 		case c.sendQ <- v:
 			return true
 		default:
+			c.runtime.logf("worker conn enqueue dropped: conn=%s wait=0 type=%T", c.connID, v)
 			return false
 		}
 	}
@@ -555,6 +557,7 @@ func (c *connCtx) enqueue(v any, wait time.Duration) bool {
 	case c.sendQ <- v:
 		return true
 	case <-timer.C:
+		c.runtime.logf("worker conn enqueue timeout: conn=%s wait=%s type=%T", c.connID, wait, v)
 		return false
 	}
 }
@@ -647,13 +650,23 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 					previewWorkerBytesForLog(data),
 				)
 				encoded := base64.StdEncoding.EncodeToString(data)
-				return c.sendEvent(EventEnvelope{
+				ok := c.sendEvent(EventEnvelope{
 					Type:      "evt",
 					Event:     EventOutput,
 					SessionID: c.runtime.cfg.SessionID,
 					Seq:       &seq,
 					Data:      &encoded,
 				})
+				if !ok {
+					c.runtime.logf(
+						"worker output forward failed: session=%s conn=%s sub=%s seq=%d",
+						c.runtime.cfg.SessionID,
+						c.connID,
+						subID,
+						seq,
+					)
+				}
+				return ok
 			},
 			func(reason string) {
 				c.runtime.logf(
@@ -663,12 +676,20 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 					subID,
 					reason,
 				)
-				_ = c.sendEvent(EventEnvelope{
+				if !c.sendEvent(EventEnvelope{
 					Type:      "evt",
 					Event:     EventDesync,
 					SessionID: c.runtime.cfg.SessionID,
 					Reason:    &reason,
-				})
+				}) {
+					c.runtime.logf(
+						"worker output desync forward failed: session=%s conn=%s sub=%s reason=%s",
+						c.runtime.cfg.SessionID,
+						c.connID,
+						subID,
+						reason,
+					)
+				}
 			},
 		)
 		if err != nil {

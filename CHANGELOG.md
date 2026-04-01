@@ -6,6 +6,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-01]
+
+### Added
+- **PTY stall diagnostics**: Add daemon and worker-side flow-control logging around websocket PTY acknowledgements, worker-stream buffering, and worker output forwarding so live terminal stalls can be traced to the exact handoff that stops delivering bytes.
+
+### Fixed
+- **Live PTY stream stalls after perf pacing**: Stop gating daemon PTY forwarding on frontend render acknowledgements and make worker-stream buffering backpressure instead of killing the stream after a short overflow timeout, so transient UI slowdowns no longer wedge a session until reload.
+
 ## [2026-03-31]
 
 ### Changed
@@ -14,6 +22,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Perf harness baseline**: Remove the old runtime coalescing toggle from the packaged-app perf harness so the baseline measurements reflect the restored direct terminal write path.
 - **Terminal rendering structure**: Move terminal sizing and theme helpers out of the main terminal component and clean up a few small rendering-path footguns without changing scroll-pin behavior.
 - **Scroll-pin structure**: Move the scroll-pin write interception, wheel tracking, and CSI suppression into a dedicated helper so the live terminal component stops owning that behavior inline and the remaining private xterm usage is easier to audit.
+- **Frontend terminal stall tracing**: Add a low-volume frontend runtime log for pane binding changes, terminal mount/unmount, and throttled xterm write/render heartbeats so reload-only terminal stalls leave evidence after the page is gone.
 
 ### Removed
 - **Visible-terminal coalescing experiment**: Remove the frontend terminal coalescing config and debug plumbing after it repeatedly caused rendering artifacts in both DOM and WebGL renderers.

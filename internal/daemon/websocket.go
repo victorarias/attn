@@ -90,24 +90,44 @@ func newPTYFlowState(lastAckedSeq uint32) *ptyFlowState {
 	return state
 }
 
-func (s *ptyFlowState) acquire() bool {
+func (s *ptyFlowState) snapshot() (credits int, ackedSeq uint32, closed bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.credits, s.ackedSeq, s.closed
+}
+
+func (s *ptyFlowState) acquire() (ok bool, waited time.Duration, prevCredits int, prevAcked uint32, remainingCredits int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prevCredits = s.credits
+	prevAcked = s.ackedSeq
+	var waitStart time.Time
 	for !s.closed && s.credits <= 0 {
+		if waitStart.IsZero() {
+			waitStart = time.Now()
+		}
 		s.cond.Wait()
 	}
 	if s.closed {
-		return false
+		if !waitStart.IsZero() {
+			waited = time.Since(waitStart)
+		}
+		return false, waited, prevCredits, prevAcked, s.credits
 	}
 	s.credits--
-	return true
+	if !waitStart.IsZero() {
+		waited = time.Since(waitStart)
+	}
+	return true, waited, prevCredits, prevAcked, s.credits
 }
 
-func (s *ptyFlowState) ack(seq uint32) {
+func (s *ptyFlowState) ack(seq uint32) (advanced bool, prevAcked uint32, prevCredits int, newCredits int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	prevAcked = s.ackedSeq
+	prevCredits = s.credits
 	if s.closed || seq <= s.ackedSeq {
-		return
+		return false, prevAcked, prevCredits, s.credits
 	}
 	delta := int(seq - s.ackedSeq)
 	s.ackedSeq = seq
@@ -115,7 +135,9 @@ func (s *ptyFlowState) ack(seq uint32) {
 	if s.credits > maxPTYInFlightMessages {
 		s.credits = maxPTYInFlightMessages
 	}
+	newCredits = s.credits
 	s.cond.Broadcast()
+	return true, prevAcked, prevCredits, newCredits
 }
 
 func (s *ptyFlowState) close() {
@@ -216,14 +238,15 @@ func (c *wsClient) removePTYFlowState(sessionID string) {
 	}
 }
 
-func (c *wsClient) ackPTYFlow(sessionID string, seq uint32) {
+func (c *wsClient) ackPTYFlow(sessionID string, seq uint32) (hasState bool, advanced bool, prevAcked uint32, prevCredits int, newCredits int) {
 	c.ptyFlowMu.Lock()
 	state := c.ptyFlow[sessionID]
 	c.ptyFlowMu.Unlock()
 	if state == nil {
-		return
+		return false, false, 0, 0, 0
 	}
-	state.ack(seq)
+	advanced, prevAcked, prevCredits, newCredits = state.ack(seq)
+	return true, advanced, prevAcked, prevCredits, newCredits
 }
 
 // stopGitStatusPoll stops any active git status polling for this client
@@ -1000,7 +1023,21 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdPtyOutputAck:
 		ackMsg := msg.(*protocol.PtyOutputAckMessage)
 		if ackMsg.Seq >= 0 {
-			client.ackPTYFlow(ackMsg.ID, uint32(ackMsg.Seq))
+			hasState, advanced, prevAcked, prevCredits, newCredits := client.ackPTYFlow(ackMsg.ID, uint32(ackMsg.Seq))
+			if !hasState {
+				d.logf("pty_output ack ignored: id=%s seq=%d reason=no_flow_state", ackMsg.ID, ackMsg.Seq)
+				return
+			}
+			if advanced && (prevCredits <= 0 || ackMsg.Seq-int(prevAcked) > 1) {
+				d.logf(
+					"pty_output ack: id=%s seq=%d prev_acked=%d prev_credits=%d new_credits=%d",
+					ackMsg.ID,
+					ackMsg.Seq,
+					prevAcked,
+					prevCredits,
+					newCredits,
+				)
+			}
 		}
 
 	case protocol.CmdPtyResize:
@@ -1325,7 +1362,12 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 }
 
 func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stream ptybackend.Stream) {
-	flow := client.ensurePTYFlowState(sessionID, 0)
+	// Keep per-session ACK state so the frontend can continue sending PTY
+	// acknowledgements without tripping noisy "missing state" logs, but do not
+	// gate live output on those ACKs. Waiting for frontend render acks here made
+	// transient UI slowdowns tear down otherwise healthy PTY streams.
+	client.ensurePTYFlowState(sessionID, 0)
+	d.logf("pty stream forward start: id=%s", sessionID)
 	defer func() {
 		client.attachMu.Lock()
 		current, ok := client.attachedStreams[sessionID]
@@ -1336,14 +1378,12 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 		if ok && current == stream {
 			client.removePTYFlowState(sessionID)
 		}
+		d.logf("pty stream forward stop: id=%s", sessionID)
 	}()
 
 	for event := range stream.Events() {
 		switch event.Kind {
 		case ptybackend.OutputEventKindOutput:
-			if !flow.acquire() {
-				return
-			}
 			d.logf(
 				"pty_output forward: id=%s seq=%d bytes=%d preview=%q",
 				sessionID,
@@ -1361,7 +1401,6 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 			payload, err := json.Marshal(wsEvent)
 			if err != nil {
 				d.logf("pty_output marshal failed: id=%s seq=%d err=%v", sessionID, event.Seq, err)
-				flow.ack(event.Seq)
 				continue
 			}
 			if !d.sendOutboundBlocking(client, outboundMessage{kind: messageKindText, payload: payload}, ptyOutputSendWait) {
@@ -1386,6 +1425,8 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 			}
 		}
 	}
+
+	d.logf("pty stream events closed: id=%s", sessionID)
 }
 
 func (d *Daemon) handlePtyResize(client *wsClient, msg *protocol.PtyResizeMessage) {

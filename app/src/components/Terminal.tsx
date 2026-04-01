@@ -7,6 +7,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled, recordResizeEvent, formatResizeLog, type ResizeDiagnostics } from '../utils/terminalDebug';
+import { activeElementSummary } from '../utils/paneRuntimeDebug';
 import { cleanTerminalLines, bufferSelectionToMarkdown } from '../utils/terminalMarkdown';
 import { registerTerminalPerfGetter } from '../utils/terminalPerf';
 import {
@@ -30,6 +31,7 @@ import {
   subscribeTerminalRendererConfig,
   type TerminalRendererMode,
 } from '../utils/terminalRenderer';
+import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
 export type { ResolvedTheme } from '../utils/terminalSizing';
 
 function getContainerDebugInfo(container: HTMLElement) {
@@ -71,6 +73,14 @@ interface TerminalProps {
   fontSize?: number;
   resolvedTheme?: ResolvedTheme;
   debugName?: string;
+  runtimeLogMeta?: {
+    sessionId: string;
+    paneId: string;
+    runtimeId: string;
+    paneKind: 'main' | 'shell';
+    isActivePane: boolean;
+    isActiveSession: boolean;
+  };
   /** TUI apps (Ink) render their own cursor; hide xterm's after resize to prevent ghost cursor. */
   tuiCursor?: boolean;
   onInit?: (terminal: XTerm) => void;
@@ -79,7 +89,7 @@ interface TerminalProps {
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
-  function Terminal({ fontSize = DEFAULT_FONT_SIZE, resolvedTheme = 'dark', debugName, tuiCursor, onInit, onReady, onResize }, ref) {
+  function Terminal({ fontSize = DEFAULT_FONT_SIZE, resolvedTheme = 'dark', debugName, runtimeLogMeta, tuiCursor, onInit, onReady, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
     const webglAddonRef = useRef<WebglAddon | null>(null);
@@ -97,6 +107,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const fontSizeRef = useRef(fontSize);
     const resolvedThemeRef = useRef(resolvedTheme);
     const tuiCursorRef = useRef(tuiCursor);
+    const runtimeLogMetaRef = useRef(runtimeLogMeta);
 
     useEffect(() => {
       onReadyRef.current = onReady;
@@ -106,7 +117,35 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       resolvedThemeRef.current = resolvedTheme;
       debugNameRef.current = debugName || 'unknown';
       tuiCursorRef.current = tuiCursor;
+      runtimeLogMetaRef.current = runtimeLogMeta;
     });
+
+    useEffect(() => {
+      if (!runtimeLogMeta) {
+        return;
+      }
+      recordTerminalRuntimeLog({
+        category: 'terminal',
+        sessionId: runtimeLogMeta.sessionId,
+        paneId: runtimeLogMeta.paneId,
+        runtimeId: runtimeLogMeta.runtimeId,
+        debugName: debugName || 'unknown',
+        message: 'terminal activity target changed',
+        details: {
+          paneKind: runtimeLogMeta.paneKind,
+          isActivePane: runtimeLogMeta.isActivePane,
+          isActiveSession: runtimeLogMeta.isActiveSession,
+        },
+      });
+    }, [
+      debugName,
+      runtimeLogMeta?.isActivePane,
+      runtimeLogMeta?.isActiveSession,
+      runtimeLogMeta?.paneId,
+      runtimeLogMeta?.paneKind,
+      runtimeLogMeta?.runtimeId,
+      runtimeLogMeta?.sessionId,
+    ]);
 
     // Update xterm theme at runtime when resolved theme changes
     useEffect(() => {
@@ -504,6 +543,89 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
       // Store ref immediately
       xtermRef.current = term;
+      const runtimeMeta = runtimeLogMetaRef.current;
+      if (runtimeMeta) {
+        recordTerminalRuntimeLog({
+          category: 'terminal',
+          sessionId: runtimeMeta.sessionId,
+          paneId: runtimeMeta.paneId,
+          runtimeId: runtimeMeta.runtimeId,
+          debugName: debugNameRef.current,
+          message: 'xterm mounted',
+          details: {
+            paneKind: runtimeMeta.paneKind,
+            cols: term.cols,
+            rows: term.rows,
+            renderer: rendererModeRef.current,
+          },
+        });
+      }
+      const activity = {
+        renderCount: 0,
+        writeParsedCount: 0,
+        loggedRenderCount: 0,
+        loggedWriteParsedCount: 0,
+        lastRenderAt: 0,
+        lastWriteParsedAt: 0,
+        lastRenderRange: null as { start: number; end: number } | null,
+      };
+      const renderDisposable = term.onRender((event) => {
+        activity.renderCount += 1;
+        activity.lastRenderAt = Date.now();
+        activity.lastRenderRange = event;
+      });
+      const writeParsedDisposable = term.onWriteParsed(() => {
+        activity.writeParsedCount += 1;
+        activity.lastWriteParsedAt = Date.now();
+      });
+      const heartbeatInterval = window.setInterval(() => {
+        const meta = runtimeLogMetaRef.current;
+        if (!meta || !meta.isActiveSession || !meta.isActivePane) {
+          return;
+        }
+        const now = Date.now();
+        const renderDelta = activity.renderCount - activity.loggedRenderCount;
+        const writeParsedDelta = activity.writeParsedCount - activity.loggedWriteParsedCount;
+        const msSinceRender = activity.lastRenderAt > 0 ? now - activity.lastRenderAt : null;
+        const msSinceWriteParsed = activity.lastWriteParsedAt > 0 ? now - activity.lastWriteParsedAt : null;
+        if (
+          renderDelta === 0 &&
+          writeParsedDelta === 0 &&
+          (msSinceRender === null || msSinceRender < 4000) &&
+          (msSinceWriteParsed === null || msSinceWriteParsed < 4000)
+        ) {
+          return;
+        }
+        const buffer = term.buffer.active;
+        recordTerminalRuntimeLog({
+          category: 'activity',
+          sessionId: meta.sessionId,
+          paneId: meta.paneId,
+          runtimeId: meta.runtimeId,
+          debugName: debugNameRef.current,
+          message: 'xterm renderer heartbeat',
+          details: {
+            paneKind: meta.paneKind,
+            renderer: rendererModeRef.current,
+            visible: visibleRef.current,
+            cols: term.cols,
+            rows: term.rows,
+            bufferLength: buffer.length,
+            baseY: buffer.baseY,
+            viewportY: buffer.viewportY,
+            renderDelta,
+            writeParsedDelta,
+            msSinceRender,
+            msSinceWriteParsed,
+            lastRenderRange: activity.lastRenderRange,
+            writeQueueChunks: writeQueueChunksRef.current,
+            writeQueueBytes: writeQueueBytesRef.current,
+            ...activeElementSummary(),
+          },
+        });
+        activity.loggedRenderCount = activity.renderCount;
+        activity.loggedWriteParsedCount = activity.writeParsedCount;
+      }, 3000);
       const unregisterTerminalPerf = registerTerminalPerfGetter(perfRegistryIdRef.current, () => {
         const currentTerm = xtermRef.current;
         if (!currentTerm) {
@@ -709,6 +831,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           isVisible = nowVisible;
           visibleRef.current = nowVisible;
           logTerminal('log', 'Visibility changed', { nowVisible, wasHidden, readyFired });
+          const meta = runtimeLogMetaRef.current;
+          if (meta && meta.isActiveSession && meta.isActivePane) {
+            recordTerminalRuntimeLog({
+              category: 'terminal',
+              sessionId: meta.sessionId,
+              paneId: meta.paneId,
+              runtimeId: meta.runtimeId,
+              debugName: debugNameRef.current,
+              message: 'terminal visibility changed',
+              details: {
+                paneKind: meta.paneKind,
+                nowVisible,
+                wasHidden,
+                readyFired,
+              },
+            });
+          }
 
           // VS Code pattern: flush pending resizes when becoming visible
           if (wasHidden && readyFired) {
@@ -759,6 +898,32 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
 	      // Cleanup
 	      return () => {
+          const meta = runtimeLogMetaRef.current;
+          if (meta) {
+            const buffer = term.buffer.active;
+            recordTerminalRuntimeLog({
+              category: 'terminal',
+              sessionId: meta.sessionId,
+              paneId: meta.paneId,
+              runtimeId: meta.runtimeId,
+              debugName: debugNameRef.current,
+              message: 'xterm unmounted',
+              details: {
+                paneKind: meta.paneKind,
+                renderer: rendererModeRef.current,
+                cols: term.cols,
+                rows: term.rows,
+                bufferLength: buffer.length,
+                baseY: buffer.baseY,
+                viewportY: buffer.viewportY,
+                renderCount: activity.renderCount,
+                writeParsedCount: activity.writeParsedCount,
+              },
+            });
+          }
+          renderDisposable.dispose();
+          writeParsedDisposable.dispose();
+          window.clearInterval(heartbeatInterval);
           unsubscribeRendererConfig();
 	        resizeObserver.disconnect();
         visibilityObserver.disconnect();
