@@ -1,7 +1,7 @@
 # Preparatory Refactors Plan
 
 Date: 2026-04-02
-Status: In Progress
+Status: Done
 Owner: daemon/frontend
 
 ## Summary
@@ -10,11 +10,13 @@ This document isolates the preparatory refactorings into standalone work items.
 
 Each item should be implemented as a clean PR.
 
+Completed on 2026-04-02. The last pending item (`2. Add Linux targets to release workflow`) was implemented and validated via the `Release Preflight` GitHub Actions run on PR #105 (`refactor/preparatory-refactors`), which successfully built the Linux daemon on both `ubuntu-24.04` and `ubuntu-24.04-arm`.
+
 ## Implementation Status
 
 - Done: 0. Extract command routing in websocket.go
 - Done: 1. Add compiled-in version string
-- Pending: 2. Add linux targets to release workflow
+- Done: 2. Add Linux targets to release workflow
 - Done: 3. Add `endpoint_id` to Session model
 - Done: 4. Abstract the frontend WS URL
 - Dropped: 5. Introduce major.minor protocol versioning
@@ -82,15 +84,52 @@ Changes needed:
 - Update `.github/workflows/release.yml` to include ldflags in Go build step
 - Version is derived from the git tag in CI, from `package.json` or Makefile var locally
 
-### 2. Add linux targets to release workflow
+### 2. Add Linux targets to release workflow (done)
 
-The current release workflow only produces `darwin/arm64` and is tightly coupled to the Tauri build action (which creates the GitHub release). Adding Linux requires careful coordination:
+The current release workflow only produces `darwin/arm64` artifacts and is tightly coupled to the Tauri action, which also creates the GitHub release. Linux should be added as native post-release jobs, not as ad hoc cross-compilation from macOS.
 
-1. Add a `linux-binaries` job that runs on `ubuntu-latest` (or in the existing `tauri` job after the Tauri action creates the release)
-2. Build `GOOS=linux GOARCH=amd64` and `GOOS=linux GOARCH=arm64` with ldflags
-3. Upload binaries via `gh release upload $TAG attn-linux-amd64 attn-linux-arm64 --clobber`
-4. **CGO consideration:** Check if the SQLite dependency requires CGO. If so, either use `CGO_ENABLED=0` with a pure-Go SQLite driver, or set up cross-compilation toolchain. Test that the resulting binary runs correctly.
-5. Name binaries consistently: `attn-linux-amd64`, `attn-linux-arm64`
+**Decision**
+
+- Keep the `tauri` job as the release-creating job.
+- Add two follow-on jobs that upload standalone daemon binaries:
+  - `linux-amd64` on `ubuntu-24.04`
+  - `linux-arm64` on `ubuntu-24.04-arm`
+- Build natively on Linux for each architecture instead of cross-compiling from macOS.
+
+**Why native Linux jobs**
+
+- The repo currently uses `github.com/mattn/go-sqlite3`, which requires CGO.
+- That makes the old "just add `GOOS=linux GOARCH=...`" framing incomplete, especially for `linux/arm64`.
+- Native GitHub-hosted Linux runners exist for both targets, including the standard `ubuntu-24.04-arm` label, so we can avoid custom cross-toolchains and avoid pretending `CGO_ENABLED=0` is viable without a driver change.
+
+**Implementation shape**
+
+1. Keep the existing `tauri` job responsible for creating the release.
+2. Add `linux-amd64` and `linux-arm64` jobs with `needs: tauri` so upload only starts after the release exists.
+3. In each Linux job:
+   - resolve `RELEASE_TAG` / `RELEASE_VERSION` the same way as the macOS job
+   - `actions/checkout@v4` at `ref: ${{ env.RELEASE_TAG }}`
+   - `actions/setup-go@v5`
+   - build with the existing ldflags path via `make build VERSION="${RELEASE_VERSION}" OUTPUT=/tmp/attn-linux-<arch>`
+   - upload with `gh release upload "${RELEASE_TAG}" /tmp/attn-linux-<arch> --clobber`
+4. Artifact names should be:
+   - `attn-linux-amd64`
+   - `attn-linux-arm64`
+5. Add a light validation step before upload:
+   - run `/tmp/attn-linux-<arch> --version`
+   - optionally run `file /tmp/attn-linux-<arch>` to confirm the architecture in logs
+
+**Non-goals for this PR**
+
+- No Linux Tauri/Desktop build.
+- No packaging changes (`.deb`, `.rpm`, tarballs).
+- No SQLite driver swap just to simplify CI.
+
+**Exit gate**
+
+- Tag-triggered release uploads both `attn-linux-amd64` and `attn-linux-arm64`.
+- Both binaries report the tagged version via `--version`.
+- `docs/RELEASE.md` is updated to say the workflow now publishes macOS app artifacts plus Linux daemon binaries.
 
 ### 3. Add `endpoint_id` to Session model (done)
 

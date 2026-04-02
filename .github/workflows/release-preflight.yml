@@ -1,0 +1,68 @@
+name: Release Preflight
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/release.yml"
+      - ".github/workflows/release-preflight.yml"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+  workflow_dispatch:
+
+jobs:
+  linux-daemon-preflight:
+    name: Linux daemon (${{ matrix.label }})
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: amd64
+            runs_on: ubuntu-24.04
+            goarch: amd64
+            output: /tmp/attn-linux-amd64
+            artifact: attn-linux-amd64
+          - label: arm64
+            runs_on: ubuntu-24.04-arm
+            goarch: arm64
+            output: /tmp/attn-linux-arm64
+            artifact: attn-linux-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build daemon
+        env:
+          VERSION: preflight-${{ github.sha }}
+        run: |
+          GOOS=linux GOARCH=${{ matrix.goarch }} make build VERSION="${VERSION}" OUTPUT=${{ matrix.output }}
+
+      - name: Validate daemon
+        env:
+          EXPECTED_VERSION: preflight-${{ github.sha }}
+        run: |
+          actual_version="$(${{ matrix.output }} --version)"
+          if [ "$actual_version" != "$EXPECTED_VERSION" ]; then
+            echo "Version mismatch: got '$actual_version', want '$EXPECTED_VERSION'"
+            exit 1
+          fi
+          file ${{ matrix.output }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 7
