@@ -86,7 +86,6 @@ interface SessionTerminalWorkspaceProps {
   onSplitPane: (targetPaneId: string, direction: TerminalSplitDirection) => void;
   onClosePane: (paneId: string) => void;
   onFocusPane: (paneId: string) => void;
-  onPtyOutputProcessed?: (runtimeId: string, seq: number) => void;
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
 }
@@ -109,7 +108,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onSplitPane,
     onClosePane,
     onFocusPane,
-    onPtyOutputProcessed,
     onZoomModeChange,
     onNavigateOutOfSession,
   }, ref) {
@@ -157,7 +155,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       })),
     ]), [cwd, getMainPaneSpawnArgs, sessionId, workspace.terminals]);
 
-    const binder = usePaneRuntimeBinder(runtimePanes, activePaneId, eventRouter, onPtyOutputProcessed);
+    const binder = usePaneRuntimeBinder(runtimePanes, activePaneId, eventRouter);
     const fitPane = binder.fitPane;
     const activeRuntimeId = useMemo(
       () => runtimePanes.find((pane) => pane.paneId === activePaneId)?.runtimeId,

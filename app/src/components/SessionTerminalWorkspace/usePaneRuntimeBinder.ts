@@ -137,7 +137,6 @@ export function usePaneRuntimeBinder(
   panes: PaneRuntimeSpec[],
   activePaneId: string,
   eventRouter: PaneRuntimeEventRouter,
-  onPtyOutputProcessed?: (runtimeId: string, seq: number) => void,
 ): PaneRuntimeBinder {
   const paneByIdRef = useRef<Map<string, PaneRuntimeSpec>>(new Map());
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
@@ -260,14 +259,8 @@ export function usePaneRuntimeBinder(
       }
       await writeBytesToTerminalAsync(liveXterm, bytes);
       recordPaneWriteActivity(paneId, bytes.length, seq);
-      if (typeof seq === 'number') {
-        const runtimeId = paneByIdRef.current.get(paneId)?.runtimeId;
-        if (runtimeId) {
-          onPtyOutputProcessed?.(runtimeId, seq);
-        }
-      }
     });
-  }, [onPtyOutputProcessed, queueBufferedBytesForReplay, queuePaneWriteTask, recordPaneWriteActivity]);
+  }, [queueBufferedBytesForReplay, queuePaneWriteTask, recordPaneWriteActivity]);
 
   const replayPendingTerminalEvent = useCallback((paneId: string, xterm: XTerm, event: PtyEventPayload) => {
     switch (event.event) {

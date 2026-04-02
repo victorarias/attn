@@ -1,5 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core';
 
+const TERMINAL_RUNTIME_TRACE_STORAGE_KEY = 'attn:terminal-runtime-trace';
 const TERMINAL_RUNTIME_LOG_DIR = 'debug';
 const TERMINAL_RUNTIME_LOG_FILE = `${TERMINAL_RUNTIME_LOG_DIR}/terminal-runtime.jsonl`;
 const MAX_TERMINAL_RUNTIME_EVENTS = 500;
@@ -25,6 +26,28 @@ declare global {
 }
 
 let fileWriteChain: Promise<void> = Promise.resolve();
+
+export function isTerminalRuntimeTraceEnabled(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(TERMINAL_RUNTIME_TRACE_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setTerminalRuntimeTraceEnabled(enabled: boolean) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(TERMINAL_RUNTIME_TRACE_STORAGE_KEY, enabled ? '1' : '0');
+  } catch {
+    // Ignore storage failures.
+  }
+}
 
 async function appendRuntimeLogToFile(entry: TerminalRuntimeLogEvent) {
   if (!isTauri()) {
@@ -66,6 +89,15 @@ async function clearRuntimeLogFile() {
   }
 }
 
+export function clearTerminalRuntimeLog() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  ensureGlobals();
+  window.__ATTN_TERMINAL_RUNTIME_EVENTS = [];
+  void clearRuntimeLogFile();
+}
+
 function enqueueRuntimeLogFileWrite(entry: TerminalRuntimeLogEvent) {
   fileWriteChain = fileWriteChain
     .catch(() => {})
@@ -84,15 +116,15 @@ function ensureGlobals() {
     window.__ATTN_TERMINAL_RUNTIME_DUMP = () => [...(window.__ATTN_TERMINAL_RUNTIME_EVENTS || [])];
   }
   if (!window.__ATTN_TERMINAL_RUNTIME_CLEAR) {
-    window.__ATTN_TERMINAL_RUNTIME_CLEAR = () => {
-      window.__ATTN_TERMINAL_RUNTIME_EVENTS = [];
-      void clearRuntimeLogFile();
-    };
+    window.__ATTN_TERMINAL_RUNTIME_CLEAR = () => clearTerminalRuntimeLog();
   }
 }
 
 export function recordTerminalRuntimeLog(event: Omit<TerminalRuntimeLogEvent, 'at'>) {
   if (typeof window === 'undefined') {
+    return;
+  }
+  if (!isTerminalRuntimeTraceEnabled()) {
     return;
   }
   ensureGlobals();

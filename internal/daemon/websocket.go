@@ -62,8 +62,6 @@ type wsClient struct {
 	// PTY subscriptions keyed by session ID
 	attachedStreams map[string]ptybackend.Stream // session -> stream
 	attachMu        sync.Mutex
-	ptyFlow         map[string]*ptyFlowState
-	ptyFlowMu       sync.Mutex
 
 	// Git status subscription state
 	gitStatusDir    string
@@ -71,83 +69,6 @@ type wsClient struct {
 	gitStatusStop   chan struct{}
 	gitStatusHash   string // hash of last sent status for dedup
 	gitStatusMu     sync.Mutex
-}
-
-type ptyFlowState struct {
-	mu       sync.Mutex
-	cond     *sync.Cond
-	credits  int
-	ackedSeq uint32
-	closed   bool
-}
-
-func newPTYFlowState(lastAckedSeq uint32) *ptyFlowState {
-	state := &ptyFlowState{
-		credits:  maxPTYInFlightMessages,
-		ackedSeq: lastAckedSeq,
-	}
-	state.cond = sync.NewCond(&state.mu)
-	return state
-}
-
-func (s *ptyFlowState) snapshot() (credits int, ackedSeq uint32, closed bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.credits, s.ackedSeq, s.closed
-}
-
-func (s *ptyFlowState) acquire() (ok bool, waited time.Duration, prevCredits int, prevAcked uint32, remainingCredits int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	prevCredits = s.credits
-	prevAcked = s.ackedSeq
-	var waitStart time.Time
-	for !s.closed && s.credits <= 0 {
-		if waitStart.IsZero() {
-			waitStart = time.Now()
-		}
-		s.cond.Wait()
-	}
-	if s.closed {
-		if !waitStart.IsZero() {
-			waited = time.Since(waitStart)
-		}
-		return false, waited, prevCredits, prevAcked, s.credits
-	}
-	s.credits--
-	if !waitStart.IsZero() {
-		waited = time.Since(waitStart)
-	}
-	return true, waited, prevCredits, prevAcked, s.credits
-}
-
-func (s *ptyFlowState) ack(seq uint32) (advanced bool, prevAcked uint32, prevCredits int, newCredits int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	prevAcked = s.ackedSeq
-	prevCredits = s.credits
-	if s.closed || seq <= s.ackedSeq {
-		return false, prevAcked, prevCredits, s.credits
-	}
-	delta := int(seq - s.ackedSeq)
-	s.ackedSeq = seq
-	s.credits += delta
-	if s.credits > maxPTYInFlightMessages {
-		s.credits = maxPTYInFlightMessages
-	}
-	newCredits = s.credits
-	s.cond.Broadcast()
-	return true, prevAcked, prevCredits, newCredits
-}
-
-func (s *ptyFlowState) close() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return
-	}
-	s.closed = true
-	s.cond.Broadcast()
 }
 
 func (c *wsClient) closeSendChannel() {
@@ -198,57 +119,6 @@ func (c *wsClient) sendWithWait(message outboundMessage, wait time.Duration) boo
 	}
 }
 
-func (c *wsClient) ensurePTYFlowState(sessionID string, lastAckedSeq uint32) *ptyFlowState {
-	c.ptyFlowMu.Lock()
-	defer c.ptyFlowMu.Unlock()
-	if c.ptyFlow == nil {
-		c.ptyFlow = make(map[string]*ptyFlowState)
-	}
-	if state, ok := c.ptyFlow[sessionID]; ok {
-		return state
-	}
-	state := newPTYFlowState(lastAckedSeq)
-	c.ptyFlow[sessionID] = state
-	return state
-}
-
-func (c *wsClient) resetPTYFlowState(sessionID string, lastAckedSeq uint32) {
-	c.ptyFlowMu.Lock()
-	if c.ptyFlow == nil {
-		c.ptyFlow = make(map[string]*ptyFlowState)
-	}
-	previous := c.ptyFlow[sessionID]
-	c.ptyFlow[sessionID] = newPTYFlowState(lastAckedSeq)
-	c.ptyFlowMu.Unlock()
-	if previous != nil {
-		previous.close()
-	}
-}
-
-func (c *wsClient) removePTYFlowState(sessionID string) {
-	c.ptyFlowMu.Lock()
-	var previous *ptyFlowState
-	if c.ptyFlow != nil {
-		previous = c.ptyFlow[sessionID]
-		delete(c.ptyFlow, sessionID)
-	}
-	c.ptyFlowMu.Unlock()
-	if previous != nil {
-		previous.close()
-	}
-}
-
-func (c *wsClient) ackPTYFlow(sessionID string, seq uint32) (hasState bool, advanced bool, prevAcked uint32, prevCredits int, newCredits int) {
-	c.ptyFlowMu.Lock()
-	state := c.ptyFlow[sessionID]
-	c.ptyFlowMu.Unlock()
-	if state == nil {
-		return false, false, 0, 0, 0
-	}
-	advanced, prevAcked, prevCredits, newCredits = state.ack(seq)
-	return true, advanced, prevAcked, prevCredits, newCredits
-}
-
 // stopGitStatusPoll stops any active git status polling for this client
 func (c *wsClient) stopGitStatusPoll() {
 	c.gitStatusMu.Lock()
@@ -292,10 +162,9 @@ type wsHub struct {
 }
 
 const (
-	maxSlowCount           = 3 // disconnect after this many consecutive failed sends
-	maxPTYDimValue         = 65535
-	maxPTYInFlightMessages = 4
-	ptyOutputSendWait      = 1 * time.Second
+	maxSlowCount      = 3 // disconnect after this many consecutive failed sends
+	maxPTYDimValue    = 65535
+	ptyOutputSendWait = 1 * time.Second
 )
 
 func newWSHub() *wsHub {
@@ -450,7 +319,6 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 		send:            make(chan outboundMessage, 256),
 		recv:            make(chan []byte, 256), // buffer for incoming messages
 		attachedStreams: make(map[string]ptybackend.Stream),
-		ptyFlow:         make(map[string]*ptyFlowState),
 	}
 
 	d.wsHub.register <- client
@@ -1020,26 +888,6 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 			d.logf("pty_input ok: id=%s bytes=%d", inputMsg.ID, len(inputMsg.Data))
 		}
 
-	case protocol.CmdPtyOutputAck:
-		ackMsg := msg.(*protocol.PtyOutputAckMessage)
-		if ackMsg.Seq >= 0 {
-			hasState, advanced, prevAcked, prevCredits, newCredits := client.ackPTYFlow(ackMsg.ID, uint32(ackMsg.Seq))
-			if !hasState {
-				d.logf("pty_output ack ignored: id=%s seq=%d reason=no_flow_state", ackMsg.ID, ackMsg.Seq)
-				return
-			}
-			if advanced && (prevCredits <= 0 || ackMsg.Seq-int(prevAcked) > 1) {
-				d.logf(
-					"pty_output ack: id=%s seq=%d prev_acked=%d prev_credits=%d new_credits=%d",
-					ackMsg.ID,
-					ackMsg.Seq,
-					prevAcked,
-					prevCredits,
-					newCredits,
-				)
-			}
-		}
-
 	case protocol.CmdPtyResize:
 		resizeMsg := msg.(*protocol.PtyResizeMessage)
 		d.handlePtyResize(client, resizeMsg)
@@ -1128,7 +976,6 @@ func (d *Daemon) detachSession(client *wsClient, sessionID string) {
 		delete(client.attachedStreams, sessionID)
 	}
 	client.attachMu.Unlock()
-	client.removePTYFlowState(sessionID)
 	if hasStream {
 		_ = stream.Close()
 	}
@@ -1137,17 +984,11 @@ func (d *Daemon) detachSession(client *wsClient, sessionID string) {
 func (d *Daemon) detachAllSessions(client *wsClient) {
 	client.attachMu.Lock()
 	streams := make([]ptybackend.Stream, 0, len(client.attachedStreams))
-	sessionIDs := make([]string, 0, len(client.attachedStreams))
-	for sessionID, stream := range client.attachedStreams {
+	for _, stream := range client.attachedStreams {
 		streams = append(streams, stream)
-		sessionIDs = append(sessionIDs, sessionID)
 	}
 	client.attachedStreams = make(map[string]ptybackend.Stream)
 	client.attachMu.Unlock()
-
-	for _, sessionID := range sessionIDs {
-		client.removePTYFlowState(sessionID)
-	}
 	for _, stream := range streams {
 		_ = stream.Close()
 	}
@@ -1327,7 +1168,6 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 	previous := client.attachedStreams[msg.ID]
 	client.attachedStreams[msg.ID] = stream
 	client.attachMu.Unlock()
-	client.resetPTYFlowState(msg.ID, info.LastSeq)
 	if previous != nil && previous != stream {
 		_ = previous.Close()
 	}
@@ -1362,11 +1202,6 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 }
 
 func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stream ptybackend.Stream) {
-	// Keep per-session ACK state so the frontend can continue sending PTY
-	// acknowledgements without tripping noisy "missing state" logs, but do not
-	// gate live output on those ACKs. Waiting for frontend render acks here made
-	// transient UI slowdowns tear down otherwise healthy PTY streams.
-	client.ensurePTYFlowState(sessionID, 0)
 	d.logf("pty stream forward start: id=%s", sessionID)
 	defer func() {
 		client.attachMu.Lock()
@@ -1375,9 +1210,6 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 			delete(client.attachedStreams, sessionID)
 		}
 		client.attachMu.Unlock()
-		if ok && current == stream {
-			client.removePTYFlowState(sessionID)
-		}
 		d.logf("pty stream forward stop: id=%s", sessionID)
 	}()
 
@@ -1470,8 +1302,6 @@ func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMe
 func shouldLogWSCommand(cmd string) bool {
 	switch cmd {
 	case protocol.CmdPtyInput:
-		return false
-	case protocol.CmdPtyOutputAck:
 		return false
 	default:
 		return true

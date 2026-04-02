@@ -271,7 +271,6 @@ function App() {
     sendWorkspaceSplitPane,
     sendWorkspaceClosePane,
     sendRuntimeInput,
-    sendPtyOutputAck,
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,
@@ -376,7 +375,6 @@ function App() {
         sendWorkspaceSplitPane={sendWorkspaceSplitPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendRuntimeInput={sendRuntimeInput}
-        sendPtyOutputAck={sendPtyOutputAck}
         sendGetFileDiff={sendGetFileDiff}
         sendGetBranchDiffFiles={sendGetBranchDiffFiles}
         getRepoInfo={getRepoInfo}
@@ -451,7 +449,6 @@ interface AppContentProps {
   sendWorkspaceSplitPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceSplitPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
-  sendPtyOutputAck: ReturnType<typeof useDaemonSocket>['sendPtyOutputAck'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
   sendGetBranchDiffFiles: ReturnType<typeof useDaemonSocket>['sendGetBranchDiffFiles'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
@@ -521,7 +518,6 @@ function AppContent({
   sendWorkspaceSplitPane,
   sendWorkspaceClosePane,
   sendRuntimeInput,
-  sendPtyOutputAck,
   sendGetFileDiff,
   sendGetBranchDiffFiles,
   getRepoInfo,
@@ -1837,7 +1833,6 @@ function AppContent({
                   onFocusPane={(paneId) => {
                     setActivePane(session.id, paneId);
                   }}
-                  onPtyOutputProcessed={sendPtyOutputAck}
                   onZoomModeChange={(zoomed) => {
                     setZoomModeBySessionId((prev) => (
                       prev[session.id] === zoomed

@@ -9,6 +9,11 @@ import { getRepoName } from '../utils/repo';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { UISessionState } from '../types/sessionState';
 import { isTerminalDebugEnabled, formatResizeLog } from '../utils/terminalDebug';
+import {
+  clearTerminalRuntimeLog,
+  isTerminalRuntimeTraceEnabled,
+  setTerminalRuntimeTraceEnabled,
+} from '../utils/terminalRuntimeLog';
 import appIcon from '../assets/icon.png';
 import './Dashboard.css';
 
@@ -130,12 +135,24 @@ export function Dashboard({
 
   // Terminal resize debug toggle
   const [termDebug, setTermDebug] = useState(isTerminalDebugEnabled);
+  const [runtimeTraceEnabled, setRuntimeTraceEnabled] = useState(isTerminalRuntimeTraceEnabled);
   const copyBtnRef = useRef<HTMLButtonElement>(null);
   const toggleTermDebug = useCallback(() => {
     const next = !termDebug;
     try { window.localStorage.setItem('attn:terminal-debug', next ? '1' : '0'); } catch {}
     setTermDebug(next);
   }, [termDebug]);
+  const toggleRuntimeTrace = useCallback(() => {
+    const next = !runtimeTraceEnabled;
+    setTerminalRuntimeTraceEnabled(next);
+    if (next) {
+      clearTerminalRuntimeLog();
+    }
+    setRuntimeTraceEnabled(next);
+  }, [runtimeTraceEnabled]);
+  const clearRuntimeTrace = useCallback(() => {
+    clearTerminalRuntimeLog();
+  }, []);
   const copyResizeLog = useCallback(() => {
     const log = formatResizeLog();
     navigator.clipboard.writeText(log).then(() => {
@@ -534,6 +551,22 @@ export function Dashboard({
               title="Copy resize event log to clipboard"
             >
               Copy resize log
+            </button>
+          )}
+          <button
+            className={`debug-toggle ${runtimeTraceEnabled ? 'active' : ''}`}
+            onClick={toggleRuntimeTrace}
+            title="Toggle terminal runtime tracing to AppLocalData/debug/terminal-runtime.jsonl"
+          >
+            Runtime trace {runtimeTraceEnabled ? 'ON' : 'off'}
+          </button>
+          {runtimeTraceEnabled && (
+            <button
+              className="debug-copy-btn"
+              onClick={clearRuntimeTrace}
+              title="Clear the current terminal runtime trace log"
+            >
+              Clear runtime trace
             </button>
           )}
         </div>

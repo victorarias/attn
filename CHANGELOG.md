@@ -13,6 +13,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Live PTY stream stalls after perf pacing**: Stop gating daemon PTY forwarding on frontend render acknowledgements and make worker-stream buffering backpressure instead of killing the stream after a short overflow timeout, so transient UI slowdowns no longer wedge a session until reload.
+- **Terminal runtime tracing**: Gate the new terminal runtime trace logger behind an explicit dashboard toggle so the app no longer performs always-on debug file writes unless you enable tracing for a repro.
 
 ## [2026-03-31]
 

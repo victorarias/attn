@@ -96,7 +96,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '40';
+const PROTOCOL_VERSION = '41';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1648,12 +1648,6 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'pty_input', id, data, ...(source ? { source } : {}) }));
   }, []);
 
-  const sendPtyOutputAck = useCallback((id: string, seq: number) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ cmd: 'pty_output_ack', id, seq }));
-  }, []);
-
   const sendPtyResize = useCallback((id: string, cols: number, rows: number) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -3018,7 +3012,6 @@ export function useDaemonSocket({
     sendWorkspaceFocusPane,
     sendWorkspaceRenamePane,
     sendRuntimeInput: sendPtyInput,
-    sendPtyOutputAck,
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,
