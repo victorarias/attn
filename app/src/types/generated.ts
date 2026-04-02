@@ -318,6 +318,7 @@ export interface SessionElement {
     agent:                        SessionAgent;
     branch?:                      string;
     directory:                    string;
+    endpoint_id?:                 string;
     id:                           string;
     is_worktree?:                 boolean;
     label:                        string;
@@ -1720,6 +1721,7 @@ export interface Session {
     agent:                        SessionAgent;
     branch?:                      string;
     directory:                    string;
+    endpoint_id?:                 string;
     id:                           string;
     is_worktree?:                 boolean;
     label:                        string;
@@ -3887,6 +3889,7 @@ const typeMap: any = {
         { json: "agent", js: "agent", typ: r("SessionAgent") },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: "" },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },
         { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
         { json: "label", js: "label", typ: "" },
@@ -4661,6 +4664,7 @@ const typeMap: any = {
         { json: "agent", js: "agent", typ: r("SessionAgent") },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "directory", js: "directory", typ: "" },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },
         { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
         { json: "label", js: "label", typ: "" },

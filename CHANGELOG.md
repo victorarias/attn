@@ -12,6 +12,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Remote Daemon Hub Plan Scope**: Stop treating a binary WebSocket protocol or MsgPack migration as a prerequisite for the remote hub. The plan now assumes JSON forwarding for v1, with PTY-specific optimizations and binary framing only as a later, measurement-driven option.
 - **Daemon WebSocket Routing Structure**: Split the remaining inline WebSocket command handlers into domain-specific daemon files and add explicit command-scope metadata, so future endpoint-aware routing work has one place to reason about command ownership and recovery-sensitive actions.
 - **Compiled CLI Versioning**: Build the daemon with an explicit compiled version string, expose it through `attn --version`, and route local builds plus release packaging through the same ldflags path so the binary reports the release it actually came from.
+- **Session Endpoint Metadata**: Add optional `endpoint_id` to the session protocol shape and persisted store model so endpoint-aware routing can build on a stable session record without changing current local-daemon behavior.
+- **Frontend Daemon Endpoint Resolution**: Move websocket URL construction into one frontend resolver with override/profile hooks and env-based defaults, so the app no longer hardcodes the local daemon URL inline before endpoint-aware transport work lands.
+- **Protocol-Mismatch Daemon Restart**: When the app detects an older local daemon protocol, it now preflights the resolved daemon binary’s protocol before restarting, so mismatched binaries fail closed instead of entering restart churn.
 
 ## [2026-04-01]
 

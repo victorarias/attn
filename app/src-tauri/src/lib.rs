@@ -2,8 +2,11 @@ mod thumbs;
 mod ui_automation;
 
 use std::env;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 fn daemon_socket_path() -> Option<PathBuf> {
     if let Ok(path) = env::var("ATTN_SOCKET_PATH") {
@@ -15,6 +18,11 @@ fn daemon_socket_path() -> Option<PathBuf> {
 
     let home = dirs::home_dir()?;
     Some(home.join(".attn").join("attn.sock"))
+}
+
+fn daemon_pid_path() -> Option<PathBuf> {
+    let socket_path = daemon_socket_path()?;
+    Some(socket_path.parent()?.join("attn.pid"))
 }
 
 #[cfg(unix)]
@@ -33,6 +41,226 @@ fn daemon_is_running_at(socket_path: &Path) -> bool {
         return false;
     }
     socket_is_live(socket_path)
+}
+
+fn resolve_prefer_local(prefer_local: Option<bool>) -> bool {
+    let prefer_local_env = matches!(
+        env::var("ATTN_PREFER_LOCAL_DAEMON")
+            .ok()
+            .map(|value| value.trim().to_ascii_lowercase()),
+        Some(value) if value == "1" || value == "true" || value == "yes"
+    );
+    let prefer_local_hint = prefer_local.unwrap_or(false);
+    prefer_local_env || prefer_local_hint
+}
+
+fn resolve_daemon_binary(prefer_local: bool) -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let local_path = home.join(".local/bin/attn");
+    let bundled_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("attn")));
+
+    if prefer_local {
+        if local_path.exists() {
+            return Ok(local_path);
+        }
+        if let Some(ref path) = bundled_path {
+            if path.exists() {
+                return Ok(path.clone());
+            }
+        }
+    } else {
+        if let Some(ref path) = bundled_path {
+            if path.exists() {
+                return Ok(path.clone());
+            }
+        }
+        if local_path.exists() {
+            return Ok(local_path);
+        }
+    }
+
+    Err("No daemon binary found. Run 'make install' or reinstall the app.".into())
+}
+
+fn spawn_daemon(bin_path: &Path) -> Result<(), String> {
+    Command::new(bin_path)
+        .env("ATTN_WRAPPER_PATH", bin_path)
+        .arg("daemon")
+        .spawn()
+        .map_err(|e| format!("Failed to start daemon: {}", e))?;
+    Ok(())
+}
+
+fn daemon_binary_protocol_version(bin_path: &Path) -> Result<String, String> {
+    let empty_path = env::temp_dir().join("attn-protocol-probe-empty-path");
+    let mut child = Command::new(bin_path)
+        .arg("--protocol-version")
+        // Older binaries may not understand this flag and fall back into the
+        // wrapper path. Force the in-app direct-launch branch and strip PATH so
+        // any nested agent exec fails fast instead of opening the app.
+        .env("ATTN_INSIDE_APP", "1")
+        .env("ATTN_DAEMON_MANAGED", "1")
+        .env("ATTN_AGENT", "codex")
+        .env("PATH", &empty_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            format!(
+                "Failed to query protocol version from daemon binary {}: {}",
+                bin_path.display(),
+                e
+            )
+        })?;
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "Timed out querying protocol version from daemon binary {}",
+                        bin_path.display()
+                    ));
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "Failed while querying protocol version from daemon binary {}: {}",
+                    bin_path.display(),
+                    e
+                ));
+            }
+        }
+    };
+
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        let _ = pipe.read_to_string(&mut stdout);
+    }
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = pipe.read_to_string(&mut stderr);
+    }
+
+    if !status.success() {
+        let stderr = stderr.trim().to_string();
+        return Err(format!(
+            "Daemon binary {} failed protocol preflight{}",
+            bin_path.display(),
+            if stderr.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", stderr)
+            }
+        ));
+    }
+
+    let reported = stdout.trim().to_string();
+    if reported.is_empty() {
+        return Err(format!(
+            "Daemon binary {} returned an empty protocol version",
+            bin_path.display()
+        ));
+    }
+
+    Ok(reported)
+}
+
+fn wait_for_socket_state(socket_path: &Path, want_live: bool, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let live = daemon_is_running_at(socket_path);
+        if live == want_live {
+            return true;
+        }
+        if !want_live && !socket_path.exists() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn start_daemon_impl(prefer_local: Option<bool>) -> Result<(), String> {
+    let prefer_local = resolve_prefer_local(prefer_local);
+    let bin_path = resolve_daemon_binary(prefer_local)?;
+    let socket_path = daemon_socket_path().ok_or("Cannot resolve daemon socket path")?;
+    if !daemon_is_running_at(&socket_path) {
+        let _ = std::fs::remove_file(&socket_path);
+    } else {
+        return Ok(());
+    }
+
+    spawn_daemon(&bin_path)?;
+
+    if wait_for_socket_state(&socket_path, true, Duration::from_secs(3)) {
+        return Ok(());
+    }
+
+    Err("Daemon did not start within 3 seconds".to_string())
+}
+
+fn read_daemon_pid(pid_path: &Path) -> Result<u32, String> {
+    let data = std::fs::read_to_string(pid_path).map_err(|e| {
+        format!(
+            "Failed to read daemon pid file {}: {}",
+            pid_path.display(),
+            e
+        )
+    })?;
+    let pid = data.trim().parse::<u32>().map_err(|e| {
+        format!(
+            "Failed to parse daemon pid file {}: {}",
+            pid_path.display(),
+            e
+        )
+    })?;
+    if pid == 0 {
+        return Err(format!("Invalid daemon pid in {}", pid_path.display()));
+    }
+    Ok(pid)
+}
+
+#[cfg(unix)]
+fn terminate_process(pid: u32) -> Result<(), String> {
+    let rc = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    if rc == 0 {
+        return Ok(());
+    }
+
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(());
+    }
+
+    Err(format!("Failed to stop daemon process {}: {}", pid, err))
+}
+
+#[cfg(not(unix))]
+fn terminate_process(_pid: u32) -> Result<(), String> {
+    Err("Daemon restart is only supported on unix targets".into())
+}
+
+#[cfg(unix)]
+fn parent_process_id() -> Option<u32> {
+    Some(unsafe { libc::getppid() as u32 })
+}
+
+#[cfg(not(unix))]
+fn parent_process_id() -> Option<u32> {
+    None
 }
 
 /// Check if the daemon is running by validating the socket is live.
@@ -55,80 +283,56 @@ fn is_daemon_running() -> bool {
 /// Uses bundled app daemon by default, with optional local override for development.
 #[tauri::command]
 fn start_daemon(_app: tauri::AppHandle, prefer_local: Option<bool>) -> Result<(), String> {
-    use std::thread;
-    use std::time::Duration;
+    start_daemon_impl(prefer_local)
+}
 
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let prefer_local_env = matches!(
-        env::var("ATTN_PREFER_LOCAL_DAEMON")
-            .ok()
-            .map(|value| value.trim().to_ascii_lowercase()),
-        Some(value) if value == "1" || value == "true" || value == "yes"
-    );
-    let prefer_local_hint = prefer_local.unwrap_or(false);
-    let prefer_local = prefer_local_env || prefer_local_hint;
-
-    // 1. Local dev daemon (~/.local/bin/attn)
-    let local_path = home.join(".local/bin/attn");
-
-    // 2. Bundled path (same directory as the app executable)
-    let bundled_path = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("attn")));
-
-    // Default behavior: prefer bundled daemon so cask installs are independent of PATH/local bins.
-    // Dev override: set ATTN_PREFER_LOCAL_DAEMON=1 to prefer ~/.local/bin/attn.
-    let bin_path = if prefer_local {
-        if local_path.exists() {
-            local_path
-        } else if let Some(ref bp) = bundled_path {
-            if bp.exists() {
-                bp.clone()
-            } else {
-                return Err(
-                    "No daemon binary found. Run 'make install' or reinstall the app.".into(),
-                );
-            }
-        } else {
-            return Err("No daemon binary found.".into());
-        }
-    } else {
-        if let Some(ref bp) = bundled_path {
-            if bp.exists() {
-                bp.clone()
-            } else if local_path.exists() {
-                local_path
-            } else {
-                return Err(
-                    "No daemon binary found. Run 'make install' or reinstall the app.".into(),
-                );
-            }
-        } else if local_path.exists() {
-            local_path
-        } else {
-            return Err("No daemon binary found.".into());
-        }
-    };
+#[tauri::command]
+fn restart_daemon(
+    _app: tauri::AppHandle,
+    prefer_local: Option<bool>,
+    expected_protocol: String,
+) -> Result<(), String> {
+    let prefer_local = resolve_prefer_local(prefer_local);
+    let bin_path = resolve_daemon_binary(prefer_local)?;
+    let reported_protocol = daemon_binary_protocol_version(&bin_path)?;
+    if reported_protocol != expected_protocol.trim() {
+        return Err(format!(
+            "Refusing restart: resolved daemon binary {} reports protocol {}, app expects {}",
+            bin_path.display(),
+            reported_protocol,
+            expected_protocol.trim()
+        ));
+    }
 
     let socket_path = daemon_socket_path().ok_or("Cannot resolve daemon socket path")?;
     if !daemon_is_running_at(&socket_path) {
         let _ = std::fs::remove_file(&socket_path);
-    } else {
-        return Ok(());
-    }
-
-    Command::new(&bin_path)
-        .env("ATTN_WRAPPER_PATH", &bin_path)
-        .arg("daemon")
-        .spawn()
-        .map_err(|e| format!("Failed to start daemon: {}", e))?;
-
-    // Wait for live socket (up to 3 seconds)
-    for _ in 0..30 {
-        if daemon_is_running_at(&socket_path) {
+        spawn_daemon(&bin_path)?;
+        if wait_for_socket_state(&socket_path, true, Duration::from_secs(3)) {
             return Ok(());
         }
-        thread::sleep(Duration::from_millis(100));
+        return Err("Daemon did not start within 3 seconds".to_string());
+    }
+
+    let pid_path = daemon_pid_path().ok_or("Cannot resolve daemon pid path")?;
+    let pid = read_daemon_pid(&pid_path)?;
+    let self_pid = std::process::id();
+    if pid == self_pid || parent_process_id() == Some(pid) {
+        return Err(format!(
+            "Refusing to stop daemon pid {} because it matches the current app process tree",
+            pid
+        ));
+    }
+
+    terminate_process(pid)?;
+    if !wait_for_socket_state(&socket_path, false, Duration::from_secs(5)) {
+        return Err("Timed out waiting for daemon to stop".into());
+    }
+    let _ = std::fs::remove_file(&socket_path);
+
+    spawn_daemon(&bin_path)?;
+    if wait_for_socket_state(&socket_path, true, Duration::from_secs(3)) {
+        return Ok(());
     }
 
     Err("Daemon did not start within 3 seconds".to_string())
@@ -298,6 +502,7 @@ pub fn run() {
             list_directory,
             is_daemon_running,
             start_daemon,
+            restart_daemon,
             open_in_editor,
             thumbs::extract_patterns,
             thumbs::reveal_in_finder,

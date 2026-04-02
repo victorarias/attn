@@ -101,12 +101,13 @@ func (s *Store) Add(session *protocol.Session) {
 	session.Agent = protocol.SessionAgent(normalizedAgent)
 	_, err = s.db.Exec(`
 		INSERT OR REPLACE INTO sessions
-		(id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, label, agent, directory, endpoint_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Label,
 		session.Agent,
 		session.Directory,
+		protocol.Deref(session.EndpointID),
 		protocol.Deref(session.Branch),
 		boolToInt(protocol.Deref(session.IsWorktree)),
 		protocol.Deref(session.MainRepo),
@@ -136,15 +137,16 @@ func (s *Store) Get(id string) *protocol.Session {
 	var todosJSON string
 	var stateSince, stateUpdatedAt, lastSeen string
 	var muted, isWorktree, recoverable int
-	var branch, mainRepo sql.NullString
+	var endpointID, branch, mainRepo sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+		SELECT id, label, agent, directory, endpoint_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
 		&session.Agent,
 		&session.Directory,
+		&endpointID,
 		&branch,
 		&isWorktree,
 		&mainRepo,
@@ -160,6 +162,9 @@ func (s *Store) Get(id string) *protocol.Session {
 		return nil
 	}
 
+	if endpointID.Valid && endpointID.String != "" {
+		session.EndpointID = protocol.Ptr(endpointID.String)
+	}
 	if branch.Valid && branch.String != "" {
 		session.Branch = protocol.Ptr(branch.String)
 	}
@@ -242,11 +247,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+			SELECT id, label, agent, directory, endpoint_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
 			FROM sessions ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+			SELECT id, label, agent, directory, endpoint_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
 			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
@@ -260,13 +265,14 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var todosJSON string
 		var stateSince, stateUpdatedAt, lastSeen string
 		var muted, isWorktree, recoverable int
-		var branch, mainRepo sql.NullString
+		var endpointID, branch, mainRepo sql.NullString
 
 		err := rows.Scan(
 			&session.ID,
 			&session.Label,
 			&session.Agent,
 			&session.Directory,
+			&endpointID,
 			&branch,
 			&isWorktree,
 			&mainRepo,
@@ -282,6 +288,9 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			continue
 		}
 
+		if endpointID.Valid && endpointID.String != "" {
+			session.EndpointID = protocol.Ptr(endpointID.String)
+		}
 		if branch.Valid && branch.String != "" {
 			session.Branch = protocol.Ptr(branch.String)
 		}

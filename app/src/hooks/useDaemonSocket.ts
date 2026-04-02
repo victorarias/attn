@@ -23,6 +23,7 @@ import { emitPtyEvent, setPtyBackend, type PtySpawnArgs } from '../pty/bridge';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
 import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
 import { recordWsJsonParse } from '../utils/ptyPerf';
+import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 
 // Re-export types from generated for consumers
 // Use type aliases to maintain backward compatibility
@@ -38,6 +39,7 @@ export type ReviewLoopState = GeneratedReviewLoopRun;
 export type ReviewLoopInteraction = GeneratedReviewLoopInteraction;
 export type DaemonSettings = Record<string, string>;
 export type DaemonWarning = GeneratedWarning;
+export type { DaemonEndpointProfile };
 
 // Re-export enums and useful types
 export { SessionState, PRRole, HeatState };
@@ -96,7 +98,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '41';
+const PROTOCOL_VERSION = '42';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -327,11 +329,9 @@ interface UseDaemonSocketOptions {
   onSettingError?: (message: string) => void;
   onGitStatusUpdate?: (status: GitStatusUpdate) => void;
   onReviewLoopUpdate?: (state: ReviewLoopState | null) => void;
+  endpoint?: DaemonEndpointProfile;
   wsUrl?: string;
 }
-
-// Default WebSocket port, can be overridden via VITE_DAEMON_PORT env var
-const DEFAULT_WS_URL = `ws://127.0.0.1:${import.meta.env.VITE_DAEMON_PORT || '9849'}/ws`;
 
 function dedupeSessionsByID(sessions: DaemonSession[]): DaemonSession[] {
   const deduped: DaemonSession[] = [];
@@ -425,8 +425,10 @@ export function useDaemonSocket({
   onSettingError,
   onGitStatusUpdate,
   onReviewLoopUpdate,
-  wsUrl = DEFAULT_WS_URL,
+  endpoint,
+  wsUrl,
 }: UseDaemonSocketOptions) {
+  const resolvedWsUrl = resolveDaemonWebSocketURL({ endpoint, wsUrl });
   const wsRef = useRef<WebSocket | null>(null);
   const sessionsRef = useRef<DaemonSession[]>([]);
   const workspacesRef = useRef<DaemonWorkspace[]>([]);
@@ -460,6 +462,8 @@ export function useDaemonSocket({
   const MAX_RECONNECTS_BEFORE_PAUSE = 8;
   const MAX_RECONNECT_DELAY_MS = 5000;
   const RECOVERY_NOTICE = 'Daemon is recovering PTY sessions. Please retry in a moment.';
+  const DAEMON_RESTART_NOTICE = 'Restarting daemon...';
+  const daemonRestartInProgressRef = useRef(false);
 
   const showRecoveringNoticeForCommand = useCallback((cmd: string | undefined) => {
     if (!cmd) return;
@@ -604,10 +608,11 @@ export function useDaemonSocket({
 
     await ensureDaemonRunning();
 
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(resolvedWsUrl);
 
     ws.onopen = () => {
       console.log('[Daemon] WebSocket connected');
+      daemonRestartInProgressRef.current = false;
       setConnectionError(null);
       reconnectDelayRef.current = 1000; // Reset to 1s on successful connect
       reconnectAttemptsRef.current = 0;
@@ -662,6 +667,26 @@ export function useDaemonSocket({
               const clientVersion = Number(PROTOCOL_VERSION);
               const activeSessions = data.sessions?.length || 0;
               if (!Number.isNaN(daemonVersion) && !Number.isNaN(clientVersion) && daemonVersion < clientVersion) {
+                if (isTauri()) {
+                  setConnectionError(DAEMON_RESTART_NOTICE);
+                  if (!daemonRestartInProgressRef.current) {
+                    daemonRestartInProgressRef.current = true;
+                    console.log(`[Daemon] Restarting older daemon ${data.protocol_version} to match app protocol ${PROTOCOL_VERSION}`);
+                    void invoke('restart_daemon', {
+                      expected_protocol: PROTOCOL_VERSION,
+                      prefer_local: import.meta.env.VITE_INSTALL_CHANNEL === 'source',
+                    }).catch((err) => {
+                      console.error('[Daemon] Failed to restart daemon after protocol mismatch:', err);
+                      daemonRestartInProgressRef.current = false;
+                      setConnectionError(
+                        `New daemon version available. Restart when ready (${activeSessions} active sessions may be lost). daemon v${data.protocol_version}, app v${PROTOCOL_VERSION}`
+                      );
+                      circuitOpenRef.current = true;
+                    });
+                  }
+                  ws.close();
+                  return;
+                }
                 setConnectionError(
                   `New daemon version available. Restart when ready (${activeSessions} active sessions may be lost). daemon v${data.protocol_version}, app v${PROTOCOL_VERSION}`
                 );
@@ -1540,7 +1565,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
+  }, [resolvedWsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
 
   useEffect(() => {
     void connect();
@@ -1566,6 +1591,7 @@ export function useDaemonSocket({
       clearTimeout(circuitResetTimeoutRef.current);
       circuitResetTimeoutRef.current = null;
     }
+    daemonRestartInProgressRef.current = false;
     circuitOpenRef.current = false;
     reconnectAttemptsRef.current = 0;
     reconnectDelayRef.current = 1000;
