@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-02]
+
+### Changed
+- **Remote Daemon Hub Plan Scope**: Stop treating a binary WebSocket protocol or MsgPack migration as a prerequisite for the remote hub. The plan now assumes JSON forwarding for v1, with PTY-specific optimizations and binary framing only as a later, measurement-driven option.
+
 ## [2026-04-01]
 
 ### Added
