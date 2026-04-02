@@ -1,7 +1,7 @@
 # Preparatory Refactors Plan
 
 Date: 2026-04-02
-Status: In Progress
+Status: Done
 Owner: daemon/frontend
 
 ## Summary
@@ -9,6 +9,8 @@ Owner: daemon/frontend
 This document isolates the preparatory refactorings into standalone work items.
 
 Each item should be implemented as a clean PR.
+
+Completed on 2026-04-02. The last pending item (`2. Add Linux targets to release workflow`) was implemented and validated via the `Release Preflight` GitHub Actions run on PR #105 (`refactor/preparatory-refactors`), which successfully built the Linux daemon on both `ubuntu-24.04` and `ubuntu-24.04-arm`.
 
 ## Implementation Status
 
