@@ -28,7 +28,7 @@ What it automates:
 5. Pushes `main` and tag.
 6. Updates `Formula/attn.rb` SHA/version for the new tag and pushes that commit.
 
-The GitHub release workflow (`.github/workflows/release.yml`) builds and publishes macOS artifacts and uploads `attn_aarch64.dmg` for the Homebrew cask.
+The GitHub release workflow (`.github/workflows/release.yml`) builds and publishes the macOS app artifacts, uploads `attn_aarch64.dmg` for the Homebrew cask, and attaches standalone Linux daemon binaries for `amd64` and `arm64`.
 The cask itself stays `version :latest` and does not need per-release edits.
 
 ## Optional Fast Path
@@ -38,6 +38,27 @@ The cask itself stays `version :latest` and does not need per-release edits.
 ```
 
 Use only if CI or prior local verification already covered tests.
+
+## Branch Preflight
+
+To verify the Linux release builds on GitHub-hosted runners without publishing a release, use the `Release Preflight` workflow.
+
+It runs in branch/PR context and has no release side effects:
+
+1. Builds the Linux daemon on:
+   - `ubuntu-24.04` (`amd64`)
+   - `ubuntu-24.04-arm` (`arm64`)
+2. Verifies the compiled-in version via `attn --version`
+3. Uploads the binaries as workflow artifacts instead of GitHub release assets
+
+Suggested use:
+
+1. Push your branch.
+2. Open a PR against `main` to trigger `Release Preflight` against the branch with no release side effects.
+3. Confirm both artifacts are produced:
+   - `attn-linux-amd64`
+   - `attn-linux-arm64`
+4. Only then merge changes to `.github/workflows/release.yml`.
 
 ## Preconditions
 
@@ -52,6 +73,8 @@ Use only if CI or prior local verification already covered tests.
 2. Confirm release assets include:
    - versioned DMG
    - `attn_aarch64.dmg`
+   - `attn-linux-amd64`
+   - `attn-linux-arm64`
 3. Verify install/upgrade:
    - `brew upgrade victorarias/attn/attn`
    - `brew upgrade --cask victorarias/attn/attn`
