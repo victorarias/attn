@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { listenPtyEvents, type PtyEventPayload } from '../../pty/bridge';
 import { recordPaneRuntimeDebugEvent } from '../../utils/paneRuntimeDebug';
+import { recordTerminalRuntimeLog } from '../../utils/terminalRuntimeLog';
 
 export interface PaneRuntimeEventBinding {
   sessionId?: string;
@@ -43,6 +44,19 @@ export function createPaneRuntimeEventRouterController(): PaneRuntimeEventRouter
           }
         : undefined,
     });
+    recordTerminalRuntimeLog({
+      category: 'binding',
+      sessionId: binding.sessionId,
+      paneId: binding.paneId,
+      runtimeId: binding.runtimeId,
+      message: previous ? 'replace runtime binding' : 'register runtime binding',
+      details: previous
+        ? {
+            previousPaneId: previous.binding.paneId,
+            previousSessionId: previous.binding.sessionId,
+          }
+        : undefined,
+    });
 
     return () => {
       const current = bindings.get(binding.runtimeId);
@@ -52,6 +66,13 @@ export function createPaneRuntimeEventRouterController(): PaneRuntimeEventRouter
       bindings.delete(binding.runtimeId);
       recordPaneRuntimeDebugEvent({
         scope: 'pty-router',
+        sessionId: binding.sessionId,
+        paneId: binding.paneId,
+        runtimeId: binding.runtimeId,
+        message: 'unregister runtime binding',
+      });
+      recordTerminalRuntimeLog({
+        category: 'binding',
         sessionId: binding.sessionId,
         paneId: binding.paneId,
         runtimeId: binding.runtimeId,

@@ -19,7 +19,8 @@ pnpm run dev    # Starts tauri dev with hot reload
 - **LocationPicker.tsx**: Path selection with filesystem suggestions
 - **NewSessionDialog/**: Session creation (PathInput, RepoOptions subcomponents)
 - **ChangesPanel.tsx**: Git changes display
-- **DiffOverlay.tsx**: Monaco-based diff viewing
+- **DiffDetailPanel.tsx**: Review/diff panel orchestration and file selection
+- **UnifiedDiffEditor.tsx**: CodeMirror-based unified diff viewing with inline comments
 - **BranchPicker.tsx**: Branch selection UI
 - **AttentionDrawer.tsx**: Quick view of items needing attention
 

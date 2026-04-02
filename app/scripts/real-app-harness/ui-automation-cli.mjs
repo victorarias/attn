@@ -6,8 +6,8 @@ function printHelp() {
   console.log(`Usage: pnpm exec node scripts/real-app-harness/ui-automation-cli.mjs [options] <action> [json-payload]
 
 Options:
-  --launch         Launch /Applications/attn.app before connecting
-  --fresh-launch   Quit and relaunch /Applications/attn.app before connecting
+  --launch         Launch ~/Applications/attn.app before connecting
+  --fresh-launch   Quit and relaunch ~/Applications/attn.app before connecting
   --wait-ready     Wait for the frontend automation hook before sending the action
 
 Examples:

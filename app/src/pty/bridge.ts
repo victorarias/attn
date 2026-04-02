@@ -19,7 +19,7 @@ export interface PtySpawnArgs {
 }
 
 export type PtyEventPayload =
-  | { event: 'data'; id: string; data: string }
+  | { event: 'data'; id: string; data: string; seq?: number }
   | { event: 'exit'; id: string; code: number; signal?: string }
   | { event: 'error'; id: string; error: string }
   | { event: 'transcript'; id: string; matched: boolean }

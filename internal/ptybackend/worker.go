@@ -42,6 +42,7 @@ const (
 	spawnReadyPollInterval  = 100 * time.Millisecond
 	spawnKillGracePeriod    = 1 * time.Second
 	spawnWaitTimeout        = 500 * time.Millisecond
+	streamPublishWait       = 250 * time.Millisecond
 	streamEventBufferSize   = 256
 	streamPreEventBufferCap = 8
 	workingStatePulseWindow = 2 * time.Second
@@ -247,12 +248,13 @@ func (b *WorkerBackend) resolveBinaryPath() string {
 	if wrapperPath := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); wrapperPath != "" {
 		candidates = append(candidates, wrapperPath)
 	}
-	if home, err := os.UserHomeDir(); err == nil {
+	home, _ := os.UserHomeDir()
+	if home != "" {
 		candidates = append(candidates, filepath.Join(home, ".local", "bin", "attn"))
 	}
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == "darwin" && home != "" {
 		// Bundled binary inside the macOS app bundle.
-		candidates = append(candidates, "/Applications/attn.app/Contents/MacOS/attn")
+		candidates = append(candidates, filepath.Join(home, "Applications", "attn.app", "Contents", "MacOS", "attn"))
 	}
 	if path, err := exec.LookPath("attn"); err == nil && path != "" {
 		candidates = append(candidates, path)
@@ -543,7 +545,7 @@ func (b *WorkerBackend) Attach(ctx context.Context, sessionID, subscriberID stri
 			}
 			// Clear the RPC deadline before handing off to long-lived stream forwarding.
 			_ = conn.SetDeadline(time.Time{})
-			stream := newWorkerStream(conn, enc, dec, sessionID, b.nextReqID("detach"), preEvents)
+			stream := newWorkerStream(conn, enc, dec, sessionID, b.nextReqID("detach"), preEvents, b.cfg.Logf)
 			return AttachInfo{
 				Scrollback:          attachResult.Scrollback,
 				ScrollbackTruncated: attachResult.ScrollbackTruncated,
@@ -1875,6 +1877,7 @@ type workerStream struct {
 	dec         *json.Decoder
 	sessionID   string
 	detachReqID string
+	logf        func(format string, args ...interface{})
 
 	events    chan OutputEvent
 	done      chan struct{}
@@ -1883,13 +1886,23 @@ type workerStream struct {
 	closed    chan struct{}
 }
 
-func newWorkerStream(conn net.Conn, enc *json.Encoder, dec *json.Decoder, sessionID, detachReqID string, pre []OutputEvent) *workerStream {
+func (s *workerStream) log(format string, args ...interface{}) {
+	if s != nil && s.logf != nil {
+		s.logf(format, args...)
+	}
+}
+
+func newWorkerStream(conn net.Conn, enc *json.Encoder, dec *json.Decoder, sessionID, detachReqID string, pre []OutputEvent, logf func(format string, args ...interface{})) *workerStream {
+	if logf == nil {
+		logf = func(string, ...interface{}) {}
+	}
 	s := &workerStream{
 		conn:        conn,
 		enc:         enc,
 		dec:         dec,
 		sessionID:   sessionID,
 		detachReqID: detachReqID,
+		logf:        logf,
 		events:      make(chan OutputEvent, streamEventBufferSize),
 		done:        make(chan struct{}),
 		closed:      make(chan struct{}),
@@ -1904,6 +1917,7 @@ func (s *workerStream) Events() <-chan OutputEvent {
 
 func (s *workerStream) Close() error {
 	s.closeOnce.Do(func() {
+		s.log("worker stream close requested: session=%s", s.sessionID)
 		s.doneOnce.Do(func() {
 			close(s.done)
 		})
@@ -1919,6 +1933,7 @@ func (s *workerStream) Close() error {
 
 func (s *workerStream) readLoop(pre []OutputEvent) {
 	defer func() {
+		s.log("worker stream closed: session=%s", s.sessionID)
 		_ = s.conn.Close()
 		close(s.events)
 		close(s.closed)
@@ -1933,6 +1948,7 @@ func (s *workerStream) readLoop(pre []OutputEvent) {
 	for {
 		frameType, _, evt, err := readFrame(s.dec)
 		if err != nil {
+			s.log("worker stream read loop exit: session=%s err=%v", s.sessionID, err)
 			return
 		}
 		if frameType != "evt" {
@@ -1949,18 +1965,26 @@ func (s *workerStream) readLoop(pre []OutputEvent) {
 }
 
 func (s *workerStream) publish(evt OutputEvent) bool {
-	select {
-	case <-s.done:
-		return false
-	case s.events <- evt:
-		return true
-	default:
-		// Signal desync on overflow once, then terminate stream.
+	timer := time.NewTimer(streamPublishWait)
+	defer timer.Stop()
+	loggedWait := false
+	for {
 		select {
-		case s.events <- OutputEvent{Kind: OutputEventKindDesync, Reason: "buffer_overflow"}:
-		default:
+		case <-s.done:
+			s.log("worker stream publish aborted after close: session=%s kind=%s seq=%d", s.sessionID, evt.Kind, evt.Seq)
+			return false
+		case s.events <- evt:
+			if loggedWait {
+				s.log("worker stream publish resumed: session=%s kind=%s seq=%d", s.sessionID, evt.Kind, evt.Seq)
+			}
+			return true
+		case <-timer.C:
+			if !loggedWait {
+				s.log("worker stream publish blocked: session=%s kind=%s seq=%d reason=backpressure", s.sessionID, evt.Kind, evt.Seq)
+				loggedWait = true
+			}
+			timer.Reset(streamPublishWait)
 		}
-		return false
 	}
 }
 

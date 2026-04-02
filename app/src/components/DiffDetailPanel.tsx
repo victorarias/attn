@@ -12,6 +12,7 @@ import UnifiedDiffEditor, {
   type InlineComment as EditorComment,
 } from './UnifiedDiffEditor';
 import './DiffDetailPanel.css';
+import { updateReviewPerf } from '../utils/reviewPerf';
 
 // Auto-skip patterns for lockfiles and generated files
 const AUTO_SKIP_PATTERNS = [
@@ -252,6 +253,7 @@ export function DiffDetailPanel({
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
+  const editorCommentBuildDurationMsRef = useRef(0);
 
   // Auto-clear comment errors after 3 seconds
   useEffect(() => {
@@ -779,13 +781,64 @@ export function DiffDetailPanel({
   // Build unified document and convert comments
   const editorComments = useMemo(() => {
     if (!diffContent) {
+      editorCommentBuildDurationMsRef.current = 0;
       return [] as EditorComment[];
     }
+    const startedAt = performance.now();
     const { lines } = buildUnifiedDocument(diffContent.original, diffContent.modified);
-    return comments
+    const mapped = comments
       .map(c => toEditorComment(c, lines))
       .filter((c): c is EditorComment => c !== null);
+    editorCommentBuildDurationMsRef.current = performance.now() - startedAt;
+    return mapped;
   }, [diffContent, comments]);
+
+  useEffect(() => {
+    updateReviewPerf({
+      panel: {
+        active: isOpen,
+        selectedFilePath,
+        fileCount: allFiles.length,
+        needsReviewFileCount: needsReviewFiles.length,
+        autoSkipFileCount: autoSkipFiles.length,
+        commentCount: comments.length,
+        editorCommentCount: editorComments.length,
+        commentBuildDurationMs: editorCommentBuildDurationMsRef.current,
+        branchDiffCacheEntries: branchDiffCacheRef.current.size,
+        originalLength: diffContent?.original.length || 0,
+        modifiedLength: diffContent?.modified.length || 0,
+      },
+    });
+  }, [
+    allFiles.length,
+    autoSkipFiles.length,
+    comments.length,
+    diffContent,
+    editorComments.length,
+    isOpen,
+    needsReviewFiles.length,
+    selectedFilePath,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      updateReviewPerf({
+        panel: {
+          active: false,
+          selectedFilePath: null,
+          fileCount: 0,
+          needsReviewFileCount: 0,
+          autoSkipFileCount: 0,
+          commentCount: 0,
+          editorCommentCount: 0,
+          commentBuildDurationMs: 0,
+          branchDiffCacheEntries: 0,
+          originalLength: 0,
+          modifiedLength: 0,
+        },
+      });
+    };
+  }, []);
 
   // Get language from file extension
   const editorLanguage = useMemo(() => {

@@ -22,6 +22,7 @@ import type {
 import { emitPtyEvent, setPtyBackend, type PtySpawnArgs } from '../pty/bridge';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
 import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
+import { recordWsJsonParse } from '../utils/ptyPerf';
 
 // Re-export types from generated for consumers
 // Use type aliases to maintain backward compatibility
@@ -95,7 +96,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '39';
+const PROTOCOL_VERSION = '41';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -630,7 +631,15 @@ export function useDaemonSocket({
 
     ws.onmessage = (event) => {
       try {
+        const rawText = typeof event.data === 'string' ? event.data : '';
+        const parseStartedAt = performance.now();
         const data: WebSocketEvent = JSON.parse(event.data);
+        recordWsJsonParse(
+          rawText.length,
+          performance.now() - parseStartedAt,
+          data.event,
+          data.event === 'pty_output' && typeof data.data === 'string' ? data.data.length : 0,
+        );
 
         switch (data.event) {
           case 'initial_state':
@@ -846,7 +855,7 @@ export function useDaemonSocket({
                       }
                       ptySeqRef.current.set(data.id, chunk.seq);
                     }
-                    emitPtyEvent({ event: 'data', id: data.id, data: chunk.data });
+                    emitPtyEvent({ event: 'data', id: data.id, data: chunk.data, seq: chunk.seq });
                   }
                 }
                 if (!hasScreenSnapshot && data.scrollback_truncated) {
@@ -911,7 +920,7 @@ export function useDaemonSocket({
                 message: 'emit pty_output to bridge',
                 details: { seq: data.seq },
               });
-              emitPtyEvent({ event: 'data', id: data.id, data: data.data });
+              emitPtyEvent({ event: 'data', id: data.id, data: data.data, seq: data.seq });
             }
             break;
           }

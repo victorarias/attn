@@ -36,20 +36,55 @@ function createMockEventRouter(bindings: Map<string, PaneRuntimeEventBinding>): 
   };
 }
 
-function createMockXterm() {
+function createMockXterm(options?: { manualWriteCallbacks?: boolean }) {
+  const writeParsedHandlers = new Set<() => void>();
+  const pendingWriteCallbacks: Array<() => void> = [];
+  const completeWrite = (callback?: () => void) => {
+    callback?.();
+    for (const handler of Array.from(writeParsedHandlers)) {
+      handler();
+    }
+  };
   return {
     cols: 80,
     rows: 24,
-    write: vi.fn(),
+    write: vi.fn((_data: string | Uint8Array, callback?: () => void) => {
+      if (!callback) {
+        return;
+      }
+      if (options?.manualWriteCallbacks) {
+        pendingWriteCallbacks.push(callback);
+        return;
+      }
+      queueMicrotask(() => completeWrite(callback));
+    }),
     reset: vi.fn(),
     focus: vi.fn(),
     onData: vi.fn(() => ({ dispose: vi.fn() })),
+    onWriteParsed: vi.fn((handler: () => void) => {
+      writeParsedHandlers.add(handler);
+      return {
+        dispose: () => {
+          writeParsedHandlers.delete(handler);
+        },
+      };
+    }),
     attachCustomKeyEventHandler: vi.fn(),
     buffer: {
       active: {
         length: 0,
         getLine: vi.fn(() => null),
       },
+    },
+    __fireWriteParsed: () => {
+      for (const handler of Array.from(writeParsedHandlers)) {
+        handler();
+      }
+    },
+    __flushPendingWrites: () => {
+      while (pendingWriteCallbacks.length > 0) {
+        completeWrite(pendingWriteCallbacks.shift());
+      }
     },
   };
 }
@@ -129,10 +164,11 @@ describe('usePaneRuntimeBinder', () => {
 
     await act(async () => {
       result.current.handleTerminalReady('pane-1')(xterm as any);
+      await result.current.drainPaneTerminal('pane-1');
       await Promise.resolve();
     });
 
-    expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode('queued output'));
+    expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode('queued output'), expect.any(Function));
     expect(mockPtySpawn).toHaveBeenCalledWith({
       args: {
         id: 'runtime-1',
@@ -147,6 +183,51 @@ describe('usePaneRuntimeBinder', () => {
       bindings.get('runtime-1')?.onEvent({ event: 'data', id: 'runtime-1', data: btoa(' live output') });
     });
 
-    expect(xterm.write).toHaveBeenNthCalledWith(2, new TextEncoder().encode(' live output'));
+    await act(async () => {
+      await result.current.drainPaneTerminal('pane-1');
+      await Promise.resolve();
+    });
+
+    expect(xterm.write).toHaveBeenNthCalledWith(2, new TextEncoder().encode(' live output'), expect.any(Function));
+  });
+
+  it('keeps reset ordered behind pending terminal writes', async () => {
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: () => null,
+      },
+    ], 'pane-1', eventRouter));
+
+    const xterm = createMockXterm({ manualWriteCallbacks: true });
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(xterm as any);
+      await Promise.resolve();
+    });
+
+    act(() => {
+      bindings.get('runtime-1')?.onEvent({ event: 'data', id: 'runtime-1', data: btoa('queued output') });
+      bindings.get('runtime-1')?.onEvent({ event: 'reset', id: 'runtime-1', reason: 'test' });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode('queued output'), expect.any(Function));
+    expect(xterm.reset).not.toHaveBeenCalled();
+
+    await act(async () => {
+      (xterm as any).__flushPendingWrites();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(xterm.reset).toHaveBeenCalledOnce();
   });
 });

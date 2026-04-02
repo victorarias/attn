@@ -385,10 +385,60 @@
 
 .dashboard-footer {
   display: flex;
-  gap: 24px;
+  align-items: center;
+  justify-content: space-between;
   padding-top: 20px;
   border-top: 1px solid var(--color-border);
   margin-top: 20px;
+}
+
+.footer-shortcuts {
+  display: flex;
+  gap: 24px;
+}
+
+.footer-debug {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.debug-toggle {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+}
+
+.debug-toggle:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+}
+
+.debug-toggle.active {
+  background: rgba(78, 201, 176, 0.1);
+  border-color: rgba(78, 201, 176, 0.35);
+  color: #4ec9b0;
+}
+
+.debug-copy-btn {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.debug-copy-btn:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 .shortcut {

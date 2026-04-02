@@ -24,7 +24,7 @@ function defaultManifestPath() {
 
 export class UiAutomationClient {
   constructor({
-    appPath = '/Applications/attn.app',
+    appPath = path.join(os.homedir(), 'Applications', 'attn.app'),
     manifestPath = defaultManifestPath(),
   } = {}) {
     this.appPath = appPath;
@@ -32,7 +32,7 @@ export class UiAutomationClient {
   }
 
   async launchApp() {
-    await execFileAsync('open', ['-a', this.appPath]);
+    await execFileAsync('open', [this.appPath]);
   }
 
   async quitApp(timeoutMs = 10_000) {

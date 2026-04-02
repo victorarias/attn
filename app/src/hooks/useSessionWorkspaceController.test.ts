@@ -46,6 +46,10 @@ describe('useSessionWorkspaceController', () => {
         isPaneInputFocused: vi.fn(() => true),
         getPaneText,
         getPaneSize,
+        resetPaneTerminal: vi.fn(() => true),
+        injectPaneBytes: vi.fn(async () => true),
+        injectPaneBase64: vi.fn(async () => true),
+        drainPaneTerminal: vi.fn(async () => true),
       });
     });
 
@@ -72,6 +76,10 @@ describe('useSessionWorkspaceController', () => {
         isPaneInputFocused: vi.fn(() => true),
         getPaneText: vi.fn(() => 'text'),
         getPaneSize: vi.fn(() => ({ cols: 80, rows: 24 })),
+        resetPaneTerminal: vi.fn(() => true),
+        injectPaneBytes: vi.fn(async () => true),
+        injectPaneBase64: vi.fn(async () => true),
+        drainPaneTerminal: vi.fn(async () => true),
       });
     });
 

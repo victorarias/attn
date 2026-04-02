@@ -87,9 +87,9 @@ func TestGenerateHooks_HasUserPromptSubmitHook(t *testing.T) {
 }
 
 func TestGenerateHooks_UsesWrapperPath(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "/Applications/attn.app/Contents/MacOS/attn")
+	hooks := Generate("test", "/tmp/test.sock", "/Users/testuser/Applications/attn.app/Contents/MacOS/attn")
 
-	if !strings.Contains(hooks, "'/Applications/attn.app/Contents/MacOS/attn' _hook-stop") {
+	if !strings.Contains(hooks, "'/Users/testuser/Applications/attn.app/Contents/MacOS/attn' _hook-stop") {
 		t.Error("hooks should include wrapper path in stop hook command")
 	}
 }

@@ -722,6 +722,10 @@ function AppContent({
     fitSessionActivePane,
     getPaneText,
     getPaneSize,
+    resetSessionPaneTerminal,
+    injectSessionPaneBytes,
+    injectSessionPaneBase64,
+    drainSessionPaneTerminal,
   } = useSessionWorkspaceController(sessions, activeSessionId);
 
   useEffect(() => {
@@ -1268,6 +1272,10 @@ function AppContent({
     getPaneSize,
     fitSessionActivePane,
     sendRuntimeInput,
+    resetSessionPaneTerminal,
+    injectSessionPaneBytes,
+    injectSessionPaneBase64,
+    drainSessionPaneTerminal,
   });
 
   const openPR = useOpenPR({
