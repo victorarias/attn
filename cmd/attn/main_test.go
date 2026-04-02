@@ -220,3 +220,24 @@ func TestParseDirectLaunchArgs_ResumeIDStillAccepted(t *testing.T) {
 		t.Fatalf("expected fork-session flag to be true")
 	}
 }
+
+func TestIsVersionCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "no args", args: []string{"attn"}, want: false},
+		{name: "long flag", args: []string{"attn", "--version"}, want: true},
+		{name: "subcommand", args: []string{"attn", "version"}, want: true},
+		{name: "other flag", args: []string{"attn", "--help"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isVersionCommand(tt.args); got != tt.want {
+				t.Fatalf("isVersionCommand(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}

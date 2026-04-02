@@ -38,7 +38,14 @@ type todoWriteInput struct {
 	} `json:"todos"`
 }
 
+var version = "dev"
+
 func main() {
+	if isVersionCommand(os.Args) {
+		runVersion()
+		return
+	}
+
 	if len(os.Args) < 2 {
 		runWrapper()
 		return
@@ -68,6 +75,22 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func isVersionCommand(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	switch args[1] {
+	case "--version", "version":
+		return true
+	default:
+		return false
+	}
+}
+
+func runVersion() {
+	fmt.Println(version)
 }
 
 func runPTYWorker() {

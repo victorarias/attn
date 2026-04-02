@@ -33,6 +33,7 @@ jobs:
           fi
 
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
         with:
@@ -66,7 +67,7 @@ jobs:
 
       - name: Build bundled daemon binary
         run: |
-          GOOS=darwin GOARCH=arm64 go build -o /tmp/attn ./cmd/attn
+          GOOS=darwin GOARCH=arm64 make build VERSION="${RELEASE_VERSION}" OUTPUT=/tmp/attn
           mkdir -p app/src-tauri/binaries
           cp /tmp/attn "app/src-tauri/binaries/attn-aarch64-apple-darwin"
 
