@@ -241,3 +241,24 @@ func TestIsVersionCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestIsProtocolVersionCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "no args", args: []string{"attn"}, want: false},
+		{name: "protocol flag", args: []string{"attn", "--protocol-version"}, want: true},
+		{name: "version flag", args: []string{"attn", "--version"}, want: false},
+		{name: "subcommand", args: []string{"attn", "version"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isProtocolVersionCommand(tt.args); got != tt.want {
+				t.Fatalf("isProtocolVersionCommand(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}

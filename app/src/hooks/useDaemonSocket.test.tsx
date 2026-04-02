@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyKill } from '../pty/bridge';
@@ -192,6 +192,58 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
 
     await expect(answerPromise).rejects.toThrow('interaction not found');
+
+    unmount();
+  });
+
+  it('restarts an older daemon automatically on protocol mismatch in Tauri', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'restart_daemon') {
+        return undefined;
+      }
+      return true;
+    });
+
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '41',
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith('restart_daemon', {
+        expected_protocol: '42',
+        prefer_local: false,
+      });
+    });
+    expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(result.current.connectionError === null || result.current.connectionError === 'Restarting daemon...').toBe(true);
 
     unmount();
   });

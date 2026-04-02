@@ -19,6 +19,7 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/pathutil"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
 	"github.com/victorarias/attn/internal/wrapper"
 )
@@ -41,6 +42,11 @@ type todoWriteInput struct {
 var version = "dev"
 
 func main() {
+	if isProtocolVersionCommand(os.Args) {
+		runProtocolVersion()
+		return
+	}
+
 	if isVersionCommand(os.Args) {
 		runVersion()
 		return
@@ -89,8 +95,19 @@ func isVersionCommand(args []string) bool {
 	}
 }
 
+func isProtocolVersionCommand(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	return args[1] == "--protocol-version"
+}
+
 func runVersion() {
 	fmt.Println(version)
+}
+
+func runProtocolVersion() {
+	fmt.Println(protocol.ProtocolVersion)
 }
 
 func runPTYWorker() {

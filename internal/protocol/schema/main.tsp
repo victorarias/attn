@@ -93,6 +93,7 @@ model Session {
   label: string;
   agent: SessionAgent;
   directory: string;
+  endpoint_id?: string;         // Optional: owning endpoint for remote/session-aware routing
   branch?: string;              // Optional: might not be in git repo
   is_worktree?: boolean;        // Optional: false if not worktree
   main_repo?: string;           // Optional: only set if worktree
