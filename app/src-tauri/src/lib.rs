@@ -2,8 +2,9 @@ mod thumbs;
 mod ui_automation;
 
 use std::env;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -93,9 +94,20 @@ fn spawn_daemon(bin_path: &Path) -> Result<(), String> {
 }
 
 fn daemon_binary_protocol_version(bin_path: &Path) -> Result<String, String> {
-    let output = Command::new(bin_path)
+    let empty_path = env::temp_dir().join("attn-protocol-probe-empty-path");
+    let mut child = Command::new(bin_path)
         .arg("--protocol-version")
-        .output()
+        // Older binaries may not understand this flag and fall back into the
+        // wrapper path. Force the in-app direct-launch branch and strip PATH so
+        // any nested agent exec fails fast instead of opening the app.
+        .env("ATTN_INSIDE_APP", "1")
+        .env("ATTN_DAEMON_MANAGED", "1")
+        .env("ATTN_AGENT", "codex")
+        .env("PATH", &empty_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| {
             format!(
                 "Failed to query protocol version from daemon binary {}: {}",
@@ -104,8 +116,44 @@ fn daemon_binary_protocol_version(bin_path: &Path) -> Result<String, String> {
             )
         })?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "Timed out querying protocol version from daemon binary {}",
+                        bin_path.display()
+                    ));
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "Failed while querying protocol version from daemon binary {}: {}",
+                    bin_path.display(),
+                    e
+                ));
+            }
+        }
+    };
+
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        let _ = pipe.read_to_string(&mut stdout);
+    }
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = pipe.read_to_string(&mut stderr);
+    }
+
+    if !status.success() {
+        let stderr = stderr.trim().to_string();
         return Err(format!(
             "Daemon binary {} failed protocol preflight{}",
             bin_path.display(),
@@ -117,7 +165,7 @@ fn daemon_binary_protocol_version(bin_path: &Path) -> Result<String, String> {
         ));
     }
 
-    let reported = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let reported = stdout.trim().to_string();
     if reported.is_empty() {
         return Err(format!(
             "Daemon binary {} returned an empty protocol version",
@@ -205,6 +253,16 @@ fn terminate_process(_pid: u32) -> Result<(), String> {
     Err("Daemon restart is only supported on unix targets".into())
 }
 
+#[cfg(unix)]
+fn parent_process_id() -> Option<u32> {
+    Some(unsafe { libc::getppid() as u32 })
+}
+
+#[cfg(not(unix))]
+fn parent_process_id() -> Option<u32> {
+    None
+}
+
 /// Check if the daemon is running by validating the socket is live.
 #[tauri::command]
 fn is_daemon_running() -> bool {
@@ -259,8 +317,7 @@ fn restart_daemon(
     let pid_path = daemon_pid_path().ok_or("Cannot resolve daemon pid path")?;
     let pid = read_daemon_pid(&pid_path)?;
     let self_pid = std::process::id();
-    let parent_pid = unsafe { libc::getppid() as u32 };
-    if pid == self_pid || pid == parent_pid {
+    if pid == self_pid || parent_process_id() == Some(pid) {
         return Err(format!(
             "Refusing to stop daemon pid {} because it matches the current app process tree",
             pid
