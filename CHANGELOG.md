@@ -10,6 +10,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Remote Daemon Hub Plan Scope**: Stop treating a binary WebSocket protocol or MsgPack migration as a prerequisite for the remote hub. The plan now assumes JSON forwarding for v1, with PTY-specific optimizations and binary framing only as a later, measurement-driven option.
+- **Daemon WebSocket Routing Structure**: Split the remaining inline WebSocket command handlers into domain-specific daemon files and add explicit command-scope metadata, so future endpoint-aware routing work has one place to reason about command ownership and recovery-sensitive actions.
+- **Compiled CLI Versioning**: Build the daemon with an explicit compiled version string, expose it through `attn --version`, and route local builds plus release packaging through the same ldflags path so the binary reports the release it actually came from.
 
 ## [2026-04-01]
 

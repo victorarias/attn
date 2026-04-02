@@ -34,11 +34,11 @@ class Attn < Formula
   depends_on "go" => :build
 
   def install
-    system "go", "build", *std_go_args(output: bin/"attn"), "./cmd/attn"
+    system "go", "build", *std_go_args(output: bin/"attn", ldflags: "-X main.version=#{version}"), "./cmd/attn"
   end
 
   test do
-    assert_match "daemon offline", shell_output("#{bin}/attn status")
+    assert_equal version.to_s, shell_output("#{bin}/attn --version").strip
   end
 end
 EOF

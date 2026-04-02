@@ -24,7 +24,7 @@ header "Go tests"
 
 header "Go build"
 tmp_bin="$(mktemp -t attn-precommit.XXXXXX)"
-go build -o "$tmp_bin" ./cmd/attn
+make -C "$root" build OUTPUT="$tmp_bin"
 
 header "Tauri daemon binary"
 target_triple="$(rustc -vV | awk '/host:/ {print $2}')"

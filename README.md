@@ -113,6 +113,7 @@ Long-run review behavior: if a run takes 5+ minutes, attn keeps it yellow when i
 
 ```bash
 attn                 # Open app, start session
+attn --version       # Print the compiled CLI/daemon version
 attn -s myproject    # Session with a label
 attn --resume        # Resume via agent's native picker
 attn list            # All sessions as JSON

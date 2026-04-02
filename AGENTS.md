@@ -37,6 +37,7 @@ go test ./internal/store -run TestList  # Run single test
 
 ```bash
 attn                # Open app and create session (label = directory name)
+attn --version      # Print the compiled CLI/daemon version
 attn -s <label>     # Open app and create session with explicit label
 attn daemon         # Run daemon in foreground
 attn list           # List all sessions (JSON)

@@ -3,9 +3,12 @@
 BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
 BUILD_DIR=./cmd/attn
+VERSION ?= $(shell bash ./scripts/version.sh)
+OUTPUT ?= $(BINARY_NAME)
+GO_LDFLAGS = -X main.version=$(VERSION)
 
 build:
-	go build -o $(BINARY_NAME) $(BUILD_DIR)
+	go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
 
 GOTESTSUM=$(HOME)/go/bin/gotestsum
 
@@ -50,7 +53,7 @@ UNAME_S := $(shell uname -s)
 
 install: build
 	@mkdir -p $(INSTALL_DIR)
-	cp $(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
+	cp $(OUTPUT) $(INSTALL_DIR)/$(BINARY_NAME)
 	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(INSTALL_DIR)/$(BINARY_NAME); fi
 	@# Kill running daemon and restart with new local code.
 	-pkill -f "$(BINARY_NAME) daemon" 2>/dev/null || true
