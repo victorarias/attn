@@ -1,7 +1,7 @@
 # Preparatory Refactors Plan
 
 Date: 2026-04-02
-Status: Proposed
+Status: In Progress
 Owner: daemon/frontend
 
 ## Summary
@@ -10,9 +10,19 @@ This document isolates the preparatory refactorings into standalone work items.
 
 Each item should be implemented as a clean PR.
 
+## Implementation Status
+
+- Done: 0. Extract command routing in websocket.go
+- Done: 1. Add compiled-in version string
+- Pending: 2. Add linux targets to release workflow
+- Done: 3. Add `endpoint_id` to Session model
+- Done: 4. Abstract the frontend WS URL
+- Dropped: 5. Introduce major.minor protocol versioning
+- Done: 6. Auto-restart local daemon on protocol version mismatch
+
 ## Refactorings
 
-### 0. Extract command routing in websocket.go (do first)
+### 0. Extract command routing in websocket.go (done)
 
 The `handleClientMessage` switch in `websocket.go` has 62 case arms across ~430 lines, with many handlers implemented inline. This makes it hard to reason about command routing and command handling by scope.
 
@@ -58,7 +68,7 @@ The `handleClientMessage` switch in `websocket.go` has 62 case arms across ~430 
 
 **Exit gate:** All existing tests pass. `websocket.go` contains only WS infrastructure and the thin switch. Every command has a scope classification in `command_meta.go`.
 
-### 1. Add compiled-in version string (do second)
+### 1. Add compiled-in version string (done)
 
 **This is a hard prerequisite for binary bootstrap and auto-update flows.** Nothing in those flows works without it.
 
@@ -82,11 +92,11 @@ The current release workflow only produces `darwin/arm64` and is tightly coupled
 4. **CGO consideration:** Check if the SQLite dependency requires CGO. If so, either use `CGO_ENABLED=0` with a pure-Go SQLite driver, or set up cross-compilation toolchain. Test that the resulting binary runs correctly.
 5. Name binaries consistently: `attn-linux-amd64`, `attn-linux-arm64`
 
-### 3. Add `endpoint_id` to Session model
+### 3. Add `endpoint_id` to Session model (done)
 
 Additive field in TypeSpec, regenerate. Frontend ignores it until used. Store can persist it.
 
-### 4. Abstract the frontend WS URL
+### 4. Abstract the frontend WS URL (done)
 
 Currently hardcoded to `ws://127.0.0.1:${port}/ws`. Make it configurable via settings or an endpoint profile.
 
@@ -94,7 +104,7 @@ Currently hardcoded to `ws://127.0.0.1:${port}/ws`. Make it configurable via set
 
 No longer needed. Exact version matching plus automatic update removes the compatibility window that major.minor versioning was meant to solve.
 
-### 6. Auto-restart local daemon on protocol version mismatch
+### 6. Auto-restart local daemon on protocol version mismatch (done)
 
 **Problem:** When a user upgrades the app (or runs `make install`), the old daemon process keeps running in the background. The app connects, receives `initial_state` with the old protocol version, detects mismatch, shows a red error banner ("New daemon version available. Restart when ready..."), opens the circuit breaker, and dead-ends. The user must manually restart the daemon. This generates support requests and is a bad UX for something the app can handle itself.
 
@@ -110,18 +120,21 @@ No longer needed. Exact version matching plus automatic update removes the compa
 3. Old daemon is killed, new daemon started.
 4. App reconnects automatically.
 
+**Implemented adjustment:** Before restarting, Tauri resolves the daemon binary it would launch and runs `attn --protocol-version`. If that reported protocol does not match the app's expected protocol, restart fails closed and the existing mismatch banner remains. This avoids restart churn when the resolved binary is itself stale.
+
 **Changes — Rust (`app/src-tauri/src/lib.rs`):**
 1. Add `restart_daemon` Tauri command:
    - Read PID from `~/.attn/attn.pid`.
    - Send SIGTERM to the old process (with safety checks: not self, not parent).
    - Wait for socket to go away (up to 5s polling).
-   - Start new daemon using existing binary resolution logic.
+   - Resolve the daemon binary first and preflight it with `attn --protocol-version`.
+   - Start new daemon using existing binary resolution logic only if the protocol matches the app.
 2. Extract shared helpers (`resolve_daemon_binary`, `spawn_daemon`, `resolve_prefer_local`) from `start_daemon` to avoid duplication.
 
 **Changes — Frontend (`app/src/hooks/useDaemonSocket.ts`):**
 1. When version mismatch detected and `daemonVersion < clientVersion`:
    - Log that auto-restart is happening.
-   - Call `invoke('restart_daemon', { prefer_local })` instead of showing error banner.
+   - Call `invoke('restart_daemon', { prefer_local, expected_protocol })` instead of showing error banner.
    - Close WebSocket but do NOT open circuit breaker — let normal reconnection logic handle it.
    - Show a transient info message ("Restarting daemon...") instead of the red error banner.
 2. If `restart_daemon` fails, fall back to the current error banner behavior.
