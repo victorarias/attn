@@ -694,10 +694,48 @@ Currently hardcoded to `ws://127.0.0.1:${port}/ws`. Make it configurable via set
 
 No longer needed. Exact version matching + auto-update via SSH bootstrap means hub and remote always run the same version. The compatibility window was needed for manual deployments; SSH-based auto-update eliminates the problem. See §11.
 
+### 6. Auto-restart local daemon on protocol version mismatch
+
+**Problem:** When a user upgrades the app (or runs `make install`), the old daemon process keeps running in the background. The app connects, receives `initial_state` with the old protocol version, detects mismatch, shows a red error banner ("New daemon version available. Restart when ready..."), opens the circuit breaker, and dead-ends. The user must manually restart the daemon. This generates support requests and is a bad UX for something the app can handle itself.
+
+**Current behavior:**
+1. App connects to daemon via WebSocket.
+2. Receives `initial_state` with `protocol_version`.
+3. Detects mismatch (daemon version < client version).
+4. Shows red banner, opens circuit breaker — dead end requiring manual intervention.
+
+**Desired behavior:**
+1. App connects, detects old daemon.
+2. App calls `restart_daemon` Tauri command.
+3. Old daemon is killed, new daemon started.
+4. App reconnects automatically.
+
+**Changes — Rust (`app/src-tauri/src/lib.rs`):**
+1. Add `restart_daemon` Tauri command:
+   - Read PID from `~/.attn/attn.pid`.
+   - Send SIGTERM to the old process (with safety checks: not self, not parent).
+   - Wait for socket to go away (up to 5s polling).
+   - Start new daemon using existing binary resolution logic.
+2. Extract shared helpers (`resolve_daemon_binary`, `spawn_daemon`, `resolve_prefer_local`) from `start_daemon` to avoid duplication.
+
+**Changes — Frontend (`app/src/hooks/useDaemonSocket.ts`):**
+1. When version mismatch detected and `daemonVersion < clientVersion`:
+   - Log that auto-restart is happening.
+   - Call `invoke('restart_daemon', { prefer_local })` instead of showing error banner.
+   - Close WebSocket but do NOT open circuit breaker — let normal reconnection logic handle it.
+   - Show a transient info message ("Restarting daemon...") instead of the red error banner.
+2. If `restart_daemon` fails, fall back to the current error banner behavior.
+3. The case where `daemonVersion >= clientVersion` (app is old) still shows the existing error banner — app can't fix itself.
+
+**Why this is a prerequisite for remote hub:**
+The same auto-restart pattern is needed in the hub when a remote daemon has a version mismatch (§11, bootstrap step 4). Implementing it locally first validates the kill→wait→start→reconnect cycle. The hub's remote equivalent uses SSH (`ssh <target> kill/restart`) instead of local PID files, but the lifecycle and frontend handling are identical.
+
+**Exit gate:** Upgrade the app while a daemon is running. App auto-restarts the daemon and reconnects without user intervention. No red banner for the common "upgraded app, old daemon" case.
+
 ## Risks and Mitigations
 
 ### 1. PTY I/O latency over network
-- **Risk:** Terminal feels sluggish for remote sessions. Every output chunk goes through JSON parse → route → JSON serialize → WS send, all base64-encoded.
+- **Risk:** Terminal feels sluggish for remote sessions.
 - **Mitigation:** Use raw message forwarding (byte-level `endpoint_id` splice) to avoid full deserialization for `pty_output` — the highest-volume message type. Network latency is additive but typically <50ms on good networks. Binary WebSocket frames can eliminate base64 overhead if needed (deferred optimization). Measure latency before and after proxying to validate.
 
 ### 2. Hub reconnection complexity
