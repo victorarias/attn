@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -30,11 +31,12 @@ type wsClient struct {
 	attachMu        sync.Mutex
 
 	// Git status subscription state
-	gitStatusDir    string
-	gitStatusTicker *time.Ticker
-	gitStatusStop   chan struct{}
-	gitStatusHash   string // hash of last sent status for dedup
-	gitStatusMu     sync.Mutex
+	gitStatusDir        string
+	gitStatusTicker     *time.Ticker
+	gitStatusStop       chan struct{}
+	gitStatusHash       string // hash of last sent status for dedup
+	gitStatusEndpointID string
+	gitStatusMu         sync.Mutex
 }
 
 func (c *wsClient) closeSendChannel() {
@@ -100,6 +102,19 @@ func (c *wsClient) stopGitStatusPoll() {
 	}
 	c.gitStatusDir = ""
 	c.gitStatusHash = ""
+	c.gitStatusEndpointID = ""
+}
+
+func (c *wsClient) setGitStatusEndpointID(endpointID string) {
+	c.gitStatusMu.Lock()
+	defer c.gitStatusMu.Unlock()
+	c.gitStatusEndpointID = strings.TrimSpace(endpointID)
+}
+
+func (c *wsClient) gitStatusEndpointIDValue() string {
+	c.gitStatusMu.Lock()
+	defer c.gitStatusMu.Unlock()
+	return c.gitStatusEndpointID
 }
 
 // BroadcastListener is called for each broadcast event (for testing)
@@ -217,6 +232,18 @@ func (h *wsHub) BroadcastValue(message interface{}) {
 	h.broadcastValue(message)
 }
 
+func (h *wsHub) BroadcastRawText(payload []byte) {
+	if len(payload) == 0 {
+		return
+	}
+	cloned := append([]byte(nil), payload...)
+	select {
+	case h.broadcast <- outboundMessage{kind: messageKindText, payload: cloned}:
+	default:
+		h.logf("WebSocket broadcast channel full, dropping raw outbound message")
+	}
+}
+
 func (h *wsHub) broadcastValue(message interface{}) {
 	data, err := json.Marshal(message)
 	if err != nil {
@@ -329,9 +356,9 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Event:            protocol.EventInitialState,
 		ProtocolVersion:  protocol.Ptr(protocol.ProtocolVersion),
 		DaemonInstanceID: protocol.Ptr(d.daemonInstanceID),
-		Sessions:         d.sessionsForBroadcast(d.store.List("")),
+		Sessions:         d.mergedSessionsForBroadcast(),
 		Endpoints:        d.listEndpointInfos(),
-		Workspaces:       d.listWorkspaceSnapshots(d.store.List("")),
+		Workspaces:       d.mergedWorkspacesForBroadcast(),
 		Prs:              protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:            protocol.RepoStatesToValues(d.store.ListRepoStates()),
 		Authors:          protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
@@ -409,6 +436,7 @@ func (d *Daemon) wsPingLoop(client *wsClient, done <-chan struct{}) {
 func (d *Daemon) wsReadPump(client *wsClient) {
 	defer func() {
 		d.dropPendingInitialState(client)
+		d.cleanupRemoteGitStatusSubscription(client)
 		d.detachAllSessions(client)
 		close(client.recv) // signal wsMsgPump to exit
 		d.wsHub.unregister <- client
@@ -438,6 +466,24 @@ func (d *Daemon) wsReadPump(client *wsClient) {
 	}
 }
 
+func (d *Daemon) cleanupRemoteGitStatusSubscription(client *wsClient) {
+	if d.hubManager == nil || client == nil {
+		return
+	}
+	endpointID := client.gitStatusEndpointIDValue()
+	if endpointID == "" {
+		return
+	}
+	client.setGitStatusEndpointID("")
+	payload, err := json.Marshal(protocol.UnsubscribeGitStatusMessage{Cmd: protocol.CmdUnsubscribeGitStatus})
+	if err != nil {
+		return
+	}
+	if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, payload); err != nil {
+		d.logf("remote git-status unsubscribe failed for endpoint %s: %v", endpointID, err)
+	}
+}
+
 func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	cmd, msg, err := protocol.ParseMessage(data)
 	if err != nil {
@@ -454,6 +500,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	}
 	if d.isRecovering() && blocksDuringRecovery(cmd) {
 		d.sendCommandError(client, cmd, "daemon_recovering")
+		return
+	}
+	if d.tryHandleRemoteWSCommand(client, cmd, msg, data) {
 		return
 	}
 
@@ -502,6 +551,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleUnregisterWS(client, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdGetRecentLocations:
 		d.handleGetRecentLocationsWS(client, msg.(*protocol.GetRecentLocationsMessage))
+	case protocol.CmdBrowseDirectory:
+		d.handleBrowseDirectoryWS(client, msg.(*protocol.BrowseDirectoryMessage))
+	case protocol.CmdInspectPath:
+		d.handleInspectPathWS(client, msg.(*protocol.InspectPathMessage))
 	case protocol.CmdListBranches:
 		d.handleListBranchesWS(client, msg.(*protocol.ListBranchesMessage))
 	case protocol.CmdDeleteBranch:
@@ -595,6 +648,308 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	}
 }
 
+func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg interface{}, raw []byte) bool {
+	if d.hubManager == nil {
+		return false
+	}
+
+	if endpointID := remoteCommandEndpointID(cmd, msg); endpointID != "" {
+		if d.hubManager.HasEndpoint(endpointID) {
+			if cmd == protocol.CmdSpawnSession {
+				if typed, ok := msg.(*protocol.SpawnSessionMessage); ok {
+					d.hubManager.ReservePendingSessionRoute(endpointID, typed.ID)
+				}
+			}
+			if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, raw); err != nil {
+				d.sendCommandError(client, cmd, err.Error())
+				return true
+			}
+			return true
+		}
+		if d.hubManager.HasConfiguredEndpoints() {
+			d.sendCommandError(client, cmd, fmt.Sprintf("endpoint not found: %s", endpointID))
+			return true
+		}
+	}
+
+	if ptyTargetID := remoteCommandPTYTargetID(cmd, msg); ptyTargetID != "" {
+		if _, ok := d.hubManager.EndpointIDForPTYTarget(ptyTargetID); !ok {
+			return false
+		}
+		if err := d.hubManager.ForwardPTYCommand(context.Background(), ptyTargetID, raw); err != nil {
+			d.sendCommandError(client, cmd, err.Error())
+			return true
+		}
+		return true
+	}
+
+	sessionID := remoteCommandSessionID(cmd, msg)
+	if sessionID == "" {
+		if cmd == protocol.CmdUnsubscribeGitStatus {
+			endpointID := client.gitStatusEndpointIDValue()
+			if endpointID == "" {
+				return false
+			}
+			client.setGitStatusEndpointID("")
+			if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, raw); err != nil {
+				d.sendCommandError(client, cmd, err.Error())
+			}
+			return true
+		}
+
+		endpointID, ok := remoteCommandScopedEndpointID(msg, d.hubManager)
+		if !ok {
+			return false
+		}
+		if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, raw); err != nil {
+			d.sendCommandError(client, cmd, err.Error())
+			return true
+		}
+		if cmd == protocol.CmdSubscribeGitStatus {
+			client.setGitStatusEndpointID(endpointID)
+		}
+		return true
+	}
+	endpointID, ok := d.hubManager.EndpointIDForSession(sessionID)
+	if !ok {
+		return false
+	}
+	if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, raw); err != nil {
+		d.sendCommandError(client, cmd, err.Error())
+		return true
+	}
+	return true
+}
+
+func remoteCommandSessionID(cmd string, msg interface{}) string {
+	switch cmd {
+	case protocol.CmdUnregister:
+		if typed, ok := msg.(*protocol.UnregisterMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdStartReviewLoop:
+		if typed, ok := msg.(*protocol.StartReviewLoopMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdStopReviewLoop:
+		if typed, ok := msg.(*protocol.StopReviewLoopMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdGetReviewLoopState:
+		if typed, ok := msg.(*protocol.GetReviewLoopStateMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdSetReviewLoopIterations:
+		if typed, ok := msg.(*protocol.SetReviewLoopIterationLimitMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdWorkspaceGet:
+		if typed, ok := msg.(*protocol.WorkspaceGetMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdWorkspaceSplitPane:
+		if typed, ok := msg.(*protocol.WorkspaceSplitPaneMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdWorkspaceClosePane:
+		if typed, ok := msg.(*protocol.WorkspaceClosePaneMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdWorkspaceFocusPane:
+		if typed, ok := msg.(*protocol.WorkspaceFocusPaneMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdWorkspaceRenamePane:
+		if typed, ok := msg.(*protocol.WorkspaceRenamePaneMessage); ok {
+			return typed.SessionID
+		}
+	}
+	return ""
+}
+
+func remoteCommandEndpointID(cmd string, msg interface{}) string {
+	switch cmd {
+	case protocol.CmdGetRecentLocations:
+		if typed, ok := msg.(*protocol.GetRecentLocationsMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	case protocol.CmdBrowseDirectory:
+		if typed, ok := msg.(*protocol.BrowseDirectoryMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	case protocol.CmdInspectPath:
+		if typed, ok := msg.(*protocol.InspectPathMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	case protocol.CmdSpawnSession:
+		if typed, ok := msg.(*protocol.SpawnSessionMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	case protocol.CmdCreateWorktree:
+		if typed, ok := msg.(*protocol.CreateWorktreeMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	case protocol.CmdDeleteWorktree:
+		if typed, ok := msg.(*protocol.DeleteWorktreeMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	case protocol.CmdDeleteBranch:
+		if typed, ok := msg.(*protocol.DeleteBranchMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	case protocol.CmdGetRepoInfo:
+		if typed, ok := msg.(*protocol.GetRepoInfoMessage); ok {
+			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
+		}
+	}
+	return ""
+}
+
+func remoteCommandPTYTargetID(cmd string, msg interface{}) string {
+	switch cmd {
+	case protocol.CmdSpawnSession:
+	case protocol.CmdAttachSession:
+		if typed, ok := msg.(*protocol.AttachSessionMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdDetachSession:
+		if typed, ok := msg.(*protocol.DetachSessionMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdPtyInput:
+		if typed, ok := msg.(*protocol.PtyInputMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdPtyResize:
+		if typed, ok := msg.(*protocol.PtyResizeMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdKillSession:
+		if typed, ok := msg.(*protocol.KillSessionMessage); ok {
+			return typed.ID
+		}
+	}
+	return ""
+}
+
+func remoteCommandScopedEndpointID(msg interface{}, manager interface {
+	EndpointIDForPath(path string) (string, bool)
+	EndpointIDForReview(reviewID string) (string, bool)
+	EndpointIDForComment(commentID string) (string, bool)
+	EndpointIDForReviewLoop(loopID string) (string, bool)
+}) (string, bool) {
+	if manager == nil {
+		return "", false
+	}
+	if path := remoteCommandPath(msg); path != "" {
+		if endpointID, ok := manager.EndpointIDForPath(path); ok {
+			return endpointID, true
+		}
+	}
+	if reviewID := remoteCommandReviewID(msg); reviewID != "" {
+		if endpointID, ok := manager.EndpointIDForReview(reviewID); ok {
+			return endpointID, true
+		}
+	}
+	if commentID := remoteCommandCommentID(msg); commentID != "" {
+		if endpointID, ok := manager.EndpointIDForComment(commentID); ok {
+			return endpointID, true
+		}
+	}
+	if loopID := remoteCommandReviewLoopID(msg); loopID != "" {
+		if endpointID, ok := manager.EndpointIDForReviewLoop(loopID); ok {
+			return endpointID, true
+		}
+	}
+	return "", false
+}
+
+func remoteCommandPath(msg interface{}) string {
+	switch typed := msg.(type) {
+	case *protocol.ListWorktreesMessage:
+		return typed.MainRepo
+	case *protocol.CreateWorktreeMessage:
+		return typed.MainRepo
+	case *protocol.DeleteWorktreeMessage:
+		return typed.Path
+	case *protocol.ListBranchesMessage:
+		return typed.MainRepo
+	case *protocol.DeleteBranchMessage:
+		return typed.MainRepo
+	case *protocol.SwitchBranchMessage:
+		return typed.MainRepo
+	case *protocol.CreateWorktreeFromBranchMessage:
+		return typed.MainRepo
+	case *protocol.CreateBranchMessage:
+		return typed.MainRepo
+	case *protocol.CheckDirtyMessage:
+		return typed.Repo
+	case *protocol.StashMessage:
+		return typed.Repo
+	case *protocol.StashPopMessage:
+		return typed.Repo
+	case *protocol.CheckAttnStashMessage:
+		return typed.Repo
+	case *protocol.CommitWIPMessage:
+		return typed.Repo
+	case *protocol.GetDefaultBranchMessage:
+		return typed.Repo
+	case *protocol.FetchRemotesMessage:
+		return typed.Repo
+	case *protocol.ListRemoteBranchesMessage:
+		return typed.Repo
+	case *protocol.EnsureRepoMessage:
+		return typed.TargetPath
+	case *protocol.SubscribeGitStatusMessage:
+		return typed.Directory
+	case *protocol.GetFileDiffMessage:
+		return typed.Directory
+	case *protocol.GetBranchDiffFilesMessage:
+		return typed.Directory
+	case *protocol.GetRepoInfoMessage:
+		return typed.Repo
+	case *protocol.GetReviewStateMessage:
+		return typed.RepoPath
+	}
+	return ""
+}
+
+func remoteCommandReviewID(msg interface{}) string {
+	switch typed := msg.(type) {
+	case *protocol.MarkFileViewedMessage:
+		return typed.ReviewID
+	case *protocol.AddCommentMessage:
+		return typed.ReviewID
+	case *protocol.GetCommentsMessage:
+		return typed.ReviewID
+	}
+	return ""
+}
+
+func remoteCommandCommentID(msg interface{}) string {
+	switch typed := msg.(type) {
+	case *protocol.UpdateCommentMessage:
+		return typed.CommentID
+	case *protocol.ResolveCommentMessage:
+		return typed.CommentID
+	case *protocol.WontFixCommentMessage:
+		return typed.CommentID
+	case *protocol.DeleteCommentMessage:
+		return typed.CommentID
+	}
+	return ""
+}
+
+func remoteCommandReviewLoopID(msg interface{}) string {
+	switch typed := msg.(type) {
+	case *protocol.GetReviewLoopRunMessage:
+		return typed.LoopID
+	case *protocol.AnswerReviewLoopMessage:
+		return typed.LoopID
+	}
+	return ""
+}
+
 func (d *Daemon) sendCommandError(client *wsClient, cmd, errMsg string) {
 	event := &protocol.WebSocketEvent{
 		Event:   protocol.EventCommandError,
@@ -621,4 +976,11 @@ func (d *Daemon) broadcastMessage(message interface{}) {
 		return
 	}
 	d.wsHub.BroadcastValue(message)
+}
+
+func (d *Daemon) broadcastRawWSMessage(payload []byte) {
+	if d.wsHub == nil {
+		return
+	}
+	d.wsHub.BroadcastRawText(payload)
 }

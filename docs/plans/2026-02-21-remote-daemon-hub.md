@@ -1,7 +1,7 @@
 # Remote Daemon Hub: Multi-Machine Session Control
 
 Date: 2026-02-21
-Status: Planning
+Status: Implemented (SSH scope)
 Owner: daemon/frontend
 
 ## Motivation
@@ -21,7 +21,43 @@ Treat those items as completed prerequisites, not future work:
 - extracted websocket command scope metadata in `internal/daemon/command_meta.go`
 - automatic local daemon restart on protocol mismatch
 
-What remains is the remote-specific work: endpoint persistence and lifecycle, SSH bootstrap, `ws-relay`, merged remote session visibility, and endpoint-aware command routing.
+The core SSH-based remote-daemon-hub architecture from this plan is implemented. The remaining work is manual validation/polish from real use and the optional direct-connection hardening described in Phase E.
+
+The picker UX target for this remaining work is explicit:
+
+- local and remote daemons should behave the same from the user's perspective once a target is selected
+- the picker should support arbitrary directory navigation on remote daemons, but start from that daemon's `projects_directory` when configured
+- if a daemon has no `projects_directory`, the picker should start from `~`
+- recent locations should be scoped per endpoint and populated only after successful session launches
+- typed paths should validate and browse live; there should be no manual-entry fallback that bypasses daemon validation
+- repo detection should use the daemon's real git probing path, not a picker-local heuristic
+- repo probing should happen on explicit directory selection, matching the local flow today
+- the picker should remain directory-only; file browsing is out of scope for this pass
+- if a remote endpoint is disconnected or cannot browse/validate, the picker should fail closed rather than falling back to a degraded local-only path
+
+## Current Status
+
+Implemented and working:
+
+- Phase A: SSH bootstrap, remote binary install/update, `attn ws-relay`, remote daemon start/restart, and transport retry handling.
+- Phase B: persisted endpoints, endpoint lifecycle/status events, and Settings-based endpoint management.
+- Phase C: merged remote sessions in the main app session list with endpoint badges and grouped visibility.
+- Phase D: remote PTY attach/input/output, remote session creation from the app, remote reload, remote git/diff/review routing, remote review comment mutations, and remote review-loop routing/UI.
+- Picker parity: local and remote new-session browsing now share the same daemon-backed browse/inspect path, remote browsing starts from `projects_directory` (or `~`), repo detection uses daemon git probing, per-endpoint recents are returned by the owning daemon, and remote repo/worktree flows match the local picker path.
+- Packaged real-app smoke coverage: verified end-to-end against `ai-sandbox` with a fresh app instance and a fresh local daemon instance, including remote review-loop start, stop, awaiting-user, answer, and completion.
+- Packaged picker smoke coverage: verified end-to-end against `ai-sandbox`, including remote directory browse, repo selection, per-endpoint recent locations, remote worktree creation, and worktree visibility on reopen.
+- Stability pass: repeated fresh packaged-app runs against `ai-sandbox` now pass consistently after hardening transient worker attach races and harness failure reporting.
+
+Implemented with intentional scope limits:
+
+- Remote open-in-editor is supported only for Zed remote SSH targets.
+- Remote fork is intentionally not supported.
+- Branch switching is not a target for this plan because that UI path is expected to be removed later.
+
+Still remaining:
+
+- manual validation and UX polish from real use
+- optional direct-connection hardening from Phase E (TLS/token/non-SSH flow)
 
 ## Topology
 
@@ -70,10 +106,11 @@ The Tauri app already talks to the daemon exclusively over WebSocket. The hub da
 
 Each phase is independently valuable:
 - Preparatory refactors (done) established the versioning, protocol, and routing baseline.
-- Phase A (remote bootstrap) lets the hub reach and validate a remote daemon today.
-- Phase B (hub client) lets the local daemon aggregate remotes.
-- Phase C (UI) shows remote sessions in the app.
-- Phase D (auth/TLS) makes it production-safe.
+- Phase A (done) lets the hub reach and validate a remote daemon.
+- Phase B (done) lets the local daemon aggregate remotes and manage endpoints.
+- Phase C (done) shows remote sessions in the app.
+- Phase D is done: interactive remote PTY, spawn, reload, repo/review routing, review-loop flows, and picker parity for browse/repo/worktree session creation are all implemented and packaged-smoked.
+- Phase E (later) covers direct connections and hardening.
 
 ## Design Principles
 
@@ -605,7 +642,15 @@ Changes:
 4. Git operations (branch, stash, worktree, diff) forwarded to the endpoint owning the session's directory.
 5. Destructive/scoped commands (`clear_sessions`, `set_setting`) require explicit `endpoint_id` targeting — never broadcast (see §8).
 
-**Exit gate:** Can attach to a remote session's terminal, type commands, see output. Can spawn new sessions on remote endpoints. Git operations work.
+Current state:
+
+- implemented: attach/input/resize, remote spawn from the app, remote reload, git/diff/review routing, review comment mutations, and endpoint-aware packaged-app verification
+- intentionally unsupported: remote fork
+- supported with constraint: remote open-in-editor only for Zed remote SSH targets
+- intentionally not pursued here: branch switching
+- packaged verification is in place for remote review-loop start/stop/awaiting-user/answer flows
+
+**Exit gate:** Can attach to a remote session's terminal, type commands, see output. Can spawn new sessions on remote endpoints. Git operations work. Review/comment mutations work. Remote review-loop flows work end to end.
 
 ### Phase E: Direct connections and hardening
 
@@ -698,3 +743,39 @@ Changes:
 7. Connected endpoints display capabilities: available agents, projects directory, session count.
 8. Reconnects automatically after SSH disconnect with backoff.
 9. Local functionality is completely unaffected by remote endpoint configuration.
+
+## Integrated Smoke Scenario (Current Phase D)
+
+This is the highest-signal end-to-end verification path for the current implementation. It uses the real packaged Tauri app, the real local daemon, SSH bootstrap, and a real remote daemon, and it now exercises the real remote interactive path instead of seeding synthetic remote session state.
+
+Example target: `ssh ai-sandbox`
+
+Flow:
+
+1. Launch the packaged app with the dev-only UI automation bridge enabled.
+2. Reset the remote target before app startup so previously persisted local endpoints cannot race the bootstrap flow.
+3. Add endpoint `ai-sandbox` to the local daemon and wait for `endpoint_status_changed` to report `connected`.
+4. Create a brand-new remote session from the packaged app, targeting the connected endpoint.
+5. Verify the session registers through the hub, appears in the main app UI, and shows the expected endpoint badge.
+6. Attach to the remote session, split a utility pane, type into the remote PTY, and verify the output returns through the app.
+7. Reload the remote session from the app and verify the main runtime is replaced rather than silently reattaching to stale state.
+8. Create or reuse a real remote git repo, dirty a tracked file, and verify the packaged diff/review panel loads that remote change set.
+9. Add, update, resolve, wont-fix, and delete a remote review comment through the app, and verify each mutation round-trips successfully.
+10. Start a remote review loop, stop one run while it is active, then start another run that reaches `awaiting_user`, answer it, and verify completion in both daemon state and the packaged review-loop drawer.
+11. Remove the session and endpoint and verify cleanup in both the observer and the packaged UI.
+
+What this scenario proves now:
+
+- SSH bootstrap/install/update works against a real host
+- hub↔remote websocket handshake and reconnect state work
+- remote sessions merge into the app session model correctly
+- endpoint-aware grouping/labeling works in the real UI
+- remote PTY interactivity works in the packaged app
+- remote session creation and reload from the app work
+- remote diff/review panel routing works
+- remote review comment mutations work
+- remote review-loop start/stop/awaiting-user/answer flows work in the packaged app
+
+What it does not prove yet:
+
+- Settings-modal CRUD driven entirely through UI automation

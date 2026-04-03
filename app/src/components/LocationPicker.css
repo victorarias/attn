@@ -149,6 +149,98 @@
   background: rgba(255, 107, 53, 0.06);
 }
 
+.picker-endpoint-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.picker-endpoint-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.endpoint-option {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-input);
+  color: var(--color-text-secondary);
+  border-radius: 12px;
+  padding: 8px 10px;
+  min-width: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  cursor: pointer;
+  transition: all 0.12s ease-out;
+}
+
+.endpoint-option:hover:not(:disabled) {
+  border-color: rgba(255, 107, 53, 0.45);
+  color: var(--color-text-primary);
+}
+
+.endpoint-option.active {
+  border-color: rgba(255, 107, 53, 0.65);
+  box-shadow: 0 0 0 1px rgba(255, 107, 53, 0.2);
+  background: rgba(255, 107, 53, 0.08);
+}
+
+.endpoint-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.endpoint-option-name {
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.endpoint-option-meta {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: lowercase;
+}
+
+.picker-endpoint-summary {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: rgba(255, 255, 255, 0.015);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+}
+
+.picker-endpoint-summary-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.picker-endpoint-summary-label {
+  width: 60px;
+  color: var(--color-text-dimmed);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+}
+
+.picker-endpoint-summary-note {
+  font-size: 10px;
+  color: var(--color-text-dimmed);
+  line-height: 1.5;
+}
+
 .resume-toggle {
   border: 1px solid var(--color-border);
   border-radius: 999px;

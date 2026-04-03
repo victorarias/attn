@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyKill } from '../pty/bridge';
-import { useDaemonSocket } from './useDaemonSocket';
+import { retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -237,8 +237,8 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
 
     await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith('restart_daemon', {
-        expected_protocol: '43',
+        expect(vi.mocked(invoke)).toHaveBeenCalledWith('restart_daemon', {
+        expected_protocol: '46',
         prefer_local: false,
       });
     });
@@ -285,5 +285,25 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await expect(first).resolves.toMatchObject({ success: true, endpoint_id: 'ep-1' });
     unmount();
+  });
+
+  it('retries transient worker attach failures after respawn', async () => {
+    const waits: number[] = [];
+    const attach = vi.fn()
+      .mockRejectedValueOnce(new Error('dial unix /Users/test/.attn/workers/d-test/sock/ABC.sock: connect: no such file or directory'))
+      .mockResolvedValueOnce({ success: true });
+
+    await expect(
+      retryTransientAttachRequest(() => attach(), {
+        timeoutMs: 500,
+        delayMs: 25,
+        wait: async (delayMs) => {
+          waits.push(delayMs);
+        },
+      }),
+    ).resolves.toEqual({ success: true });
+
+    expect(attach).toHaveBeenCalledTimes(2);
+    expect(waits).toEqual([25]);
   });
 });

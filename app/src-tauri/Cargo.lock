@@ -52,6 +52,7 @@ name = "app"
 version = "0.3.2"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "dirs 5.0.1",
  "libc",
  "regex",

@@ -2,7 +2,9 @@ package hub
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,8 @@ import (
 )
 
 const githubRepo = "victorarias/attn"
+
+const remoteDaemonReadyTimeout = 35 * time.Second
 
 type RemotePlatform struct {
 	GOOS         string
@@ -130,12 +134,24 @@ func (b *Bootstrapper) ensureLocalBinary(ctx context.Context, platform RemotePla
 	if err != nil {
 		return "", err
 	}
-	cachePath := filepath.Join(home, ".attn", "remotes", "binaries", version, platform.ArtifactName)
+	cacheKey, preferSourceBuild, err := b.localBinaryCacheKey(version)
+	if err != nil {
+		return "", err
+	}
+	cachePath := filepath.Join(home, ".attn", "remotes", "binaries", cacheKey, platform.ArtifactName)
 	if info, err := os.Stat(cachePath); err == nil && info.Mode().IsRegular() {
 		return cachePath, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
 		return "", err
+	}
+
+	if preferSourceBuild {
+		if err := b.buildBinaryFromSource(ctx, platform, version, cachePath); err == nil {
+			return cachePath, nil
+		} else {
+			b.logf("source build failed for %s %s: %v", cacheKey, platform.ArtifactName, err)
+		}
 	}
 
 	if version != "" && version != "dev" {
@@ -173,6 +189,65 @@ func sourceRoot() string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
+func sourceCheckoutAvailable() bool {
+	root := sourceRoot()
+	if root == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
+		return false
+	}
+	return true
+}
+
+func localBinaryFingerprint() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	file, err := os.Open(exe)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+func (b *Bootstrapper) localBinaryCacheKey(version string) (string, bool, error) {
+	cacheVersion := strings.TrimSpace(version)
+	if cacheVersion == "" {
+		cacheVersion = "unknown"
+	}
+	if !sourceCheckoutAvailable() {
+		return cacheVersion, false, nil
+	}
+
+	fingerprint, err := localBinaryFingerprint()
+	if err != nil {
+		return "", false, fmt.Errorf("fingerprint local binary: %w", err)
+	}
+	if len(fingerprint) > 12 {
+		fingerprint = fingerprint[:12]
+	}
+	return fmt.Sprintf("source-%s-%s", cacheVersion, fingerprint), true, nil
+}
+
+func zigTargetForPlatform(platform RemotePlatform) (string, error) {
+	switch {
+	case platform.GOOS == "linux" && platform.GOARCH == "amd64":
+		return "x86_64-linux-gnu", nil
+	case platform.GOOS == "linux" && platform.GOARCH == "arm64":
+		return "aarch64-linux-gnu", nil
+	default:
+		return "", fmt.Errorf("unsupported zig target for %s/%s", platform.GOOS, platform.GOARCH)
+	}
+}
+
 func (b *Bootstrapper) buildBinaryFromSource(ctx context.Context, platform RemotePlatform, version, outputPath string) error {
 	root := sourceRoot()
 	if root == "" {
@@ -181,9 +256,31 @@ func (b *Bootstrapper) buildBinaryFromSource(ctx context.Context, platform Remot
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
 		return fmt.Errorf("source checkout not available for fallback build")
 	}
+
 	cmd := exec.CommandContext(ctx, "go", "build", "-ldflags", "-X main.version="+version, "-o", outputPath, "./cmd/attn")
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "GOOS="+platform.GOOS, "GOARCH="+platform.GOARCH)
+	env := append(os.Environ(), "GOOS="+platform.GOOS, "GOARCH="+platform.GOARCH)
+	if platform.GOOS == "linux" {
+		env = append(env, "CGO_ENABLED=1")
+		if runtime.GOOS != "linux" {
+			if _, err := exec.LookPath("zig"); err != nil {
+				return fmt.Errorf(
+					"zig is required to cross-compile %s with cgo from %s; install zig or use the published Linux artifact",
+					platform.ArtifactName,
+					runtime.GOOS,
+				)
+			}
+			target, err := zigTargetForPlatform(platform)
+			if err != nil {
+				return err
+			}
+			env = append(env,
+				"CC=zig cc -target "+target,
+				"CXX=zig c++ -target "+target,
+			)
+		}
+	}
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("cross-compile %s: %s", platform.ArtifactName, strings.TrimSpace(string(out)))
@@ -195,12 +292,17 @@ func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, local
 	if _, err := runSSH(ctx, sshTarget, "mkdir -p ~/.local/bin ~/.attn"); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "scp", localBinary, sshTarget+":~/.local/bin/"+config.BinaryName()+".tmp")
+	remoteHome, err := runSSH(ctx, sshTarget, `printf '%s' "$HOME"`)
+	if err != nil {
+		return err
+	}
+	remoteTmpPath := strings.TrimSpace(remoteHome) + "/.local/bin/" + config.BinaryName() + ".tmp"
+	cmd := exec.CommandContext(ctx, "scp", localBinary, sshTarget+":"+remoteTmpPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("scp binary: %s", strings.TrimSpace(string(out)))
 	}
-	_, err = runSSH(ctx, sshTarget, fmt.Sprintf("chmod +x ~/.local/bin/%s.tmp && mv ~/.local/bin/%s.tmp ~/.local/bin/%s", config.BinaryName(), config.BinaryName(), config.BinaryName()))
+	_, err = runSSH(ctx, sshTarget, fmt.Sprintf("chmod +x %s && mv %s %s", shellQuote(remoteTmpPath), shellQuote(remoteTmpPath), shellQuote(strings.TrimSpace(remoteHome)+"/.local/bin/"+config.BinaryName())))
 	return err
 }
 
@@ -222,17 +324,23 @@ pid_path="$(dirname "$socket_path")/attn.pid"
 }
 
 type remoteDaemonState struct {
-	Running bool
-	Stale   bool
-	PID     string
+	Running  bool
+	Starting bool
+	Stale    bool
+	PID      string
 }
 
 func (b *Bootstrapper) probeRemoteDaemon(ctx context.Context, sshTarget string) (remoteDaemonState, error) {
 	script := remoteSocketConfigScript() + `
+listener_pid="$(ss -H -ltnp "( sport = :${ATTN_WS_PORT:-9849} )" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
+if [ -n "$listener_pid" ]; then
+  printf 'running %s\n' "$listener_pid"
+  exit 0
+fi
 if [ -S "$socket_path" ] && [ -f "$pid_path" ]; then
   pid="$(cat "$pid_path" 2>/dev/null || true)"
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-    printf 'running %%s\n' "$pid"
+    printf 'starting %%s\n' "$pid"
     exit 0
   fi
   printf 'stale %%s\n' "$pid"
@@ -251,6 +359,12 @@ printf 'stopped\n'
 	switch fields[0] {
 	case "running":
 		state := remoteDaemonState{Running: true}
+		if len(fields) > 1 {
+			state.PID = fields[1]
+		}
+		return state, nil
+	case "starting":
+		state := remoteDaemonState{Starting: true}
 		if len(fields) > 1 {
 			state.PID = fields[1]
 		}
@@ -281,20 +395,20 @@ func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget 
 		state = remoteDaemonState{}
 	}
 
-	if state.Running && binaryUpdated {
+	if (state.Running || state.Starting) && binaryUpdated {
 		if err := b.restartRemoteDaemon(ctx, sshTarget, state.PID); err != nil {
 			return err
 		}
 		state = remoteDaemonState{}
 	}
 
-	if !state.Running {
+	if !state.Running && !state.Starting {
 		if err := b.startRemoteDaemon(ctx, sshTarget); err != nil {
 			return err
 		}
 	}
 
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(remoteDaemonReadyTimeout)
 	for time.Now().Before(deadline) {
 		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		current, err := b.probeRemoteDaemon(probeCtx, sshTarget)
@@ -307,8 +421,24 @@ func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget 
 	return fmt.Errorf("daemon did not become ready")
 }
 
+func remoteDaemonEnvScript() string {
+	assignments := make([]string, 0, 1)
+	if value := strings.TrimSpace(os.Getenv("ATTN_REVIEW_LOOP_SCRIPT_B64")); value != "" {
+		assignments = append(assignments, "export ATTN_REVIEW_LOOP_SCRIPT_B64="+shellQuote(value))
+	}
+	if len(assignments) == 0 {
+		return ""
+	}
+	return strings.Join(assignments, "; ") + "; "
+}
+
 func (b *Bootstrapper) startRemoteDaemon(ctx context.Context, sshTarget string) error {
-	_, err := runSSH(ctx, sshTarget, "mkdir -p ~/.attn && nohup setsid "+remoteAttnCommand("daemon")+` </dev/null >>~/.attn/daemon.log 2>&1 &`)
+	launchScript := remoteDaemonEnvScript() + remoteAttnCommand("daemon")
+	_, err := runSSH(
+		ctx,
+		sshTarget,
+		"mkdir -p ~/.attn && nohup setsid sh -lc "+shellQuote(launchScript)+` </dev/null >>~/.attn/daemon.log 2>&1 &`,
+	)
 	return err
 }
 

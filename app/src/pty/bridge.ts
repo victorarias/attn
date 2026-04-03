@@ -3,6 +3,8 @@ import { isTauri } from '@tauri-apps/api/core';
 export interface PtySpawnArgs {
   id: string;
   cwd: string;
+  endpoint_id?: string;
+  reload?: boolean;
   cols: number;
   rows: number;
   shell?: boolean;

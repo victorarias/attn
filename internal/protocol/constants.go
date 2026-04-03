@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "43"
+const ProtocolVersion = "46"
 
 // Commands
 const (
@@ -50,6 +50,8 @@ const (
 	CmdInjectTestPR             = "inject_test_pr"
 	CmdInjectTestSession        = "inject_test_session"
 	CmdGetRecentLocations       = "get_recent_locations"
+	CmdBrowseDirectory          = "browse_directory"
+	CmdInspectPath              = "inspect_path"
 	CmdListBranches             = "list_branches"
 	CmdDeleteBranch             = "delete_branch"
 	CmdSwitchBranch             = "switch_branch"
@@ -122,6 +124,8 @@ const (
 	EventSettingsUpdated          = "settings_updated"
 	EventRateLimited              = "rate_limited"
 	EventRecentLocationsResult    = "recent_locations_result"
+	EventBrowseDirectoryResult    = "browse_directory_result"
+	EventInspectPathResult        = "inspect_path_result"
 	EventBranchesResult           = "branches_result"
 	EventDeleteBranchResult       = "delete_branch_result"
 	EventSwitchBranchResult       = "switch_branch_result"
@@ -480,6 +484,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdGetRecentLocations:
 		var msg GetRecentLocationsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdBrowseDirectory:
+		var msg BrowseDirectoryMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdInspectPath:
+		var msg InspectPathMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

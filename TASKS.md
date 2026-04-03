@@ -1,5 +1,69 @@
 # Tasks
 
+## Remote daemon hub automation coverage
+
+- Status: `open`
+- Priority: `medium`
+- Area: `app automation bridge`, `real-app harness`, `settings UI`, `remote hub`
+
+### Problem
+
+The current remote-daemon verification path is only partially automated.
+
+Today:
+
+1. the real packaged app can be driven through the dev-only UI automation bridge
+2. the bridge can inspect session/workspace state and drive session selection
+3. endpoint CRUD and Settings-modal flows are not exposed through the bridge
+4. remote hub smoke coverage still needs hybrid setup through daemon commands and SSH helpers
+
+### Goal
+
+Add integrated automation for the remote-daemon hub so real-app scenarios can cover endpoint CRUD, Settings UI, remote session visibility, and later Phase D interactivity from one repeatable harness.
+
+### Plan
+
+Use the Phase C smoke scenario documented in [docs/plans/2026-02-21-remote-daemon-hub.md](/Users/victor.arias/projects/victor/attn/docs/plans/2026-02-21-remote-daemon-hub.md) as the baseline, then extend the bridge and harness until endpoint management can be driven through the real UI instead of side-channel setup.
+
+### Follow-up checklist
+
+1. Extend the UI automation bridge with Settings and endpoint actions:
+- open/close Settings
+- list endpoint cards
+- add endpoint
+- edit endpoint
+- enable/disable endpoint
+- remove endpoint
+
+2. Add structured snapshot coverage for endpoint UI:
+- endpoint status badge
+- status message
+- capabilities
+- session count
+
+3. Add a real-app `bridge-remote-hub` scenario:
+- connect to a real SSH host such as `ai-sandbox`
+- wait for endpoint bootstrap/connect
+- seed remote session state over SSH
+- verify merged session visibility and read-only placeholder behavior
+
+4. Add negative/reconnect scenarios:
+- remote daemon restart
+- SSH disconnect / reconnect
+- endpoint disable / remove while sessions are visible
+
+5. Once Phase D lands, extend the same harness for:
+- remote PTY attach/input/output
+- remote spawn from app
+- remote git/diff/review routing
+
+### Acceptance criteria
+
+- A packaged-app harness can create and manage endpoints without manual Settings interaction.
+- The harness can assert endpoint status and remote session visibility in the real UI.
+- Endpoint CRUD regressions are caught automatically.
+- The automation path is ready to expand into Phase D remote interactivity coverage.
+
 ## Persistent split workspaces and attached pane recovery
 
 - Status: `open`

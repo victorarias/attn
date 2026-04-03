@@ -73,6 +73,7 @@ export function PathInput({
         ref={inputRef}
         type="text"
         className="path-input"
+        data-testid="location-picker-path-input"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}

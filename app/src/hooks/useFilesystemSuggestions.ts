@@ -1,7 +1,5 @@
-// app/src/hooks/useFilesystemSuggestions.ts
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { homeDir } from '@tauri-apps/api/path';
+import type { BrowseDirectoryResult } from './useDaemonSocket';
 
 interface FilesystemSuggestion {
   name: string;
@@ -13,97 +11,83 @@ interface UseFilesystemSuggestionsResult {
   loading: boolean;
   error: string | null;
   currentDir: string;
+  homePath: string;
 }
 
-export function useFilesystemSuggestions(inputPath: string): UseFilesystemSuggestionsResult {
+function contractPath(path: string, homePath: string): string {
+  if (!path || !homePath) {
+    return path;
+  }
+  if (path === homePath) {
+    return '~';
+  }
+  if (path.startsWith(homePath + '/')) {
+    return '~' + path.slice(homePath.length);
+  }
+  return path;
+}
+
+export function useFilesystemSuggestions(
+  inputPath: string,
+  endpointId: string | undefined,
+  browseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>,
+): UseFilesystemSuggestionsResult {
   const [suggestions, setSuggestions] = useState<FilesystemSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentDir, setCurrentDir] = useState('');
-  const [homePath, setHomePath] = useState('/Users');
+  const [homePath, setHomePath] = useState('');
   const debounceRef = useRef<number | null>(null);
+  const requestIdRef = useRef(0);
 
-  // Get home directory on mount
-  useEffect(() => {
-    homeDir().then((dir) => {
-      setHomePath(dir.replace(/\/$/, ''));
-    }).catch(() => {});
-  }, []);
-
-  const fetchSuggestions = useCallback(async (path: string) => {
-    if (!path || path.length < 1) {
+  const fetchSuggestions = useCallback(async (path: string, targetEndpointId?: string) => {
+    if (!browseDirectory || !path || path.length < 1) {
       setSuggestions([]);
       setCurrentDir('');
       return;
     }
 
-    // Parse input to determine directory to query
-    let dirToQuery: string;
-    let prefix: string;
-
-    // Expand ~ to home directory
-    let expandedPath: string;
-    if (path === '~') {
-      expandedPath = homePath;
-    } else if (path.startsWith('~/')) {
-      expandedPath = homePath + path.slice(1); // ~/foo -> /Users/x/foo
-    } else if (path.startsWith('~')) {
-      expandedPath = homePath + '/' + path.slice(1); // ~foo -> /Users/x/foo
-    } else {
-      expandedPath = path;
-    }
-
-    if (expandedPath.endsWith('/')) {
-      // User typed "/Users/" - query that directory
-      dirToQuery = expandedPath;
-      prefix = '';
-    } else {
-      // User typed "/Users/jo" - query parent, filter by "jo"
-      const lastSlash = expandedPath.lastIndexOf('/');
-      if (lastSlash === -1) {
-        setSuggestions([]);
-        return;
-      }
-      dirToQuery = expandedPath.slice(0, lastSlash + 1) || '/';
-      prefix = expandedPath.slice(lastSlash + 1).toLowerCase();
-    }
-
-    setCurrentDir(dirToQuery.replace(homePath, '~'));
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
 
     try {
-      // Pass prefix to Rust side so filtering happens before truncation
-      const dirs = await invoke<string[]>('list_directory', {
-        path: dirToQuery,
-        prefix: prefix || null,
-      });
+      const result = await browseDirectory(path, targetEndpointId);
+      if (requestIdRef.current !== requestId) {
+        return;
+      }
 
-      // Contract paths back to use ~ for home directory
-      const contractPath = (p: string) =>
-        p === homePath ? '~' : p.startsWith(homePath + '/') ? '~' + p.slice(homePath.length) : p;
-
-      setSuggestions(dirs.map(name => ({
-        name,
-        path: contractPath(dirToQuery + name) + '/',  // Keep ~ and add trailing slash
+      const nextHomePath = result.home_path || '';
+      if (nextHomePath) {
+        setHomePath(nextHomePath);
+      }
+      setCurrentDir(contractPath(result.directory, nextHomePath));
+      setSuggestions((result.entries || []).map((entry) => ({
+        name: entry.name,
+        path: contractPath(entry.path, nextHomePath) + '/',
       })));
     } catch (e) {
+      if (requestIdRef.current !== requestId) {
+        return;
+      }
       console.error('[fs-suggestions] error:', e);
       setError(String(e));
       setSuggestions([]);
+      setCurrentDir('');
     } finally {
-      setLoading(false);
+      if (requestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
-  }, [homePath]);
+  }, [browseDirectory]);
 
-  // Debounced fetch
   useEffect(() => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
     }
 
     debounceRef.current = window.setTimeout(() => {
-      fetchSuggestions(inputPath);
+      void fetchSuggestions(inputPath, endpointId);
     }, 150);
 
     return () => {
@@ -111,7 +95,7 @@ export function useFilesystemSuggestions(inputPath: string): UseFilesystemSugges
         clearTimeout(debounceRef.current);
       }
     };
-  }, [inputPath, fetchSuggestions]);
+  }, [endpointId, fetchSuggestions, inputPath]);
 
-  return { suggestions, loading, error, currentDir };
+  return { suggestions, loading, error, currentDir, homePath };
 }

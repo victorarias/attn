@@ -149,10 +149,11 @@ func (d *Daemon) handleListBranchesWS(client *wsClient, msg *protocol.ListBranch
 func (d *Daemon) handleDeleteBranchWS(client *wsClient, msg *protocol.DeleteBranchMessage) {
 	go func() {
 		err := d.doDeleteBranch(msg.MainRepo, msg.Branch, msg.Force)
-		result := &protocol.WebSocketEvent{
-			Event:   protocol.EventDeleteBranchResult,
-			Branch:  protocol.Ptr(msg.Branch),
-			Success: protocol.Ptr(err == nil),
+		result := &protocol.DeleteBranchResultMessage{
+			Event:      protocol.EventDeleteBranchResult,
+			Branch:     msg.Branch,
+			EndpointID: msg.EndpointID,
+			Success:    err == nil,
 		}
 		if err != nil {
 			result.Error = protocol.Ptr(err.Error())
@@ -230,9 +231,10 @@ func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfo
 		currentBranch, err := git.GetCurrentBranch(repo)
 		if err != nil {
 			d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
-				Event:   protocol.EventGetRepoInfoResult,
-				Success: false,
-				Error:   protocol.Ptr(err.Error()),
+				Event:      protocol.EventGetRepoInfoResult,
+				EndpointID: msg.EndpointID,
+				Success:    false,
+				Error:      protocol.Ptr(err.Error()),
 			})
 			return
 		}
@@ -264,9 +266,10 @@ func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfo
 			branchesWithCommits, err := git.ListBranchesWithCommits(repo)
 			if err != nil {
 				d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
-					Event:   protocol.EventGetRepoInfoResult,
-					Success: false,
-					Error:   protocol.Ptr(err.Error()),
+					Event:      protocol.EventGetRepoInfoResult,
+					EndpointID: msg.EndpointID,
+					Success:    false,
+					Error:      protocol.Ptr(err.Error()),
 				})
 				return
 			}
@@ -281,7 +284,8 @@ func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfo
 		}
 
 		d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
-			Event: protocol.EventGetRepoInfoResult,
+			Event:      protocol.EventGetRepoInfoResult,
+			EndpointID: msg.EndpointID,
 			Info: &protocol.RepoInfo{
 				Repo:              repo,
 				CurrentBranch:     currentBranch,

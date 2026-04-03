@@ -13,21 +13,58 @@ import (
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/workspace"
 )
 
 // Store manages session state in SQLite
 type Store struct {
 	mu sync.RWMutex
 	db *sql.DB
+
+	sessions        map[string]*protocol.Session
+	workspaces      map[string]workspace.Snapshot
+	recentLocations map[string]*protocol.RecentLocation
 }
 
 // New creates a new in-memory store (backed by SQLite :memory:)
 func New() *Store {
 	db, err := OpenDB(":memory:")
 	if err != nil {
-		return &Store{}
+		return &Store{
+			sessions:        make(map[string]*protocol.Session),
+			workspaces:      make(map[string]workspace.Snapshot),
+			recentLocations: make(map[string]*protocol.RecentLocation),
+		}
 	}
 	return &Store{db: db}
+}
+
+func cloneSession(session *protocol.Session) *protocol.Session {
+	if session == nil {
+		return nil
+	}
+	cloned := *session
+	if session.EndpointID != nil {
+		cloned.EndpointID = protocol.Ptr(protocol.Deref(session.EndpointID))
+	}
+	if session.Branch != nil {
+		cloned.Branch = protocol.Ptr(protocol.Deref(session.Branch))
+	}
+	if session.IsWorktree != nil {
+		value := protocol.Deref(session.IsWorktree)
+		cloned.IsWorktree = protocol.Ptr(value)
+	}
+	if session.MainRepo != nil {
+		cloned.MainRepo = protocol.Ptr(protocol.Deref(session.MainRepo))
+	}
+	if session.Recoverable != nil {
+		value := protocol.Deref(session.Recoverable)
+		cloned.Recoverable = protocol.Ptr(value)
+	}
+	if session.Todos != nil {
+		cloned.Todos = append([]string(nil), session.Todos...)
+	}
+	return &cloned
 }
 
 // NewWithDB creates a store backed by SQLite
@@ -77,6 +114,10 @@ func (s *Store) Add(session *protocol.Session) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		if s.sessions == nil {
+			s.sessions = make(map[string]*protocol.Session)
+		}
+		s.sessions[session.ID] = cloneSession(session)
 		return
 	}
 
@@ -130,7 +171,7 @@ func (s *Store) Get(id string) *protocol.Session {
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
-		return nil
+		return cloneSession(s.sessions[id])
 	}
 
 	var session protocol.Session
@@ -196,6 +237,8 @@ func (s *Store) Remove(id string) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		delete(s.sessions, id)
+		delete(s.workspaces, id)
 		return
 	}
 
@@ -217,6 +260,8 @@ func (s *Store) ClearSessions() {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		s.sessions = make(map[string]*protocol.Session)
+		s.workspaces = make(map[string]workspace.Snapshot)
 		return
 	}
 
@@ -239,7 +284,20 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
-		return nil
+		result := make([]*protocol.Session, 0, len(s.sessions))
+		for _, session := range s.sessions {
+			if stateFilter != "" && string(session.State) != stateFilter {
+				continue
+			}
+			result = append(result, cloneSession(session))
+		}
+		sort.Slice(result, func(i, j int) bool {
+			if result[i].Label == result[j].Label {
+				return result[i].ID < result[j].ID
+			}
+			return result[i].Label < result[j].Label
+		})
+		return result
 	}
 
 	var rows *sql.Rows
@@ -325,6 +383,11 @@ func (s *Store) HasSessionInDirectory(directory string) bool {
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
+		for _, session := range s.sessions {
+			if session.Directory == directory {
+				return true
+			}
+		}
 		return false
 	}
 
@@ -342,6 +405,12 @@ func (s *Store) RemoveSessionsInDirectory(directory string) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		for id, session := range s.sessions {
+			if session.Directory == directory {
+				delete(s.sessions, id)
+				delete(s.workspaces, id)
+			}
+		}
 		return
 	}
 
@@ -363,6 +432,14 @@ func (s *Store) UpdateState(id, state string) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		session := s.sessions[id]
+		if session == nil {
+			return
+		}
+		now := time.Now().Format(time.RFC3339Nano)
+		session.State = protocol.SessionState(state)
+		session.StateSince = now
+		session.StateUpdatedAt = now
 		return
 	}
 
@@ -381,7 +458,22 @@ func (s *Store) UpdateStateWithTimestamp(id, state string, updatedAt time.Time) 
 	defer s.mu.Unlock()
 
 	if s.db == nil {
-		return false
+		session := s.sessions[id]
+		if session == nil {
+			return false
+		}
+		current, err := time.Parse(time.RFC3339Nano, session.StateUpdatedAt)
+		if err != nil {
+			current, _ = time.Parse(time.RFC3339, session.StateUpdatedAt)
+		}
+		if !updatedAt.After(current) {
+			return false
+		}
+		ts := updatedAt.Format(time.RFC3339Nano)
+		session.State = protocol.SessionState(state)
+		session.StateSince = ts
+		session.StateUpdatedAt = ts
+		return true
 	}
 
 	// Get current state_updated_at
@@ -416,6 +508,9 @@ func (s *Store) UpdateTodos(id string, todos []string) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		if session := s.sessions[id]; session != nil {
+			session.Todos = append([]string(nil), todos...)
+		}
 		return
 	}
 
@@ -436,6 +531,19 @@ func (s *Store) UpdateBranch(id, branch string, isWorktree bool, mainRepo string
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		if session := s.sessions[id]; session != nil {
+			if branch != "" {
+				session.Branch = protocol.Ptr(branch)
+			} else {
+				session.Branch = nil
+			}
+			session.IsWorktree = protocol.Ptr(isWorktree)
+			if mainRepo != "" {
+				session.MainRepo = protocol.Ptr(mainRepo)
+			} else {
+				session.MainRepo = nil
+			}
+		}
 		return
 	}
 
@@ -452,6 +560,9 @@ func (s *Store) Touch(id string) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		if session := s.sessions[id]; session != nil {
+			session.LastSeen = time.Now().Format(time.RFC3339Nano)
+		}
 		return
 	}
 
@@ -468,6 +579,9 @@ func (s *Store) SetRecoverable(id string, recoverable bool) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		if session := s.sessions[id]; session != nil {
+			session.Recoverable = protocol.Ptr(recoverable)
+		}
 		return
 	}
 
@@ -516,6 +630,9 @@ func (s *Store) ToggleMute(id string) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		if session := s.sessions[id]; session != nil {
+			session.Muted = !session.Muted
+		}
 		return
 	}
 
@@ -1245,6 +1362,22 @@ func (s *Store) UpsertRecentLocation(path, label string) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		if s.recentLocations == nil {
+			s.recentLocations = make(map[string]*protocol.RecentLocation)
+		}
+		now := time.Now().Format(time.RFC3339)
+		if existing := s.recentLocations[path]; existing != nil {
+			existing.Label = label
+			existing.LastSeen = now
+			existing.UseCount++
+			return
+		}
+		s.recentLocations[path] = &protocol.RecentLocation{
+			Path:     path,
+			Label:    label,
+			LastSeen: now,
+			UseCount: 1,
+		}
 		return
 	}
 
@@ -1265,7 +1398,24 @@ func (s *Store) GetRecentLocations(limit int) []*protocol.RecentLocation {
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
-		return nil
+		if limit <= 0 {
+			limit = 20
+		}
+		result := make([]*protocol.RecentLocation, 0, len(s.recentLocations))
+		for _, loc := range s.recentLocations {
+			if _, err := os.Stat(loc.Path); os.IsNotExist(err) {
+				continue
+			}
+			cloned := *loc
+			result = append(result, &cloned)
+		}
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].LastSeen > result[j].LastSeen
+		})
+		if len(result) > limit {
+			result = result[:limit]
+		}
+		return result
 	}
 
 	if limit <= 0 {
@@ -1320,7 +1470,16 @@ func (s *Store) CleanupStaleLocations(maxAge time.Duration) int {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
-		return 0
+		cutoff := time.Now().Add(-maxAge)
+		removed := 0
+		for path, loc := range s.recentLocations {
+			lastSeen, err := time.Parse(time.RFC3339, loc.LastSeen)
+			if err != nil || lastSeen.Before(cutoff) {
+				delete(s.recentLocations, path)
+				removed++
+			}
+		}
+		return removed
 	}
 
 	cutoff := time.Now().Add(-maxAge).Format(time.RFC3339)
@@ -1340,6 +1499,7 @@ func (s *Store) RemoveRecentLocation(path string) {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		delete(s.recentLocations, path)
 		return
 	}
 

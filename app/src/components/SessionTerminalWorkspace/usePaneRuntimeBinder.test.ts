@@ -230,4 +230,45 @@ describe('usePaneRuntimeBinder', () => {
 
     expect(xterm.reset).toHaveBeenCalledOnce();
   });
+
+  it('ensures the runtime from the first resize when terminal ready is missed', async () => {
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: true,
+        }),
+      },
+    ], 'pane-1', eventRouter));
+
+    const xterm = createMockXterm();
+
+    await act(async () => {
+      result.current.handleTerminalInit('pane-1')(xterm as any);
+      result.current.handleTerminalResize('pane-1')(132, 41);
+      result.current.handleTerminalResize('pane-1')(140, 43);
+      await Promise.resolve();
+    });
+
+    expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 132, rows: 41 });
+    expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 140, rows: 43 });
+    expect(mockPtySpawn).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-1',
+        cwd: '/tmp/repo',
+        cols: 80,
+        rows: 24,
+        shell: true,
+      },
+    });
+    expect(mockPtySpawn).toHaveBeenCalledTimes(1);
+  });
 });

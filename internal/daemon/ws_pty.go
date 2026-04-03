@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -73,14 +74,32 @@ func legacyExecutableFromSpawnMessage(msg *protocol.SpawnSessionMessage, agent s
 	}
 }
 
+func resolveSpawnCWD(cwd string) string {
+	trimmed := strings.TrimSpace(cwd)
+	switch {
+	case trimmed == "~":
+		home, err := os.UserHomeDir()
+		if err == nil && home != "" {
+			return home
+		}
+	case strings.HasPrefix(trimmed, "~/"):
+		home, err := os.UserHomeDir()
+		if err == nil && home != "" {
+			return filepath.Join(home, trimmed[2:])
+		}
+	}
+	return cwd
+}
+
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
 	agent := normalizeSpawnAgent(msg.Agent)
 	isShell := agent == protocol.AgentShellValue
 	spawnStartedAt := time.Now()
 	existingSession := d.store.Get(msg.ID)
+	cwd := resolveSpawnCWD(msg.Cwd)
 	label := protocol.Deref(msg.Label)
 	if label == "" {
-		label = filepath.Base(msg.Cwd)
+		label = filepath.Base(cwd)
 	}
 	if msg.Cols <= 0 || msg.Rows <= 0 || msg.Cols > maxPTYDimValue || msg.Rows > maxPTYDimValue {
 		d.sendToClient(client, protocol.SpawnResultMessage{
@@ -108,7 +127,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	}
 	spawnOpts := ptybackend.SpawnOptions{
 		ID:                msg.ID,
-		CWD:               msg.Cwd,
+		CWD:               cwd,
 		Agent:             agent,
 		Label:             label,
 		Cols:              uint16(msg.Cols),
@@ -135,13 +154,13 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 
 	if !isShell {
 		d.clearLongRunTracking(msg.ID)
-		branchInfo, _ := git.GetBranchInfo(msg.Cwd)
+		branchInfo, _ := git.GetBranchInfo(cwd)
 		nowStr := string(protocol.TimestampNow())
 		session := &protocol.Session{
 			ID:             msg.ID,
 			Label:          label,
 			Agent:          protocol.SessionAgent(agent),
-			Directory:      msg.Cwd,
+			Directory:      cwd,
 			State:          protocol.SessionStateLaunching,
 			StateSince:     nowStr,
 			StateUpdatedAt: nowStr,
@@ -171,7 +190,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			d.store.SetResumeSessionID(session.ID, persistResumeID)
 		}
 		d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
-		d.store.UpsertRecentLocation(msg.Cwd, label)
+		d.store.UpsertRecentLocation(cwd, label)
 		eventType := protocol.EventSessionRegistered
 		if existingSession != nil {
 			eventType = protocol.EventSessionStateChanged

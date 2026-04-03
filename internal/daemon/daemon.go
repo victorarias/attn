@@ -60,6 +60,7 @@ type longRunSession struct {
 
 const (
 	longRunReviewThreshold = 5 * time.Minute
+	forcedStopSuppressTTL  = 30 * time.Second
 
 	startupRecoveryRetryMax       = 2
 	startupRecoveryRetryDelay     = 500 * time.Millisecond
@@ -109,6 +110,8 @@ type Daemon struct {
 	classifyingTurn  map[string]string
 	longRunMu        sync.Mutex
 	longRun          map[string]longRunSession
+	forcedStopMu     sync.Mutex
+	forcedStop       map[string]time.Time
 	reviewLoopMu     sync.Mutex
 	reviewLoopCancel map[string]context.CancelFunc
 	inputSourceMu    sync.Mutex
@@ -265,6 +268,14 @@ func New(socketPath string) *Daemon {
 	dataRoot := filepath.Dir(socketPath)
 	pidPath := filepath.Join(dataRoot, "attn.pid")
 	manager := pty.NewManager(pty.DefaultScrollbackSize, logger.Infof)
+	scriptedReviewLoopCfg, scriptedReviewLoopErr := scriptedReviewLoopConfigFromEnv()
+	if scriptedReviewLoopErr != nil {
+		logger.Infof("Failed to load scripted review loop config: %v", scriptedReviewLoopErr)
+	}
+	var reviewLoopExecutor ReviewLoopExecutor
+	if scriptedReviewLoopCfg != nil {
+		reviewLoopExecutor = newScriptedReviewLoopExecutor(scriptedReviewLoopCfg, logger.Infof)
+	}
 
 	return &Daemon{
 		socketPath:       socketPath,
@@ -276,6 +287,7 @@ func New(socketPath string) *Daemon {
 		logger:           logger,
 		ghRegistry:       github.NewClientRegistry(),
 		hubManager:       nil,
+		reviewLoopExec:   reviewLoopExecutor,
 		repoCaches:       make(map[string]*repoCache),
 		warnings:         startupWarnings,
 		ptyBackend:       ptybackend.NewEmbedded(manager),
@@ -285,6 +297,7 @@ func New(socketPath string) *Daemon {
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
 		longRun:          make(map[string]longRunSession),
+		forcedStop:       make(map[string]time.Time),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 	}
@@ -313,6 +326,7 @@ func NewForTesting(socketPath string) *Daemon {
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
 		longRun:          make(map[string]longRunSession),
+		forcedStop:       make(map[string]time.Time),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 	}
@@ -345,6 +359,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
 		longRun:          make(map[string]longRunSession),
+		forcedStop:       make(map[string]time.Time),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 	}
@@ -373,6 +388,9 @@ func (d *Daemon) Start() error {
 	if d.longRun == nil {
 		d.longRun = make(map[string]longRunSession)
 	}
+	if d.forcedStop == nil {
+		d.forcedStop = make(map[string]time.Time)
+	}
 	if d.ptyBackend == nil {
 		d.ptyBackend = ptybackend.NewEmbedded(pty.NewManager(pty.DefaultScrollbackSize, d.logf))
 	}
@@ -384,7 +402,7 @@ func (d *Daemon) Start() error {
 		d.daemonInstanceID = instanceID
 	}
 	if d.hubManager == nil {
-		d.hubManager = hub.NewManager(d.store, d.broadcastEndpointStatusChanged, d.logf)
+		d.hubManager = hub.NewManager(d.store, d.broadcastEndpointStatusChanged, d.broadcastSessionsUpdated, d.broadcastRawWSMessage, d.logf)
 	}
 	selectedBackend := strings.TrimSpace(strings.ToLower(os.Getenv("ATTN_PTY_BACKEND")))
 	if selectedBackend == "" {
@@ -1067,6 +1085,7 @@ func (d *Daemon) removePTYSession(sessionID string) error {
 
 func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 	d.stopTranscriptWatcher(sessionID)
+	d.markForcedStopClassification(sessionID)
 
 	if d.ptyBackend == nil {
 		return
@@ -1549,6 +1568,11 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.store.Touch(msg.ID)
 	d.sendOK(conn)
 
+	if d.consumeForcedStopClassification(msg.ID) {
+		d.logf("handleStop: skipping classification for daemon-terminated session=%s", msg.ID)
+		return
+	}
+
 	// Async classification/deferred-review handling
 	go d.classifyOrDeferAfterStop(msg.ID, msg.TranscriptPath)
 }
@@ -1918,6 +1942,47 @@ func (d *Daemon) clearLongRunTracking(sessionID string) {
 	delete(d.longRun, sessionID)
 }
 
+func (d *Daemon) markForcedStopClassification(sessionID string) {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	now := time.Now()
+	d.forcedStopMu.Lock()
+	defer d.forcedStopMu.Unlock()
+	if d.forcedStop == nil {
+		d.forcedStop = make(map[string]time.Time)
+	}
+	for id, markedAt := range d.forcedStop {
+		if now.Sub(markedAt) > forcedStopSuppressTTL {
+			delete(d.forcedStop, id)
+		}
+	}
+	d.forcedStop[sessionID] = now
+}
+
+func (d *Daemon) consumeForcedStopClassification(sessionID string) bool {
+	if strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+	now := time.Now()
+	d.forcedStopMu.Lock()
+	defer d.forcedStopMu.Unlock()
+	if len(d.forcedStop) == 0 {
+		return false
+	}
+	for id, markedAt := range d.forcedStop {
+		if now.Sub(markedAt) > forcedStopSuppressTTL {
+			delete(d.forcedStop, id)
+		}
+	}
+	markedAt, ok := d.forcedStop[sessionID]
+	if !ok {
+		return false
+	}
+	delete(d.forcedStop, sessionID)
+	return now.Sub(markedAt) <= forcedStopSuppressTTL
+}
+
 func (d *Daemon) sessionNeedsReviewAfterLongRun(sessionID string) bool {
 	d.longRunMu.Lock()
 	defer d.longRunMu.Unlock()
@@ -1959,6 +2024,50 @@ func (d *Daemon) sessionsForBroadcast(sessions []*protocol.Session) []protocol.S
 		}
 	}
 	return out
+}
+
+func (d *Daemon) mergedSessionsForBroadcast() []protocol.Session {
+	localSessions := d.sessionsForBroadcast(d.store.List(""))
+	remoteSessions := d.remoteSessionsForBroadcast()
+	if len(localSessions) == 0 {
+		return remoteSessions
+	}
+	if len(remoteSessions) == 0 {
+		return localSessions
+	}
+	merged := make([]protocol.Session, 0, len(localSessions)+len(remoteSessions))
+	merged = append(merged, localSessions...)
+	merged = append(merged, remoteSessions...)
+	return merged
+}
+
+func (d *Daemon) mergedWorkspacesForBroadcast() []protocol.WorkspaceSnapshot {
+	localWorkspaces := d.listWorkspaceSnapshots(d.store.List(""))
+	remoteWorkspaces := d.remoteWorkspacesForBroadcast()
+	if len(localWorkspaces) == 0 {
+		return remoteWorkspaces
+	}
+	if len(remoteWorkspaces) == 0 {
+		return localWorkspaces
+	}
+	merged := make([]protocol.WorkspaceSnapshot, 0, len(localWorkspaces)+len(remoteWorkspaces))
+	merged = append(merged, localWorkspaces...)
+	merged = append(merged, remoteWorkspaces...)
+	return merged
+}
+
+func (d *Daemon) remoteSessionsForBroadcast() []protocol.Session {
+	if d.hubManager == nil {
+		return nil
+	}
+	return d.hubManager.RemoteSessions()
+}
+
+func (d *Daemon) remoteWorkspacesForBroadcast() []protocol.WorkspaceSnapshot {
+	if d.hubManager == nil {
+		return nil
+	}
+	return d.hubManager.RemoteWorkspaces()
 }
 
 func (d *Daemon) broadcastSessionStateChanged(sessionID string) {
@@ -2697,7 +2806,7 @@ func (d *Daemon) broadcastSessionsUpdated() {
 	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:    protocol.EventSessionsUpdated,
-		Sessions: d.sessionsForBroadcast(d.store.List("")),
+		Sessions: d.mergedSessionsForBroadcast(),
 	})
 }
 

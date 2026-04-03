@@ -286,7 +286,8 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     iconColor: string,
     name: string,
     detail?: string,
-    shortcut?: number
+    shortcut?: number,
+    kind?: string,
   ) => {
     const isSelected = selectedIndex === itemIndex;
     const isDeleting = pendingDeleteIndex === itemIndex;
@@ -301,7 +302,14 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     }
 
     return (
-      <div className={`repo-option-item ${isSelected ? 'selected' : ''}`}>
+      <div
+        className={`repo-option-item ${isSelected ? 'selected' : ''}`}
+        data-testid={`repo-option-${itemIndex}`}
+        data-option-index={itemIndex}
+        data-option-kind={kind || ''}
+        onClick={() => handleSelect(itemIndex)}
+        onMouseEnter={() => setSelectedIndex(itemIndex)}
+      >
         <span className={`repo-option-icon ${iconColor}`}>{icon}</span>
         <span className="repo-option-name">{name}</span>
         {detail && <span className="repo-option-detail">{detail}</span>}
@@ -328,7 +336,8 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
         'icon-green',
         repoInfo.currentBranch,
         mainCommitInfo,
-        1
+        1,
+        'main-repo',
       )}
     </div>
   );
@@ -349,7 +358,8 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
             'icon-purple',
             worktree.branch,
             worktree.path,
-            idx + 2
+            idx + 2,
+            'worktree',
           )}
         </div>
       );
@@ -366,12 +376,13 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   // New worktree option
   if (showNewWorktree) {
     items.push(
-      <div key="new-worktree-form" className="new-worktree-form">
+      <div key="new-worktree-form" className="new-worktree-form" data-testid="repo-new-worktree-form">
         <div className="new-worktree-input-row">
           <span className="repo-option-icon icon-blue">+</span>
           <input
             type="text"
             className="new-worktree-input"
+            data-testid="repo-new-worktree-input"
             placeholder="Branch name..."
             value={newWorktreeName}
             onChange={(e) => setNewWorktreeName(e.target.value)}
@@ -383,6 +394,8 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
             <input
               type="radio"
               name="startingBranch"
+              value="current"
+              data-testid="repo-new-worktree-start-current"
               checked={startingBranch === 'current'}
               onChange={() => setStartingBranch('current')}
             />
@@ -392,6 +405,8 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
             <input
               type="radio"
               name="startingBranch"
+              value="default"
+              data-testid="repo-new-worktree-start-default"
               checked={startingBranch === 'default'}
               onChange={() => setStartingBranch('default')}
             />
@@ -412,7 +427,8 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
           'icon-blue',
           'New worktree...',
           undefined,
-          repoInfo.worktrees.length + 2
+          repoInfo.worktrees.length + 2,
+          'new-worktree',
         )}
       </div>
     );
@@ -431,14 +447,15 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
           'icon-muted',
           branch.name,
           commitInfo,
-          repoInfo.worktrees.length + idx + 3
+          repoInfo.worktrees.length + idx + 3,
+          'branch',
         )}
       </div>
     );
   });
 
   return (
-    <div className="repo-options">
+    <div className="repo-options" data-testid="repo-options">
       <div className="repo-options-content">
         {items}
       </div>

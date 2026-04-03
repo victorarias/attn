@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ import (
 )
 
 type StatusCallback func(info protocol.EndpointInfo)
+type SessionsChangedCallback func()
+type RawEventCallback func(data []byte)
 
 const (
 	settingProjectsDirectory = "projects_directory"
@@ -28,25 +31,46 @@ type endpointRuntime struct {
 	record store.EndpointRecord
 	info   protocol.EndpointInfo
 
-	cancel context.CancelFunc
-	conn   *websocket.Conn
-	cmd    *exec.Cmd
+	cancel  context.CancelFunc
+	conn    *websocket.Conn
+	cmd     *exec.Cmd
+	writeMu sync.Mutex
+
+	sessions   map[string]protocol.Session
+	workspaces map[string]protocol.WorkspaceSnapshot
+}
+
+type pendingSessionRoute struct {
+	endpointID string
+	expiresAt  time.Time
 }
 
 type Manager struct {
 	store        *store.Store
 	bootstrapper *Bootstrapper
 	onStatus     StatusCallback
+	onSessions   SessionsChangedCallback
+	onRawEvent   RawEventCallback
 	logf         func(format string, args ...interface{})
 
 	mu       sync.RWMutex
 	runtimes map[string]*endpointRuntime
+	pending  map[string]pendingSessionRoute
+	reviews  map[string]string
+	comments map[string]string
+	loops    map[string]string
 	ctx      context.Context
 	cancel   context.CancelFunc
 	started  bool
 }
 
-func NewManager(endpointStore *store.Store, onStatus StatusCallback, logf func(format string, args ...interface{})) *Manager {
+func NewManager(
+	endpointStore *store.Store,
+	onStatus StatusCallback,
+	onSessions SessionsChangedCallback,
+	onRawEvent RawEventCallback,
+	logf func(format string, args ...interface{}),
+) *Manager {
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
 	}
@@ -54,13 +78,21 @@ func NewManager(endpointStore *store.Store, onStatus StatusCallback, logf func(f
 		store:        endpointStore,
 		bootstrapper: NewBootstrapper(logf),
 		onStatus:     onStatus,
+		onSessions:   onSessions,
+		onRawEvent:   onRawEvent,
 		logf:         logf,
 		runtimes:     make(map[string]*endpointRuntime),
+		pending:      make(map[string]pendingSessionRoute),
+		reviews:      make(map[string]string),
+		comments:     make(map[string]string),
+		loops:        make(map[string]string),
 	}
 	for _, record := range endpointStore.ListEndpoints() {
 		m.runtimes[record.ID] = &endpointRuntime{
-			record: record,
-			info:   infoFromRecord(record),
+			record:     record,
+			info:       infoFromRecord(record),
+			sessions:   make(map[string]protocol.Session),
+			workspaces: make(map[string]protocol.WorkspaceSnapshot),
 		}
 	}
 	return m
@@ -92,15 +124,20 @@ func (m *Manager) Start(parent context.Context) {
 }
 
 func (m *Manager) Stop() {
+	changed := false
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cancel != nil {
 		m.cancel()
 	}
 	for _, runtime := range m.runtimes {
+		changed = changed || len(runtime.sessions) > 0
 		m.stopRuntimeLocked(runtime)
 	}
 	m.started = false
+	if changed {
+		go m.publishSessionsChanged()
+	}
 }
 
 func (m *Manager) List() []protocol.EndpointInfo {
@@ -145,8 +182,10 @@ func (m *Manager) AddEndpoint(name, sshTarget string) (*store.EndpointRecord, er
 
 	m.mu.Lock()
 	m.runtimes[record.ID] = &endpointRuntime{
-		record: *record,
-		info:   infoFromRecord(*record),
+		record:     *record,
+		info:       infoFromRecord(*record),
+		sessions:   make(map[string]protocol.Session),
+		workspaces: make(map[string]protocol.WorkspaceSnapshot),
 	}
 	if m.started && record.Enabled {
 		m.startRuntimeLocked(record.ID)
@@ -163,10 +202,14 @@ func (m *Manager) UpdateEndpoint(id string, update store.EndpointUpdate) (*store
 		return nil, err
 	}
 
+	changed := false
 	m.mu.Lock()
 	runtime, ok := m.runtimes[id]
 	if !ok {
-		runtime = &endpointRuntime{}
+		runtime = &endpointRuntime{
+			sessions:   make(map[string]protocol.Session),
+			workspaces: make(map[string]protocol.WorkspaceSnapshot),
+		}
 		m.runtimes[id] = runtime
 	}
 	runtime.record = *record
@@ -179,23 +222,32 @@ func (m *Manager) UpdateEndpoint(id string, update store.EndpointUpdate) (*store
 		info.Status = "disconnected"
 	}
 	runtime.info = info
+	changed = len(runtime.sessions) > 0
 	m.stopRuntimeLocked(runtime)
 	if m.started && record.Enabled {
 		m.startRuntimeLocked(id)
 	}
 	m.mu.Unlock()
 
+	if changed {
+		m.publishSessionsChanged()
+	}
 	m.publishStatus(id)
 	return record, nil
 }
 
 func (m *Manager) RemoveEndpoint(id string) error {
+	changed := false
 	m.mu.Lock()
 	if runtime, ok := m.runtimes[id]; ok {
+		changed = len(runtime.sessions) > 0
 		m.stopRuntimeLocked(runtime)
 		delete(m.runtimes, id)
 	}
 	m.mu.Unlock()
+	if changed {
+		m.publishSessionsChanged()
+	}
 	return m.store.RemoveEndpoint(id)
 }
 
@@ -229,6 +281,12 @@ func (m *Manager) stopRuntimeLocked(runtime *endpointRuntime) {
 		_, _ = runtime.cmd.Process.Wait()
 		runtime.cmd = nil
 	}
+	runtime.sessions = make(map[string]protocol.Session)
+	runtime.workspaces = make(map[string]protocol.WorkspaceSnapshot)
+	m.clearPendingRoutesLocked(runtime.record.ID)
+	m.clearRouteCachesLocked(runtime.record.ID)
+	zero := 0
+	runtime.info.SessionCount = protocol.Ptr(zero)
 }
 
 func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
@@ -266,6 +324,10 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		m.setConnection(id, conn, cmd)
 		connected, err := m.consumeRemote(ctx, id, conn)
 		m.clearConnection(id)
+		if m.clearRemoteSessions(id) {
+			m.publishSessionsChanged()
+		}
+		m.clearRemoteWorkspaces(id)
 
 		if ctx.Err() != nil {
 			return
@@ -312,19 +374,663 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			if remoteProtocol := strings.TrimSpace(protocol.Deref(msg.ProtocolVersion)); remoteProtocol != "" && remoteProtocol != protocol.ProtocolVersion {
 				return false, fmt.Errorf("protocol mismatch: remote=%s local=%s", remoteProtocol, protocol.ProtocolVersion)
 			}
+			changed := m.replaceRemoteSessions(id, msg.Sessions)
+			m.replaceRemoteWorkspaces(id, msg.Workspaces)
 			caps := capabilitiesFromInitialState(&msg)
 			sessionCount := int32(len(msg.Sessions))
 			m.updateStatus(id, "connected", "Connected", caps, &sessionCount)
+			if changed {
+				m.publishSessionsChanged()
+			}
+			m.publishWorkspaceSnapshots(msg.Workspaces)
 			connected = true
 		case protocol.EventSessionsUpdated:
 			var msg protocol.SessionsUpdatedMessage
 			if err := json.Unmarshal(data, &msg); err != nil {
 				continue
 			}
+			changed := m.replaceRemoteSessions(id, msg.Sessions)
 			sessionCount := int32(len(msg.Sessions))
 			m.updateStatus(id, "connected", "Connected", nil, &sessionCount)
+			if changed {
+				m.publishSessionsChanged()
+			}
+		case protocol.EventSessionRegistered, protocol.EventSessionStateChanged, protocol.EventSessionTodosUpdated:
+			var msg struct {
+				Session *protocol.Session `json:"session"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil || msg.Session == nil {
+				continue
+			}
+			changed, sessionCount := m.upsertRemoteSession(id, *msg.Session)
+			countValue := int32(sessionCount)
+			m.updateStatus(id, "connected", "Connected", nil, &countValue)
+			if changed {
+				m.publishSessionsChanged()
+			}
+		case protocol.EventSessionUnregistered:
+			var msg struct {
+				Session *protocol.Session `json:"session"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil || msg.Session == nil {
+				continue
+			}
+			changed, sessionCount := m.removeRemoteSession(id, msg.Session.ID)
+			m.removeRemoteWorkspace(id, msg.Session.ID)
+			countValue := int32(sessionCount)
+			m.updateStatus(id, "connected", "Connected", nil, &countValue)
+			if changed {
+				m.publishSessionsChanged()
+			}
+		case protocol.EventWorkspaceSnapshot, protocol.EventWorkspaceUpdated:
+			var msg struct {
+				Workspace *protocol.WorkspaceSnapshot `json:"workspace"`
+			}
+			if err := json.Unmarshal(data, &msg); err != nil || msg.Workspace == nil {
+				continue
+			}
+			m.upsertRemoteWorkspace(id, *msg.Workspace)
+			m.publishRawEvent(data)
+		default:
+			if forwardsRawEvent(peek.Event) {
+				m.observeRemoteEvent(id, peek.Event, data)
+				m.publishRawEvent(data)
+			}
 		}
 	}
+}
+
+func forwardsRawEvent(event string) bool {
+	switch event {
+	case protocol.EventBranchesResult,
+		protocol.EventRecentLocationsResult,
+		protocol.EventBrowseDirectoryResult,
+		protocol.EventInspectPathResult,
+		protocol.EventCreateWorktreeResult,
+		protocol.EventDeleteWorktreeResult,
+		protocol.EventDeleteBranchResult,
+		protocol.EventSwitchBranchResult,
+		protocol.EventCreateBranchResult,
+		protocol.EventCheckDirtyResult,
+		protocol.EventStashResult,
+		protocol.EventStashPopResult,
+		protocol.EventCheckAttnStashResult,
+		protocol.EventCommitWIPResult,
+		protocol.EventGetDefaultBranchResult,
+		protocol.EventFetchRemotesResult,
+		protocol.EventListRemoteBranchesResult,
+		protocol.EventEnsureRepoResult,
+		protocol.EventGitStatusUpdate,
+		protocol.EventFileDiffResult,
+		protocol.EventBranchDiffFilesResult,
+		protocol.EventGetRepoInfoResult,
+		protocol.EventGetReviewStateResult,
+		protocol.EventReviewLoopResult,
+		protocol.EventReviewLoopUpdated,
+		protocol.EventMarkFileViewedResult,
+		protocol.EventAddCommentResult,
+		protocol.EventUpdateCommentResult,
+		protocol.EventResolveCommentResult,
+		protocol.EventWontFixCommentResult,
+		protocol.EventDeleteCommentResult,
+		protocol.EventGetCommentsResult,
+		protocol.EventWorkspaceRuntimeExited,
+		protocol.EventSpawnResult,
+		protocol.EventAttachResult,
+		protocol.EventPtyOutput,
+		protocol.EventPtyDesync,
+		protocol.EventSessionExited,
+		protocol.EventWorkspaceActionResult,
+		protocol.EventCommandError:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Manager) RemoteSessions() []protocol.Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	total := 0
+	for _, runtime := range m.runtimes {
+		total += len(runtime.sessions)
+	}
+	if total == 0 {
+		return nil
+	}
+
+	out := make([]protocol.Session, 0, total)
+	for _, runtime := range m.runtimes {
+		for _, session := range runtime.sessions {
+			out = append(out, session)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if protocol.Deref(out[i].EndpointID) == protocol.Deref(out[j].EndpointID) {
+			if out[i].Directory == out[j].Directory {
+				return out[i].ID < out[j].ID
+			}
+			return out[i].Directory < out[j].Directory
+		}
+		return protocol.Deref(out[i].EndpointID) < protocol.Deref(out[j].EndpointID)
+	})
+	return out
+}
+
+func (m *Manager) RemoteWorkspaces() []protocol.WorkspaceSnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	total := 0
+	for _, runtime := range m.runtimes {
+		total += len(runtime.workspaces)
+	}
+	if total == 0 {
+		return nil
+	}
+
+	out := make([]protocol.WorkspaceSnapshot, 0, total)
+	for _, runtime := range m.runtimes {
+		for _, workspace := range runtime.workspaces {
+			out = append(out, workspace)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].SessionID < out[j].SessionID
+	})
+	return out
+}
+
+func (m *Manager) EndpointIDForSession(sessionID string) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for endpointID, runtime := range m.runtimes {
+		if _, ok := runtime.sessions[sessionID]; ok {
+			return endpointID, true
+		}
+	}
+	if pending, ok := m.pendingSessionRouteLocked(sessionID, time.Now()); ok {
+		return pending.endpointID, true
+	}
+	return "", false
+}
+
+func (m *Manager) EndpointIDForPTYTarget(targetID string) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for endpointID, runtime := range m.runtimes {
+		if _, ok := runtime.sessions[targetID]; ok {
+			return endpointID, true
+		}
+		for _, workspace := range runtime.workspaces {
+			for _, pane := range workspace.Panes {
+				if protocol.Deref(pane.RuntimeID) == targetID {
+					return endpointID, true
+				}
+			}
+		}
+	}
+	if pending, ok := m.pendingSessionRouteLocked(targetID, time.Now()); ok {
+		return pending.endpointID, true
+	}
+	return "", false
+}
+
+func (m *Manager) EndpointIDForPath(targetPath string) (string, bool) {
+	targetPath = normalizeRoutePath(targetPath)
+	if targetPath == "" {
+		return "", false
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for endpointID, runtime := range m.runtimes {
+		for _, session := range runtime.sessions {
+			if normalizeRoutePath(session.Directory) == targetPath {
+				return endpointID, true
+			}
+			if normalizeRoutePath(protocol.Deref(session.MainRepo)) == targetPath {
+				return endpointID, true
+			}
+		}
+	}
+	return "", false
+}
+
+func (m *Manager) EndpointIDForReview(reviewID string) (string, bool) {
+	reviewID = strings.TrimSpace(reviewID)
+	if reviewID == "" {
+		return "", false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	endpointID, ok := m.reviews[reviewID]
+	return endpointID, ok
+}
+
+func (m *Manager) EndpointIDForComment(commentID string) (string, bool) {
+	commentID = strings.TrimSpace(commentID)
+	if commentID == "" {
+		return "", false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	endpointID, ok := m.comments[commentID]
+	return endpointID, ok
+}
+
+func (m *Manager) EndpointIDForReviewLoop(loopID string) (string, bool) {
+	loopID = strings.TrimSpace(loopID)
+	if loopID == "" {
+		return "", false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	endpointID, ok := m.loops[loopID]
+	return endpointID, ok
+}
+
+func (m *Manager) ReservePendingSessionRoute(endpointID, sessionID string) {
+	if strings.TrimSpace(endpointID) == "" || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pending[sessionID] = pendingSessionRoute{
+		endpointID: endpointID,
+		expiresAt:  time.Now().Add(30 * time.Second),
+	}
+}
+
+func (m *Manager) HasEndpoint(endpointID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.runtimes[endpointID]
+	return ok
+}
+
+func (m *Manager) HasConfiguredEndpoints() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.runtimes) > 0
+}
+
+func (m *Manager) ForwardPTYCommand(ctx context.Context, targetID string, payload []byte) error {
+	endpointID, ok := m.EndpointIDForPTYTarget(targetID)
+	if !ok {
+		return fmt.Errorf("pty target not found: %s", targetID)
+	}
+	return m.ForwardEndpointCommand(ctx, endpointID, payload)
+}
+
+func (m *Manager) ForwardEndpointCommand(ctx context.Context, endpointID string, payload []byte) error {
+	m.mu.RLock()
+	runtime, ok := m.runtimes[endpointID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("endpoint not found: %s", endpointID)
+	}
+	conn := runtime.conn
+	m.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("endpoint not connected: %s", endpointID)
+	}
+
+	runtime.writeMu.Lock()
+	defer runtime.writeMu.Unlock()
+	return conn.Write(ctx, websocket.MessageText, payload)
+}
+
+func (m *Manager) replaceRemoteSessions(id string, sessions []protocol.Session) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime, ok := m.runtimes[id]
+	if !ok {
+		return false
+	}
+	next := make(map[string]protocol.Session, len(sessions))
+	for _, session := range sessions {
+		tagged := tagRemoteSession(id, session)
+		next[tagged.ID] = tagged
+	}
+	if sessionsEqual(runtime.sessions, next) {
+		return false
+	}
+	runtime.sessions = next
+	return true
+}
+
+func (m *Manager) upsertRemoteSession(id string, session protocol.Session) (bool, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime, ok := m.runtimes[id]
+	if !ok {
+		return false, 0
+	}
+	if runtime.sessions == nil {
+		runtime.sessions = make(map[string]protocol.Session)
+	}
+	tagged := tagRemoteSession(id, session)
+	delete(m.pending, tagged.ID)
+	if existing, ok := runtime.sessions[tagged.ID]; ok && sessionsMatch(existing, tagged) {
+		return false, len(runtime.sessions)
+	}
+	runtime.sessions[tagged.ID] = tagged
+	return true, len(runtime.sessions)
+}
+
+func (m *Manager) removeRemoteSession(id, sessionID string) (bool, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime, ok := m.runtimes[id]
+	if !ok || runtime.sessions == nil {
+		return false, 0
+	}
+	if _, ok := runtime.sessions[sessionID]; !ok {
+		return false, len(runtime.sessions)
+	}
+	delete(runtime.sessions, sessionID)
+	delete(m.pending, sessionID)
+	return true, len(runtime.sessions)
+}
+
+func (m *Manager) clearRemoteSessions(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime, ok := m.runtimes[id]
+	if !ok || len(runtime.sessions) == 0 {
+		if ok {
+			m.clearPendingRoutesLocked(id)
+		}
+		return false
+	}
+	m.clearPendingRoutesLocked(id)
+	runtime.sessions = make(map[string]protocol.Session)
+	zero := 0
+	runtime.info.SessionCount = protocol.Ptr(zero)
+	return true
+}
+
+func (m *Manager) pendingSessionRouteLocked(sessionID string, now time.Time) (pendingSessionRoute, bool) {
+	pending, ok := m.pending[sessionID]
+	if !ok {
+		return pendingSessionRoute{}, false
+	}
+	if !pending.expiresAt.IsZero() && now.After(pending.expiresAt) {
+		delete(m.pending, sessionID)
+		return pendingSessionRoute{}, false
+	}
+	return pending, true
+}
+
+func (m *Manager) clearPendingRoutesLocked(endpointID string) {
+	if endpointID == "" {
+		return
+	}
+	for sessionID, pending := range m.pending {
+		if pending.endpointID == endpointID {
+			delete(m.pending, sessionID)
+		}
+	}
+}
+
+func (m *Manager) clearRouteCachesLocked(endpointID string) {
+	if endpointID == "" {
+		return
+	}
+	for reviewID, current := range m.reviews {
+		if current == endpointID {
+			delete(m.reviews, reviewID)
+		}
+	}
+	for commentID, current := range m.comments {
+		if current == endpointID {
+			delete(m.comments, commentID)
+		}
+	}
+	for loopID, current := range m.loops {
+		if current == endpointID {
+			delete(m.loops, loopID)
+		}
+	}
+}
+
+func (m *Manager) observeRemoteEvent(endpointID, event string, data []byte) {
+	switch event {
+	case protocol.EventGetReviewStateResult:
+		var msg protocol.GetReviewStateResultMessage
+		if err := json.Unmarshal(data, &msg); err != nil || !msg.Success || msg.State == nil {
+			return
+		}
+		m.recordReviewRoute(endpointID, msg.State.ReviewID)
+	case protocol.EventMarkFileViewedResult:
+		var msg protocol.MarkFileViewedResultMessage
+		if err := json.Unmarshal(data, &msg); err != nil || !msg.Success {
+			return
+		}
+		m.recordReviewRoute(endpointID, msg.ReviewID)
+	case protocol.EventAddCommentResult:
+		var msg protocol.AddCommentResultMessage
+		if err := json.Unmarshal(data, &msg); err != nil || !msg.Success || msg.Comment == nil {
+			return
+		}
+		m.recordReviewRoute(endpointID, msg.Comment.ReviewID)
+		m.recordCommentRoute(endpointID, msg.Comment.ID)
+	case protocol.EventGetCommentsResult:
+		var msg protocol.GetCommentsResultMessage
+		if err := json.Unmarshal(data, &msg); err != nil || !msg.Success {
+			return
+		}
+		for _, comment := range msg.Comments {
+			m.recordReviewRoute(endpointID, comment.ReviewID)
+			m.recordCommentRoute(endpointID, comment.ID)
+		}
+	case protocol.EventReviewLoopResult:
+		var msg protocol.ReviewLoopResultMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return
+		}
+		if msg.ReviewLoopRun != nil {
+			m.recordLoopRoute(endpointID, msg.ReviewLoopRun.LoopID)
+		}
+		if msg.LoopID != nil {
+			m.recordLoopRoute(endpointID, *msg.LoopID)
+		}
+	case protocol.EventReviewLoopUpdated:
+		var msg protocol.ReviewLoopUpdatedMessage
+		if err := json.Unmarshal(data, &msg); err != nil || msg.ReviewLoopRun == nil {
+			return
+		}
+		m.recordLoopRoute(endpointID, msg.ReviewLoopRun.LoopID)
+	}
+}
+
+func (m *Manager) recordReviewRoute(endpointID, reviewID string) {
+	reviewID = strings.TrimSpace(reviewID)
+	if endpointID == "" || reviewID == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reviews[reviewID] = endpointID
+}
+
+func (m *Manager) recordCommentRoute(endpointID, commentID string) {
+	commentID = strings.TrimSpace(commentID)
+	if endpointID == "" || commentID == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.comments[commentID] = endpointID
+}
+
+func (m *Manager) recordLoopRoute(endpointID, loopID string) {
+	loopID = strings.TrimSpace(loopID)
+	if endpointID == "" || loopID == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.loops[loopID] = endpointID
+}
+
+func (m *Manager) replaceRemoteWorkspaces(id string, workspaces []protocol.WorkspaceSnapshot) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime, ok := m.runtimes[id]
+	if !ok {
+		return false
+	}
+	next := make(map[string]protocol.WorkspaceSnapshot, len(workspaces))
+	for _, workspace := range workspaces {
+		next[workspace.SessionID] = workspace
+	}
+	if workspacesEqual(runtime.workspaces, next) {
+		return false
+	}
+	runtime.workspaces = next
+	return true
+}
+
+func (m *Manager) upsertRemoteWorkspace(id string, workspace protocol.WorkspaceSnapshot) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime, ok := m.runtimes[id]
+	if !ok {
+		return false
+	}
+	if runtime.workspaces == nil {
+		runtime.workspaces = make(map[string]protocol.WorkspaceSnapshot)
+	}
+	if existing, ok := runtime.workspaces[workspace.SessionID]; ok && workspacesMatch(existing, workspace) {
+		return false
+	}
+	runtime.workspaces[workspace.SessionID] = workspace
+	return true
+}
+
+func (m *Manager) removeRemoteWorkspace(id, sessionID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime, ok := m.runtimes[id]
+	if !ok || runtime.workspaces == nil {
+		return false
+	}
+	if _, ok := runtime.workspaces[sessionID]; !ok {
+		return false
+	}
+	delete(runtime.workspaces, sessionID)
+	return true
+}
+
+func (m *Manager) clearRemoteWorkspaces(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime, ok := m.runtimes[id]
+	if !ok || len(runtime.workspaces) == 0 {
+		return false
+	}
+	runtime.workspaces = make(map[string]protocol.WorkspaceSnapshot)
+	return true
+}
+
+func (m *Manager) publishSessionsChanged() {
+	if m.onSessions != nil {
+		m.onSessions()
+	}
+}
+
+func (m *Manager) publishRawEvent(data []byte) {
+	if m.onRawEvent == nil || len(data) == 0 {
+		return
+	}
+	cloned := append([]byte(nil), data...)
+	m.onRawEvent(cloned)
+}
+
+func (m *Manager) publishWorkspaceSnapshots(workspaces []protocol.WorkspaceSnapshot) {
+	for _, workspace := range workspaces {
+		payload, err := json.Marshal(protocol.WorkspaceSnapshotMessage{
+			Event:     protocol.EventWorkspaceSnapshot,
+			Workspace: workspace,
+		})
+		if err != nil {
+			continue
+		}
+		m.publishRawEvent(payload)
+	}
+}
+
+func tagRemoteSession(endpointID string, session protocol.Session) protocol.Session {
+	tagged := session
+	tagged.EndpointID = protocol.Ptr(endpointID)
+	if len(session.Todos) > 0 {
+		tagged.Todos = append([]string(nil), session.Todos...)
+	}
+	return tagged
+}
+
+func sessionsEqual(left, right map[string]protocol.Session) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for id, leftSession := range left {
+		rightSession, ok := right[id]
+		if !ok || !sessionsMatch(leftSession, rightSession) {
+			return false
+		}
+	}
+	return true
+}
+
+func sessionsMatch(left, right protocol.Session) bool {
+	return left.ID == right.ID &&
+		left.Label == right.Label &&
+		left.Agent == right.Agent &&
+		left.Directory == right.Directory &&
+		protocol.Deref(left.EndpointID) == protocol.Deref(right.EndpointID) &&
+		protocol.Deref(left.Branch) == protocol.Deref(right.Branch) &&
+		protocol.Deref(left.IsWorktree) == protocol.Deref(right.IsWorktree) &&
+		protocol.Deref(left.MainRepo) == protocol.Deref(right.MainRepo) &&
+		left.State == right.State &&
+		left.StateSince == right.StateSince &&
+		left.StateUpdatedAt == right.StateUpdatedAt &&
+		protocol.Deref(left.NeedsReviewAfterLongRun) == protocol.Deref(right.NeedsReviewAfterLongRun) &&
+		protocol.Deref(left.Recoverable) == protocol.Deref(right.Recoverable) &&
+		strings.Join(left.Todos, "\x00") == strings.Join(right.Todos, "\x00") &&
+		left.LastSeen == right.LastSeen &&
+		left.Muted == right.Muted
+}
+
+func workspacesEqual(left, right map[string]protocol.WorkspaceSnapshot) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for id, leftWorkspace := range left {
+		rightWorkspace, ok := right[id]
+		if !ok || !workspacesMatch(leftWorkspace, rightWorkspace) {
+			return false
+		}
+	}
+	return true
+}
+
+func workspacesMatch(left, right protocol.WorkspaceSnapshot) bool {
+	if left.SessionID != right.SessionID ||
+		left.ActivePaneID != right.ActivePaneID ||
+		left.LayoutJson != right.LayoutJson ||
+		protocol.Deref(left.UpdatedAt) != protocol.Deref(right.UpdatedAt) ||
+		len(left.Panes) != len(right.Panes) {
+		return false
+	}
+	for i := range left.Panes {
+		if left.Panes[i] != right.Panes[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func capabilitiesFromInitialState(msg *protocol.InitialStateMessage) *protocol.EndpointCapabilities {
@@ -467,6 +1173,14 @@ func nextBackoff(current time.Duration) time.Duration {
 		return 30 * time.Second
 	}
 	return current
+}
+
+func normalizeRoutePath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return filepath.Clean(value)
 }
 
 func sleepOrDone(ctx context.Context, delay time.Duration) bool {

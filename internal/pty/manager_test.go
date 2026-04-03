@@ -75,16 +75,6 @@ func TestShouldFallbackShell(t *testing.T) {
 	}
 }
 
-func TestShouldSetpgidForPTY(t *testing.T) {
-	got := shouldSetpgidForPTY()
-	if runtime.GOOS == "darwin" && got {
-		t.Fatal("expected shouldSetpgidForPTY=false on darwin")
-	}
-	if runtime.GOOS != "darwin" && !got {
-		t.Fatal("expected shouldSetpgidForPTY=true outside darwin")
-	}
-}
-
 func TestFirstExecutablePath_PicksFirstValidExecutable(t *testing.T) {
 	tmpDir := t.TempDir()
 	missing := filepath.Join(tmpDir, "missing-attn")

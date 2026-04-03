@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSessionStore } from './sessions';
 import { WorkspacePaneKind } from '../types/generated';
 
+const { mockPtySpawn, mockPtyKill } = vi.hoisted(() => ({
+  mockPtySpawn: vi.fn(),
+  mockPtyKill: vi.fn(),
+}));
+
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }));
@@ -10,8 +15,19 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
+vi.mock('../pty/bridge', async () => {
+  const actual = await vi.importActual<typeof import('../pty/bridge')>('../pty/bridge');
+  return {
+    ...actual,
+    ptySpawn: mockPtySpawn,
+    ptyKill: mockPtyKill,
+  };
+});
+
 describe('sessions store', () => {
   beforeEach(() => {
+    mockPtySpawn.mockReset();
+    mockPtyKill.mockReset();
     useSessionStore.setState({
       sessions: [],
       activeSessionId: null,
@@ -65,6 +81,7 @@ describe('sessions store', () => {
         label: 'New Label',
         agent: 'claude',
         directory: '/tmp/new',
+        endpoint_id: 'ep-1',
         state: 'idle',
         branch: 'feature/workspace',
         is_worktree: true,
@@ -78,6 +95,7 @@ describe('sessions store', () => {
       cwd: '/tmp/new',
       state: 'idle',
       agent: 'claude',
+      endpointId: 'ep-1',
       branch: 'feature/workspace',
       isWorktree: true,
       daemonActivePaneId: 'pane-a',
@@ -88,7 +106,7 @@ describe('sessions store', () => {
   });
 
   it('takeSessionSpawnArgs consumes pending fork params once and applies launcher overrides', async () => {
-    const sessionId = await useSessionStore.getState().createSession('Spawn Test', '/tmp/workspace', 'sess-spawn', 'claude');
+    const sessionId = await useSessionStore.getState().createSession('Spawn Test', '/tmp/workspace', 'sess-spawn', 'claude', 'ep-1');
     useSessionStore.getState().setLauncherConfig({
       executables: { claude: '/opt/bin/claude-custom' },
     });
@@ -100,6 +118,7 @@ describe('sessions store', () => {
     expect(first).toMatchObject({
       id: sessionId,
       cwd: '/tmp/workspace',
+      endpoint_id: 'ep-1',
       label: 'Spawn Test',
       cols: 120,
       rows: 40,
@@ -187,5 +206,23 @@ describe('sessions store', () => {
       layoutTree: { type: 'pane', paneId: 'main' },
     });
     expect(session?.daemonActivePaneId).toBe('main');
+  });
+
+  it('reloadSession preserves endpoint routing for remote sessions', async () => {
+    await useSessionStore.getState().createSession('Remote', '/srv/repo', 'sess-remote', 'codex', 'ep-remote');
+
+    await useSessionStore.getState().reloadSession('sess-remote', { cols: 120, rows: 40 });
+
+    expect(mockPtyKill).toHaveBeenCalledWith({ id: 'sess-remote' });
+    expect(mockPtySpawn).toHaveBeenCalledWith({
+      args: expect.objectContaining({
+        id: 'sess-remote',
+        cwd: '/srv/repo',
+        endpoint_id: 'ep-remote',
+        reload: true,
+        cols: 120,
+        rows: 40,
+      }),
+    });
   });
 });

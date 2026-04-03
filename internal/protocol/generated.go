@@ -228,6 +228,49 @@ type BranchesResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type BrowseDirectoryMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
+	// InputPath corresponds to the JSON schema field "input_path".
+	InputPath string `json:"input_path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty"`
+}
+
+type BrowseDirectoryResultMessage struct {
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
+	// Entries corresponds to the JSON schema field "entries".
+	Entries []DirectoryEntry `json:"entries"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// HomePath corresponds to the JSON schema field "home_path".
+	HomePath *string `json:"home_path,omitempty"`
+
+	// InputPath corresponds to the JSON schema field "input_path".
+	InputPath string `json:"input_path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type CheckAttnStashMessage struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch string `json:"branch"`
@@ -378,6 +421,9 @@ type CreateWorktreeMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
 	// MainRepo corresponds to the JSON schema field "main_repo".
 	MainRepo string `json:"main_repo"`
 
@@ -389,6 +435,9 @@ type CreateWorktreeMessage struct {
 }
 
 type CreateWorktreeResultMessage struct {
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
 
@@ -417,6 +466,9 @@ type DeleteBranchMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
 	// Force corresponds to the JSON schema field "force".
 	Force bool `json:"force"`
 
@@ -427,6 +479,9 @@ type DeleteBranchMessage struct {
 type DeleteBranchResultMessage struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch string `json:"branch"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
@@ -461,11 +516,17 @@ type DeleteWorktreeMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
 }
 
 type DeleteWorktreeResultMessage struct {
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
 
@@ -485,6 +546,14 @@ type DetachSessionMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+}
+
+type DirectoryEntry struct {
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
 }
 
 type EndpointActionResultMessage struct {
@@ -734,19 +803,31 @@ type GetRecentLocationsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
 	// Limit corresponds to the JSON schema field "limit".
 	Limit *int `json:"limit,omitempty"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty"`
 }
 
 type GetRepoInfoMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
 	// Repo corresponds to the JSON schema field "repo".
 	Repo string `json:"repo"`
 }
 
 type GetRepoInfoResultMessage struct {
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
 
@@ -906,6 +987,40 @@ type InjectTestSessionMessage struct {
 
 	// Session corresponds to the JSON schema field "session".
 	Session Session `json:"session"`
+}
+
+type InspectPathMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty"`
+}
+
+type InspectPathResultMessage struct {
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Inspection corresponds to the JSON schema field "inspection".
+	Inspection *PathInspection `json:"inspection,omitempty"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type KillSessionMessage struct {
@@ -1158,6 +1273,26 @@ type PRsUpdatedMessage struct {
 	Prs []PR `json:"prs,omitempty"`
 }
 
+type PathInspection struct {
+	// Exists corresponds to the JSON schema field "exists".
+	Exists bool `json:"exists"`
+
+	// HomePath corresponds to the JSON schema field "home_path".
+	HomePath *string `json:"home_path,omitempty"`
+
+	// InputPath corresponds to the JSON schema field "input_path".
+	InputPath string `json:"input_path"`
+
+	// IsDirectory corresponds to the JSON schema field "is_directory".
+	IsDirectory bool `json:"is_directory"`
+
+	// RepoRoot corresponds to the JSON schema field "repo_root".
+	RepoRoot *string `json:"repo_root,omitempty"`
+
+	// ResolvedPath corresponds to the JSON schema field "resolved_path".
+	ResolvedPath string `json:"resolved_path"`
+}
+
 type PtyDesyncMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -1266,14 +1401,23 @@ type RecentLocation struct {
 }
 
 type RecentLocationsResultMessage struct {
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
 
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
+	// HomePath corresponds to the JSON schema field "home_path".
+	HomePath *string `json:"home_path,omitempty"`
+
 	// RecentLocations corresponds to the JSON schema field "recent_locations".
 	RecentLocations []RecentLocation `json:"recent_locations"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
@@ -1953,6 +2097,9 @@ type SpawnSessionMessage struct {
 
 	// Cwd corresponds to the JSON schema field "cwd".
 	Cwd string `json:"cwd"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty"`
 
 	// Executable corresponds to the JSON schema field "executable".
 	Executable *string `json:"executable,omitempty"`

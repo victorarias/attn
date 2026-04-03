@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { homeDir } from '@tauri-apps/api/path';
-import { readDir } from '@tauri-apps/plugin-fs';
 import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
 import { PathInput } from './NewSessionDialog/PathInput';
 import { RepoOptions } from './NewSessionDialog/RepoOptions';
-import type { RecentLocation } from '../hooks/useDaemonSocket';
-import type { SessionAgent } from '../types/sessionAgent';
+import type { BrowseDirectoryResult, DaemonEndpoint, InspectPathResult, RecentLocation } from '../hooks/useDaemonSocket';
+import { formatSessionAgentLabel, type SessionAgent } from '../types/sessionAgent';
 import { useSettings } from '../contexts/SettingsContext';
 import {
   agentLabel,
@@ -30,19 +28,24 @@ interface RepoInfo {
 interface LocationPickerProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (path: string, agent: SessionAgent) => void;
-  onGetRecentLocations?: () => Promise<{ locations: RecentLocation[] }>;
-  onGetRepoInfo?: (mainRepo: string) => Promise<{ success: boolean; info?: RepoInfo; error?: string }>;
-  onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string) => Promise<{ success: boolean; path?: string }>;
-  onDeleteWorktree?: (path: string) => Promise<{ success: boolean; error?: string }>;
-  onDeleteBranch?: (mainRepo: string, branch: string, force?: boolean) => Promise<{ success: boolean; error?: string }>;
+  onSelect: (path: string, agent: SessionAgent, endpointId?: string) => void;
+  onGetRecentLocations?: (endpointId?: string) => Promise<{ locations: RecentLocation[]; home_path?: string }>;
+  onBrowseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>;
+  onInspectPath?: (path: string, endpointId?: string) => Promise<InspectPathResult>;
+  onGetRepoInfo?: (mainRepo: string, endpointId?: string) => Promise<{ success: boolean; info?: RepoInfo; error?: string }>;
+  onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string, endpointId?: string) => Promise<{ success: boolean; path?: string }>;
+  onDeleteWorktree?: (path: string, endpointId?: string) => Promise<{ success: boolean; error?: string }>;
+  onDeleteBranch?: (mainRepo: string, branch: string, force?: boolean, endpointId?: string) => Promise<{ success: boolean; error?: string }>;
   onError?: (message: string) => void;
   projectsDirectory?: string;
   agentAvailability?: AgentAvailability;
+  endpoints?: DaemonEndpoint[];
 }
 
 const MAX_RECENT_LOCATIONS = 10;
 const SESSION_AGENT_KEY = 'new_session_agent';
+const LOCAL_TARGET = '__local__';
+
 const DEFAULT_AGENT_AVAILABILITY: AgentAvailability = {
   codex: true,
   claude: true,
@@ -57,6 +60,27 @@ const normalizeAgent = (value?: string): SessionAgent | null => {
   return lower || null;
 };
 
+function toDisplayPath(path: string, homePath: string): string {
+  if (!path) {
+    return '';
+  }
+  if (path.startsWith(homePath + '/')) {
+    return '~' + path.slice(homePath.length);
+  }
+  if (path === homePath) {
+    return '~';
+  }
+  return path;
+}
+
+function buildInitialInput(path: string | undefined, homePath: string): string {
+  if (!path) {
+    return '';
+  }
+  const displayPath = homePath ? toDisplayPath(path, homePath) : path;
+  return displayPath.endsWith('/') ? displayPath : `${displayPath}/`;
+}
+
 type Mode = 'path-input' | 'repo-options';
 
 interface State {
@@ -68,10 +92,9 @@ interface State {
   recentLocations: RecentLocation[];
   homePath: string;
   refreshing: boolean;
-  // Tracks if user has intentionally selected since last Tab
-  // (typing or arrow navigation = intentional, Tab auto-selects first child = not intentional)
   hasSelectedSinceTab: boolean;
   agent: SessionAgent;
+  endpointId: string;
 }
 
 export function LocationPicker({
@@ -79,6 +102,8 @@ export function LocationPicker({
   onClose,
   onSelect,
   onGetRecentLocations,
+  onBrowseDirectory,
+  onInspectPath,
   onGetRepoInfo,
   onCreateWorktree,
   onDeleteWorktree,
@@ -86,6 +111,7 @@ export function LocationPicker({
   onError,
   projectsDirectory,
   agentAvailability,
+  endpoints = [],
 }: LocationPickerProps) {
   const { settings, setSetting } = useSettings();
   const effectiveAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
@@ -94,91 +120,99 @@ export function LocationPicker({
   const [state, setState] = useState<State>({
     mode: 'path-input',
     inputValue: '',
-    selectedIndex: -1, // Start with nothing selected
+    selectedIndex: -1,
     selectedRepo: null,
     repoInfo: null,
     recentLocations: [],
-    homePath: '/Users',
+    homePath: '',
     refreshing: false,
-    hasSelectedSinceTab: false, // Start false - user hasn't navigated yet
+    hasSelectedSinceTab: false,
     agent: 'claude',
+    endpointId: LOCAL_TARGET,
   });
 
-  const { suggestions: fsSuggestions, currentDir } = useFilesystemSuggestions(state.inputValue);
+  const isLocalTarget = state.endpointId === LOCAL_TARGET;
+  const { suggestions: fsSuggestions, currentDir, homePath: suggestedHomePath } = useFilesystemSuggestions(
+    state.inputValue,
+    isLocalTarget ? undefined : state.endpointId,
+    onBrowseDirectory,
+  );
+  const availableEndpoints = useMemo(
+    () => endpoints.filter((endpoint) => endpoint.enabled !== false),
+    [endpoints],
+  );
+  const selectedEndpoint = useMemo(
+    () => availableEndpoints.find((endpoint) => endpoint.id === state.endpointId),
+    [availableEndpoints, state.endpointId],
+  );
+  const selectedEndpointId = selectedEndpoint?.id;
+  const selectedProjectsDirectory = isLocalTarget
+    ? projectsDirectory
+    : selectedEndpoint?.capabilities?.projects_directory;
 
-  // Get home directory on mount
-  useEffect(() => {
-    homeDir().then((dir) => {
-      setState(prev => ({ ...prev, homePath: dir.replace(/\/$/, '') }));
-    }).catch(() => {});
-  }, []);
-
-  // Fetch recent locations when picker opens
   useEffect(() => {
     if (isOpen && onGetRecentLocations) {
-      onGetRecentLocations()
+      onGetRecentLocations(selectedEndpointId)
         .then((result) => {
-          setState(prev => ({ ...prev, recentLocations: result.locations }));
+          setState((prev) => ({
+            ...prev,
+            recentLocations: result.locations,
+            homePath: result.home_path || prev.homePath,
+          }));
         })
         .catch((err) => {
           console.error('[LocationPicker] Failed to fetch recent locations:', err);
-          setState(prev => ({ ...prev, recentLocations: [] }));
+          setState((prev) => ({ ...prev, recentLocations: [] }));
         });
+    } else if (isOpen) {
+      setState((prev) => ({ ...prev, recentLocations: [] }));
     }
-  }, [isOpen, onGetRecentLocations]);
+  }, [isOpen, onGetRecentLocations, selectedEndpointId]);
 
-  // Reset state when picker opens
   useEffect(() => {
-    if (isOpen) {
-      // Contract projectsDirectory to use ~ for home path
-      let initialValue = '';
-      if (projectsDirectory) {
-        if (projectsDirectory.startsWith(state.homePath + '/')) {
-          initialValue = '~' + projectsDirectory.slice(state.homePath.length);
-        } else if (projectsDirectory === state.homePath) {
-          initialValue = '~';
-        } else {
-          initialValue = projectsDirectory;
-        }
-        // Ensure trailing slash for directory browsing
-        if (!initialValue.endsWith('/')) {
-          initialValue += '/';
-        }
-      }
-      setState(prev => ({
-        ...prev,
-        mode: 'path-input',
-        inputValue: initialValue,
-        selectedIndex: -1, // Nothing selected initially
-        selectedRepo: null,
-        repoInfo: null,
-        refreshing: false,
-        hasSelectedSinceTab: false, // User hasn't navigated yet
-      }));
+    if (!suggestedHomePath) {
+      return;
     }
-  }, [isOpen, projectsDirectory, state.homePath]);
+    setState((prev) => (prev.homePath === suggestedHomePath ? prev : { ...prev, homePath: suggestedHomePath }));
+  }, [suggestedHomePath]);
 
-  const orderedAgentList = useMemo(
-    () => {
-      const ordered: SessionAgent[] = [];
-      const seen = new Set<SessionAgent>();
-      const push = (agent: SessionAgent) => {
-        if (seen.has(agent)) return;
-        seen.add(agent);
-        ordered.push(agent);
-      };
-      for (const agent of FIXED_AGENT_ORDER) {
-        push(agent);
-      }
-      const dynamicAgents = Object.keys(effectiveAgentAvailability) as SessionAgent[];
-      dynamicAgents.sort((a, b) => a.localeCompare(b));
-      for (const agent of dynamicAgents) {
-        push(agent);
-      }
-      return ordered;
-    },
-    [effectiveAgentAvailability],
-  );
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const defaultPath = selectedProjectsDirectory || (!isLocalTarget ? '~' : undefined);
+    const initialValue = buildInitialInput(defaultPath, state.homePath);
+    setState((prev) => ({
+      ...prev,
+      mode: 'path-input',
+      inputValue: initialValue,
+      selectedIndex: -1,
+      selectedRepo: null,
+      repoInfo: null,
+      refreshing: false,
+      hasSelectedSinceTab: false,
+    }));
+  }, [isLocalTarget, isOpen, selectedProjectsDirectory, state.homePath]);
+
+  const orderedAgentList = useMemo(() => {
+    const ordered: SessionAgent[] = [];
+    const seen = new Set<SessionAgent>();
+    const push = (agent: SessionAgent) => {
+      if (seen.has(agent)) return;
+      seen.add(agent);
+      ordered.push(agent);
+    };
+    for (const agent of FIXED_AGENT_ORDER) {
+      push(agent);
+    }
+    const dynamicAgents = Object.keys(effectiveAgentAvailability) as SessionAgent[];
+    dynamicAgents.sort((a, b) => a.localeCompare(b));
+    for (const agent of dynamicAgents) {
+      push(agent);
+    }
+    return ordered;
+  }, [effectiveAgentAvailability]);
+
   const agentShortcutByName = useMemo(() => {
     const shortcuts = new Map<SessionAgent, number>();
     orderedAgentList.forEach((agent, index) => {
@@ -186,12 +220,13 @@ export function LocationPicker({
     });
     return shortcuts;
   }, [orderedAgentList]);
+
   const savedAgent = normalizeAgent(settings[SESSION_AGENT_KEY]);
 
   useEffect(() => {
     if (!savedAgent) return;
     const resolvedSavedAgent = resolvePreferredAgent(savedAgent, effectiveAgentAvailability, 'codex');
-    setState(prev => (prev.agent === resolvedSavedAgent ? prev : { ...prev, agent: resolvedSavedAgent }));
+    setState((prev) => (prev.agent === resolvedSavedAgent ? prev : { ...prev, agent: resolvedSavedAgent }));
   }, [effectiveAgentAvailability, savedAgent]);
 
   useEffect(() => {
@@ -199,54 +234,41 @@ export function LocationPicker({
     if (resolvedAgent === state.agent) {
       return;
     }
-    setState(prev => ({ ...prev, agent: resolvedAgent }));
+    setState((prev) => ({ ...prev, agent: resolvedAgent }));
   }, [effectiveAgentAvailability, state.agent]);
 
-  // Filter recent locations based on input
-  // Expand ~ to home path so filtering works with stored full paths
   const expandedInput = state.inputValue.startsWith('~')
-    ? state.inputValue.replace('~', state.homePath)
+    ? (state.homePath ? state.inputValue.replace('~', state.homePath) : state.inputValue)
     : state.inputValue;
+
   const filteredRecent = expandedInput
     ? state.recentLocations.filter(
         (loc) =>
           loc.label.toLowerCase().includes(expandedInput.toLowerCase()) ||
-          loc.path.toLowerCase().includes(expandedInput.toLowerCase())
+          loc.path.toLowerCase().includes(expandedInput.toLowerCase()),
       )
     : state.recentLocations;
 
-  // Contract full path to use ~ for home directory
-  const contractPath = (path: string) => {
-    if (path.startsWith(state.homePath + '/')) {
-      return '~' + path.slice(state.homePath.length);
-    } else if (path === state.homePath) {
-      return '~';
-    }
-    return path;
-  };
+  const visibleRecent = filteredRecent;
+  const visibleSuggestions = fsSuggestions;
 
-  // Calculate ghost text from selected item (recent or filesystem suggestion)
-  // When nothing selected (-1), use first available suggestion for Tab autocomplete
   const getSelectedPath = () => {
     if (state.selectedIndex === -1) {
-      // Nothing selected - use first suggestion for autocomplete
-      return fsSuggestions[0]?.path || filteredRecent[0]?.path || '';
+      return visibleSuggestions[0]?.path || visibleRecent[0]?.path || '';
     }
-    if (state.selectedIndex < filteredRecent.length) {
-      return filteredRecent[state.selectedIndex]?.path || '';
+    if (state.selectedIndex < visibleRecent.length) {
+      return visibleRecent[state.selectedIndex]?.path || '';
     }
-    const fsIndex = state.selectedIndex - filteredRecent.length;
-    return fsSuggestions[fsIndex]?.path || '';
+    const fsIndex = state.selectedIndex - visibleRecent.length;
+    return visibleSuggestions[fsIndex]?.path || '';
   };
-  // Contract ghostText to use ~ so it matches input value format
-  const ghostText = contractPath(getSelectedPath());
+  const selectedPath = getSelectedPath();
+  const ghostText = state.homePath ? toDisplayPath(selectedPath, state.homePath) : selectedPath;
 
-  // Reset selection when input changes (user is typing, not navigating)
   useEffect(() => {
-    setState(prev => ({ ...prev, selectedIndex: -1 }));
+    setState((prev) => ({ ...prev, selectedIndex: -1 }));
   }, [state.inputValue]);
 
-  // Scroll selected item into view
   useEffect(() => {
     if (state.selectedIndex >= 0) {
       const el = document.querySelector(`[data-index="${state.selectedIndex}"]`);
@@ -254,79 +276,91 @@ export function LocationPicker({
     }
   }, [state.selectedIndex]);
 
-  const handleSelect = useCallback(
-    async (rawPath: string) => {
-      if (!hasAvailableAgents) {
-        onError?.(noAgentsMessage);
+  const handleSelect = useCallback(async (rawPath: string) => {
+    if (!hasAvailableAgents) {
+      onError?.(noAgentsMessage);
+      return;
+    }
+    if (!onInspectPath) {
+      onError?.('Path inspection is not available.');
+      return;
+    }
+    const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
+
+    try {
+      const inspected = await onInspectPath(rawPath.replace(/\/$/, ''), selectedEndpointId);
+      const inspection = inspected.inspection;
+      if (!inspection?.exists || !inspection.is_directory) {
+        onError?.(`Directory not found: ${rawPath.replace(/\/$/, '')}`);
         return;
       }
-      // Expand ~ to home path and remove trailing slash
-      const path = (rawPath.startsWith('~')
-        ? rawPath.replace('~', state.homePath)
-        : rawPath
-      ).replace(/\/$/, '');
-      const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
 
-      console.log('[LocationPicker] handleSelect:', path);
-
-      // Check if path is a git repo by checking for .git
-      try {
-        const entries = await readDir(path);
-        const isGitRepo = entries.some(e => e.name === '.git');
-
-        if (isGitRepo && onGetRepoInfo) {
-          // Fetch repo info and enter repo-options mode
-          console.log('[LocationPicker] Entering repo-options mode');
-          const result = await onGetRepoInfo(path);
-
-          if (result.success && result.info) {
-            setState(prev => ({
-              ...prev,
-              mode: 'repo-options',
-              selectedRepo: path,
-              repoInfo: result.info || null,
-            }));
-          } else {
-            // Failed to get repo info, just select the path
-            onSelect(path, selectedAgent);
-            onClose();
-          }
-          return;
+      const path = inspection.resolved_path;
+      const repoRoot = inspection.repo_root;
+      if (repoRoot && onGetRepoInfo) {
+        const result = await onGetRepoInfo(repoRoot, selectedEndpointId);
+        if (result.success && result.info) {
+          setState((prev) => ({
+            ...prev,
+            mode: 'repo-options',
+            selectedRepo: repoRoot,
+            repoInfo: result.info || null,
+          }));
+        } else {
+          onSelect(path, selectedAgent, selectedEndpointId);
+          onClose();
         }
-      } catch (e) {
-        // Not a readable directory, proceed with selection
-        console.log('[LocationPicker] readDir error:', e);
+        return;
       }
 
-      // Not a git repo, just select it
-      onSelect(path, selectedAgent);
+      onSelect(path, selectedAgent, selectedEndpointId);
       onClose();
-    },
-    [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onGetRepoInfo, onSelect, state.agent, state.homePath]
-  );
+    } catch (err) {
+      console.log('[LocationPicker] inspect path error:', err);
+      onError?.(err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onGetRepoInfo, onInspectPath, onSelect, selectedEndpointId, state.agent]);
 
   const handleAgentChange = useCallback((agent: SessionAgent) => {
     if (!isAgentAvailable(effectiveAgentAvailability, agent)) return;
-    setState(prev => ({ ...prev, agent }));
+    setState((prev) => ({ ...prev, agent }));
     setSetting(SESSION_AGENT_KEY, agent);
   }, [effectiveAgentAvailability, setSetting]);
 
+  const handleEndpointChange = useCallback((endpointId: string) => {
+    const nextEndpoint = endpointId === LOCAL_TARGET
+      ? null
+      : availableEndpoints.find((endpoint) => endpoint.id === endpointId);
+    const nextProjectsDirectory = endpointId === LOCAL_TARGET
+      ? projectsDirectory
+      : nextEndpoint?.capabilities?.projects_directory;
+    const defaultPath = nextProjectsDirectory || (endpointId === LOCAL_TARGET ? undefined : '~');
+    setState((prev) => ({
+      ...prev,
+      endpointId,
+      mode: 'path-input',
+      inputValue: buildInitialInput(defaultPath, prev.homePath),
+      selectedIndex: -1,
+      selectedRepo: null,
+      repoInfo: null,
+      recentLocations: [],
+      hasSelectedSinceTab: false,
+    }));
+  }, [availableEndpoints, projectsDirectory]);
+
   const handlePathInputChange = useCallback((value: string) => {
-    setState(prev => ({ ...prev, inputValue: value, hasSelectedSinceTab: true }));
+    setState((prev) => ({ ...prev, inputValue: value, hasSelectedSinceTab: true }));
   }, []);
 
-  // Tab completion handler - sets hasSelectedSinceTab to false since
-  // the auto-selection of first child is not an intentional selection
   const handleTabComplete = useCallback((value: string) => {
-    setState(prev => ({ ...prev, inputValue: value, hasSelectedSinceTab: false }));
+    setState((prev) => ({ ...prev, inputValue: value, hasSelectedSinceTab: false }));
   }, []);
 
-  // PathInput already sends the raw path - handleSelect does the expansion
   const handlePathInputSelect = useCallback((path: string) => {
     handleSelect(path);
   }, [handleSelect]);
 
-  // RepoOptions callbacks
   const handleSelectMainRepo = useCallback(() => {
     if (!hasAvailableAgents) {
       onError?.(noAgentsMessage);
@@ -334,10 +368,10 @@ export function LocationPicker({
     }
     if (state.selectedRepo) {
       const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-      onSelect(state.selectedRepo, selectedAgent);
+      onSelect(state.selectedRepo, selectedAgent, selectedEndpointId);
       onClose();
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent, state.selectedRepo]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo]);
 
   const handleSelectWorktree = useCallback((path: string) => {
     if (!hasAvailableAgents) {
@@ -345,9 +379,9 @@ export function LocationPicker({
       return;
     }
     const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-    onSelect(path, selectedAgent);
+    onSelect(path, selectedAgent, selectedEndpointId);
     onClose();
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent]);
 
   const handleSelectBranch = useCallback((_branch: string) => {
     if (!hasAvailableAgents) {
@@ -356,10 +390,10 @@ export function LocationPicker({
     }
     if (state.selectedRepo) {
       const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-      onSelect(state.selectedRepo, selectedAgent);
+      onSelect(state.selectedRepo, selectedAgent, selectedEndpointId);
       onClose();
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, state.agent, state.selectedRepo]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo]);
 
   const handleCreateWorktree = useCallback(async (branchName: string, startingFrom: string) => {
     if (!hasAvailableAgents) {
@@ -369,25 +403,25 @@ export function LocationPicker({
     if (!state.selectedRepo || !onCreateWorktree) return;
 
     try {
-      const result = await onCreateWorktree(state.selectedRepo, branchName, undefined, startingFrom);
+      const result = await onCreateWorktree(state.selectedRepo, branchName, undefined, startingFrom, selectedEndpointId);
       if (result.success && result.path) {
         const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-        onSelect(result.path, selectedAgent);
+        onSelect(result.path, selectedAgent, selectedEndpointId);
         onClose();
       }
     } catch (err) {
       console.error('[LocationPicker] Failed to create worktree:', err);
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onCreateWorktree, onError, onSelect, state.agent, state.selectedRepo]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onCreateWorktree, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo]);
 
   const handleRefresh = useCallback(async () => {
     if (!state.selectedRepo || !onGetRepoInfo || state.refreshing) return;
 
-    setState(prev => ({ ...prev, refreshing: true }));
+    setState((prev) => ({ ...prev, refreshing: true }));
     try {
-      const result = await onGetRepoInfo(state.selectedRepo);
+      const result = await onGetRepoInfo(state.selectedRepo, selectedEndpointId);
       if (result.success && result.info) {
-        setState(prev => ({
+        setState((prev) => ({
           ...prev,
           repoInfo: result.info || null,
           refreshing: false,
@@ -396,12 +430,12 @@ export function LocationPicker({
     } catch (err) {
       console.error('[LocationPicker] Failed to refresh repo info:', err);
     } finally {
-      setState(prev => ({ ...prev, refreshing: false }));
+      setState((prev) => ({ ...prev, refreshing: false }));
     }
-  }, [state.selectedRepo, state.refreshing, onGetRepoInfo]);
+  }, [onGetRepoInfo, state.refreshing, state.selectedRepo]);
 
   const handleBack = useCallback(() => {
-    setState(prev => ({
+    setState((prev) => ({
       ...prev,
       mode: 'path-input',
       selectedRepo: null,
@@ -409,7 +443,6 @@ export function LocationPicker({
     }));
   }, []);
 
-  // Global keyboard handler for navigation
   useEffect(() => {
     if (!isOpen) return;
 
@@ -440,34 +473,30 @@ export function LocationPicker({
         return;
       }
 
-      // Arrow keys and Enter only in path-input mode
       if (state.mode !== 'path-input') return;
 
-      const totalItems = filteredRecent.length + fsSuggestions.length;
-
+      const totalItems = visibleRecent.length + visibleSuggestions.length;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setState(prev => ({
+        setState((prev) => ({
           ...prev,
           selectedIndex: Math.min(prev.selectedIndex + 1, totalItems - 1),
-          hasSelectedSinceTab: true, // Arrow navigation is intentional selection
+          hasSelectedSinceTab: true,
         }));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setState(prev => ({
+        setState((prev) => ({
           ...prev,
           selectedIndex: Math.max(prev.selectedIndex - 1, 0),
-          hasSelectedSinceTab: true, // Arrow navigation is intentional selection
+          hasSelectedSinceTab: true,
         }));
       }
-      // Note: Enter is handled by PathInput component directly
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [effectiveAgentAvailability, fsSuggestions, filteredRecent, handleAgentChange, handleBack, isOpen, onClose, orderedAgentList, state.mode, state.selectedIndex]);
+  }, [effectiveAgentAvailability, handleAgentChange, handleBack, isOpen, onClose, orderedAgentList, state.mode, visibleRecent.length, visibleSuggestions.length]);
 
-  // Transform RepoInfo from snake_case to camelCase for RepoOptions
   const transformedRepoInfo = state.repoInfo ? {
     repo: state.repoInfo.repo,
     currentBranch: state.repoInfo.current_branch,
@@ -482,8 +511,8 @@ export function LocationPicker({
   if (!isOpen) return null;
 
   return (
-    <div className="location-picker-overlay" onClick={onClose}>
-      <div className="location-picker" onClick={(e) => e.stopPropagation()}>
+    <div className="location-picker-overlay" data-testid="location-picker-overlay" onClick={onClose}>
+      <div className="location-picker" data-testid="location-picker" onClick={(e) => e.stopPropagation()}>
         <div className="picker-agent-bar">
           <div className="picker-agent-label">SESSION AGENT</div>
           <div className="picker-agent-controls">
@@ -511,13 +540,68 @@ export function LocationPicker({
             </div>
           </div>
         </div>
+        <div className="picker-endpoint-bar">
+          <div className="picker-agent-label">SESSION TARGET</div>
+          <div className="picker-endpoint-controls" role="radiogroup" aria-label="Session target">
+            <button
+              type="button"
+              className={`endpoint-option ${isLocalTarget ? 'active' : ''}`}
+              data-testid="location-picker-target-local"
+              onClick={() => handleEndpointChange(LOCAL_TARGET)}
+              role="radio"
+              aria-checked={isLocalTarget}
+            >
+              <span className="endpoint-option-name">Local</span>
+              <span className="endpoint-option-meta">this machine</span>
+            </button>
+            {availableEndpoints.map((endpoint) => {
+              const connected = endpoint.status === 'connected';
+              return (
+                <button
+                  key={endpoint.id}
+                  type="button"
+                  className={`endpoint-option ${state.endpointId === endpoint.id ? 'active' : ''}`}
+                  data-testid={`location-picker-target-${endpoint.id}`}
+                  data-endpoint-id={endpoint.id}
+                  onClick={() => handleEndpointChange(endpoint.id)}
+                  role="radio"
+                  aria-checked={state.endpointId === endpoint.id}
+                  disabled={!connected}
+                  title={!connected ? `${endpoint.name} is ${endpoint.status}` : undefined}
+                >
+                  <span className="endpoint-option-name">{endpoint.name}</span>
+                  <span className={`endpoint-option-meta status-${endpoint.status}`}>{endpoint.status}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
         {!hasAvailableAgents && (
           <div className="picker-agent-warning">{noAgentsMessage}</div>
+        )}
+        {!isLocalTarget && selectedEndpoint && (
+          <div className="picker-endpoint-summary">
+            <div className="picker-endpoint-summary-row">
+              <span className="picker-endpoint-summary-label">SSH</span>
+              <code>{selectedEndpoint.ssh_target}</code>
+            </div>
+            {selectedEndpoint.capabilities?.projects_directory && (
+              <div className="picker-endpoint-summary-row">
+                <span className="picker-endpoint-summary-label">Projects</span>
+                <code>{selectedEndpoint.capabilities.projects_directory}</code>
+              </div>
+            )}
+            <div className="picker-endpoint-summary-note">
+              Browsing, repo inspection, and worktree actions run on {selectedEndpoint.name}.
+            </div>
+          </div>
         )}
         {state.mode === 'path-input' ? (
           <>
             <div className="picker-header">
-              <div className="picker-title">New Session Location</div>
+              <div className="picker-title" data-testid="location-picker-title">
+                {isLocalTarget ? 'New Session Location' : `New ${formatSessionAgentLabel(state.agent)} Session on ${selectedEndpoint?.name || 'Remote'}`}
+              </div>
               <PathInput
                 value={state.inputValue}
                 onChange={handlePathInputChange}
@@ -525,52 +609,56 @@ export function LocationPicker({
                 onSelect={handlePathInputSelect}
                 ghostText={ghostText}
                 hasSelectedSinceTab={state.hasSelectedSinceTab}
-                placeholder="Type path (e.g., ~/projects) or search..."
+                placeholder={isLocalTarget ? 'Type path (e.g., ~/projects) or search...' : `Type path on ${selectedEndpoint?.name || 'remote host'} (e.g., ~/projects/repo)`}
               />
               {currentDir && (
-                <div className="picker-breadcrumb">
+                <div className="picker-breadcrumb" data-testid="location-picker-breadcrumb">
                   <span className="picker-breadcrumb-label">Browsing:</span>
-                  <span className="picker-breadcrumb-path">{currentDir}</span>
+                  <span className="picker-breadcrumb-path" data-testid="location-picker-breadcrumb-path">{currentDir}</span>
                 </div>
               )}
             </div>
 
             <div className="picker-results">
-              {/* Recent locations section */}
-              {filteredRecent.length > 0 && (
+              {visibleRecent.length > 0 && (
                 <div className="picker-section">
                   <div className="picker-section-title">RECENT</div>
-                  {filteredRecent.slice(0, MAX_RECENT_LOCATIONS).map((loc, index) => (
+                  {visibleRecent.slice(0, MAX_RECENT_LOCATIONS).map((loc, index) => (
                     <div
                       key={loc.path}
                       className={`picker-item ${index === state.selectedIndex ? 'selected' : ''}`}
+                      data-testid={`location-picker-item-${index}`}
                       data-index={index}
+                      data-kind="recent"
+                      data-path={loc.path}
                       onClick={() => handleSelect(loc.path)}
-                      onMouseEnter={() => setState(prev => ({ ...prev, selectedIndex: index }))}
+                      onMouseEnter={() => setState((prev) => ({ ...prev, selectedIndex: index }))}
                     >
                       <div className="picker-icon">🕐</div>
                       <div className="picker-info">
                         <div className="picker-name">{loc.label}</div>
-                        <div className="picker-path">{loc.path.replace(state.homePath, '~')}</div>
+                        <div className="picker-path">{state.homePath ? toDisplayPath(loc.path, state.homePath) : loc.path}</div>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* Filesystem suggestions */}
-              {fsSuggestions.length > 0 && (
+              {visibleSuggestions.length > 0 && (
                 <div className="picker-section">
                   <div className="picker-section-title">DIRECTORIES</div>
-                  {fsSuggestions.map((item: { name: string; path: string }, index: number) => {
-                    const globalIndex = filteredRecent.length + index;
+                  {visibleSuggestions.map((item, index) => {
+                    const globalIndex = visibleRecent.length + index;
                     return (
                       <div
                         key={item.path}
                         className={`picker-item ${globalIndex === state.selectedIndex ? 'selected' : ''}`}
+                        data-testid={`location-picker-item-${globalIndex}`}
                         data-index={globalIndex}
+                        data-kind="directory"
+                        data-path={item.path}
                         onClick={() => handleSelect(item.path)}
-                        onMouseEnter={() => setState(prev => ({ ...prev, selectedIndex: globalIndex }))}
+                        onMouseEnter={() => setState((prev) => ({ ...prev, selectedIndex: globalIndex }))}
                       >
                         <div className="picker-icon">📁</div>
                         <div className="picker-info">
@@ -582,9 +670,8 @@ export function LocationPicker({
                 </div>
               )}
 
-              {/* Empty state */}
-              {fsSuggestions.length === 0 && filteredRecent.length === 0 && (
-                <div className="picker-empty">
+              {visibleSuggestions.length === 0 && visibleRecent.length === 0 && (
+                <div className="picker-empty" data-testid="location-picker-empty">
                   {state.inputValue
                     ? 'No matches. Press Enter to use path directly.'
                     : 'Type a path to browse directories'}
@@ -607,23 +694,21 @@ export function LocationPicker({
             onSelectBranch={handleSelectBranch}
             onCreateWorktree={handleCreateWorktree}
             onDeleteWorktree={onDeleteWorktree ? async (path) => {
-              await onDeleteWorktree(path);
-              // Refresh repo info after delete
+              await onDeleteWorktree(path, selectedEndpointId);
               if (state.selectedRepo && onGetRepoInfo) {
-                const result = await onGetRepoInfo(state.selectedRepo);
+                const result = await onGetRepoInfo(state.selectedRepo, selectedEndpointId);
                 if (result.success && result.info) {
-                  setState(prev => ({ ...prev, repoInfo: result.info || null }));
+                  setState((prev) => ({ ...prev, repoInfo: result.info || null }));
                 }
               }
             } : undefined}
             onDeleteBranch={onDeleteBranch ? async (branch) => {
               if (state.selectedRepo) {
-                await onDeleteBranch(state.selectedRepo, branch, true);
-                // Refresh repo info after delete
+                await onDeleteBranch(state.selectedRepo, branch, true, selectedEndpointId);
                 if (onGetRepoInfo) {
-                  const result = await onGetRepoInfo(state.selectedRepo);
+                  const result = await onGetRepoInfo(state.selectedRepo, selectedEndpointId);
                   if (result.success && result.info) {
-                    setState(prev => ({ ...prev, repoInfo: result.info || null }));
+                    setState((prev) => ({ ...prev, repoInfo: result.info || null }));
                   }
                 }
               }

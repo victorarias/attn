@@ -11,6 +11,8 @@ import { resetTerminalScrollPin } from '../../utils/terminalScrollPin';
 import { recordTerminalRuntimeLog } from '../../utils/terminalRuntimeLog';
 
 const MAX_PENDING_TERMINAL_EVENTS = 256;
+const RUNTIME_ENSURE_TIMEOUT_MS = 20_000;
+const RUNTIME_ENSURE_RETRY_DELAY_MS = 150;
 const terminalTextEncoder = new TextEncoder();
 
 interface PaneRuntimeSize {
@@ -99,6 +101,29 @@ function writeBytesToTerminalAsync(terminal: XTerm, bytes: Uint8Array): Promise<
   });
 }
 
+function runtimeEnsureErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function isRetryableRuntimeEnsureError(error: unknown): boolean {
+  const message = runtimeEnsureErrorMessage(error).toLowerCase();
+  return (
+    message.includes('pty backend is not configured') ||
+    message.includes('websocket not connected') ||
+    message.includes('attach session timed out') ||
+    message.includes('spawn session timed out')
+  );
+}
+
+function waitForRuntimeEnsureRetry(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 export function installTerminalKeyHandler(sendToPty: (data: string) => void) {
   return (ev: KeyboardEvent) => {
     const accel = isMacLikePlatform() ? ev.metaKey : (ev.metaKey || ev.ctrlKey);
@@ -144,6 +169,7 @@ export function usePaneRuntimeBinder(
   const inputSubscriptionsRef = useRef<Map<string, { dispose: () => void }>>(new Map());
   const pendingTerminalEventsRef = useRef<Map<string, PtyEventPayload[]>>(new Map());
   const pendingEnsuresRef = useRef<Map<string, Promise<void>>>(new Map());
+  const ensuredRuntimeIdsRef = useRef<Set<string>>(new Set());
   const cachedSpawnArgsRef = useRef<Map<string, PtySpawnArgs | null>>(new Map());
   const cachedTerminalTextRef = useRef<Map<string, string>>(new Map());
   const pendingUnmountCleanupRef = useRef<Map<string, number>>(new Map());
@@ -311,6 +337,12 @@ export function usePaneRuntimeBinder(
 
   useEffect(() => {
     paneByIdRef.current = new Map(panes.map((pane) => [pane.paneId, pane]));
+    const activeRuntimeIDs = new Set(panes.map((pane) => pane.runtimeId));
+    for (const runtimeId of Array.from(ensuredRuntimeIdsRef.current)) {
+      if (!activeRuntimeIDs.has(runtimeId)) {
+        ensuredRuntimeIdsRef.current.delete(runtimeId);
+      }
+    }
     recordPaneRuntimeDebugEvent({
       scope: 'binder',
       paneId: activePaneId,
@@ -456,6 +488,7 @@ export function usePaneRuntimeBinder(
       inputSubscriptionsRef.current.clear();
       terminalHandlesRef.current.clear();
       xtermsRef.current.clear();
+      ensuredRuntimeIdsRef.current.clear();
       paneWriteStatesRef.current.clear();
       paneWriteLogStatesRef.current.clear();
     };
@@ -528,6 +561,9 @@ export function usePaneRuntimeBinder(
     if (!pane) {
       return;
     }
+    if (ensuredRuntimeIdsRef.current.has(pane.runtimeId)) {
+      return;
+    }
 
     const existing = pendingEnsuresRef.current.get(pane.runtimeId);
     if (existing) {
@@ -570,19 +606,54 @@ export function usePaneRuntimeBinder(
         testWindow.__TEST_SESSION_INPUT_EVENTS.push({ sessionId: pane.testSessionId, event: 'connect_terminal' });
       }
 
-      recordPaneRuntimeDebugEvent({
-        scope: 'binder',
-        sessionId: pane.sessionId ?? pane.testSessionId,
-        paneId,
-        runtimeId: pane.runtimeId,
-        message: 'spawn/attach runtime',
-        details: {
-          cols: spawnArgs.cols,
-          rows: spawnArgs.rows,
-          shell: spawnArgs.shell ?? false,
-        },
-      });
-      await ptySpawn({ args: spawnArgs });
+      const startedAt = performance.now();
+      let attempt = 0;
+
+      for (;;) {
+        attempt += 1;
+        recordPaneRuntimeDebugEvent({
+          scope: 'binder',
+          sessionId: pane.sessionId ?? pane.testSessionId,
+          paneId,
+          runtimeId: pane.runtimeId,
+          message: attempt === 1 ? 'spawn/attach runtime' : 'retry spawn/attach runtime',
+          details: {
+            attempt,
+            cols: spawnArgs.cols,
+            rows: spawnArgs.rows,
+            shell: spawnArgs.shell ?? false,
+          },
+        });
+        try {
+          await ptySpawn({ args: spawnArgs });
+          break;
+        } catch (error) {
+          const elapsedMs = performance.now() - startedAt;
+          if (!isRetryableRuntimeEnsureError(error) || elapsedMs >= RUNTIME_ENSURE_TIMEOUT_MS) {
+            throw error;
+          }
+          recordPaneRuntimeDebugEvent({
+            scope: 'binder',
+            sessionId: pane.sessionId ?? pane.testSessionId,
+            paneId,
+            runtimeId: pane.runtimeId,
+            message: 'runtime ensure retry scheduled',
+            details: {
+              attempt,
+              elapsedMs: Math.round(elapsedMs),
+              error: runtimeEnsureErrorMessage(error),
+            },
+          });
+          await waitForRuntimeEnsureRetry(RUNTIME_ENSURE_RETRY_DELAY_MS);
+          if (xtermsRef.current.get(paneId) !== xterm) {
+            return;
+          }
+          const livePane = paneByIdRef.current.get(paneId);
+          if (!livePane || livePane.runtimeId !== pane.runtimeId) {
+            return;
+          }
+        }
+      }
       recordPaneRuntimeDebugEvent({
         scope: 'binder',
         sessionId: pane.sessionId ?? pane.testSessionId,
@@ -590,6 +661,7 @@ export function usePaneRuntimeBinder(
         runtimeId: pane.runtimeId,
         message: 'runtime ensured',
       });
+      ensuredRuntimeIdsRef.current.add(pane.runtimeId);
     })().finally(() => {
       pendingEnsuresRef.current.delete(pane.runtimeId);
     });
@@ -678,6 +750,35 @@ export function usePaneRuntimeBinder(
     }
   }, [replayPendingTerminalEvent]);
 
+  const requestPaneRuntimeEnsure = useCallback((
+    paneId: string,
+    xterm: XTerm,
+    source: 'ready' | 'resize',
+  ) => {
+    const pane = paneByIdRef.current.get(paneId);
+    if (!pane) {
+      return;
+    }
+    if (
+      ensuredRuntimeIdsRef.current.has(pane.runtimeId) ||
+      pendingEnsuresRef.current.has(pane.runtimeId)
+    ) {
+      return;
+    }
+    void ensurePaneRuntime(paneId, xterm).catch((error) => {
+      recordPaneRuntimeDebugEvent({
+        scope: 'binder',
+        sessionId: pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: `runtime ensure failed from ${source}`,
+        details: { error: error instanceof Error ? error.message : String(error) },
+      });
+      console.error('[PaneRuntimeBinder] Failed to ensure runtime:', error);
+      xterm.write(`\r\n[Failed to connect PTY: ${error}]\r\n`);
+    });
+  }, [ensurePaneRuntime]);
+
   const handleTerminalInit = useCallback((paneId: string) => (xterm: XTerm) => {
     const pane = paneByIdRef.current.get(paneId);
     recordPaneRuntimeDebugEvent({
@@ -702,19 +803,8 @@ export function usePaneRuntimeBinder(
       details: { cols: xterm.cols, rows: xterm.rows },
     });
     wireTerminal(paneId, xterm);
-    void ensurePaneRuntime(paneId, xterm).catch((error) => {
-      recordPaneRuntimeDebugEvent({
-        scope: 'binder',
-        sessionId: pane?.testSessionId,
-        paneId,
-        runtimeId: pane?.runtimeId,
-        message: 'runtime ensure failed',
-        details: { error: error instanceof Error ? error.message : String(error) },
-      });
-      console.error('[PaneRuntimeBinder] Failed to ensure runtime:', error);
-      xterm.write(`\r\n[Failed to connect PTY: ${error}]\r\n`);
-    });
-  }, [ensurePaneRuntime, wireTerminal]);
+    requestPaneRuntimeEnsure(paneId, xterm, 'ready');
+  }, [requestPaneRuntimeEnsure, wireTerminal]);
 
   const handleTerminalResize = useCallback((paneId: string) => (cols: number, rows: number) => {
     const pane = paneByIdRef.current.get(paneId);
@@ -730,7 +820,11 @@ export function usePaneRuntimeBinder(
       details: { cols, rows },
     });
     ptyResize({ id: pane.runtimeId, cols, rows }).catch(console.error);
-  }, []);
+    const xterm = xtermsRef.current.get(paneId);
+    if (xterm) {
+      requestPaneRuntimeEnsure(paneId, xterm, 'resize');
+    }
+  }, [requestPaneRuntimeEnsure]);
 
   const focusPaneWithRetry = useCallback((paneId: string, retries = 20) => {
     const tryFocus = (remaining: number) => {

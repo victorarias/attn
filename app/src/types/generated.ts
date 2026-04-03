@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RemoveEndpointMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, WorkspaceActionResultMessage, WorkspaceClosePaneMessage, WorkspaceFocusPaneMessage, WorkspaceGetMessage, WorkspacePane, WorkspacePaneKind, WorkspaceRenamePaneMessage, WorkspaceRuntimeExitedMessage, WorkspaceSnapshot, WorkspaceSnapshotMessage, WorkspaceSplitDirection, WorkspaceSplitPaneMessage, WorkspaceUpdatedMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RemoveEndpointMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, WorkspaceActionResultMessage, WorkspaceClosePaneMessage, WorkspaceFocusPaneMessage, WorkspaceGetMessage, WorkspacePane, WorkspacePaneKind, WorkspaceRenamePaneMessage, WorkspaceRuntimeExitedMessage, WorkspaceSnapshot, WorkspaceSnapshotMessage, WorkspaceSplitDirection, WorkspaceSplitPaneMessage, WorkspaceUpdatedMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -16,6 +16,8 @@
 //   const branchDiffFile = Convert.toBranchDiffFile(json);
 //   const branchDiffFilesResultMessage = Convert.toBranchDiffFilesResultMessage(json);
 //   const branchesResultMessage = Convert.toBranchesResultMessage(json);
+//   const browseDirectoryMessage = Convert.toBrowseDirectoryMessage(json);
+//   const browseDirectoryResultMessage = Convert.toBrowseDirectoryResultMessage(json);
 //   const checkAttnStashMessage = Convert.toCheckAttnStashMessage(json);
 //   const checkAttnStashResultMessage = Convert.toCheckAttnStashResultMessage(json);
 //   const checkDirtyMessage = Convert.toCheckDirtyMessage(json);
@@ -39,6 +41,7 @@
 //   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
 //   const detachSessionMessage = Convert.toDetachSessionMessage(json);
+//   const directoryEntry = Convert.toDirectoryEntry(json);
 //   const endpointActionResultMessage = Convert.toEndpointActionResultMessage(json);
 //   const endpointCapabilities = Convert.toEndpointCapabilities(json);
 //   const endpointInfo = Convert.toEndpointInfo(json);
@@ -72,6 +75,8 @@
 //   const initialStateMessage = Convert.toInitialStateMessage(json);
 //   const injectTestPRMessage = Convert.toInjectTestPRMessage(json);
 //   const injectTestSessionMessage = Convert.toInjectTestSessionMessage(json);
+//   const inspectPathMessage = Convert.toInspectPathMessage(json);
+//   const inspectPathResultMessage = Convert.toInspectPathResultMessage(json);
 //   const killSessionMessage = Convert.toKillSessionMessage(json);
 //   const listBranchesMessage = Convert.toListBranchesMessage(json);
 //   const listEndpointsMessage = Convert.toListEndpointsMessage(json);
@@ -90,6 +95,7 @@
 //   const pRRole = Convert.toPRRole(json);
 //   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
 //   const pRsUpdatedMessage = Convert.toPRsUpdatedMessage(json);
+//   const pathInspection = Convert.toPathInspection(json);
 //   const ptyDesyncMessage = Convert.toPtyDesyncMessage(json);
 //   const ptyInputMessage = Convert.toPtyInputMessage(json);
 //   const ptyOutputMessage = Convert.toPtyOutputMessage(json);
@@ -424,6 +430,41 @@ export enum BranchesResultMessageEvent {
     BranchesResult = "branches_result",
 }
 
+export interface BrowseDirectoryMessage {
+    cmd:          BrowseDirectoryMessageCmd;
+    endpoint_id?: string;
+    input_path:   string;
+    request_id?:  string;
+    [property: string]: any;
+}
+
+export enum BrowseDirectoryMessageCmd {
+    BrowseDirectory = "browse_directory",
+}
+
+export interface BrowseDirectoryResultMessage {
+    directory:    string;
+    endpoint_id?: string;
+    entries:      EntryElement[];
+    error?:       string;
+    event:        BrowseDirectoryResultMessageEvent;
+    home_path?:   string;
+    input_path:   string;
+    request_id?:  string;
+    success:      boolean;
+    [property: string]: any;
+}
+
+export interface EntryElement {
+    name: string;
+    path: string;
+    [property: string]: any;
+}
+
+export enum BrowseDirectoryResultMessageEvent {
+    BrowseDirectoryResult = "browse_directory_result",
+}
+
 export interface CheckAttnStashMessage {
     branch: string;
     cmd:    CheckAttnStashMessageCmd;
@@ -570,6 +611,7 @@ export enum CreateWorktreeFromBranchMessageCmd {
 export interface CreateWorktreeMessage {
     branch:         string;
     cmd:            CreateWorktreeMessageCmd;
+    endpoint_id?:   string;
     main_repo:      string;
     path?:          string;
     starting_from?: string;
@@ -581,10 +623,11 @@ export enum CreateWorktreeMessageCmd {
 }
 
 export interface CreateWorktreeResultMessage {
-    error?:  string;
-    event:   CreateWorktreeResultMessageEvent;
-    path?:   string;
-    success: boolean;
+    endpoint_id?: string;
+    error?:       string;
+    event:        CreateWorktreeResultMessageEvent;
+    path?:        string;
+    success:      boolean;
     [property: string]: any;
 }
 
@@ -599,10 +642,11 @@ export interface DaemonWarning {
 }
 
 export interface DeleteBranchMessage {
-    branch:    string;
-    cmd:       DeleteBranchMessageCmd;
-    force:     boolean;
-    main_repo: string;
+    branch:       string;
+    cmd:          DeleteBranchMessageCmd;
+    endpoint_id?: string;
+    force:        boolean;
+    main_repo:    string;
     [property: string]: any;
 }
 
@@ -611,10 +655,11 @@ export enum DeleteBranchMessageCmd {
 }
 
 export interface DeleteBranchResultMessage {
-    branch:  string;
-    error?:  string;
-    event:   DeleteBranchResultMessageEvent;
-    success: boolean;
+    branch:       string;
+    endpoint_id?: string;
+    error?:       string;
+    event:        DeleteBranchResultMessageEvent;
+    success:      boolean;
     [property: string]: any;
 }
 
@@ -644,8 +689,9 @@ export enum DeleteCommentResultMessageEvent {
 }
 
 export interface DeleteWorktreeMessage {
-    cmd:  DeleteWorktreeMessageCmd;
-    path: string;
+    cmd:          DeleteWorktreeMessageCmd;
+    endpoint_id?: string;
+    path:         string;
     [property: string]: any;
 }
 
@@ -654,10 +700,11 @@ export enum DeleteWorktreeMessageCmd {
 }
 
 export interface DeleteWorktreeResultMessage {
-    error?:  string;
-    event:   DeleteWorktreeResultMessageEvent;
-    path:    string;
-    success: boolean;
+    endpoint_id?: string;
+    error?:       string;
+    event:        DeleteWorktreeResultMessageEvent;
+    path:         string;
+    success:      boolean;
     [property: string]: any;
 }
 
@@ -673,6 +720,12 @@ export interface DetachSessionMessage {
 
 export enum DetachSessionMessageCmd {
     DetachSession = "detach_session",
+}
+
+export interface DirectoryEntry {
+    name: string;
+    path: string;
+    [property: string]: any;
 }
 
 export interface EndpointActionResultMessage {
@@ -943,8 +996,10 @@ export enum GetFileDiffMessageCmd {
 }
 
 export interface GetRecentLocationsMessage {
-    cmd:    GetRecentLocationsMessageCmd;
-    limit?: number;
+    cmd:          GetRecentLocationsMessageCmd;
+    endpoint_id?: string;
+    limit?:       number;
+    request_id?:  string;
     [property: string]: any;
 }
 
@@ -953,8 +1008,9 @@ export enum GetRecentLocationsMessageCmd {
 }
 
 export interface GetRepoInfoMessage {
-    cmd:  GetRepoInfoMessageCmd;
-    repo: string;
+    cmd:          GetRepoInfoMessageCmd;
+    endpoint_id?: string;
+    repo:         string;
     [property: string]: any;
 }
 
@@ -963,10 +1019,11 @@ export enum GetRepoInfoMessageCmd {
 }
 
 export interface GetRepoInfoResultMessage {
-    error?:  string;
-    event:   GetRepoInfoResultMessageEvent;
-    info?:   Info;
-    success: boolean;
+    endpoint_id?: string;
+    error?:       string;
+    event:        GetRepoInfoResultMessageEvent;
+    info?:        Info;
+    success:      boolean;
     [property: string]: any;
 }
 
@@ -1168,6 +1225,42 @@ export interface InjectTestSessionMessage {
 
 export enum InjectTestSessionMessageCmd {
     InjectTestSession = "inject_test_session",
+}
+
+export interface InspectPathMessage {
+    cmd:          InspectPathMessageCmd;
+    endpoint_id?: string;
+    path:         string;
+    request_id?:  string;
+    [property: string]: any;
+}
+
+export enum InspectPathMessageCmd {
+    InspectPath = "inspect_path",
+}
+
+export interface InspectPathResultMessage {
+    endpoint_id?: string;
+    error?:       string;
+    event:        InspectPathResultMessageEvent;
+    inspection?:  Inspection;
+    request_id?:  string;
+    success:      boolean;
+    [property: string]: any;
+}
+
+export enum InspectPathResultMessageEvent {
+    InspectPathResult = "inspect_path_result",
+}
+
+export interface Inspection {
+    exists:        boolean;
+    home_path?:    string;
+    input_path:    string;
+    is_directory:  boolean;
+    repo_root?:    string;
+    resolved_path: string;
+    [property: string]: any;
 }
 
 export interface KillSessionMessage {
@@ -1372,6 +1465,16 @@ export enum PRsUpdatedMessageEvent {
     PrsUpdated = "prs_updated",
 }
 
+export interface PathInspection {
+    exists:        boolean;
+    home_path?:    string;
+    input_path:    string;
+    is_directory:  boolean;
+    repo_root?:    string;
+    resolved_path: string;
+    [property: string]: any;
+}
+
 export interface PtyDesyncMessage {
     event:  PtyDesyncMessageEvent;
     id:     string;
@@ -1478,9 +1581,12 @@ export interface RecentLocation {
 }
 
 export interface RecentLocationsResultMessage {
+    endpoint_id?:     string;
     error?:           string;
     event:            RecentLocationsResultMessageEvent;
+    home_path?:       string;
     recent_locations: RecentLocationElement[];
+    request_id?:      string;
     success:          boolean;
     [property: string]: any;
 }
@@ -1989,6 +2095,7 @@ export interface SpawnSessionMessage {
     cols:                number;
     copilot_executable?: string;
     cwd:                 string;
+    endpoint_id?:        string;
     executable?:         string;
     fork_session?:       boolean;
     id:                  string;
@@ -2557,6 +2664,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("BranchesResultMessage")), null, 2);
     }
 
+    public static toBrowseDirectoryMessage(json: string): BrowseDirectoryMessage {
+        return cast(JSON.parse(json), r("BrowseDirectoryMessage"));
+    }
+
+    public static browseDirectoryMessageToJson(value: BrowseDirectoryMessage): string {
+        return JSON.stringify(uncast(value, r("BrowseDirectoryMessage")), null, 2);
+    }
+
+    public static toBrowseDirectoryResultMessage(json: string): BrowseDirectoryResultMessage {
+        return cast(JSON.parse(json), r("BrowseDirectoryResultMessage"));
+    }
+
+    public static browseDirectoryResultMessageToJson(value: BrowseDirectoryResultMessage): string {
+        return JSON.stringify(uncast(value, r("BrowseDirectoryResultMessage")), null, 2);
+    }
+
     public static toCheckAttnStashMessage(json: string): CheckAttnStashMessage {
         return cast(JSON.parse(json), r("CheckAttnStashMessage"));
     }
@@ -2739,6 +2862,14 @@ export class Convert {
 
     public static detachSessionMessageToJson(value: DetachSessionMessage): string {
         return JSON.stringify(uncast(value, r("DetachSessionMessage")), null, 2);
+    }
+
+    public static toDirectoryEntry(json: string): DirectoryEntry {
+        return cast(JSON.parse(json), r("DirectoryEntry"));
+    }
+
+    public static directoryEntryToJson(value: DirectoryEntry): string {
+        return JSON.stringify(uncast(value, r("DirectoryEntry")), null, 2);
     }
 
     public static toEndpointActionResultMessage(json: string): EndpointActionResultMessage {
@@ -3005,6 +3136,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("InjectTestSessionMessage")), null, 2);
     }
 
+    public static toInspectPathMessage(json: string): InspectPathMessage {
+        return cast(JSON.parse(json), r("InspectPathMessage"));
+    }
+
+    public static inspectPathMessageToJson(value: InspectPathMessage): string {
+        return JSON.stringify(uncast(value, r("InspectPathMessage")), null, 2);
+    }
+
+    public static toInspectPathResultMessage(json: string): InspectPathResultMessage {
+        return cast(JSON.parse(json), r("InspectPathResultMessage"));
+    }
+
+    public static inspectPathResultMessageToJson(value: InspectPathResultMessage): string {
+        return JSON.stringify(uncast(value, r("InspectPathResultMessage")), null, 2);
+    }
+
     public static toKillSessionMessage(json: string): KillSessionMessage {
         return cast(JSON.parse(json), r("KillSessionMessage"));
     }
@@ -3147,6 +3294,14 @@ export class Convert {
 
     public static pRsUpdatedMessageToJson(value: PRsUpdatedMessage): string {
         return JSON.stringify(uncast(value, r("PRsUpdatedMessage")), null, 2);
+    }
+
+    public static toPathInspection(json: string): PathInspection {
+        return cast(JSON.parse(json), r("PathInspection"));
+    }
+
+    public static pathInspectionToJson(value: PathInspection): string {
+        return JSON.stringify(uncast(value, r("PathInspection")), null, 2);
     }
 
     public static toPtyDesyncMessage(json: string): PtyDesyncMessage {
@@ -4144,6 +4299,27 @@ const typeMap: any = {
         { json: "is_current", js: "is_current", typ: u(undefined, true) },
         { json: "name", js: "name", typ: "" },
     ], "any"),
+    "BrowseDirectoryMessage": o([
+        { json: "cmd", js: "cmd", typ: r("BrowseDirectoryMessageCmd") },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
+        { json: "input_path", js: "input_path", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "BrowseDirectoryResultMessage": o([
+        { json: "directory", js: "directory", typ: "" },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
+        { json: "entries", js: "entries", typ: a(r("EntryElement")) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("BrowseDirectoryResultMessageEvent") },
+        { json: "home_path", js: "home_path", typ: u(undefined, "") },
+        { json: "input_path", js: "input_path", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "EntryElement": o([
+        { json: "name", js: "name", typ: "" },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
     "CheckAttnStashMessage": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "cmd", js: "cmd", typ: r("CheckAttnStashMessageCmd") },
@@ -4212,11 +4388,13 @@ const typeMap: any = {
     "CreateWorktreeMessage": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "cmd", js: "cmd", typ: r("CreateWorktreeMessageCmd") },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "main_repo", js: "main_repo", typ: "" },
         { json: "path", js: "path", typ: u(undefined, "") },
         { json: "starting_from", js: "starting_from", typ: u(undefined, "") },
     ], "any"),
     "CreateWorktreeResultMessage": o([
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("CreateWorktreeResultMessageEvent") },
         { json: "path", js: "path", typ: u(undefined, "") },
@@ -4229,11 +4407,13 @@ const typeMap: any = {
     "DeleteBranchMessage": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "cmd", js: "cmd", typ: r("DeleteBranchMessageCmd") },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "force", js: "force", typ: true },
         { json: "main_repo", js: "main_repo", typ: "" },
     ], "any"),
     "DeleteBranchResultMessage": o([
         { json: "branch", js: "branch", typ: "" },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("DeleteBranchResultMessageEvent") },
         { json: "success", js: "success", typ: true },
@@ -4249,9 +4429,11 @@ const typeMap: any = {
     ], "any"),
     "DeleteWorktreeMessage": o([
         { json: "cmd", js: "cmd", typ: r("DeleteWorktreeMessageCmd") },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
     ], "any"),
     "DeleteWorktreeResultMessage": o([
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("DeleteWorktreeResultMessageEvent") },
         { json: "path", js: "path", typ: "" },
@@ -4260,6 +4442,10 @@ const typeMap: any = {
     "DetachSessionMessage": o([
         { json: "cmd", js: "cmd", typ: r("DetachSessionMessageCmd") },
         { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "DirectoryEntry": o([
+        { json: "name", js: "name", typ: "" },
+        { json: "path", js: "path", typ: "" },
     ], "any"),
     "EndpointActionResultMessage": o([
         { json: "action", js: "action", typ: "" },
@@ -4413,13 +4599,17 @@ const typeMap: any = {
     ], "any"),
     "GetRecentLocationsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetRecentLocationsMessageCmd") },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "limit", js: "limit", typ: u(undefined, 0) },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
     ], "any"),
     "GetRepoInfoMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetRepoInfoMessageCmd") },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
     "GetRepoInfoResultMessage": o([
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("GetRepoInfoResultMessageEvent") },
         { json: "info", js: "info", typ: u(undefined, r("Info")) },
@@ -4538,6 +4728,28 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("InjectTestSessionMessageCmd") },
         { json: "session", js: "session", typ: r("SessionElement") },
     ], "any"),
+    "InspectPathMessage": o([
+        { json: "cmd", js: "cmd", typ: r("InspectPathMessageCmd") },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "InspectPathResultMessage": o([
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("InspectPathResultMessageEvent") },
+        { json: "inspection", js: "inspection", typ: u(undefined, r("Inspection")) },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "Inspection": o([
+        { json: "exists", js: "exists", typ: true },
+        { json: "home_path", js: "home_path", typ: u(undefined, "") },
+        { json: "input_path", js: "input_path", typ: "" },
+        { json: "is_directory", js: "is_directory", typ: true },
+        { json: "repo_root", js: "repo_root", typ: u(undefined, "") },
+        { json: "resolved_path", js: "resolved_path", typ: "" },
+    ], "any"),
     "KillSessionMessage": o([
         { json: "cmd", js: "cmd", typ: r("KillSessionMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -4642,6 +4854,14 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("PRsUpdatedMessageEvent") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
     ], "any"),
+    "PathInspection": o([
+        { json: "exists", js: "exists", typ: true },
+        { json: "home_path", js: "home_path", typ: u(undefined, "") },
+        { json: "input_path", js: "input_path", typ: "" },
+        { json: "is_directory", js: "is_directory", typ: true },
+        { json: "repo_root", js: "repo_root", typ: u(undefined, "") },
+        { json: "resolved_path", js: "resolved_path", typ: "" },
+    ], "any"),
     "PtyDesyncMessage": o([
         { json: "event", js: "event", typ: r("PtyDesyncMessageEvent") },
         { json: "id", js: "id", typ: "" },
@@ -4692,9 +4912,12 @@ const typeMap: any = {
         { json: "use_count", js: "use_count", typ: 0 },
     ], "any"),
     "RecentLocationsResultMessage": o([
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("RecentLocationsResultMessageEvent") },
+        { json: "home_path", js: "home_path", typ: u(undefined, "") },
         { json: "recent_locations", js: "recent_locations", typ: a(r("RecentLocationElement")) },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "RecentLocationElement": o([
@@ -5005,6 +5228,7 @@ const typeMap: any = {
         { json: "cols", js: "cols", typ: 0 },
         { json: "copilot_executable", js: "copilot_executable", typ: u(undefined, "") },
         { json: "cwd", js: "cwd", typ: "" },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "executable", js: "executable", typ: u(undefined, "") },
         { json: "fork_session", js: "fork_session", typ: u(undefined, true) },
         { json: "id", js: "id", typ: "" },
@@ -5300,6 +5524,12 @@ const typeMap: any = {
     "BranchesResultMessageEvent": [
         "branches_result",
     ],
+    "BrowseDirectoryMessageCmd": [
+        "browse_directory",
+    ],
+    "BrowseDirectoryResultMessageEvent": [
+        "browse_directory_result",
+    ],
     "CheckAttnStashMessageCmd": [
         "check_attn_stash",
     ],
@@ -5465,6 +5695,12 @@ const typeMap: any = {
     ],
     "InjectTestSessionMessageCmd": [
         "inject_test_session",
+    ],
+    "InspectPathMessageCmd": [
+        "inspect_path",
+    ],
+    "InspectPathResultMessageEvent": [
+        "inspect_path_result",
     ],
     "KillSessionMessageCmd": [
         "kill_session",

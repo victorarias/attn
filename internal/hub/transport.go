@@ -9,11 +9,35 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"nhooyr.io/websocket"
 )
 
+const remoteWSMessageReadLimit = 8 << 20
+const remoteWSDialRetryDelay = 250 * time.Millisecond
+
 func connectViaSSH(ctx context.Context, sshTarget, authToken string) (*websocket.Conn, *exec.Cmd, error) {
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		ws, cmd, err := connectViaSSHOnce(ctx, sshTarget, authToken)
+		if err == nil {
+			return ws, cmd, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil || !isRetryableWSRelayDialError(err) || attempt == 4 {
+			return nil, nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-time.After(remoteWSDialRetryDelay):
+		}
+	}
+	return nil, nil, lastErr
+}
+
+func connectViaSSHOnce(ctx context.Context, sshTarget, authToken string) (*websocket.Conn, *exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, "ssh", append(sshBaseArgs(sshTarget), remoteShellCommand(remoteAttnCommand("ws-relay")))...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -72,5 +96,13 @@ func connectViaSSH(ctx context.Context, sshTarget, authToken string) (*websocket
 		}
 		return nil, nil, err
 	}
+	ws.SetReadLimit(remoteWSMessageReadLimit)
 	return ws, cmd, nil
+}
+
+func isRetryableWSRelayDialError(err error) bool {
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(message, "eof") ||
+		strings.Contains(message, "connection reset by peer") ||
+		strings.Contains(message, "connection refused")
 }

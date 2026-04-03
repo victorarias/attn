@@ -1,4 +1,4 @@
-.PHONY: build install test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-ui-automation install-app install-app-ui-automation install-all install-all-ui-automation dist release release-skip-tests
+.PHONY: build build-linux-amd64 build-linux-arm64 install test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-ui-automation install-app install-app-ui-automation install-all install-all-ui-automation app-screenshot dist release release-skip-tests
 
 BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
@@ -6,9 +6,16 @@ BUILD_DIR=./cmd/attn
 VERSION ?= $(shell bash ./scripts/version.sh)
 OUTPUT ?= $(BINARY_NAME)
 GO_LDFLAGS = -X main.version=$(VERSION)
+ZIG ?= zig
 
 build:
 	go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
+
+build-linux-amd64:
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 CC='$(ZIG) cc -target x86_64-linux-gnu' CXX='$(ZIG) c++ -target x86_64-linux-gnu' go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
+
+build-linux-arm64:
+	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC='$(ZIG) cc -target aarch64-linux-gnu' CXX='$(ZIG) c++ -target aarch64-linux-gnu' go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
 
 GOTESTSUM=$(HOME)/go/bin/gotestsum
 
@@ -94,7 +101,7 @@ build-app: build
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
 	cd app && VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles app
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign --remove-signature app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn 2>/dev/null || true; \
+		codesign -s - -f app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn; \
 	fi
 
 build-app-ui-automation: build
@@ -102,7 +109,7 @@ build-app-ui-automation: build
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
 	cd app && ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles app
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign --remove-signature app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn 2>/dev/null || true; \
+		codesign -s - -f app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn; \
 	fi
 
 # Install Tauri app to ~/Applications
@@ -122,6 +129,9 @@ install-app-ui-automation: build-app-ui-automation
 install-all: install install-app-ui-automation
 
 install-all-ui-automation: install install-app-ui-automation
+
+app-screenshot:
+	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path $(SCREENSHOT_PATH),) $(APP_SCREENSHOT_FLAGS)
 
 # Ad-hoc sign the installed app binary so macOS doesn't SIGKILL it
 # when invoked as a CLI subprocess (e.g. Claude Code hooks)
