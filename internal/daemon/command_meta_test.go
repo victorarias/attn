@@ -181,6 +181,12 @@ func TestRemoteCommandSessionID_IncludesReviewLoopCommands(t *testing.T) {
 		want string
 	}{
 		{
+			name: "session_visualized",
+			cmd:  protocol.CmdSessionVisualized,
+			msg:  &protocol.SessionVisualizedMessage{ID: "sess-visualized"},
+			want: "sess-visualized",
+		},
+		{
 			name: "start",
 			cmd:  protocol.CmdStartReviewLoop,
 			msg:  &protocol.StartReviewLoopMessage{SessionID: "sess-start"},

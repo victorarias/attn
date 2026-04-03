@@ -817,7 +817,7 @@ function AppContent({
       view === 'session' && activeSessionId
         ? daemonSessions.find((session) => session.id === activeSessionId)
         : undefined;
-    const needsReview = Boolean(activeSession?.needs_review_after_long_run && !activeSession?.endpoint_id);
+    const needsReview = Boolean(activeSession?.needs_review_after_long_run);
     const key = needsReview && activeSession ? `${activeSession.id}:${activeSession.state_updated_at}` : null;
 
     if (tracker.key === key) {

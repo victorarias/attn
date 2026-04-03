@@ -17,6 +17,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Remote Picker Packaged Smoke Coverage**: Extend the packaged `bridge-remote-hub` harness to drive remote directory browse, repo selection, per-endpoint recents, and remote worktree creation through the real new-session picker so picker parity is verified end to end against `ai-sandbox`.
 
 ### Fixed
+- **Remote Long-Run Visualization Acknowledgement**: Route `session_visualized` through the hub for remote sessions and stop excluding remote sessions from the app-side visualization timer, so long-running remote sessions can clear `needs_review_after_long_run` after the user has actually looked at them.
 - **Unavailable Picker Shortcuts**: Stop advertising unusable agent shortcuts and consume disabled `⌥1-9` agent shortcuts as no-ops, so unavailable agents no longer leak `Alt` characters into the path field on macOS.
 - **Harness Endpoint Identity Matching**: Match existing remote-hub harness endpoints by the full normalized SSH target instead of host-only, so smoke runs no longer reuse the wrong endpoint when multiple SSH identities point at the same machine.
 - **Quoted Screenshot Output Paths**: Quote `make app-screenshot` output paths so screenshot destinations containing spaces are passed through correctly.

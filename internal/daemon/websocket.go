@@ -727,6 +727,10 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.UnregisterMessage); ok {
 			return typed.ID
 		}
+	case protocol.CmdSessionVisualized:
+		if typed, ok := msg.(*protocol.SessionVisualizedMessage); ok {
+			return typed.ID
+		}
 	case protocol.CmdStartReviewLoop:
 		if typed, ok := msg.(*protocol.StartReviewLoopMessage); ok {
 			return typed.SessionID

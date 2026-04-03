@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
 
@@ -109,6 +109,7 @@ describe('worktree cleanup prompt', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    vi.useRealTimers();
 
     mockUseSessionStore.mockReturnValue({
       sessions: [
@@ -217,6 +218,10 @@ describe('worktree cleanup prompt', () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('shows worktree cleanup prompt when closing a worktree session', async () => {
     localStorage.setItem('alwaysKeepWorktrees', 'true');
     render(<App />);
@@ -226,5 +231,128 @@ describe('worktree cleanup prompt', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
+  });
+
+  it('marks remote long-run sessions as visualized after the visibility delay', async () => {
+    vi.useFakeTimers();
+    const sendSessionVisualized = vi.fn();
+    const fn = vi.fn();
+
+    mockUseSessionStore.mockReturnValue({
+      sessions: [
+        {
+          id: 'remote-1',
+          label: 'remote-session',
+          state: 'waiting_input',
+          cwd: '/srv/repo',
+          agent: 'claude',
+          transcriptMatched: true,
+          branch: 'main',
+          daemonActivePaneId: 'main',
+          endpointId: 'ep-1',
+          workspace: {
+            terminals: [],
+            layoutTree: { type: 'pane', paneId: 'main' },
+          },
+        },
+      ],
+      activeSessionId: 'remote-1',
+      connect: vi.fn(async () => {}),
+      connected: true,
+      launcherConfig: { executables: {} },
+      createSession: vi.fn(async () => 'remote-1'),
+      closeSession: vi.fn(),
+      setActiveSession: vi.fn(),
+      takeSessionSpawnArgs: vi.fn(() => null),
+      reloadSession: vi.fn(async () => {}),
+      setForkParams: vi.fn(),
+      setLauncherConfig: vi.fn(),
+      syncFromDaemonSessions: vi.fn(),
+      syncFromDaemonWorkspaces: vi.fn(),
+    });
+
+    mockUseDaemonStore.mockReturnValue({
+      daemonSessions: [
+        {
+          id: 'remote-1',
+          label: 'remote-session',
+          directory: '/srv/repo',
+          state: 'waiting_input',
+          endpoint_id: 'ep-1',
+          needs_review_after_long_run: true,
+          state_updated_at: '2026-04-03T12:00:00Z',
+        },
+      ],
+      setDaemonSessions: vi.fn(),
+      prs: [],
+      setPRs: vi.fn(),
+      repoStates: [],
+      setRepoStates: vi.fn(),
+      authorStates: [],
+      setAuthorStates: vi.fn(),
+    });
+
+    mockUseDaemonSocket.mockReturnValue({
+      sendPRAction: fn,
+      sendMutePR: fn,
+      sendMuteRepo: fn,
+      sendMuteAuthor: fn,
+      sendPRVisited: fn,
+      sendRefreshPRs: vi.fn(async () => ({ success: true })),
+      sendUnregisterSession: mockSendUnregisterSession,
+      sendSetSetting: fn,
+      sendCreateWorktree: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
+      sendDeleteWorktree: vi.fn(async () => ({ success: true })),
+      sendDeleteBranch: fn,
+      sendGetRecentLocations: vi.fn(async () => ({ success: true, locations: [] })),
+      sendListBranches: vi.fn(async () => ({ success: true, branches: [] })),
+      sendSwitchBranch: vi.fn(async () => ({ success: true })),
+      sendCreateWorktreeFromBranch: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
+      sendCheckDirty: vi.fn(async () => ({ success: true, dirty: false })),
+      sendStash: vi.fn(async () => ({ success: true })),
+      sendStashPop: vi.fn(async () => ({ success: true })),
+      sendCheckAttnStash: vi.fn(async () => ({ success: true, has_stash: false })),
+      sendCommitWIP: vi.fn(async () => ({ success: true })),
+      sendGetDefaultBranch: vi.fn(async () => ({ success: true, branch: 'main' })),
+      sendFetchRemotes: vi.fn(async () => ({ success: true })),
+      sendFetchPRDetails: vi.fn(async () => ({ success: true })),
+      sendListRemoteBranches: vi.fn(async () => ({ success: true, branches: [] })),
+      sendEnsureRepo: vi.fn(async () => ({ success: true, path: '/tmp/repo' })),
+      sendSubscribeGitStatus: fn,
+      sendUnsubscribeGitStatus: fn,
+      sendSessionVisualized,
+      sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
+      sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
+      getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
+      getReviewLoopRun: vi.fn(async () => ({ success: true, state: null })),
+      getReviewLoopState: vi.fn(async () => ({ success: true, state: null })),
+      getReviewState: vi.fn(async () => ({ success: true })),
+      markFileViewed: vi.fn(async () => ({ success: true })),
+      sendAddComment: vi.fn(async () => ({ success: true })),
+      sendUpdateComment: vi.fn(async () => ({ success: true })),
+      sendResolveComment: vi.fn(async () => ({ success: true })),
+      sendWontFixComment: vi.fn(async () => ({ success: true })),
+      sendDeleteComment: vi.fn(async () => ({ success: true })),
+      sendGetComments: vi.fn(async () => ({ success: true, comments: [] })),
+      sendStartReviewLoop: vi.fn(async () => ({ success: true, state: null })),
+      sendStopReviewLoop: vi.fn(async () => ({ success: true, state: null })),
+      setReviewLoopIterationLimit: vi.fn(async () => ({ success: true, state: null })),
+      connectionError: null,
+      hasReceivedInitialState: true,
+      rateLimit: null,
+      warnings: [],
+      clearWarnings: fn,
+    });
+
+    await act(async () => {
+      render(<App />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(sendSessionVisualized).toHaveBeenCalledWith('remote-1');
   });
 });
