@@ -168,7 +168,23 @@ git clone https://github.com/victorarias/attn.git && cd attn
 
 ## Status
 
-Alpha — I use it every day. It's still evolving.
+Alpha — I use it every day. It's rough around the edges, but it works really well and it's genuinely powerful once you get going.
+
+## A note about this project
+
+I built attn because I needed it. Managing multiple agents was the bottleneck, not the coding itself.
+
+I work full time, and I have 2 dogs and 4 cats at home. Free time is not abundant. attn is open source, but if you need changes I can't get to — **fork it**. That's encouraged, not rude.
+
+**Issues are welcome**, but please be detailed:
+
+- Describe what happened and what you expected.
+- Include the tail of `~/.attn/daemon.log` from right after you reproduced the issue.
+- For visual bugs, attach a screenshot.
+
+Vague "it doesn't work" reports aren't actionable and will sit there forever.
+
+I'm a friendly person and happy to help when I can. But don't be entitled about it — that's the one thing I can't deal with. Entitled behavior gets ignored, and if I'm having a bad day, maybe banned.
 
 ## Built with
 
