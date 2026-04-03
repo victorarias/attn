@@ -1,3 +1,4 @@
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -269,8 +270,44 @@ fn handle_request<R: Runtime>(
         };
     }
 
-    if request.action == "capture_screenshot" {
+    if request.action == "capture_window_screenshot" {
         return match capture_screenshot(app, request.payload.as_ref()) {
+            Ok(result) => {
+                append_log(
+                    app,
+                    &format!(
+                        "request ok id={} action=capture_window_screenshot",
+                        request_id
+                    ),
+                );
+                AutomationSocketResponse {
+                    id: request_id,
+                    ok: true,
+                    result: Some(result),
+                    error: None,
+                }
+            }
+            Err(error) => {
+                append_log(
+                    app,
+                    &format!(
+                        "request err id={} action=capture_window_screenshot error={}",
+                        request_id, error
+                    ),
+                );
+                AutomationSocketResponse {
+                    id: request_id,
+                    ok: false,
+                    result: None,
+                    error: Some(error),
+                }
+            }
+        };
+    }
+
+    if request.action == "capture_screenshot" {
+        let payload = request.payload.unwrap_or(Value::Null);
+        return match capture_webview_screenshot(app, pending, &request_id, payload) {
             Ok(result) => {
                 append_log(
                     app,
@@ -363,6 +400,90 @@ fn handle_request<R: Runtime>(
             }
         }
     }
+}
+
+fn request_bridge_action<R: Runtime>(
+    app: &AppHandle<R>,
+    pending: &PendingAutomationResponses,
+    request_id: &str,
+    action: &str,
+    payload: Value,
+) -> Result<BridgeResponse, String> {
+    let bridge_request = BridgeRequest {
+        request_id: request_id.to_string(),
+        action: action.to_string(),
+        payload,
+    };
+
+    let (sender, receiver) = mpsc::channel();
+    pending.insert(request_id.to_string(), sender);
+
+    if let Err(error) = app.emit(REQUEST_EVENT, &bridge_request) {
+        pending.remove(request_id);
+        return Err(format!("failed to emit automation request: {error}"));
+    }
+
+    match receiver.recv_timeout(Duration::from_millis(DEFAULT_TIMEOUT_MS)) {
+        Ok(response) => Ok(response),
+        Err(_) => {
+            pending.remove(request_id);
+            Err("frontend automation request timed out".into())
+        }
+    }
+}
+
+fn capture_webview_screenshot<R: Runtime>(
+    app: &AppHandle<R>,
+    pending: &PendingAutomationResponses,
+    request_id: &str,
+    payload: Value,
+) -> Result<Value, String> {
+    let bridge_response = request_bridge_action(
+        app,
+        pending,
+        request_id,
+        "capture_screenshot_data",
+        payload.clone(),
+    )?;
+    if !bridge_response.ok {
+        return Err(bridge_response
+            .error
+            .unwrap_or_else(|| "web screenshot capture failed".into()));
+    }
+
+    let result = bridge_response
+        .result
+        .ok_or_else(|| "web screenshot capture returned no result".to_string())?;
+    let png_base64 = result
+        .get("pngBase64")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "web screenshot capture returned no png data".to_string())?;
+    let png_bytes = base64::engine::general_purpose::STANDARD
+        .decode(png_base64)
+        .map_err(|error| format!("invalid screenshot base64 payload: {error}"))?;
+
+    let output_path = match payload
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(path) => PathBuf::from(path),
+        None => default_screenshot_path(app)?,
+    };
+
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create screenshot parent dir: {error}"))?;
+    }
+    fs::write(&output_path, png_bytes)
+        .map_err(|error| format!("failed to write screenshot: {error}"))?;
+
+    Ok(serde_json::json!({
+        "path": output_path.to_string_lossy().to_string(),
+        "source": "web",
+        "bounds": result.get("bounds").cloned().unwrap_or(Value::Null),
+    }))
 }
 
 fn serve_connection<R: Runtime>(
@@ -625,7 +746,9 @@ fn capture_screenshot<R: Runtime>(
             .map_err(|error| format!("failed to run screencapture: {error}"))?;
 
         if !status.success() {
-            return Err(format!("screencapture exited with status {status}"));
+            return Err(format!(
+                "screencapture exited with status {status}. On macOS this usually means Screen Recording permission is missing for attn.app or the current terminal session."
+            ));
         }
 
         Ok(serde_json::json!({

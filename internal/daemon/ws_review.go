@@ -7,6 +7,34 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
+func reviewCommentToProtocol(comment *store.ReviewComment) protocol.ReviewComment {
+	out := protocol.ReviewComment{
+		ID:        comment.ID,
+		ReviewID:  comment.ReviewID,
+		Filepath:  comment.Filepath,
+		LineStart: int(comment.LineStart),
+		LineEnd:   int(comment.LineEnd),
+		Content:   comment.Content,
+		Author:    comment.Author,
+		Resolved:  comment.Resolved,
+		WontFix:   comment.WontFix,
+		CreatedAt: comment.CreatedAt.Format(time.RFC3339),
+	}
+	if comment.ResolvedBy != "" {
+		out.ResolvedBy = protocol.Ptr(comment.ResolvedBy)
+	}
+	if comment.ResolvedAt != nil {
+		out.ResolvedAt = protocol.Ptr(comment.ResolvedAt.Format(time.RFC3339))
+	}
+	if comment.WontFixBy != "" {
+		out.WontFixBy = protocol.Ptr(comment.WontFixBy)
+	}
+	if comment.WontFixAt != nil {
+		out.WontFixAt = protocol.Ptr(comment.WontFixAt.Format(time.RFC3339))
+	}
+	return out
+}
+
 func (d *Daemon) handleStartReviewLoopWS(client *wsClient, msg *protocol.StartReviewLoopMessage) {
 	run, err := d.startReviewLoop(msg)
 	d.sendReviewLoopResult(client, "start", msg.SessionID, "", run, err)
@@ -110,17 +138,8 @@ func (d *Daemon) handleAddComment(client *wsClient, msg *protocol.AddCommentMess
 	}
 
 	result.Success = true
-	result.Comment = &protocol.ReviewComment{
-		ID:        comment.ID,
-		ReviewID:  comment.ReviewID,
-		Filepath:  comment.Filepath,
-		LineStart: int(comment.LineStart),
-		LineEnd:   int(comment.LineEnd),
-		Content:   comment.Content,
-		Author:    comment.Author,
-		Resolved:  comment.Resolved,
-		CreatedAt: comment.CreatedAt.Format(time.RFC3339),
-	}
+	commentProtocol := reviewCommentToProtocol(comment)
+	result.Comment = &commentProtocol
 	d.sendToClient(client, result)
 }
 
@@ -226,17 +245,7 @@ func (d *Daemon) handleGetComments(client *wsClient, msg *protocol.GetCommentsMe
 	result.Success = true
 	result.Comments = make([]protocol.ReviewComment, len(comments))
 	for i, c := range comments {
-		result.Comments[i] = protocol.ReviewComment{
-			ID:        c.ID,
-			ReviewID:  c.ReviewID,
-			Filepath:  c.Filepath,
-			LineStart: int(c.LineStart),
-			LineEnd:   int(c.LineEnd),
-			Content:   c.Content,
-			Author:    c.Author,
-			Resolved:  c.Resolved,
-			CreatedAt: c.CreatedAt.Format(time.RFC3339),
-		}
+		result.Comments[i] = reviewCommentToProtocol(c)
 	}
 	d.sendToClient(client, result)
 }

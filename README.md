@@ -10,6 +10,8 @@ I built this after noticing a pattern: I'd start the day sharp, spin up 4-5 AI a
 
 attn fixes the dumbest part of multi-agent workflows: knowing what needs you right now.
 
+It also lets one app manage sessions running somewhere else. Point attn at a remote daemon over SSH — a cloud box, a homelab machine, or even a local VM — and those sessions show up in the same sidebar, terminals, and worktree picker as your local ones.
+
 It's a desktop app that wraps your agent CLIs — Claude Code, Codex, Copilot — and puts them all in one window with color-coded status. Green means working. Yellow means "hey, I need you." Gray means done. No more tab-hunting. No more heavy head.
 
 **There is no custom agent UI.** attn wraps each CLI directly. You get the real, native experience of every agent — just organized.
@@ -22,7 +24,7 @@ It's a desktop app that wraps your agent CLIs — Claude Code, Codex, Copilot �
 
 **Embedded terminals** — No more "which terminal was that in?" Run agents inside the app. Open utility shells next to them. Resume sessions, fork them, never leave the window.
 
-**Code review** — Full diff viewer with inline comments and AI-assisted review. Claude reads your branch, leaves comments, you resolve them. All without opening a browser. *(Claude only)*
+**Remote daemons over SSH** — Keep sessions on a GPU box, Linux host, or local VM and manage them from the same app. Spawn new sessions remotely, browse remote repos, and open remote worktrees without juggling another terminal window.
 
 **PR dashboard** — Your PRs, your review requests, CI failures, merge conflicts — one place. Works across GitHub.com and GitHub Enterprise. Open a PR directly into a worktree.
 
@@ -84,6 +86,7 @@ The app nudges you when a new release exists. No auto-install — you pick when.
 1. Launch **attn** from Applications (or just type `attn`).
 2. **Cmd+N** — pick an agent, pick a directory, go.
 3. Watch the sidebar. Colors tell you who needs you.
+4. Optional: add an SSH endpoint in Settings and run remote or VM sessions from the same picker.
 
 ## Session states
 
@@ -125,9 +128,10 @@ attn daemon          # Run daemon in foreground
 1. `attn` wraps your agent CLI and installs hooks (Claude) or reads PTY output (Codex, Copilot) to detect state.
 2. A background daemon tracks sessions via unix socket (`~/.attn/attn.sock`).
 3. The desktop app connects over WebSocket for real-time updates.
-4. A lightweight classifier figures out if Claude stopped because it's done or because it's waiting for you.
-5. For 5+ minute runs, classification is intentionally deferred until you visualize the session, so "done" runs still surface for manual review first.
-6. `gh` polls PRs across all your authenticated GitHub hosts.
+4. Optional SSH-managed remote daemons connect through the local hub, so local and remote sessions share one session list and one control surface.
+5. A lightweight classifier figures out if Claude stopped because it's done or because it's waiting for you.
+6. For 5+ minute runs, classification is intentionally deferred until you visualize the session, so "done" runs still surface for manual review first.
+7. `gh` polls PRs across all your authenticated GitHub hosts.
 
 ## Build from source
 

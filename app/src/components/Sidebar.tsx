@@ -12,6 +12,9 @@ interface LocalSession {
   branch?: string;
   isWorktree?: boolean;
   cwd?: string;
+  endpointId?: string;
+  endpointName?: string;
+  endpointStatus?: string;
   recoverable?: boolean;
   reviewLoopStatus?: string;
 }
@@ -264,6 +267,11 @@ export function Sidebar({
                 <StateIndicator state={session.state} size="md" seed={session.id} />
                 <div className="session-info">
                   <span className="session-label">{session.label}</span>
+                  {session.endpointName && (
+                    <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
+                      {session.endpointName}
+                    </span>
+                  )}
                   {session.branch && (
                     <span className="session-branch">{session.branch}</span>
                   )}
@@ -283,68 +291,8 @@ export function Sidebar({
                 {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                 <span className="session-shortcut">⌘{globalIndex + 1}</span>
                 <div className="session-actions">
-                  <button
-                    className="session-action-btn close-session-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCloseSession(session.id);
-                    }}
-                    title="Close session (⌘⇧W)"
-                  >
-                    ×
-                  </button>
-                  <button
-                    className="session-action-btn reload-session-btn"
-                    data-testid={`reload-session-${session.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onReloadSession(session.id);
-                    }}
-                    title="Reload session"
-                  >
-                    ↻
-                  </button>
-                </div>
-              </div>
-            );
-          }
-
-          return (
-            <div key={group.directory} className="session-group">
-              <div className="session-group-header">
-                <span className="session-label">{group.label}</span>
-                {group.branch && (
-                  <span className="session-branch">{group.branch}</span>
-                )}
-              </div>
-              {group.sessions.map((session) => {
-                const globalIndex = visualIndexOf(session.id);
-                return (
-                  <div
-                    key={session.id}
-                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''} ${session.reviewLoopStatus ? `session-item--loop-${session.reviewLoopStatus}` : ''}`}
-                    data-testid={`sidebar-session-${session.id}`}
-                    data-state={session.state}
-                    onClick={() => onSelectSession(session.id)}
-                    title={session.recoverable ? 'Session will be recovered when opened' : undefined}
-                  >
-                    <StateIndicator state={session.state} size="md" seed={session.id} />
-                    <span className="session-label">{session.label}</span>
-                    {session.recoverable && (
-                      <span className="session-recoverable">recoverable</span>
-                    )}
-                    {reviewLoopIndicator(session.reviewLoopStatus) && (
-                      <span
-                        className={`session-loop-indicator session-loop-indicator--${session.reviewLoopStatus}`}
-                        title={reviewLoopIndicator(session.reviewLoopStatus)?.label}
-                        aria-label={reviewLoopIndicator(session.reviewLoopStatus)?.label}
-                      >
-                        {reviewLoopIndicator(session.reviewLoopStatus)?.glyph}
-                      </span>
-                    )}
-                    {session.isWorktree && <span className="worktree-indicator">⎇</span>}
-                    <span className="session-shortcut">⌘{globalIndex + 1}</span>
-                    <div className="session-actions">
+                  {!session.endpointId && (
+                    <>
                       <button
                         className="session-action-btn close-session-btn"
                         onClick={(e) => {
@@ -366,6 +314,84 @@ export function Sidebar({
                       >
                         ↻
                       </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div key={group.directory} className="session-group">
+              <div className="session-group-header">
+                <span className="session-label">{group.label}</span>
+                {group.endpointName && (
+                  <span className={`session-endpoint-badge status-${group.endpointStatus || 'connected'}`}>
+                    {group.endpointName}
+                  </span>
+                )}
+                {group.branch && (
+                  <span className="session-branch">{group.branch}</span>
+                )}
+              </div>
+              {group.sessions.map((session) => {
+                const globalIndex = visualIndexOf(session.id);
+                return (
+                  <div
+                    key={session.id}
+                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''} ${session.reviewLoopStatus ? `session-item--loop-${session.reviewLoopStatus}` : ''}`}
+                    data-testid={`sidebar-session-${session.id}`}
+                    data-state={session.state}
+                    onClick={() => onSelectSession(session.id)}
+                    title={session.recoverable ? 'Session will be recovered when opened' : undefined}
+                  >
+                    <StateIndicator state={session.state} size="md" seed={session.id} />
+                    <span className="session-label">{session.label}</span>
+                    {session.endpointName && (
+                      <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
+                        {session.endpointName}
+                      </span>
+                    )}
+                    {session.recoverable && (
+                      <span className="session-recoverable">recoverable</span>
+                    )}
+                    {reviewLoopIndicator(session.reviewLoopStatus) && (
+                      <span
+                        className={`session-loop-indicator session-loop-indicator--${session.reviewLoopStatus}`}
+                        title={reviewLoopIndicator(session.reviewLoopStatus)?.label}
+                        aria-label={reviewLoopIndicator(session.reviewLoopStatus)?.label}
+                      >
+                        {reviewLoopIndicator(session.reviewLoopStatus)?.glyph}
+                      </span>
+                    )}
+                    {session.isWorktree && <span className="worktree-indicator">⎇</span>}
+                    <span className="session-shortcut">⌘{globalIndex + 1}</span>
+                    <div className="session-actions">
+                      {!session.endpointId && (
+                        <>
+                          <button
+                            className="session-action-btn close-session-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onCloseSession(session.id);
+                            }}
+                            title="Close session (⌘⇧W)"
+                          >
+                            ×
+                          </button>
+                          <button
+                            className="session-action-btn reload-session-btn"
+                            data-testid={`reload-session-${session.id}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onReloadSession(session.id);
+                            }}
+                            title="Reload session"
+                          >
+                            ↻
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );

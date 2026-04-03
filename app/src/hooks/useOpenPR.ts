@@ -29,7 +29,7 @@ export interface UseOpenPRDeps {
     repoPath: string,
     branch: string
   ) => Promise<{ success: boolean; path?: string; error?: string }>;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string) => Promise<string>;
 }
 
 export function useOpenPR({

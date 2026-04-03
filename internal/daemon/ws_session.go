@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"os"
 	"syscall"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -44,10 +45,14 @@ func (d *Daemon) handleGetRecentLocationsWS(client *wsClient, msg *protocol.GetR
 	}
 	d.logf("Getting recent locations (limit=%d)", limit)
 	locations := d.store.GetRecentLocations(limit)
-	d.sendToClient(client, &protocol.WebSocketEvent{
+	homePath, _ := os.UserHomeDir()
+	d.sendToClient(client, &protocol.RecentLocationsResultMessage{
 		Event:           protocol.EventRecentLocationsResult,
 		RecentLocations: protocol.RecentLocationsToValues(locations),
-		Success:         protocol.Ptr(true),
+		EndpointID:      msg.EndpointID,
+		RequestID:       msg.RequestID,
+		HomePath:        protocol.Ptr(homePath),
+		Success:         true,
 	})
 }
 

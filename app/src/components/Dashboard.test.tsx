@@ -70,4 +70,21 @@ describe('Dashboard sessions', () => {
 
     expect(screen.getByLabelText('Review loop running')).toBeInTheDocument();
   });
+
+  it('renders endpoint badges for remote sessions', () => {
+    render(
+      <Dashboard
+        sessions={[
+          { id: 's1', label: 'remote-bot', state: 'working', cwd: '/repo/a', endpointName: 'gpu-box', endpointStatus: 'connected' },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('gpu-box')).toBeInTheDocument();
+  });
 });

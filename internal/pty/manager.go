@@ -169,9 +169,6 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	for i, shellPath := range shellCandidates {
 		cmd = buildSpawnCommand(opts, agent, shellPath, attnPath)
 		cmd.Dir = opts.CWD
-		if shouldSetpgidForPTY() {
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		}
 		cmd.Env = cmdEnv
 
 		ptmx, lastErr = creackpty.StartWithSize(cmd, &creackpty.Winsize{
@@ -600,12 +597,6 @@ func shouldFallbackShell(err error) bool {
 		errors.Is(err, syscall.EACCES) ||
 		errors.Is(err, syscall.ENOENT) ||
 		errors.Is(err, exec.ErrNotFound)
-}
-
-func shouldSetpgidForPTY() bool {
-	// On macOS, creack/pty (forkpty) already creates a new session/process group.
-	// Requesting Setpgid via os/exec conflicts and fails with EPERM.
-	return runtime.GOOS != "darwin"
 }
 
 func resolveAttnPath() string {

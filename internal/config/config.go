@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -126,6 +127,29 @@ func StatePath() string {
 // LogPath returns the log file path
 func LogPath() string {
 	return filepath.Join(attnDir(), "daemon.log")
+}
+
+// WSPort returns the WebSocket/HTTP port.
+func WSPort() string {
+	port := strings.TrimSpace(os.Getenv("ATTN_WS_PORT"))
+	if port == "" {
+		return "9849"
+	}
+	return port
+}
+
+// WSBindAddress returns the interface/address the HTTP server binds to.
+func WSBindAddress() string {
+	addr := strings.TrimSpace(os.Getenv("ATTN_WS_BIND"))
+	if addr == "" {
+		return "127.0.0.1"
+	}
+	return addr
+}
+
+// WSAuthToken returns the optional bearer token required for WebSocket access.
+func WSAuthToken() string {
+	return strings.TrimSpace(os.Getenv("ATTN_WS_AUTH_TOKEN"))
 }
 
 // PIDPath returns the PID file path (same directory as socket)

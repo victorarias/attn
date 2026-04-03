@@ -1,7 +1,7 @@
 // app/src/components/SettingsModal.tsx
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { DaemonSettings } from '../hooks/useDaemonSocket';
+import { DaemonEndpoint, DaemonSettings } from '../hooks/useDaemonSocket';
 import { normalizeSessionAgent, type SessionAgent } from '../types/sessionAgent';
 import type { ThemePreference } from '../hooks/useTheme';
 import {
@@ -34,6 +34,10 @@ interface SettingsModalProps {
   mutedAuthors: string[];
   onUnmuteAuthor: (author: string) => void;
   settings: DaemonSettings;
+  endpoints: DaemonEndpoint[];
+  onAddEndpoint: (name: string, sshTarget: string) => Promise<{ success: boolean }>;
+  onUpdateEndpoint: (endpointId: string, updates: { name?: string; ssh_target?: string; enabled?: boolean }) => Promise<{ success: boolean }>;
+  onRemoveEndpoint: (endpointId: string) => Promise<{ success: boolean }>;
   onSetSetting: (key: string, value: string) => void;
   themePreference: ThemePreference;
   onSetTheme: (theme: ThemePreference) => void;
@@ -48,6 +52,10 @@ export function SettingsModal({
   mutedAuthors,
   onUnmuteAuthor,
   settings,
+  endpoints,
+  onAddEndpoint,
+  onUpdateEndpoint,
+  onRemoveEndpoint,
   onSetSetting,
   themePreference,
   onSetTheme,
@@ -63,6 +71,13 @@ export function SettingsModal({
   const [selectedReviewLoopPresetID, setSelectedReviewLoopPresetID] = useState('');
   const [reviewLoopModel, setReviewLoopModel] = useState(settings.review_loop_model || '');
   const [reviewerModel, setReviewerModel] = useState(settings.reviewer_model || '');
+  const [newEndpointName, setNewEndpointName] = useState('');
+  const [newEndpointTarget, setNewEndpointTarget] = useState('');
+  const [editingEndpointID, setEditingEndpointID] = useState<string | null>(null);
+  const [editingEndpointName, setEditingEndpointName] = useState('');
+  const [editingEndpointTarget, setEditingEndpointTarget] = useState('');
+  const [endpointError, setEndpointError] = useState<string | null>(null);
+  const [endpointActionID, setEndpointActionID] = useState<string | null>(null);
   const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
   const hasAvailableAgents = useMemo(
     () => hasAnyAvailableAgents(agentAvailability),
@@ -110,8 +125,9 @@ export function SettingsModal({
     ptyBackendMode === 'worker'
       ? 'Sessions run in per-session worker processes and can survive daemon restarts.'
       : ptyBackendMode === 'embedded'
-        ? 'Sessions run inside the daemon process and stop if the daemon restarts.'
-        : 'Backend mode is not currently reported by the daemon.';
+      ? 'Sessions run inside the daemon process and stop if the daemon restarts.'
+      : 'Backend mode is not currently reported by the daemon.';
+  const endpointActionInFlight = endpointActionID !== null;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -126,6 +142,13 @@ export function SettingsModal({
     setReviewLoopIterations(actualReviewLoopPresets[0]?.iterationLimit || 3);
     setReviewLoopModel(actualReviewLoopModel);
     setReviewerModel(actualReviewerModel);
+    setNewEndpointName('');
+    setNewEndpointTarget('');
+    setEditingEndpointID(null);
+    setEditingEndpointName('');
+    setEditingEndpointTarget('');
+    setEndpointError(null);
+    setEndpointActionID(null);
   }, [isOpen, actualProjectsDir, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel]);
 
   useEffect(() => {
@@ -145,6 +168,22 @@ export function SettingsModal({
       setReviewLoopIterations(3);
     }
   }, [actualReviewLoopPresets, isOpen, selectedReviewLoopPresetID]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [isOpen, onClose]);
 
   const handleBrowse = useCallback(async () => {
     const selected = await open({
@@ -282,6 +321,85 @@ export function SettingsModal({
     }
   }, [actualReviewerModel, onSetSetting, reviewerModel]);
 
+  const handleAddEndpoint = useCallback(async () => {
+    const name = newEndpointName.trim();
+    const sshTarget = newEndpointTarget.trim();
+    if (!name || !sshTarget) {
+      setEndpointError('Endpoint name and SSH target are required.');
+      return;
+    }
+    setEndpointError(null);
+    setEndpointActionID('new');
+    try {
+      await onAddEndpoint(name, sshTarget);
+      setNewEndpointName('');
+      setNewEndpointTarget('');
+    } catch (error) {
+      setEndpointError(error instanceof Error ? error.message : 'Failed to add endpoint');
+    } finally {
+      setEndpointActionID(null);
+    }
+  }, [newEndpointName, newEndpointTarget, onAddEndpoint]);
+
+  const beginEditEndpoint = useCallback((endpoint: DaemonEndpoint) => {
+    setEndpointError(null);
+    setEditingEndpointID(endpoint.id);
+    setEditingEndpointName(endpoint.name);
+    setEditingEndpointTarget(endpoint.ssh_target);
+  }, []);
+
+  const cancelEditEndpoint = useCallback(() => {
+    setEditingEndpointID(null);
+    setEditingEndpointName('');
+    setEditingEndpointTarget('');
+  }, []);
+
+  const handleSaveEndpoint = useCallback(async (endpointId: string) => {
+    const name = editingEndpointName.trim();
+    const sshTarget = editingEndpointTarget.trim();
+    if (!name || !sshTarget) {
+      setEndpointError('Endpoint name and SSH target are required.');
+      return;
+    }
+    setEndpointError(null);
+    setEndpointActionID(endpointId);
+    try {
+      await onUpdateEndpoint(endpointId, { name, ssh_target: sshTarget });
+      cancelEditEndpoint();
+    } catch (error) {
+      setEndpointError(error instanceof Error ? error.message : 'Failed to update endpoint');
+    } finally {
+      setEndpointActionID(null);
+    }
+  }, [cancelEditEndpoint, editingEndpointName, editingEndpointTarget, onUpdateEndpoint]);
+
+  const handleToggleEndpoint = useCallback(async (endpoint: DaemonEndpoint) => {
+    setEndpointError(null);
+    setEndpointActionID(endpoint.id);
+    try {
+      await onUpdateEndpoint(endpoint.id, { enabled: endpoint.enabled === false });
+    } catch (error) {
+      setEndpointError(error instanceof Error ? error.message : 'Failed to update endpoint');
+    } finally {
+      setEndpointActionID(null);
+    }
+  }, [onUpdateEndpoint]);
+
+  const handleRemoveEndpoint = useCallback(async (endpointId: string) => {
+    setEndpointError(null);
+    setEndpointActionID(endpointId);
+    try {
+      await onRemoveEndpoint(endpointId);
+      if (editingEndpointID === endpointId) {
+        cancelEditEndpoint();
+      }
+    } catch (error) {
+      setEndpointError(error instanceof Error ? error.message : 'Failed to remove endpoint');
+    } finally {
+      setEndpointActionID(null);
+    }
+  }, [cancelEditEndpoint, editingEndpointID, onRemoveEndpoint]);
+
   if (!isOpen) return null;
 
   return (
@@ -336,6 +454,9 @@ export function SettingsModal({
                 onKeyDown={handleKeyDown}
                 placeholder="/Users/you/projects"
                 className="settings-input"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
               <button className="browse-btn" onClick={handleBrowse}>
                 Browse
@@ -358,6 +479,161 @@ export function SettingsModal({
               </div>
             )}
             <div className="settings-hint">Add hosts with `gh auth login --hostname &lt;host&gt;`.</div>
+          </div>
+
+          <div className="settings-section">
+            <h3>Remote Endpoints</h3>
+            <p className="settings-description">
+              SSH targets that the local daemon bootstraps and keeps connected as remote attn peers.
+            </p>
+            <div className="endpoint-form">
+              <input
+                type="text"
+                value={newEndpointName}
+                onChange={(e) => setNewEndpointName(e.target.value)}
+                placeholder="gpu-box"
+                className="settings-input"
+                aria-label="Endpoint name"
+                disabled={endpointActionInFlight}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <input
+                type="text"
+                value={newEndpointTarget}
+                onChange={(e) => setNewEndpointTarget(e.target.value)}
+                placeholder="user@gpu-box"
+                className="settings-input"
+                aria-label="SSH target"
+                disabled={endpointActionInFlight}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <button
+                className="browse-btn"
+                onClick={() => void handleAddEndpoint()}
+                disabled={endpointActionInFlight}
+              >
+                Add Endpoint
+              </button>
+            </div>
+            {endpointError && <div className="settings-agent-warning">{endpointError}</div>}
+            {endpoints.length === 0 ? (
+              <p className="settings-empty">No remote endpoints configured.</p>
+            ) : (
+              <div className="endpoint-list">
+                {endpoints.map((endpoint) => {
+                  const isEditing = editingEndpointID === endpoint.id;
+                  const isBusy = endpointActionID === endpoint.id;
+                  const availableAgents = endpoint.capabilities?.agents_available || [];
+                  return (
+                    <div key={endpoint.id} className={`endpoint-card status-${endpoint.status}`}>
+                      <div className="endpoint-card-header">
+                        <div className="endpoint-card-title">
+                          <span className="endpoint-name">{endpoint.name}</span>
+                          <span className={`endpoint-status-badge status-${endpoint.status}`}>
+                            {endpoint.status}
+                          </span>
+                        </div>
+                        <div className="endpoint-card-actions">
+                          {isEditing ? (
+                            <>
+                              <button className="browse-btn" onClick={() => void handleSaveEndpoint(endpoint.id)} disabled={isBusy}>
+                                Save
+                              </button>
+                              <button className="browse-btn" onClick={cancelEditEndpoint} disabled={endpointActionInFlight}>
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <button className="browse-btn" onClick={() => beginEditEndpoint(endpoint)} disabled={endpointActionInFlight}>
+                              Edit
+                            </button>
+                          )}
+                          <button className="browse-btn" onClick={() => void handleToggleEndpoint(endpoint)} disabled={endpointActionInFlight}>
+                            {endpoint.enabled === false ? 'Enable' : 'Disable'}
+                          </button>
+                          <button className="browse-btn danger" onClick={() => void handleRemoveEndpoint(endpoint.id)} disabled={endpointActionInFlight}>
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                      {isEditing ? (
+                        <div className="endpoint-form endpoint-form-inline">
+                          <input
+                            type="text"
+                            value={editingEndpointName}
+                            onChange={(e) => setEditingEndpointName(e.target.value)}
+                            className="settings-input"
+                            aria-label="Edit endpoint name"
+                            disabled={endpointActionInFlight}
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                          />
+                          <input
+                            type="text"
+                            value={editingEndpointTarget}
+                            onChange={(e) => setEditingEndpointTarget(e.target.value)}
+                            className="settings-input"
+                            aria-label="Edit SSH target"
+                            disabled={endpointActionInFlight}
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                          />
+                        </div>
+                      ) : (
+                        <div className="endpoint-summary">
+                          <div className="endpoint-meta">
+                            <span className="endpoint-meta-label">SSH</span>
+                            <code>{endpoint.ssh_target}</code>
+                          </div>
+                          <div className="endpoint-meta">
+                            <span className="endpoint-meta-label">Enabled</span>
+                            <span>{endpoint.enabled === false ? 'No' : 'Yes'}</span>
+                          </div>
+                          {endpoint.status_message && (
+                            <div className="endpoint-meta">
+                              <span className="endpoint-meta-label">Status</span>
+                              <span>{endpoint.status_message}</span>
+                            </div>
+                          )}
+                          {endpoint.capabilities && (
+                            <>
+                              <div className="endpoint-meta">
+                                <span className="endpoint-meta-label">Protocol</span>
+                                <span>{endpoint.capabilities.protocol_version}</span>
+                              </div>
+                              <div className="endpoint-meta">
+                                <span className="endpoint-meta-label">PTY</span>
+                                <span>{endpoint.capabilities.pty_backend_mode || 'unknown'}</span>
+                              </div>
+                              <div className="endpoint-meta">
+                                <span className="endpoint-meta-label">Sessions</span>
+                                <span>{endpoint.session_count ?? 0}</span>
+                              </div>
+                              <div className="endpoint-meta">
+                                <span className="endpoint-meta-label">Agents</span>
+                                <span>{availableAgents.length > 0 ? availableAgents.join(', ') : 'none reported'}</span>
+                              </div>
+                              {endpoint.capabilities.projects_directory && (
+                                <div className="endpoint-meta">
+                                  <span className="endpoint-meta-label">Projects</span>
+                                  <code>{endpoint.capabilities.projects_directory}</code>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="settings-section">
@@ -388,6 +664,9 @@ export function SettingsModal({
                     }}
                     placeholder={agent}
                     className="settings-input"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                   />
                 </div>
               );
@@ -403,6 +682,9 @@ export function SettingsModal({
                 onKeyDown={handleEditorKeyDown}
                 placeholder="$EDITOR"
                 className="settings-input"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
             </div>
           </div>
@@ -442,6 +724,9 @@ export function SettingsModal({
                   value={reviewLoopPresetName}
                   onChange={(e) => setReviewLoopPresetName(e.target.value)}
                   placeholder="Architect pass"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
               </div>
               <div className="settings-field">
@@ -463,6 +748,8 @@ export function SettingsModal({
                   value={reviewLoopPrompt}
                   onChange={(e) => setReviewLoopPrompt(e.target.value)}
                   rows={6}
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   spellCheck={false}
                   placeholder="Do a full review of these changes..."
                 />
@@ -506,6 +793,9 @@ export function SettingsModal({
                 }}
                 placeholder="claude-sonnet-4-6"
                 className="settings-input"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
             </div>
             <div className="settings-field">
@@ -523,6 +813,9 @@ export function SettingsModal({
                 }}
                 placeholder="claude-opus-4-6"
                 className="settings-input"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
             </div>
           </div>

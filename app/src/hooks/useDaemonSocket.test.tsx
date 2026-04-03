@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyKill } from '../pty/bridge';
-import { useDaemonSocket } from './useDaemonSocket';
+import { retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -237,8 +237,8 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
 
     await waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith('restart_daemon', {
-        expected_protocol: '42',
+        expect(vi.mocked(invoke)).toHaveBeenCalledWith('restart_daemon', {
+        expected_protocol: '46',
         prefer_local: false,
       });
     });
@@ -246,5 +246,64 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     expect(result.current.connectionError === null || result.current.connectionError === 'Restarting daemon...').toBe(true);
 
     unmount();
+  });
+
+  it('serializes endpoint actions so concurrent updates do not collide', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onEndpointsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    const first = result.current.sendUpdateEndpoint('ep-1', { enabled: false });
+    await expect(result.current.sendUpdateEndpoint('ep-2', { enabled: false })).rejects.toThrow(
+      'Another endpoint action is already in progress',
+    );
+
+    act(() => {
+      ws.emit({
+        event: 'endpoint_action_result',
+        action: 'update',
+        endpoint_id: 'ep-1',
+        success: true,
+      });
+    });
+
+    await expect(first).resolves.toMatchObject({ success: true, endpoint_id: 'ep-1' });
+    unmount();
+  });
+
+  it('retries transient worker attach failures after respawn', async () => {
+    const waits: number[] = [];
+    const attach = vi.fn()
+      .mockRejectedValueOnce(new Error('dial unix /Users/test/.attn/workers/d-test/sock/ABC.sock: connect: no such file or directory'))
+      .mockResolvedValueOnce({ success: true });
+
+    await expect(
+      retryTransientAttachRequest(() => attach(), {
+        timeoutMs: 500,
+        delayMs: 25,
+        wait: async (delayMs) => {
+          waits.push(delayMs);
+        },
+      }),
+    ).resolves.toEqual({ success: true });
+
+    expect(attach).toHaveBeenCalledTimes(2);
+    expect(waits).toEqual([25]);
   });
 });

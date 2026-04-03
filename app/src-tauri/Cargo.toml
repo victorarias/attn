@@ -28,6 +28,7 @@ tauri-plugin-deep-link = "2"
 dirs = "5"
 regex = "1"
 libc = "0.2"
+base64 = "0.22"
 
 [dev-dependencies]
 anyhow = "1"

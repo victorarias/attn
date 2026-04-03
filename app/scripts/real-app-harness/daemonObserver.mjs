@@ -18,13 +18,14 @@ function workspacePaneIds(workspace) {
 export class DaemonObserver {
   constructor({
     wsUrl = 'ws://127.0.0.1:9849/ws',
-    connectTimeoutMs = 15_000,
+    connectTimeoutMs = 45_000,
   } = {}) {
     this.wsUrl = wsUrl;
     this.connectTimeoutMs = connectTimeoutMs;
     this.ws = null;
     this.sessionsById = new Map();
     this.workspacesBySessionId = new Map();
+    this.endpointsById = new Map();
     this.connected = false;
     this.initialStateReceived = false;
   }
@@ -78,6 +79,18 @@ export class DaemonObserver {
     this.ws.send(JSON.stringify(message));
   }
 
+  addEndpoint(name, sshTarget) {
+    this.send({ cmd: 'add_endpoint', name, ssh_target: sshTarget });
+  }
+
+  updateEndpoint(endpointId, updates) {
+    this.send({ cmd: 'update_endpoint', endpoint_id: endpointId, ...updates });
+  }
+
+  removeEndpoint(endpointId) {
+    this.send({ cmd: 'remove_endpoint', endpoint_id: endpointId });
+  }
+
   unregisterSession(sessionId) {
     this.send({ cmd: 'unregister', id: sessionId });
   }
@@ -109,10 +122,43 @@ export class DaemonObserver {
     return this.sessionsById.get(sessionId) || null;
   }
 
-  async waitForSession({ label, directory, timeoutMs = 20_000 } = {}) {
+  getEndpoint(endpointId) {
+    return this.endpointsById.get(endpointId) || null;
+  }
+
+  findEndpointByName(name) {
+    for (const endpoint of this.endpointsById.values()) {
+      if (endpoint.name === name) {
+        return endpoint;
+      }
+    }
+    return null;
+  }
+
+  async waitForEndpoint({ id, name, sshTarget, status, timeoutMs = 20_000 } = {}) {
+    return this.waitFor(
+      () => {
+        for (const endpoint of this.endpointsById.values()) {
+          if (id && endpoint.id !== id) continue;
+          if (name && endpoint.name !== name) continue;
+          if (sshTarget && endpoint.ssh_target !== sshTarget) continue;
+          if (status && endpoint.status !== status) continue;
+          return endpoint;
+        }
+        return null;
+      },
+      `endpoint id=${id || '*'} name=${name || '*'} sshTarget=${sshTarget || '*'} status=${status || '*'}`,
+      timeoutMs
+    );
+  }
+
+  async waitForSession({ id, label, directory, timeoutMs = 20_000 } = {}) {
     return this.waitFor(
       () => {
         for (const session of this.sessionsById.values()) {
+          if (id && session.id !== id) {
+            continue;
+          }
           if (label && session.label !== label) {
             continue;
           }
@@ -123,7 +169,7 @@ export class DaemonObserver {
         }
         return null;
       },
-      `session label=${label || '*'} directory=${directory || '*'}`,
+      `session id=${id || '*'} label=${label || '*'} directory=${directory || '*'}`,
       timeoutMs
     );
   }
@@ -172,6 +218,22 @@ export class DaemonObserver {
     );
   }
 
+  async waitForScrollbackReady(runtimeId, timeoutMs = 12_000) {
+    const startedAt = Date.now();
+    let lastError = null;
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        return await this.readScrollback(runtimeId, Math.min(5_000, timeoutMs));
+      } catch (error) {
+        lastError = error;
+      }
+      await delay(250);
+    }
+    throw new Error(
+      `Timed out waiting for scrollback ${runtimeId} to become attachable: ${lastError instanceof Error ? lastError.message : String(lastError || 'unknown error')}`
+    );
+  }
+
   async waitFor(predicate, description, timeoutMs = 10_000) {
     const startedAt = Date.now();
     let lastSnapshot = this.describeState();
@@ -199,7 +261,14 @@ export class DaemonObserver {
       activePaneId: workspace.active_pane_id,
       paneIds: workspacePaneIds(workspace),
     }));
-    return JSON.stringify({ sessions, workspaces }, null, 2);
+    const endpoints = [...this.endpointsById.values()].map((endpoint) => ({
+      id: endpoint.id,
+      name: endpoint.name,
+      sshTarget: endpoint.ssh_target,
+      status: endpoint.status,
+      sessionCount: endpoint.session_count,
+    }));
+    return JSON.stringify({ sessions, workspaces, endpoints }, null, 2);
   }
 
   #connectOnce() {
@@ -274,11 +343,26 @@ export class DaemonObserver {
         for (const workspace of data.workspaces || []) {
           this.workspacesBySessionId.set(workspace.session_id, workspace);
         }
+        this.endpointsById.clear();
+        for (const endpoint of data.endpoints || []) {
+          this.endpointsById.set(endpoint.id, endpoint);
+        }
         break;
       case 'sessions_updated':
         this.sessionsById.clear();
         for (const session of data.sessions || []) {
           this.sessionsById.set(session.id, session);
+        }
+        break;
+      case 'endpoint_status_changed':
+        if (data.endpoint?.id) {
+          this.endpointsById.set(data.endpoint.id, data.endpoint);
+        }
+        break;
+      case 'endpoints_updated':
+        this.endpointsById.clear();
+        for (const endpoint of data.endpoints || []) {
+          this.endpointsById.set(endpoint.id, endpoint);
         }
         break;
       case 'session_registered':

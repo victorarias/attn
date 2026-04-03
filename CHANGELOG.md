@@ -6,10 +6,63 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-03]
+
+### Added
+- **Remote Session Visibility**: Merge connected remote daemon sessions into the main app session list, tag them with their endpoint identity, and surface endpoint badges in the dashboard and sidebar so multi-machine state is visible from one local UI.
+- **Remote Hub Real-App Smoke Harness**: Add a packaged-app `bridge-remote-hub` scenario that bootstraps a real SSH endpoint, seeds a remote daemon session over SSH, and verifies merged session visibility plus the Phase C read-only placeholder in the real app.
+- **Remote Session Creation From the App**: Let the new-session flow target a connected remote endpoint, carry that endpoint through `spawn_session`, and verify the packaged app can create, select, and interact with a brand-new remote session end-to-end against `ai-sandbox`.
+- **Repo-Backed Remote Hub Smoke Coverage**: Extend the packaged-app `bridge-remote-hub` harness to create a real remote git repo, dirty a tracked file over SSH, and verify the packaged diff/review panel loads that remote change set inside the app.
+- **Remote Review-Loop Smoke Coverage**: Extend the packaged `bridge-remote-hub` harness with a scripted remote review-loop mode so the real app now verifies remote review-loop stop, awaiting-user, answer, and completion flows against `ai-sandbox` without depending on live model availability.
+- **Remote Picker Packaged Smoke Coverage**: Extend the packaged `bridge-remote-hub` harness to drive remote directory browse, repo selection, per-endpoint recents, and remote worktree creation through the real new-session picker so picker parity is verified end to end against `ai-sandbox`.
+
+### Fixed
+- **Remote Long-Run Visualization Acknowledgement**: Route `session_visualized` through the hub for remote sessions and stop excluding remote sessions from the app-side visualization timer, so long-running remote sessions can clear `needs_review_after_long_run` after the user has actually looked at them.
+- **Unavailable Picker Shortcuts**: Stop advertising unusable agent shortcuts and consume disabled `⌥1-9` agent shortcuts as no-ops, so unavailable agents no longer leak `Alt` characters into the path field on macOS.
+- **Harness Endpoint Identity Matching**: Match existing remote-hub harness endpoints by the full normalized SSH target instead of host-only, so smoke runs no longer reuse the wrong endpoint when multiple SSH identities point at the same machine.
+- **Quoted Screenshot Output Paths**: Quote `make app-screenshot` output paths so screenshot destinations containing spaces are passed through correctly.
+- **Picker Target Switching Polish**: Make new-session target changes clear stale browse results immediately, update the starting path without a second delayed rewrite, and add reliable `⌥Q/W/E/...` target shortcuts that still work while the path input is focused.
+- **Picker Summary Cleanup**: Remove the leftover remote-only summary block from the new-session picker so local and remote targets use the same streamlined layout and title.
+- **Settings Modal Input Text Defaults**: Disable browser autocapitalization and autocorrect across settings text fields so paths, SSH targets, executable names, and model IDs no longer get silently rewritten while typing.
+- **Settings Modal Escape Dismissal**: Let the settings dialog close on `Escape` even when focus is inside one of its form fields.
+
+- **Remote Bootstrap Readiness Window**: Give SSH-bootstrapped remote daemons more time to become ready before the hub marks the endpoint as failed, so Linux hosts that spend time probing and falling back from the worker PTY backend no longer flap into `error` during normal startup.
+- **Packaged App Daemon Startup Window**: Give the macOS app more time to wait for the local daemon socket during startup and restart, so a normal cold daemon boot no longer fails closed before the websocket is listening.
+- **Cgo-Less Remote Daemon Fallback**: Make the daemon’s degraded in-memory mode actually keep session and workspace state when SQLite cannot open, so Linux remotes built without cgo still register sessions and propagate state updates instead of dropping them immediately.
+- **Packaged Remote Main-Pane Spawn Flake**: Let a wired terminal trigger its first runtime ensure from real resize traffic even if packaged WebKit misses the initial terminal `ready` edge, so the installed app no longer leaves a newly created remote session stuck in `launching` with a visible pane but no PTY spawn.
+- **Remote Review-Loop Panel Availability**: Stop treating the review-loop drawer as Claude-session-only in the app so remote sessions that can already start routed review loops now expose the packaged review-loop UI as expected.
+- **Remote Hub Smoke Determinism**: Replace the remote-hub harness’s fixed UI sleeps with explicit session-UI readiness checks, clean up stale harness endpoints before each run, and treat the live remote websocket listener as the source of truth during bootstrap so real packaged-app smoke tests stop failing on retry churn and backgrounded render timing.
+- **Transient Worker Attach Flake**: Retry short-lived worker socket attach failures during session reload/reattach and persist the harness’s last completed step into `summary.json`, so packaged remote-hub smoke runs no longer fail on intermittent `dial unix ...workers...sock` races without leaving useful artifacts behind.
+- **Linux PTY Spawn EPERM**: Stop forcing `Setpgid` on PTY-launched sessions because `forkpty` already creates an isolated process group on Linux, fixing remote `spawn_session` failures like `fork/exec /bin/sh: operation not permitted` on SSH-managed hosts such as `ai-sandbox`.
+- **Forced-Stop Transcript Noise**: Treat daemon-initiated session termination as PTY-exit-authoritative, so a later best-effort `Stop` message from a force-killed non-hook agent no longer triggers redundant transcript classification with an empty path.
+- **Remote Spawn Routing Leakage**: Stop remote daemons from re-interpreting the hub-only `endpoint_id` routing hint on forwarded `spawn_session` commands, so remote session creation now executes on the target daemon instead of being rejected or dropped mid-hop.
+- **Remote `~` Path Expansion**: Resolve `~/...` spawn directories on the daemon that actually owns the session, so remote session creation no longer rewrites a remote home-relative path through the local machine’s home directory.
+- **Remote Harness Session Matching**: Match packaged-app smoke sessions by their exact spawned session ID instead of only label and directory so retries no longer latch onto stale remote sessions from an earlier failed run.
+- **Remote Picker Result Correlation**: Add per-request IDs to picker recent-location, browse, and inspect websocket commands so repeated requests to the same endpoint no longer race and satisfy each other out of order, which was causing packaged remote recents and browse verification to see stale results.
+- **Repo Options Click Selection**: Make repo-options rows clickable in addition to keyboard-driven selection so choosing the main repo or a worktree in the picker works consistently for real users and UI automation.
+- **Picker Trailing-Slash Browsing**: Preserve explicit trailing slashes when parsing picker browse requests so typing a matching directory name followed by `/` now browses inside that directory instead of staying anchored on the parent and continuing name-prefix matching there.
+- **Source Remote Bootstrap Freshness**: When running from a source checkout, compare remote daemon binary hashes as well as `attn --version` before deciding a remote install is current, so SSH endpoints pick up local code changes even while the semantic version stays the same.
+
+### Changed
+- **Bundled Daemon Signing During App Builds**: Ad-hoc sign the bundled `attn` binary inside the macOS app bundle during source builds so the packaged app can exercise its own embedded daemon instead of relying on an external install.
+- **Picker Filesystem Routing**: Move new-session path browsing, path inspection, and endpoint-scoped recent-location lookup onto daemon websocket commands for both local and remote targets, so the picker no longer depends on Tauri-local filesystem access or a separate remote-only behavior.
+- **Remote Session Interactivity**: Route remote PTY attach/input/resize traffic and workspace updates through the hub daemon so already-running remote sessions render as real terminals in the app instead of Phase C placeholders, including remote split-pane runtime attachment once the remote daemon publishes workspace panes.
+- **Remote Session Read-Only UX**: Treat remote sessions as explicit Phase C placeholders in the main session view instead of trying to spawn local PTYs for them, while local-only controls like diff, reload, fork, editor open, and review loop stay disabled until endpoint-aware routing lands.
+- **Remote Git/Diff/Review Routing**: Forward endpoint-owned git, diff, review, and comment websocket commands through the hub based on remote session paths and cached remote review/comment ownership, so remote sessions can open the branch picker, subscribe to git status, and load the diff/review panel from the packaged app.
+- **Local Linux Cross-Compile Path**: Use `zig cc` for local macOS-to-Linux cgo builds in both the remote bootstrap source fallback and new `make build-linux-amd64` / `make build-linux-arm64` targets, so remote-daemon iteration can produce SQLite-capable Linux binaries without needing a Linux box.
+- **Remote Bootstrap Dev Cache**: When a local source checkout is available, cache remote Linux binaries by the current local executable fingerprint and prefer a source cross-build before downloading a release asset, so local remote-hub iteration stops reusing stale published binaries that happen to share the same semantic version.
+- **App Screenshot Wrapper**: Add a reusable `capture-app-screenshot.mjs` helper and `make app-screenshot` target, and switch the default automation screenshot path to a webview-rendered PNG saved by the Rust automation server so screenshots no longer depend on macOS desktop capture permissions.
+- **Remote Hub Smoke Readiness Gate**: Make the packaged remote-hub harness wait for the newly created session workspace to mount in the app before judging the spawn path, so the end-to-end verification follows the same UI readiness that actually triggers terminal initialization.
+- **Remote Harness Review-Loop Mode**: Let the hub export a scripted review-loop scenario into freshly bootstrapped remote daemons during dev/package smoke runs, keeping normal review-loop behavior untouched while making remote review-loop coverage deterministic.
+
 ## [2026-04-02]
+
+### Added
+- **Remote Endpoint Bootstrap Substrate**: Add the first executable slice of the remote-daemon hub with persisted SSH endpoints, `attn ws-relay`, daemon-side endpoint lifecycle management, SSH bootstrap/install logic, runtime endpoint status events, and initial-state endpoint metadata so the local daemon can begin treating remotes as managed peers instead of pure future design.
 
 ### Changed
 - **Remote Daemon Hub Plan Scope**: Stop treating a binary WebSocket protocol or MsgPack migration as a prerequisite for the remote hub. The plan now assumes JSON forwarding for v1, with PTY-specific optimizations and binary framing only as a later, measurement-driven option.
+- **Daemon WebSocket Runtime Config**: Let the daemon honor `ATTN_WS_BIND` and optional `ATTN_WS_AUTH_TOKEN` checks so local-loopback remains the default while direct or relayed remote connections can target a different bind address and opt into token-gated access.
 - **Daemon WebSocket Routing Structure**: Split the remaining inline WebSocket command handlers into domain-specific daemon files and add explicit command-scope metadata, so future endpoint-aware routing work has one place to reason about command ownership and recovery-sensitive actions.
 - **Compiled CLI Versioning**: Build the daemon with an explicit compiled version string, expose it through `attn --version`, and route local builds plus release packaging through the same ldflags path so the binary reports the release it actually came from.
 - **Linux Release Artifacts**: Extend the release workflow to upload standalone `attn-linux-amd64` and `attn-linux-arm64` daemon binaries built natively on GitHub-hosted Linux runners, so tagged releases now ship the daemon artifacts needed for remote Linux installs without changing the macOS app flow.

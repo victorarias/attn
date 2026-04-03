@@ -70,6 +70,15 @@ CREATE TABLE IF NOT EXISTS settings (
 	value TEXT
 );
 
+CREATE TABLE IF NOT EXISTS endpoints (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	ssh_target TEXT NOT NULL,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
 	version INTEGER PRIMARY KEY,
 	applied_at TEXT NOT NULL
@@ -267,6 +276,14 @@ var migrations = []migration{
 	CREATE INDEX IF NOT EXISTS idx_workspace_panes_runtime_id
 		ON workspace_panes(runtime_id);`},
 	{31, "add endpoint_id to sessions", "ALTER TABLE sessions ADD COLUMN endpoint_id TEXT"},
+	{32, "create endpoints table", `CREATE TABLE IF NOT EXISTS endpoints (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		ssh_target TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

@@ -1,12 +1,63 @@
 # Remote Daemon Hub: Multi-Machine Session Control
 
 Date: 2026-02-21
-Status: Planning
+Status: Implemented (SSH scope)
 Owner: daemon/frontend
 
 ## Motivation
 
 attn currently runs everything on one machine: daemon, agents, git, UI. The goal is to run agent workloads on remote machines (dev servers, VMs, cloud instances) while keeping a single local UI that shows all sessions across all machines.
+
+## Current Baseline
+
+This plan predates the preparatory refactors completed on 2026-04-02 in [docs/plans/2026-04-02-preparatory-refactors.md](/Users/victor.arias/projects/victor/attn/docs/plans/2026-04-02-preparatory-refactors.md).
+
+Treat those items as completed prerequisites, not future work:
+
+- compiled-in version string and `attn --version`
+- Linux release artifacts for `linux/amd64` and `linux/arm64`
+- `Session.endpoint_id` in the protocol/store/frontend types
+- frontend WebSocket URL abstraction
+- extracted websocket command scope metadata in `internal/daemon/command_meta.go`
+- automatic local daemon restart on protocol mismatch
+
+The core SSH-based remote-daemon-hub architecture from this plan is implemented. The remaining work is manual validation/polish from real use and the optional direct-connection hardening described in Phase E.
+
+The picker UX target for this remaining work is explicit:
+
+- local and remote daemons should behave the same from the user's perspective once a target is selected
+- the picker should support arbitrary directory navigation on remote daemons, but start from that daemon's `projects_directory` when configured
+- if a daemon has no `projects_directory`, the picker should start from `~`
+- recent locations should be scoped per endpoint and populated only after successful session launches
+- typed paths should validate and browse live; there should be no manual-entry fallback that bypasses daemon validation
+- repo detection should use the daemon's real git probing path, not a picker-local heuristic
+- repo probing should happen on explicit directory selection, matching the local flow today
+- the picker should remain directory-only; file browsing is out of scope for this pass
+- if a remote endpoint is disconnected or cannot browse/validate, the picker should fail closed rather than falling back to a degraded local-only path
+
+## Current Status
+
+Implemented and working:
+
+- Phase A: SSH bootstrap, remote binary install/update, `attn ws-relay`, remote daemon start/restart, and transport retry handling.
+- Phase B: persisted endpoints, endpoint lifecycle/status events, and Settings-based endpoint management.
+- Phase C: merged remote sessions in the main app session list with endpoint badges and grouped visibility.
+- Phase D: remote PTY attach/input/output, remote session creation from the app, remote reload, remote git/diff/review routing, remote review comment mutations, and remote review-loop routing/UI.
+- Picker parity: local and remote new-session browsing now share the same daemon-backed browse/inspect path, remote browsing starts from `projects_directory` (or `~`), repo detection uses daemon git probing, per-endpoint recents are returned by the owning daemon, and remote repo/worktree flows match the local picker path.
+- Packaged real-app smoke coverage: verified end-to-end against `ai-sandbox` with a fresh app instance and a fresh local daemon instance, including remote review-loop start, stop, awaiting-user, answer, and completion.
+- Packaged picker smoke coverage: verified end-to-end against `ai-sandbox`, including remote directory browse, repo selection, per-endpoint recent locations, remote worktree creation, and worktree visibility on reopen.
+- Stability pass: repeated fresh packaged-app runs against `ai-sandbox` now pass consistently after hardening transient worker attach races and harness failure reporting.
+
+Implemented with intentional scope limits:
+
+- Remote open-in-editor is supported only for Zed remote SSH targets.
+- Remote fork is intentionally not supported.
+- Branch switching is not a target for this plan because that UI path is expected to be removed later.
+
+Still remaining:
+
+- manual validation and UX polish from real use
+- optional direct-connection hardening from Phase E (TLS/token/non-SSH flow)
 
 ## Topology
 
@@ -54,10 +105,12 @@ The Tauri app already talks to the daemon exclusively over WebSocket. The hub da
 ### Incremental delivery
 
 Each phase is independently valuable:
-- Phase A (expose WS) lets you SSH-tunnel to a remote daemon today.
-- Phase B (hub client) lets the local daemon aggregate remotes.
-- Phase C (UI) shows remote sessions in the app.
-- Phase D (auth/TLS) makes it production-safe.
+- Preparatory refactors (done) established the versioning, protocol, and routing baseline.
+- Phase A (done) lets the hub reach and validate a remote daemon.
+- Phase B (done) lets the local daemon aggregate remotes and manage endpoints.
+- Phase C (done) shows remote sessions in the app.
+- Phase D is done: interactive remote PTY, spawn, reload, repo/review routing, review-loop flows, and picker parity for browse/repo/worktree session creation are all implemented and packaged-smoked.
+- Phase E (later) covers direct connections and hardening.
 
 ## Design Principles
 
@@ -90,7 +143,7 @@ The UI needs to distinguish sessions from different endpoints. Options:
 
 **Option B: Add endpoint field** — Events and sessions gain an `endpoint_id` field. Session identity becomes a compound key.
 
-**Recommendation: Option B.** It's cleaner, doesn't break ID formats, and the `Session` model already has optional fields. Adding `endpoint_id?: string` is additive and backward-compatible. Local sessions have no endpoint_id (or a sentinel like `"local"`).
+**Recommendation: Option B.** It's cleaner, doesn't break ID formats, and it matches the current protocol direction. `Session.endpoint_id` already exists from the preparatory refactors, so the remaining work is to use that field consistently in hub merge/routing logic. Local sessions have no endpoint_id (or a sentinel like `"local"`).
 
 ### 3. State the hub must manage per remote endpoint
 
@@ -237,13 +290,7 @@ This means version skew is a transient state lasting only seconds during the upd
 
 ### Additive changes to existing protocol
 
-1. **`Session` model** — Add optional `endpoint_id` field:
-   ```
-   model Session {
-     ...existing fields...
-     endpoint_id?: string;  // Which daemon owns this session. Absent = local.
-   }
-   ```
+1. **`Session` model** — `endpoint_id` is already present from the preparatory refactors, so Phase C should reuse that field rather than introducing it again.
 
 2. **`InitialStateMessage`** — Add optional `endpoints` field for hub to inform UI about connected remotes:
    ```
@@ -275,7 +322,7 @@ This means version skew is a transient state lasting only seconds during the upd
    - `endpoint_disconnected` — A remote endpoint went offline.
    - `endpoints_updated` — Full endpoint list refresh.
 
-4. **Command routing** — Commands that target a session (e.g., `pty_input`, `attach_session`, `kill_session`) gain an optional `endpoint_id` field. If present, the hub forwards to that endpoint. If absent, handled locally.
+4. **Command routing** — Commands that target a session (e.g., `pty_input`, `attach_session`, `kill_session`) already have the protocol model needed for endpoint-aware routing. The remaining work is hub-side routing logic and any missing endpoint-aware fields on endpoint-scoped commands.
 
 ### No breaking changes
 
@@ -330,13 +377,14 @@ When the hub connects to a new endpoint (or reconnects after version change):
      c. ssh <target> 'chmod +x ~/.local/bin/attn'
    
 4. Ensure remote daemon is running
-   ssh <target> 'attn daemon --status'
+   Use an internal hub-side SSH probe against the remote daemon socket/PID paths.
+   The v1 plan does not add an `attn daemon --status` CLI command.
    If not running:
      ssh <target> 'nohup setsid attn daemon </dev/null >>~/.attn/daemon.log 2>&1 &'
      sleep 1
-     ssh <target> 'attn daemon --status'   (verify it started)
+     repeat the health probe   (verify it started)
    If running but wrong version (just updated binary):
-     ssh <target> 'attn daemon --restart'   (or kill + start)
+     restart from the hub via kill + start
 
 5. Connect via ws-relay
    ssh <target> 'attn ws-relay'                           → stdin/stdout bridge
@@ -511,21 +559,26 @@ ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 <t
 
 ## Implementation Phases
 
+These phases assume the completed groundwork in [docs/plans/2026-04-02-preparatory-refactors.md](/Users/victor.arias/projects/victor/attn/docs/plans/2026-04-02-preparatory-refactors.md).
+
 ### Phase A: Remote bootstrap infrastructure
 
 **Goal:** The hub can SSH into a remote machine, install attn, start the daemon, and connect via `ws-relay`. No UI yet — CLI/config-driven.
 
 Changes:
-1. Add compiled-in version string via `-ldflags "-X main.version=..."`. Update Makefile, homebrew formula, release workflow.
-2. Add `attn ws-relay` subcommand (stdin/stdout ↔ localhost:9849 TCP bridge, ~30 lines).
-3. Add `attn daemon --status` subcommand (prints running/stopped + version, ~10 lines).
-4. Add linux/amd64 and linux/arm64 to release workflow (two more `GOOS/GOARCH go build` lines + `gh release upload`).
-5. Add `internal/hub/bootstrap.go` — SSH-based bootstrap logic: detect platform, check/install binary, ensure daemon running.
-6. Add `internal/hub/transport.go` — SSH stdio transport: spawn `ssh <target> attn ws-relay`, local TCP proxy, return `*websocket.Conn`.
-7. Add `ATTN_WS_BIND` env var support (default: `127.0.0.1`). Optional for direct connections.
-8. Add `ATTN_WS_AUTH_TOKEN` env var support. Optional for direct connections.
+1. Add `attn ws-relay` subcommand (stdin/stdout ↔ localhost:9849 TCP bridge, ~30 lines).
+2. Add a remote daemon health/start probe inside `internal/hub/bootstrap.go`, using SSH to validate the remote socket/PID state directly rather than adding a `daemon --status` CLI command.
+3. Add `internal/hub/bootstrap.go` — SSH-based bootstrap logic: detect platform, check/install binary, ensure daemon running.
+4. Add `internal/hub/transport.go` — SSH stdio transport: spawn `ssh <target> attn ws-relay`, local TCP proxy, return `*websocket.Conn`.
+5. Add `ATTN_WS_BIND` env var support (default: `127.0.0.1`). Optional for direct connections.
+6. Add `ATTN_WS_AUTH_TOKEN` env var support. Optional for direct connections.
 
-**Exit gate:** Can run `attn ws-relay` on a remote machine via SSH and get a working WebSocket connection. Binary auto-installs on remote. `attn --version` works.
+Inherited prerequisites from the completed preparatory refactors:
+- `attn --version` already exists and is suitable for remote binary version checks
+- Linux release binaries already exist for remote bootstrap/autoupdate
+- frontend WS URL abstraction is already in place for future direct-connection support
+
+**Exit gate:** Can run `attn ws-relay` on a remote machine via SSH and get a working WebSocket connection. Binary auto-installs on remote. Remote startup/version checks are automated.
 
 ### Phase B: Walking skeleton — connect, handshake, show capabilities
 
@@ -570,7 +623,7 @@ Changes — UI:
 **Goal:** Remote sessions appear in the main session list, tagged with their endpoint. Read-only initially (can see state, but can't attach/interact yet).
 
 Changes:
-1. Add `endpoint_id` field to `Session` TypeSpec model. Regenerate types. Local sessions have `endpoint_id = ""` (or omitted).
+1. Reuse the existing `Session.endpoint_id` field for merged remote session identity. Local sessions keep it empty/omitted.
 2. Hub merges remote sessions into the local session list on `initial_state` and on `session_registered`/`session_state_changed` events from remote. Tags each with `endpoint_id`.
 3. Hub forwards relevant remote events to local UI clients: `session_registered`, `session_state_changed`, `session_removed`.
 4. Frontend groups or labels sessions by endpoint (e.g., endpoint name badge on each card).
@@ -583,13 +636,21 @@ Changes:
 **Goal:** Full interactive usage of remote sessions from the Tauri app.
 
 Changes:
-1. Add `internal/hub/router.go` — Command routing by `endpoint_id` lookup, using a `CommandMeta` scope registry.
+1. Add `internal/hub/router.go` — Command routing by `endpoint_id` lookup, reusing the existing `internal/daemon/command_meta.go` scope registry instead of inventing a second scope table.
 2. PTY attach/detach/input/resize proxied to remote endpoint. Use raw message forwarding for `pty_output` events (§10 efficiency).
 3. Spawn session UI allows selecting target endpoint.
 4. Git operations (branch, stash, worktree, diff) forwarded to the endpoint owning the session's directory.
 5. Destructive/scoped commands (`clear_sessions`, `set_setting`) require explicit `endpoint_id` targeting — never broadcast (see §8).
 
-**Exit gate:** Can attach to a remote session's terminal, type commands, see output. Can spawn new sessions on remote endpoints. Git operations work.
+Current state:
+
+- implemented: attach/input/resize, remote spawn from the app, remote reload, git/diff/review routing, review comment mutations, and endpoint-aware packaged-app verification
+- intentionally unsupported: remote fork
+- supported with constraint: remote open-in-editor only for Zed remote SSH targets
+- intentionally not pursued here: branch switching
+- packaged verification is in place for remote review-loop start/stop/awaiting-user/answer flows
+
+**Exit gate:** Can attach to a remote session's terminal, type commands, see output. Can spawn new sessions on remote endpoints. Git operations work. Review/comment mutations work. Remote review-loop flows work end to end.
 
 ### Phase E: Direct connections and hardening
 
@@ -674,12 +735,47 @@ Changes:
 ## Acceptance Criteria (Walking Skeleton — Phases A+B only)
 
 1. `attn ws-relay` subcommand works (bridges stdin/stdout ↔ localhost WS).
-2. `attn --version` returns compiled-in version string.
-3. Release workflow produces linux/amd64 and linux/arm64 binaries.
-4. UI can add/remove/edit remote endpoints by SSH target.
-5. Hub automatically installs attn on remote if missing, updates if version differs.
-6. Hub connects via SSH stdio and receives `initial_state`.
-7. Each endpoint shows status with progress (⏳ bootstrapping / 🟢 connected / 🔴 error).
-8. Connected endpoints display capabilities: available agents, projects directory, session count.
-9. Reconnects automatically after SSH disconnect with backoff.
-10. Local functionality is completely unaffected by remote endpoint configuration.
+2. Hub can use the existing `attn --version` output and released Linux binaries to install/update remotes.
+3. UI can add/remove/edit remote endpoints by SSH target.
+4. Hub automatically installs attn on remote if missing, updates if version differs.
+5. Hub connects via SSH stdio and receives `initial_state`.
+6. Each endpoint shows status with progress (⏳ bootstrapping / 🟢 connected / 🔴 error).
+7. Connected endpoints display capabilities: available agents, projects directory, session count.
+8. Reconnects automatically after SSH disconnect with backoff.
+9. Local functionality is completely unaffected by remote endpoint configuration.
+
+## Integrated Smoke Scenario (Current Phase D)
+
+This is the highest-signal end-to-end verification path for the current implementation. It uses the real packaged Tauri app, the real local daemon, SSH bootstrap, and a real remote daemon, and it now exercises the real remote interactive path instead of seeding synthetic remote session state.
+
+Example target: `ssh ai-sandbox`
+
+Flow:
+
+1. Launch the packaged app with the dev-only UI automation bridge enabled.
+2. Reset the remote target before app startup so previously persisted local endpoints cannot race the bootstrap flow.
+3. Add endpoint `ai-sandbox` to the local daemon and wait for `endpoint_status_changed` to report `connected`.
+4. Create a brand-new remote session from the packaged app, targeting the connected endpoint.
+5. Verify the session registers through the hub, appears in the main app UI, and shows the expected endpoint badge.
+6. Attach to the remote session, split a utility pane, type into the remote PTY, and verify the output returns through the app.
+7. Reload the remote session from the app and verify the main runtime is replaced rather than silently reattaching to stale state.
+8. Create or reuse a real remote git repo, dirty a tracked file, and verify the packaged diff/review panel loads that remote change set.
+9. Add, update, resolve, wont-fix, and delete a remote review comment through the app, and verify each mutation round-trips successfully.
+10. Start a remote review loop, stop one run while it is active, then start another run that reaches `awaiting_user`, answer it, and verify completion in both daemon state and the packaged review-loop drawer.
+11. Remove the session and endpoint and verify cleanup in both the observer and the packaged UI.
+
+What this scenario proves now:
+
+- SSH bootstrap/install/update works against a real host
+- hub↔remote websocket handshake and reconnect state work
+- remote sessions merge into the app session model correctly
+- endpoint-aware grouping/labeling works in the real UI
+- remote PTY interactivity works in the packaged app
+- remote session creation and reload from the app work
+- remote diff/review panel routing works
+- remote review comment mutations work
+- remote review-loop start/stop/awaiting-user/answer flows work in the packaged app
+
+What it does not prove yet:
+
+- Settings-modal CRUD driven entirely through UI automation
