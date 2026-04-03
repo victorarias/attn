@@ -32,6 +32,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Remote Picker Result Correlation**: Add per-request IDs to picker recent-location, browse, and inspect websocket commands so repeated requests to the same endpoint no longer race and satisfy each other out of order, which was causing packaged remote recents and browse verification to see stale results.
 - **Repo Options Click Selection**: Make repo-options rows clickable in addition to keyboard-driven selection so choosing the main repo or a worktree in the picker works consistently for real users and UI automation.
 - **Picker Trailing-Slash Browsing**: Preserve explicit trailing slashes when parsing picker browse requests so typing a matching directory name followed by `/` now browses inside that directory instead of staying anchored on the parent and continuing name-prefix matching there.
+- **Source Remote Bootstrap Freshness**: When running from a source checkout, compare remote daemon binary hashes as well as `attn --version` before deciding a remote install is current, so SSH endpoints pick up local code changes even while the semantic version stays the same.
 
 ### Changed
 - **Bundled Daemon Signing During App Builds**: Ad-hoc sign the bundled `attn` binary inside the macOS app bundle during source builds so the packaged app can exercise its own embedded daemon instead of relying on an external install.

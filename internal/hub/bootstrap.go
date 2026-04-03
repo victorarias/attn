@@ -57,12 +57,33 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget string) 
 		return fmt.Errorf("check remote version on %s: %w", sshTarget, err)
 	}
 
+	preferSourceBuild := sourceCheckoutAvailable()
+	var localBinary string
 	binaryUpdated := false
-	if remoteVersion != localVersion {
-		localBinary, err := b.ensureLocalBinary(ctx, platform, localVersion)
+	if remoteVersion != localVersion || preferSourceBuild {
+		localBinary, err = b.ensureLocalBinary(ctx, platform, localVersion)
 		if err != nil {
 			return fmt.Errorf("prepare %s binary for %s: %w", platform.ArtifactName, sshTarget, err)
 		}
+	}
+
+	shouldInstall := remoteVersion != localVersion
+	if !shouldInstall && preferSourceBuild {
+		localHash, err := fileSHA256(localBinary)
+		if err != nil {
+			return fmt.Errorf("hash local binary for %s: %w", sshTarget, err)
+		}
+		remoteHash, err := b.remoteBinarySHA256(ctx, sshTarget)
+		if err != nil {
+			return fmt.Errorf("hash remote binary on %s: %w", sshTarget, err)
+		}
+		shouldInstall = shouldInstallRemoteBinary(localVersion, remoteVersion, preferSourceBuild, localHash, remoteHash)
+		if shouldInstall {
+			b.logf("remote binary hash mismatch for %s: remote=%s local=%s", sshTarget, remoteHash, localHash)
+		}
+	}
+
+	if shouldInstall {
 		if err := b.installRemoteBinary(ctx, sshTarget, localBinary); err != nil {
 			return fmt.Errorf("install attn on %s: %w", sshTarget, err)
 		}
@@ -73,6 +94,16 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget string) 
 		return fmt.Errorf("ensure remote daemon on %s: %w", sshTarget, err)
 	}
 	return nil
+}
+
+func shouldInstallRemoteBinary(localVersion, remoteVersion string, preferSourceBuild bool, localHash, remoteHash string) bool {
+	if remoteVersion != localVersion {
+		return true
+	}
+	if preferSourceBuild && remoteHash != localHash {
+		return true
+	}
+	return false
 }
 
 func (b *Bootstrapper) detectRemotePlatform(ctx context.Context, sshTarget string) (RemotePlatform, error) {
@@ -205,7 +236,11 @@ func localBinaryFingerprint() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	file, err := os.Open(exe)
+	return fileSHA256(exe)
+}
+
+func fileSHA256(path string) (string, error) {
+	file, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
@@ -216,6 +251,41 @@ func localBinaryFingerprint() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+func (b *Bootstrapper) remoteBinarySHA256(ctx context.Context, sshTarget string) (string, error) {
+	script := fmt.Sprintf(`
+ATTN_BIN="$HOME/.local/bin/%s"
+if [ ! -x "$ATTN_BIN" ]; then
+  ATTN_BIN="$(command -v %s 2>/dev/null || true)"
+fi
+if [ -z "$ATTN_BIN" ] || [ ! -f "$ATTN_BIN" ]; then
+  printf NOT_FOUND
+  exit 0
+fi
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "$ATTN_BIN" | awk '{print $1}'
+  exit 0
+fi
+if command -v shasum >/dev/null 2>&1; then
+  shasum -a 256 "$ATTN_BIN" | awk '{print $1}'
+  exit 0
+fi
+printf NO_HASH_TOOL
+`, config.BinaryName(), config.BinaryName())
+	out, err := runSSH(ctx, sshTarget, script)
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSpace(out)
+	switch value {
+	case "", "NOT_FOUND":
+		return "", nil
+	case "NO_HASH_TOOL":
+		return "", fmt.Errorf("remote host has neither sha256sum nor shasum")
+	default:
+		return value, nil
+	}
 }
 
 func (b *Bootstrapper) localBinaryCacheKey(version string) (string, bool, error) {
