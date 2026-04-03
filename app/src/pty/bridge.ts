@@ -3,6 +3,8 @@ import { isTauri } from '@tauri-apps/api/core';
 export interface PtySpawnArgs {
   id: string;
   cwd: string;
+  endpoint_id?: string;
+  reload?: boolean;
   cols: number;
   rows: number;
   shell?: boolean;
@@ -19,7 +21,7 @@ export interface PtySpawnArgs {
 }
 
 export type PtyEventPayload =
-  | { event: 'data'; id: string; data: string }
+  | { event: 'data'; id: string; data: string; seq?: number }
   | { event: 'exit'; id: string; code: number; signal?: string }
   | { event: 'error'; id: string; error: string }
   | { event: 'transcript'; id: string; matched: boolean }

@@ -164,9 +164,33 @@
         <span></span>
         <span></span>
       </div>
+      <div id="boot-trace" style="display:none;margin-top:24px;color:#888;font:11px/1.8 'SF Mono',monospace;text-align:left;max-width:600px;"></div>
     </div>
 
     <div id="root"></div>
+    <!-- Startup tracing — visible on loading screen for source builds only -->
+    <script>
+      (function() {
+        var isDev = '%VITE_INSTALL_CHANNEL%' === 'source';
+        var el = document.getElementById('boot-trace');
+        if (isDev && el) el.style.display = 'block';
+        var t0 = performance.now();
+        window.__dbg = function(msg) {
+          var ms = (performance.now() - t0).toFixed(0);
+          var line = '[' + ms + 'ms] ' + msg;
+          console.log('[boot] ' + line);
+          if (isDev && el) el.textContent += line + '\n';
+        };
+        window.__dbg('html parsed');
+        window.onerror = function(msg, src, line, col, err) {
+          window.__dbg('ERROR: ' + msg + (src ? ' at ' + src + ':' + line : '') + (err && err.stack ? '\n' + err.stack : ''));
+        };
+        window.onunhandledrejection = function(e) {
+          var r = e.reason;
+          window.__dbg('REJECT: ' + (r && r.stack ? r.stack : String(r)));
+        };
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

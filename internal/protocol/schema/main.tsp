@@ -93,6 +93,7 @@ model Session {
   label: string;
   agent: SessionAgent;
   directory: string;
+  endpoint_id?: string;         // Optional: owning endpoint for remote/session-aware routing
   branch?: string;              // Optional: might not be in git repo
   is_worktree?: boolean;        // Optional: false if not worktree
   main_repo?: string;           // Optional: only set if worktree
@@ -168,6 +169,20 @@ model RecentLocation {
   use_count: int32;
 }
 
+model DirectoryEntry {
+  name: string;
+  path: string;
+}
+
+model PathInspection {
+  input_path: string;
+  resolved_path: string;
+  home_path?: string;
+  exists: boolean;
+  is_directory: boolean;
+  repo_root?: string;
+}
+
 model Branch {
   name: string;
   commit_hash?: string;    // Short SHA (7 chars)
@@ -196,6 +211,25 @@ model WorkspaceSnapshot {
   layout_json: string;
   panes: WorkspacePane[];
   updated_at?: string;
+}
+
+model EndpointCapabilities {
+  protocol_version: string;
+  agents_available: string[];
+  projects_directory?: string;
+  pty_backend_mode?: string;
+  daemon_instance_id?: string;
+}
+
+model EndpointInfo {
+  id: string;
+  name: string;
+  ssh_target: string;
+  status: string;
+  enabled?: boolean;
+  status_message?: string;
+  session_count?: int32;
+  capabilities?: EndpointCapabilities;
 }
 
 // ============================================================================
@@ -326,12 +360,14 @@ model CreateWorktreeMessage {
   main_repo: string;
   branch: string;
   path?: string;
+  endpoint_id?: string;
   starting_from?: string;  // Branch to create worktree from (default: current HEAD)
 }
 
 model DeleteWorktreeMessage {
   cmd: "delete_worktree";
   path: string;
+  endpoint_id?: string;
 }
 
 model GetSettingsMessage {
@@ -342,6 +378,29 @@ model SetSettingMessage {
   cmd: "set_setting";
   key: string;
   value: string;
+}
+
+model AddEndpointMessage {
+  cmd: "add_endpoint";
+  name: string;
+  ssh_target: string;
+}
+
+model RemoveEndpointMessage {
+  cmd: "remove_endpoint";
+  endpoint_id: string;
+}
+
+model UpdateEndpointMessage {
+  cmd: "update_endpoint";
+  endpoint_id: string;
+  name?: string;
+  ssh_target?: string;
+  enabled?: boolean;
+}
+
+model ListEndpointsMessage {
+  cmd: "list_endpoints";
 }
 
 model ApprovePRMessage {
@@ -368,6 +427,22 @@ model InjectTestSessionMessage {
 model GetRecentLocationsMessage {
   cmd: "get_recent_locations";
   limit?: int32;  // Default 20
+  endpoint_id?: string;
+  request_id?: string;
+}
+
+model BrowseDirectoryMessage {
+  cmd: "browse_directory";
+  input_path: string;
+  endpoint_id?: string;
+  request_id?: string;
+}
+
+model InspectPathMessage {
+  cmd: "inspect_path";
+  path: string;
+  endpoint_id?: string;
+  request_id?: string;
 }
 
 model ListBranchesMessage {
@@ -380,6 +455,7 @@ model DeleteBranchMessage {
   main_repo: string;
   branch: string;
   force: boolean;
+  endpoint_id?: string;
 }
 
 model SwitchBranchMessage {
@@ -485,6 +561,7 @@ model GetBranchDiffFilesMessage {
 model GetRepoInfoMessage {
   cmd: "get_repo_info";
   repo: string;
+  endpoint_id?: string;
 }
 
 model GetReviewStateMessage {
@@ -579,6 +656,7 @@ model SpawnSessionMessage {
   cmd: "spawn_session";
   id: string;
   cwd: string;
+  endpoint_id?: string;
   agent: string;            // "claude", "codex", "copilot", "shell"
   cols: int32;
   rows: int32;
@@ -663,12 +741,31 @@ model InitialStateMessage {
   protocol_version?: string;
   daemon_instance_id?: string;
   sessions?: Session[];
+  endpoints?: EndpointInfo[];
   workspaces?: WorkspaceSnapshot[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
   settings?: Record<string>;
   warnings?: DaemonWarning[];
+}
+
+model EndpointStatusChangedMessage {
+  event: "endpoint_status_changed";
+  endpoint: EndpointInfo;
+}
+
+model EndpointsUpdatedMessage {
+  event: "endpoints_updated";
+  endpoints: EndpointInfo[];
+}
+
+model EndpointActionResultMessage {
+  event: "endpoint_action_result";
+  action: string;
+  endpoint_id?: string;
+  success: boolean;
+  error?: string;
 }
 
 model SessionRegisteredMessage {
@@ -789,6 +886,7 @@ model WorktreesUpdatedMessage {
 model CreateWorktreeResultMessage {
   event: "create_worktree_result";
   path?: string;
+  endpoint_id?: string;
   success: boolean;
   error?: string;
 }
@@ -796,6 +894,7 @@ model CreateWorktreeResultMessage {
 model DeleteWorktreeResultMessage {
   event: "delete_worktree_result";
   path: string;
+  endpoint_id?: string;
   success: boolean;
   error?: string;
 }
@@ -810,6 +909,30 @@ model SettingsUpdatedMessage {
 model RecentLocationsResultMessage {
   event: "recent_locations_result";
   recent_locations: RecentLocation[];
+  endpoint_id?: string;
+  request_id?: string;
+  home_path?: string;
+  success: boolean;
+  error?: string;
+}
+
+model BrowseDirectoryResultMessage {
+  event: "browse_directory_result";
+  input_path: string;
+  directory: string;
+  entries: DirectoryEntry[];
+  endpoint_id?: string;
+  request_id?: string;
+  home_path?: string;
+  success: boolean;
+  error?: string;
+}
+
+model InspectPathResultMessage {
+  event: "inspect_path_result";
+  inspection?: PathInspection;
+  endpoint_id?: string;
+  request_id?: string;
   success: boolean;
   error?: string;
 }
@@ -824,6 +947,7 @@ model BranchesResultMessage {
 model DeleteBranchResultMessage {
   event: "delete_branch_result";
   branch: string;
+  endpoint_id?: string;
   success: boolean;
   error?: string;
 }
@@ -946,6 +1070,7 @@ model RepoInfo {
 model GetRepoInfoResultMessage {
   event: "get_repo_info_result";
   info?: RepoInfo;
+  endpoint_id?: string;
   success: boolean;
   error?: string;
 }

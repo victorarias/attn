@@ -10,7 +10,8 @@
 }
 
 .settings-modal {
-  width: 480px;
+  width: 960px;
+  max-width: calc(100vw - 48px);
   max-height: 80vh;
   background: var(--color-bg-panel);
   border: 1px solid var(--color-border);
@@ -163,6 +164,115 @@
   gap: 10px;
 }
 
+.endpoint-form {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr auto;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.endpoint-form-inline {
+  margin-bottom: 0;
+}
+
+.endpoint-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.endpoint-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--color-bg-elevated);
+}
+
+.endpoint-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.endpoint-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.endpoint-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.endpoint-status-badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--color-border);
+}
+
+.endpoint-status-badge.status-connected {
+  color: #1f8f4c;
+  background: rgba(31, 143, 76, 0.12);
+}
+
+.endpoint-status-badge.status-connecting,
+.endpoint-status-badge.status-bootstrapping {
+  color: #a56a00;
+  background: rgba(165, 106, 0, 0.12);
+}
+
+.endpoint-status-badge.status-error,
+.endpoint-status-badge.status-disconnected {
+  color: #b24040;
+  background: rgba(178, 64, 64, 0.12);
+}
+
+.endpoint-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.endpoint-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.endpoint-meta {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.endpoint-meta code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
+
+.endpoint-meta-label {
+  width: 62px;
+  flex: 0 0 62px;
+  color: var(--color-text-dimmed);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+}
+
 /* Projects directory input */
 .projects-dir-input {
   display: flex;
@@ -179,6 +289,30 @@
   font-size: 13px;
   color: var(--color-text-primary);
   outline: none;
+}
+
+@media (max-width: 700px) {
+  .endpoint-form {
+    grid-template-columns: 1fr;
+  }
+
+  .endpoint-card-header {
+    flex-direction: column;
+  }
+
+  .endpoint-card-actions {
+    justify-content: flex-start;
+  }
+
+  .endpoint-meta {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .endpoint-meta-label {
+    width: auto;
+    flex-basis: auto;
+  }
 }
 
 .settings-input:focus {

@@ -290,9 +290,10 @@ func (d *Daemon) handleCreateWorktreeWS(client *wsClient, msg *protocol.CreateWo
 	go func() {
 		path, err := d.doCreateWorktree(msg)
 		result := protocol.CreateWorktreeResultMessage{
-			Event:   protocol.EventCreateWorktreeResult,
-			Path:    protocol.Ptr(path),
-			Success: err == nil,
+			Event:      protocol.EventCreateWorktreeResult,
+			Path:       protocol.Ptr(path),
+			EndpointID: msg.EndpointID,
+			Success:    err == nil,
 		}
 		if err != nil {
 			result.Error = protocol.Ptr(err.Error())
@@ -316,9 +317,10 @@ func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWo
 
 		err := d.doDeleteWorktree(msg.Path)
 		result := protocol.DeleteWorktreeResultMessage{
-			Event:   protocol.EventDeleteWorktreeResult,
-			Path:    msg.Path,
-			Success: err == nil,
+			Event:      protocol.EventDeleteWorktreeResult,
+			Path:       msg.Path,
+			EndpointID: msg.EndpointID,
+			Success:    err == nil,
 		}
 		if err != nil {
 			result.Error = protocol.Ptr(err.Error())

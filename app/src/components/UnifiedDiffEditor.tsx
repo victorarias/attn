@@ -30,6 +30,7 @@ import { diffLines } from 'diff';
 import { marked } from 'marked';
 import { ClaudeIcon } from './icons/ClaudeIcon';
 import type { ResolvedTheme } from '../hooks/useTheme';
+import { updateReviewPerf } from '../utils/reviewPerf';
 
 // ============================================================================
 // Types
@@ -980,6 +981,8 @@ export function UnifiedDiffEditor({
   const containerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const linesRef = useRef<DiffLine[]>([]);
+  const buildDocumentDurationMsRef = useRef(0);
+  const collapsedRegionCountRef = useRef(0);
 
   // Track which lines have open "new comment" forms
   const [newCommentLines, setNewCommentLines] = useState<Set<number>>(new Set());
@@ -1006,7 +1009,12 @@ export function UnifiedDiffEditor({
 
   // Build unified document - memoize to prevent editor recreation on unrelated state changes
   const { content, lines } = useMemo(
-    () => buildUnifiedDocument(original, modified),
+    () => {
+      const startedAt = performance.now();
+      const result = buildUnifiedDocument(original, modified);
+      buildDocumentDurationMsRef.current = performance.now() - startedAt;
+      return result;
+    },
     [original, modified]
   );
   linesRef.current = lines;
@@ -1595,6 +1603,7 @@ export function UnifiedDiffEditor({
     const view = editorViewRef.current;
     if (!view || contextLines <= 0) {
       // No collapsing needed - clear any existing collapsed decorations
+      collapsedRegionCountRef.current = 0;
       if (view) {
         view.dispatch({ effects: setCollapsedDecorations.of(Decoration.none) });
       }
@@ -1623,6 +1632,7 @@ export function UnifiedDiffEditor({
 
       return true;
     });
+    collapsedRegionCountRef.current = regionsToCollapse.length;
 
     // Build replace decorations for collapsed regions
     const decorations: Range<Decoration>[] = [];
@@ -1659,6 +1669,59 @@ export function UnifiedDiffEditor({
   // NOTE: fontSize is included because the main editor effect recreates the EditorView when fontSize changes.
   // Without fontSize here, this effect wouldn't re-run and collapsed regions would be lost.
   }, [lines, contextLines, expandedRegions, comments, newCommentLines, handleExpandRegion, fontSize]);
+
+  useEffect(() => {
+    updateReviewPerf({
+      editor: {
+        active: true,
+        filePath,
+        language,
+        fontSize,
+        lineCount: lines.length,
+        contentLength: content.length,
+        commentCount: comments.length,
+        newCommentLineCount: newCommentLines.size,
+        expandedRegionCount: expandedRegions.size,
+        collapsedRegionCount: collapsedRegionCountRef.current,
+        contextLines,
+        buildDocumentDurationMs: buildDocumentDurationMsRef.current,
+        theme: resolvedTheme,
+      },
+    });
+  }, [
+    comments.length,
+    content.length,
+    contextLines,
+    expandedRegions.size,
+    filePath,
+    fontSize,
+    language,
+    lines.length,
+    newCommentLines.size,
+    resolvedTheme,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      updateReviewPerf({
+        editor: {
+          active: false,
+          filePath: undefined,
+          language: undefined,
+          fontSize,
+          lineCount: 0,
+          contentLength: 0,
+          commentCount: 0,
+          newCommentLineCount: 0,
+          expandedRegionCount: 0,
+          collapsedRegionCount: 0,
+          contextLines: 0,
+          buildDocumentDurationMs: 0,
+          theme: resolvedTheme,
+        },
+      });
+    };
+  }, [fontSize, resolvedTheme]);
 
   // Scroll to line when scrollToLine prop changes or content loads
   // We depend on `lines` so we re-run when new file content arrives

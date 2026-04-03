@@ -70,6 +70,15 @@ CREATE TABLE IF NOT EXISTS settings (
 	value TEXT
 );
 
+CREATE TABLE IF NOT EXISTS endpoints (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	ssh_target TEXT NOT NULL,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
 	version INTEGER PRIMARY KEY,
 	applied_at TEXT NOT NULL
@@ -266,6 +275,15 @@ var migrations = []migration{
 	);
 	CREATE INDEX IF NOT EXISTS idx_workspace_panes_runtime_id
 		ON workspace_panes(runtime_id);`},
+	{31, "add endpoint_id to sessions", "ALTER TABLE sessions ADD COLUMN endpoint_id TEXT"},
+	{32, "create endpoints table", `CREATE TABLE IF NOT EXISTS endpoints (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		ssh_target TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -356,6 +374,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 29 {
 			if err := applyMigration29(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 31 {
+			if err := applyMigration31(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -471,6 +494,20 @@ func applyMigration29(tx *sql.Tx) error {
 		return nil
 	}
 	if _, err := tx.Exec("ALTER TABLE review_loop_iterations ADD COLUMN change_stats_json TEXT"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyMigration31(tx *sql.Tx) error {
+	hasEndpointID, err := columnExists(tx, "sessions", "endpoint_id")
+	if err != nil {
+		return err
+	}
+	if hasEndpointID {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN endpoint_id TEXT"); err != nil {
 		return err
 	}
 	return nil

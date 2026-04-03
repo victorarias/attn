@@ -6,6 +6,29 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-03]
+
+### Added
+- **Remote Daemon Hub**: Connect to remote machines over SSH, bootstrap and manage remote `attn` daemons, and surface remote sessions alongside local ones in the dashboard with endpoint badges. Remote sessions get full PTY interactivity, git status, diff/review panels, and review-loop support routed through the local hub.
+- **Remote Session Creation**: The new-session picker can target connected remote endpoints, browse remote directories, show per-endpoint recents, and create remote worktrees — all through daemon websocket commands instead of local filesystem access.
+- **Packaged Remote Smoke Coverage**: End-to-end packaged-app harness that bootstraps a real SSH endpoint, exercises remote session creation, diff/review panels, review-loop flows, and picker parity against `ai-sandbox`.
+- **Terminal Copy-on-Select**: Selecting text in terminals copies it automatically with whitespace cleanup. `Cmd+Shift+C` copies as markdown, detecting colored text as inline code.
+- **UI Perf Harness**: Packaged-app benchmark that samples CPU, RSS, and frontend terminal/diff/review perf at repeatable checkpoints, including PTY transport mode comparisons.
+
+### Changed
+- **PTY Output Backpressure**: Pace live terminal output with xterm write callbacks and websocket acknowledgements so the daemon stops flooding terminals faster than they can render.
+- **Linux Release Artifacts**: Tagged releases now ship standalone `attn-linux-amd64` and `attn-linux-arm64` daemon binaries, with a release-preflight workflow for branch-safe verification.
+- **Compiled Versioning**: The daemon reports an explicit compiled version via `attn --version`, and the app preflights binary protocol compatibility before restarting a mismatched daemon.
+- **Cross-Compile Path**: Use `zig cc` for macOS-to-Linux cgo builds with fingerprint-based dev caching, so remote-daemon iteration produces SQLite-capable Linux binaries without a Linux box.
+
+### Fixed
+- **Terminal Scroll & Cursor**: Fix viewport scroll jump during fast TUI output, ghost cursor reappearing after resize, and scroll pin not resetting on session respawn.
+- **Remote Daemon Robustness**: Wider startup readiness windows for SSH-bootstrapped daemons and packaged-app cold boot, cgo-less in-memory fallback that actually retains state, correct `~` expansion on the remote host, and Linux PTY spawn no longer fails with EPERM.
+
+### Removed
+- **Terminal Coalescing Experiment**: Remove the frontend write-coalescing config and debug plumbing after it repeatedly caused rendering artifacts in both DOM and WebGL renderers.
+- **Unused Monaco Dependencies**: Remove stale Monaco editor packages after the review UI fully moved to CodeMirror.
+
 ## [2026-03-16]
 
 ### Fixed

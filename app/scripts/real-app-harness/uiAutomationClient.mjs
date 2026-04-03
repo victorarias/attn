@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -24,15 +24,32 @@ function defaultManifestPath() {
 
 export class UiAutomationClient {
   constructor({
-    appPath = '/Applications/attn.app',
+    appPath = path.join(os.homedir(), 'Applications', 'attn.app'),
     manifestPath = defaultManifestPath(),
+    launchEnv = null,
   } = {}) {
     this.appPath = appPath;
     this.manifestPath = manifestPath;
+    this.launchEnv = launchEnv;
   }
 
   async launchApp() {
-    await execFileAsync('open', ['-a', this.appPath]);
+    if (this.launchEnv && Object.keys(this.launchEnv).length > 0) {
+      const executablePath = this.appPath.endsWith('.app')
+        ? path.join(this.appPath, 'Contents', 'MacOS', 'app')
+        : this.appPath;
+      const child = spawn(executablePath, [], {
+        detached: true,
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          ...this.launchEnv,
+        },
+      });
+      child.unref();
+      return;
+    }
+    await execFileAsync('open', [this.appPath]);
   }
 
   async quitApp(timeoutMs = 10_000) {
@@ -47,25 +64,37 @@ export class UiAutomationClient {
     try {
       await execFileAsync('osascript', ['-e', 'tell application id "com.attn.manager" to quit']);
     } catch {
-      return;
-    }
-
-    if (!existingPid) {
-      await delay(500);
-      return;
+      // Fall through to process-based cleanup.
     }
 
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
-      if (!processExists(existingPid)) {
+      const appPids = await this.listAppPids();
+      if ((!existingPid || !processExists(existingPid)) && appPids.length === 0) {
         return;
       }
       await delay(200);
+    }
+
+    const remainingPids = await this.listAppPids();
+    for (const pid of new Set([existingPid, ...remainingPids].filter((value) => Number.isInteger(value) && value > 0))) {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {}
+    }
+    await delay(500);
+    for (const pid of await this.listAppPids()) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
     }
   }
 
   async launchFreshApp() {
     await this.quitApp();
+    try {
+      fs.unlinkSync(this.manifestPath);
+    } catch {}
     await this.launchApp();
   }
 
@@ -76,7 +105,7 @@ export class UiAutomationClient {
     while (Date.now() - startedAt < timeoutMs) {
       try {
         const manifest = this.readManifest();
-        if (manifest?.enabled && manifest.port && manifest.token) {
+        if (manifest?.enabled && manifest.port && manifest.token && processExists(manifest.pid)) {
           return manifest;
         }
       } catch (error) {
@@ -92,6 +121,18 @@ export class UiAutomationClient {
 
   readManifest() {
     return JSON.parse(fs.readFileSync(this.manifestPath, 'utf8'));
+  }
+
+  async listAppPids() {
+    try {
+      const { stdout } = await execFileAsync('pgrep', ['-f', `${this.appPath}/Contents/MacOS/app`]);
+      return stdout
+        .split(/\s+/)
+        .map((value) => Number.parseInt(value, 10))
+        .filter((value) => Number.isInteger(value) && value > 0);
+    } catch {
+      return [];
+    }
   }
 
   async request(action, payload = {}, options = {}) {
@@ -137,7 +178,8 @@ export class UiAutomationClient {
         try {
           const response = JSON.parse(line);
           if (!response.ok) {
-            reject(new Error(response.error || `Automation request failed: ${action} (${requestId})`));
+            const detail = response.error || 'unknown error';
+            reject(new Error(`Automation request failed: ${action} (${requestId}): ${detail}`));
             return;
           }
           resolve(response.result);
@@ -180,7 +222,20 @@ export class UiAutomationClient {
 
     while (Date.now() - startedAt < timeoutMs) {
       try {
-        return await this.request(action, {}, { timeoutMs: 5_000 });
+        const result = await this.request(action, {}, { timeoutMs: Math.min(15_000, timeoutMs) });
+        if (
+          action === 'get_state' &&
+          result &&
+          typeof result === 'object' &&
+          'daemonReady' in result &&
+          result.daemonReady === false
+        ) {
+          const detail = typeof result.connectionError === 'string' && result.connectionError
+            ? `: ${result.connectionError}`
+            : '';
+          throw new Error(`daemon not ready${detail}`);
+        }
+        return result;
       } catch (error) {
         lastError = error;
       }

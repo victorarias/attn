@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { emit, listen } from '@tauri-apps/api/event';
 import { isTauri } from '@tauri-apps/api/core';
 import type { Session } from '../store/sessions';
@@ -6,6 +6,10 @@ import { MAIN_TERMINAL_PANE_ID } from '../store/sessions';
 import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId } from '../shortcuts';
+import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
+import { getReviewPerfSnapshot } from '../utils/reviewPerf';
+import { getAllResizeEvents } from '../utils/terminalDebug';
+import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
 
 const UI_AUTOMATION_REQUEST_EVENT = 'attn://ui-automation/request';
 const UI_AUTOMATION_RESPONSE_EVENT = 'attn://ui-automation/response';
@@ -27,10 +31,13 @@ interface AutomationResponse {
 interface UseUiAutomationBridgeArgs {
   sessions: Session[];
   activeSessionId: string | null;
+  daemonReady?: boolean;
+  connectionError?: string | null;
   getActivePaneIdForSession: (session: Session | undefined | null) => string;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string) => Promise<string>;
   selectSession: (sessionId: string) => void;
   closeSession: (sessionId: string) => void;
+  reloadSession?: (sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
   splitPane: (sessionId: string, targetPaneId: string, direction: TerminalSplitDirection) => Promise<unknown>;
   closePane: (sessionId: string, paneId: string) => Promise<unknown>;
   focusPane: (sessionId: string, paneId: string) => void;
@@ -40,10 +47,37 @@ interface UseUiAutomationBridgeArgs {
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null;
   fitSessionActivePane: (sessionId: string) => void;
   sendRuntimeInput: (runtimeId: string, data: string, source?: string) => void;
+  getReviewState?: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: unknown; error?: string }>;
+  addComment?: (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => Promise<{ success: boolean; comment?: unknown }>;
+  updateComment?: (commentId: string, content: string) => Promise<{ success: boolean }>;
+  resolveComment?: (commentId: string, resolved: boolean) => Promise<{ success: boolean }>;
+  wontFixComment?: (commentId: string, wontFix: boolean) => Promise<{ success: boolean }>;
+  deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
+  getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: unknown[] }>;
+  startReviewLoop?: (prompt: string, iterationLimit: number, presetId?: string) => Promise<void>;
+  stopReviewLoop?: () => Promise<void>;
+  getReviewLoopState?: (sessionId: string) => Promise<{ success: boolean; state: unknown | null }>;
+  answerReviewLoop?: (loopId: string, interactionId: string, answer: string) => Promise<{ success: boolean; state: unknown | null }>;
+  resetSessionPaneTerminal: (sessionId: string, paneId: string) => boolean;
+  injectSessionPaneBytes: (sessionId: string, paneId: string, bytes: Uint8Array) => Promise<boolean>;
+  injectSessionPaneBase64: (sessionId: string, paneId: string, payload: string) => Promise<boolean>;
+  drainSessionPaneTerminal: (sessionId: string, paneId: string) => Promise<boolean>;
 }
 
 function nextAnimationFrame() {
-  return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const timeoutId = window.setTimeout(finish, 50);
+    window.requestAnimationFrame(() => {
+      window.clearTimeout(timeoutId);
+      finish();
+    });
+  });
 }
 
 async function settleUi(frames = 2) {
@@ -132,13 +166,41 @@ function rectSnapshot(element: Element | null) {
   };
 }
 
+async function captureDomScreenshotData() {
+  const target = document.getElementById('root') || document.body;
+  if (!(target instanceof HTMLElement)) {
+    throw new Error('Screenshot target not found');
+  }
+
+  const { toPng } = await import('html-to-image');
+  const backgroundColor = getComputedStyle(document.body).backgroundColor || '#111111';
+  const dataUrl = await toPng(target, {
+    cacheBust: true,
+    pixelRatio: 1,
+    backgroundColor,
+  });
+  return {
+    source: 'web',
+    bounds: rectSnapshot(target),
+    pngBase64: dataUrl.replace(/^data:image\/png;base64,/, ''),
+  };
+}
+
 function collectVisualSnapshot(
   sessions: Session[],
   activeSessionId: string | null,
   getActivePaneIdForSession: (session: Session | undefined | null) => string,
   getPaneText: (sessionId: string, paneId: string) => string,
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null,
+  options?: {
+    includePaneText?: boolean;
+    sessionIds?: Set<string> | null;
+  },
 ) {
+  const includePaneText = options?.includePaneText !== false;
+  const filteredSessions = options?.sessionIds
+    ? sessions.filter((session) => options.sessionIds?.has(session.id))
+    : sessions;
   return {
     activeSessionId,
     activeElement: {
@@ -147,14 +209,23 @@ function collectVisualSnapshot(
       ariaLabel: (document.activeElement as HTMLElement | null)?.getAttribute?.('aria-label') || null,
       text: document.activeElement?.textContent?.slice(0, 120) || '',
     },
-    sessions: sessions.map((session) => {
+    sessions: filteredSessions.map((session) => {
       const activePaneId = getActivePaneIdForSession(session);
       const paneIds = [MAIN_TERMINAL_PANE_ID, ...session.workspace.terminals.map((terminal) => terminal.id)];
+      const sidebarItem = document.querySelector(
+        `[data-testid="sidebar-session-${session.id}"]`
+      );
       return {
         id: session.id,
         label: session.label,
         activePaneId,
         daemonActivePaneId: session.daemonActivePaneId,
+        sidebarItem: sidebarItem instanceof HTMLElement
+          ? {
+              text: sidebarItem.textContent || '',
+              bounds: rectSnapshot(sidebarItem),
+            }
+          : null,
         workspaceBounds: rectSnapshot(
           document.querySelector(`[data-session-terminal-workspace="${session.id}"]`)
         ),
@@ -168,12 +239,62 @@ function collectVisualSnapshot(
             kind: paneId === MAIN_TERMINAL_PANE_ID ? 'main' : 'shell',
             bounds: rectSnapshot(paneElement),
             className: paneElement instanceof HTMLElement ? paneElement.className : null,
-            text: getPaneText(session.id, paneId),
+            text: includePaneText ? getPaneText(session.id, paneId) : '',
             size: getPaneSize(session.id, paneId),
           };
         }),
       };
     }),
+  };
+}
+
+function collectSessionUiState(
+  sessions: Session[],
+  activeSessionId: string | null,
+  sessionId: string,
+  getActivePaneIdForSession: (session: Session | undefined | null) => string,
+) {
+  const session = sessions.find((entry) => entry.id === sessionId);
+  if (!session) {
+    return {
+      sessionId,
+      exists: false,
+      selected: false,
+      sidebarItem: null,
+      workspaceBounds: null,
+      mainPaneBounds: null,
+      activePaneId: null,
+      daemonActivePaneId: null,
+      label: null,
+      cwd: null,
+    };
+  }
+
+  const sidebarItem = document.querySelector(
+    `[data-testid="sidebar-session-${session.id}"]`
+  );
+  const mainPane = document.querySelector(
+    `[data-pane-session-id="${session.id}"][data-pane-id="${MAIN_TERMINAL_PANE_ID}"]`
+  );
+
+  return {
+    sessionId,
+    exists: true,
+    selected: activeSessionId === session.id,
+    label: session.label,
+    cwd: session.cwd,
+    activePaneId: getActivePaneIdForSession(session),
+    daemonActivePaneId: session.daemonActivePaneId,
+    sidebarItem: sidebarItem instanceof HTMLElement
+      ? {
+          text: sidebarItem.textContent || '',
+          bounds: rectSnapshot(sidebarItem),
+        }
+      : null,
+    workspaceBounds: rectSnapshot(
+      document.querySelector(`[data-session-terminal-workspace="${session.id}"]`)
+    ),
+    mainPaneBounds: rectSnapshot(mainPane),
   };
 }
 
@@ -227,13 +348,325 @@ function clickPaneElement(sessionId: string, paneId: string) {
   }));
 }
 
+function clickElement(element: HTMLElement) {
+  element.dispatchEvent(new MouseEvent('mousedown', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+  }));
+  element.dispatchEvent(new MouseEvent('mouseup', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+  }));
+  element.dispatchEvent(new MouseEvent('click', {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+  }));
+}
+
+function setInputValue(element: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    'value',
+  )?.set;
+  if (!setter) {
+    throw new Error('Unable to resolve input value setter');
+  }
+  setter.call(element, value);
+  element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+}
+
+function getLocationPickerRoot() {
+  const root = document.querySelector('[data-testid="location-picker"]');
+  return root instanceof HTMLElement ? root : null;
+}
+
+function getLocationPickerOverlay() {
+  const overlay = document.querySelector('[data-testid="location-picker-overlay"]');
+  return overlay instanceof HTMLElement ? overlay : null;
+}
+
+function collectLocationPickerUiState() {
+  const root = getLocationPickerRoot();
+  if (!root) {
+    return {
+      open: false,
+      mode: null,
+      title: null,
+      pathInputValue: '',
+      currentDir: '',
+      selectedTarget: null,
+      targets: [],
+      recents: [],
+      directories: [],
+      emptyText: '',
+      repoOptions: null,
+    };
+  }
+
+  const title = root.querySelector('[data-testid="location-picker-title"]');
+  const pathInput = root.querySelector('[data-testid="location-picker-path-input"]');
+  const breadcrumb = root.querySelector('[data-testid="location-picker-breadcrumb-path"]');
+  const empty = root.querySelector('[data-testid="location-picker-empty"]');
+  const targetButtons = Array.from(root.querySelectorAll('.picker-endpoint-controls button'))
+    .filter((button): button is HTMLButtonElement => button instanceof HTMLButtonElement)
+    .map((button) => ({
+      label: button.querySelector('.endpoint-option-name')?.textContent?.trim() || '',
+      meta: button.querySelector('.endpoint-option-meta')?.textContent?.trim() || '',
+      endpointId: button.dataset.endpointId || null,
+      active: button.classList.contains('active'),
+      disabled: button.disabled,
+    }));
+
+  const pickerItems = Array.from(root.querySelectorAll('[data-testid^="location-picker-item-"]'))
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .map((item) => ({
+      index: Number.parseInt(item.dataset.index || '-1', 10),
+      kind: item.dataset.kind || '',
+      path: item.dataset.path || '',
+      name: item.querySelector('.picker-name')?.textContent?.trim() || '',
+      detail: item.querySelector('.picker-path')?.textContent?.trim() || '',
+      selected: item.classList.contains('selected'),
+    }))
+    .sort((left, right) => left.index - right.index);
+
+  const repoOptionsRoot = root.querySelector('[data-testid="repo-options"]');
+  const repoOptions = repoOptionsRoot instanceof HTMLElement
+    ? {
+        items: Array.from(repoOptionsRoot.querySelectorAll('[data-testid^="repo-option-"]'))
+          .filter((node): node is HTMLElement => node instanceof HTMLElement)
+          .map((item) => ({
+            index: Number.parseInt(item.dataset.optionIndex || '-1', 10),
+            kind: item.dataset.optionKind || '',
+            name: item.querySelector('.repo-option-name')?.textContent?.trim() || '',
+            detail: item.querySelector('.repo-option-detail')?.textContent?.trim() || '',
+            selected: item.classList.contains('selected'),
+          }))
+          .sort((left, right) => left.index - right.index),
+        newWorktree: (() => {
+          const form = repoOptionsRoot.querySelector('[data-testid="repo-new-worktree-form"]');
+          if (!(form instanceof HTMLElement)) {
+            return null;
+          }
+          const currentRadio = form.querySelector('[data-testid="repo-new-worktree-start-current"]');
+          const defaultRadio = form.querySelector('[data-testid="repo-new-worktree-start-default"]');
+          const input = form.querySelector('[data-testid="repo-new-worktree-input"]');
+          return {
+            visible: true,
+            name: input instanceof HTMLInputElement ? input.value : '',
+            startingBranch: currentRadio instanceof HTMLInputElement && currentRadio.checked
+              ? 'current'
+              : defaultRadio instanceof HTMLInputElement && defaultRadio.checked
+                ? 'default'
+                : null,
+          };
+        })(),
+      }
+    : null;
+
+  return {
+    open: true,
+    mode: repoOptions ? 'repo-options' : 'path-input',
+    title: title?.textContent?.trim() || '',
+    pathInputValue: pathInput instanceof HTMLInputElement ? pathInput.value : '',
+    currentDir: breadcrumb?.textContent?.trim() || '',
+    selectedTarget: targetButtons.find((button) => button.active)?.label || null,
+    targets: targetButtons,
+    recents: pickerItems.filter((item) => item.kind === 'recent'),
+    directories: pickerItems.filter((item) => item.kind === 'directory'),
+    emptyText: empty?.textContent?.trim() || '',
+    repoOptions,
+  };
+}
+
+async function getBrowserMemorySnapshot() {
+  const performanceWithMemory = performance as typeof performance & {
+    memory?: {
+      usedJSHeapSize?: number;
+      totalJSHeapSize?: number;
+      jsHeapSizeLimit?: number;
+    };
+    measureUserAgentSpecificMemory?: () => Promise<{
+      bytes: number;
+      breakdown?: Array<{ bytes: number; attribution?: Array<{ scope?: string; url?: string }> }>;
+    }>;
+  };
+
+  let performanceMemory: Record<string, number> | null = null;
+  if (performanceWithMemory.memory) {
+    performanceMemory = {
+      usedJSHeapSize: performanceWithMemory.memory.usedJSHeapSize || 0,
+      totalJSHeapSize: performanceWithMemory.memory.totalJSHeapSize || 0,
+      jsHeapSizeLimit: performanceWithMemory.memory.jsHeapSizeLimit || 0,
+    };
+  }
+
+  let userAgentSpecificMemory: { bytes: number; breakdownCount: number } | null = null;
+  let userAgentSpecificMemoryError: string | null = null;
+  if (typeof performanceWithMemory.measureUserAgentSpecificMemory === 'function') {
+    try {
+      const result = await Promise.race([
+        performanceWithMemory.measureUserAgentSpecificMemory(),
+        new Promise((_, reject) => {
+          window.setTimeout(() => reject(new Error('measureUserAgentSpecificMemory timed out')), 400);
+        }),
+      ]) as {
+        bytes: number;
+        breakdown?: Array<{ bytes: number; attribution?: Array<{ scope?: string; url?: string }> }>;
+      };
+      userAgentSpecificMemory = {
+        bytes: result.bytes,
+        breakdownCount: result.breakdown?.length || 0,
+      };
+    } catch (error) {
+      userAgentSpecificMemoryError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  return {
+    performanceMemory,
+    userAgentSpecificMemory,
+    userAgentSpecificMemoryError,
+  };
+}
+
+async function capturePerfSnapshot(
+  sessions: Session[],
+  activeSessionId: string | null,
+  getActivePaneIdForSession: (session: Session | undefined | null) => string,
+  options?: { includeMemory?: boolean },
+) {
+  const browserMemory = options?.includeMemory === false
+    ? {
+        performanceMemory: null,
+        userAgentSpecificMemory: null,
+        userAgentSpecificMemoryError: null,
+      }
+    : await getBrowserMemorySnapshot();
+  const totalPaneCount = sessions.reduce(
+    (sum, session) => sum + 1 + session.workspace.terminals.length,
+    0,
+  );
+  return {
+    capturedAt: new Date().toISOString(),
+    location: window.location.href,
+    window: {
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+    },
+    document: {
+      totalElements: document.querySelectorAll('*').length,
+      xtermCount: document.querySelectorAll('.xterm').length,
+      terminalContainerCount: document.querySelectorAll('.terminal-container').length,
+      codeMirrorCount: document.querySelectorAll('.cm-editor').length,
+      unifiedDiffEditorCount: document.querySelectorAll('.unified-diff-editor').length,
+      diffDetailOpen: document.querySelectorAll('.dock-panel--diff-detail, .dock-panel--diffDetail').length > 0,
+      diffPanelOpen: document.querySelectorAll('.dock-panel--diff').length > 0,
+      reviewLoopOpen: document.querySelectorAll('.dock-panel--review-loop, .dock-panel--reviewLoop').length > 0,
+    },
+    sessions: {
+      count: sessions.length,
+      activeSessionId,
+      totalPaneCount,
+      items: sessions.map((session) => ({
+        id: session.id,
+        label: session.label,
+        state: session.state,
+        activePaneId: getActivePaneIdForSession(session),
+        shellPaneCount: session.workspace.terminals.length,
+      })),
+    },
+    browserMemory,
+    terminals: getTerminalPerfSnapshot(),
+    review: getReviewPerfSnapshot(),
+    paneDebugEventCount: window.__ATTN_PANE_DEBUG_DUMP?.().length || 0,
+    resizeEventCount: getAllResizeEvents().length,
+    pty: getPtyPerfSnapshot(),
+  };
+}
+
+function buildBenchmarkBytes(chunkBytes: number): Uint8Array {
+  const safeChunkBytes = Math.max(64, Math.floor(chunkBytes));
+  const linePayloadWidth = 112;
+  let output = '';
+  let lineNumber = 0;
+  while (output.length < safeChunkBytes) {
+    output += `bench ${String(lineNumber).padStart(6, '0')} ${'x'.repeat(linePayloadWidth)}\r\n`;
+    lineNumber += 1;
+  }
+  return new TextEncoder().encode(output.slice(0, safeChunkBytes));
+}
+
+function encodeBytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const slice = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
+}
+
+function decodeBase64ToBytes(payload: string): Uint8Array {
+  const startedAt = performance.now();
+  const binaryStr = atob(payload);
+  const bytes = Uint8Array.from(binaryStr, (char) => char.charCodeAt(0));
+  recordPtyDecode(bytes.length, performance.now() - startedAt);
+  return bytes;
+}
+
+function concatByteChunks(chunks: Uint8Array[]): Uint8Array {
+  const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const combined = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return combined;
+}
+
+function collectReviewLoopUiState(sessionId: string) {
+  const requestedDrawer = document.querySelector(`[data-testid="review-loop-drawer-${sessionId}"]`);
+  const fallbackDrawer = document.querySelector('.review-loop-drawer-panel');
+  const drawer = requestedDrawer || fallbackDrawer;
+  const reviewLoopPanel = document.querySelector('.dock-panel--review-loop, .dock-panel--reviewLoop');
+  const summary = drawer?.querySelector('.review-loop-panel-card--summary .review-loop-panel-content');
+  const question = drawer?.querySelector('.review-loop-question-text');
+  const status = drawer?.querySelector('.review-loop-drawer-status');
+  const subtitle = drawer?.querySelector('.review-loop-drawer-subtitle');
+  const files = Array.from(drawer?.querySelectorAll('.review-loop-file-list li, .review-loop-change-path') || [])
+    .map((node) => node.textContent?.trim() || '')
+    .filter(Boolean);
+
+  return {
+    sessionId,
+    open: Boolean(reviewLoopPanel && drawer),
+    drawerBounds: rectSnapshot(drawer || null),
+    panelBounds: rectSnapshot(reviewLoopPanel || null),
+    drawerTestId: drawer instanceof HTMLElement ? drawer.dataset.testid || drawer.getAttribute('data-testid') || '' : '',
+    statusText: status?.textContent?.trim() || '',
+    subtitleText: subtitle?.textContent?.trim() || '',
+    summaryText: summary?.textContent?.trim() || '',
+    questionText: question?.textContent?.trim() || '',
+    answerVisible: Boolean(drawer?.querySelector('.review-loop-answer-box')),
+    files,
+  };
+}
+
 export function useUiAutomationBridge({
   sessions,
   activeSessionId,
+  daemonReady = true,
+  connectionError = null,
   getActivePaneIdForSession,
   createSession,
   selectSession,
   closeSession,
+  reloadSession,
   splitPane,
   closePane,
   focusPane,
@@ -243,6 +676,21 @@ export function useUiAutomationBridge({
   getPaneSize,
   fitSessionActivePane,
   sendRuntimeInput,
+  getReviewState,
+  addComment,
+  updateComment,
+  resolveComment,
+  wontFixComment,
+  deleteComment,
+  getComments,
+  startReviewLoop,
+  stopReviewLoop,
+  getReviewLoopState,
+  answerReviewLoop,
+  resetSessionPaneTerminal,
+  injectSessionPaneBytes,
+  injectSessionPaneBase64,
+  drainSessionPaneTerminal,
 }: UseUiAutomationBridgeArgs) {
   const handleAutomationRequest = useCallback(async (request: AutomationRequest) => {
     const payload = request.payload || {};
@@ -253,8 +701,12 @@ export function useUiAutomationBridge({
       case 'get_state':
         return {
           activeSessionId,
+          daemonReady,
+          connectionError,
           sessions: sessions.map((session) => serializeSession(session, getActivePaneIdForSession)),
         };
+      case 'capture_screenshot_data':
+        return captureDomScreenshotData();
       case 'list_sessions':
         return {
           activeSessionId,
@@ -276,12 +728,20 @@ export function useUiAutomationBridge({
           ? payload.label
           : (cwd.split('/').pop() || 'session');
         const agent = typeof payload.agent === 'string' ? payload.agent : undefined;
+        const providedSessionId = typeof payload.sessionId === 'string' && payload.sessionId.length > 0
+          ? payload.sessionId
+          : undefined;
+        const endpointId = typeof payload.endpoint_id === 'string' && payload.endpoint_id.length > 0
+          ? payload.endpoint_id
+          : undefined;
         if (!cwd) {
           throw new Error('create_session requires cwd');
         }
-        const sessionId = await createSession(label, cwd, undefined, agent);
+        const sessionId = await createSession(label, cwd, providedSessionId, agent, endpointId);
         await settleUi();
-        fitSessionActivePane(sessionId);
+        window.setTimeout(() => {
+          fitSessionActivePane(sessionId);
+        }, 50);
         return { sessionId };
       }
       case 'close_session': {
@@ -290,6 +750,19 @@ export function useUiAutomationBridge({
           throw new Error('close_session requires sessionId');
         }
         closeSession(sessionId);
+        await settleUi();
+        return { sessionId };
+      }
+      case 'reload_session': {
+        if (!reloadSession) {
+          throw new Error('reload_session is not configured');
+        }
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        if (!sessionId) {
+          throw new Error('reload_session requires sessionId');
+        }
+        const size = getPaneSize(sessionId, MAIN_TERMINAL_PANE_ID) || undefined;
+        await reloadSession(sessionId, size);
         await settleUi();
         return { sessionId };
       }
@@ -309,6 +782,161 @@ export function useUiAutomationBridge({
           throw new Error('Session not found');
         }
         return serializeSession(session, getActivePaneIdForSession);
+      }
+      case 'get_session_ui_state': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        if (!sessionId) {
+          throw new Error('get_session_ui_state requires sessionId');
+        }
+        return collectSessionUiState(
+          sessions,
+          activeSessionId,
+          sessionId,
+          getActivePaneIdForSession,
+        );
+      }
+      case 'location_picker_get_state':
+        return collectLocationPickerUiState();
+      case 'location_picker_open': {
+        if (!getLocationPickerRoot()) {
+          const button = document.querySelector('[aria-label="New Session"]');
+          if (!(button instanceof HTMLElement)) {
+            throw new Error('New Session button not found');
+          }
+          clickElement(button);
+        }
+        await settleUi(2);
+        return collectLocationPickerUiState();
+      }
+      case 'location_picker_close': {
+        const overlay = getLocationPickerOverlay();
+        if (overlay) {
+          overlay.dispatchEvent(new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+          }));
+          await settleUi(2);
+        }
+        return collectLocationPickerUiState();
+      }
+      case 'location_picker_set_target': {
+        const root = getLocationPickerRoot();
+        if (!root) {
+          throw new Error('Location picker is not open');
+        }
+        const endpointId = typeof payload.endpointId === 'string' ? payload.endpointId : '';
+        const endpointName = typeof payload.endpointName === 'string' ? payload.endpointName : '';
+        const local = payload.local === true;
+        const buttons = Array.from(root.querySelectorAll('.picker-endpoint-controls button'))
+          .filter((button): button is HTMLButtonElement => button instanceof HTMLButtonElement);
+        const button = buttons.find((candidate) => {
+          if (local) {
+            return candidate.getAttribute('data-testid') === 'location-picker-target-local';
+          }
+          if (endpointId && candidate.dataset.endpointId === endpointId) {
+            return true;
+          }
+          if (endpointName) {
+            return candidate.querySelector('.endpoint-option-name')?.textContent?.trim() === endpointName;
+          }
+          return false;
+        });
+        if (!button) {
+          throw new Error('Requested location picker target not found');
+        }
+        clickElement(button);
+        await settleUi(2);
+        return collectLocationPickerUiState();
+      }
+      case 'location_picker_set_path': {
+        const input = document.querySelector('[data-testid="location-picker-path-input"]');
+        if (!(input instanceof HTMLInputElement)) {
+          throw new Error('Location picker path input not found');
+        }
+        const value = typeof payload.value === 'string' ? payload.value : '';
+        input.focus();
+        setInputValue(input, value);
+        await settleUi(2);
+        return collectLocationPickerUiState();
+      }
+      case 'location_picker_submit_path': {
+        const input = document.querySelector('[data-testid="location-picker-path-input"]');
+        if (!(input instanceof HTMLInputElement)) {
+          throw new Error('Location picker path input not found');
+        }
+        input.focus();
+        input.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }));
+        await settleUi(2);
+        return collectLocationPickerUiState();
+      }
+      case 'location_picker_select_path_item': {
+        const index = typeof payload.index === 'number' ? payload.index : NaN;
+        if (!Number.isFinite(index)) {
+          throw new Error('location_picker_select_path_item requires index');
+        }
+        const item = document.querySelector(`[data-testid="location-picker-item-${Math.floor(index)}"]`);
+        if (!(item instanceof HTMLElement)) {
+          throw new Error(`Location picker item ${index} not found`);
+        }
+        clickElement(item);
+        await settleUi(2);
+        return collectLocationPickerUiState();
+      }
+      case 'location_picker_select_repo_option': {
+        const index = typeof payload.index === 'number' ? payload.index : NaN;
+        if (!Number.isFinite(index)) {
+          throw new Error('location_picker_select_repo_option requires index');
+        }
+        const option = document.querySelector(`[data-testid="repo-option-${Math.floor(index)}"]`);
+        if (!(option instanceof HTMLElement)) {
+          throw new Error(`Repo option ${index} not found`);
+        }
+        clickElement(option);
+        await settleUi(2);
+        return collectLocationPickerUiState();
+      }
+      case 'location_picker_set_new_worktree_name': {
+        const input = document.querySelector('[data-testid="repo-new-worktree-input"]');
+        if (!(input instanceof HTMLInputElement)) {
+          throw new Error('New worktree input not found');
+        }
+        const value = typeof payload.value === 'string' ? payload.value : '';
+        input.focus();
+        setInputValue(input, value);
+        await settleUi(2);
+        return collectLocationPickerUiState();
+      }
+      case 'location_picker_set_new_worktree_starting_branch': {
+        const mode = payload.mode === 'default' ? 'default' : 'current';
+        const selector = mode === 'default'
+          ? '[data-testid="repo-new-worktree-start-default"]'
+          : '[data-testid="repo-new-worktree-start-current"]';
+        const radio = document.querySelector(selector);
+        if (!(radio instanceof HTMLInputElement)) {
+          throw new Error(`New worktree ${mode} radio not found`);
+        }
+        clickElement(radio);
+        await settleUi(2);
+        return collectLocationPickerUiState();
+      }
+      case 'location_picker_submit_new_worktree': {
+        const input = document.querySelector('[data-testid="repo-new-worktree-input"]');
+        if (!(input instanceof HTMLInputElement)) {
+          throw new Error('New worktree input not found');
+        }
+        input.focus();
+        input.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }));
+        await settleUi(2);
+        return collectLocationPickerUiState();
       }
       case 'split_pane': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
@@ -436,6 +1064,136 @@ export function useUiAutomationBridge({
           pane: snapshot.sessions[0]?.panes.find((pane) => pane.paneId === paneId) || null,
         };
       }
+      case 'review_get_state': {
+        if (!getReviewState) {
+          throw new Error('review_get_state is not configured');
+        }
+        const repoPath = typeof payload.repoPath === 'string' ? payload.repoPath : '';
+        const branch = typeof payload.branch === 'string' ? payload.branch : '';
+        if (!repoPath || !branch) {
+          throw new Error('review_get_state requires repoPath and branch');
+        }
+        return getReviewState(repoPath, branch);
+      }
+      case 'review_get_comments': {
+        if (!getComments) {
+          throw new Error('review_get_comments is not configured');
+        }
+        const reviewId = typeof payload.reviewId === 'string' ? payload.reviewId : '';
+        const filepath = typeof payload.filepath === 'string' && payload.filepath.length > 0
+          ? payload.filepath
+          : undefined;
+        if (!reviewId) {
+          throw new Error('review_get_comments requires reviewId');
+        }
+        return getComments(reviewId, filepath);
+      }
+      case 'review_add_comment': {
+        if (!addComment) {
+          throw new Error('review_add_comment is not configured');
+        }
+        const reviewId = typeof payload.reviewId === 'string' ? payload.reviewId : '';
+        const filepath = typeof payload.filepath === 'string' ? payload.filepath : '';
+        const lineStart = typeof payload.lineStart === 'number' ? payload.lineStart : NaN;
+        const lineEnd = typeof payload.lineEnd === 'number' ? payload.lineEnd : NaN;
+        const content = typeof payload.content === 'string' ? payload.content : '';
+        if (!reviewId || !filepath || !Number.isFinite(lineStart) || !Number.isFinite(lineEnd) || !content) {
+          throw new Error('review_add_comment requires reviewId, filepath, lineStart, lineEnd, and content');
+        }
+        return addComment(reviewId, filepath, lineStart, lineEnd, content);
+      }
+      case 'review_update_comment': {
+        if (!updateComment) {
+          throw new Error('review_update_comment is not configured');
+        }
+        const commentId = typeof payload.commentId === 'string' ? payload.commentId : '';
+        const content = typeof payload.content === 'string' ? payload.content : '';
+        if (!commentId || !content) {
+          throw new Error('review_update_comment requires commentId and content');
+        }
+        return updateComment(commentId, content);
+      }
+      case 'review_resolve_comment': {
+        if (!resolveComment) {
+          throw new Error('review_resolve_comment is not configured');
+        }
+        const commentId = typeof payload.commentId === 'string' ? payload.commentId : '';
+        const resolved = payload.resolved !== false;
+        if (!commentId) {
+          throw new Error('review_resolve_comment requires commentId');
+        }
+        return resolveComment(commentId, resolved);
+      }
+      case 'review_wont_fix_comment': {
+        if (!wontFixComment) {
+          throw new Error('review_wont_fix_comment is not configured');
+        }
+        const commentId = typeof payload.commentId === 'string' ? payload.commentId : '';
+        const wontFix = payload.wontFix !== false;
+        if (!commentId) {
+          throw new Error('review_wont_fix_comment requires commentId');
+        }
+        return wontFixComment(commentId, wontFix);
+      }
+      case 'review_delete_comment': {
+        if (!deleteComment) {
+          throw new Error('review_delete_comment is not configured');
+        }
+        const commentId = typeof payload.commentId === 'string' ? payload.commentId : '';
+        if (!commentId) {
+          throw new Error('review_delete_comment requires commentId');
+        }
+        return deleteComment(commentId);
+      }
+      case 'review_loop_start': {
+        if (!startReviewLoop) {
+          throw new Error('review_loop_start is not configured');
+        }
+        const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
+        const iterationLimit = typeof payload.iterationLimit === 'number' ? payload.iterationLimit : 1;
+        const presetId = typeof payload.presetId === 'string' ? payload.presetId : undefined;
+        if (!prompt) {
+          throw new Error('review_loop_start requires prompt');
+        }
+        await startReviewLoop(prompt, iterationLimit, presetId);
+        return { ok: true };
+      }
+      case 'review_loop_stop': {
+        if (!stopReviewLoop) {
+          throw new Error('review_loop_stop is not configured');
+        }
+        await stopReviewLoop();
+        return { ok: true };
+      }
+      case 'review_loop_get_state': {
+        if (!getReviewLoopState) {
+          throw new Error('review_loop_get_state is not configured');
+        }
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : activeSessionId;
+        if (!sessionId) {
+          throw new Error('review_loop_get_state requires sessionId');
+        }
+        return getReviewLoopState(sessionId);
+      }
+      case 'review_loop_answer': {
+        if (!answerReviewLoop) {
+          throw new Error('review_loop_answer is not configured');
+        }
+        const loopId = typeof payload.loopId === 'string' ? payload.loopId : '';
+        const interactionId = typeof payload.interactionId === 'string' ? payload.interactionId : '';
+        const answer = typeof payload.answer === 'string' ? payload.answer : '';
+        if (!loopId || !interactionId || !answer.trim()) {
+          throw new Error('review_loop_answer requires loopId, interactionId, and answer');
+        }
+        return answerReviewLoop(loopId, interactionId, answer.trim());
+      }
+      case 'review_loop_ui_state': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : activeSessionId;
+        if (!sessionId) {
+          throw new Error('review_loop_ui_state requires sessionId');
+        }
+        return collectReviewLoopUiState(sessionId);
+      }
       case 'set_pane_debug': {
         const enabled = payload.enabled !== false;
         window.__ATTN_PANE_DEBUG_ENABLE?.(enabled);
@@ -457,7 +1215,148 @@ export function useUiAutomationBridge({
           getActivePaneIdForSession,
           getPaneText,
           getPaneSize,
+          {
+            includePaneText: payload.includePaneText !== false,
+            sessionIds: Array.isArray(payload.sessionIds)
+              ? new Set(payload.sessionIds.filter((value): value is string => typeof value === 'string'))
+              : null,
+          },
         );
+      case 'capture_perf_snapshot': {
+        const settleFrames = typeof payload.settleFrames === 'number' ? payload.settleFrames : 2;
+        const includeMemory = payload.includeMemory !== false;
+        await settleUi(settleFrames);
+        return capturePerfSnapshot(
+          sessions,
+          activeSessionId,
+          getActivePaneIdForSession,
+          { includeMemory },
+        );
+      }
+      case 'clear_perf_counters':
+        clearPtyPerfSnapshot();
+        return { ok: true };
+      case 'benchmark_pty_transport': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : activeSessionId;
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session || !sessionId) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const mode = payload.mode === 'bytes' || payload.mode === 'base64' || payload.mode === 'json_base64'
+          ? payload.mode
+          : 'json_base64';
+        const chunkBytes = typeof payload.chunkBytes === 'number' ? payload.chunkBytes : 16 * 1024;
+        const chunkCount = typeof payload.chunkCount === 'number' ? payload.chunkCount : 128;
+        const flushEvery = typeof payload.flushEvery === 'number' && payload.flushEvery > 0
+          ? Math.floor(payload.flushEvery)
+          : 1;
+        const runtimeId = paneId === MAIN_TERMINAL_PANE_ID
+          ? session.id
+          : session.workspace.terminals.find((entry) => entry.id === paneId)?.ptyId || `bench:${paneId}`;
+        const bytes = buildBenchmarkBytes(chunkBytes);
+        const base64Payload = encodeBytesToBase64(bytes);
+
+        selectSession(sessionId);
+        focusPane(sessionId, paneId);
+        await settleUi(2);
+        if (!resetSessionPaneTerminal(sessionId, paneId)) {
+          throw new Error(`Pane terminal not ready for ${paneId}`);
+        }
+        clearPtyPerfSnapshot();
+
+        const startedAt = performance.now();
+        let bufferedByteChunks: Uint8Array[] = [];
+        const flushBufferedBytes = async () => {
+          if (bufferedByteChunks.length === 0) {
+            return;
+          }
+          const combined = concatByteChunks(bufferedByteChunks);
+          bufferedByteChunks = [];
+          const ok = await injectSessionPaneBytes(sessionId, paneId, combined);
+          if (!ok) {
+            throw new Error(`Failed to inject buffered bytes into pane ${paneId}`);
+          }
+        };
+        for (let index = 0; index < chunkCount; index += 1) {
+          if (mode === 'bytes') {
+            if (flushEvery === 1) {
+              const ok = await injectSessionPaneBytes(sessionId, paneId, bytes);
+              if (!ok) {
+                throw new Error(`Failed to inject bytes into pane ${paneId}`);
+              }
+            } else {
+              bufferedByteChunks.push(bytes);
+              if (bufferedByteChunks.length >= flushEvery) {
+                await flushBufferedBytes();
+              }
+            }
+            continue;
+          }
+
+          if (mode === 'base64') {
+            if (flushEvery === 1) {
+              const ok = await injectSessionPaneBase64(sessionId, paneId, base64Payload);
+              if (!ok) {
+                throw new Error(`Failed to inject base64 payload into pane ${paneId}`);
+              }
+            } else {
+              bufferedByteChunks.push(decodeBase64ToBytes(base64Payload));
+              if (bufferedByteChunks.length >= flushEvery) {
+                await flushBufferedBytes();
+              }
+            }
+            continue;
+          }
+
+          const raw = JSON.stringify({
+            event: 'pty_output',
+            id: runtimeId,
+            data: base64Payload,
+            seq: index,
+          });
+          const parseStartedAt = performance.now();
+          const parsed = JSON.parse(raw) as { id: string; data: string };
+          recordWsJsonParse(raw.length, performance.now() - parseStartedAt, 'pty_output', parsed.data.length);
+          if (flushEvery === 1) {
+            const ok = await injectSessionPaneBase64(sessionId, paneId, parsed.data);
+            if (!ok) {
+              throw new Error(`Failed to replay parsed payload into pane ${paneId}`);
+            }
+          } else {
+            bufferedByteChunks.push(decodeBase64ToBytes(parsed.data));
+            if (bufferedByteChunks.length >= flushEvery) {
+              await flushBufferedBytes();
+            }
+          }
+        }
+        await flushBufferedBytes();
+        if (!(await drainSessionPaneTerminal(sessionId, paneId))) {
+          throw new Error(`Failed to drain pane ${paneId}`);
+        }
+
+        await settleUi(2);
+        const totalMs = performance.now() - startedAt;
+        return {
+          sessionId,
+          paneId,
+          runtimeId,
+          mode,
+          flushEvery,
+          chunkBytes: bytes.length,
+          chunkCount,
+          totalPayloadBytes: bytes.length * chunkCount,
+          totalMs,
+          throughputMiBPerSec: totalMs > 0
+            ? ((bytes.length * chunkCount) / (1024 * 1024)) / (totalMs / 1000)
+            : null,
+          pty: getPtyPerfSnapshot(),
+          pane: {
+            size: getPaneSize(sessionId, paneId),
+            textLength: getPaneText(sessionId, paneId).length,
+          },
+        };
+      }
       default:
         throw new Error(`Unknown automation action: ${request.action}`);
     }
@@ -468,16 +1367,23 @@ export function useUiAutomationBridge({
     closeSession,
     fitSessionActivePane,
     focusPane,
+    injectSessionPaneBase64,
+    injectSessionPaneBytes,
     typeInSessionPaneViaUI,
     isSessionPaneInputFocused,
     getActivePaneIdForSession,
     getPaneSize,
     getPaneText,
+    resetSessionPaneTerminal,
+    drainSessionPaneTerminal,
     selectSession,
     sendRuntimeInput,
     sessions,
     splitPane,
   ]);
+
+  const handleAutomationRequestRef = useRef(handleAutomationRequest);
+  handleAutomationRequestRef.current = handleAutomationRequest;
 
   useEffect(() => {
     if (!isTauri() || import.meta.env.VITE_UI_AUTOMATION !== '1') {
@@ -489,7 +1395,7 @@ export function useUiAutomationBridge({
       const request = event.payload;
       let response: AutomationResponse;
       try {
-        const result = await handleAutomationRequest(request);
+        const result = await handleAutomationRequestRef.current(request);
         response = {
           request_id: request.request_id,
           ok: true,
@@ -508,5 +1414,5 @@ export function useUiAutomationBridge({
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [handleAutomationRequest]);
+  }, []);
 }

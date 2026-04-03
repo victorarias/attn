@@ -33,6 +33,7 @@ jobs:
           fi
 
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
         with:
@@ -66,7 +67,7 @@ jobs:
 
       - name: Build bundled daemon binary
         run: |
-          GOOS=darwin GOARCH=arm64 go build -o /tmp/attn ./cmd/attn
+          GOOS=darwin GOARCH=arm64 make build VERSION="${RELEASE_VERSION}" OUTPUT=/tmp/attn
           mkdir -p app/src-tauri/binaries
           cp /tmp/attn "app/src-tauri/binaries/attn-aarch64-apple-darwin"
 
@@ -123,3 +124,99 @@ jobs:
           fi
           cp "$DMG_REBUILT" /tmp/attn_aarch64.dmg
           gh release upload "${RELEASE_TAG}" /tmp/attn_aarch64.dmg --clobber
+
+  linux-amd64:
+    name: Linux amd64 daemon
+    needs: tauri
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Resolve release tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RELEASE_TAG="${{ inputs.tag }}"
+          else
+            RELEASE_TAG="${{ github.ref_name }}"
+          fi
+
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $RELEASE_TAG"
+            exit 1
+          fi
+
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build Linux amd64 daemon
+        run: |
+          GOOS=linux GOARCH=amd64 make build VERSION="${RELEASE_VERSION}" OUTPUT=/tmp/attn-linux-amd64
+
+      - name: Validate Linux amd64 daemon
+        run: |
+          /tmp/attn-linux-amd64 --version
+          file /tmp/attn-linux-amd64
+
+      - name: Upload Linux amd64 daemon
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${RELEASE_TAG}" /tmp/attn-linux-amd64 --clobber
+
+  linux-arm64:
+    name: Linux arm64 daemon
+    needs: tauri
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Resolve release tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RELEASE_TAG="${{ inputs.tag }}"
+          else
+            RELEASE_TAG="${{ github.ref_name }}"
+          fi
+
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $RELEASE_TAG"
+            exit 1
+          fi
+
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build Linux arm64 daemon
+        run: |
+          GOOS=linux GOARCH=arm64 make build VERSION="${RELEASE_VERSION}" OUTPUT=/tmp/attn-linux-arm64
+
+      - name: Validate Linux arm64 daemon
+        run: |
+          /tmp/attn-linux-arm64 --version
+          file /tmp/attn-linux-arm64
+
+      - name: Upload Linux arm64 daemon
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${RELEASE_TAG}" /tmp/attn-linux-arm64 --clobber

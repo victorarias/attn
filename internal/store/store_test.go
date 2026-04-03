@@ -57,6 +57,30 @@ func TestStore_AddAndGet_PreservesAgent(t *testing.T) {
 	}
 }
 
+func TestStore_AddAndGet_PreservesEndpointID(t *testing.T) {
+	s := New()
+
+	session := &protocol.Session{
+		ID:         "endpoint123",
+		Label:      "session-with-endpoint",
+		Directory:  "/home/user/project",
+		EndpointID: protocol.Ptr("local"),
+		State:      protocol.SessionStateWorking,
+		StateSince: protocol.TimestampNow().String(),
+		LastSeen:   protocol.TimestampNow().String(),
+	}
+
+	s.Add(session)
+
+	got := s.Get("endpoint123")
+	if got == nil {
+		t.Fatal("expected session, got nil")
+	}
+	if protocol.Deref(got.EndpointID) != "local" {
+		t.Errorf("EndpointID = %q, want %q", protocol.Deref(got.EndpointID), "local")
+	}
+}
+
 func TestStore_Remove(t *testing.T) {
 	s := New()
 

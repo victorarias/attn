@@ -21,6 +21,7 @@ export interface Session {
   state: UISessionState;
   cwd: string;
   agent: SessionAgent;
+  endpointId?: string;
   transcriptMatched: boolean;
   branch?: string;
   isWorktree?: boolean;
@@ -33,6 +34,7 @@ export interface DaemonSessionSnapshot {
   label: string;
   agent?: string;
   directory: string;
+  endpoint_id?: string;
   state: string;
   branch?: string;
   is_worktree?: boolean;
@@ -50,7 +52,7 @@ interface SessionStore {
 
   // Actions
   connect: () => Promise<void>;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string) => Promise<string>;
   closeSession: (id: string) => void;
   setActiveSession: (id: string | null) => void;
   takeSessionSpawnArgs: (id: string, cols: number, rows: number) => PtySpawnArgs | null;
@@ -118,7 +120,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  createSession: async (label: string, cwd: string, providedId?: string, agent?: SessionAgent) => {
+  createSession: async (label: string, cwd: string, providedId?: string, agent?: SessionAgent, endpointId?: string) => {
     // Use provided ID or generate new one
     const id = providedId || crypto.randomUUID();
     const resolvedAgent: SessionAgent = agent ?? 'claude';
@@ -128,6 +130,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       state: 'launching',
       cwd,
       agent: resolvedAgent,
+      endpointId,
       transcriptMatched: resolvedAgent !== 'codex',
       workspace: createDefaultWorkspaceState(),
       daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
@@ -185,6 +188,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     return {
       id,
       cwd: session.cwd,
+      ...(session.endpointId ? { endpoint_id: session.endpointId } : {}),
       label: session.label,
       cols: resolvedCols,
       rows: resolvedRows,
@@ -231,6 +235,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         args: {
           id,
           cwd: session.cwd,
+          ...(session.endpointId ? { endpoint_id: session.endpointId } : {}),
+          reload: true,
           label: session.label,
           cols,
           rows,
@@ -253,6 +259,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       });
     } catch (e) {
       console.error('[Session] Reload spawn failed:', e);
+      throw e;
     }
   },
 
@@ -272,6 +279,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         const existing = existingByID.get(daemonSession.id);
         const normalizedState = normalizeSessionState(daemonSession.state);
         const nextAgent: SessionAgent = normalizeSessionAgent(daemonSession.agent, existing?.agent ?? 'codex');
+        const nextEndpointId = daemonSession.endpoint_id ?? existing?.endpointId;
         const nextBranch = daemonSession.branch ?? existing?.branch;
         const nextIsWorktree = daemonSession.is_worktree ?? existing?.isWorktree;
 
@@ -280,6 +288,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           existing.label === daemonSession.label &&
           existing.agent === nextAgent &&
           existing.cwd === daemonSession.directory &&
+          existing.endpointId === nextEndpointId &&
           existing.state === normalizedState &&
           existing.branch === nextBranch &&
           existing.isWorktree === nextIsWorktree
@@ -293,6 +302,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           state: normalizedState,
           cwd: daemonSession.directory,
           agent: nextAgent,
+          endpointId: nextEndpointId,
           transcriptMatched: existing?.transcriptMatched ?? nextAgent !== 'codex',
           branch: nextBranch,
           isWorktree: nextIsWorktree,

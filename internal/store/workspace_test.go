@@ -84,3 +84,49 @@ func TestRemoveSessionDeletesWorkspaceRows(t *testing.T) {
 		t.Fatal("GetWorkspace() != nil after session removal")
 	}
 }
+
+func TestInMemoryFallbackSupportsSessionWorkspaceAndState(t *testing.T) {
+	s := &Store{
+		sessions:        make(map[string]*protocol.Session),
+		workspaces:      make(map[string]workspace.Snapshot),
+		recentLocations: make(map[string]*protocol.RecentLocation),
+	}
+
+	s.Add(&protocol.Session{
+		ID:             "sess-1",
+		Label:          "Session 1",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      "/tmp/sess-1",
+		State:          protocol.SessionStateLaunching,
+		StateSince:     string(protocol.TimestampNow()),
+		StateUpdatedAt: string(protocol.TimestampNow()),
+		LastSeen:       string(protocol.TimestampNow()),
+	})
+
+	snapshot := workspace.DefaultSnapshot("sess-1")
+	if err := s.SaveWorkspace(snapshot); err != nil {
+		t.Fatalf("SaveWorkspace() error = %v", err)
+	}
+
+	got := s.Get("sess-1")
+	if got == nil {
+		t.Fatal("Get() = nil, want session")
+	}
+	if got.State != protocol.SessionStateLaunching {
+		t.Fatalf("state = %s, want launching", got.State)
+	}
+
+	loadedWorkspace := s.GetWorkspace("sess-1")
+	if loadedWorkspace == nil {
+		t.Fatal("GetWorkspace() = nil, want snapshot")
+	}
+	if loadedWorkspace.ActivePaneID != workspace.MainPaneID {
+		t.Fatalf("ActivePaneID = %q, want %q", loadedWorkspace.ActivePaneID, workspace.MainPaneID)
+	}
+
+	s.UpdateState("sess-1", protocol.StateWaitingInput)
+	got = s.Get("sess-1")
+	if got == nil || got.State != protocol.SessionStateWaitingInput {
+		t.Fatalf("state = %v, want waiting_input", got)
+	}
+}

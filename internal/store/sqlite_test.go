@@ -156,6 +156,7 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		{"sessions", "agent"},
 		{"sessions", "recoverable"},
 		{"sessions", "resume_session_id"},
+		{"sessions", "endpoint_id"},
 	}
 
 	for _, tc := range migratedColumns {
@@ -278,5 +279,52 @@ func TestMigration21_IdempotentWhenAgentColumnAlreadyExists(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("migration 21 marker count = %d, want 1", count)
+	}
+}
+
+func TestMigration31_IdempotentWhenEndpointIDColumnAlreadyExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() setup error = %v", err)
+	}
+	db.Close()
+
+	raw, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() reopen setup error = %v", err)
+	}
+
+	if _, err := raw.Exec("DELETE FROM schema_migrations WHERE version >= 31"); err != nil {
+		raw.Close()
+		t.Fatalf("DELETE migration >=31 markers error = %v", err)
+	}
+	if _, err := raw.Exec("ALTER TABLE sessions ADD COLUMN endpoint_id TEXT"); err != nil {
+		_ = err
+	}
+	raw.Close()
+
+	db2, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() should handle existing sessions.endpoint_id in migration 31, got error = %v", err)
+	}
+	defer db2.Close()
+
+	version, err := GetSchemaVersion(db2)
+	if err != nil {
+		t.Fatalf("GetSchemaVersion() error = %v", err)
+	}
+	if version != len(migrations) {
+		t.Fatalf("schema version = %d, want %d", version, len(migrations))
+	}
+
+	var count int
+	if err := db2.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = 31").Scan(&count); err != nil {
+		t.Fatalf("count migration 31 row error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("migration 31 marker count = %d, want 1", count)
 	}
 }

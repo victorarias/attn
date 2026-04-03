@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -19,6 +21,7 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/pathutil"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
 	"github.com/victorarias/attn/internal/wrapper"
 )
@@ -38,7 +41,19 @@ type todoWriteInput struct {
 	} `json:"todos"`
 }
 
+var version = "dev"
+
 func main() {
+	if isProtocolVersionCommand(os.Args) {
+		runProtocolVersion()
+		return
+	}
+
+	if isVersionCommand(os.Args) {
+		runVersion()
+		return
+	}
+
 	if len(os.Args) < 2 {
 		runWrapper()
 		return
@@ -47,6 +62,8 @@ func main() {
 	switch os.Args[1] {
 	case "daemon":
 		runDaemon()
+	case "ws-relay":
+		runWSRelay()
 	case "pty-worker":
 		runPTYWorker()
 	case "review-loop":
@@ -68,6 +85,33 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func isVersionCommand(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	switch args[1] {
+	case "--version", "version":
+		return true
+	default:
+		return false
+	}
+}
+
+func isProtocolVersionCommand(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	return args[1] == "--protocol-version"
+}
+
+func runVersion() {
+	fmt.Println(version)
+}
+
+func runProtocolVersion() {
+	fmt.Println(protocol.ProtocolVersion)
 }
 
 func runPTYWorker() {
@@ -128,6 +172,24 @@ func runDaemon() {
 		fmt.Fprintf(os.Stderr, "daemon error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runWSRelay() {
+	addr := net.JoinHostPort(config.WSBindAddress(), config.WSPort())
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ws-relay connect %s: %v\n", addr, err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	go func() {
+		_, _ = io.Copy(conn, os.Stdin)
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			_ = tcpConn.CloseWrite()
+		}
+	}()
+	_, _ = io.Copy(os.Stdout, conn)
 }
 
 func runList() {

@@ -11,6 +11,9 @@ interface TestSession {
   branch?: string;
   isWorktree?: boolean;
   cwd?: string;
+  endpointId?: string;
+  endpointName?: string;
+  endpointStatus?: string;
   recoverable?: boolean;
   reviewLoopStatus?: string;
 }
@@ -158,5 +161,25 @@ describe('Sidebar', () => {
     expect(screen.getByText('⌘⇧Z zoom')).toHaveAttribute('data-active', 'true');
     expect(screen.getByText('⌘⌥←↑→↓ pane')).toBeInTheDocument();
     expect(screen.getByText('⌘⇧B sidebar')).toBeInTheDocument();
+  });
+
+  it('shows endpoint badge and hides local-only actions for remote sessions', () => {
+    const sessions: TestSession[] = [{
+      id: 'remote-1',
+      label: 'codex',
+      state: 'idle',
+      endpointId: 'ep-1',
+      endpointName: 'gpu-box',
+      endpointStatus: 'connected',
+    }];
+    render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData(sessions)}
+      />
+    );
+
+    expect(screen.getByText('gpu-box')).toBeInTheDocument();
+    expect(screen.queryByTestId('reload-session-remote-1')).not.toBeInTheDocument();
   });
 });

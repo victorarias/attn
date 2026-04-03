@@ -23,7 +23,7 @@ import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { MAIN_TERMINAL_PANE_ID, useSessionStore } from './store/sessions';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
@@ -107,6 +107,7 @@ function App() {
   // Settings state (must be declared before useDaemonSocket to pass as callback)
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [settingError, setSettingError] = useState<string | null>(null);
+  const [daemonEndpoints, setDaemonEndpoints] = useState<DaemonEndpoint[]>([]);
 
   const [reviewLoopsBySessionId, setReviewLoopsBySessionId] = useState<Record<string, ReviewLoopState>>({});
   const [daemonWorkspaces, setDaemonWorkspaces] = useState<DaemonWorkspace[]>([]);
@@ -251,7 +252,12 @@ function App() {
     sendCreateWorktree,
     sendDeleteWorktree,
     sendDeleteBranch,
+    sendAddEndpoint,
+    sendUpdateEndpoint,
+    sendRemoveEndpoint,
     sendGetRecentLocations,
+    sendBrowseDirectory,
+    sendInspectPath,
     sendListBranches,
     sendSwitchBranch,
     sendCreateWorktreeFromBranch,
@@ -297,6 +303,7 @@ function App() {
     onSessionsUpdate: setDaemonSessions,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
+    onEndpointsUpdate: setDaemonEndpoints,
     onReposUpdate: setRepoStates,
     onAuthorsUpdate: setAuthorStates,
     onSettingsUpdate: setSettings,
@@ -330,6 +337,7 @@ function App() {
         daemonSessions={daemonSessions}
         daemonWorkspaces={daemonWorkspaces}
         prs={prs}
+        daemonEndpoints={daemonEndpoints}
         settings={settings}
         gitStatus={gitStatus}
         reviewLoopsBySessionId={reviewLoopsBySessionId}
@@ -355,7 +363,12 @@ function App() {
         sendCreateWorktree={sendCreateWorktree}
         sendDeleteWorktree={sendDeleteWorktree}
         sendDeleteBranch={sendDeleteBranch}
+        sendAddEndpoint={sendAddEndpoint}
+        sendUpdateEndpoint={sendUpdateEndpoint}
+        sendRemoveEndpoint={sendRemoveEndpoint}
         sendGetRecentLocations={sendGetRecentLocations}
+        sendBrowseDirectory={sendBrowseDirectory}
+        sendInspectPath={sendInspectPath}
         sendListBranches={sendListBranches}
         sendSwitchBranch={sendSwitchBranch}
         sendCreateWorktreeFromBranch={sendCreateWorktreeFromBranch}
@@ -404,6 +417,7 @@ interface AppContentProps {
   daemonSessions: DaemonSession[];
   daemonWorkspaces: DaemonWorkspace[];
   prs: DaemonPR[];
+  daemonEndpoints: DaemonEndpoint[];
   settings: Record<string, string>;
   gitStatus: GitStatusUpdate | null;
   reviewLoopsBySessionId: Record<string, ReviewLoopState>;
@@ -429,7 +443,12 @@ interface AppContentProps {
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
   sendDeleteWorktree: ReturnType<typeof useDaemonSocket>['sendDeleteWorktree'];
   sendDeleteBranch: ReturnType<typeof useDaemonSocket>['sendDeleteBranch'];
+  sendAddEndpoint: ReturnType<typeof useDaemonSocket>['sendAddEndpoint'];
+  sendUpdateEndpoint: ReturnType<typeof useDaemonSocket>['sendUpdateEndpoint'];
+  sendRemoveEndpoint: ReturnType<typeof useDaemonSocket>['sendRemoveEndpoint'];
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
+  sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
+  sendInspectPath: ReturnType<typeof useDaemonSocket>['sendInspectPath'];
   sendListBranches: ReturnType<typeof useDaemonSocket>['sendListBranches'];
   sendSwitchBranch: ReturnType<typeof useDaemonSocket>['sendSwitchBranch'];
   sendCreateWorktreeFromBranch: ReturnType<typeof useDaemonSocket>['sendCreateWorktreeFromBranch'];
@@ -474,6 +493,7 @@ function AppContent({
   daemonSessions,
   daemonWorkspaces,
   prs,
+  daemonEndpoints,
   settings,
   gitStatus,
   reviewLoopsBySessionId,
@@ -496,9 +516,14 @@ function AppContent({
   sendUnregisterSession,
   sendSetSetting,
   sendCreateWorktree,
-  sendDeleteWorktree,
-  sendDeleteBranch,
+    sendDeleteWorktree,
+    sendDeleteBranch,
+    sendAddEndpoint,
+    sendUpdateEndpoint,
+  sendRemoveEndpoint,
   sendGetRecentLocations,
+  sendBrowseDirectory,
+  sendInspectPath,
   sendListBranches,
   sendSwitchBranch,
   sendCreateWorktreeFromBranch,
@@ -696,13 +721,23 @@ function AppContent({
 
   // Enrich local sessions with daemon state (working/waiting from hooks)
   // Match by session ID (UUID) - not directory - to handle multiple sessions per directory
+  const endpointById = useMemo(
+    () => new Map(daemonEndpoints.map((endpoint) => [endpoint.id, endpoint])),
+    [daemonEndpoints],
+  );
+
   const enrichedLocalSessions = sessions.map((s) => {
     const daemonSession = daemonSessions.find((ds) => ds.id === s.id);
     const rawState = daemonSession?.state ?? s.state;
     const reviewLoop = reviewLoopsBySessionId[s.id];
+    const endpointId = daemonSession?.endpoint_id ?? s.endpointId;
+    const endpoint = endpointId ? endpointById.get(endpointId) : undefined;
     return {
       ...s,
       state: normalizeSessionState(rawState),
+      endpointId,
+      endpointName: endpoint?.name,
+      endpointStatus: endpoint?.status,
       branch: daemonSession?.branch ?? s.branch,
       isWorktree: daemonSession?.is_worktree ?? s.isWorktree,
       recoverable: daemonSession?.recoverable ?? false,
@@ -722,6 +757,10 @@ function AppContent({
     fitSessionActivePane,
     getPaneText,
     getPaneSize,
+    resetSessionPaneTerminal,
+    injectSessionPaneBytes,
+    injectSessionPaneBase64,
+    drainSessionPaneTerminal,
   } = useSessionWorkspaceController(sessions, activeSessionId);
 
   useEffect(() => {
@@ -1003,9 +1042,30 @@ function AppContent({
     () => (activeSessionId ? sessions.find((s) => s.id === activeSessionId) ?? null : null),
     [activeSessionId, sessions],
   );
+  const activeDaemonSession = useMemo(() => {
+    if (!activeSessionId) {
+      return null;
+    }
+    return daemonSessions.find((session) => session.id === activeSessionId) || null;
+  }, [activeSessionId, daemonSessions]);
+  const activeRepoDaemonSession = useMemo(
+    () => activeDaemonSession,
+    [activeDaemonSession],
+  );
+  const activeRemoteSession = Boolean(activeDaemonSession?.endpoint_id);
+  const activeEndpoint = useMemo(
+    () => {
+      const endpointId = activeDaemonSession?.endpoint_id;
+      if (!endpointId) {
+        return null;
+      }
+      return endpointById.get(endpointId) ?? null;
+    },
+    [activeDaemonSession?.endpoint_id, endpointById],
+  );
   const activeReviewLoopAvailable = useMemo(
-    () => Boolean(activeLocalSession && daemonSessions.find((ds) => ds.id === activeLocalSession.id)?.agent === 'claude'),
-    [activeLocalSession, daemonSessions],
+    () => Boolean(activeLocalSession && activeDaemonSession),
+    [activeDaemonSession, activeLocalSession],
   );
   const openDockPanels = dockState.openPanels;
   const dockPanelStack = dockState.stack;
@@ -1088,21 +1148,32 @@ function AppContent({
   }, []);
 
   const handleLocationSelect = useCallback(
-    async (path: string, agent: SessionAgent) => {
+    async (path: string, agent: SessionAgent, endpointId?: string) => {
       if (!hasAvailableAgents) {
         showError('No supported agent CLI found in PATH.');
         return;
       }
+      if (endpointId) {
+        const endpoint = daemonEndpoints.find((entry) => entry.id === endpointId);
+        if (!endpoint) {
+          showError('Selected endpoint no longer exists.');
+          return;
+        }
+        if (endpoint.status !== 'connected') {
+          showError(`Endpoint ${endpoint.name} is ${endpoint.status}.`);
+          return;
+        }
+      }
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
       const selectedAgent = resolvePreferredAgent(agent, agentAvailability, 'codex');
-      const sessionId = await createSession(folderName, path, undefined, selectedAgent);
+      const sessionId = await createSession(folderName, path, undefined, selectedAgent, endpointId);
       // Fit terminal after view becomes visible
       setTimeout(() => {
         fitSessionActivePane(sessionId);
       }, 100);
     },
-    [agentAvailability, createSession, fitSessionActivePane, hasAvailableAgents, showError]
+    [agentAvailability, createSession, daemonEndpoints, fitSessionActivePane, hasAvailableAgents, showError]
   );
 
   const closeLocationPicker = useCallback(() => {
@@ -1137,6 +1208,10 @@ function AppContent({
     if (!localSession) return;
     const daemonSession = daemonSessions.find((ds) => ds.id === localSession.id);
     if (!daemonSession) return;
+    if (daemonSession.endpoint_id) {
+      showError('Forking remote sessions is not implemented yet.');
+      return;
+    }
 
     setForkTargetSession({
       id: localSession.id,
@@ -1147,7 +1222,7 @@ function AppContent({
     });
     setForkError(null);
     setForkDialogOpen(true);
-  }, [activeSessionId, sessions, daemonSessions]);
+  }, [activeSessionId, daemonSessions, sessions, showError]);
 
   const handleForkConfirm = useCallback(async (name: string, createWorktree: boolean) => {
     if (!forkTargetSession) return;
@@ -1224,15 +1299,15 @@ function AppContent({
       }
 
       // Unregister from daemon by matching session ID
-      const daemonSession = daemonSessions.find(ds => ds.id === session?.id);
-      if (daemonSession) {
-        sendUnregisterSession(daemonSession.id);
+      const localDaemonSession = daemonSessions.find(ds => ds.id === session?.id);
+      if (localDaemonSession) {
+        sendUnregisterSession(localDaemonSession.id);
       }
 
       removeWorkspaceRef(id);
       closeSession(id);
     },
-    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession]
+    [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession, showError]
   );
 
   const handleSelectSession = useCallback(
@@ -1250,10 +1325,13 @@ function AppContent({
   useUiAutomationBridge({
     sessions,
     activeSessionId,
+    daemonReady: hasReceivedInitialState && !connectionError,
+    connectionError,
     getActivePaneIdForSession,
     createSession,
     selectSession: handleSelectSession,
     closeSession: handleCloseSession,
+    reloadSession,
     splitPane: sendWorkspaceSplitPane,
     closePane: sendWorkspaceClosePane,
     focusPane: (sessionId: string, paneId: string) => {
@@ -1268,6 +1346,31 @@ function AppContent({
     getPaneSize,
     fitSessionActivePane,
     sendRuntimeInput,
+    getReviewState,
+    addComment: sendAddComment,
+    updateComment: sendUpdateComment,
+    resolveComment: sendResolveComment,
+    wontFixComment: sendWontFixComment,
+    deleteComment: sendDeleteComment,
+    getComments: sendGetComments,
+    startReviewLoop: async (prompt: string, iterationLimit: number, presetId?: string) => {
+      if (!activeSessionId) {
+        throw new Error('No active session');
+      }
+      await sendStartReviewLoop(activeSessionId, prompt, iterationLimit, presetId);
+    },
+    stopReviewLoop: async () => {
+      if (!activeSessionId) {
+        throw new Error('No active session');
+      }
+      await sendStopReviewLoop(activeSessionId);
+    },
+    getReviewLoopState,
+    answerReviewLoop,
+    resetSessionPaneTerminal,
+    injectSessionPaneBytes,
+    injectSessionPaneBase64,
+    drainSessionPaneTerminal,
   });
 
   const openPR = useOpenPR({
@@ -1444,8 +1547,11 @@ function AppContent({
 
   const handleReloadSession = useCallback((id: string) => {
     const size = getPaneSize(id, MAIN_TERMINAL_PANE_ID) || undefined;
-    void reloadSession(id, size);
-  }, [getPaneSize, reloadSession]);
+    void reloadSession(id, size).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      showError(`Failed to reload session: ${message}`);
+    });
+  }, [getPaneSize, reloadSession, showError]);
 
   // Open file in diff detail panel
   const handleFileSelect = useCallback((path: string, _staged: boolean) => {
@@ -1456,19 +1562,11 @@ function AppContent({
   // Fetch diff for diff detail panel
   // Options: staged (deprecated), baseRef (for PR-like branch diffs)
   const fetchDiffForReview = useCallback(async (path: string, options?: { staged?: boolean; baseRef?: string }) => {
-    const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
-    if (!activeLocalSession?.cwd) throw new Error('No active session');
-    const daemonSession = daemonSessions.find((ds) => ds.id === activeLocalSession.id);
-    if (!daemonSession) throw new Error('No daemon session found');
-    return sendGetFileDiff(daemonSession.directory, path, options);
-  }, [sessions, activeSessionId, daemonSessions, sendGetFileDiff]);
-
-  // Get active daemon session info for diff detail panel
-  const activeDaemonSession = useMemo(() => {
-    const activeLocalSession = sessions.find((s) => s.id === activeSessionId);
-    if (!activeLocalSession?.cwd) return null;
-    return daemonSessions.find((ds) => ds.id === activeLocalSession.id) || null;
-  }, [sessions, activeSessionId, daemonSessions]);
+    if (!activeRepoDaemonSession?.directory) {
+      throw new Error('No repo directory available');
+    }
+    return sendGetFileDiff(activeRepoDaemonSession.directory, path, options);
+  }, [activeRepoDaemonSession?.directory, sendGetFileDiff]);
 
   const branchDiffRequestId = useRef(0);
   const refreshBranchDiff = useCallback(async (directory: string) => {
@@ -1498,31 +1596,31 @@ function AppContent({
     setBranchDiffFiles([]);
     setBranchDiffBaseRef('');
     setBranchDiffError(null);
-  }, [activeDaemonSession?.directory]);
+  }, [activeRepoDaemonSession?.directory]);
 
   useEffect(() => {
-    if (view !== 'session' || !activeDaemonSession?.directory) {
+    if (view !== 'session' || !activeRepoDaemonSession?.directory) {
       setBranchDiffFiles([]);
       setBranchDiffBaseRef('');
       setBranchDiffError(null);
       return;
     }
 
-    refreshBranchDiff(activeDaemonSession.directory);
+    refreshBranchDiff(activeRepoDaemonSession.directory);
     const intervalId = window.setInterval(() => {
-      refreshBranchDiff(activeDaemonSession.directory);
+      refreshBranchDiff(activeRepoDaemonSession.directory);
     }, 30000);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [view, activeDaemonSession?.directory, refreshBranchDiff]);
+  }, [view, activeRepoDaemonSession?.directory, refreshBranchDiff]);
 
   useEffect(() => {
-    if (!gitStatus || !activeDaemonSession?.directory) return;
-    if (gitStatus.directory !== activeDaemonSession.directory) return;
-    refreshBranchDiff(activeDaemonSession.directory);
-  }, [gitStatus, activeDaemonSession?.directory, refreshBranchDiff]);
+    if (!gitStatus || !activeRepoDaemonSession?.directory) return;
+    if (gitStatus.directory !== activeRepoDaemonSession.directory) return;
+    refreshBranchDiff(activeRepoDaemonSession.directory);
+  }, [gitStatus, activeRepoDaemonSession?.directory, refreshBranchDiff]);
 
   // Diff detail panel handlers
   const handleOpenDiffDetailPanel = useCallback(() => {
@@ -1549,12 +1647,21 @@ function AppContent({
     };
   }, [diffDetailPanelOpen, handleCloseDiffDetailPanel]);
 
-  const handleOpenEditor = useCallback(async (cwd: string, filePath?: string) => {
+  const isZedEditorConfigured = useMemo(() => {
+    const editor = (settings.editor_executable || '').trim().toLowerCase();
+    if (!editor) {
+      return false;
+    }
+    return editor.includes('zed');
+  }, [settings.editor_executable]);
+
+  const handleOpenEditor = useCallback(async (cwd: string, filePath?: string, remoteTarget?: string) => {
     try {
       await invoke('open_in_editor', {
         cwd,
         filePath,
         editor: settings.editor_executable || '',
+        remoteTarget,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1568,29 +1675,61 @@ function AppContent({
       showError('No active session directory');
       return;
     }
+    if (activeSession.endpointId) {
+      if (!activeEndpoint) {
+        showError('Remote endpoint not available.');
+        return;
+      }
+      if (!isZedEditorConfigured) {
+        showError('Remote open-in-editor currently requires Zed.');
+        return;
+      }
+      handleOpenEditor(activeSession.cwd, undefined, activeEndpoint.ssh_target);
+      return;
+    }
     handleOpenEditor(activeSession.cwd);
-  }, [sessions, activeSessionId, handleOpenEditor, showError]);
+  }, [sessions, activeSessionId, activeEndpoint, handleOpenEditor, isZedEditorConfigured, showError]);
 
   const handleOpenEditorForReview = useCallback((filePath?: string) => {
-    if (!activeDaemonSession?.directory) {
+    if (!activeRepoDaemonSession?.directory) {
       showError('No repo directory available');
       return;
     }
-    handleOpenEditor(activeDaemonSession.directory, filePath);
-  }, [activeDaemonSession?.directory, handleOpenEditor, showError]);
+    if (activeRemoteSession) {
+      if (!activeEndpoint) {
+        showError('Remote endpoint not available.');
+        return;
+      }
+      if (!isZedEditorConfigured) {
+        showError('Remote open-in-editor currently requires Zed.');
+        return;
+      }
+      handleOpenEditor(activeRepoDaemonSession.directory, filePath, activeEndpoint.ssh_target);
+      return;
+    }
+    handleOpenEditor(activeRepoDaemonSession.directory, filePath);
+  }, [activeEndpoint, activeRemoteSession, activeRepoDaemonSession?.directory, handleOpenEditor, isZedEditorConfigured, showError]);
+
+  const remoteEditorAvailable = Boolean(activeRemoteSession && activeEndpoint && isZedEditorConfigured);
 
   const sidebarHeaderActions = useMemo<SidebarHeaderAction[]>(() => ([
     {
       id: 'editor',
-      title: activeSessionId ? 'Open in Editor' : 'Open in Editor (No active session)',
+      title: !activeSessionId
+        ? 'Open in Editor (No active session)'
+        : activeRemoteSession
+          ? remoteEditorAvailable
+            ? 'Open in Zed Remote'
+            : 'Open in Editor (Remote requires Zed)'
+          : 'Open in Editor',
       icon: <EditorIcon />,
-      disabled: !activeSessionId,
+      disabled: !activeSessionId || (activeRemoteSession && !remoteEditorAvailable),
       shortcutHint: '⌘⇧E detail',
       onClick: handleOpenEditorForSession,
     },
     {
       id: 'reviewLoop',
-      title: activeReviewLoopAvailable ? 'Review Loop' : 'Review Loop (Claude only)',
+      title: activeReviewLoopAvailable ? 'Review Loop' : 'Review Loop (No active session)',
       icon: <ReviewLoopIcon />,
       active: reviewLoopPanelOpen,
       disabled: !activeReviewLoopAvailable,
@@ -1620,6 +1759,7 @@ function AppContent({
     activeReviewLoopAvailable,
     activeReviewLoopState?.status,
     activeSessionId,
+    remoteEditorAvailable,
     attentionCount,
     attentionPanelOpen,
     diffPanelOpen,
@@ -1699,9 +1839,15 @@ function AppContent({
     onNextSession: handleNextSession,
     onToggleSidebar: toggleSidebarCollapse,
     onRefreshPRs: handleRefreshPRs,
-    onToggleDiffPanel: () => toggleDockPanel('diff'),
-    onToggleReviewLoopPanel: () => toggleDockPanel('reviewLoop'),
-    onToggleDiffDetailPanel: () => toggleDockPanel('diffDetail'),
+    onToggleDiffPanel: () => {
+      toggleDockPanel('diff');
+    },
+    onToggleReviewLoopPanel: () => {
+      toggleDockPanel('reviewLoop');
+    },
+    onToggleDiffDetailPanel: () => {
+      toggleDockPanel('diffDetail');
+    },
     onToggleAttentionPanel: () => toggleDockPanel('attention'),
     onOpenBranchPicker: () => {
       // Only open if we have an active session with git
@@ -1714,7 +1860,7 @@ function AppContent({
       }
     },
     onQuickFind: view === 'session' ? handleOpenQuickFind : undefined,
-    onForkSession: view === 'session' ? handleOpenForkDialog : undefined,
+    onForkSession: view === 'session' && !activeRemoteSession ? handleOpenForkDialog : undefined,
     onOpenSettings: useCallback(() => setSettingsOpen(prev => !prev), []),
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
@@ -1908,8 +2054,8 @@ function AppContent({
                 <DiffDetailPanel
                   isOpen={diffDetailPanelOpen}
                   gitStatus={gitStatus}
-                  repoPath={activeDaemonSession?.directory || ''}
-                  branch={activeDaemonSession?.branch || ''}
+                  repoPath={activeRepoDaemonSession?.directory || ''}
+                  branch={activeRepoDaemonSession?.branch || ''}
                   onClose={handleCloseDiffDetailPanel}
                   fetchDiff={fetchDiffForReview}
                   sendGetBranchDiffFiles={sendGetBranchDiffFiles}
@@ -1937,6 +2083,8 @@ function AppContent({
         onClose={closeLocationPicker}
         onSelect={handleLocationSelect}
         onGetRecentLocations={sendGetRecentLocations}
+        onBrowseDirectory={sendBrowseDirectory}
+        onInspectPath={sendInspectPath}
         onGetRepoInfo={getRepoInfo}
         onCreateWorktree={sendCreateWorktree}
         onDeleteWorktree={sendDeleteWorktree}
@@ -1944,6 +2092,7 @@ function AppContent({
         onError={showError}
         projectsDirectory={settings.projects_directory}
         agentAvailability={agentAvailability}
+        endpoints={daemonEndpoints}
       />
       <BranchPicker
         isOpen={branchPickerOpen}
@@ -1998,6 +2147,10 @@ function AppContent({
         mutedAuthors={mutedAuthors}
         onUnmuteAuthor={sendMuteAuthor}
         settings={settings}
+        endpoints={daemonEndpoints}
+        onAddEndpoint={sendAddEndpoint}
+        onUpdateEndpoint={sendUpdateEndpoint}
+        onRemoveEndpoint={sendRemoveEndpoint}
         onSetSetting={sendSetSetting}
         themePreference={themePreference}
         onSetTheme={setTheme}

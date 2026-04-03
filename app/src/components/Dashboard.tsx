@@ -1,5 +1,5 @@
 // app/src/components/Dashboard.tsx
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { DaemonPR, RateLimitState } from '../hooks/useDaemonSocket';
 import { usePRsNeedingAttention } from '../hooks/usePRsNeedingAttention';
 import { PRActions } from './PRActions';
@@ -8,6 +8,12 @@ import { useDaemonContext } from '../contexts/DaemonContext';
 import { getRepoName } from '../utils/repo';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { UISessionState } from '../types/sessionState';
+import { isTerminalDebugEnabled, formatResizeLog } from '../utils/terminalDebug';
+import {
+  clearTerminalRuntimeLog,
+  isTerminalRuntimeTraceEnabled,
+  setTerminalRuntimeTraceEnabled,
+} from '../utils/terminalRuntimeLog';
 import appIcon from '../assets/icon.png';
 import './Dashboard.css';
 
@@ -17,6 +23,8 @@ interface DashboardProps {
     label: string;
     state: UISessionState;
     cwd: string;
+    endpointName?: string;
+    endpointStatus?: string;
     reviewLoopStatus?: string;
   }>;
   prs: DaemonPR[];
@@ -59,6 +67,17 @@ export function Dashboard({
       default:
         return null;
     }
+  };
+
+  const renderEndpointBadge = (session: DashboardProps['sessions'][number]) => {
+    if (!session.endpointName) {
+      return null;
+    }
+    return (
+      <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
+        {session.endpointName}
+      </span>
+    );
   };
 
   const waitingSessions = sessions.filter((s) => s.state === 'waiting_input');
@@ -126,6 +145,34 @@ export function Dashboard({
       return next;
     });
   };
+
+  // Terminal resize debug toggle
+  const [termDebug, setTermDebug] = useState(isTerminalDebugEnabled);
+  const [runtimeTraceEnabled, setRuntimeTraceEnabled] = useState(isTerminalRuntimeTraceEnabled);
+  const copyBtnRef = useRef<HTMLButtonElement>(null);
+  const toggleTermDebug = useCallback(() => {
+    const next = !termDebug;
+    try { window.localStorage.setItem('attn:terminal-debug', next ? '1' : '0'); } catch {}
+    setTermDebug(next);
+  }, [termDebug]);
+  const toggleRuntimeTrace = useCallback(() => {
+    const next = !runtimeTraceEnabled;
+    setTerminalRuntimeTraceEnabled(next);
+    if (next) {
+      clearTerminalRuntimeLog();
+    }
+    setRuntimeTraceEnabled(next);
+  }, [runtimeTraceEnabled]);
+  const clearRuntimeTrace = useCallback(() => {
+    clearTerminalRuntimeLog();
+  }, []);
+  const copyResizeLog = useCallback(() => {
+    const log = formatResizeLog();
+    navigator.clipboard.writeText(log).then(() => {
+      const btn = copyBtnRef.current;
+      if (btn) { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy resize log'; }, 1500); }
+    }).catch(console.error);
+  }, []);
 
   // Rate limit countdown
   const [rateLimitCountdown, setRateLimitCountdown] = useState<string | null>(null);
@@ -215,6 +262,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="waiting_input" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span
                             className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`}
@@ -241,6 +289,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="pending_approval" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
                             {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
@@ -263,6 +312,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="launching" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
                             {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
@@ -285,6 +335,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="working" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
                             {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
@@ -307,6 +358,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="idle" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
                             {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
@@ -329,6 +381,7 @@ export function Dashboard({
                       >
                         <StateIndicator state="unknown" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
+                        {renderEndpointBadge(s)}
                         {reviewLoopIndicator(s.reviewLoopStatus) && (
                           <span className={`session-loop-indicator session-loop-indicator--${s.reviewLoopStatus}`} title={reviewLoopIndicator(s.reviewLoopStatus)?.label} aria-label={reviewLoopIndicator(s.reviewLoopStatus)?.label}>
                             {reviewLoopIndicator(s.reviewLoopStatus)?.glyph}
@@ -496,9 +549,46 @@ export function Dashboard({
       </div>
 
       <footer className="dashboard-footer">
-        <span className="shortcut"><kbd>⌘N</kbd> new session</span>
-        <span className="shortcut"><kbd>⌘1-9</kbd> switch session</span>
-        <span className="shortcut"><kbd>⌘,</kbd> settings</span>
+        <div className="footer-shortcuts">
+          <span className="shortcut"><kbd>⌘N</kbd> new session</span>
+          <span className="shortcut"><kbd>⌘1-9</kbd> switch session</span>
+          <span className="shortcut"><kbd>⌘,</kbd> settings</span>
+        </div>
+        <div className="footer-debug">
+          <button
+            className={`debug-toggle ${termDebug ? 'active' : ''}`}
+            onClick={toggleTermDebug}
+            title="Toggle terminal resize debug overlay on each pane"
+          >
+            Resize debug {termDebug ? 'ON' : 'off'}
+          </button>
+          {termDebug && (
+            <button
+              ref={copyBtnRef}
+              className="debug-copy-btn"
+              onClick={copyResizeLog}
+              title="Copy resize event log to clipboard"
+            >
+              Copy resize log
+            </button>
+          )}
+          <button
+            className={`debug-toggle ${runtimeTraceEnabled ? 'active' : ''}`}
+            onClick={toggleRuntimeTrace}
+            title="Toggle terminal runtime tracing to AppLocalData/debug/terminal-runtime.jsonl"
+          >
+            Runtime trace {runtimeTraceEnabled ? 'ON' : 'off'}
+          </button>
+          {runtimeTraceEnabled && (
+            <button
+              className="debug-copy-btn"
+              onClick={clearRuntimeTrace}
+              title="Clear the current terminal runtime trace log"
+            >
+              Clear runtime trace
+            </button>
+          )}
+        </div>
       </footer>
     </div>
   );

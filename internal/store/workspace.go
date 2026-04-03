@@ -13,6 +13,10 @@ func (s *Store) SaveWorkspace(snapshot workspace.Snapshot) error {
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		if s.workspaces == nil {
+			s.workspaces = make(map[string]workspace.Snapshot)
+		}
+		s.workspaces[snapshot.SessionID] = snapshot
 		return nil
 	}
 
@@ -77,7 +81,15 @@ func (s *Store) GetWorkspace(sessionID string) *workspace.Snapshot {
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
-		return nil
+		snapshot, ok := s.workspaces[sessionID]
+		if !ok {
+			return nil
+		}
+		cloned := snapshot
+		if snapshot.Panes != nil {
+			cloned.Panes = append([]workspace.Pane(nil), snapshot.Panes...)
+		}
+		return &cloned
 	}
 
 	var activePaneID, layoutJSON, updatedAt string
@@ -130,7 +142,8 @@ func (s *Store) HasWorkspace(sessionID string) bool {
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
-		return false
+		_, ok := s.workspaces[sessionID]
+		return ok
 	}
 
 	var exists int
@@ -145,6 +158,13 @@ func (s *Store) FindWorkspacePaneByRuntimeID(runtimeID string) (sessionID string
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
+		for sessionID, snapshot := range s.workspaces {
+			for _, pane := range snapshot.Panes {
+				if pane.RuntimeID == runtimeID {
+					return sessionID, pane.PaneID, true
+				}
+			}
+		}
 		return "", "", false
 	}
 
