@@ -71,11 +71,56 @@ jobs:
           mkdir -p app/src-tauri/binaries
           cp /tmp/attn "app/src-tauri/binaries/attn-aarch64-apple-darwin"
 
+      - name: Import Apple signing credentials
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8; do
+            if [ -z "${!var:-}" ]; then
+              echo "Missing required secret: $var"
+              exit 1
+            fi
+          done
+
+          CERT_PATH="$RUNNER_TEMP/apple-certificate.p12"
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          printf '%s' "$APPLE_CERTIFICATE" | tr -d '\n\r' | openssl base64 -d -A -out "$CERT_PATH"
+          printf '%s' "$APPLE_API_KEY_P8" | tr -d '\n\r' | openssl base64 -d -A -out "$KEY_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -f pkcs12 -A
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          SIGNING_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -nE 's/.*"([^"]+)".*/\1/p' | grep 'Developer ID Application:' | head -n1)"
+          if [ -z "$SIGNING_IDENTITY" ]; then
+            echo "Developer ID Application identity not found in imported keychain"
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+            exit 1
+          fi
+
+          echo "APPLE_SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_INSTALL_CHANNEL: release
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         with:
           projectPath: app
           tagName: ${{ env.RELEASE_TAG }}
@@ -85,9 +130,12 @@ jobs:
           prerelease: false
           args: --target aarch64-apple-darwin
 
-      - name: Re-sign app and replace release assets
+      - name: Repackage notarized app and replace release assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         run: |
           APP_PATH="$(find app/src-tauri/target -type d -name 'attn.app' | head -n1)"
           if [ -z "$APP_PATH" ]; then
@@ -99,13 +147,28 @@ jobs:
           WORK_DIR="$(mktemp -d)"
           cp -R "$APP_PATH" "$WORK_DIR/attn.app"
 
-          # Ensure app bundle has a coherent signature before distributing via cask.
-          xattr -cr "$WORK_DIR/attn.app" || true
-          codesign --force --deep --sign - "$WORK_DIR/attn.app"
           codesign --verify --deep --strict --verbose=2 "$WORK_DIR/attn.app"
+          spctl -a -t exec -vv "$WORK_DIR/attn.app"
+
+          APP_ZIP="$WORK_DIR/attn.app.zip"
+          ditto -c -k --keepParent "$WORK_DIR/attn.app" "$APP_ZIP"
+          xcrun notarytool submit "$APP_ZIP" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$WORK_DIR/attn.app"
+          xcrun stapler validate "$WORK_DIR/attn.app"
 
           DMG_REBUILT="$WORK_DIR/attn_${VERSION}_aarch64.dmg"
           hdiutil create -volname "attn" -srcfolder "$WORK_DIR/attn.app" -format UDZO "$DMG_REBUILT"
+          xcrun notarytool submit "$DMG_REBUILT" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$DMG_REBUILT"
+          xcrun stapler validate "$DMG_REBUILT"
 
           (cd "$WORK_DIR" && tar -czf "attn_aarch64.app.tar.gz" attn.app)
           APP_TAR="$WORK_DIR/attn_aarch64.app.tar.gz"
@@ -124,6 +187,17 @@ jobs:
           fi
           cp "$DMG_REBUILT" /tmp/attn_aarch64.dmg
           gh release upload "${RELEASE_TAG}" /tmp/attn_aarch64.dmg --clobber
+
+      - name: Clean up Apple signing credentials
+        if: always()
+        run: |
+          if [ -n "${APPLE_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$APPLE_KEYCHAIN_PATH" || true
+          fi
+          rm -f "$RUNNER_TEMP/apple-certificate.p12"
+          if [ -n "${APPLE_API_KEY_PATH:-}" ]; then
+            rm -f "$APPLE_API_KEY_PATH"
+          fi
 
   linux-amd64:
     name: Linux amd64 daemon
