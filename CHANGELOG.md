@@ -17,6 +17,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Remote Picker Packaged Smoke Coverage**: Extend the packaged `bridge-remote-hub` harness to drive remote directory browse, repo selection, per-endpoint recents, and remote worktree creation through the real new-session picker so picker parity is verified end to end against `ai-sandbox`.
 
 ### Fixed
+- **Unavailable Picker Shortcuts**: Stop advertising unusable agent shortcuts and consume disabled `⌥1-9` agent shortcuts as no-ops, so unavailable agents no longer leak `Alt` characters into the path field on macOS.
+- **Harness Endpoint Identity Matching**: Match existing remote-hub harness endpoints by the full normalized SSH target instead of host-only, so smoke runs no longer reuse the wrong endpoint when multiple SSH identities point at the same machine.
+- **Quoted Screenshot Output Paths**: Quote `make app-screenshot` output paths so screenshot destinations containing spaces are passed through correctly.
 - **Picker Target Switching Polish**: Make new-session target changes clear stale browse results immediately, update the starting path without a second delayed rewrite, and add reliable `⌥Q/W/E/...` target shortcuts that still work while the path input is focused.
 - **Picker Summary Cleanup**: Remove the leftover remote-only summary block from the new-session picker so local and remote targets use the same streamlined layout and title.
 - **Settings Modal Input Text Defaults**: Disable browser autocapitalization and autocorrect across settings text fields so paths, SSH targets, executable names, and model IDs no longer get silently rewritten while typing.

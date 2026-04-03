@@ -485,11 +485,11 @@ export function LocationPicker({
         const targetID = targetShortcutIDByCode.get(e.code);
         if (targetID) {
           const target = selectableTargets.find((candidate) => candidate.id === targetID);
+          e.preventDefault();
+          e.stopPropagation();
           if (!target || !target.connected) {
             return;
           }
-          e.preventDefault();
-          e.stopPropagation();
           handleEndpointChange(target.id);
           return;
         }
@@ -499,10 +499,11 @@ export function LocationPicker({
           const idx = Number(digitMatch[1]) - 1;
           if (idx < orderedAgentList.length) {
             const targetAgent = orderedAgentList[idx];
+            e.preventDefault();
+            e.stopPropagation();
             if (!isAgentAvailable(effectiveAgentAvailability, targetAgent)) {
               return;
             }
-            e.preventDefault();
             handleAgentChange(targetAgent);
             return;
           }
@@ -579,7 +580,7 @@ export function LocationPicker({
                     title={!available ? `${agentLabel(agent)} CLI not found in PATH` : undefined}
                   >
                     <span className="agent-option-name">{agentLabel(agent)}</span>
-                    {shortcut && <kbd className="agent-shortcut">{shortcut}</kbd>}
+                    {available && shortcut && <kbd className="agent-shortcut">{shortcut}</kbd>}
                   </button>
                 );
               })}
@@ -622,7 +623,7 @@ export function LocationPicker({
                   <span className="endpoint-option-name">{endpoint.name}</span>
                   <div className="endpoint-option-footer">
                     <span className={`endpoint-option-meta status-${endpoint.status}`}>{endpoint.status}</span>
-                    {shortcutKey && <kbd className="agent-shortcut endpoint-shortcut">{`⌥${shortcutKey.toUpperCase()}`}</kbd>}
+                    {connected && shortcutKey && <kbd className="agent-shortcut endpoint-shortcut">{`⌥${shortcutKey.toUpperCase()}`}</kbd>}
                   </div>
                 </button>
               );

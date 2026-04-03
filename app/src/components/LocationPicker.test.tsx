@@ -128,4 +128,59 @@ describe('LocationPicker', () => {
       expect(screen.getByRole('radio', { name: /local/i })).toHaveAttribute('aria-checked', 'true');
     });
   });
+
+  it('does not advertise or apply shortcuts for disconnected endpoints', async () => {
+    renderPicker({
+      projectsDirectory: '/Users/victor/projects',
+      endpoints: [
+        {
+          id: 'ep-1',
+          name: 'gpu-box',
+          ssh_target: 'ai-sandbox',
+          status: 'disconnected',
+          enabled: true,
+          capabilities: {
+            protocol_version: '46',
+            agents_available: ['codex'],
+            projects_directory: '/srv/projects',
+          },
+        },
+      ],
+    });
+
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    expect(input.value).toBe('/Users/victor/projects/');
+    expect(screen.queryByText('⌥W')).not.toBeInTheDocument();
+
+    input.focus();
+    fireEvent.keyDown(input, { key: '∑', code: 'KeyW', altKey: true });
+
+    await waitFor(() => {
+      expect(input.value).toBe('/Users/victor/projects/');
+      expect(screen.getByRole('radio', { name: /local/i })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('radio', { name: /gpu-box/i })).toHaveAttribute('aria-checked', 'false');
+    });
+  });
+
+  it('does not advertise or apply shortcuts for unavailable agents', async () => {
+    renderPicker({
+      agentAvailability: {
+        claude: true,
+        codex: false,
+        copilot: true,
+        pi: false,
+      },
+    });
+
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    expect(screen.queryByText('⌥2')).not.toBeInTheDocument();
+
+    input.focus();
+    fireEvent.keyDown(input, { key: '™', code: 'Digit2', altKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: /claude/i })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('radio', { name: /copilot/i })).toHaveAttribute('aria-checked', 'false');
+    });
+  });
 });

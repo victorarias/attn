@@ -22,12 +22,7 @@ function shellQuote(value) {
 }
 
 function normalizeSshTarget(value) {
-  const trimmed = String(value || '').trim().toLowerCase();
-  if (!trimmed) {
-    return '';
-  }
-  const atIndex = trimmed.lastIndexOf('@');
-  return atIndex >= 0 ? trimmed.slice(atIndex + 1) : trimmed;
+  return String(value || '').trim().toLowerCase();
 }
 
 function saveJson(filePath, value) {

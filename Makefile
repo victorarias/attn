@@ -131,7 +131,7 @@ install-all: install install-app-ui-automation
 install-all-ui-automation: install install-app-ui-automation
 
 app-screenshot:
-	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path $(SCREENSHOT_PATH),) $(APP_SCREENSHOT_FLAGS)
+	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path "$(SCREENSHOT_PATH)",) $(APP_SCREENSHOT_FLAGS)
 
 # Ad-hoc sign the installed app binary so macOS doesn't SIGKILL it
 # when invoked as a CLI subprocess (e.g. Claude Code hooks)
