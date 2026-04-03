@@ -30,6 +30,14 @@ What it automates:
 
 The GitHub release workflow (`.github/workflows/release.yml`) builds and publishes the macOS app artifacts, uploads `attn_aarch64.dmg` for the Homebrew cask, and attaches standalone Linux daemon binaries for `amd64` and `arm64`.
 The cask itself stays `version :latest` and does not need per-release edits.
+The macOS release job now requires these GitHub Actions secrets for Developer ID signing and notarization:
+
+- `APPLE_CERTIFICATE`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `KEYCHAIN_PASSWORD`
+- `APPLE_API_ISSUER`
+- `APPLE_API_KEY`
+- `APPLE_API_KEY_P8`
 
 ## Optional Fast Path
 
@@ -78,3 +86,11 @@ Suggested use:
 3. Verify install/upgrade:
    - `brew upgrade victorarias/attn/attn`
    - `brew upgrade --cask victorarias/attn/attn`
+
+## Re-run an Existing Tag
+
+If the workflow changes after a tag already exists, rerun the release workflow manually:
+
+1. Merge the workflow change to `main`.
+2. Open the `Release` workflow in GitHub Actions.
+3. Run `workflow_dispatch` with the existing tag, for example `v0.4.0`.
