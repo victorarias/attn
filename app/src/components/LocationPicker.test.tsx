@@ -62,9 +62,6 @@ describe('LocationPicker', () => {
     });
 
     fireEvent.click(screen.getByRole('radio', { name: /gpu-box/i }));
-    await waitFor(() => {
-      expect(screen.getByText(/Browsing, repo inspection, and worktree actions run on gpu-box/i)).toBeInTheDocument();
-    });
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: '~/projects/remote-repo' } });
     fireEvent.focus(input);
@@ -75,5 +72,60 @@ describe('LocationPicker', () => {
       expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'claude', 'ep-1');
     });
     expect(onGetRepoInfo).not.toHaveBeenCalled();
+  });
+
+  it('switches targets with alt key shortcuts in UI order', async () => {
+    renderPicker({
+      projectsDirectory: '/Users/victor/projects',
+      endpoints: [
+        {
+          id: 'ep-1',
+          name: 'gpu-box',
+          ssh_target: 'ai-sandbox',
+          status: 'connected',
+          enabled: true,
+          capabilities: {
+            protocol_version: '46',
+            agents_available: ['codex'],
+            projects_directory: '/srv/projects',
+          },
+        },
+        {
+          id: 'ep-2',
+          name: 'lab-box',
+          ssh_target: 'lab-box',
+          status: 'connected',
+          enabled: true,
+          capabilities: {
+            protocol_version: '46',
+            agents_available: ['codex'],
+            projects_directory: '/opt/work',
+          },
+        },
+      ],
+    });
+
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    expect(input.value).toBe('/Users/victor/projects/');
+
+    input.focus();
+
+    fireEvent.keyDown(input, { key: '∑', code: 'KeyW', altKey: true });
+    await waitFor(() => {
+      expect(input.value).toBe('/srv/projects/');
+      expect(screen.getByRole('radio', { name: /gpu-box/i })).toHaveAttribute('aria-checked', 'true');
+    });
+
+    fireEvent.keyDown(input, { key: '€', code: 'KeyE', altKey: true });
+    await waitFor(() => {
+      expect(input.value).toBe('/opt/work/');
+      expect(screen.getByRole('radio', { name: /lab-box/i })).toHaveAttribute('aria-checked', 'true');
+    });
+
+    fireEvent.keyDown(input, { key: 'œ', code: 'KeyQ', altKey: true });
+    await waitFor(() => {
+      expect(input.value).toBe('/Users/victor/projects/');
+      expect(screen.getByRole('radio', { name: /local/i })).toHaveAttribute('aria-checked', 'true');
+    });
   });
 });

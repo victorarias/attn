@@ -39,6 +39,7 @@ export function useFilesystemSuggestions(
   const [homePath, setHomePath] = useState('');
   const debounceRef = useRef<number | null>(null);
   const requestIdRef = useRef(0);
+  const previousEndpointIdRef = useRef<string | undefined>(endpointId);
 
   const fetchSuggestions = useCallback(async (path: string, targetEndpointId?: string) => {
     if (!browseDirectory || !path || path.length < 1) {
@@ -84,6 +85,19 @@ export function useFilesystemSuggestions(
   useEffect(() => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
+    }
+
+    const endpointChanged = previousEndpointIdRef.current !== endpointId;
+    previousEndpointIdRef.current = endpointId;
+
+    if (endpointChanged) {
+      requestIdRef.current += 1;
+      setSuggestions([]);
+      setCurrentDir('');
+      setError(null);
+      setLoading(Boolean(browseDirectory && inputPath && inputPath.length >= 1));
+      void fetchSuggestions(inputPath, endpointId);
+      return;
     }
 
     debounceRef.current = window.setTimeout(() => {

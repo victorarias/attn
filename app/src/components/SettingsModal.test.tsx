@@ -3,6 +3,34 @@ import { fireEvent, render, screen, waitFor } from '../test/utils';
 import { SettingsModal } from './SettingsModal';
 
 describe('SettingsModal review loop prompts', () => {
+  it('closes on escape', () => {
+    const onClose = vi.fn();
+
+    render(
+      <SettingsModal
+        isOpen
+        onClose={onClose}
+        mutedRepos={[]}
+        connectedHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{}}
+        endpoints={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={vi.fn()}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />
+    );
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('saves a custom review loop preset to settings', () => {
     const onSetSetting = vi.fn();
 

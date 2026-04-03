@@ -10,7 +10,8 @@
 }
 
 .settings-modal {
-  width: 480px;
+  width: 960px;
+  max-width: calc(100vw - 48px);
   max-height: 80vh;
   background: var(--color-bg-panel);
   border: 1px solid var(--color-border);

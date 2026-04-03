@@ -3,7 +3,7 @@ import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
 import { PathInput } from './NewSessionDialog/PathInput';
 import { RepoOptions } from './NewSessionDialog/RepoOptions';
 import type { BrowseDirectoryResult, DaemonEndpoint, InspectPathResult, RecentLocation } from '../hooks/useDaemonSocket';
-import { formatSessionAgentLabel, type SessionAgent } from '../types/sessionAgent';
+import type { SessionAgent } from '../types/sessionAgent';
 import { useSettings } from '../contexts/SettingsContext';
 import {
   agentLabel,
@@ -45,6 +45,8 @@ interface LocationPickerProps {
 const MAX_RECENT_LOCATIONS = 10;
 const SESSION_AGENT_KEY = 'new_session_agent';
 const LOCAL_TARGET = '__local__';
+const TARGET_SHORTCUT_KEYS = ['q', 'w', 'e', 'r', 't', 'a', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
+const TARGET_SHORTCUT_CODES = ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB'];
 
 const DEFAULT_AGENT_AVAILABILITY: AgentAvailability = {
   codex: true,
@@ -149,6 +151,38 @@ export function LocationPicker({
   const selectedProjectsDirectory = isLocalTarget
     ? projectsDirectory
     : selectedEndpoint?.capabilities?.projects_directory;
+  const selectableTargets = useMemo(
+    () => [
+      { id: LOCAL_TARGET, connected: true },
+      ...availableEndpoints.map((endpoint) => ({
+        id: endpoint.id,
+        connected: endpoint.status === 'connected',
+      })),
+    ],
+    [availableEndpoints],
+  );
+  const targetShortcutByID = useMemo(() => {
+    const shortcuts = new Map<string, string>();
+    selectableTargets.forEach((target, index) => {
+      const shortcutKey = TARGET_SHORTCUT_KEYS[index];
+      if (!shortcutKey) {
+        return;
+      }
+      shortcuts.set(target.id, shortcutKey);
+    });
+    return shortcuts;
+  }, [selectableTargets]);
+  const targetShortcutIDByCode = useMemo(() => {
+    const shortcuts = new Map<string, string>();
+    selectableTargets.forEach((target, index) => {
+      const shortcutCode = TARGET_SHORTCUT_CODES[index];
+      if (!shortcutCode) {
+        return;
+      }
+      shortcuts.set(shortcutCode, target.id);
+    });
+    return shortcuts;
+  }, [selectableTargets]);
 
   useEffect(() => {
     if (isOpen && onGetRecentLocations) {
@@ -192,7 +226,7 @@ export function LocationPicker({
       refreshing: false,
       hasSelectedSinceTab: false,
     }));
-  }, [isLocalTarget, isOpen, selectedProjectsDirectory, state.homePath]);
+  }, [isLocalTarget, isOpen, selectedProjectsDirectory]);
 
   const orderedAgentList = useMemo(() => {
     const ordered: SessionAgent[] = [];
@@ -448,6 +482,18 @@ export function LocationPicker({
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && !e.metaKey && !e.ctrlKey) {
+        const targetID = targetShortcutIDByCode.get(e.code);
+        if (targetID) {
+          const target = selectableTargets.find((candidate) => candidate.id === targetID);
+          if (!target || !target.connected) {
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          handleEndpointChange(target.id);
+          return;
+        }
+
         const digitMatch = /^Digit([1-9])$/.exec(e.code);
         if (digitMatch) {
           const idx = Number(digitMatch[1]) - 1;
@@ -493,9 +539,9 @@ export function LocationPicker({
       }
     };
 
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [effectiveAgentAvailability, handleAgentChange, handleBack, isOpen, onClose, orderedAgentList, state.mode, visibleRecent.length, visibleSuggestions.length]);
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [effectiveAgentAvailability, handleAgentChange, handleBack, handleEndpointChange, isOpen, onClose, orderedAgentList, selectableTargets, state.mode, targetShortcutIDByCode, visibleRecent.length, visibleSuggestions.length]);
 
   const transformedRepoInfo = state.repoInfo ? {
     repo: state.repoInfo.repo,
@@ -552,10 +598,14 @@ export function LocationPicker({
               aria-checked={isLocalTarget}
             >
               <span className="endpoint-option-name">Local</span>
-              <span className="endpoint-option-meta">this machine</span>
+              <div className="endpoint-option-footer">
+                <span className="endpoint-option-meta">this machine</span>
+                <kbd className="agent-shortcut endpoint-shortcut">{`⌥${targetShortcutByID.get(LOCAL_TARGET)?.toUpperCase()}`}</kbd>
+              </div>
             </button>
             {availableEndpoints.map((endpoint) => {
               const connected = endpoint.status === 'connected';
+              const shortcutKey = targetShortcutByID.get(endpoint.id);
               return (
                 <button
                   key={endpoint.id}
@@ -570,7 +620,10 @@ export function LocationPicker({
                   title={!connected ? `${endpoint.name} is ${endpoint.status}` : undefined}
                 >
                   <span className="endpoint-option-name">{endpoint.name}</span>
-                  <span className={`endpoint-option-meta status-${endpoint.status}`}>{endpoint.status}</span>
+                  <div className="endpoint-option-footer">
+                    <span className={`endpoint-option-meta status-${endpoint.status}`}>{endpoint.status}</span>
+                    {shortcutKey && <kbd className="agent-shortcut endpoint-shortcut">{`⌥${shortcutKey.toUpperCase()}`}</kbd>}
+                  </div>
                 </button>
               );
             })}
@@ -579,28 +632,11 @@ export function LocationPicker({
         {!hasAvailableAgents && (
           <div className="picker-agent-warning">{noAgentsMessage}</div>
         )}
-        {!isLocalTarget && selectedEndpoint && (
-          <div className="picker-endpoint-summary">
-            <div className="picker-endpoint-summary-row">
-              <span className="picker-endpoint-summary-label">SSH</span>
-              <code>{selectedEndpoint.ssh_target}</code>
-            </div>
-            {selectedEndpoint.capabilities?.projects_directory && (
-              <div className="picker-endpoint-summary-row">
-                <span className="picker-endpoint-summary-label">Projects</span>
-                <code>{selectedEndpoint.capabilities.projects_directory}</code>
-              </div>
-            )}
-            <div className="picker-endpoint-summary-note">
-              Browsing, repo inspection, and worktree actions run on {selectedEndpoint.name}.
-            </div>
-          </div>
-        )}
         {state.mode === 'path-input' ? (
           <>
             <div className="picker-header">
               <div className="picker-title" data-testid="location-picker-title">
-                {isLocalTarget ? 'New Session Location' : `New ${formatSessionAgentLabel(state.agent)} Session on ${selectedEndpoint?.name || 'Remote'}`}
+                New Session Location
               </div>
               <PathInput
                 value={state.inputValue}

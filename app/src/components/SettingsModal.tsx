@@ -169,6 +169,22 @@ export function SettingsModal({
     }
   }, [actualReviewLoopPresets, isOpen, selectedReviewLoopPresetID]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [isOpen, onClose]);
+
   const handleBrowse = useCallback(async () => {
     const selected = await open({
       directory: true,
@@ -438,6 +454,9 @@ export function SettingsModal({
                 onKeyDown={handleKeyDown}
                 placeholder="/Users/you/projects"
                 className="settings-input"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
               <button className="browse-btn" onClick={handleBrowse}>
                 Browse
@@ -476,6 +495,9 @@ export function SettingsModal({
                 className="settings-input"
                 aria-label="Endpoint name"
                 disabled={endpointActionInFlight}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
               <input
                 type="text"
@@ -485,6 +507,9 @@ export function SettingsModal({
                 className="settings-input"
                 aria-label="SSH target"
                 disabled={endpointActionInFlight}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
               <button
                 className="browse-btn"
@@ -544,6 +569,9 @@ export function SettingsModal({
                             className="settings-input"
                             aria-label="Edit endpoint name"
                             disabled={endpointActionInFlight}
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
                           />
                           <input
                             type="text"
@@ -552,6 +580,9 @@ export function SettingsModal({
                             className="settings-input"
                             aria-label="Edit SSH target"
                             disabled={endpointActionInFlight}
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
                           />
                         </div>
                       ) : (
@@ -633,6 +664,9 @@ export function SettingsModal({
                     }}
                     placeholder={agent}
                     className="settings-input"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                   />
                 </div>
               );
@@ -648,6 +682,9 @@ export function SettingsModal({
                 onKeyDown={handleEditorKeyDown}
                 placeholder="$EDITOR"
                 className="settings-input"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
             </div>
           </div>
@@ -687,6 +724,9 @@ export function SettingsModal({
                   value={reviewLoopPresetName}
                   onChange={(e) => setReviewLoopPresetName(e.target.value)}
                   placeholder="Architect pass"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
               </div>
               <div className="settings-field">
@@ -708,6 +748,8 @@ export function SettingsModal({
                   value={reviewLoopPrompt}
                   onChange={(e) => setReviewLoopPrompt(e.target.value)}
                   rows={6}
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   spellCheck={false}
                   placeholder="Do a full review of these changes..."
                 />
@@ -751,6 +793,9 @@ export function SettingsModal({
                 }}
                 placeholder="claude-sonnet-4-6"
                 className="settings-input"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
             </div>
             <div className="settings-field">
@@ -768,6 +813,9 @@ export function SettingsModal({
                 }}
                 placeholder="claude-opus-4-6"
                 className="settings-input"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
               />
             </div>
           </div>

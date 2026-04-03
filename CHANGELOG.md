@@ -17,6 +17,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Remote Picker Packaged Smoke Coverage**: Extend the packaged `bridge-remote-hub` harness to drive remote directory browse, repo selection, per-endpoint recents, and remote worktree creation through the real new-session picker so picker parity is verified end to end against `ai-sandbox`.
 
 ### Fixed
+- **Picker Target Switching Polish**: Make new-session target changes clear stale browse results immediately, update the starting path without a second delayed rewrite, and add reliable `⌥Q/W/E/...` target shortcuts that still work while the path input is focused.
+- **Picker Summary Cleanup**: Remove the leftover remote-only summary block from the new-session picker so local and remote targets use the same streamlined layout and title.
+- **Settings Modal Input Text Defaults**: Disable browser autocapitalization and autocorrect across settings text fields so paths, SSH targets, executable names, and model IDs no longer get silently rewritten while typing.
+- **Settings Modal Escape Dismissal**: Let the settings dialog close on `Escape` even when focus is inside one of its form fields.
+
 - **Remote Bootstrap Readiness Window**: Give SSH-bootstrapped remote daemons more time to become ready before the hub marks the endpoint as failed, so Linux hosts that spend time probing and falling back from the worker PTY backend no longer flap into `error` during normal startup.
 - **Packaged App Daemon Startup Window**: Give the macOS app more time to wait for the local daemon socket during startup and restart, so a normal cold daemon boot no longer fails closed before the websocket is listening.
 - **Cgo-Less Remote Daemon Fallback**: Make the daemon’s degraded in-memory mode actually keep session and workspace state when SQLite cannot open, so Linux remotes built without cgo still register sessions and propagate state updates instead of dropping them immediately.
