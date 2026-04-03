@@ -199,6 +199,25 @@ model WorkspaceSnapshot {
   updated_at?: string;
 }
 
+model EndpointCapabilities {
+  protocol_version: string;
+  agents_available: string[];
+  projects_directory?: string;
+  pty_backend_mode?: string;
+  daemon_instance_id?: string;
+}
+
+model EndpointInfo {
+  id: string;
+  name: string;
+  ssh_target: string;
+  status: string;
+  enabled?: boolean;
+  status_message?: string;
+  session_count?: int32;
+  capabilities?: EndpointCapabilities;
+}
+
 // ============================================================================
 // Command Messages (Client → Daemon)
 // ============================================================================
@@ -343,6 +362,29 @@ model SetSettingMessage {
   cmd: "set_setting";
   key: string;
   value: string;
+}
+
+model AddEndpointMessage {
+  cmd: "add_endpoint";
+  name: string;
+  ssh_target: string;
+}
+
+model RemoveEndpointMessage {
+  cmd: "remove_endpoint";
+  endpoint_id: string;
+}
+
+model UpdateEndpointMessage {
+  cmd: "update_endpoint";
+  endpoint_id: string;
+  name?: string;
+  ssh_target?: string;
+  enabled?: boolean;
+}
+
+model ListEndpointsMessage {
+  cmd: "list_endpoints";
 }
 
 model ApprovePRMessage {
@@ -664,12 +706,31 @@ model InitialStateMessage {
   protocol_version?: string;
   daemon_instance_id?: string;
   sessions?: Session[];
+  endpoints?: EndpointInfo[];
   workspaces?: WorkspaceSnapshot[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
   settings?: Record<string>;
   warnings?: DaemonWarning[];
+}
+
+model EndpointStatusChangedMessage {
+  event: "endpoint_status_changed";
+  endpoint: EndpointInfo;
+}
+
+model EndpointsUpdatedMessage {
+  event: "endpoints_updated";
+  endpoints: EndpointInfo[];
+}
+
+model EndpointActionResultMessage {
+  event: "endpoint_action_result";
+  action: string;
+  endpoint_id?: string;
+  success: boolean;
+  error?: string;
 }
 
 model SessionRegisteredMessage {

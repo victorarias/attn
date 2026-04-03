@@ -6,6 +6,7 @@ import type {
   WorkspaceSnapshot as GeneratedWorkspaceSnapshot,
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
+  Endpoint as GeneratedEndpoint,
   RepoState as GeneratedRepoState,
   AuthorState as GeneratedAuthorState,
   WebSocketEvent as GeneratedWebSocketEvent,
@@ -31,6 +32,7 @@ export type DaemonSession = GeneratedSession;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
+export type DaemonEndpoint = GeneratedEndpoint;
 export type RepoState = GeneratedRepoState;
 export type AuthorState = GeneratedAuthorState;
 export type RecentLocation = GeneratedRecentLocation;
@@ -47,6 +49,8 @@ export { SessionState, PRRole, HeatState };
 // Extended WebSocketEvent with action result fields (generated allows extra properties)
 type WebSocketEvent = GeneratedWebSocketEvent & {
   id?: string;
+  endpoint?: GeneratedEndpoint;
+  endpoints?: GeneratedEndpoint[];
   workspace?: GeneratedWorkspaceSnapshot;
   data?: string;
   seq?: number;
@@ -98,7 +102,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '42';
+const PROTOCOL_VERSION = '43';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -187,6 +191,12 @@ interface RemoteBranchesResult {
 interface EnsureRepoResult {
   success: boolean;
   cloned?: boolean;
+  error?: string;
+}
+
+interface EndpointActionResult {
+  success: boolean;
+  endpoint_id?: string;
   error?: string;
 }
 
@@ -322,6 +332,7 @@ interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
+  onEndpointsUpdate?: (endpoints: DaemonEndpoint[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
   onAuthorsUpdate: (authors: AuthorState[]) => void;
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
@@ -368,6 +379,16 @@ function workspaceRuntimeIDs(workspaces: DaemonWorkspace[]): Set<string> {
     }
   }
   return ids;
+}
+
+function upsertEndpointByID(endpoints: DaemonEndpoint[], endpoint: DaemonEndpoint): DaemonEndpoint[] {
+  const index = endpoints.findIndex((entry) => entry.id === endpoint.id);
+  if (index === -1) {
+    return [...endpoints, endpoint];
+  }
+  const updated = [...endpoints];
+  updated[index] = endpoint;
+  return updated;
 }
 
 function workspaceActionKey(action: string, sessionId: string, paneId?: string): string {
@@ -418,6 +439,7 @@ export function useDaemonSocket({
   onSessionsUpdate,
   onWorkspacesUpdate,
   onPRsUpdate,
+  onEndpointsUpdate,
   onReposUpdate,
   onAuthorsUpdate,
   onWorktreesUpdate,
@@ -433,6 +455,7 @@ export function useDaemonSocket({
   const sessionsRef = useRef<DaemonSession[]>([]);
   const workspacesRef = useRef<DaemonWorkspace[]>([]);
   const prsRef = useRef<DaemonPR[]>([]);
+  const endpointsRef = useRef<DaemonEndpoint[]>([]);
   const reposRef = useRef<RepoState[]>([]);
   const authorsRef = useRef<AuthorState[]>([]);
   const settingsRef = useRef<DaemonSettings>({});
@@ -563,6 +586,15 @@ export function useDaemonSocket({
         rejectPendingByPredicate((key) => key === cmd, error);
     }
   }, [rejectPendingByPredicate]);
+
+  const hasPendingEndpointAction = useCallback(() => {
+    for (const key of pendingActionsRef.current.keys()) {
+      if (key.startsWith('endpoint_action:')) {
+        return true;
+      }
+    }
+    return false;
+  }, []);
 
   const ensureDaemonRunning = useCallback(async () => {
     if (!isTauri()) {
@@ -710,6 +742,10 @@ export function useDaemonSocket({
             prsRef.current = nextPRs;
             onPRsUpdate(nextPRs);
 
+            const nextEndpoints = data.endpoints || [];
+            endpointsRef.current = nextEndpoints;
+            onEndpointsUpdate?.(nextEndpoints);
+
             const nextRepos = data.repos || [];
             reposRef.current = nextRepos;
             onReposUpdate(nextRepos);
@@ -791,6 +827,45 @@ export function useDaemonSocket({
           case 'workspace_runtime_exited':
             // The canonical pane removal arrives via workspace_updated.
             break;
+
+          case 'endpoint_status_changed':
+            if (data.endpoint) {
+              const nextEndpoints = upsertEndpointByID(endpointsRef.current, data.endpoint);
+              endpointsRef.current = nextEndpoints;
+              onEndpointsUpdate?.(nextEndpoints);
+            }
+            break;
+
+          case 'endpoints_updated':
+            if (data.endpoints) {
+              endpointsRef.current = data.endpoints;
+              onEndpointsUpdate?.(data.endpoints);
+            }
+            if (pendingActionsRef.current.has('list_endpoints')) {
+              const pending = pendingActionsRef.current.get('list_endpoints');
+              pendingActionsRef.current.delete('list_endpoints');
+              pending?.resolve(data.endpoints || []);
+            }
+            break;
+
+          case 'endpoint_action_result': {
+            const action = data.action || '';
+            const exactKey = data.endpoint_id ? `endpoint_action:${action}:${data.endpoint_id}` : '';
+            let pendingKey = exactKey;
+            if (!pendingKey || !pendingActionsRef.current.has(pendingKey)) {
+              pendingKey = Array.from(pendingActionsRef.current.keys()).find((key) => key.startsWith(`endpoint_action:${action}:`)) || '';
+            }
+            const pending = pendingKey ? pendingActionsRef.current.get(pendingKey) : undefined;
+            if (pending) {
+              pendingActionsRef.current.delete(pendingKey);
+              if (data.success) {
+                pending.resolve({ success: true, endpoint_id: data.endpoint_id });
+              } else {
+                pending.reject(new Error(data.error || 'Endpoint action failed'));
+              }
+            }
+            break;
+          }
 
           case 'spawn_result': {
             if (data.id) {
@@ -2134,6 +2209,97 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'set_setting', key, value }));
   }, [onSettingsUpdate]);
 
+  const sendAddEndpoint = useCallback((name: string, sshTarget: string): Promise<EndpointActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      if (hasPendingEndpointAction()) {
+        reject(new Error('Another endpoint action is already in progress'));
+        return;
+      }
+      const key = 'endpoint_action:add:pending';
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'add_endpoint', name, ssh_target: sshTarget }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Add endpoint timed out'));
+        }
+      }, 30000);
+    });
+  }, [hasPendingEndpointAction]);
+
+  const sendUpdateEndpoint = useCallback((
+    endpointId: string,
+    updates: { name?: string; ssh_target?: string; enabled?: boolean }
+  ): Promise<EndpointActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      if (hasPendingEndpointAction()) {
+        reject(new Error('Another endpoint action is already in progress'));
+        return;
+      }
+      const key = `endpoint_action:update:${endpointId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'update_endpoint', endpoint_id: endpointId, ...updates }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Update endpoint timed out'));
+        }
+      }, 30000);
+    });
+  }, [hasPendingEndpointAction]);
+
+  const sendRemoveEndpoint = useCallback((endpointId: string): Promise<EndpointActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      if (hasPendingEndpointAction()) {
+        reject(new Error('Another endpoint action is already in progress'));
+        return;
+      }
+      const key = `endpoint_action:remove:${endpointId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'remove_endpoint', endpoint_id: endpointId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Remove endpoint timed out'));
+        }
+      }, 30000);
+    });
+  }, [hasPendingEndpointAction]);
+
+  const sendListEndpoints = useCallback((): Promise<DaemonEndpoint[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = 'list_endpoints';
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'list_endpoints' }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('List endpoints timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
   // Get recent locations from daemon
   const sendGetRecentLocations = useCallback((limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
@@ -3014,6 +3180,10 @@ export function useDaemonSocket({
     sendCreateWorktree,
     sendDeleteWorktree,
     sendSetSetting,
+    sendAddEndpoint,
+    sendUpdateEndpoint,
+    sendRemoveEndpoint,
+    sendListEndpoints,
     sendGetRecentLocations,
     sendListBranches,
     sendDeleteBranch,

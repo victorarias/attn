@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
@@ -208,18 +210,26 @@ func (h *wsHub) Broadcast(event *protocol.WebSocketEvent) {
 		h.broadcastListener(event)
 	}
 
-	data, err := json.Marshal(event)
+	h.broadcastValue(event)
+}
+
+func (h *wsHub) BroadcastValue(message interface{}) {
+	h.broadcastValue(message)
+}
+
+func (h *wsHub) broadcastValue(message interface{}) {
+	data, err := json.Marshal(message)
 	if err != nil {
 		h.logf("WebSocket broadcast marshal error: %v", err)
 		return
 	}
-	message := outboundMessage{kind: messageKindText, payload: data}
+	out := outboundMessage{kind: messageKindText, payload: data}
 	select {
-	case h.broadcast <- message:
+	case h.broadcast <- out:
 		// Message queued for broadcast
 	default:
 		// Broadcast channel full - this indicates the hub is overwhelmed
-		h.logf("WebSocket broadcast channel full, dropping %s event", event.Event)
+		h.logf("WebSocket broadcast channel full, dropping outbound message")
 	}
 }
 
@@ -261,6 +271,16 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 		d.logf("WebSocket rejected origin: %s", origin)
 		http.Error(w, "forbidden origin", http.StatusForbidden)
 		return
+	}
+	if required := config.WSAuthToken(); required != "" {
+		provided := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		if provided == "" {
+			provided = strings.TrimSpace(r.URL.Query().Get("token"))
+		}
+		if subtle.ConstantTimeCompare([]byte(required), []byte(provided)) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
@@ -310,6 +330,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		ProtocolVersion:  protocol.Ptr(protocol.ProtocolVersion),
 		DaemonInstanceID: protocol.Ptr(d.daemonInstanceID),
 		Sessions:         d.sessionsForBroadcast(d.store.List("")),
+		Endpoints:        d.listEndpointInfos(),
 		Workspaces:       d.listWorkspaceSnapshots(d.store.List("")),
 		Prs:              protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:            protocol.RepoStatesToValues(d.store.ListRepoStates()),
@@ -469,6 +490,14 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleGetSettingsWS(client)
 	case protocol.CmdSetSetting:
 		d.handleSetSettingWS(client, msg.(*protocol.SetSettingMessage))
+	case protocol.CmdAddEndpoint:
+		d.handleAddEndpointWS(client, msg.(*protocol.AddEndpointMessage))
+	case protocol.CmdRemoveEndpoint:
+		d.handleRemoveEndpointWS(client, msg.(*protocol.RemoveEndpointMessage))
+	case protocol.CmdUpdateEndpoint:
+		d.handleUpdateEndpointWS(client, msg.(*protocol.UpdateEndpointMessage))
+	case protocol.CmdListEndpoints:
+		d.handleListEndpointsWS(client)
 	case protocol.CmdUnregister:
 		d.handleUnregisterWS(client, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdGetRecentLocations:
@@ -585,4 +614,11 @@ func (d *Daemon) sendToClient(client *wsClient, message interface{}) {
 		kind:    messageKindText,
 		payload: data,
 	})
+}
+
+func (d *Daemon) broadcastMessage(message interface{}) {
+	if d.wsHub == nil {
+		return
+	}
+	d.wsHub.BroadcastValue(message)
 }

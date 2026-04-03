@@ -22,6 +22,7 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/github"
+	"github.com/victorarias/attn/internal/hub"
 	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
@@ -93,6 +94,7 @@ type Daemon struct {
 	done             chan struct{}
 	logger           *logging.Logger
 	ghRegistry       *github.ClientRegistry
+	hubManager       *hub.Manager
 	classifier       Classifier // Optional, uses package-level classifier.Classify if nil
 	reviewLoopExec   ReviewLoopExecutor
 	repoCaches       map[string]*repoCache
@@ -273,6 +275,7 @@ func New(socketPath string) *Daemon {
 		done:             make(chan struct{}),
 		logger:           logger,
 		ghRegistry:       github.NewClientRegistry(),
+		hubManager:       nil,
 		repoCaches:       make(map[string]*repoCache),
 		warnings:         startupWarnings,
 		ptyBackend:       ptybackend.NewEmbedded(manager),
@@ -301,6 +304,7 @@ func NewForTesting(socketPath string) *Daemon {
 		done:             make(chan struct{}),
 		logger:           nil, // No logging in tests
 		ghRegistry:       github.NewClientRegistry(),
+		hubManager:       nil,
 		repoCaches:       make(map[string]*repoCache),
 		ptyBackend:       ptybackend.NewEmbedded(manager),
 		transcriptWatch:  make(map[string]*transcriptWatcher),
@@ -332,6 +336,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		done:             make(chan struct{}),
 		logger:           nil,
 		ghRegistry:       registry,
+		hubManager:       nil,
 		repoCaches:       make(map[string]*repoCache),
 		ptyBackend:       ptybackend.NewEmbedded(manager),
 		transcriptWatch:  make(map[string]*transcriptWatcher),
@@ -377,6 +382,9 @@ func (d *Daemon) Start() error {
 			return fmt.Errorf("ensure daemon instance id: %w", err)
 		}
 		d.daemonInstanceID = instanceID
+	}
+	if d.hubManager == nil {
+		d.hubManager = hub.NewManager(d.store, d.broadcastEndpointStatusChanged, d.logf)
 	}
 	selectedBackend := strings.TrimSpace(strings.ToLower(os.Getenv("ATTN_PTY_BACKEND")))
 	if selectedBackend == "" {
@@ -477,6 +485,7 @@ func (d *Daemon) Start() error {
 	// Create HTTP server for WebSocket (must be created synchronously to avoid race with Stop())
 	d.initHTTPServer()
 	go d.runHTTPServer()
+	d.hubManager.Start(d.doneContext())
 
 	recoveryStartedAt := time.Now()
 	go func() {
@@ -957,6 +966,9 @@ func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.Session
 func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
+	if d.hubManager != nil {
+		d.hubManager.Stop()
+	}
 	d.stopAllTranscriptWatchers()
 	if d.ptyBackend != nil {
 		_ = d.ptyBackend.Shutdown(context.Background())
@@ -974,6 +986,18 @@ func (d *Daemon) Stop() {
 	if d.logger != nil {
 		d.logger.Close()
 	}
+}
+
+func (d *Daemon) doneContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-d.done:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx
 }
 
 func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
@@ -1090,13 +1114,8 @@ func (d *Daemon) initHTTPServer() {
 	mux.HandleFunc("/ws", d.handleWS)
 	mux.HandleFunc("/health", d.handleHealth)
 
-	port := os.Getenv("ATTN_WS_PORT")
-	if port == "" {
-		port = "9849"
-	}
-
 	d.httpServer = &http.Server{
-		Addr:    "127.0.0.1:" + port,
+		Addr:    net.JoinHostPort(config.WSBindAddress(), config.WSPort()),
 		Handler: mux,
 	}
 }
@@ -2679,6 +2698,38 @@ func (d *Daemon) broadcastSessionsUpdated() {
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:    protocol.EventSessionsUpdated,
 		Sessions: d.sessionsForBroadcast(d.store.List("")),
+	})
+}
+
+func (d *Daemon) listEndpointInfos() []protocol.EndpointInfo {
+	if d.hubManager == nil {
+		records := d.store.ListEndpoints()
+		out := make([]protocol.EndpointInfo, 0, len(records))
+		for _, record := range records {
+			out = append(out, protocol.EndpointInfo{
+				ID:        record.ID,
+				Name:      record.Name,
+				SshTarget: record.SSHTarget,
+				Status:    "disconnected",
+				Enabled:   protocol.Ptr(record.Enabled),
+			})
+		}
+		return out
+	}
+	return d.hubManager.List()
+}
+
+func (d *Daemon) broadcastEndpointStatusChanged(info protocol.EndpointInfo) {
+	d.broadcastMessage(&protocol.EndpointStatusChangedMessage{
+		Event:    protocol.EventEndpointStatusChanged,
+		Endpoint: info,
+	})
+}
+
+func (d *Daemon) broadcastEndpointsUpdated() {
+	d.broadcastMessage(&protocol.EndpointsUpdatedMessage{
+		Event:     protocol.EventEndpointsUpdated,
+		Endpoints: d.listEndpointInfos(),
 	})
 }
 

@@ -238,13 +238,52 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith('restart_daemon', {
-        expected_protocol: '42',
+        expected_protocol: '43',
         prefer_local: false,
       });
     });
     expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
     expect(result.current.connectionError === null || result.current.connectionError === 'Restarting daemon...').toBe(true);
 
+    unmount();
+  });
+
+  it('serializes endpoint actions so concurrent updates do not collide', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onEndpointsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    const first = result.current.sendUpdateEndpoint('ep-1', { enabled: false });
+    await expect(result.current.sendUpdateEndpoint('ep-2', { enabled: false })).rejects.toThrow(
+      'Another endpoint action is already in progress',
+    );
+
+    act(() => {
+      ws.emit({
+        event: 'endpoint_action_result',
+        action: 'update',
+        endpoint_id: 'ep-1',
+        success: true,
+      });
+    });
+
+    await expect(first).resolves.toMatchObject({ success: true, endpoint_id: 'ep-1' });
     unmount();
   });
 });

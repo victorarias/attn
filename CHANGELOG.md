@@ -8,8 +8,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-04-02]
 
+### Added
+- **Remote Endpoint Bootstrap Substrate**: Add the first executable slice of the remote-daemon hub with persisted SSH endpoints, `attn ws-relay`, daemon-side endpoint lifecycle management, SSH bootstrap/install logic, runtime endpoint status events, and initial-state endpoint metadata so the local daemon can begin treating remotes as managed peers instead of pure future design.
+
 ### Changed
 - **Remote Daemon Hub Plan Scope**: Stop treating a binary WebSocket protocol or MsgPack migration as a prerequisite for the remote hub. The plan now assumes JSON forwarding for v1, with PTY-specific optimizations and binary framing only as a later, measurement-driven option.
+- **Daemon WebSocket Runtime Config**: Let the daemon honor `ATTN_WS_BIND` and optional `ATTN_WS_AUTH_TOKEN` checks so local-loopback remains the default while direct or relayed remote connections can target a different bind address and opt into token-gated access.
 - **Daemon WebSocket Routing Structure**: Split the remaining inline WebSocket command handlers into domain-specific daemon files and add explicit command-scope metadata, so future endpoint-aware routing work has one place to reason about command ownership and recovery-sensitive actions.
 - **Compiled CLI Versioning**: Build the daemon with an explicit compiled version string, expose it through `attn --version`, and route local builds plus release packaging through the same ldflags path so the binary reports the release it actually came from.
 - **Linux Release Artifacts**: Extend the release workflow to upload standalone `attn-linux-amd64` and `attn-linux-arm64` daemon binaries built natively on GitHub-hosted Linux runners, so tagged releases now ship the daemon artifacts needed for remote Linux installs without changing the macOS app flow.

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "42"
+const ProtocolVersion = "43"
 
 // Commands
 const (
@@ -41,6 +41,10 @@ const (
 	CmdDeleteWorktree           = "delete_worktree"
 	CmdGetSettings              = "get_settings"
 	CmdSetSetting               = "set_setting"
+	CmdAddEndpoint              = "add_endpoint"
+	CmdRemoveEndpoint           = "remove_endpoint"
+	CmdUpdateEndpoint           = "update_endpoint"
+	CmdListEndpoints            = "list_endpoints"
 	CmdApprovePR                = "approve_pr"
 	CmdMergePR                  = "merge_pr"
 	CmdInjectTestPR             = "inject_test_pr"
@@ -103,6 +107,9 @@ const (
 	EventReposUpdated             = "repos_updated"
 	EventAuthorsUpdated           = "authors_updated"
 	EventInitialState             = "initial_state"
+	EventEndpointStatusChanged    = "endpoint_status_changed"
+	EventEndpointsUpdated         = "endpoints_updated"
+	EventEndpointActionResult     = "endpoint_action_result"
 	EventPRActionResult           = "pr_action_result"
 	EventRefreshPRsResult         = "refresh_prs_result"
 	EventFetchPRDetailsResult     = "fetch_pr_details_result"
@@ -410,6 +417,34 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdSetSetting:
 		var msg SetSettingMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAddEndpoint:
+		var msg AddEndpointMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdRemoveEndpoint:
+		var msg RemoveEndpointMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdUpdateEndpoint:
+		var msg UpdateEndpointMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdListEndpoints:
+		var msg ListEndpointsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

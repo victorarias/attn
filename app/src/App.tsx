@@ -23,7 +23,7 @@ import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { MAIN_TERMINAL_PANE_ID, useSessionStore } from './store/sessions';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
@@ -107,6 +107,7 @@ function App() {
   // Settings state (must be declared before useDaemonSocket to pass as callback)
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [settingError, setSettingError] = useState<string | null>(null);
+  const [daemonEndpoints, setDaemonEndpoints] = useState<DaemonEndpoint[]>([]);
 
   const [reviewLoopsBySessionId, setReviewLoopsBySessionId] = useState<Record<string, ReviewLoopState>>({});
   const [daemonWorkspaces, setDaemonWorkspaces] = useState<DaemonWorkspace[]>([]);
@@ -297,6 +298,7 @@ function App() {
     onSessionsUpdate: setDaemonSessions,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
+    onEndpointsUpdate: setDaemonEndpoints,
     onReposUpdate: setRepoStates,
     onAuthorsUpdate: setAuthorStates,
     onSettingsUpdate: setSettings,
@@ -496,9 +498,12 @@ function AppContent({
   sendUnregisterSession,
   sendSetSetting,
   sendCreateWorktree,
-  sendDeleteWorktree,
-  sendDeleteBranch,
-  sendGetRecentLocations,
+    sendDeleteWorktree,
+    sendDeleteBranch,
+    sendAddEndpoint,
+    sendUpdateEndpoint,
+    sendRemoveEndpoint,
+    sendGetRecentLocations,
   sendListBranches,
   sendSwitchBranch,
   sendCreateWorktreeFromBranch,
@@ -2006,6 +2011,10 @@ function AppContent({
         mutedAuthors={mutedAuthors}
         onUnmuteAuthor={sendMuteAuthor}
         settings={settings}
+        endpoints={daemonEndpoints}
+        onAddEndpoint={sendAddEndpoint}
+        onUpdateEndpoint={sendUpdateEndpoint}
+        onRemoveEndpoint={sendRemoveEndpoint}
         onSetSetting={sendSetSetting}
         themePreference={themePreference}
         onSetTheme={setTheme}
