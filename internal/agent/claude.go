@@ -55,6 +55,7 @@ func (c *Claude) Capabilities() Capabilities {
 		HasStateDetector:     true,
 		HasResume:            true,
 		HasFork:              true,
+		HasYolo:              true,
 	}
 }
 
@@ -81,6 +82,9 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		}
 	} else if opts.ResumePicker {
 		args = append(args, "-r")
+	}
+	if opts.YoloMode {
+		args = append(args, "--dangerously-skip-permissions")
 	}
 
 	args = append(args, opts.AgentArgs...)

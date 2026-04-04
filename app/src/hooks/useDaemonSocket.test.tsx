@@ -238,7 +238,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
         expect(vi.mocked(invoke)).toHaveBeenCalledWith('restart_daemon', {
-        expected_protocol: '46',
+        expected_protocol: '47',
         prefer_local: false,
       });
     });

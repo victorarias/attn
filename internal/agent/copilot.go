@@ -40,6 +40,7 @@ func (c *Copilot) Capabilities() Capabilities {
 		HasStateDetector:     true,
 		HasResume:            true,
 		HasFork:              false,
+		HasYolo:              true,
 	}
 }
 
@@ -49,6 +50,9 @@ func (c *Copilot) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	} else if opts.ResumePicker {
 		args = append(args, "--resume")
+	}
+	if opts.YoloMode {
+		args = append(args, "--yolo")
 	}
 	args = append(args, opts.AgentArgs...)
 	return exec.Command(opts.Executable, args...)

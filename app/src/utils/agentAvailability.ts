@@ -6,6 +6,7 @@ export type AgentCapabilities = Record<SessionAgent, Record<string, boolean>>;
 const BUILTIN_AGENT_ORDER: SessionAgent[] = ['codex', 'claude', 'copilot', 'pi'];
 
 export const AGENT_CAPABILITY_ORDER = [
+  'yolo',
   'resume',
   'fork',
   'hooks',
@@ -16,6 +17,7 @@ export const AGENT_CAPABILITY_ORDER = [
 ] as const;
 
 const AGENT_CAPABILITY_LABELS: Record<string, string> = {
+  yolo: 'YOLO',
   resume: 'Resume',
   fork: 'Fork',
   hooks: 'Hooks',

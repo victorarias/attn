@@ -664,6 +664,7 @@ model SpawnSessionMessage {
   resume_session_id?: string;
   resume_picker?: boolean;
   fork_session?: boolean;
+  yolo_mode?: boolean;
   executable?: string;         // Generic executable override for selected agent
   claude_executable?: string;  // Backward compatibility
   codex_executable?: string;   // Backward compatibility

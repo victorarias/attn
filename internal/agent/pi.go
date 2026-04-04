@@ -31,6 +31,7 @@ func (p *Pi) Capabilities() Capabilities {
 		HasStateDetector:     false,
 		HasResume:            false,
 		HasFork:              false,
+		HasYolo:              false,
 	}
 }
 

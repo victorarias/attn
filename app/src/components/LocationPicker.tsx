@@ -8,6 +8,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import {
   agentLabel,
   type AgentAvailability,
+  getAgentCapabilities,
   hasAnyAvailableAgents,
   isAgentAvailable,
   resolvePreferredAgent,
@@ -28,7 +29,7 @@ interface RepoInfo {
 interface LocationPickerProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (path: string, agent: SessionAgent, endpointId?: string) => void;
+  onSelect: (path: string, agent: SessionAgent, endpointId?: string, yoloMode?: boolean) => void;
   onGetRecentLocations?: (endpointId?: string) => Promise<{ locations: RecentLocation[]; home_path?: string }>;
   onBrowseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>;
   onInspectPath?: (path: string, endpointId?: string) => Promise<InspectPathResult>;
@@ -44,6 +45,7 @@ interface LocationPickerProps {
 
 const MAX_RECENT_LOCATIONS = 10;
 const SESSION_AGENT_KEY = 'new_session_agent';
+const SESSION_YOLO_KEY = 'new_session_yolo';
 const LOCAL_TARGET = '__local__';
 const TARGET_SHORTCUT_KEYS = ['q', 'w', 'e', 'r', 't', 'a', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
 const TARGET_SHORTCUT_CODES = ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB'];
@@ -83,6 +85,35 @@ function buildInitialInput(path: string | undefined, homePath: string): string {
   return displayPath.endsWith('/') ? displayPath : `${displayPath}/`;
 }
 
+function parseBooleanSetting(value?: string): boolean | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') {
+    return true;
+  }
+  if (normalized === 'false') {
+    return false;
+  }
+  return null;
+}
+
+function yoloSettingKeys(endpointId: string, daemonInstanceId?: string): string[] {
+  if (endpointId === LOCAL_TARGET) {
+    return [`${SESSION_YOLO_KEY}_local`, SESSION_YOLO_KEY];
+  }
+  const keys: string[] = [];
+  const daemonID = daemonInstanceId?.trim();
+  if (daemonID) {
+    keys.push(`${SESSION_YOLO_KEY}_daemon_${daemonID}`);
+  }
+  if (endpointId.trim()) {
+    keys.push(`${SESSION_YOLO_KEY}_endpoint_${endpointId}`);
+  }
+  return keys;
+}
+
 type Mode = 'path-input' | 'repo-options';
 
 interface State {
@@ -97,6 +128,7 @@ interface State {
   hasSelectedSinceTab: boolean;
   agent: SessionAgent;
   endpointId: string;
+  yoloMode: boolean;
 }
 
 export function LocationPicker({
@@ -131,9 +163,11 @@ export function LocationPicker({
     hasSelectedSinceTab: false,
     agent: 'claude',
     endpointId: LOCAL_TARGET,
+    yoloMode: false,
   });
 
   const isLocalTarget = state.endpointId === LOCAL_TARGET;
+  const agentCapabilities = useMemo(() => getAgentCapabilities(settings), [settings]);
   const { suggestions: fsSuggestions, currentDir, homePath: suggestedHomePath } = useFilesystemSuggestions(
     state.inputValue,
     isLocalTarget ? undefined : state.endpointId,
@@ -148,6 +182,20 @@ export function LocationPicker({
     [availableEndpoints, state.endpointId],
   );
   const selectedEndpointId = selectedEndpoint?.id;
+  const yoloKeys = useMemo(
+    () => yoloSettingKeys(state.endpointId, selectedEndpoint?.capabilities?.daemon_instance_id),
+    [selectedEndpoint?.capabilities?.daemon_instance_id, state.endpointId],
+  );
+  const yoloSettingKey = yoloKeys[0];
+  const savedYoloMode = useMemo(() => {
+    for (const key of yoloKeys) {
+      const parsed = parseBooleanSetting(settings[key]);
+      if (parsed != null) {
+        return parsed;
+      }
+    }
+    return false;
+  }, [settings, yoloKeys]);
   const selectedProjectsDirectory = isLocalTarget
     ? projectsDirectory
     : selectedEndpoint?.capabilities?.projects_directory;
@@ -256,6 +304,7 @@ export function LocationPicker({
   }, [orderedAgentList]);
 
   const savedAgent = normalizeAgent(settings[SESSION_AGENT_KEY]);
+  const yoloSupported = Boolean(agentCapabilities[state.agent]?.yolo);
 
   useEffect(() => {
     if (!savedAgent) return;
@@ -270,6 +319,17 @@ export function LocationPicker({
     }
     setState((prev) => ({ ...prev, agent: resolvedAgent }));
   }, [effectiveAgentAvailability, state.agent]);
+
+  useEffect(() => {
+    setState((prev) => (prev.yoloMode === savedYoloMode ? prev : { ...prev, yoloMode: savedYoloMode }));
+  }, [savedYoloMode]);
+
+  useEffect(() => {
+    if (yoloSupported) {
+      return;
+    }
+    setState((prev) => (prev.yoloMode ? { ...prev, yoloMode: false } : prev));
+  }, [yoloSupported]);
 
   const expandedInput = state.inputValue.startsWith('~')
     ? (state.homePath ? state.inputValue.replace('~', state.homePath) : state.inputValue)
@@ -347,14 +407,14 @@ export function LocationPicker({
         return;
       }
 
-      onSelect(path, selectedAgent, selectedEndpointId);
+      onSelect(path, selectedAgent, selectedEndpointId, state.yoloMode && yoloSupported);
       onClose();
     } catch (err) {
       console.log('[LocationPicker] inspect path error:', err);
       onError?.(err instanceof Error ? err.message : String(err));
       return;
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onGetRepoInfo, onInspectPath, onSelect, selectedEndpointId, state.agent]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onGetRepoInfo, onInspectPath, onSelect, selectedEndpointId, state.agent, state.yoloMode, yoloSupported]);
 
   const handleAgentChange = useCallback((agent: SessionAgent) => {
     if (!isAgentAvailable(effectiveAgentAvailability, agent)) return;
@@ -363,6 +423,15 @@ export function LocationPicker({
   }, [effectiveAgentAvailability, setSetting]);
 
   const handleEndpointChange = useCallback((endpointId: string) => {
+    if (endpointId === state.endpointId) {
+      if (!yoloSupported || !yoloSettingKey) {
+        return;
+      }
+      const nextYoloMode = !state.yoloMode;
+      setSetting(yoloSettingKey, String(nextYoloMode));
+      setState((prev) => ({ ...prev, yoloMode: nextYoloMode }));
+      return;
+    }
     const nextEndpoint = endpointId === LOCAL_TARGET
       ? null
       : availableEndpoints.find((endpoint) => endpoint.id === endpointId);
@@ -381,7 +450,16 @@ export function LocationPicker({
       recentLocations: [],
       hasSelectedSinceTab: false,
     }));
-  }, [availableEndpoints, projectsDirectory]);
+  }, [availableEndpoints, projectsDirectory, setSetting, state.endpointId, state.yoloMode, yoloSettingKey, yoloSupported]);
+
+  const handleYoloToggle = useCallback(() => {
+    if (!yoloSupported || !yoloSettingKey) {
+      return;
+    }
+    const nextYoloMode = !state.yoloMode;
+    setSetting(yoloSettingKey, String(nextYoloMode));
+    setState((prev) => ({ ...prev, yoloMode: nextYoloMode }));
+  }, [setSetting, state.yoloMode, yoloSettingKey, yoloSupported]);
 
   const handlePathInputChange = useCallback((value: string) => {
     setState((prev) => ({ ...prev, inputValue: value, hasSelectedSinceTab: true }));
@@ -402,10 +480,10 @@ export function LocationPicker({
     }
     if (state.selectedRepo) {
       const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-      onSelect(state.selectedRepo, selectedAgent, selectedEndpointId);
+      onSelect(state.selectedRepo, selectedAgent, selectedEndpointId, state.yoloMode && yoloSupported);
       onClose();
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo, state.yoloMode, yoloSupported]);
 
   const handleSelectWorktree = useCallback((path: string) => {
     if (!hasAvailableAgents) {
@@ -413,9 +491,9 @@ export function LocationPicker({
       return;
     }
     const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-    onSelect(path, selectedAgent, selectedEndpointId);
+    onSelect(path, selectedAgent, selectedEndpointId, state.yoloMode && yoloSupported);
     onClose();
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent, state.yoloMode, yoloSupported]);
 
   const handleSelectBranch = useCallback((_branch: string) => {
     if (!hasAvailableAgents) {
@@ -424,10 +502,10 @@ export function LocationPicker({
     }
     if (state.selectedRepo) {
       const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-      onSelect(state.selectedRepo, selectedAgent, selectedEndpointId);
+      onSelect(state.selectedRepo, selectedAgent, selectedEndpointId, state.yoloMode && yoloSupported);
       onClose();
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo, state.yoloMode, yoloSupported]);
 
   const handleCreateWorktree = useCallback(async (branchName: string, startingFrom: string) => {
     if (!hasAvailableAgents) {
@@ -440,13 +518,13 @@ export function LocationPicker({
       const result = await onCreateWorktree(state.selectedRepo, branchName, undefined, startingFrom, selectedEndpointId);
       if (result.success && result.path) {
         const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-        onSelect(result.path, selectedAgent, selectedEndpointId);
+        onSelect(result.path, selectedAgent, selectedEndpointId, state.yoloMode && yoloSupported);
         onClose();
       }
     } catch (err) {
       console.error('[LocationPicker] Failed to create worktree:', err);
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onCreateWorktree, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo]);
+  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onCreateWorktree, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo, state.yoloMode, yoloSupported]);
 
   const handleRefresh = useCallback(async () => {
     if (!state.selectedRepo || !onGetRepoInfo || state.refreshing) return;
@@ -588,17 +666,22 @@ export function LocationPicker({
           </div>
         </div>
         <div className="picker-endpoint-bar">
-          <div className="picker-agent-label">SESSION TARGET</div>
+          <div className="picker-endpoint-leading">
+            <div className="picker-endpoint-label">SESSION TARGET</div>
+          </div>
           <div className="picker-endpoint-controls" role="radiogroup" aria-label="Session target">
             <button
               type="button"
-              className={`endpoint-option ${isLocalTarget ? 'active' : ''}`}
+              className={`endpoint-option ${isLocalTarget ? 'active' : ''} ${isLocalTarget && state.yoloMode ? 'yolo-active' : ''}`}
               data-testid="location-picker-target-local"
               onClick={() => handleEndpointChange(LOCAL_TARGET)}
               role="radio"
               aria-checked={isLocalTarget}
             >
               <span className="endpoint-option-name">Local</span>
+              {isLocalTarget && state.yoloMode && (
+                <span className="endpoint-option-badge">YOLO</span>
+              )}
               <div className="endpoint-option-footer">
                 <span className="endpoint-option-meta">this machine</span>
                 <kbd className="agent-shortcut endpoint-shortcut">{`⌥${targetShortcutByID.get(LOCAL_TARGET)?.toUpperCase()}`}</kbd>
@@ -611,7 +694,7 @@ export function LocationPicker({
                 <button
                   key={endpoint.id}
                   type="button"
-                  className={`endpoint-option ${state.endpointId === endpoint.id ? 'active' : ''}`}
+                  className={`endpoint-option ${state.endpointId === endpoint.id ? 'active' : ''} ${state.endpointId === endpoint.id && state.yoloMode ? 'yolo-active' : ''}`}
                   data-testid={`location-picker-target-${endpoint.id}`}
                   data-endpoint-id={endpoint.id}
                   onClick={() => handleEndpointChange(endpoint.id)}
@@ -621,6 +704,9 @@ export function LocationPicker({
                   title={!connected ? `${endpoint.name} is ${endpoint.status}` : undefined}
                 >
                   <span className="endpoint-option-name">{endpoint.name}</span>
+                  {state.endpointId === endpoint.id && state.yoloMode && (
+                    <span className="endpoint-option-badge">YOLO</span>
+                  )}
                   <div className="endpoint-option-footer">
                     <span className={`endpoint-option-meta status-${endpoint.status}`}>{endpoint.status}</span>
                     {connected && shortcutKey && <kbd className="agent-shortcut endpoint-shortcut">{`⌥${shortcutKey.toUpperCase()}`}</kbd>}
@@ -636,8 +722,16 @@ export function LocationPicker({
         {state.mode === 'path-input' ? (
           <>
             <div className="picker-header">
-              <div className="picker-title" data-testid="location-picker-title">
-                New Session Location
+              <div className="picker-header-top">
+                <div className="picker-title" data-testid="location-picker-title">
+                  New Session Location
+                </div>
+                <div
+                  className={`picker-endpoint-hint ${!yoloSupported ? 'disabled' : ''}`}
+                  title={!yoloSupported ? `${agentLabel(state.agent)} does not support yolo mode` : undefined}
+                >
+                  {yoloSupported ? 'reselect to toggle YOLO' : 'YOLO unavailable'}
+                </div>
               </div>
               <PathInput
                 value={state.inputValue}
@@ -754,6 +848,9 @@ export function LocationPicker({
             onRefresh={handleRefresh}
             onBack={handleBack}
             refreshing={state.refreshing}
+            yoloMode={state.yoloMode && yoloSupported}
+            yoloSupported={yoloSupported}
+            onToggleYoloMode={handleYoloToggle}
           />
         ) : null}
       </div>

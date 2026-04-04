@@ -13,10 +13,14 @@ vi.mock('../hooks/useFilesystemSuggestions', () => ({
   })),
 }));
 
-function renderPicker(props?: Partial<React.ComponentProps<typeof LocationPicker>>) {
+function renderPicker(
+  props?: Partial<React.ComponentProps<typeof LocationPicker>>,
+  options?: { settings?: Record<string, string>; setSetting?: (key: string, value: string) => void },
+) {
   const onSelect = vi.fn();
+  const setSetting = options?.setSetting ?? vi.fn();
   render(
-    <SettingsProvider settings={{}} setSetting={vi.fn()}>
+    <SettingsProvider settings={options?.settings ?? {}} setSetting={setSetting}>
       <LocationPicker
         isOpen
         onClose={vi.fn()}
@@ -26,7 +30,7 @@ function renderPicker(props?: Partial<React.ComponentProps<typeof LocationPicker
       />
     </SettingsProvider>,
   );
-  return { onSelect };
+  return { onSelect, setSetting };
 }
 
 describe('LocationPicker', () => {
@@ -69,7 +73,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('~/projects/remote-repo', 'ep-1');
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'claude', 'ep-1');
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'claude', 'ep-1', false);
     });
     expect(onGetRepoInfo).not.toHaveBeenCalled();
   });
@@ -181,6 +185,54 @@ describe('LocationPicker', () => {
     await waitFor(() => {
       expect(screen.getByRole('radio', { name: /claude/i })).toHaveAttribute('aria-checked', 'true');
       expect(screen.getByRole('radio', { name: /copilot/i })).toHaveAttribute('aria-checked', 'false');
+    });
+  });
+
+  it('persists yolo preference per remote daemon and launches with attn yolo enabled', async () => {
+    const onInspectPath = vi.fn(async () => ({
+      success: true,
+      inspection: {
+        input_path: '~/projects/remote-repo',
+        resolved_path: '/home/remote/projects/remote-repo',
+        home_path: '/home/remote',
+        exists: true,
+        is_directory: true,
+      },
+    }));
+    const { onSelect, setSetting } = renderPicker({
+      onInspectPath,
+      endpoints: [{
+        id: 'ep-1',
+        name: 'gpu-box',
+        ssh_target: 'ai-sandbox',
+        status: 'connected',
+        enabled: true,
+        capabilities: {
+          protocol_version: '47',
+          daemon_instance_id: 'daemon-remote-1',
+          agents_available: ['claude'],
+          projects_directory: '/srv/projects',
+        },
+      }],
+    }, {
+      settings: {
+        claude_cap_yolo: 'true',
+      },
+    });
+
+    const endpoint = screen.getByRole('radio', { name: /gpu-box/i });
+    fireEvent.click(endpoint);
+    fireEvent.click(endpoint);
+
+    expect(setSetting).toHaveBeenCalledWith('new_session_yolo_daemon_daemon-remote-1', 'true');
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '~/projects/remote-repo' } });
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'claude', 'ep-1', true);
     });
   });
 });

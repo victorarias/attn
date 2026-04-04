@@ -221,6 +221,16 @@ func TestParseDirectLaunchArgs_ResumeIDStillAccepted(t *testing.T) {
 	}
 }
 
+func TestParseDirectLaunchArgs_YoloFlag(t *testing.T) {
+	parsed := parseDirectLaunchArgs([]string{"--yolo", "--", "--model", "foo"})
+	if !parsed.yoloMode {
+		t.Fatal("expected yolo mode to be enabled")
+	}
+	if len(parsed.agentArgs) != 2 || parsed.agentArgs[0] != "--model" || parsed.agentArgs[1] != "foo" {
+		t.Fatalf("unexpected agent args: %#v", parsed.agentArgs)
+	}
+}
+
 func TestIsVersionCommand(t *testing.T) {
 	tests := []struct {
 		name string

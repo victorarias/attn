@@ -22,6 +22,7 @@ export interface Session {
   cwd: string;
   agent: SessionAgent;
   endpointId?: string;
+  yoloMode?: boolean;
   transcriptMatched: boolean;
   branch?: string;
   isWorktree?: boolean;
@@ -52,7 +53,7 @@ interface SessionStore {
 
   // Actions
   connect: () => Promise<void>;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean) => Promise<string>;
   closeSession: (id: string) => void;
   setActiveSession: (id: string | null) => void;
   takeSessionSpawnArgs: (id: string, cols: number, rows: number) => PtySpawnArgs | null;
@@ -120,7 +121,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  createSession: async (label: string, cwd: string, providedId?: string, agent?: SessionAgent, endpointId?: string) => {
+  createSession: async (label: string, cwd: string, providedId?: string, agent?: SessionAgent, endpointId?: string, yoloMode = false) => {
     // Use provided ID or generate new one
     const id = providedId || crypto.randomUUID();
     const resolvedAgent: SessionAgent = agent ?? 'claude';
@@ -131,6 +132,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       cwd,
       agent: resolvedAgent,
       endpointId,
+      yoloMode,
       transcriptMatched: resolvedAgent !== 'codex',
       workspace: createDefaultWorkspaceState(),
       daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
@@ -196,6 +198,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       agent: session.agent,
       resume_session_id: forkParams?.resumeSessionId ?? null,
       fork_session: forkParams?.forkSession ?? null,
+      yolo_mode: session.yoloMode ?? null,
       ...(selectedExecutable ? { executable: selectedExecutable } : {}),
       ...(session.agent === 'claude' && selectedExecutable
         ? { claude_executable: selectedExecutable }
@@ -242,6 +245,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           rows,
           shell: false,
           agent: session.agent,
+          yolo_mode: session.yoloMode ?? null,
           ...(selectedExecutable ? { executable: selectedExecutable } : {}),
           ...(session.agent === 'claude' && selectedExecutable
             ? { claude_executable: selectedExecutable }
@@ -303,6 +307,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           cwd: daemonSession.directory,
           agent: nextAgent,
           endpointId: nextEndpointId,
+          yoloMode: existing?.yoloMode,
           transcriptMatched: existing?.transcriptMatched ?? nextAgent !== 'codex',
           branch: nextBranch,
           isWorktree: nextIsWorktree,

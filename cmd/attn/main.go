@@ -129,6 +129,7 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.ResumeSessionID, "resume-session-id", "", "resume session id")
 	fs.BoolVar(&cfg.ResumePicker, "resume-picker", false, "resume picker")
 	fs.BoolVar(&cfg.ForkSession, "fork-session", false, "fork session")
+	fs.BoolVar(&cfg.YoloMode, "yolo-mode", false, "launch agent in yolo mode")
 	fs.StringVar(&cfg.Executable, "executable", "", "selected agent executable override")
 	fs.StringVar(&cfg.ClaudeExecutable, "claude-executable", "", "claude executable override")
 	fs.StringVar(&cfg.CodexExecutable, "codex-executable", "", "codex executable override")
@@ -375,6 +376,7 @@ type directLaunchArgs struct {
 	resumeID     string
 	resumePicker bool
 	forkSession  bool
+	yoloMode     bool
 	agentArgs    []string
 }
 
@@ -383,6 +385,7 @@ func parseDirectLaunchArgs(args []string) directLaunchArgs {
 	labelFlag := fs.String("s", "", "session label")
 	resumeFlag := fs.String("resume", "", "session ID to resume from")
 	forkFlag := fs.Bool("fork-session", false, "fork the resumed session")
+	yoloFlag := fs.Bool("yolo", false, "launch agent in yolo mode")
 	resumePicker := false
 
 	var attnArgs []string
@@ -404,6 +407,8 @@ func parseDirectLaunchArgs(args []string) directLaunchArgs {
 			}
 		case "--fork-session":
 			attnArgs = append(attnArgs, arg)
+		case "--yolo":
+			attnArgs = append(attnArgs, arg)
 		case "--":
 			agentArgs = append(agentArgs, args[i+1:]...)
 			i = len(args)
@@ -422,6 +427,7 @@ func parseDirectLaunchArgs(args []string) directLaunchArgs {
 		resumeID:     *resumeFlag,
 		resumePicker: resumePicker,
 		forkSession:  *forkFlag,
+		yoloMode:     *yoloFlag,
 		agentArgs:    agentArgs,
 	}
 }
@@ -505,6 +511,7 @@ func runAgentDirectly(requestedAgent string) {
 		ResumeSessionID: parsed.resumeID,
 		ResumePicker:    parsed.resumePicker,
 		ForkSession:     parsed.forkSession,
+		YoloMode:        parsed.yoloMode,
 		Executable:      driver.ResolveExecutable(""),
 		SocketPath:      config.SocketPath(),
 		WrapperPath:     resolveWrapperPath(),

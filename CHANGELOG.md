@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-04-04]
 
+### Added
+- **Launch YOLO Preference**: The new-session location picker and repo/worktree picker now expose a keyboard-friendly `YOLO` toggle that launches sessions with each agent's approval-bypass equivalent, and the chosen value is remembered per target daemon so local and remote hosts keep independent defaults.
+
 ### Changed
 - **Release Signing & Notarization**: The GitHub macOS release workflow now imports a `Developer ID Application` certificate from GitHub Actions secrets, signs release builds with the real Apple identity, notarizes both the packaged app and the rebuilt DMG, and staples the notarization tickets before publishing the Homebrew cask artifacts.
 

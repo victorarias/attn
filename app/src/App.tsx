@@ -1148,7 +1148,7 @@ function AppContent({
   }, []);
 
   const handleLocationSelect = useCallback(
-    async (path: string, agent: SessionAgent, endpointId?: string) => {
+    async (path: string, agent: SessionAgent, endpointId?: string, yoloMode = false) => {
       if (!hasAvailableAgents) {
         showError('No supported agent CLI found in PATH.');
         return;
@@ -1167,7 +1167,7 @@ function AppContent({
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
       const selectedAgent = resolvePreferredAgent(agent, agentAvailability, 'codex');
-      const sessionId = await createSession(folderName, path, undefined, selectedAgent, endpointId);
+      const sessionId = await createSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode);
       // Fit terminal after view becomes visible
       setTimeout(() => {
         fitSessionActivePane(sessionId);

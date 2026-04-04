@@ -20,7 +20,7 @@
 }
 
 .location-picker {
-  width: 580px;
+  width: 760px;
   background: var(--color-bg-app);
   border: 1px solid var(--color-border-subtle);
   border-radius: 8px;
@@ -151,7 +151,7 @@
 
 .picker-endpoint-bar {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 10px 16px;
@@ -159,11 +159,42 @@
   background: rgba(255, 255, 255, 0.015);
 }
 
+.picker-endpoint-leading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.picker-endpoint-label {
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-dimmed);
+}
+
+.picker-endpoint-hint {
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  line-height: 1;
+  white-space: nowrap;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.picker-endpoint-hint.disabled {
+  color: #676773;
+}
+
 .picker-endpoint-controls {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+  flex: 1 1 auto;
 }
 
 .endpoint-option {
@@ -172,11 +203,12 @@
   color: var(--color-text-secondary);
   border-radius: 12px;
   padding: 8px 10px;
-  min-width: 104px;
+  min-width: 135px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 3px;
+  position: relative;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
   cursor: pointer;
   transition: all 0.12s ease-out;
@@ -193,6 +225,15 @@
   background: rgba(255, 107, 53, 0.08);
 }
 
+.endpoint-option.active.yolo-active {
+  border-color: rgba(255, 107, 53, 0.9);
+  box-shadow:
+    0 0 0 1px rgba(255, 107, 53, 0.28),
+    0 8px 20px rgba(255, 107, 53, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 107, 53, 0.16) 0%, rgba(255, 107, 53, 0.1) 100%);
+}
+
 .endpoint-option:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -201,6 +242,35 @@
 .endpoint-option-name {
   font-size: 11px;
   color: var(--color-text-primary);
+}
+
+.endpoint-option-badge {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  border-radius: 999px;
+  padding: 1px 6px;
+  border: 1px solid rgba(255, 107, 53, 0.35);
+  background: rgba(255, 107, 53, 0.12);
+  color: #ff6b35;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+}
+
+.endpoint-option.active .endpoint-option-badge {
+  border-color: rgba(255, 107, 53, 0.2);
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff3ec;
+}
+
+.endpoint-option.active.yolo-active .endpoint-option-name {
+  color: #fff7f2;
+}
+
+.endpoint-option.active.yolo-active .endpoint-option-meta {
+  color: #ffd8c9;
 }
 
 .endpoint-option-meta {
@@ -253,47 +323,19 @@
   line-height: 1.5;
 }
 
-.resume-toggle {
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: var(--color-bg-input);
-  color: var(--color-text-tertiary);
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  font-size: 11px;
-  padding: 6px 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: all 0.12s ease-out;
-}
-
-.resume-toggle:hover:not(:disabled) {
-  color: var(--color-text-primary);
-}
-
-.resume-toggle:focus-visible {
-  outline: 2px solid rgba(255, 107, 53, 0.7);
-  outline-offset: 2px;
-}
-
-.resume-toggle.active {
-  background: linear-gradient(180deg, #ff6b35 0%, #ff874f 100%);
-  color: var(--color-bg-app);
-  box-shadow: 0 6px 16px rgba(255, 107, 53, 0.25);
-}
-
-.resume-toggle.active .agent-shortcut {
-  border-color: rgba(0, 0, 0, 0.2);
-  color: #3a1a0e;
-  background: rgba(255, 255, 255, 0.45);
-}
-
 /* Header */
 .picker-header {
   padding: 16px 16px 12px;
   border-bottom: 1px solid var(--color-border-subtle);
   background: rgba(255, 255, 255, 0.01);
+}
+
+.picker-header-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
 }
 
 .picker-title {
@@ -303,7 +345,6 @@
   letter-spacing: 0.15em;
   text-transform: uppercase;
   color: #ff6b35;
-  margin-bottom: 12px;
   text-shadow: 0 0 20px rgba(255, 107, 53, 0.3);
 }
 
