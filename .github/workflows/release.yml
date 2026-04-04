@@ -118,11 +118,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_INSTALL_CHANNEL: release
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
-          # Tauri should sign during build, but explicit notarization happens later
-          # on the rebuilt artifacts so transient notary failures do not abort bundling.
-          APPLE_API_ISSUER: ""
-          APPLE_API_KEY: ""
-          APPLE_API_KEY_PATH: ""
         with:
           projectPath: app
           tagName: ${{ env.RELEASE_TAG }}
