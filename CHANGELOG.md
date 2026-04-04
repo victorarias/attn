@@ -16,6 +16,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Remote Sidebar Session Actions**: Remote-host sessions now show the same hover-only reload and close buttons as local sessions in the left sidebar.
+- **Hidden Session Terminal Repaint**: Switching back to a previously hidden session now forces xterm through a real size bounce when the measured cols/rows are unchanged, so main panes no longer stay rendered as a narrow stale column until some later resize shakes them loose.
 
 ## [2026-04-03]
 

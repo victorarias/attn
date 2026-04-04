@@ -333,6 +333,33 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
     }, [logTerminal, recordDiags]);
 
+    const bounceTerminalResize = useCallback((
+      term: XTerm,
+      cols: number,
+      rows: number,
+      reason: string,
+      diagnostics?: ResizeDiagnostics | null,
+    ) => {
+      let bounceCols = cols;
+      let bounceRows = rows;
+
+      if (rows > 1) {
+        bounceRows = rows - 1;
+      } else if (cols > 1) {
+        bounceCols = cols - 1;
+      } else {
+        return;
+      }
+
+      resizeTerminal(term, bounceCols, bounceRows, `${reason}_bounce_out`, diagnostics);
+      window.setTimeout(() => {
+        if (xtermRef.current !== term) {
+          return;
+        }
+        resizeTerminal(term, cols, rows, `${reason}_bounce_back`, diagnostics);
+      }, 0);
+    }, [resizeTerminal]);
+
     useImperativeHandle(ref, () => ({
       get terminal() {
         return xtermRef.current;
@@ -363,17 +390,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const sizeChanged = dims.cols !== term.cols || dims.rows !== term.rows;
         resizeTerminal(term, dims.cols, dims.rows, 'fit', dims.diagnostics);
         if (!sizeChanged) {
-          // Full-screen TUIs like Claude can stay visually stale unless the PTY
-          // receives a real size transition and emits SIGWINCH. Bounce through a
-          // nearby size, then restore the actual one on the next tick.
-          if (dims.rows > 1) {
-            onResizeRef.current?.(dims.cols, dims.rows - 1);
-          } else if (dims.cols > 1) {
-            onResizeRef.current?.(dims.cols - 1, dims.rows);
-          }
-          window.setTimeout(() => {
-            onResizeRef.current?.(dims.cols, dims.rows);
-          }, 0);
+          // Hidden session wrappers can leave xterm painted at an old width even
+          // after the PTY has the correct size again. Force a real xterm size
+          // transition so the renderer subtree is rebuilt, not just the PTY.
+          bounceTerminalResize(term, dims.cols, dims.rows, 'fit_same_size', dims.diagnostics);
         }
       },
       focus: () => {
@@ -858,7 +878,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
               if (dims) {
                 lastCols = dims.cols;
                 lastRows = dims.rows;
-                resizeTerminal(term, dims.cols, dims.rows, 'visibility_flush');
+                if (dims.cols === term.cols && dims.rows === term.rows) {
+                  bounceTerminalResize(term, dims.cols, dims.rows, 'visibility_flush', dims.diagnostics);
+                } else {
+                  resizeTerminal(term, dims.cols, dims.rows, 'visibility_flush', dims.diagnostics);
+                }
               }
             }
           }
@@ -938,7 +962,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         xtermRef.current = null;
         term.dispose();
       };
-    }, [logTerminal, resizeTerminal]);
+    }, [bounceTerminalResize, logTerminal, resizeTerminal]);
 
     // Handle fontSize changes after terminal is created
     useEffect(() => {
