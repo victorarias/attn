@@ -291,31 +291,30 @@ export function Sidebar({
                 {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                 <span className="session-shortcut">⌘{globalIndex + 1}</span>
                 <div className="session-actions">
-                  {!session.endpointId && (
-                    <>
-                      <button
-                        className="session-action-btn close-session-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCloseSession(session.id);
-                        }}
-                        title="Close session (⌘⇧W)"
-                      >
-                        ×
-                      </button>
-                      <button
-                        className="session-action-btn reload-session-btn"
-                        data-testid={`reload-session-${session.id}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onReloadSession(session.id);
-                        }}
-                        title="Reload session"
-                      >
-                        ↻
-                      </button>
-                    </>
-                  )}
+                  <button
+                    className="session-action-btn close-session-btn"
+                    data-testid={`close-session-${session.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseSession(session.id);
+                    }}
+                    title="Close session (⌘⇧W)"
+                    aria-label={`Close session ${session.label}`}
+                  >
+                    ×
+                  </button>
+                  <button
+                    className="session-action-btn reload-session-btn"
+                    data-testid={`reload-session-${session.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onReloadSession(session.id);
+                    }}
+                    title="Reload session"
+                    aria-label={`Reload session ${session.label}`}
+                  >
+                    ↻
+                  </button>
                 </div>
               </div>
             );
@@ -367,31 +366,30 @@ export function Sidebar({
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <span className="session-shortcut">⌘{globalIndex + 1}</span>
                     <div className="session-actions">
-                      {!session.endpointId && (
-                        <>
-                          <button
-                            className="session-action-btn close-session-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onCloseSession(session.id);
-                            }}
-                            title="Close session (⌘⇧W)"
-                          >
-                            ×
-                          </button>
-                          <button
-                            className="session-action-btn reload-session-btn"
-                            data-testid={`reload-session-${session.id}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onReloadSession(session.id);
-                            }}
-                            title="Reload session"
-                          >
-                            ↻
-                          </button>
-                        </>
-                      )}
+                      <button
+                        className="session-action-btn close-session-btn"
+                        data-testid={`close-session-${session.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCloseSession(session.id);
+                        }}
+                        title="Close session (⌘⇧W)"
+                        aria-label={`Close session ${session.label}`}
+                      >
+                        ×
+                      </button>
+                      <button
+                        className="session-action-btn reload-session-btn"
+                        data-testid={`reload-session-${session.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onReloadSession(session.id);
+                        }}
+                        title="Reload session"
+                        aria-label={`Reload session ${session.label}`}
+                      >
+                        ↻
+                      </button>
                     </div>
                   </div>
                 );

@@ -14,6 +14,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **Release Signing & Notarization**: The GitHub macOS release workflow now imports a `Developer ID Application` certificate from GitHub Actions secrets, signs release builds with the real Apple identity, notarizes both the packaged app and the rebuilt DMG, and staples the notarization tickets before publishing the Homebrew cask artifacts.
 
+### Fixed
+- **Remote Sidebar Session Actions**: Remote-host sessions now show the same hover-only reload and close buttons as local sessions in the left sidebar.
+
 ## [2026-04-03]
 
 ### Added
