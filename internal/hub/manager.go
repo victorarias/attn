@@ -25,19 +25,31 @@ type RawEventCallback func(data []byte)
 const (
 	settingProjectsDirectory = "projects_directory"
 	settingPTYBackendMode    = "pty_backend_mode"
+	settingTailscaleEnabled  = "tailscale_enabled"
+	settingTailscaleStatus   = "tailscale_status"
+	settingTailscaleURL      = "tailscale_url"
+	settingTailscaleDomain   = "tailscale_domain"
+	settingTailscaleAuthURL  = "tailscale_auth_url"
+	settingTailscaleError    = "tailscale_error"
 )
 
 type endpointRuntime struct {
 	record store.EndpointRecord
 	info   protocol.EndpointInfo
 
-	cancel  context.CancelFunc
-	conn    *websocket.Conn
-	cmd     *exec.Cmd
-	writeMu sync.Mutex
+	cancel           context.CancelFunc
+	conn             *websocket.Conn
+	cmd              *exec.Cmd
+	writeMu          sync.Mutex
+	pendingRemoteWeb *pendingRemoteWebAction
 
 	sessions   map[string]protocol.Session
 	workspaces map[string]protocol.WorkspaceSnapshot
+}
+
+type pendingRemoteWebAction struct {
+	desiredEnabled bool
+	done           chan error
 }
 
 type pendingSessionRoute struct {
@@ -268,6 +280,13 @@ func (m *Manager) stopRuntimeLocked(runtime *endpointRuntime) {
 	if runtime == nil {
 		return
 	}
+	if runtime.pendingRemoteWeb != nil {
+		select {
+		case runtime.pendingRemoteWeb.done <- fmt.Errorf("endpoint disconnected"):
+		default:
+		}
+		runtime.pendingRemoteWeb = nil
+	}
 	if runtime.cancel != nil {
 		runtime.cancel()
 		runtime.cancel = nil
@@ -384,6 +403,12 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			}
 			m.publishWorkspaceSnapshots(msg.Workspaces)
 			connected = true
+		case protocol.EventSettingsUpdated:
+			var msg protocol.SettingsUpdatedMessage
+			if err := json.Unmarshal(data, &msg); err != nil {
+				continue
+			}
+			m.handleRemoteSettingsUpdated(id, &msg)
 		case protocol.EventSessionsUpdated:
 			var msg protocol.SessionsUpdatedMessage
 			if err := json.Unmarshal(data, &msg); err != nil {
@@ -1059,7 +1084,7 @@ func capabilitiesFromInitialState(msg *protocol.InitialStateMessage) *protocol.E
 	if value := strings.TrimSpace(protocol.Deref(msg.DaemonInstanceID)); value != "" {
 		caps.DaemonInstanceID = protocol.Ptr(value)
 	}
-	return caps
+	return mergeCapabilitiesFromSettings(caps, settings)
 }
 
 func truthySetting(value interface{}) bool {
@@ -1075,6 +1100,205 @@ func truthySetting(value interface{}) bool {
 		}
 	default:
 		return false
+	}
+}
+
+func stringSetting(value interface{}) string {
+	trimmed := strings.TrimSpace(fmt.Sprint(value))
+	if trimmed == "" || trimmed == "<nil>" {
+		return ""
+	}
+	return trimmed
+}
+
+func mergeCapabilitiesFromSettings(existing *protocol.EndpointCapabilities, settings map[string]interface{}) *protocol.EndpointCapabilities {
+	var caps protocol.EndpointCapabilities
+	if existing != nil {
+		caps = *existing
+		if existing.AgentsAvailable != nil {
+			caps.AgentsAvailable = append([]string(nil), existing.AgentsAvailable...)
+		}
+	}
+
+	if settings == nil {
+		return &caps
+	}
+	if value := stringSetting(settings[settingProjectsDirectory]); value != "" {
+		caps.ProjectsDirectory = protocol.Ptr(value)
+	}
+	if value := stringSetting(settings[settingPTYBackendMode]); value != "" {
+		caps.PtyBackendMode = protocol.Ptr(value)
+	}
+	if _, ok := settings[settingTailscaleEnabled]; ok {
+		enabled := truthySetting(settings[settingTailscaleEnabled])
+		caps.TailscaleEnabled = protocol.Ptr(enabled)
+	}
+	if value := stringSetting(settings[settingTailscaleStatus]); value != "" {
+		caps.TailscaleStatus = protocol.Ptr(value)
+	} else {
+		caps.TailscaleStatus = nil
+	}
+	if value := stringSetting(settings[settingTailscaleURL]); value != "" {
+		caps.TailscaleURL = protocol.Ptr(value)
+	} else {
+		caps.TailscaleURL = nil
+	}
+	if value := stringSetting(settings[settingTailscaleDomain]); value != "" {
+		caps.TailscaleDomain = protocol.Ptr(value)
+	} else {
+		caps.TailscaleDomain = nil
+	}
+	if value := stringSetting(settings[settingTailscaleAuthURL]); value != "" {
+		caps.TailscaleAuthURL = protocol.Ptr(value)
+	} else {
+		caps.TailscaleAuthURL = nil
+	}
+	if value := stringSetting(settings[settingTailscaleError]); value != "" {
+		caps.TailscaleError = protocol.Ptr(value)
+	} else {
+		caps.TailscaleError = nil
+	}
+	return &caps
+}
+
+func shouldResolveRemoteWebAction(pending *pendingRemoteWebAction, msg *protocol.SettingsUpdatedMessage, caps *protocol.EndpointCapabilities) bool {
+	if pending == nil || msg == nil {
+		return false
+	}
+	if strings.TrimSpace(protocol.Deref(msg.ChangedKey)) != settingTailscaleEnabled {
+		return false
+	}
+	if msg.Success != nil && !protocol.Deref(msg.Success) {
+		return true
+	}
+	if caps == nil {
+		return false
+	}
+	return protocol.Deref(caps.TailscaleEnabled) == pending.desiredEnabled
+}
+
+func remoteWebActionResult(desiredEnabled bool, msg *protocol.SettingsUpdatedMessage, caps *protocol.EndpointCapabilities) error {
+	if msg != nil && msg.Success != nil && !protocol.Deref(msg.Success) {
+		return fmt.Errorf("%s", strings.TrimSpace(protocol.Deref(msg.Error)))
+	}
+	if caps == nil {
+		return fmt.Errorf("remote daemon did not report tailscale status")
+	}
+	status := strings.TrimSpace(protocol.Deref(caps.TailscaleStatus))
+	errorText := strings.TrimSpace(protocol.Deref(caps.TailscaleError))
+	enabled := protocol.Deref(caps.TailscaleEnabled)
+	if desiredEnabled {
+		if !enabled {
+			return fmt.Errorf("remote web setting did not stick")
+		}
+		if status == "running" {
+			return nil
+		}
+		if errorText != "" {
+			return fmt.Errorf("%s", errorText)
+		}
+		if status == "" {
+			return fmt.Errorf("remote daemon did not report tailscale status")
+		}
+		return fmt.Errorf("remote web is %s", status)
+	}
+	if enabled {
+		return fmt.Errorf("remote web setting is still enabled")
+	}
+	if status == "error" && errorText != "" {
+		return fmt.Errorf("%s", errorText)
+	}
+	return nil
+}
+
+func (m *Manager) handleRemoteSettingsUpdated(id string, msg *protocol.SettingsUpdatedMessage) {
+	var (
+		info    protocol.EndpointInfo
+		pending *pendingRemoteWebAction
+		result  error
+	)
+
+	m.mu.Lock()
+	runtime, ok := m.runtimes[id]
+	if ok {
+		info = runtime.info
+		info.Capabilities = mergeCapabilitiesFromSettings(runtime.info.Capabilities, msg.Settings)
+		runtime.info = info
+		if shouldResolveRemoteWebAction(runtime.pendingRemoteWeb, msg, info.Capabilities) {
+			pending = runtime.pendingRemoteWeb
+			result = remoteWebActionResult(pending.desiredEnabled, msg, info.Capabilities)
+			runtime.pendingRemoteWeb = nil
+		}
+	}
+	m.mu.Unlock()
+
+	if !ok {
+		return
+	}
+	if m.onStatus != nil {
+		m.onStatus(info)
+	}
+	if pending != nil {
+		select {
+		case pending.done <- result:
+		default:
+		}
+	}
+}
+
+func (m *Manager) SetEndpointRemoteWeb(ctx context.Context, endpointID string, enabled bool) error {
+	payload, err := json.Marshal(protocol.SetSettingMessage{
+		Cmd:   protocol.CmdSetSetting,
+		Key:   settingTailscaleEnabled,
+		Value: fmt.Sprintf("%t", enabled),
+	})
+	if err != nil {
+		return err
+	}
+
+	pending := &pendingRemoteWebAction{
+		desiredEnabled: enabled,
+		done:           make(chan error, 1),
+	}
+
+	m.mu.Lock()
+	runtime, ok := m.runtimes[endpointID]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("endpoint not found: %s", endpointID)
+	}
+	if runtime.conn == nil {
+		m.mu.Unlock()
+		return fmt.Errorf("endpoint not connected: %s", endpointID)
+	}
+	if runtime.pendingRemoteWeb != nil {
+		m.mu.Unlock()
+		return fmt.Errorf("remote web update already in progress")
+	}
+	runtime.pendingRemoteWeb = pending
+	m.mu.Unlock()
+
+	if err := m.ForwardEndpointCommand(ctx, endpointID, payload); err != nil {
+		m.mu.Lock()
+		runtime, ok := m.runtimes[endpointID]
+		if ok && runtime.pendingRemoteWeb == pending {
+			runtime.pendingRemoteWeb = nil
+		}
+		m.mu.Unlock()
+		return err
+	}
+
+	select {
+	case err := <-pending.done:
+		return err
+	case <-ctx.Done():
+		m.mu.Lock()
+		runtime, ok := m.runtimes[endpointID]
+		if ok && runtime.pendingRemoteWeb == pending {
+			runtime.pendingRemoteWeb = nil
+		}
+		m.mu.Unlock()
+		return ctx.Err()
 	}
 }
 

@@ -1,8 +1,11 @@
 package daemon
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
@@ -64,6 +67,25 @@ func (d *Daemon) handleUpdateEndpointWS(client *wsClient, msg *protocol.UpdateEn
 	}
 	d.broadcastEndpointsUpdated()
 	d.sendEndpointActionResult(client, "update", record.ID, true, "")
+}
+
+func (d *Daemon) handleSetEndpointRemoteWebWS(client *wsClient, msg *protocol.SetEndpointRemoteWebMessage) {
+	if d.hubManager == nil {
+		d.sendEndpointActionResult(client, "remote_web", msg.EndpointID, false, "endpoint manager unavailable")
+		return
+	}
+	endpointID := strings.TrimSpace(msg.EndpointID)
+	if endpointID == "" {
+		d.sendEndpointActionResult(client, "remote_web", "", false, "endpoint id is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := d.hubManager.SetEndpointRemoteWeb(ctx, endpointID, msg.Enabled); err != nil {
+		d.sendEndpointActionResult(client, "remote_web", endpointID, false, err.Error())
+		return
+	}
+	d.sendEndpointActionResult(client, "remote_web", endpointID, true, "")
 }
 
 func (d *Daemon) sendEndpointActionResult(client *wsClient, action, endpointID string, success bool, errMsg string) {

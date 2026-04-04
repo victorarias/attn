@@ -5,7 +5,9 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -267,11 +269,22 @@ func (h *wsHub) ClientCount() int {
 	return len(h.clients)
 }
 
-func isAllowedWSOrigin(origin string) bool {
+func isAllowedWSOrigin(origin string, requestHost string) bool {
 	if origin == "" {
 		// Non-browser clients/tests may omit Origin.
 		return true
 	}
+	if isAllowedLocalOrigin(origin) {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return normalizeWSHost(parsed.Host) != "" && normalizeWSHost(parsed.Host) == normalizeWSHost(requestHost)
+}
+
+func isAllowedLocalOrigin(origin string) bool {
 	allowedPrefixes := []string{
 		"tauri://localhost",
 		"http://tauri.localhost",
@@ -291,10 +304,37 @@ func isAllowedWSOrigin(origin string) bool {
 	return false
 }
 
+func normalizeWSHost(value string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(value))
+	if trimmed == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(trimmed); err == nil {
+		return host
+	}
+	return trimmed
+}
+
+func websocketOriginPatternsForRequest(r *http.Request) []string {
+	patterns := []string{
+		"localhost",
+		"localhost:*",
+		"127.0.0.1",
+		"127.0.0.1:*",
+		"tauri.localhost",
+		"tauri.localhost:*",
+	}
+	host := normalizeWSHost(r.Host)
+	if host != "" && host != "localhost" && host != "127.0.0.1" && host != "tauri.localhost" {
+		patterns = append(patterns, host)
+	}
+	return patterns
+}
+
 // handleWS handles WebSocket connections
 func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
-	if !isAllowedWSOrigin(origin) {
+	if !isAllowedWSOrigin(origin, r.Host) {
 		d.logf("WebSocket rejected origin: %s", origin)
 		http.Error(w, "forbidden origin", http.StatusForbidden)
 		return
@@ -311,14 +351,7 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{
-			"localhost",
-			"localhost:*",
-			"127.0.0.1",
-			"127.0.0.1:*",
-			"tauri.localhost",
-			"tauri.localhost:*",
-		},
+		OriginPatterns: websocketOriginPatternsForRequest(r),
 	})
 	if err != nil {
 		d.logf("WebSocket accept error: %v", err)
@@ -547,6 +580,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleUpdateEndpointWS(client, msg.(*protocol.UpdateEndpointMessage))
 	case protocol.CmdListEndpoints:
 		d.handleListEndpointsWS(client)
+	case protocol.CmdSetEndpointRemoteWeb:
+		d.handleSetEndpointRemoteWebWS(client, msg.(*protocol.SetEndpointRemoteWebMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregisterWS(client, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdGetRecentLocations:

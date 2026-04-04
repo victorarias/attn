@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>attn web</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232f2417'/%3E%3Cpath d='M4 12V4h2.3l1.7 4.4L9.7 4H12v8h-1.7V6.6L8.3 12H7.1L5.7 8.5V12z' fill='%23f5f1e8'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/vendor/xterm.min.css" />
+    <style>
+      :root {
+        --bg: #f5f1e8;
+        --bg-panel: rgba(255, 250, 239, 0.92);
+        --bg-panel-strong: rgba(255, 247, 230, 0.98);
+        --bg-terminal: #171513;
+        --line: rgba(59, 44, 24, 0.12);
+        --text: #2f2417;
+        --muted: #74604a;
+        --accent: #9f3c23;
+        --accent-strong: #7e2f1b;
+        --ok: #1d8a52;
+        --wait: #b77918;
+        --idle: #7b746c;
+        --launching: #2367b4;
+        --unknown: #7547a2;
+        --danger: #b24040;
+        --shadow: rgba(71, 42, 15, 0.16);
+        --safe-top: env(safe-area-inset-top, 0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(circle at top right, rgba(159, 60, 35, 0.18), transparent 32%),
+          radial-gradient(circle at bottom left, rgba(35, 103, 180, 0.14), transparent 28%),
+          linear-gradient(180deg, #fbf6ec 0%, #efe4d3 100%);
+        color: var(--text);
+        font-family:
+          "Iowan Old Style",
+          "Palatino Linotype",
+          "Book Antiqua",
+          Palatino,
+          serif;
+      }
+
+      body {
+        min-height: 100vh;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        border-radius: 16px;
+        background: var(--bg-panel-strong);
+        color: var(--text);
+        padding: 0;
+      }
+
+      #app {
+        min-height: 100vh;
+        padding-top: var(--safe-top);
+        padding-bottom: var(--safe-bottom);
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .banner {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        padding: 10px 16px;
+        background: rgba(126, 47, 27, 0.92);
+        color: #fff7ef;
+        font-size: 14px;
+        letter-spacing: 0.01em;
+        box-shadow: 0 12px 32px rgba(64, 21, 11, 0.18);
+      }
+
+      .list-view {
+        padding: 18px 16px 28px;
+      }
+
+      .hero {
+        padding: 8px 2px 18px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-family:
+          "JetBrains Mono",
+          "SFMono-Regular",
+          ui-monospace,
+          monospace;
+      }
+
+      .hero h1 {
+        margin: 10px 0 6px;
+        font-size: 34px;
+        line-height: 1;
+        font-weight: 700;
+      }
+
+      .hero p {
+        margin: 0;
+        font-size: 15px;
+        line-height: 1.45;
+        color: var(--muted);
+      }
+
+      .session-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .session-card {
+        padding: 16px;
+        background: var(--bg-panel);
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        box-shadow: 0 14px 40px var(--shadow);
+        text-align: left;
+      }
+
+      .session-card:active {
+        transform: translateY(1px);
+      }
+
+      .session-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .session-title {
+        font-size: 20px;
+        line-height: 1.1;
+        margin: 0;
+      }
+
+      .session-meta {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .state-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        font-family:
+          "JetBrains Mono",
+          "SFMono-Regular",
+          ui-monospace,
+          monospace;
+        background: rgba(47, 36, 23, 0.06);
+      }
+
+      .state-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--idle);
+        flex: 0 0 auto;
+      }
+
+      .state-launching .state-dot { background: var(--launching); }
+      .state-working .state-dot { background: var(--ok); }
+      .state-pending_approval .state-dot { background: var(--wait); }
+      .state-waiting_input .state-dot { background: var(--wait); }
+      .state-idle .state-dot { background: var(--idle); }
+      .state-unknown .state-dot { background: var(--unknown); }
+
+      .state-pending_approval .state-dot {
+        animation: pulse 1s infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.35; transform: scale(0.72); }
+      }
+
+      .empty {
+        margin-top: 26px;
+        padding: 18px;
+        border-radius: 22px;
+        border: 1px dashed rgba(59, 44, 24, 0.25);
+        color: var(--muted);
+        background: rgba(255, 251, 243, 0.58);
+      }
+
+      .terminal-view {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background:
+          radial-gradient(circle at top, rgba(159, 60, 35, 0.12), transparent 30%),
+          linear-gradient(180deg, #221c17 0%, #14110f 100%);
+        color: #f5efe7;
+      }
+
+      .terminal-topbar {
+        padding: calc(var(--safe-top) + 8px) 14px 10px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid rgba(255, 239, 214, 0.08);
+        background: rgba(18, 14, 11, 0.78);
+        backdrop-filter: blur(14px);
+        position: sticky;
+        top: 0;
+        z-index: 20;
+      }
+
+      .back-button {
+        width: 44px;
+        height: 44px;
+        border-radius: 14px;
+        background: rgba(255, 247, 235, 0.1);
+        color: #fff2e5;
+        font-size: 20px;
+      }
+
+      .terminal-title {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .terminal-title h2 {
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.1;
+      }
+
+      .terminal-title p {
+        margin: 5px 0 0;
+        color: rgba(255, 237, 214, 0.72);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-family:
+          "JetBrains Mono",
+          "SFMono-Regular",
+          ui-monospace,
+          monospace;
+      }
+
+      .terminal-shell {
+        flex: 1;
+        min-height: 0;
+        padding: 12px;
+      }
+
+      .terminal-frame {
+        height: 100%;
+        border-radius: 20px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 239, 214, 0.08);
+        background: var(--bg-terminal);
+        box-shadow: inset 0 1px 0 rgba(255, 239, 214, 0.05);
+      }
+
+      #terminal {
+        height: 100%;
+        width: 100%;
+        padding: 12px;
+      }
+
+      .actions {
+        padding: 10px 12px calc(var(--safe-bottom) + 12px);
+        background: rgba(18, 14, 11, 0.84);
+        border-top: 1px solid rgba(255, 239, 214, 0.08);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .action-row {
+        display: grid;
+        gap: 8px;
+      }
+
+      .action-row.keys {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .action-row.shortcuts {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+
+      .action-btn {
+        min-height: 44px;
+        padding: 10px 8px;
+        border-radius: 14px;
+        background: rgba(255, 247, 235, 0.1);
+        color: #fff7ef;
+        font-size: 14px;
+        letter-spacing: 0.02em;
+      }
+
+      .action-btn.active {
+        background: rgba(159, 60, 35, 0.92);
+      }
+
+      .terminal-note {
+        margin-top: 2px;
+        color: rgba(255, 237, 214, 0.68);
+        font-size: 11px;
+        text-align: center;
+        font-family:
+          "JetBrains Mono",
+          "SFMono-Regular",
+          ui-monospace,
+          monospace;
+      }
+
+      a {
+        color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="banner" class="banner hidden"></div>
+
+      <main id="list-view" class="list-view">
+        <section class="hero">
+          <div class="eyebrow">attn web</div>
+          <h1>Sessions</h1>
+          <p>Attach to a running session, type into its PTY, or clear approvals from your phone.</p>
+        </section>
+        <section id="session-list" class="session-list"></section>
+        <div id="empty-state" class="empty hidden">No sessions are visible on this daemon yet.</div>
+      </main>
+
+      <main id="terminal-view" class="terminal-view hidden">
+        <header class="terminal-topbar">
+          <button id="back-button" class="back-button" type="button" aria-label="Back">‹</button>
+          <div class="terminal-title">
+            <h2 id="terminal-session-label">Session</h2>
+            <p id="terminal-session-meta">Connecting</p>
+          </div>
+          <div id="terminal-state-badge" class="state-badge state-unknown">
+            <span class="state-dot"></span>
+            <span id="terminal-state-label">Unknown</span>
+          </div>
+        </header>
+
+        <section class="terminal-shell">
+          <div class="terminal-frame">
+            <div id="terminal"></div>
+          </div>
+        </section>
+
+        <section class="actions">
+          <div class="action-row keys">
+            <button class="action-btn" data-action="esc" type="button">Esc</button>
+            <button class="action-btn" data-action="shift-tab" type="button">Shift+Tab</button>
+            <button id="ctrl-toggle" class="action-btn" type="button">Ctrl</button>
+            <button id="alt-toggle" class="action-btn" type="button">Alt</button>
+          </div>
+          <div class="action-row shortcuts">
+            <button class="action-btn" data-action="yes" type="button">yes</button>
+            <button class="action-btn" data-action="no" type="button">no</button>
+            <button class="action-btn" data-action="compact" type="button">/compact</button>
+            <button class="action-btn" data-action="new" type="button">/new</button>
+            <button class="action-btn" data-action="1" type="button">1</button>
+          </div>
+          <div class="action-row shortcuts">
+            <button class="action-btn" data-action="2" type="button">2</button>
+            <button class="action-btn" data-action="3" type="button">3</button>
+            <button class="action-btn" data-action="4" type="button">4</button>
+            <button class="action-btn" data-action="5" type="button">5</button>
+            <button class="action-btn" data-action="6" type="button">6</button>
+          </div>
+          <div class="terminal-note">Tap the terminal to raise the keyboard. Ctrl and Alt stay armed for the next typed character.</div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/vendor/xterm.min.js"></script>
+    <script src="/vendor/xterm-addon-fit.min.js"></script>
+    <script>
+      (() => {
+        const PROTOCOL_VERSION = "49";
+        const STATE_META = {
+          launching: { label: "Launching", className: "state-launching" },
+          working: { label: "Working", className: "state-working" },
+          pending_approval: { label: "Needs Approval", className: "state-pending_approval" },
+          waiting_input: { label: "Waiting", className: "state-waiting_input" },
+          idle: { label: "Idle", className: "state-idle" },
+          unknown: { label: "Unknown", className: "state-unknown" }
+        };
+        const stateRank = {
+          pending_approval: 0,
+          waiting_input: 1,
+          working: 2,
+          launching: 3,
+          idle: 4,
+          unknown: 5
+        };
+
+        const listView = document.getElementById("list-view");
+        const terminalView = document.getElementById("terminal-view");
+        const sessionList = document.getElementById("session-list");
+        const emptyState = document.getElementById("empty-state");
+        const banner = document.getElementById("banner");
+        const backButton = document.getElementById("back-button");
+        const terminalLabel = document.getElementById("terminal-session-label");
+        const terminalMeta = document.getElementById("terminal-session-meta");
+        const terminalStateBadge = document.getElementById("terminal-state-badge");
+        const terminalStateLabel = document.getElementById("terminal-state-label");
+        const ctrlToggle = document.getElementById("ctrl-toggle");
+        const altToggle = document.getElementById("alt-toggle");
+
+        const terminal = new Terminal({
+          cursorBlink: true,
+          convertEol: false,
+          fontFamily: '"JetBrains Mono", "SFMono-Regular", ui-monospace, monospace',
+          fontSize: 15,
+          theme: {
+            background: "#171513",
+            foreground: "#f5efe7",
+            cursor: "#f8b26a",
+            black: "#171513",
+            brightBlack: "#6b635b",
+            red: "#e06456",
+            brightRed: "#f28f7f",
+            green: "#5ebf86",
+            brightGreen: "#8bd7a5",
+            yellow: "#e8b85a",
+            brightYellow: "#f3d38f",
+            blue: "#72a5f6",
+            brightBlue: "#a1c4ff",
+            magenta: "#d48cf0",
+            brightMagenta: "#e6b1fa",
+            cyan: "#71cfd8",
+            brightCyan: "#9de6ec",
+            white: "#d8d1c8",
+            brightWhite: "#fffaf3"
+          }
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        terminal.loadAddon(fitAddon);
+        terminal.open(document.getElementById("terminal"));
+
+        const textDecoder = new TextDecoder();
+        const query = new URLSearchParams(window.location.search);
+        const wsToken = query.get("token") || "";
+        const QUICK_ACTIONS = {
+          esc: "\u001b",
+          "shift-tab": "\u001b[Z",
+          yes: "yes\r",
+          no: "no\r",
+          compact: "/compact\r",
+          new: "/new\r",
+          "1": "1\r",
+          "2": "2\r",
+          "3": "3\r",
+          "4": "4\r",
+          "5": "5\r",
+          "6": "6\r"
+        };
+        const state = {
+          ws: null,
+          reconnectTimer: null,
+          reconnectDelayMs: 1000,
+          sessions: [],
+          endpoints: [],
+          currentSessionId: null,
+          protocolMismatch: false,
+          attachPending: false,
+          attachQueue: [],
+          lastSeqBySession: new Map(),
+          stickyCtrl: false,
+          stickyAlt: false
+        };
+
+        function webSocketURL() {
+          const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+          const url = new URL(protocol + "//" + window.location.host + "/ws");
+          if (wsToken) {
+            url.searchParams.set("token", wsToken);
+          }
+          return url.toString();
+        }
+
+        function showBanner(message) {
+          if (!message) {
+            banner.textContent = "";
+            banner.classList.add("hidden");
+            return;
+          }
+          banner.textContent = message;
+          banner.classList.remove("hidden");
+        }
+
+        function stateMeta(value) {
+          return STATE_META[value] || STATE_META.unknown;
+        }
+
+        function endpointName(session) {
+          if (!session || !session.endpoint_id) return "Local";
+          const endpoint = state.endpoints.find((item) => item.id === session.endpoint_id);
+          return endpoint ? endpoint.name : session.endpoint_id;
+        }
+
+        function sortedSessions() {
+          return [...state.sessions].sort((a, b) => {
+            const aRank = stateRank[a.state] ?? stateRank.unknown;
+            const bRank = stateRank[b.state] ?? stateRank.unknown;
+            if (aRank !== bRank) return aRank - bRank;
+            return (a.label || "").localeCompare(b.label || "");
+          });
+        }
+
+        function renderSessions() {
+          const sessions = sortedSessions();
+          sessionList.replaceChildren();
+          emptyState.classList.toggle("hidden", sessions.length !== 0);
+
+          sessions.forEach((session) => {
+            const meta = stateMeta(session.state);
+            const card = document.createElement("button");
+            card.className = "session-card";
+            card.type = "button";
+            card.addEventListener("click", () => openSession(session.id));
+
+            card.innerHTML = `
+              <div class="session-head">
+                <div>
+                  <h2 class="session-title"></h2>
+                  <div class="session-meta">
+                    <span>${escapeHtml(endpointName(session))}</span>
+                    <span>${escapeHtml(session.agent || "agent")}</span>
+                  </div>
+                </div>
+                <div class="state-badge ${meta.className}">
+                  <span class="state-dot"></span>
+                  <span>${meta.label}</span>
+                </div>
+              </div>
+            `;
+            card.querySelector(".session-title").textContent = session.label || session.id;
+            sessionList.appendChild(card);
+          });
+        }
+
+        function renderTerminalHeader() {
+          const session = state.sessions.find((item) => item.id === state.currentSessionId);
+          const meta = stateMeta(session ? session.state : "unknown");
+          terminalLabel.textContent = session ? session.label : "Session";
+          terminalMeta.textContent = session ? endpointName(session) + " • " + (session.agent || "agent") : "Disconnected";
+          terminalStateLabel.textContent = meta.label;
+          terminalStateBadge.className = "state-badge " + meta.className;
+        }
+
+        function setView(kind) {
+          const showTerminal = kind === "terminal";
+          listView.classList.toggle("hidden", showTerminal);
+          terminalView.classList.toggle("hidden", !showTerminal);
+          if (showTerminal) {
+            queueMicrotask(() => {
+              fitTerminal();
+              terminal.focus();
+            });
+          }
+        }
+
+        function fitTerminal() {
+          if (terminalView.classList.contains("hidden")) return;
+          try {
+            fitAddon.fit();
+            if (state.currentSessionId && terminal.cols > 0 && terminal.rows > 0) {
+              send({ cmd: "pty_resize", id: state.currentSessionId, cols: terminal.cols, rows: terminal.rows });
+            }
+          } catch (error) {
+            console.warn("[attn-web] fit failed", error);
+          }
+        }
+
+        function decodeBase64(value) {
+          const raw = atob(value);
+          const bytes = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i += 1) {
+            bytes[i] = raw.charCodeAt(i);
+          }
+          return textDecoder.decode(bytes);
+        }
+
+        function applyStickyModifiers(data) {
+          const ctrl = state.stickyCtrl;
+          const alt = state.stickyAlt;
+          if (!ctrl && !alt) return data;
+          state.stickyCtrl = false;
+          state.stickyAlt = false;
+          syncModifierButtons();
+
+          let transformed = data;
+          if (ctrl) {
+            const encoded = ctrlEncode(data);
+            transformed = encoded == null ? data : encoded;
+          }
+          if (alt) {
+            transformed = "\u001b" + transformed;
+          }
+          return transformed;
+        }
+
+        function ctrlEncode(data) {
+          if (typeof data !== "string" || data.length === 0) return null;
+          const char = data[0];
+          const code = char.toUpperCase().charCodeAt(0);
+          if (code >= 64 && code <= 95) {
+            return String.fromCharCode(code - 64);
+          }
+          if (char === " ") return "\u0000";
+          if (char === "?") return "\u007f";
+          return null;
+        }
+
+        function syncModifierButtons() {
+          ctrlToggle.classList.toggle("active", state.stickyCtrl);
+          altToggle.classList.toggle("active", state.stickyAlt);
+        }
+
+        function resetTerminal() {
+          terminal.reset();
+          terminal.clear();
+          state.attachQueue = [];
+          if (state.currentSessionId) {
+            state.lastSeqBySession.set(state.currentSessionId, 0);
+          }
+        }
+
+        function attachCurrentSession() {
+          if (!state.currentSessionId) return;
+          state.attachPending = true;
+          state.attachQueue = [];
+          state.lastSeqBySession.set(state.currentSessionId, 0);
+          send({ cmd: "attach_session", id: state.currentSessionId });
+        }
+
+        function openSession(sessionId) {
+          if (state.currentSessionId && state.currentSessionId !== sessionId) {
+            send({ cmd: "detach_session", id: state.currentSessionId });
+          }
+          state.currentSessionId = sessionId;
+          resetTerminal();
+          renderTerminalHeader();
+          setView("terminal");
+          attachCurrentSession();
+        }
+
+        function leaveSession() {
+          if (state.currentSessionId) {
+            send({ cmd: "detach_session", id: state.currentSessionId });
+          }
+          state.currentSessionId = null;
+          state.attachPending = false;
+          state.attachQueue = [];
+          state.stickyCtrl = false;
+          state.stickyAlt = false;
+          syncModifierButtons();
+          renderTerminalHeader();
+          setView("list");
+        }
+
+        function escapeHtml(value) {
+          return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#39;");
+        }
+
+        function send(payload) {
+          if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+          state.ws.send(JSON.stringify(payload));
+        }
+
+        function writePayload(encoded) {
+          terminal.write(decodeBase64(encoded));
+        }
+
+        function handleAttachResult(message) {
+          if (message.id !== state.currentSessionId) return;
+          state.attachPending = false;
+          resetTerminal();
+
+          if (typeof message.last_seq === "number") {
+            state.lastSeqBySession.set(message.id, message.last_seq);
+          }
+
+          if (message.screen_snapshot && message.screen_snapshot_fresh !== false) {
+            writePayload(message.screen_snapshot);
+          } else if (message.scrollback) {
+            writePayload(message.scrollback);
+          }
+
+          state.attachQueue.forEach((entry) => {
+            if (typeof entry.seq === "number") {
+              const lastSeq = state.lastSeqBySession.get(message.id) || 0;
+              if (entry.seq <= lastSeq) return;
+              state.lastSeqBySession.set(message.id, entry.seq);
+            }
+            writePayload(entry.data);
+          });
+          state.attachQueue = [];
+          fitTerminal();
+        }
+
+        function handlePtyOutput(message) {
+          if (!message.id || !message.data || message.id !== state.currentSessionId) return;
+          if (state.attachPending) {
+            state.attachQueue.push({ data: message.data, seq: message.seq });
+            return;
+          }
+          if (typeof message.seq === "number") {
+            const lastSeq = state.lastSeqBySession.get(message.id) || 0;
+            if (message.seq <= lastSeq) return;
+            state.lastSeqBySession.set(message.id, message.seq);
+          }
+          writePayload(message.data);
+        }
+
+        function applyInitialState(message) {
+          if (message.protocol_version && message.protocol_version !== PROTOCOL_VERSION) {
+            state.protocolMismatch = true;
+            showBanner("Protocol mismatch. Update the daemon before using the web client.");
+            if (state.ws) state.ws.close();
+            return;
+          }
+
+          state.sessions = Array.isArray(message.sessions) ? message.sessions : [];
+          state.endpoints = Array.isArray(message.endpoints) ? message.endpoints : [];
+          renderSessions();
+          renderTerminalHeader();
+
+          if (state.currentSessionId) {
+            const exists = state.sessions.some((session) => session.id === state.currentSessionId);
+            if (exists) {
+              attachCurrentSession();
+            } else {
+              leaveSession();
+              showBanner("The selected session is no longer available.");
+            }
+          }
+        }
+
+        function handleSocketMessage(event) {
+          const message = JSON.parse(event.data);
+          switch (message.event) {
+            case "initial_state":
+              applyInitialState(message);
+              break;
+            case "sessions_updated":
+              state.sessions = Array.isArray(message.sessions) ? message.sessions : [];
+              renderSessions();
+              renderTerminalHeader();
+              break;
+            case "endpoints_updated":
+              state.endpoints = Array.isArray(message.endpoints) ? message.endpoints : [];
+              renderSessions();
+              renderTerminalHeader();
+              break;
+            case "session_registered":
+              if (message.session) {
+                state.sessions = state.sessions.filter((entry) => entry.id !== message.session.id).concat(message.session);
+                renderSessions();
+              }
+              break;
+            case "session_state_changed":
+              if (message.session) {
+                state.sessions = state.sessions.map((entry) => entry.id === message.session.id ? message.session : entry);
+                renderSessions();
+                renderTerminalHeader();
+              }
+              break;
+            case "session_unregistered":
+              if (message.id) {
+                state.sessions = state.sessions.filter((entry) => entry.id !== message.id);
+                renderSessions();
+                if (message.id === state.currentSessionId) {
+                  leaveSession();
+                  showBanner("The selected session exited.");
+                }
+              }
+              break;
+            case "attach_result":
+              if (message.success) {
+                handleAttachResult(message);
+              } else {
+                showBanner(message.error || "Failed to attach to the session.");
+              }
+              break;
+            case "pty_output":
+              handlePtyOutput(message);
+              break;
+            case "command_error":
+              showBanner(message.error || "Command failed.");
+              break;
+            case "pty_desync":
+              showBanner("Terminal desynced. Reattaching.");
+              attachCurrentSession();
+              break;
+            case "session_exited":
+              if (message.id === state.currentSessionId) {
+                showBanner("Session exited.");
+              }
+              break;
+            default:
+              break;
+          }
+        }
+
+        function connect() {
+          if (state.protocolMismatch) return;
+          clearTimeout(state.reconnectTimer);
+          showBanner("Connecting…");
+
+          const ws = new WebSocket(webSocketURL());
+          state.ws = ws;
+
+          ws.addEventListener("open", () => {
+            state.reconnectDelayMs = 1000;
+            showBanner("");
+          });
+
+          ws.addEventListener("message", handleSocketMessage);
+
+          ws.addEventListener("close", () => {
+            if (state.protocolMismatch) return;
+            showBanner("Disconnected. Reconnecting…");
+            const delay = state.reconnectDelayMs;
+            state.reconnectTimer = window.setTimeout(connect, delay);
+            state.reconnectDelayMs = Math.min(delay * 2, 30000);
+          });
+
+          ws.addEventListener("error", () => {
+            showBanner("Connection error. Retrying…");
+          });
+        }
+
+        terminal.onData((data) => {
+          if (!state.currentSessionId) return;
+          send({ cmd: "pty_input", id: state.currentSessionId, data: applyStickyModifiers(data), source: "web_client" });
+        });
+
+        terminal.element?.addEventListener("click", () => terminal.focus());
+        backButton.addEventListener("click", leaveSession);
+        ctrlToggle.addEventListener("click", () => {
+          state.stickyCtrl = !state.stickyCtrl;
+          syncModifierButtons();
+          terminal.focus();
+        });
+        altToggle.addEventListener("click", () => {
+          state.stickyAlt = !state.stickyAlt;
+          syncModifierButtons();
+          terminal.focus();
+        });
+
+        document.querySelectorAll("[data-action]").forEach((button) => {
+          button.addEventListener("click", () => {
+            if (!state.currentSessionId) return;
+            const payload = QUICK_ACTIONS[button.dataset.action];
+            if (typeof payload !== "string") return;
+            send({ cmd: "pty_input", id: state.currentSessionId, data: payload, source: "web_quick_action" });
+            terminal.focus();
+          });
+        });
+
+        if (window.ResizeObserver) {
+          const observer = new ResizeObserver(() => fitTerminal());
+          observer.observe(document.querySelector(".terminal-shell"));
+        }
+        window.addEventListener("resize", fitTerminal);
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener("resize", fitTerminal);
+        }
+
+        renderSessions();
+        renderTerminalHeader();
+        syncModifierButtons();
+        connect();
+      })();
+    </script>
+  </body>
+</html>

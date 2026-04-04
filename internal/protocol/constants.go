@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "47"
+const ProtocolVersion = "49"
 
 // Commands
 const (
@@ -45,6 +45,7 @@ const (
 	CmdRemoveEndpoint           = "remove_endpoint"
 	CmdUpdateEndpoint           = "update_endpoint"
 	CmdListEndpoints            = "list_endpoints"
+	CmdSetEndpointRemoteWeb     = "set_endpoint_remote_web"
 	CmdApprovePR                = "approve_pr"
 	CmdMergePR                  = "merge_pr"
 	CmdInjectTestPR             = "inject_test_pr"
@@ -449,6 +450,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdListEndpoints:
 		var msg ListEndpointsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSetEndpointRemoteWeb:
+		var msg SetEndpointRemoteWebMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

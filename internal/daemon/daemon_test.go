@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -1806,6 +1807,93 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestDaemon_WebRootServesEmbeddedClient(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	wsPort := "19852"
+	os.Setenv("ATTN_WS_PORT", wsPort)
+	defer os.Unsetenv("ATTN_WS_PORT")
+
+	d := NewForTesting(sockPath)
+	go d.Start()
+	defer d.Stop()
+
+	waitForSocket(t, sockPath, 5*time.Second)
+
+	rootURL := "http://127.0.0.1:" + wsPort + "/"
+	var resp *http.Response
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, err := http.Get(rootURL)
+		if err == nil {
+			resp = r
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if resp == nil {
+		t.Fatalf("root endpoint not ready after 5s")
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read root body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("root status = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "attn web") {
+		t.Fatalf("root body did not contain web client marker")
+	}
+	if !strings.Contains(string(body), "rel=\"icon\"") {
+		t.Fatalf("root body did not include favicon link")
+	}
+}
+
+func TestDaemon_WebFaviconDoesNot404(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	wsPort := "19853"
+	os.Setenv("ATTN_WS_PORT", wsPort)
+	defer os.Unsetenv("ATTN_WS_PORT")
+
+	d := NewForTesting(sockPath)
+	go d.Start()
+	defer d.Stop()
+
+	waitForSocket(t, sockPath, 5*time.Second)
+
+	faviconURL := "http://127.0.0.1:" + wsPort + "/favicon.ico"
+	var resp *http.Response
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, err := http.Get(faviconURL)
+		if err == nil {
+			resp = r
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if resp == nil {
+		t.Fatalf("favicon endpoint not ready after 5s")
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read favicon body: %v", err)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("favicon status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	if len(body) != 0 {
+		t.Fatalf("favicon body length = %d, want 0", len(body))
+	}
+}
+
 func TestDaemon_SettingsValidation(t *testing.T) {
 	// Test the validateSetting function directly
 	d := &Daemon{}
@@ -1830,9 +1918,12 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"custom review_loop_model", "review_loop_model", "claude-opus-4-6", false},
 		{"empty reviewer_model", "reviewer_model", "", false},
 		{"custom reviewer_model", "reviewer_model", "claude-sonnet-4-6", false},
+		{"valid tailscale_enabled true", "tailscale_enabled", "true", false},
+		{"valid tailscale_enabled false", "tailscale_enabled", "false", false},
 		{"dynamic executable key for known agent", "pi_executable", "not-a-real-binary-123", true},
 		{"invalid claude_executable", "claude_executable", "not-a-real-binary-123", true},
 		{"invalid new_session_agent", "new_session_agent", "gpt", true},
+		{"invalid tailscale_enabled", "tailscale_enabled", "maybe", true},
 		{"invalid key", "unknown_setting", "value", true},
 		{"empty projects_directory", "projects_directory", "", true},
 		{"relative path", "projects_directory", "relative/path", true},
@@ -1878,6 +1969,12 @@ func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
 	if got := settings[SettingPTYBackendMode]; got != "unknown" {
 		t.Fatalf("settings[%s] = %v, want unknown", SettingPTYBackendMode, got)
 	}
+	if got := settings[SettingTailscaleEnabled]; got != "false" {
+		t.Fatalf("settings[%s] = %v, want false", SettingTailscaleEnabled, got)
+	}
+	if got := settings["tailscale_status"]; got != tailscaleStatusDisabled {
+		t.Fatalf("settings[tailscale_status] = %v, want %s", got, tailscaleStatusDisabled)
+	}
 
 	tmp := t.TempDir()
 	custom := filepath.Join(tmp, "custom-codex")
@@ -1899,6 +1996,69 @@ func TestDaemon_SettingsWithAgentAvailability(t *testing.T) {
 	}
 	if got := settings[SettingPiAvailable]; got != "false" {
 		t.Fatalf("settings[%s] = %v, want false", SettingPiAvailable, got)
+	}
+
+	d.store.SetSetting(SettingTailscaleEnabled, "true")
+	d.tailscale = newTailscaleRuntimeWithCLI(nil)
+	d.tailscale.snapshot = tailscaleStateSnapshot{
+		status:  tailscaleStatusNeedsLogin,
+		domain:  "macbook-epidemic.tail1bfe77.ts.net",
+		authURL: "https://login.tailscale.example/auth",
+	}
+	settings = d.settingsWithAgentAvailability()
+	if got := settings[SettingTailscaleEnabled]; got != "true" {
+		t.Fatalf("settings[%s] = %v, want true", SettingTailscaleEnabled, got)
+	}
+	if got := settings["tailscale_domain"]; got != "macbook-epidemic.tail1bfe77.ts.net" {
+		t.Fatalf("settings[tailscale_domain] = %v, want DNS name", got)
+	}
+	if got := settings["tailscale_status"]; got != tailscaleStatusNeedsLogin {
+		t.Fatalf("settings[tailscale_status] = %v, want %s", got, tailscaleStatusNeedsLogin)
+	}
+	if got := settings["tailscale_auth_url"]; got != "https://login.tailscale.example/auth" {
+		t.Fatalf("settings[tailscale_auth_url] = %v, want auth url", got)
+	}
+}
+
+func TestDaemon_EnsureTailscaleServeFromSettingsAndBroadcast_BroadcastsUpdatedState(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.store.SetSetting(SettingTailscaleEnabled, "true")
+	d.tailscale = newTailscaleRuntimeWithCLI(&fakeTailscaleCLI{
+		run: func(args []string) ([]byte, error) {
+			switch strings.Join(args, " ") {
+			case "status --json":
+				return []byte(`{"BackendState":"NeedsLogin","AuthURL":"https://login.tailscale.example/auth","Self":{"DNSName":"gpu-box.tail.ts.net."}}`), nil
+			case "serve status --json":
+				return []byte(`{}`), nil
+			default:
+				t.Fatalf("unexpected tailscale command: %q", strings.Join(args, " "))
+				return nil, nil
+			}
+		},
+	})
+
+	d.ensureTailscaleServeFromSettingsAndBroadcast()
+
+	select {
+	case outbound := <-d.wsHub.broadcast:
+		if outbound.kind != messageKindText {
+			t.Fatalf("broadcast kind = %v, want text", outbound.kind)
+		}
+		var msg protocol.SettingsUpdatedMessage
+		if err := json.Unmarshal(outbound.payload, &msg); err != nil {
+			t.Fatalf("unmarshal broadcast payload: %v", err)
+		}
+		if msg.Event != protocol.EventSettingsUpdated {
+			t.Fatalf("broadcast event = %q, want %q", msg.Event, protocol.EventSettingsUpdated)
+		}
+		if got := msg.Settings["tailscale_status"]; got != tailscaleStatusNeedsLogin {
+			t.Fatalf("broadcast tailscale_status = %v, want %s", got, tailscaleStatusNeedsLogin)
+		}
+		if got := msg.Settings["tailscale_auth_url"]; got != "https://login.tailscale.example/auth" {
+			t.Fatalf("broadcast tailscale_auth_url = %v, want auth url", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected settings_updated broadcast")
 	}
 }
 
