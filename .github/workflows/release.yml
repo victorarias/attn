@@ -109,7 +109,7 @@ jobs:
           fi
 
           echo "APPLE_SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
-          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+          echo "NOTARY_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
           echo "APPLE_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       - name: Build and publish release
@@ -118,9 +118,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_INSTALL_CHANNEL: release
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
+          # Tauri should sign during build, but explicit notarization happens later
+          # on the rebuilt artifacts so transient notary failures do not abort bundling.
+          APPLE_API_ISSUER: ""
+          APPLE_API_KEY: ""
+          APPLE_API_KEY_PATH: ""
         with:
           projectPath: app
           tagName: ${{ env.RELEASE_TAG }}
@@ -135,7 +137,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
+          NOTARY_API_KEY_PATH: ${{ env.NOTARY_API_KEY_PATH }}
         run: |
           APP_PATH="$(find app/src-tauri/target -type d -name 'attn.app' | head -n1)"
           if [ -z "$APP_PATH" ]; then
@@ -153,7 +155,7 @@ jobs:
           APP_ZIP="$WORK_DIR/attn.app.zip"
           ditto -c -k --keepParent "$WORK_DIR/attn.app" "$APP_ZIP"
           xcrun notarytool submit "$APP_ZIP" \
-            --key "$APPLE_API_KEY_PATH" \
+            --key "$NOTARY_API_KEY_PATH" \
             --key-id "$APPLE_API_KEY" \
             --issuer "$APPLE_API_ISSUER" \
             --wait
@@ -163,7 +165,7 @@ jobs:
           DMG_REBUILT="$WORK_DIR/attn_${VERSION}_aarch64.dmg"
           hdiutil create -volname "attn" -srcfolder "$WORK_DIR/attn.app" -format UDZO "$DMG_REBUILT"
           xcrun notarytool submit "$DMG_REBUILT" \
-            --key "$APPLE_API_KEY_PATH" \
+            --key "$NOTARY_API_KEY_PATH" \
             --key-id "$APPLE_API_KEY" \
             --issuer "$APPLE_API_ISSUER" \
             --wait
@@ -195,8 +197,8 @@ jobs:
             security delete-keychain "$APPLE_KEYCHAIN_PATH" || true
           fi
           rm -f "$RUNNER_TEMP/apple-certificate.p12"
-          if [ -n "${APPLE_API_KEY_PATH:-}" ]; then
-            rm -f "$APPLE_API_KEY_PATH"
+          if [ -n "${NOTARY_API_KEY_PATH:-}" ]; then
+            rm -f "$NOTARY_API_KEY_PATH"
           fi
 
   linux-amd64:
