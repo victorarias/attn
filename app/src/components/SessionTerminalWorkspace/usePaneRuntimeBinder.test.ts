@@ -168,7 +168,7 @@ describe('usePaneRuntimeBinder', () => {
       await Promise.resolve();
     });
 
-    expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode('queued output'), expect.any(Function));
+    expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode('queued output'));
     expect(mockPtySpawn).toHaveBeenCalledWith({
       args: {
         id: 'runtime-1',
@@ -188,7 +188,7 @@ describe('usePaneRuntimeBinder', () => {
       await Promise.resolve();
     });
 
-    expect(xterm.write).toHaveBeenNthCalledWith(2, new TextEncoder().encode(' live output'), expect.any(Function));
+    expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode(' live output'));
   });
 
   it('keeps reset ordered behind pending terminal writes', async () => {
@@ -219,7 +219,9 @@ describe('usePaneRuntimeBinder', () => {
       await Promise.resolve();
     });
 
-    expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode('queued output'), expect.any(Function));
+    expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode('queued output'));
+    // Reset fence write is queued with a callback — reset waits for it
+    expect(xterm.write).toHaveBeenCalledWith(new Uint8Array(0), expect.any(Function));
     expect(xterm.reset).not.toHaveBeenCalled();
 
     await act(async () => {

@@ -6,7 +6,7 @@ import { isMacLikePlatform } from '../../shortcuts/platform';
 import type { TerminalHandle } from '../Terminal';
 import { activeElementSummary, recordPaneRuntimeDebugEvent } from '../../utils/paneRuntimeDebug';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
-import { recordPtyDecode, recordTerminalWrite } from '../../utils/ptyPerf';
+import { recordPtyDecode } from '../../utils/ptyPerf';
 import { resetTerminalScrollPin } from '../../utils/terminalScrollPin';
 import { recordTerminalRuntimeLog } from '../../utils/terminalRuntimeLog';
 
@@ -89,16 +89,6 @@ function snapshotTerminalText(terminal: XTerm | null): string {
     }
   }
   return lines.join('\n');
-}
-
-function writeBytesToTerminalAsync(terminal: XTerm, bytes: Uint8Array): Promise<void> {
-  const startedAt = performance.now();
-  return new Promise<void>((resolve) => {
-    terminal.write(bytes, () => {
-      recordTerminalWrite(bytes.length, performance.now() - startedAt);
-      resolve();
-    });
-  });
 }
 
 function runtimeEnsureErrorMessage(error: unknown): string {
@@ -277,13 +267,13 @@ export function usePaneRuntimeBinder(
   }, []);
 
   const enqueuePaneBytes = useCallback((paneId: string, xterm: XTerm, bytes: Uint8Array, seq?: number) => {
-    void queuePaneWriteTask(paneId, async () => {
+    void queuePaneWriteTask(paneId, () => {
       const liveXterm = xtermsRef.current.get(paneId);
       if (!liveXterm || liveXterm !== xterm) {
         queueBufferedBytesForReplay(paneId, bytes, seq);
         return;
       }
-      await writeBytesToTerminalAsync(liveXterm, bytes);
+      liveXterm.write(bytes);
       recordPaneWriteActivity(paneId, bytes.length, seq);
     });
   }, [queueBufferedBytesForReplay, queuePaneWriteTask, recordPaneWriteActivity]);
@@ -300,33 +290,35 @@ export function usePaneRuntimeBinder(
             appendPendingTerminalEvent(paneId, event);
             return;
           }
-          // Reset scroll pin BEFORE terminal.reset() so the pin doesn't
-          // intercept output that arrives immediately after the reset.
+          // Fence: wait for xterm to process prior fire-and-forget writes
+          // before resetting, since reset() is synchronous and would bypass
+          // xterm's internal write queue.
+          await new Promise<void>(resolve => liveXterm.write(new Uint8Array(0), resolve));
           resetTerminalScrollPin(liveXterm);
           liveXterm.reset();
         });
         break;
       case 'exit': {
         const exitBytes = terminalTextEncoder.encode(`\r\n[Process exited with code ${event.code}]\r\n`);
-        void queuePaneWriteTask(paneId, async () => {
+        void queuePaneWriteTask(paneId, () => {
           const liveXterm = xtermsRef.current.get(paneId);
           if (!liveXterm || liveXterm !== xterm) {
             appendPendingTerminalEvent(paneId, event);
             return;
           }
-          await writeBytesToTerminalAsync(liveXterm, exitBytes);
+          liveXterm.write(exitBytes);
         });
         break;
       }
       case 'error': {
         const errorBytes = terminalTextEncoder.encode(`\r\n[Error: ${event.error}]\r\n`);
-        void queuePaneWriteTask(paneId, async () => {
+        void queuePaneWriteTask(paneId, () => {
           const liveXterm = xtermsRef.current.get(paneId);
           if (!liveXterm || liveXterm !== xterm) {
             appendPendingTerminalEvent(paneId, event);
             return;
           }
-          await writeBytesToTerminalAsync(liveXterm, errorBytes);
+          liveXterm.write(errorBytes);
         });
         break;
       }
