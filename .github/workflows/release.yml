@@ -145,7 +145,6 @@ jobs:
           cp -R "$APP_PATH" "$WORK_DIR/attn.app"
 
           codesign --verify --deep --strict --verbose=2 "$WORK_DIR/attn.app"
-          spctl -a -t exec -vv "$WORK_DIR/attn.app"
 
           APP_ZIP="$WORK_DIR/attn.app.zip"
           ditto -c -k --keepParent "$WORK_DIR/attn.app" "$APP_ZIP"
@@ -156,6 +155,7 @@ jobs:
             --wait
           xcrun stapler staple "$WORK_DIR/attn.app"
           xcrun stapler validate "$WORK_DIR/attn.app"
+          spctl -a -t exec -vv "$WORK_DIR/attn.app"
 
           DMG_REBUILT="$WORK_DIR/attn_${VERSION}_aarch64.dmg"
           hdiutil create -volname "attn" -srcfolder "$WORK_DIR/attn.app" -format UDZO "$DMG_REBUILT"
