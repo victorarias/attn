@@ -97,6 +97,26 @@ describe('Sidebar', () => {
     expect(onReloadSession).toHaveBeenCalledWith('s1');
   });
 
+  it('fires close callback when close button is clicked', () => {
+    const sessions: TestSession[] = [{
+      id: 's1',
+      label: 'claude',
+      state: 'idle',
+      agent: 'claude',
+    }];
+    const onCloseSession = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        onCloseSession={onCloseSession}
+        {...buildSidebarData(sessions)}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('close-session-s1'));
+    expect(onCloseSession).toHaveBeenCalledWith('s1');
+  });
+
   it('shows review loop indicator for sessions with loop state', () => {
     const sessions: TestSession[] = [{
       id: 's1',
@@ -163,7 +183,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('⌘⇧B sidebar')).toBeInTheDocument();
   });
 
-  it('shows endpoint badge and hides local-only actions for remote sessions', () => {
+  it('shows endpoint badge and renders actions for remote sessions', () => {
     const sessions: TestSession[] = [{
       id: 'remote-1',
       label: 'codex',
@@ -180,6 +200,7 @@ describe('Sidebar', () => {
     );
 
     expect(screen.getByText('gpu-box')).toBeInTheDocument();
-    expect(screen.queryByTestId('reload-session-remote-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('close-session-remote-1')).toBeInTheDocument();
+    expect(screen.getByTestId('reload-session-remote-1')).toBeInTheDocument();
   });
 });

@@ -34,6 +34,7 @@ const (
 	SettingReviewLoopLastIterations = "review_loop_last_iterations"
 	SettingReviewLoopModel          = "review_loop_model"
 	SettingReviewerModel            = "reviewer_model"
+	SettingNewSessionYoloPrefix     = "new_session_yolo_"
 )
 
 func (d *Daemon) handleGetSettingsWS(client *wsClient) {
@@ -132,6 +133,7 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		settings[capabilitySettingKey(name, "state_detector")] = strconv.FormatBool(caps.HasStateDetector)
 		settings[capabilitySettingKey(name, "resume")] = strconv.FormatBool(caps.HasResume)
 		settings[capabilitySettingKey(name, "fork")] = strconv.FormatBool(caps.HasFork)
+		settings[capabilitySettingKey(name, "yolo")] = strconv.FormatBool(caps.HasYolo)
 	}
 
 	if _, ok := settings[SettingClaudeAvailable]; !ok {
@@ -188,10 +190,22 @@ func (d *Daemon) validateSetting(key, value string) error {
 	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:
 		return nil
 	default:
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingNewSessionYoloPrefix) {
+			return validateBooleanSetting(value)
+		}
 		if _, ok := isAgentExecutableSettingKey(key); ok {
 			return validateExecutableSetting(value)
 		}
 		return fmt.Errorf("unknown setting: %s", key)
+	}
+}
+
+func validateBooleanSetting(value string) error {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "true", "false":
+		return nil
+	default:
+		return fmt.Errorf("invalid boolean value: %s", value)
 	}
 }
 

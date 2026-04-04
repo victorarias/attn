@@ -100,6 +100,9 @@ type Capabilities struct {
 
 	// HasFork indicates the agent supports forking a resumed session.
 	HasFork bool
+
+	// HasYolo indicates the agent supports launching with approvals bypassed.
+	HasYolo bool
 }
 
 var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
@@ -114,6 +117,7 @@ var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 //   - ATTN_AGENT_<AGENT>_STATE_DETECTOR=0|1
 //   - ATTN_AGENT_<AGENT>_RESUME=0|1
 //   - ATTN_AGENT_<AGENT>_FORK=0|1
+//   - ATTN_AGENT_<AGENT>_YOLO=0|1
 //
 // <AGENT> is uppercased with non-alphanumeric chars replaced by underscores
 // (e.g. "gemini-cli" -> "GEMINI_CLI").
@@ -144,6 +148,9 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	}
 	if v, ok := boolEnv(prefix + "FORK"); ok {
 		caps.HasFork = v
+	}
+	if v, ok := boolEnv(prefix + "YOLO"); ok {
+		caps.HasYolo = v
 	}
 
 	// Consistency: transcript watcher requires transcript support.
@@ -191,6 +198,7 @@ type SpawnOpts struct {
 	ResumeSessionID string
 	ResumePicker    bool
 	ForkSession     bool
+	YoloMode        bool
 
 	// Executable is the resolved executable path (from ResolveExecutable).
 	Executable string

@@ -2104,6 +2104,7 @@ export interface SpawnSessionMessage {
     resume_picker?:      boolean;
     resume_session_id?:  string;
     rows:                number;
+    yolo_mode?:          boolean;
     [property: string]: any;
 }
 
@@ -5237,6 +5238,7 @@ const typeMap: any = {
         { json: "resume_picker", js: "resume_picker", typ: u(undefined, true) },
         { json: "resume_session_id", js: "resume_session_id", typ: u(undefined, "") },
         { json: "rows", js: "rows", typ: 0 },
+        { json: "yolo_mode", js: "yolo_mode", typ: u(undefined, true) },
     ], "any"),
     "StartReviewLoopMessage": o([
         { json: "cmd", js: "cmd", typ: r("StartReviewLoopMessageCmd") },

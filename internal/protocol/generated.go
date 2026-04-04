@@ -2124,6 +2124,9 @@ type SpawnSessionMessage struct {
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows int `json:"rows"`
+
+	// YoloMode corresponds to the JSON schema field "yolo_mode".
+	YoloMode *bool `json:"yolo_mode,omitempty"`
 }
 
 type StartReviewLoopMessage struct {

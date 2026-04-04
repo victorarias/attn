@@ -23,6 +23,7 @@ type SpawnOptions struct {
 	ResumeSessionID string
 	ResumePicker    bool
 	ForkSession     bool
+	YoloMode        bool
 
 	// Executable is the selected CLI path for opts.Agent.
 	Executable string

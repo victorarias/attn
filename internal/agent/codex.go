@@ -41,6 +41,7 @@ func (c *Codex) Capabilities() Capabilities {
 		HasStateDetector:     true,
 		HasResume:            true,
 		HasFork:              false,
+		HasYolo:              true,
 	}
 }
 
@@ -62,6 +63,9 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	}
 	if !hasCwdFlag {
 		args = append(args, "-C", opts.CWD)
+	}
+	if opts.YoloMode {
+		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}
 
 	args = append(args, opts.AgentArgs...)

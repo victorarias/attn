@@ -135,6 +135,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		ResumeSessionID:   resumeSessionID,
 		ResumePicker:      protocol.Deref(msg.ResumePicker),
 		ForkSession:       protocol.Deref(msg.ForkSession),
+		YoloMode:          protocol.Deref(msg.YoloMode),
 		Executable:        strings.TrimSpace(configuredExecutable),
 		ClaudeExecutable:  protocol.Deref(msg.ClaudeExecutable),
 		CodexExecutable:   protocol.Deref(msg.CodexExecutable),

@@ -25,6 +25,9 @@ interface RepoOptionsProps {
   onRefresh: () => void;
   onBack: () => void;
   refreshing?: boolean;
+  yoloMode?: boolean;
+  yoloSupported?: boolean;
+  onToggleYoloMode?: () => void;
 }
 
 const formatTime = (isoTime?: string) => {
@@ -53,6 +56,9 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   onRefresh,
   onBack,
   refreshing = false,
+  yoloMode = false,
+  yoloSupported = false,
+  onToggleYoloMode,
 }) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showNewWorktree, setShowNewWorktree] = useState(false);
@@ -456,12 +462,28 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
 
   return (
     <div className="repo-options" data-testid="repo-options">
+      <div className="repo-options-toolbar">
+        <div className="repo-options-toolbar-label">LAUNCH MODE</div>
+        <button
+          type="button"
+          className={`repo-options-yolo ${yoloMode ? 'active' : ''}`}
+          onClick={onToggleYoloMode}
+          disabled={!yoloSupported}
+          role="switch"
+          aria-checked={yoloMode}
+          title={!yoloSupported ? 'Selected agent does not support yolo mode' : undefined}
+        >
+          <span>YOLO</span>
+          {yoloSupported && <kbd>⌥Y</kbd>}
+        </button>
+      </div>
       <div className="repo-options-content">
         {items}
       </div>
       <div className="repo-options-footer">
         <span>↑↓ Navigate</span>
         <span>Enter Select</span>
+        {yoloSupported && <span>⌥Y YOLO</span>}
         {canDeleteSelectedItem() && <span>D Delete</span>}
         <span>R Refresh{refreshing && ' ...'}</span>
         <span>Esc Back</span>

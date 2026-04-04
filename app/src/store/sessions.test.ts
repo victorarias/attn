@@ -106,7 +106,7 @@ describe('sessions store', () => {
   });
 
   it('takeSessionSpawnArgs consumes pending fork params once and applies launcher overrides', async () => {
-    const sessionId = await useSessionStore.getState().createSession('Spawn Test', '/tmp/workspace', 'sess-spawn', 'claude', 'ep-1');
+    const sessionId = await useSessionStore.getState().createSession('Spawn Test', '/tmp/workspace', 'sess-spawn', 'claude', 'ep-1', true);
     useSessionStore.getState().setLauncherConfig({
       executables: { claude: '/opt/bin/claude-custom' },
     });
@@ -127,6 +127,7 @@ describe('sessions store', () => {
       claude_executable: '/opt/bin/claude-custom',
       resume_session_id: 'resume-123',
       fork_session: true,
+      yolo_mode: true,
     });
     expect(second).toMatchObject({
       id: sessionId,
@@ -209,7 +210,7 @@ describe('sessions store', () => {
   });
 
   it('reloadSession preserves endpoint routing for remote sessions', async () => {
-    await useSessionStore.getState().createSession('Remote', '/srv/repo', 'sess-remote', 'codex', 'ep-remote');
+    await useSessionStore.getState().createSession('Remote', '/srv/repo', 'sess-remote', 'codex', 'ep-remote', true);
 
     await useSessionStore.getState().reloadSession('sess-remote', { cols: 120, rows: 40 });
 
@@ -222,6 +223,7 @@ describe('sessions store', () => {
         reload: true,
         cols: 120,
         rows: 40,
+        yolo_mode: true,
       }),
     });
   });
