@@ -20,6 +20,7 @@ describe('SettingsModal review loop prompts', () => {
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
         onSetSetting={vi.fn()}
         themePreference="system"
         onSetTheme={vi.fn()}
@@ -48,6 +49,7 @@ describe('SettingsModal review loop prompts', () => {
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
         onSetSetting={onSetSetting}
         themePreference="system"
         onSetTheme={vi.fn()}
@@ -89,6 +91,7 @@ describe('SettingsModal review loop prompts', () => {
         onAddEndpoint={onAddEndpoint}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
         onSetSetting={vi.fn()}
         themePreference="system"
         onSetTheme={vi.fn()}
@@ -102,5 +105,84 @@ describe('SettingsModal review loop prompts', () => {
     await waitFor(() => {
       expect(onAddEndpoint).toHaveBeenCalledWith('gpu-box', 'user@gpu-box');
     });
+  });
+
+  it('toggles tailscale serve on the existing device', () => {
+    const onSetSetting = vi.fn();
+
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        connectedHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{
+          tailscale_enabled: 'false',
+          tailscale_status: 'disabled',
+          tailscale_domain: 'macbook-epidemic.tail1bfe77.ts.net',
+        }}
+        endpoints={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={onSetSetting}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Enable'));
+    expect(onSetSetting).toHaveBeenCalledWith('tailscale_enabled', 'true');
+    expect(screen.getByText(/does not register a second tailnet device/i)).toBeInTheDocument();
+  });
+
+  it('toggles remote web access for a connected endpoint', async () => {
+    const onSetEndpointRemoteWeb = vi.fn().mockResolvedValue({ success: true });
+
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        connectedHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{}}
+        endpoints={[{
+          id: 'ep-1',
+          name: 'gpu-box',
+          ssh_target: 'user@gpu-box',
+          status: 'connected',
+          enabled: true,
+          capabilities: {
+            protocol_version: '49',
+            agents_available: ['codex'],
+            tailscale_enabled: false,
+            tailscale_status: 'disabled',
+            tailscale_domain: 'gpu-box.tail1bfe77.ts.net',
+            tailscale_auth_url: 'https://login.tailscale.example/auth',
+          },
+        }]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={onSetEndpointRemoteWeb}
+        onSetSetting={vi.fn()}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Enable Web'));
+
+    await waitFor(() => {
+      expect(onSetEndpointRemoteWeb).toHaveBeenCalledWith('ep-1', true);
+    });
+    expect(screen.getByText(/sign this host into tailscale/i)).toBeInTheDocument();
   });
 });

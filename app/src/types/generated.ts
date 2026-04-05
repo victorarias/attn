@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RemoveEndpointMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, WorkspaceActionResultMessage, WorkspaceClosePaneMessage, WorkspaceFocusPaneMessage, WorkspaceGetMessage, WorkspacePane, WorkspacePaneKind, WorkspaceRenamePaneMessage, WorkspaceRuntimeExitedMessage, WorkspaceSnapshot, WorkspaceSnapshotMessage, WorkspaceSplitDirection, WorkspaceSplitPaneMessage, WorkspaceUpdatedMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RemoveEndpointMessage, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, WorkspaceActionResultMessage, WorkspaceClosePaneMessage, WorkspaceFocusPaneMessage, WorkspaceGetMessage, WorkspacePane, WorkspacePaneKind, WorkspaceRenamePaneMessage, WorkspaceRuntimeExitedMessage, WorkspaceSnapshot, WorkspaceSnapshotMessage, WorkspaceSplitDirection, WorkspaceSplitPaneMessage, WorkspaceUpdatedMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -140,6 +140,7 @@
 //   const sessionUnregisteredMessage = Convert.toSessionUnregisteredMessage(json);
 //   const sessionVisualizedMessage = Convert.toSessionVisualizedMessage(json);
 //   const sessionsUpdatedMessage = Convert.toSessionsUpdatedMessage(json);
+//   const setEndpointRemoteWebMessage = Convert.toSetEndpointRemoteWebMessage(json);
 //   const setReviewLoopIterationLimitMessage = Convert.toSetReviewLoopIterationLimitMessage(json);
 //   const setSessionResumeIDMessage = Convert.toSetSessionResumeIDMessage(json);
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
@@ -747,6 +748,12 @@ export interface EndpointCapabilities {
     projects_directory?: string;
     protocol_version:    string;
     pty_backend_mode?:   string;
+    tailscale_auth_url?: string;
+    tailscale_domain?:   string;
+    tailscale_enabled?:  boolean;
+    tailscale_error?:    string;
+    tailscale_status?:   string;
+    tailscale_url?:      string;
     [property: string]: any;
 }
 
@@ -768,6 +775,12 @@ export interface Capabilities {
     projects_directory?: string;
     protocol_version:    string;
     pty_backend_mode?:   string;
+    tailscale_auth_url?: string;
+    tailscale_domain?:   string;
+    tailscale_enabled?:  boolean;
+    tailscale_error?:    string;
+    tailscale_status?:   string;
+    tailscale_url?:      string;
     [property: string]: any;
 }
 
@@ -2030,6 +2043,17 @@ export enum SessionsUpdatedMessageEvent {
     SessionsUpdated = "sessions_updated",
 }
 
+export interface SetEndpointRemoteWebMessage {
+    cmd:         SetEndpointRemoteWebMessageCmd;
+    enabled:     boolean;
+    endpoint_id: string;
+    [property: string]: any;
+}
+
+export enum SetEndpointRemoteWebMessageCmd {
+    SetEndpointRemoteWeb = "set_endpoint_remote_web",
+}
+
 export interface SetReviewLoopIterationLimitMessage {
     cmd:             SetReviewLoopIterationLimitMessageCmd;
     iteration_limit: number;
@@ -2064,10 +2088,11 @@ export enum SetSettingMessageCmd {
 }
 
 export interface SettingsUpdatedMessage {
-    error?:    string;
-    event:     SettingsUpdatedMessageEvent;
-    settings?: { [key: string]: any };
-    success?:  boolean;
+    changed_key?: string;
+    error?:       string;
+    event:        SettingsUpdatedMessageEvent;
+    settings?:    { [key: string]: any };
+    success?:     boolean;
     [property: string]: any;
 }
 
@@ -3657,6 +3682,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SessionsUpdatedMessage")), null, 2);
     }
 
+    public static toSetEndpointRemoteWebMessage(json: string): SetEndpointRemoteWebMessage {
+        return cast(JSON.parse(json), r("SetEndpointRemoteWebMessage"));
+    }
+
+    public static setEndpointRemoteWebMessageToJson(value: SetEndpointRemoteWebMessage): string {
+        return JSON.stringify(uncast(value, r("SetEndpointRemoteWebMessage")), null, 2);
+    }
+
     public static toSetReviewLoopIterationLimitMessage(json: string): SetReviewLoopIterationLimitMessage {
         return cast(JSON.parse(json), r("SetReviewLoopIterationLimitMessage"));
     }
@@ -4461,6 +4494,12 @@ const typeMap: any = {
         { json: "projects_directory", js: "projects_directory", typ: u(undefined, "") },
         { json: "protocol_version", js: "protocol_version", typ: "" },
         { json: "pty_backend_mode", js: "pty_backend_mode", typ: u(undefined, "") },
+        { json: "tailscale_auth_url", js: "tailscale_auth_url", typ: u(undefined, "") },
+        { json: "tailscale_domain", js: "tailscale_domain", typ: u(undefined, "") },
+        { json: "tailscale_enabled", js: "tailscale_enabled", typ: u(undefined, true) },
+        { json: "tailscale_error", js: "tailscale_error", typ: u(undefined, "") },
+        { json: "tailscale_status", js: "tailscale_status", typ: u(undefined, "") },
+        { json: "tailscale_url", js: "tailscale_url", typ: u(undefined, "") },
     ], "any"),
     "EndpointInfo": o([
         { json: "capabilities", js: "capabilities", typ: u(undefined, r("Capabilities")) },
@@ -4478,6 +4517,12 @@ const typeMap: any = {
         { json: "projects_directory", js: "projects_directory", typ: u(undefined, "") },
         { json: "protocol_version", js: "protocol_version", typ: "" },
         { json: "pty_backend_mode", js: "pty_backend_mode", typ: u(undefined, "") },
+        { json: "tailscale_auth_url", js: "tailscale_auth_url", typ: u(undefined, "") },
+        { json: "tailscale_domain", js: "tailscale_domain", typ: u(undefined, "") },
+        { json: "tailscale_enabled", js: "tailscale_enabled", typ: u(undefined, true) },
+        { json: "tailscale_error", js: "tailscale_error", typ: u(undefined, "") },
+        { json: "tailscale_status", js: "tailscale_status", typ: u(undefined, "") },
+        { json: "tailscale_url", js: "tailscale_url", typ: u(undefined, "") },
     ], "any"),
     "EndpointStatusChangedMessage": o([
         { json: "endpoint", js: "endpoint", typ: r("Endpoint") },
@@ -5194,6 +5239,11 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("SessionsUpdatedMessageEvent") },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
     ], "any"),
+    "SetEndpointRemoteWebMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SetEndpointRemoteWebMessageCmd") },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "endpoint_id", js: "endpoint_id", typ: "" },
+    ], "any"),
     "SetReviewLoopIterationLimitMessage": o([
         { json: "cmd", js: "cmd", typ: r("SetReviewLoopIterationLimitMessageCmd") },
         { json: "iteration_limit", js: "iteration_limit", typ: 0 },
@@ -5210,6 +5260,7 @@ const typeMap: any = {
         { json: "value", js: "value", typ: "" },
     ], "any"),
     "SettingsUpdatedMessage": o([
+        { json: "changed_key", js: "changed_key", typ: u(undefined, "") },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("SettingsUpdatedMessageEvent") },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
@@ -5862,6 +5913,9 @@ const typeMap: any = {
     ],
     "SessionsUpdatedMessageEvent": [
         "sessions_updated",
+    ],
+    "SetEndpointRemoteWebMessageCmd": [
+        "set_endpoint_remote_web",
     ],
     "SetReviewLoopIterationLimitMessageCmd": [
         "set_review_loop_iteration_limit",

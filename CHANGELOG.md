@@ -10,12 +10,17 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Launch YOLO Preference**: The new-session location picker and repo/worktree picker now expose a keyboard-friendly `YOLO` toggle that launches sessions with each agent's approval-bypass equivalent, and the chosen value is remembered per target daemon so local and remote hosts keep independent defaults.
+- **Mobile Web Client**: The daemon now serves an embedded browser client at `/` with a mobile-first session list, live PTY terminal attachment, quick approval/input shortcuts, and vendored xterm assets so running sessions can be controlled from Safari or any browser.
 
 ### Changed
 - **Release Signing & Notarization**: The GitHub macOS release workflow now imports a `Developer ID Application` certificate from GitHub Actions secrets, signs release builds with the real Apple identity, notarizes both the packaged app and the rebuilt DMG, and staples the notarization tickets before publishing the Homebrew cask artifacts.
+- **Tailscale Web Access**: The mobile web client now uses the machine&apos;s existing Tailscale device via `tailscale serve` instead of registering a second embedded tailnet node, and Settings now report the host device URL/login state rather than a separate attn hostname.
+- **Remote Endpoint Web Access**: Connected remote daemons now surface their own Tailscale Serve status, URL, DNS name, and errors in endpoint capabilities, and the Settings modal can toggle each remote host&apos;s `tailscale_enabled` state through the remote daemon instead of proxying web access through the local machine.
 
 ### Fixed
 - **Remote Sidebar Session Actions**: Remote-host sessions now show the same hover-only reload and close buttons as local sessions in the left sidebar.
+- **Hidden Session Terminal Repaint**: Switching back to a previously hidden session now forces xterm through a real size bounce when the measured cols/rows are unchanged, so main panes no longer stay rendered as a narrow stale column until some later resize shakes them loose.
+- **Web Client Favicon Noise**: The embedded browser client now ships with an explicit inline favicon and fallback handling for `/favicon.ico`, so opening it from Safari or Chrome no longer produces a spurious 404 in the console or daemon access log.
 
 ## [2026-04-03]
 

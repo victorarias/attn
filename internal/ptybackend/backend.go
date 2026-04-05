@@ -32,6 +32,10 @@ type SpawnOptions struct {
 	CodexExecutable   string
 	CopilotExecutable string
 	PiExecutable      string
+
+	// LoginShellEnv, when non-nil, is a pre-computed login shell environment
+	// from the daemon's cache. Skips the ~130ms readLoginShellEnv in workers.
+	LoginShellEnv []string
 }
 
 type AttachInfo struct {

@@ -261,6 +261,133 @@ func TestManagerEndpointIDForPathMatchesSessionDirectoryAndMainRepo(t *testing.T
 	}
 }
 
+func TestCapabilitiesFromInitialStateIncludesRemoteWebFields(t *testing.T) {
+	caps := capabilitiesFromInitialState(&protocol.InitialStateMessage{
+		ProtocolVersion:  protocol.Ptr("49"),
+		DaemonInstanceID: protocol.Ptr("d-123"),
+		Settings: map[string]interface{}{
+			"codex_available":    "true",
+			"tailscale_enabled":  "true",
+			"tailscale_status":   "running",
+			"tailscale_url":      "https://gpu-box.tail.ts.net/",
+			"tailscale_domain":   "gpu-box.tail.ts.net",
+			"tailscale_auth_url": "https://login.tailscale.example/auth",
+			"tailscale_error":    "",
+			"projects_directory": "/srv/projects",
+			"pty_backend_mode":   "worker",
+		},
+	})
+	if caps == nil {
+		t.Fatal("capabilitiesFromInitialState() = nil")
+	}
+	if protocol.Deref(caps.TailscaleEnabled) != true {
+		t.Fatalf("caps.TailscaleEnabled = %v, want true", protocol.Deref(caps.TailscaleEnabled))
+	}
+	if got := protocol.Deref(caps.TailscaleStatus); got != "running" {
+		t.Fatalf("caps.TailscaleStatus = %q, want running", got)
+	}
+	if got := protocol.Deref(caps.TailscaleURL); got != "https://gpu-box.tail.ts.net/" {
+		t.Fatalf("caps.TailscaleURL = %q, want remote URL", got)
+	}
+	if got := protocol.Deref(caps.TailscaleDomain); got != "gpu-box.tail.ts.net" {
+		t.Fatalf("caps.TailscaleDomain = %q, want DNS name", got)
+	}
+	if got := protocol.Deref(caps.TailscaleAuthURL); got != "https://login.tailscale.example/auth" {
+		t.Fatalf("caps.TailscaleAuthURL = %q, want auth URL", got)
+	}
+}
+
+func TestManagerHandleRemoteSettingsUpdatedResolvesRemoteWebAction(t *testing.T) {
+	endpointStore := store.New()
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	if err != nil {
+		t.Fatalf("AddEndpoint() error = %v", err)
+	}
+
+	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager.mu.Lock()
+	runtime := manager.runtimes[record.ID]
+	runtime.info.Capabilities = &protocol.EndpointCapabilities{
+		ProtocolVersion: "49",
+		AgentsAvailable: []string{"codex"},
+	}
+	pending := &pendingRemoteWebAction{
+		desiredEnabled: true,
+		done:           make(chan error, 1),
+	}
+	runtime.pendingRemoteWeb = pending
+	manager.mu.Unlock()
+
+	manager.handleRemoteSettingsUpdated(record.ID, &protocol.SettingsUpdatedMessage{
+		ChangedKey: protocol.Ptr("tailscale_enabled"),
+		Settings: map[string]interface{}{
+			"tailscale_enabled": "true",
+			"tailscale_status":  "running",
+			"tailscale_url":     "https://gpu-box.tail.ts.net/",
+		},
+	})
+
+	select {
+	case err := <-pending.done:
+		if err != nil {
+			t.Fatalf("pending.done returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("pending remote web action did not resolve")
+	}
+
+	endpoints := manager.List()
+	if len(endpoints) != 1 {
+		t.Fatalf("List() len = %d, want 1", len(endpoints))
+	}
+	if got := protocol.Deref(endpoints[0].Capabilities.TailscaleStatus); got != "running" {
+		t.Fatalf("endpoint remote web status = %q, want running", got)
+	}
+}
+
+func TestManagerHandleRemoteSettingsUpdatedIgnoresUnrelatedPendingRemoteWebUpdates(t *testing.T) {
+	endpointStore := store.New()
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	if err != nil {
+		t.Fatalf("AddEndpoint() error = %v", err)
+	}
+
+	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager.mu.Lock()
+	runtime := manager.runtimes[record.ID]
+	runtime.info.Capabilities = &protocol.EndpointCapabilities{
+		ProtocolVersion:  "49",
+		AgentsAvailable:  []string{"codex"},
+		TailscaleEnabled: protocol.Ptr(false),
+	}
+	pending := &pendingRemoteWebAction{
+		desiredEnabled: true,
+		done:           make(chan error, 1),
+	}
+	runtime.pendingRemoteWeb = pending
+	manager.mu.Unlock()
+
+	manager.handleRemoteSettingsUpdated(record.ID, &protocol.SettingsUpdatedMessage{
+		ChangedKey: protocol.Ptr("projects_directory"),
+		Settings: map[string]interface{}{
+			"projects_directory": "/srv/projects",
+		},
+	})
+
+	select {
+	case err := <-pending.done:
+		t.Fatalf("pending.done resolved unexpectedly: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	manager.mu.RLock()
+	stillPending := manager.runtimes[record.ID].pendingRemoteWeb == pending
+	manager.mu.RUnlock()
+	if !stillPending {
+		t.Fatal("pending remote web action was cleared by unrelated settings update")
+	}
+}
+
 func TestForwardsRawEventIncludesPickerResults(t *testing.T) {
 	for _, event := range []string{
 		protocol.EventRecentLocationsResult,

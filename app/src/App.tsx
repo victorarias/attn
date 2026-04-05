@@ -255,6 +255,7 @@ function App() {
     sendAddEndpoint,
     sendUpdateEndpoint,
     sendRemoveEndpoint,
+    sendSetEndpointRemoteWeb,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
@@ -366,6 +367,7 @@ function App() {
         sendAddEndpoint={sendAddEndpoint}
         sendUpdateEndpoint={sendUpdateEndpoint}
         sendRemoveEndpoint={sendRemoveEndpoint}
+        sendSetEndpointRemoteWeb={sendSetEndpointRemoteWeb}
         sendGetRecentLocations={sendGetRecentLocations}
         sendBrowseDirectory={sendBrowseDirectory}
         sendInspectPath={sendInspectPath}
@@ -446,6 +448,7 @@ interface AppContentProps {
   sendAddEndpoint: ReturnType<typeof useDaemonSocket>['sendAddEndpoint'];
   sendUpdateEndpoint: ReturnType<typeof useDaemonSocket>['sendUpdateEndpoint'];
   sendRemoveEndpoint: ReturnType<typeof useDaemonSocket>['sendRemoveEndpoint'];
+  sendSetEndpointRemoteWeb: ReturnType<typeof useDaemonSocket>['sendSetEndpointRemoteWeb'];
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
   sendInspectPath: ReturnType<typeof useDaemonSocket>['sendInspectPath'];
@@ -516,11 +519,12 @@ function AppContent({
   sendUnregisterSession,
   sendSetSetting,
   sendCreateWorktree,
-    sendDeleteWorktree,
-    sendDeleteBranch,
-    sendAddEndpoint,
-    sendUpdateEndpoint,
+  sendDeleteWorktree,
+  sendDeleteBranch,
+  sendAddEndpoint,
+  sendUpdateEndpoint,
   sendRemoveEndpoint,
+  sendSetEndpointRemoteWeb,
   sendGetRecentLocations,
   sendBrowseDirectory,
   sendInspectPath,
@@ -2151,6 +2155,7 @@ function AppContent({
         onAddEndpoint={sendAddEndpoint}
         onUpdateEndpoint={sendUpdateEndpoint}
         onRemoveEndpoint={sendRemoveEndpoint}
+        onSetEndpointRemoteWeb={sendSetEndpointRemoteWeb}
         onSetSetting={sendSetSetting}
         themePreference={themePreference}
         onSetTheme={setTheme}

@@ -219,6 +219,12 @@ model EndpointCapabilities {
   projects_directory?: string;
   pty_backend_mode?: string;
   daemon_instance_id?: string;
+  tailscale_enabled?: boolean;
+  tailscale_status?: string;
+  tailscale_url?: string;
+  tailscale_domain?: string;
+  tailscale_auth_url?: string;
+  tailscale_error?: string;
 }
 
 model EndpointInfo {
@@ -401,6 +407,12 @@ model UpdateEndpointMessage {
 
 model ListEndpointsMessage {
   cmd: "list_endpoints";
+}
+
+model SetEndpointRemoteWebMessage {
+  cmd: "set_endpoint_remote_web";
+  endpoint_id: string;
+  enabled: boolean;
 }
 
 model ApprovePRMessage {
@@ -903,6 +915,7 @@ model DeleteWorktreeResultMessage {
 model SettingsUpdatedMessage {
   event: "settings_updated";
   settings?: Record<string>;
+  changed_key?: string;
   success?: boolean;
   error?: string;
 }
