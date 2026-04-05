@@ -2,6 +2,7 @@ package pty
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -51,6 +52,10 @@ type SpawnOptions struct {
 	CodexExecutable   string
 	CopilotExecutable string
 	PiExecutable      string
+
+	// LoginShellEnv, when non-nil, is a pre-computed login shell environment
+	// that replaces the ReadLoginShellEnv call.
+	LoginShellEnv []string
 }
 
 type AttachInfo struct {
@@ -157,7 +162,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	}
 	m.mu.Unlock()
 
-	loginShell := getUserLoginShell()
+	loginShell := GetUserLoginShell()
 	shellCandidates := preferredShellCandidates(loginShell)
 	cmdEnv := buildSpawnEnv(loginShell, opts, agent, attnPath, m.logf)
 
@@ -395,20 +400,42 @@ func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string) *ex
 	return exec.Command(shellPath, "-l", "-c", cmdline)
 }
 
+// readCachedShellEnvFromProcess reads a JSON-encoded login shell env that the
+// daemon injected into this worker process's environment.
+func readCachedShellEnvFromProcess() []string {
+	raw := os.Getenv("ATTN_CACHED_SHELL_ENV")
+	if raw == "" {
+		return nil
+	}
+	var env []string
+	if err := json.Unmarshal([]byte(raw), &env); err != nil {
+		return nil
+	}
+	return env
+}
+
 func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath string, logf LogFunc) []string {
 	env := os.Environ()
 
-	if loginShell != "" {
-		if shellEnv, err := readLoginShellEnv(loginShell); err == nil {
-			env = mergeEnvironment(env, shellEnv)
+	shellEnv := opts.LoginShellEnv
+	if len(shellEnv) == 0 {
+		shellEnv = readCachedShellEnvFromProcess()
+	}
+	if len(shellEnv) > 0 {
+		env = mergeEnvironment(env, shellEnv)
+	} else if loginShell != "" {
+		if captured, err := ReadLoginShellEnv(loginShell); err == nil {
+			env = mergeEnvironment(env, captured)
 		} else if logf != nil {
 			logf("pty spawn: failed to capture login shell env from %s: %v", loginShell, err)
 		}
 	}
+	// Don't leak the cache transport var into spawned shells.
+	env = filterEnvKeys(env, "ATTN_CACHED_SHELL_ENV")
 
 	// Strip CLAUDECODE after all merges so spawned sessions don't think
 	// they're nested.  This var leaks into the daemon env when started
-	// from a Claude Code session, and readLoginShellEnv re-captures it
+	// from a Claude Code session, and ReadLoginShellEnv re-captures it
 	// because the login shell inherits the current process environment.
 	env = filterEnvKeys(env, "CLAUDECODE")
 
@@ -472,7 +499,9 @@ func configuredExecutableForAgent(opts SpawnOptions, agent string) string {
 	}
 }
 
-func readLoginShellEnv(shellPath string) ([]string, error) {
+// ReadLoginShellEnv spawns a login shell and captures its environment.
+// Typically ~130ms; callers should cache the result.
+func ReadLoginShellEnv(shellPath string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), shellEnvTimeout)
 	defer cancel()
 
@@ -657,7 +686,8 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
-func getUserLoginShell() string {
+// GetUserLoginShell returns the current user's login shell path.
+func GetUserLoginShell() string {
 	if runtime.GOOS == "darwin" {
 		if usr, err := user.Current(); err == nil {
 			out, dsclErr := exec.Command("dscl", ".", "-read", "/Users/"+usr.Username, "UserShell").Output()

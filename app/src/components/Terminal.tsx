@@ -491,7 +491,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // Source: xtermTerminal.ts attachToElement() - WebGL is loaded AFTER raw.open()
       term.open(containerRef.current);
 
-	      const detachWebglRenderer = () => {
+      const detachWebglRenderer = () => {
 	        webglAddonRef.current?.dispose();
 	        webglAddonRef.current = null;
 	        rendererModeRef.current = 'dom';

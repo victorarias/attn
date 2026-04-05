@@ -154,6 +154,12 @@ export function usePaneRuntimeBinder(
   eventRouter: PaneRuntimeEventRouter,
 ): PaneRuntimeBinder {
   const paneByIdRef = useRef<Map<string, PaneRuntimeSpec>>(new Map());
+  // Always-current snapshot of panes for use in child effects (which run
+  // before parent effects that update paneByIdRef).  Setting a ref during
+  // render is safe — it's just a property assignment, no allocation or
+  // side effects.
+  const panesRef = useRef(panes);
+  panesRef.current = panes;
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
   const xtermsRef = useRef<Map<string, XTerm>>(new Map());
   const inputSubscriptionsRef = useRef<Map<string, { dispose: () => void }>>(new Map());
@@ -462,6 +468,7 @@ export function usePaneRuntimeBinder(
         message: 'register pane runtime binding',
       });
     }
+
   }, [appendPendingTerminalEvent, eventRouter, panes, replayPendingTerminalEvent]);
 
   useEffect(() => {
@@ -665,39 +672,44 @@ export function usePaneRuntimeBinder(
   const wireTerminal = useCallback((paneId: string, xterm: XTerm) => {
     xtermsRef.current.set(paneId, xterm);
     const pane = paneByIdRef.current.get(paneId);
-    if (!pane) {
-      return;
+    if (pane) {
+      recordPaneRuntimeDebugEvent({
+        scope: 'binder',
+        sessionId: pane.sessionId ?? pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: 'wire terminal',
+        details: { cols: xterm.cols, rows: xterm.rows },
+      });
+      recordTerminalRuntimeLog({
+        category: 'binding',
+        sessionId: pane.sessionId ?? pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: 'wire xterm to pane runtime',
+        details: { cols: xterm.cols, rows: xterm.rows },
+      });
     }
-    recordPaneRuntimeDebugEvent({
-      scope: 'binder',
-      sessionId: pane.sessionId ?? pane.testSessionId,
-      paneId,
-      runtimeId: pane.runtimeId,
-      message: 'wire terminal',
-      details: { cols: xterm.cols, rows: xterm.rows },
-    });
-    recordTerminalRuntimeLog({
-      category: 'binding',
-      sessionId: pane.sessionId ?? pane.testSessionId,
-      paneId,
-      runtimeId: pane.runtimeId,
-      message: 'wire xterm to pane runtime',
-      details: { cols: xterm.cols, rows: xterm.rows },
-    });
 
     const sendToPty = (data: string) => {
-      if (import.meta.env.DEV && pane.testSessionId) {
+      // Look up pane at call time — during onInit the pane map may not
+      // be populated yet (React runs child effects before parent effects).
+      const currentPane = paneByIdRef.current.get(paneId);
+      if (!currentPane) {
+        return;
+      }
+      if (import.meta.env.DEV && currentPane.testSessionId) {
         const testWindow = window as Window & {
           __TEST_SESSION_INPUT_EVENTS?: Array<{ sessionId: string; event: 'connect_terminal' | 'send_to_pty'; data?: string }>;
         };
         testWindow.__TEST_SESSION_INPUT_EVENTS = testWindow.__TEST_SESSION_INPUT_EVENTS || [];
-        testWindow.__TEST_SESSION_INPUT_EVENTS.push({ sessionId: pane.testSessionId, event: 'send_to_pty', data });
+        testWindow.__TEST_SESSION_INPUT_EVENTS.push({ sessionId: currentPane.testSessionId, event: 'send_to_pty', data });
       }
       recordPaneRuntimeDebugEvent({
         scope: 'input',
-        sessionId: pane.testSessionId,
+        sessionId: currentPane.testSessionId,
         paneId,
-        runtimeId: pane.runtimeId,
+        runtimeId: currentPane.runtimeId,
         message: 'send input to pty',
         details: {
           dataPreview: data.slice(0, 20),
@@ -705,9 +717,12 @@ export function usePaneRuntimeBinder(
           ...activeElementSummary(),
         },
       });
-      ptyWrite({ id: pane.runtimeId, data, source: 'user' }).catch(console.error);
+      ptyWrite({ id: currentPane.runtimeId, data, source: 'user' }).catch(console.error);
     };
 
+    // Always subscribe onData — even if paneByIdRef doesn't have the pane
+    // yet (child effect runs before parent effect).  sendToPty defers the
+    // pane lookup to call time, by which point the map is populated.
     inputSubscriptionsRef.current.get(paneId)?.dispose();
     inputSubscriptionsRef.current.set(paneId, xterm.onData(sendToPty));
     xterm.attachCustomKeyEventHandler(installTerminalKeyHandler(sendToPty));
@@ -716,9 +731,9 @@ export function usePaneRuntimeBinder(
     if (cachedText && snapshotTerminalText(xterm).trim().length === 0) {
       recordPaneRuntimeDebugEvent({
         scope: 'binder',
-        sessionId: pane.testSessionId,
+        sessionId: pane?.testSessionId,
         paneId,
-        runtimeId: pane.runtimeId,
+        runtimeId: pane?.runtimeId,
         message: 'hydrate terminal from cached text',
         details: { textLength: cachedText.length },
       });
@@ -729,9 +744,9 @@ export function usePaneRuntimeBinder(
     if (pendingEvents?.length) {
       recordPaneRuntimeDebugEvent({
         scope: 'binder',
-        sessionId: pane.testSessionId,
+        sessionId: pane?.testSessionId,
         paneId,
-        runtimeId: pane.runtimeId,
+        runtimeId: pane?.runtimeId,
         message: 'replay queued pty events',
         details: { count: pendingEvents.length },
       });
