@@ -1773,8 +1773,8 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 	// Poll the health endpoint until the HTTP server is ready
 	healthURL := "http://127.0.0.1:" + wsPort + "/health"
 	var resp *http.Response
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	logDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(logDeadline) {
 		r, err := http.Get(healthURL)
 		if err == nil {
 			resp = r
@@ -1836,8 +1836,8 @@ func TestDaemon_WebRootServesEmbeddedClient(t *testing.T) {
 
 	rootURL := "http://127.0.0.1:" + wsPort + "/"
 	var resp *http.Response
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	logDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(logDeadline) {
 		r, err := http.Get(rootURL)
 		if err == nil {
 			resp = r
@@ -2019,7 +2019,11 @@ func TestDaemon_WebInstrumentationLogsPayload(t *testing.T) {
 	sockPath := filepath.Join(tmpDir, "test.sock")
 	logPath := filepath.Join(tmpDir, "daemon.log")
 
-	wsPort := "19855"
+	port, err := freeTCPPort()
+	if err != nil {
+		t.Fatalf("freeTCPPort: %v", err)
+	}
+	wsPort := strconv.Itoa(port)
 	os.Setenv("ATTN_WS_PORT", wsPort)
 	defer os.Unsetenv("ATTN_WS_PORT")
 
@@ -2035,6 +2039,22 @@ func TestDaemon_WebInstrumentationLogsPayload(t *testing.T) {
 	defer d.Stop()
 
 	waitForSocket(t, sockPath, 5*time.Second)
+
+	healthURL := "http://127.0.0.1:" + wsPort + "/health"
+	healthReady := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(healthURL)
+		if err == nil {
+			resp.Body.Close()
+			healthReady = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !healthReady {
+		t.Fatalf("health endpoint not ready after 5s")
+	}
 
 	payload := `{"event":"keyboard-close-request","sessionID":"web-debug-smoke","liveViewport":{"scale":1.25,"offsetTop":42}}`
 	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+wsPort+"/web-instrumentation", strings.NewReader(payload))
@@ -2056,8 +2076,8 @@ func TestDaemon_WebInstrumentationLogsPayload(t *testing.T) {
 		t.Fatalf("instrumentation Cache-Control = %q, want no-store, max-age=0", got)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	logDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(logDeadline) {
 		body, err := os.ReadFile(logPath)
 		if err == nil {
 			text := string(body)

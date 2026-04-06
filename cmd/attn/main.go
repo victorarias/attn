@@ -17,6 +17,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
@@ -40,8 +41,6 @@ type todoWriteInput struct {
 		Status  string `json:"status"`
 	} `json:"todos"`
 }
-
-var version = "dev"
 
 func main() {
 	if isProtocolVersionCommand(os.Args) {
@@ -107,7 +106,7 @@ func isProtocolVersionCommand(args []string) bool {
 }
 
 func runVersion() {
-	fmt.Println(version)
+	fmt.Println(buildinfo.Version)
 }
 
 func runProtocolVersion() {

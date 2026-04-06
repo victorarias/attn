@@ -4,8 +4,9 @@ BINARY_NAME=attn
 INSTALL_DIR=$(HOME)/.local/bin
 BUILD_DIR=./cmd/attn
 VERSION ?= $(shell bash ./scripts/version.sh)
+BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 OUTPUT ?= $(BINARY_NAME)
-GO_LDFLAGS = -X main.version=$(VERSION)
+GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME)
 ZIG ?= zig
 
 build:
@@ -125,10 +126,12 @@ install-app-ui-automation: build-app-ui-automation
 	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
 	@echo "Installed attn.app to ~/Applications with UI automation bridge enabled"
 
-# Install daemon and app
-install-all: install install-app-ui-automation
+# Install daemon and app.
+# Install the app bundle first so the final daemon restart wins even if the
+# running GUI app eagerly respawns its bundled daemon during the install.
+install-all: install-app-ui-automation install
 
-install-all-ui-automation: install install-app-ui-automation
+install-all-ui-automation: install-app-ui-automation install
 
 app-screenshot:
 	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path "$(SCREENSHOT_PATH)",) $(APP_SCREENSHOT_FLAGS)
