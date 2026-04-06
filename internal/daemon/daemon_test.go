@@ -1876,6 +1876,9 @@ func TestDaemon_WebRootServesEmbeddedClient(t *testing.T) {
 	if !strings.Contains(bodyText, `data-quick-action="esc"`) {
 		t.Fatalf("root body did not include quick action markers")
 	}
+	if !strings.Contains(bodyText, `id="font-size-decrease"`) || !strings.Contains(bodyText, `id="font-size-increase"`) {
+		t.Fatalf("root body did not include font size controls")
+	}
 	if !strings.Contains(bodyText, "attn ghostty-web") {
 		t.Fatalf("root body did not include ghostty-web heading")
 	}

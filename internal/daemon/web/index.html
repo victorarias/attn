@@ -51,6 +51,7 @@
         --safe-right: env(safe-area-inset-right, 0px);
         --safe-bottom: env(safe-area-inset-bottom, 0px);
         --safe-left: env(safe-area-inset-left, 0px);
+        --app-width: 100vw;
         --app-height: 100dvh;
         --keyboard-inset: 0px;
         --header-height: 68px;
@@ -78,12 +79,17 @@
       }
 
       body[data-view="terminal"] {
+        width: var(--app-width);
+        max-width: var(--app-width);
         min-height: var(--app-height);
         overflow: hidden;
+        overflow-x: clip;
         overscroll-behavior: none;
       }
 
       body[data-view="terminal"] #app {
+        width: var(--app-width);
+        max-width: var(--app-width);
         min-height: var(--app-height);
         height: var(--app-height);
         overflow: hidden;
@@ -353,8 +359,11 @@
       }
 
       .terminal-view {
+        width: var(--app-width);
+        max-width: var(--app-width);
         height: var(--app-height);
         min-height: 0;
+        min-width: 0;
         display: grid;
         grid-template-rows: auto minmax(0, 1fr) auto;
         overflow: hidden;
@@ -418,6 +427,7 @@
 
       .terminal-body {
         min-height: 0;
+        min-width: 0;
         padding:
           6px
           calc(var(--safe-right) + 6px)
@@ -430,12 +440,17 @@
       .terminal-frame {
         min-height: 0;
         height: 100%;
+        width: 100%;
+        min-width: 0;
       }
 
       .terminal-stage {
         position: relative;
         min-height: 0;
+        min-width: 0;
         height: 100%;
+        width: 100%;
+        max-width: 100%;
         border: 1px solid var(--line);
         border-radius: 16px;
         overflow: hidden;
@@ -447,8 +462,10 @@
 
       .terminal-host {
         width: 100%;
+        max-width: 100%;
         height: 100%;
         min-height: 100%;
+        min-width: 0;
         padding: 8px;
         font-family: var(--terminal-font);
         touch-action: none;
@@ -483,6 +500,11 @@
         padding: 0 8px;
         font-family: var(--terminal-font);
         font-size: 10px;
+      }
+
+      .font-size-button {
+        min-width: 32px;
+        padding: 0 6px;
       }
 
       .quick-action-grid {
@@ -557,6 +579,22 @@
           <div class="terminal-heading">
             <h2 id="terminal-title">Session</h2>
           </div>
+          <button
+            id="font-size-decrease"
+            class="toolbar-button font-size-button"
+            type="button"
+            aria-label="Decrease text size"
+          >
+            A-
+          </button>
+          <button
+            id="font-size-increase"
+            class="toolbar-button font-size-button"
+            type="button"
+            aria-label="Increase text size"
+          >
+            A+
+          </button>
           <button
             id="keyboard-toggle"
             class="toolbar-button"
@@ -658,6 +696,10 @@
 
       const TERMINAL_FONT_FAMILY =
         'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace';
+      const POINTER_IS_COARSE = window.matchMedia("(pointer: coarse)").matches;
+      const DEFAULT_TERMINAL_FONT_SIZE = 14;
+      const MIN_TERMINAL_FONT_SIZE = 10;
+      const MAX_TERMINAL_FONT_SIZE = 18;
 
       const QUICK_ACTIONS = {
         esc: "\u001b",
@@ -713,6 +755,8 @@
       const protocolVersion = document.getElementById("protocol-version");
       const daemonID = document.getElementById("daemon-id");
       const backButton = document.getElementById("back-button");
+      const fontSizeDecrease = document.getElementById("font-size-decrease");
+      const fontSizeIncrease = document.getElementById("font-size-increase");
       const keyboardToggle = document.getElementById("keyboard-toggle");
       const ctrlToggle = document.getElementById("ctrl-toggle");
       const altToggle = document.getElementById("alt-toggle");
@@ -737,6 +781,8 @@
         resizeFrame: 0,
         viewportSettleTimer: 0,
         viewportSettleToken: 0,
+        fontResizeTimer: 0,
+        fontResizeToken: 0,
         pendingSettledResizeClaim: false,
         debugFrame: 0,
         currentResizeSource: null,
@@ -759,13 +805,14 @@
         outputDecoder: new TextDecoder(),
         stickyCtrl: false,
         stickyAlt: false,
+        terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
         keyboardMode: false,
         lastBackspaceAt: 0,
         followOutput: true,
         sentInputs: [],
         connectionState: "connecting",
         connectionDetail: "Opening WebSocket to the daemon.",
-        pointerIsCoarse: window.matchMedia("(pointer: coarse)").matches,
+        pointerIsCoarse: POINTER_IS_COARSE,
         viewportWidth: window.innerWidth,
         viewportHeight: window.innerHeight,
         keyboardInset: 0,
@@ -859,6 +906,7 @@
         state.viewportWidth = committedWidth;
         state.viewportHeight = committedHeight;
         state.keyboardInset = keyboardInset;
+        document.documentElement.style.setProperty("--app-width", `${Math.max(committedWidth, 1)}px`);
         document.documentElement.style.setProperty("--app-height", `${committedHeight}px`);
         document.documentElement.style.setProperty(
           "--keyboard-inset",
@@ -977,10 +1025,12 @@
             attachState: state.attachState,
             cols: state.terminal ? state.terminal.cols : 0,
             rows: state.terminal ? state.terminal.rows : 0,
+            fontSize: state.terminalFontSize,
             connectionState: state.connectionState,
             stageRect: snapshotRect(terminalStage),
           },
           css: {
+            appWidth: getComputedStyle(document.documentElement).getPropertyValue("--app-width").trim(),
             appHeight: getComputedStyle(document.documentElement).getPropertyValue("--app-height").trim(),
             keyboardInset: getComputedStyle(document.documentElement)
               .getPropertyValue("--keyboard-inset")
@@ -1140,6 +1190,76 @@
         keyboardToggle.dataset.active = String(state.keyboardMode);
         keyboardToggle.setAttribute("aria-pressed", String(state.keyboardMode));
         updateTerminalStatus();
+      }
+
+      function clampTerminalFontSize(size) {
+        const numericSize = Number(size);
+        if (!Number.isFinite(numericSize)) {
+          return DEFAULT_TERMINAL_FONT_SIZE;
+        }
+        return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, Math.round(numericSize)));
+      }
+
+      function syncFontSizeButtons() {
+        const size = clampTerminalFontSize(state.terminalFontSize);
+        state.terminalFontSize = size;
+        fontSizeDecrease.disabled = size <= MIN_TERMINAL_FONT_SIZE;
+        fontSizeIncrease.disabled = size >= MAX_TERMINAL_FONT_SIZE;
+        fontSizeDecrease.title = `Decrease text size (${size}px)`;
+        fontSizeIncrease.title = `Increase text size (${size}px)`;
+      }
+
+      function scheduleFontResizeTransaction(source) {
+        if (!state.terminal) {
+          return;
+        }
+
+        clearFontResizeTimer();
+        state.fontResizeToken += 1;
+        const token = state.fontResizeToken;
+        state.suspendResizeMessages = true;
+
+        state.fontResizeTimer = window.setTimeout(() => {
+          if (token !== state.fontResizeToken) {
+            return;
+          }
+          state.fontResizeTimer = 0;
+          requestAnimationFrame(() => {
+            if (token !== state.fontResizeToken || !state.terminal) {
+              return;
+            }
+            requestAnimationFrame(() => {
+              if (token !== state.fontResizeToken || !state.terminal) {
+                return;
+              }
+
+              const resizeSource = `font-size-${source}`;
+              const fit = fitTerminal(resizeSource, false);
+              state.suspendResizeMessages = false;
+
+              if (fit?.changed && state.currentSessionID) {
+                sendResizeMessage(state.currentSessionID, fit.cols, fit.rows, resizeSource);
+              }
+
+              forceTerminalRender(resizeSource);
+            });
+          });
+        }, 40);
+      }
+
+      function applyTerminalFontSize(nextSize, source = "toolbar") {
+        const size = clampTerminalFontSize(nextSize);
+        const changed = size !== state.terminalFontSize;
+        state.terminalFontSize = size;
+        syncFontSizeButtons();
+
+        if (!state.terminal || state.terminal.options.fontSize === size) {
+          return changed;
+        }
+
+        state.terminal.options.fontSize = size;
+        scheduleFontResizeTransaction(source);
+        return true;
       }
 
       function updateMobileInputPosition() {
@@ -1429,6 +1549,12 @@
         state.viewportSettleTimer = 0;
       }
 
+      function clearFontResizeTimer() {
+        if (!state.fontResizeTimer) return;
+        clearTimeout(state.fontResizeTimer);
+        state.fontResizeTimer = 0;
+      }
+
       function clearBlurRecoveryTimer() {
         if (!state.blurRecoveryTimer) return;
         clearTimeout(state.blurRecoveryTimer);
@@ -1492,6 +1618,87 @@
         return Boolean(wasmTerm && typeof wasmTerm.isAlternateScreen === "function" && wasmTerm.isAlternateScreen());
       }
 
+      function hasMouseTrackingEnabled() {
+        return Boolean(
+          state.terminal && typeof state.terminal.hasMouseTracking === "function" && state.terminal.hasMouseTracking(),
+        );
+      }
+
+      function hasAlternateScrollEnabled() {
+        return Boolean(
+          state.terminal && typeof state.terminal.getMode === "function" && state.terminal.getMode(1007, false),
+        );
+      }
+
+      function getTerminalCellFromTouch(touch) {
+        if (!state.terminal) {
+          return null;
+        }
+
+        const target = state.terminal.canvas instanceof HTMLCanvasElement
+          ? state.terminal.canvas
+          : terminalHost;
+        const rect = target.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          return null;
+        }
+
+        const cols = Math.max(state.terminal.cols || 0, 1);
+        const rows = Math.max(state.terminal.rows || 0, 1);
+        const relativeX = Math.max(0, Math.min(rect.width - 1, touch.clientX - rect.left));
+        const relativeY = Math.max(0, Math.min(rect.height - 1, touch.clientY - rect.top));
+
+        return {
+          col: Math.max(1, Math.min(cols, Math.floor((relativeX / rect.width) * cols) + 1)),
+          row: Math.max(1, Math.min(rows, Math.floor((relativeY / rect.height) * rows) + 1)),
+        };
+      }
+
+      function encodeTerminalWheelSequence(direction, col, row) {
+        if (!state.terminal || typeof state.terminal.getMode !== "function") {
+          return "";
+        }
+
+        const button = direction === "up" ? 64 : 65;
+        if (state.terminal.getMode(1006, false)) {
+          return `\u001b[<${button};${col};${row}M`;
+        }
+
+        const x10Button = String.fromCharCode(Math.min(button + 32, 255));
+        const x10Col = String.fromCharCode(Math.min(col + 32, 255));
+        const x10Row = String.fromCharCode(Math.min(row + 32, 255));
+        return `\u001b[M${x10Button}${x10Col}${x10Row}`;
+      }
+
+      function sendAlternateScreenTouchScroll(diff, touch) {
+        if (diff === 0) {
+          return;
+        }
+
+        if (hasMouseTrackingEnabled()) {
+          const cell = getTerminalCellFromTouch(touch);
+          if (!cell) {
+            return;
+          }
+
+          const direction = diff > 0 ? "up" : "down";
+          const count = Math.min(Math.abs(diff), 5);
+          const sequence = encodeTerminalWheelSequence(direction, cell.col, cell.row).repeat(count);
+          if (sequence) {
+            sendRawInput(sequence, "web_touch_scroll");
+          }
+          return;
+        }
+
+        if (hasAlternateScrollEnabled()) {
+          if (diff > 0) {
+            sendRawInput("\u001b[A".repeat(Math.min(diff, 5)), "web_touch_scroll");
+            return;
+          }
+          sendRawInput("\u001b[B".repeat(Math.min(Math.abs(diff), 5)), "web_touch_scroll");
+        }
+      }
+
       function handleTerminalTouchStart(event) {
         if (!state.currentSessionID || !state.terminal || event.touches.length !== 1) return;
         const touch = event.touches[0];
@@ -1545,11 +1752,8 @@
         if (diff === 0) return;
 
         state.touchScroll.sentSteps = totalSteps;
-        if (diff > 0) {
-          sendRawInput("\u001b[A".repeat(Math.min(diff, 5)), "web_touch_scroll");
-          return;
-        }
-        sendRawInput("\u001b[B".repeat(Math.min(Math.abs(diff), 5)), "web_touch_scroll");
+        sendAlternateScreenTouchScroll(diff, touch);
+        queueDebugUpdate();
       }
 
       function handleTerminalTouchEnd(event) {
@@ -1696,7 +1900,7 @@
         const terminal = new Terminal({
           cols: 80,
           rows: 24,
-          fontSize: 14,
+          fontSize: state.terminalFontSize,
           fontFamily: TERMINAL_FONT_FAMILY,
           cursorBlink: false,
           smoothScrollDuration: 120,
@@ -1926,8 +2130,10 @@
       function resetTerminalState() {
         clearOwnershipState();
         clearViewportSettleTimer();
+        clearFontResizeTimer();
         clearBlurRecoveryTimer();
         state.viewportSettleToken += 1;
+        state.fontResizeToken += 1;
         state.pendingSettledResizeClaim = false;
         state.keyboardTransition = "idle";
         state.keyboardViewportRecoveryUntil = 0;
@@ -2280,6 +2486,14 @@
         }
       });
 
+      fontSizeDecrease.addEventListener("click", () => {
+        applyTerminalFontSize(state.terminalFontSize - 1, "decrease");
+      });
+
+      fontSizeIncrease.addEventListener("click", () => {
+        applyTerminalFontSize(state.terminalFontSize + 1, "increase");
+      });
+
       ctrlToggle.addEventListener("click", () => {
         handleQuickAction("ctrl");
       });
@@ -2454,6 +2668,7 @@
             keyboardMode: state.keyboardMode,
             stickyCtrl: state.stickyCtrl,
             stickyAlt: state.stickyAlt,
+            terminalFontSize: state.terminalFontSize,
             cols: state.terminal ? state.terminal.cols : 0,
             rows: state.terminal ? state.terminal.rows : 0,
             viewportWidth: state.viewportWidth,
@@ -2502,6 +2717,7 @@
       renderSessions();
       renderTerminalHeader();
       syncModifierButtons();
+      syncFontSizeButtons();
       syncViewportMetrics();
       updateMobileInputPosition();
       syncKeyboardButton();

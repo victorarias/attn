@@ -13,6 +13,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Embedded Phone Terminal Stability**: Real-phone scrolling, typing, quick actions, keyboard open/close, and keyboard-dismiss behavior now work without depending on attach replay hacks, including a dedicated `Ctrl+C` shortcut and no-store asset serving.
+- **Embedded Phone Terminal Layout**: The web terminal now commits the visual viewport width as well as height, and exposes `A-` / `A+` controls in the top bar through a settled resize transaction so narrow phone viewports fit on-screen and text size can be tuned live without destabilizing the initial attach geometry.
+- **Embedded Phone Terminal Touch Scroll**: Touch drags now distinguish real scrollback, alternate-screen mouse tracking, and alternate-scroll mode instead of always faking `Up` / `Down`, so supported apps can still scroll while prompt-driven sessions stop accidentally walking history.
 - **Embedded Phone Terminal Diagnostics**: Add daemon-backed viewport instrumentation plus PTY rendering guidance so focus and viewport bugs can be diagnosed from real-device traces instead of browser emulation alone.
 - **Build Metadata Injection**: Share version and build-time metadata across `attn --version`, daemon health output, source/bootstrap builds, Homebrew packaging, and build/install flows so it is easier to identify the running daemon build and `install-all` leaves the newest daemon running.
 - **Pane Runtime Binder Ordering**: Preserve early split-pane terminal input during initial mount and keep pane drain sequencing tied to xterm flush callbacks so shell startup probes and terminal automation no longer race the pane lifecycle.
