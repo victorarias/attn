@@ -18,6 +18,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/git"
@@ -1172,8 +1173,9 @@ func (d *Daemon) initHTTPServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", d.handleWS)
 	mux.HandleFunc("/health", d.handleHealth)
+	mux.HandleFunc("/web-instrumentation", d.handleWebInstrumentation)
 	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		setNoStoreHeaders(w.Header())
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.Handle("/", daemonWebStaticHandler())
@@ -2895,6 +2897,8 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	health := map[string]interface{}{
 		"status":             "ok",
+		"version":            buildinfo.Version,
+		"build_time":         buildinfo.BuildTime,
 		"protocol":           protocol.ProtocolVersion,
 		"daemon_instance_id": d.daemonInstanceID,
 		"sessions":           len(sessions),
@@ -2903,6 +2907,7 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"github_available":   d.githubAvailable(),
 	}
 
+	setNoStoreHeaders(w.Header())
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
 }

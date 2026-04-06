@@ -74,6 +74,77 @@ Consequences:
 - Temporary keyboard geometries can produce transient PTY redraws that should not be treated as a stable steady state.
 - Local `fitTerminal()` is a display calculation, not proof that the remote PTY is now correct.
 
+## Instrumentation Is Part Of The Model
+
+For PTY and terminal rendering work in this repo, structured instrumentation is not optional polish. It is part of the debugging model.
+
+Why:
+
+- real-phone keyboard and viewport behavior cannot be reproduced reliably from desktop emulation alone
+- the interesting failures often happen between browser focus, viewport, layout commit, terminal fit, and PTY resize
+- a screenshot or a verbal report is usually not enough to tell which layer was wrong
+
+### Current Embedded Web Mechanism
+
+The embedded web client can post structured JSON snapshots to the daemon:
+
+- endpoint: `POST /web-instrumentation`
+- daemon log prefix: `web instrumentation:`
+- handler: `internal/daemon/web_instrumentation.go`
+
+The current payload captures the cross-layer state we actually needed in practice:
+
+- keyboard mode / transition state
+- committed app viewport
+- live `visualViewport` width, height, offsets, and scale
+- `window.innerWidth/innerHeight` and scroll position
+- active element
+- mobile input geometry and styling
+- terminal geometry and attach state
+- last resize and last viewport-settle markers
+
+This exists because viewport and focus bugs were otherwise easy to misdiagnose.
+
+### Standing Rule
+
+Do not remove this instrumentation just because a bug seems fixed.
+
+Treat it like other purpose-built observability:
+
+- extend it when a new PTY or viewport bug needs more evidence
+- keep payloads compact and structured
+- prefer daemon-side logging over browser-console-only evidence for real-device issues
+- use it to prove or disprove a theory before changing terminal behavior
+
+### What To Instrument
+
+For PTY/mobile terminal bugs, instrument transitions, not just steady state:
+
+- attach start / attach result
+- ownership claim / `pty_resize`
+- keyboard open request
+- keyboard close request
+- native blur / native close detection
+- viewport signal bursts
+- viewport settled
+- any timeout or fallback path
+
+### Main App Direction
+
+The same idea should exist for the main Tauri app.
+
+The transport does not need to match the web client exactly, but the schema and intent should:
+
+- collect the same cross-layer state
+- correlate terminal geometry, PTY messages, focus, and viewport/layout state
+- write it somewhere durable enough to inspect after the fact
+
+Recommended direction:
+
+- reuse the same logical event names and payload shape where practical
+- route main-app instrumentation into daemon logs or another persistent app log, not only DevTools console output
+- treat web and main-app instrumentation as two frontends for the same diagnostic model
+
 ## Anti-Patterns
 
 Do not do these:
@@ -103,6 +174,8 @@ Automate what we can, but use a real phone for:
 - `visualViewport` timing
 - touch-scroll vs keyboard interactions
 - Safari/Chrome mobile repaint quirks
+
+When real-device behavior disagrees with desktop emulation, prefer adding or extending instrumentation before trying another behavioral fix.
 
 ## Protocol Implications
 

@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <title>attn web</title>
     <link
       rel="icon"
@@ -125,7 +128,11 @@
         background: transparent;
         color: transparent;
         caret-color: transparent;
-        font-size: 16px;
+        font-size: 18px;
+        line-height: 1.2;
+        border-radius: 12px;
+        appearance: none;
+        -webkit-appearance: none;
         pointer-events: none;
         transform: none;
         z-index: -1;
@@ -584,6 +591,14 @@
           <div class="quick-actions-shell">
             <div class="quick-action-grid">
               <button class="quick-action" data-quick-action="esc" type="button">Esc</button>
+              <button
+                class="quick-action"
+                data-quick-action="ctrl-c"
+                type="button"
+                aria-label="Send Ctrl+C"
+              >
+                ^C
+              </button>
               <button class="quick-action" data-quick-action="shift-tab" data-span="2" type="button">
                 Shift+Tab
               </button>
@@ -610,7 +625,7 @@
               <button class="quick-action" data-quick-action="new" type="button">
                 /new
               </button>
-              <button class="quick-action" data-quick-action="compact" data-span="2" type="button">
+              <button class="quick-action" data-quick-action="compact" type="button">
                 /compact
               </button>
               <button class="quick-action" data-quick-action="1" type="button">1</button>
@@ -646,6 +661,7 @@
 
       const QUICK_ACTIONS = {
         esc: "\u001b",
+        "ctrl-c": "\u0003",
         "shift-tab": "\u001b[Z",
         yes: "yes\r",
         no: "no\r",
@@ -758,6 +774,11 @@
         rawViewportOffsetTop: 0,
         rawViewportScale: 1,
         keyboardTransition: "idle",
+        lastViewportInstrumentationAt: 0,
+        lastViewportInstrumentationSource: "",
+        blurRecoveryTimer: 0,
+        keyboardBaselineViewportHeight: window.innerHeight,
+        keyboardViewportRecoveryUntil: 0,
         lastViewportWidth: 0,
         lastViewportHeight: 0,
         lastStableCols: 0,
@@ -859,7 +880,158 @@
           return;
         }
 
+        instrumentViewportSignal(source, viewport);
         scheduleViewportSettle(source);
+      }
+
+      function describeInstrumentationElement(element) {
+        if (!(element instanceof HTMLElement)) {
+          return null;
+        }
+        return {
+          tag: element.tagName.toLowerCase(),
+          id: element.id || "",
+          className: typeof element.className === "string" ? element.className : "",
+          ariaLabel: element.getAttribute("aria-label") || "",
+        };
+      }
+
+      function snapshotRect(element) {
+        if (!(element instanceof Element)) {
+          return null;
+        }
+        const rect = element.getBoundingClientRect();
+        return {
+          left: Number(rect.left.toFixed(2)),
+          top: Number(rect.top.toFixed(2)),
+          width: Number(rect.width.toFixed(2)),
+          height: Number(rect.height.toFixed(2)),
+          bottom: Number(rect.bottom.toFixed(2)),
+          right: Number(rect.right.toFixed(2)),
+        };
+      }
+
+      function getLiveViewportSnapshot() {
+        if (window.visualViewport) {
+          return {
+            width: window.visualViewport.width,
+            height: window.visualViewport.height,
+            offsetTop: window.visualViewport.offsetTop || 0,
+            offsetLeft: window.visualViewport.offsetLeft || 0,
+            pageTop: window.visualViewport.pageTop || 0,
+            pageLeft: window.visualViewport.pageLeft || 0,
+            scale: window.visualViewport.scale || 1,
+          };
+        }
+        return {
+          width: window.innerWidth,
+          height: window.innerHeight,
+          offsetTop: 0,
+          offsetLeft: 0,
+          pageTop: window.scrollY || 0,
+          pageLeft: window.scrollX || 0,
+          scale: 1,
+        };
+      }
+
+      function sendWebInstrumentation(event, detail = {}) {
+        if (!state.currentSessionID && app.dataset.view !== "terminal") {
+          return;
+        }
+
+        const payload = {
+          event,
+          detail,
+          clientTime: new Date().toISOString(),
+          sessionID: state.currentSessionID || "",
+          view: app.dataset.view || "",
+          keyboardMode: state.keyboardMode,
+          keyboardTransition: state.keyboardTransition,
+          pendingSettledResizeClaim: state.pendingSettledResizeClaim,
+          committedViewport: {
+            width: state.viewportWidth,
+            height: state.viewportHeight,
+            keyboardInset: state.keyboardInset,
+          },
+          liveViewport: getLiveViewportSnapshot(),
+          windowMetrics: {
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight,
+            scrollX: window.scrollX || 0,
+            scrollY: window.scrollY || 0,
+            devicePixelRatio: window.devicePixelRatio || 1,
+          },
+          activeElement: describeInstrumentationElement(document.activeElement),
+          mobileInput: {
+            focused: document.activeElement === mobileInput,
+            rect: snapshotRect(mobileInput),
+            leftStyle: mobileInput.style.left || "",
+            rightStyle: mobileInput.style.right || "",
+            topStyle: mobileInput.style.top || "",
+            bottomStyle: mobileInput.style.bottom || "",
+            widthStyle: mobileInput.style.width || "",
+            heightStyle: mobileInput.style.height || "",
+            transformStyle: mobileInput.style.transform || "",
+          },
+          terminal: {
+            attachState: state.attachState,
+            cols: state.terminal ? state.terminal.cols : 0,
+            rows: state.terminal ? state.terminal.rows : 0,
+            connectionState: state.connectionState,
+            stageRect: snapshotRect(terminalStage),
+          },
+          css: {
+            appHeight: getComputedStyle(document.documentElement).getPropertyValue("--app-height").trim(),
+            keyboardInset: getComputedStyle(document.documentElement)
+              .getPropertyValue("--keyboard-inset")
+              .trim(),
+          },
+          lastResizeMessage: state.lastResizeMessage,
+          lastViewportSettle: state.lastViewportSettle,
+        };
+        const body = JSON.stringify(payload);
+
+        try {
+          if (navigator.sendBeacon) {
+            const blob = new Blob([body], { type: "application/json" });
+            if (navigator.sendBeacon("/web-instrumentation", blob)) {
+              return;
+            }
+          }
+        } catch (error) {}
+
+        fetch("/web-instrumentation", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          cache: "no-store",
+          keepalive: true,
+          body,
+        }).catch(() => {});
+      }
+
+      function instrumentViewportSignal(source, viewport) {
+        if (
+          !state.keyboardMode &&
+          state.keyboardTransition === "idle" &&
+          state.keyboardInset <= 0
+        ) {
+          return;
+        }
+        const now = Date.now();
+        if (
+          state.lastViewportInstrumentationSource === source &&
+          now - state.lastViewportInstrumentationAt < 120
+        ) {
+          return;
+        }
+        state.lastViewportInstrumentationAt = now;
+        state.lastViewportInstrumentationSource = source;
+        sendWebInstrumentation("viewport-signal", {
+          source,
+          viewport,
+        });
       }
 
       function escapeHTML(text) {
@@ -971,19 +1143,27 @@
       }
 
       function updateMobileInputPosition() {
-        if (state.keyboardMode) {
-          mobileInput.style.left = "50%";
-          mobileInput.style.top = "50%";
-          mobileInput.style.bottom = "auto";
-          mobileInput.style.transform = "translate(-50%, -50%)";
-          mobileInput.style.pointerEvents = "auto";
+        if (state.keyboardMode || state.keyboardTransition === "closing") {
+          mobileInput.style.left = "calc(var(--safe-left) + 12px)";
+          mobileInput.style.right = "calc(var(--safe-right) + 12px)";
+          mobileInput.style.top = "auto";
+          mobileInput.style.bottom = "calc(var(--safe-bottom) + 72px)";
+          mobileInput.style.width = "auto";
+          mobileInput.style.height = "40px";
+          mobileInput.style.padding = "0 12px";
+          mobileInput.style.transform = "none";
+          mobileInput.style.pointerEvents = "none";
           mobileInput.style.zIndex = "4";
           return;
         }
 
         mobileInput.style.left = "-9999px";
+        mobileInput.style.right = "auto";
         mobileInput.style.top = "-9999px";
         mobileInput.style.bottom = "auto";
+        mobileInput.style.width = "1px";
+        mobileInput.style.height = "1px";
+        mobileInput.style.padding = "0";
         mobileInput.style.transform = "none";
         mobileInput.style.pointerEvents = "none";
         mobileInput.style.zIndex = "-1";
@@ -1128,6 +1308,7 @@
 
       function focusMobileInput() {
         if (!state.currentSessionID) return;
+        clearBlurRecoveryTimer();
         updateMobileInputPosition();
         mobileInput.focus({ preventScroll: true });
         mobileInput.value = " ";
@@ -1136,6 +1317,7 @@
 
       function activateKeyboard() {
         if (!state.currentSessionID) return;
+        clearBlurRecoveryTimer();
         if (state.keyboardMode) {
           focusMobileInput();
           return;
@@ -1143,25 +1325,67 @@
         state.keyboardMode = true;
         state.keyboardTransition = "opening";
         state.pendingSettledResizeClaim = true;
+        state.keyboardViewportRecoveryUntil = 0;
         captureViewportMetrics();
         syncKeyboardButton();
+        sendWebInstrumentation("keyboard-open-request");
         focusMobileInput();
         scheduleViewportSettle("keyboard-open");
       }
 
       function deactivateKeyboard() {
+        clearBlurRecoveryTimer();
         const wasKeyboardMode = state.keyboardMode;
+        if (wasKeyboardMode) {
+          state.keyboardTransition = "closing";
+          state.keyboardViewportRecoveryUntil = Date.now() + 1600;
+        }
         state.keyboardMode = false;
         syncKeyboardButton();
-        mobileInput.blur();
         updateMobileInputPosition();
+        if (wasKeyboardMode) {
+          sendWebInstrumentation("keyboard-close-request");
+        }
+        mobileInput.blur();
         if (!wasKeyboardMode) {
           return;
         }
-        state.keyboardTransition = "closing";
         state.pendingSettledResizeClaim = true;
         captureViewportMetrics();
         scheduleViewportSettle("keyboard-close");
+      }
+
+      function shouldTreatBlurAsNativeKeyboardClose(viewport) {
+        const baseline = state.keyboardBaselineViewportHeight || 0;
+        const heightRecovered = baseline > 0 && viewport.height >= baseline - 24;
+        const viewportExpanded = state.viewportHeight > 0 && viewport.height >= state.viewportHeight + 80;
+        const zoomedViewport = viewport.scale > 1.05;
+        return heightRecovered || viewportExpanded || zoomedViewport;
+      }
+
+      function handleNativeKeyboardDismiss(viewport) {
+        if (!state.keyboardMode) return;
+        clearBlurRecoveryTimer();
+        state.keyboardMode = false;
+        state.keyboardTransition = "closing";
+        state.pendingSettledResizeClaim = true;
+        state.keyboardViewportRecoveryUntil = Date.now() + 1600;
+        syncKeyboardButton();
+        updateMobileInputPosition();
+        sendWebInstrumentation("keyboard-native-close-detected", {
+          viewport,
+        });
+        captureViewportMetrics();
+        scheduleViewportSettle("keyboard-native-close");
+      }
+
+      function shouldDelayClosingViewportCommit(viewport) {
+        if (state.keyboardTransition !== "closing") {
+          return false;
+        }
+        const stillZoomed = viewport.scale > 1.05;
+        const stillShifted = Math.abs(viewport.offsetTop || 0) > 2;
+        return stillZoomed || stillShifted;
       }
 
       function decodeBase64Payload(payload) {
@@ -1203,6 +1427,12 @@
         if (!state.viewportSettleTimer) return;
         clearTimeout(state.viewportSettleTimer);
         state.viewportSettleTimer = 0;
+      }
+
+      function clearBlurRecoveryTimer() {
+        if (!state.blurRecoveryTimer) return;
+        clearTimeout(state.blurRecoveryTimer);
+        state.blurRecoveryTimer = 0;
       }
 
       function configureGhosttyInputSurface(terminal) {
@@ -1624,6 +1854,23 @@
               }
 
               const rawViewport = captureViewportMetrics();
+              if (
+                shouldDelayClosingViewportCommit(rawViewport) &&
+                Date.now() < state.keyboardViewportRecoveryUntil
+              ) {
+                sendWebInstrumentation("viewport-close-recovery-wait", {
+                  source,
+                  viewport: rawViewport,
+                });
+                scheduleViewportSettle(source);
+                return;
+              }
+              if (shouldDelayClosingViewportCommit(rawViewport)) {
+                sendWebInstrumentation("viewport-close-recovery-timeout", {
+                  source,
+                  viewport: rawViewport,
+                });
+              }
               const settledSource = `${source}-settled`;
               state.lastViewportSettle = {
                 source: settledSource,
@@ -1649,6 +1896,14 @@
               }
               state.pendingSettledResizeClaim = false;
               state.keyboardTransition = "idle";
+              state.keyboardViewportRecoveryUntil = 0;
+              if (!state.keyboardMode && state.keyboardInset <= 0) {
+                state.keyboardBaselineViewportHeight = state.viewportHeight;
+              }
+              updateMobileInputPosition();
+              sendWebInstrumentation("viewport-settled", {
+                source: settledSource,
+              });
 
               if (fit?.changed) {
                 requestAnimationFrame(() => {
@@ -1671,9 +1926,11 @@
       function resetTerminalState() {
         clearOwnershipState();
         clearViewportSettleTimer();
+        clearBlurRecoveryTimer();
         state.viewportSettleToken += 1;
         state.pendingSettledResizeClaim = false;
         state.keyboardTransition = "idle";
+        state.keyboardViewportRecoveryUntil = 0;
         state.claimOwnershipOnAttach = false;
         state.suspendResizeMessages = false;
         state.resizeMessages = [];
@@ -1685,6 +1942,7 @@
         if (state.terminal) {
           state.terminal.clear();
         }
+        updateMobileInputPosition();
         updateTerminalStatus();
         queueDebugUpdate();
       }
@@ -1985,31 +2243,18 @@
         if (action === "ctrl") {
           state.stickyCtrl = !state.stickyCtrl;
           syncModifierButtons();
-          if (state.keyboardMode) {
-            focusMobileInput();
-          } else {
-            activateKeyboard();
-          }
           return;
         }
 
         if (action === "alt") {
           state.stickyAlt = !state.stickyAlt;
           syncModifierButtons();
-          if (state.keyboardMode) {
-            focusMobileInput();
-          } else {
-            activateKeyboard();
-          }
           return;
         }
 
         const payload = QUICK_ACTIONS[action];
         if (!payload) return;
         sendRawInput(payload, "web_quick_action");
-        if (state.keyboardMode) {
-          focusMobileInput();
-        }
       }
 
       terminalStage.addEventListener("click", () => {
@@ -2054,15 +2299,30 @@
         updateMobileInputPosition();
         mobileInput.value = " ";
         mobileInput.setSelectionRange(1, 1);
+        sendWebInstrumentation("mobile-input-focus");
       });
 
       mobileInput.addEventListener("blur", () => {
+        sendWebInstrumentation("mobile-input-blur");
         if (!state.keyboardMode) return;
-        window.setTimeout(() => {
-          if (state.keyboardMode && document.activeElement !== mobileInput) {
-            focusMobileInput();
+        clearBlurRecoveryTimer();
+        state.blurRecoveryTimer = window.setTimeout(() => {
+          state.blurRecoveryTimer = 0;
+          if (!state.keyboardMode || document.activeElement === mobileInput) {
+            return;
           }
-        }, 60);
+
+          const viewport = captureViewportMetrics();
+          if (shouldTreatBlurAsNativeKeyboardClose(viewport)) {
+            handleNativeKeyboardDismiss(viewport);
+            return;
+          }
+
+          sendWebInstrumentation("mobile-input-refocus", {
+            viewport,
+          });
+          focusMobileInput();
+        }, 220);
       });
 
       mobileInput.addEventListener("compositionstart", () => {

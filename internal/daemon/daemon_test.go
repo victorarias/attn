@@ -23,6 +23,7 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/github/mockserver"
+	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
@@ -2011,6 +2012,69 @@ func TestDaemon_WebFaviconDoesNot404(t *testing.T) {
 	if got := resp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
 		t.Fatalf("favicon Cache-Control = %q, want no-store, max-age=0", got)
 	}
+}
+
+func TestDaemon_WebInstrumentationLogsPayload(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	sockPath := filepath.Join(tmpDir, "test.sock")
+	logPath := filepath.Join(tmpDir, "daemon.log")
+
+	wsPort := "19855"
+	os.Setenv("ATTN_WS_PORT", wsPort)
+	defer os.Unsetenv("ATTN_WS_PORT")
+
+	logger, err := logging.New(logPath)
+	if err != nil {
+		t.Fatalf("new test logger: %v", err)
+	}
+	defer logger.Close()
+
+	d := NewForTesting(sockPath)
+	d.logger = logger
+	go d.Start()
+	defer d.Stop()
+
+	waitForSocket(t, sockPath, 5*time.Second)
+
+	payload := `{"event":"keyboard-close-request","sessionID":"web-debug-smoke","liveViewport":{"scale":1.25,"offsetTop":42}}`
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+wsPort+"/web-instrumentation", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("new instrumentation request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post instrumentation payload: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("instrumentation status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
+		t.Fatalf("instrumentation Cache-Control = %q, want no-store, max-age=0", got)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		body, err := os.ReadFile(logPath)
+		if err == nil {
+			text := string(body)
+			if strings.Contains(text, "web instrumentation:") &&
+				strings.Contains(text, `"event":"keyboard-close-request"`) &&
+				strings.Contains(text, `"scale":1.25`) {
+				return
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read instrumentation log: %v", err)
+	}
+	t.Fatalf("instrumentation log did not contain compacted payload: %s", string(body))
 }
 
 func TestDaemon_WebClientAttachFlowOverWebSocket(t *testing.T) {

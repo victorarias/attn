@@ -275,6 +275,7 @@ Treat that document as the standing guidance for:
 - geometry ownership rules
 - why `attach_session` replay is provisional rather than authoritative
 - mobile keyboard and `visualViewport` pitfalls
+- why structured PTY/viewport instrumentation should be kept and extended rather than treated as temporary debug code
 - anti-patterns that have already caused regressions in this repo
 - minimum verification expectations for PTY/mobile terminal changes
 
