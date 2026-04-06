@@ -17,6 +17,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
@@ -24,6 +25,13 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
 	"github.com/victorarias/attn/internal/wrapper"
+)
+
+var (
+	// Backward-compatible ldflags targets for builders that still inject
+	// build metadata into the main package instead of internal/buildinfo.
+	version   = ""
+	buildTime = ""
 )
 
 // hookInput represents the JSON input from Claude Code hooks
@@ -41,7 +49,22 @@ type todoWriteInput struct {
 	} `json:"todos"`
 }
 
-var version = "dev"
+func init() {
+	applyLegacyBuildInfoOverrides()
+}
+
+func applyLegacyBuildInfoOverrides() {
+	if buildinfo.Version == "dev" {
+		if legacyVersion := strings.TrimSpace(version); legacyVersion != "" {
+			buildinfo.Version = legacyVersion
+		}
+	}
+	if buildinfo.BuildTime == "unknown" {
+		if legacyBuildTime := strings.TrimSpace(buildTime); legacyBuildTime != "" {
+			buildinfo.BuildTime = legacyBuildTime
+		}
+	}
+}
 
 func main() {
 	if isProtocolVersionCommand(os.Args) {
@@ -107,7 +130,8 @@ func isProtocolVersionCommand(args []string) bool {
 }
 
 func runVersion() {
-	fmt.Println(version)
+	applyLegacyBuildInfoOverrides()
+	fmt.Println(buildinfo.Version)
 }
 
 func runProtocolVersion() {

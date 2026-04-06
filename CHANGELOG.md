@@ -6,6 +6,19 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-06]
+
+### Changed
+- **Embedded Phone Terminal**: Rebuild the daemon-served mobile web client around `ghostty-web` with a dedicated session list, a terminal-first phone layout, embedded build metadata, and the existing PTY websocket protocol.
+
+### Fixed
+- **Embedded Phone Terminal Stability**: Real-phone scrolling, typing, quick actions, keyboard open/close, and keyboard-dismiss behavior now work without depending on attach replay hacks, including a dedicated `Ctrl+C` shortcut and no-store asset serving.
+- **Embedded Phone Terminal Layout**: The web terminal now commits the visual viewport width as well as height, and exposes `A-` / `A+` controls in the top bar through a settled resize transaction so narrow phone viewports fit on-screen and text size can be tuned live without destabilizing the initial attach geometry.
+- **Embedded Phone Terminal Touch Scroll**: Touch drags now distinguish real scrollback, alternate-screen mouse tracking, and alternate-scroll mode instead of always faking `Up` / `Down`, so supported apps can still scroll while prompt-driven sessions stop accidentally walking history.
+- **Embedded Phone Terminal Diagnostics**: Add daemon-backed viewport instrumentation plus PTY rendering guidance so focus and viewport bugs can be diagnosed from real-device traces instead of browser emulation alone.
+- **Build Metadata Injection**: Share version and build-time metadata across `attn --version`, daemon health output, source/bootstrap builds, Homebrew packaging, and build/install flows so it is easier to identify the running daemon build and `install-all` leaves the newest daemon running.
+- **Pane Runtime Binder Ordering**: Preserve early split-pane terminal input during initial mount and keep pane drain sequencing tied to xterm flush callbacks so shell startup probes and terminal automation no longer race the pane lifecycle.
+
 ## [2026-04-04]
 
 ### Added
@@ -13,9 +26,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Release Signing & Notarization**: The GitHub macOS release workflow now imports a `Developer ID Application` certificate from GitHub Actions secrets, signs release builds with the real Apple identity, notarizes both the packaged app and the rebuilt DMG, and staples the notarization tickets before publishing the Homebrew cask artifacts.
+- **Tailscale Web Access**: The mobile web client now uses the machine&apos;s existing Tailscale device via `tailscale serve` instead of registering a second embedded tailnet node, and Settings now report the host device URL/login state rather than a separate attn hostname.
+- **Remote Endpoint Web Access**: Connected remote daemons now surface their own Tailscale Serve status, URL, DNS name, and errors in endpoint capabilities, and the Settings modal can toggle each remote host&apos;s `tailscale_enabled` state through the remote daemon instead of proxying web access through the local machine.
 
 ### Fixed
 - **Remote Sidebar Session Actions**: Remote-host sessions now show the same hover-only reload and close buttons as local sessions in the left sidebar.
+- **Hidden Session Terminal Repaint**: Switching back to a previously hidden session now forces xterm through a real size bounce when the measured cols/rows are unchanged, so main panes no longer stay rendered as a narrow stale column until some later resize shakes them loose.
 
 ## [2026-04-03]
 

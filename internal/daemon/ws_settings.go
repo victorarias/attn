@@ -34,12 +34,14 @@ const (
 	SettingReviewLoopLastIterations = "review_loop_last_iterations"
 	SettingReviewLoopModel          = "review_loop_model"
 	SettingReviewerModel            = "reviewer_model"
+	SettingTailscaleEnabled         = "tailscale_enabled"
 	SettingNewSessionYoloPrefix     = "new_session_yolo_"
 )
 
 func (d *Daemon) handleGetSettingsWS(client *wsClient) {
 	d.logf("Getting settings")
-	d.sendToClient(client, &protocol.WebSocketEvent{
+	d.refreshTailscaleServeState()
+	d.sendToClient(client, &protocol.SettingsUpdatedMessage{
 		Event:    protocol.EventSettingsUpdated,
 		Settings: d.settingsWithAgentAvailability(),
 	})
@@ -49,24 +51,37 @@ func (d *Daemon) handleSetSettingWS(client *wsClient, msg *protocol.SetSettingMe
 	d.logf("Setting %s = %s", msg.Key, msg.Value)
 	if err := d.validateSetting(msg.Key, msg.Value); err != nil {
 		d.logf("Setting validation failed: %v", err)
-		d.sendToClient(client, &protocol.WebSocketEvent{
-			Event:    protocol.EventSettingsUpdated,
-			Settings: d.settingsWithAgentAvailability(),
-			Error:    protocol.Ptr(err.Error()),
-			Success:  protocol.Ptr(false),
+		d.sendToClient(client, &protocol.SettingsUpdatedMessage{
+			Event:      protocol.EventSettingsUpdated,
+			Settings:   d.settingsWithAgentAvailability(),
+			ChangedKey: protocol.Ptr(msg.Key),
+			Error:      protocol.Ptr(err.Error()),
+			Success:    protocol.Ptr(false),
 		})
 		return
 	}
 
 	d.store.SetSetting(msg.Key, msg.Value)
-	d.broadcastSettings()
+	if msg.Key == SettingTailscaleEnabled {
+		d.ensureTailscaleServeFromSettings()
+	}
+	d.broadcastSettings(msg.Key)
 }
 
-func (d *Daemon) broadcastSettings() {
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+func (d *Daemon) broadcastSettings(changedKey string) {
+	d.refreshTailscaleServeState()
+	d.broadcastCurrentSettings(changedKey)
+}
+
+func (d *Daemon) broadcastCurrentSettings(changedKey string) {
+	event := &protocol.SettingsUpdatedMessage{
 		Event:    protocol.EventSettingsUpdated,
 		Settings: d.settingsWithAgentAvailability(),
-	})
+	}
+	if strings.TrimSpace(changedKey) != "" {
+		event.ChangedKey = protocol.Ptr(changedKey)
+	}
+	d.wsHub.BroadcastValue(event)
 }
 
 func executableSettingKey(agent string) string {
@@ -150,6 +165,22 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	}
 
 	settings[SettingPTYBackendMode] = d.ptyBackendMode()
+	settings[SettingTailscaleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingTailscaleEnabled]))
+
+	tailscale := d.tailscaleStateSnapshot()
+	if tailscale.status != "" {
+		settings["tailscale_status"] = tailscale.status
+	}
+	if tailscale.domain != "" {
+		settings["tailscale_domain"] = tailscale.domain
+		settings["tailscale_url"] = "https://" + tailscale.domain + "/"
+	}
+	if tailscale.authURL != "" {
+		settings["tailscale_auth_url"] = tailscale.authURL
+	}
+	if tailscale.lastError != "" {
+		settings["tailscale_error"] = tailscale.lastError
+	}
 	return settings
 }
 
@@ -187,6 +218,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
+	case SettingTailscaleEnabled:
+		return validateBooleanSetting(value)
 	case SettingReviewLoopPresets, SettingReviewLoopLastPreset, SettingReviewLoopLastPrompt, SettingReviewLoopLastIterations, SettingReviewLoopModel, SettingReviewerModel:
 		return nil
 	default:
@@ -206,6 +239,15 @@ func validateBooleanSetting(value string) error {
 		return nil
 	default:
 		return fmt.Errorf("invalid boolean value: %s", value)
+	}
+}
+
+func parseBooleanSetting(value string) bool {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }
 

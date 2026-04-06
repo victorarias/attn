@@ -18,6 +18,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/git"
@@ -91,6 +92,7 @@ type Daemon struct {
 	store            *store.Store
 	listener         net.Listener
 	httpServer       *http.Server
+	httpHandler      http.Handler
 	wsHub            *wsHub
 	done             chan struct{}
 	logger           *logging.Logger
@@ -121,6 +123,10 @@ type Daemon struct {
 	pendingInitialWS map[*wsClient]struct{}
 	startedOnce      sync.Once
 	startedCh        chan struct{}
+	tailscale        *tailscaleRuntime
+
+	loginShellEnvMu sync.RWMutex
+	loginShellEnv   []string
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -204,6 +210,29 @@ func (d *Daemon) dropPendingInitialState(client *wsClient) {
 	d.recoveryMu.Lock()
 	defer d.recoveryMu.Unlock()
 	delete(d.pendingInitialWS, client)
+}
+
+func (d *Daemon) warmLoginShellEnvCache() {
+	shell := pty.GetUserLoginShell()
+	if shell == "" {
+		return
+	}
+	env, err := pty.ReadLoginShellEnv(shell)
+	if err != nil {
+		d.logf("login shell env pre-warm failed for %s: %v", shell, err)
+		return
+	}
+	d.loginShellEnvMu.Lock()
+	d.loginShellEnv = env
+	d.loginShellEnvMu.Unlock()
+	d.logf("login shell env pre-warmed: shell=%s vars=%d", shell, len(env))
+}
+
+func (d *Daemon) cachedLoginShellEnv() []string {
+	d.loginShellEnvMu.RLock()
+	env := d.loginShellEnv
+	d.loginShellEnvMu.RUnlock()
+	return env
 }
 
 func (d *Daemon) signalStarted() {
@@ -300,6 +329,7 @@ func New(socketPath string) *Daemon {
 		forcedStop:       make(map[string]time.Time),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
+		tailscale:        newTailscaleRuntime(),
 	}
 }
 
@@ -329,6 +359,7 @@ func NewForTesting(socketPath string) *Daemon {
 		forcedStop:       make(map[string]time.Time),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
+		tailscale:        newTailscaleRuntime(),
 	}
 }
 
@@ -362,6 +393,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		forcedStop:       make(map[string]time.Time),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
+		tailscale:        newTailscaleRuntime(),
 	}
 }
 
@@ -393,6 +425,9 @@ func (d *Daemon) Start() error {
 	}
 	if d.ptyBackend == nil {
 		d.ptyBackend = ptybackend.NewEmbedded(pty.NewManager(pty.DefaultScrollbackSize, d.logf))
+	}
+	if d.tailscale == nil {
+		d.tailscale = newTailscaleRuntime()
 	}
 	if d.daemonInstanceID == "" {
 		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
@@ -452,6 +487,10 @@ func (d *Daemon) Start() error {
 		)
 	}
 
+	// Pre-warm login shell env cache in a goroutine so the first PTY spawn
+	// doesn't pay the ~130ms cost of starting a login shell.
+	go d.warmLoginShellEnvCache()
+
 	d.setRecovering(true)
 	startSucceeded := false
 	defer func() {
@@ -503,6 +542,8 @@ func (d *Daemon) Start() error {
 	// Create HTTP server for WebSocket (must be created synchronously to avoid race with Stop())
 	d.initHTTPServer()
 	go d.runHTTPServer()
+	d.removeLegacyEmbeddedTailscaleState()
+	go d.ensureTailscaleServeFromSettingsAndBroadcast()
 	d.hubManager.Start(d.doneContext())
 
 	recoveryStartedAt := time.Now()
@@ -1132,10 +1173,17 @@ func (d *Daemon) initHTTPServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", d.handleWS)
 	mux.HandleFunc("/health", d.handleHealth)
+	mux.HandleFunc("/web-instrumentation", d.handleWebInstrumentation)
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, _ *http.Request) {
+		setNoStoreHeaders(w.Header())
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.Handle("/", daemonWebStaticHandler())
+	d.httpHandler = mux
 
 	d.httpServer = &http.Server{
 		Addr:    net.JoinHostPort(config.WSBindAddress(), config.WSPort()),
-		Handler: mux,
+		Handler: d.httpHandler,
 	}
 }
 
@@ -2849,6 +2897,8 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	health := map[string]interface{}{
 		"status":             "ok",
+		"version":            buildinfo.Version,
+		"build_time":         buildinfo.BuildTime,
 		"protocol":           protocol.ProtocolVersion,
 		"daemon_instance_id": d.daemonInstanceID,
 		"sessions":           len(sessions),
@@ -2857,6 +2907,7 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"github_available":   d.githubAvailable(),
 	}
 
+	setNoStoreHeaders(w.Header())
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
 }

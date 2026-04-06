@@ -588,6 +588,24 @@ type EndpointCapabilities struct {
 
 	// PtyBackendMode corresponds to the JSON schema field "pty_backend_mode".
 	PtyBackendMode *string `json:"pty_backend_mode,omitempty"`
+
+	// TailscaleAuthURL corresponds to the JSON schema field "tailscale_auth_url".
+	TailscaleAuthURL *string `json:"tailscale_auth_url,omitempty"`
+
+	// TailscaleDomain corresponds to the JSON schema field "tailscale_domain".
+	TailscaleDomain *string `json:"tailscale_domain,omitempty"`
+
+	// TailscaleEnabled corresponds to the JSON schema field "tailscale_enabled".
+	TailscaleEnabled *bool `json:"tailscale_enabled,omitempty"`
+
+	// TailscaleError corresponds to the JSON schema field "tailscale_error".
+	TailscaleError *string `json:"tailscale_error,omitempty"`
+
+	// TailscaleStatus corresponds to the JSON schema field "tailscale_status".
+	TailscaleStatus *string `json:"tailscale_status,omitempty"`
+
+	// TailscaleURL corresponds to the JSON schema field "tailscale_url".
+	TailscaleURL *string `json:"tailscale_url,omitempty"`
 }
 
 type EndpointInfo struct {
@@ -2015,6 +2033,17 @@ type SessionsUpdatedMessage struct {
 	Sessions []Session `json:"sessions,omitempty"`
 }
 
+type SetEndpointRemoteWebMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID string `json:"endpoint_id"`
+}
+
 type SetReviewLoopIterationLimitMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2049,6 +2078,9 @@ type SetSettingMessage struct {
 }
 
 type SettingsUpdatedMessage struct {
+	// ChangedKey corresponds to the JSON schema field "changed_key".
+	ChangedKey *string `json:"changed_key,omitempty"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty"`
 

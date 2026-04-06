@@ -116,6 +116,7 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 	buf := make([]byte, 16*1024)
 	carryover := make([]byte, 0, 64)
+	da1Responded := false
 
 	for {
 		n, err := s.ptmx.Read(buf)
@@ -133,6 +134,25 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 			if boundary > 0 {
 				data := chunk[:boundary]
+
+				// Respond to DA1 (Primary Device Attributes) queries when no
+				// frontend subscriber is attached.  The daemon spawns shell
+				// PTYs before the frontend renders the Terminal, so fish's
+				// DA1 query (\x1b[c) may arrive before anyone can relay the
+				// xterm response.  Fish waits 2 s and prints a warning.
+				// Respond once, only when unattached, to avoid duplicates
+				// with the frontend's xterm-based response.
+				if !da1Responded && containsDA1Query(data) {
+					s.subMu.RLock()
+					noSubs := len(s.subscribers) == 0
+					s.subMu.RUnlock()
+					if noSubs {
+						da1Responded = true
+						// xterm DA1 response: VT100 with Advanced Video Option
+						_, _ = s.ptmx.Write([]byte("\x1b[?1;2c"))
+					}
+				}
+
 				seq := s.seqCounter.Add(1)
 				s.scrollback.Write(data)
 				if s.screen != nil {
@@ -347,4 +367,23 @@ func (s *Session) kill(sig syscall.Signal, waitTimeout time.Duration) error {
 
 func (s *Session) closePTY() {
 	_ = s.ptmx.Close()
+}
+
+// containsDA1Query scans data for a CSI Primary Device Attributes query
+// (ESC [ c  or  ESC [ 0 c).  It ignores DA2 (ESC [ > c) and other variants.
+func containsDA1Query(data []byte) bool {
+	for i := 0; i < len(data)-2; i++ {
+		if data[i] != 0x1b || data[i+1] != '[' {
+			continue
+		}
+		j := i + 2
+		// Skip digit parameters (0x30-0x39) and semicolons (0x3b)
+		for j < len(data) && ((data[j] >= '0' && data[j] <= '9') || data[j] == ';') {
+			j++
+		}
+		if j < len(data) && data[j] == 'c' {
+			return true
+		}
+	}
+	return false
 }

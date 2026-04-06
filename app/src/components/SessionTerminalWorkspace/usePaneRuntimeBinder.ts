@@ -6,7 +6,7 @@ import { isMacLikePlatform } from '../../shortcuts/platform';
 import type { TerminalHandle } from '../Terminal';
 import { activeElementSummary, recordPaneRuntimeDebugEvent } from '../../utils/paneRuntimeDebug';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
-import { recordPtyDecode, recordTerminalWrite } from '../../utils/ptyPerf';
+import { recordPtyDecode } from '../../utils/ptyPerf';
 import { resetTerminalScrollPin } from '../../utils/terminalScrollPin';
 import { recordTerminalRuntimeLog } from '../../utils/terminalRuntimeLog';
 
@@ -91,16 +91,6 @@ function snapshotTerminalText(terminal: XTerm | null): string {
   return lines.join('\n');
 }
 
-function writeBytesToTerminalAsync(terminal: XTerm, bytes: Uint8Array): Promise<void> {
-  const startedAt = performance.now();
-  return new Promise<void>((resolve) => {
-    terminal.write(bytes, () => {
-      recordTerminalWrite(bytes.length, performance.now() - startedAt);
-      resolve();
-    });
-  });
-}
-
 function runtimeEnsureErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -164,6 +154,12 @@ export function usePaneRuntimeBinder(
   eventRouter: PaneRuntimeEventRouter,
 ): PaneRuntimeBinder {
   const paneByIdRef = useRef<Map<string, PaneRuntimeSpec>>(new Map());
+  // Always-current snapshot of panes for use in child effects (which run
+  // before parent effects that update paneByIdRef).  Setting a ref during
+  // render is safe — it's just a property assignment, no allocation or
+  // side effects.
+  const panesRef = useRef(panes);
+  panesRef.current = panes;
   const terminalHandlesRef = useRef<Map<string, TerminalHandle>>(new Map());
   const xtermsRef = useRef<Map<string, XTerm>>(new Map());
   const inputSubscriptionsRef = useRef<Map<string, { dispose: () => void }>>(new Map());
@@ -176,6 +172,10 @@ export function usePaneRuntimeBinder(
   const runtimeBindingDisposersRef = useRef<Map<string, { paneId: string; testSessionId?: string; dispose: () => void }>>(new Map());
   const paneWriteStatesRef = useRef<Map<string, PaneTerminalWriteState>>(new Map());
   const paneWriteLogStatesRef = useRef<Map<string, PaneWriteLogState>>(new Map());
+
+  const getCurrentPane = useCallback((paneId: string): PaneRuntimeSpec | undefined => {
+    return paneByIdRef.current.get(paneId) || panesRef.current.find((pane) => pane.paneId === paneId);
+  }, []);
 
   const appendPendingTerminalEvent = useCallback((paneId: string, event: PtyEventPayload) => {
     const events = pendingTerminalEventsRef.current.get(paneId) || [];
@@ -213,7 +213,7 @@ export function usePaneRuntimeBinder(
   }, [getPaneWriteState]);
 
   const queueBufferedBytesForReplay = useCallback((paneId: string, bytes: Uint8Array, seq?: number) => {
-    const pane = paneByIdRef.current.get(paneId);
+    const pane = getCurrentPane(paneId);
     if (!pane || bytes.length === 0) {
       return;
     }
@@ -234,10 +234,10 @@ export function usePaneRuntimeBinder(
       data: encodePtyBytes(bytes),
       ...(typeof seq === 'number' ? { seq } : {}),
     });
-  }, [appendPendingTerminalEvent]);
+  }, [appendPendingTerminalEvent, getCurrentPane]);
 
   const recordPaneWriteActivity = useCallback((paneId: string, bytes: number, seq?: number) => {
-    const pane = paneByIdRef.current.get(paneId);
+    const pane = getCurrentPane(paneId);
     if (!pane) {
       return;
     }
@@ -274,6 +274,12 @@ export function usePaneRuntimeBinder(
     state.lastLoggedAt = now;
     state.writeCount = 0;
     state.bytes = 0;
+  }, [getCurrentPane]);
+
+  const writeToTerminal = useCallback((xterm: XTerm, data: string | Uint8Array): Promise<void> => {
+    return new Promise((resolve) => {
+      xterm.write(data, resolve);
+    });
   }, []);
 
   const enqueuePaneBytes = useCallback((paneId: string, xterm: XTerm, bytes: Uint8Array, seq?: number) => {
@@ -283,10 +289,10 @@ export function usePaneRuntimeBinder(
         queueBufferedBytesForReplay(paneId, bytes, seq);
         return;
       }
-      await writeBytesToTerminalAsync(liveXterm, bytes);
+      await writeToTerminal(liveXterm, bytes);
       recordPaneWriteActivity(paneId, bytes.length, seq);
     });
-  }, [queueBufferedBytesForReplay, queuePaneWriteTask, recordPaneWriteActivity]);
+  }, [queueBufferedBytesForReplay, queuePaneWriteTask, recordPaneWriteActivity, writeToTerminal]);
 
   const replayPendingTerminalEvent = useCallback((paneId: string, xterm: XTerm, event: PtyEventPayload) => {
     switch (event.event) {
@@ -300,8 +306,7 @@ export function usePaneRuntimeBinder(
             appendPendingTerminalEvent(paneId, event);
             return;
           }
-          // Reset scroll pin BEFORE terminal.reset() so the pin doesn't
-          // intercept output that arrives immediately after the reset.
+          await writeToTerminal(liveXterm, new Uint8Array(0));
           resetTerminalScrollPin(liveXterm);
           liveXterm.reset();
         });
@@ -314,7 +319,7 @@ export function usePaneRuntimeBinder(
             appendPendingTerminalEvent(paneId, event);
             return;
           }
-          await writeBytesToTerminalAsync(liveXterm, exitBytes);
+          await writeToTerminal(liveXterm, exitBytes);
         });
         break;
       }
@@ -326,14 +331,14 @@ export function usePaneRuntimeBinder(
             appendPendingTerminalEvent(paneId, event);
             return;
           }
-          await writeBytesToTerminalAsync(liveXterm, errorBytes);
+          await writeToTerminal(liveXterm, errorBytes);
         });
         break;
       }
       default:
         break;
     }
-  }, [appendPendingTerminalEvent, enqueuePaneBytes, queuePaneWriteTask]);
+  }, [appendPendingTerminalEvent, enqueuePaneBytes, queuePaneWriteTask, writeToTerminal]);
 
   useEffect(() => {
     paneByIdRef.current = new Map(panes.map((pane) => [pane.paneId, pane]));
@@ -470,6 +475,7 @@ export function usePaneRuntimeBinder(
         message: 'register pane runtime binding',
       });
     }
+
   }, [appendPendingTerminalEvent, eventRouter, panes, replayPendingTerminalEvent]);
 
   useEffect(() => {
@@ -507,7 +513,7 @@ export function usePaneRuntimeBinder(
         paneId,
         message: 'terminal ref cleared',
       });
-      const pane = paneByIdRef.current.get(paneId);
+      const pane = getCurrentPane(paneId);
       if (pane) {
         recordTerminalRuntimeLog({
           category: 'binding',
@@ -554,10 +560,10 @@ export function usePaneRuntimeBinder(
         message: 'terminal handle attached',
       });
     }
-  }, []);
+  }, [getCurrentPane]);
 
   const ensurePaneRuntime = useCallback(async (paneId: string, xterm: XTerm) => {
-    const pane = paneByIdRef.current.get(paneId);
+    const pane = getCurrentPane(paneId);
     if (!pane) {
       return;
     }
@@ -648,7 +654,7 @@ export function usePaneRuntimeBinder(
           if (xtermsRef.current.get(paneId) !== xterm) {
             return;
           }
-          const livePane = paneByIdRef.current.get(paneId);
+          const livePane = getCurrentPane(paneId);
           if (!livePane || livePane.runtimeId !== pane.runtimeId) {
             return;
           }
@@ -668,44 +674,47 @@ export function usePaneRuntimeBinder(
 
     pendingEnsuresRef.current.set(pane.runtimeId, promise);
     await promise;
-  }, []);
+  }, [getCurrentPane]);
 
   const wireTerminal = useCallback((paneId: string, xterm: XTerm) => {
     xtermsRef.current.set(paneId, xterm);
-    const pane = paneByIdRef.current.get(paneId);
-    if (!pane) {
-      return;
+    const pane = getCurrentPane(paneId);
+    if (pane) {
+      recordPaneRuntimeDebugEvent({
+        scope: 'binder',
+        sessionId: pane.sessionId ?? pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: 'wire terminal',
+        details: { cols: xterm.cols, rows: xterm.rows },
+      });
+      recordTerminalRuntimeLog({
+        category: 'binding',
+        sessionId: pane.sessionId ?? pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: 'wire xterm to pane runtime',
+        details: { cols: xterm.cols, rows: xterm.rows },
+      });
     }
-    recordPaneRuntimeDebugEvent({
-      scope: 'binder',
-      sessionId: pane.sessionId ?? pane.testSessionId,
-      paneId,
-      runtimeId: pane.runtimeId,
-      message: 'wire terminal',
-      details: { cols: xterm.cols, rows: xterm.rows },
-    });
-    recordTerminalRuntimeLog({
-      category: 'binding',
-      sessionId: pane.sessionId ?? pane.testSessionId,
-      paneId,
-      runtimeId: pane.runtimeId,
-      message: 'wire xterm to pane runtime',
-      details: { cols: xterm.cols, rows: xterm.rows },
-    });
 
     const sendToPty = (data: string) => {
-      if (import.meta.env.DEV && pane.testSessionId) {
+      const currentPane = getCurrentPane(paneId);
+      if (!currentPane) {
+        return;
+      }
+      if (import.meta.env.DEV && currentPane.testSessionId) {
         const testWindow = window as Window & {
           __TEST_SESSION_INPUT_EVENTS?: Array<{ sessionId: string; event: 'connect_terminal' | 'send_to_pty'; data?: string }>;
         };
         testWindow.__TEST_SESSION_INPUT_EVENTS = testWindow.__TEST_SESSION_INPUT_EVENTS || [];
-        testWindow.__TEST_SESSION_INPUT_EVENTS.push({ sessionId: pane.testSessionId, event: 'send_to_pty', data });
+        testWindow.__TEST_SESSION_INPUT_EVENTS.push({ sessionId: currentPane.testSessionId, event: 'send_to_pty', data });
       }
       recordPaneRuntimeDebugEvent({
         scope: 'input',
-        sessionId: pane.testSessionId,
+        sessionId: currentPane.testSessionId,
         paneId,
-        runtimeId: pane.runtimeId,
+        runtimeId: currentPane.runtimeId,
         message: 'send input to pty',
         details: {
           dataPreview: data.slice(0, 20),
@@ -713,9 +722,12 @@ export function usePaneRuntimeBinder(
           ...activeElementSummary(),
         },
       });
-      ptyWrite({ id: pane.runtimeId, data, source: 'user' }).catch(console.error);
+      ptyWrite({ id: currentPane.runtimeId, data, source: 'user' }).catch(console.error);
     };
 
+    // Always subscribe onData — even if paneByIdRef doesn't have the pane
+    // yet (child effect runs before parent effect). sendToPty resolves the
+    // pane from the render-time snapshot until the effect-driven map catches up.
     inputSubscriptionsRef.current.get(paneId)?.dispose();
     inputSubscriptionsRef.current.set(paneId, xterm.onData(sendToPty));
     xterm.attachCustomKeyEventHandler(installTerminalKeyHandler(sendToPty));
@@ -724,9 +736,9 @@ export function usePaneRuntimeBinder(
     if (cachedText && snapshotTerminalText(xterm).trim().length === 0) {
       recordPaneRuntimeDebugEvent({
         scope: 'binder',
-        sessionId: pane.testSessionId,
+        sessionId: pane?.testSessionId,
         paneId,
-        runtimeId: pane.runtimeId,
+        runtimeId: pane?.runtimeId,
         message: 'hydrate terminal from cached text',
         details: { textLength: cachedText.length },
       });
@@ -737,9 +749,9 @@ export function usePaneRuntimeBinder(
     if (pendingEvents?.length) {
       recordPaneRuntimeDebugEvent({
         scope: 'binder',
-        sessionId: pane.testSessionId,
+        sessionId: pane?.testSessionId,
         paneId,
-        runtimeId: pane.runtimeId,
+        runtimeId: pane?.runtimeId,
         message: 'replay queued pty events',
         details: { count: pendingEvents.length },
       });
@@ -748,14 +760,14 @@ export function usePaneRuntimeBinder(
       }
       pendingTerminalEventsRef.current.delete(paneId);
     }
-  }, [replayPendingTerminalEvent]);
+  }, [getCurrentPane, replayPendingTerminalEvent]);
 
   const requestPaneRuntimeEnsure = useCallback((
     paneId: string,
     xterm: XTerm,
     source: 'ready' | 'resize',
   ) => {
-    const pane = paneByIdRef.current.get(paneId);
+    const pane = getCurrentPane(paneId);
     if (!pane) {
       return;
     }
@@ -777,10 +789,10 @@ export function usePaneRuntimeBinder(
       console.error('[PaneRuntimeBinder] Failed to ensure runtime:', error);
       xterm.write(`\r\n[Failed to connect PTY: ${error}]\r\n`);
     });
-  }, [ensurePaneRuntime]);
+  }, [ensurePaneRuntime, getCurrentPane]);
 
   const handleTerminalInit = useCallback((paneId: string) => (xterm: XTerm) => {
-    const pane = paneByIdRef.current.get(paneId);
+    const pane = getCurrentPane(paneId);
     recordPaneRuntimeDebugEvent({
       scope: 'binder',
       sessionId: pane?.testSessionId,
@@ -790,10 +802,10 @@ export function usePaneRuntimeBinder(
       details: { cols: xterm.cols, rows: xterm.rows },
     });
     wireTerminal(paneId, xterm);
-  }, [wireTerminal]);
+  }, [getCurrentPane, wireTerminal]);
 
   const handleTerminalReady = useCallback((paneId: string) => (xterm: XTerm) => {
-    const pane = paneByIdRef.current.get(paneId);
+    const pane = getCurrentPane(paneId);
     recordPaneRuntimeDebugEvent({
       scope: 'binder',
       sessionId: pane?.testSessionId,
@@ -804,10 +816,10 @@ export function usePaneRuntimeBinder(
     });
     wireTerminal(paneId, xterm);
     requestPaneRuntimeEnsure(paneId, xterm, 'ready');
-  }, [requestPaneRuntimeEnsure, wireTerminal]);
+  }, [getCurrentPane, requestPaneRuntimeEnsure, wireTerminal]);
 
   const handleTerminalResize = useCallback((paneId: string) => (cols: number, rows: number) => {
-    const pane = paneByIdRef.current.get(paneId);
+    const pane = getCurrentPane(paneId);
     if (!pane) {
       return;
     }
@@ -824,11 +836,11 @@ export function usePaneRuntimeBinder(
     if (xterm) {
       requestPaneRuntimeEnsure(paneId, xterm, 'resize');
     }
-  }, [requestPaneRuntimeEnsure]);
+  }, [getCurrentPane, requestPaneRuntimeEnsure]);
 
   const focusPaneWithRetry = useCallback((paneId: string, retries = 20) => {
     const tryFocus = (remaining: number) => {
-      const pane = paneByIdRef.current.get(paneId);
+      const pane = getCurrentPane(paneId);
       const handle = terminalHandlesRef.current.get(paneId);
       if (handle?.terminal && handle.focus()) {
         recordPaneRuntimeDebugEvent({
@@ -868,7 +880,7 @@ export function usePaneRuntimeBinder(
       window.setTimeout(() => tryFocus(remaining - 1), 50);
     };
     tryFocus(retries);
-  }, []);
+  }, [getCurrentPane]);
 
   const fitPane = useCallback((paneId: string) => {
     terminalHandlesRef.current.get(paneId)?.fit();

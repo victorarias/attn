@@ -121,7 +121,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '47';
+const PROTOCOL_VERSION = '49';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -434,11 +434,6 @@ function upsertEndpointByID(endpoints: DaemonEndpoint[], endpoint: DaemonEndpoin
 
 function workspaceActionKey(action: string, sessionId: string, paneId?: string): string {
   return `workspace:${action}:${sessionId}:${paneId || ''}`;
-}
-
-function isSessionNotFoundError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes('session not found');
 }
 
 const ATTACH_RETRY_TIMEOUT_MS = 3_000;
@@ -2074,7 +2069,11 @@ export function useDaemonSocket({
           sendPtyResize(args.id, args.cols, args.rows);
         }
 
-        if (!forceRespawn) {
+        // For sessions the daemon already knows about, try to attach to the
+        // existing PTY first.  For brand-new sessions (shells, first launch)
+        // skip this — the attach will always fail with "session not found" and
+        // just adds a wasted round-trip.
+        if (!forceRespawn && sessionKnownToDaemon) {
           try {
             await sendAttachSessionWithRetry(args.id);
             return;
@@ -2084,39 +2083,34 @@ export function useDaemonSocket({
             // This keeps the first-run contract:
             //   first run: --session-id <id>
             //   recover:   --resume <id>
-            if (sessionKnownToDaemon) {
-              if (existingSession.agent === 'claude') {
-                const resumeArgs: PtySpawnArgs = {
-                  ...args,
-                  resume_session_id: args.id,
-                  resume_picker: null,
-                  fork_session: null,
-                };
-                console.log(
-                  '[DaemonSocket] Recovering session %s via resume (recoverable=%s)',
-                  args.id,
-                  String(existingSession.recoverable ?? false),
-                );
-                try {
-                  await sendSpawnSession(resumeArgs);
-                } catch (spawnErr) {
-                  const message = spawnErr instanceof Error ? spawnErr.message.toLowerCase() : String(spawnErr).toLowerCase();
-                  if (!message.includes('already exists')) {
-                    throw new Error(
-                      'Failed to recover session. Close it and start a new session.'
-                    );
-                  }
-                }
-                await sendAttachSessionWithRetry(args.id);
-                return;
-              }
-              throw new Error(
-                'No live PTY found for this session. It likely ended when the daemon restarted. Close it and start a new session.'
+            if (existingSession.agent === 'claude') {
+              const resumeArgs: PtySpawnArgs = {
+                ...args,
+                resume_session_id: args.id,
+                resume_picker: null,
+                fork_session: null,
+              };
+              console.log(
+                '[DaemonSocket] Recovering session %s via resume (recoverable=%s)',
+                args.id,
+                String(existingSession.recoverable ?? false),
               );
+              try {
+                await sendSpawnSession(resumeArgs);
+              } catch (spawnErr) {
+                const message = spawnErr instanceof Error ? spawnErr.message.toLowerCase() : String(spawnErr).toLowerCase();
+                if (!message.includes('already exists')) {
+                  throw new Error(
+                    'Failed to recover session. Close it and start a new session.'
+                  );
+                }
+              }
+              await sendAttachSessionWithRetry(args.id);
+              return;
             }
-            if (!isSessionNotFoundError(attachErr)) {
-              throw attachErr;
-            }
+            throw new Error(
+              'No live PTY found for this session. It likely ended when the daemon restarted. Close it and start a new session.'
+            );
           }
         }
 
@@ -2463,6 +2457,29 @@ export function useDaemonSocket({
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
           reject(new Error('Remove endpoint timed out'));
+        }
+      }, 30000);
+    });
+  }, [hasPendingEndpointAction]);
+
+  const sendSetEndpointRemoteWeb = useCallback((endpointId: string, enabled: boolean): Promise<EndpointActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      if (hasPendingEndpointAction()) {
+        reject(new Error('Another endpoint action is already in progress'));
+        return;
+      }
+      const key = `endpoint_action:remote_web:${endpointId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'set_endpoint_remote_web', endpoint_id: endpointId, enabled }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Set endpoint remote web timed out'));
         }
       }, 30000);
     });
@@ -3438,6 +3455,7 @@ export function useDaemonSocket({
     sendAddEndpoint,
     sendUpdateEndpoint,
     sendRemoveEndpoint,
+    sendSetEndpointRemoteWeb,
     sendListEndpoints,
     sendGetRecentLocations,
     sendBrowseDirectory,

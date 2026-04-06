@@ -452,7 +452,13 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 			_ = workerLogFile.Close()
 		}()
 	}
-	cmd.Env = append(os.Environ(), "ATTN_PTY_WORKER=1")
+	workerEnv := append(os.Environ(), "ATTN_PTY_WORKER=1")
+	if len(opts.LoginShellEnv) > 0 {
+		if envJSON, err := json.Marshal(opts.LoginShellEnv); err == nil {
+			workerEnv = append(workerEnv, "ATTN_CACHED_SHELL_ENV="+string(envJSON))
+		}
+	}
+	cmd.Env = workerEnv
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start pty worker: %w", err)

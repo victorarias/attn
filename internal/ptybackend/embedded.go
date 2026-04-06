@@ -50,6 +50,7 @@ func (b *EmbeddedBackend) Spawn(_ context.Context, opts SpawnOptions) error {
 		CodexExecutable:   opts.CodexExecutable,
 		CopilotExecutable: opts.CopilotExecutable,
 		PiExecutable:      opts.PiExecutable,
+		LoginShellEnv:     opts.LoginShellEnv,
 	})
 }
 

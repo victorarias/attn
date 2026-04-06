@@ -38,6 +38,7 @@ interface SettingsModalProps {
   onAddEndpoint: (name: string, sshTarget: string) => Promise<{ success: boolean }>;
   onUpdateEndpoint: (endpointId: string, updates: { name?: string; ssh_target?: string; enabled?: boolean }) => Promise<{ success: boolean }>;
   onRemoveEndpoint: (endpointId: string) => Promise<{ success: boolean }>;
+  onSetEndpointRemoteWeb: (endpointId: string, enabled: boolean) => Promise<{ success: boolean }>;
   onSetSetting: (key: string, value: string) => void;
   themePreference: ThemePreference;
   onSetTheme: (theme: ThemePreference) => void;
@@ -56,6 +57,7 @@ export function SettingsModal({
   onAddEndpoint,
   onUpdateEndpoint,
   onRemoveEndpoint,
+  onSetEndpointRemoteWeb,
   onSetSetting,
   themePreference,
   onSetTheme,
@@ -86,6 +88,12 @@ export function SettingsModal({
 
   // Sync with settings when modal opens
   const actualProjectsDir = settings.projects_directory || '';
+  const tailscaleEnabled = (settings.tailscale_enabled || 'false') === 'true';
+  const tailscaleStatus = settings.tailscale_status || 'disabled';
+  const tailscaleURL = settings.tailscale_url || '';
+  const tailscaleDomain = settings.tailscale_domain || '';
+  const tailscaleAuthURL = settings.tailscale_auth_url || '';
+  const tailscaleError = settings.tailscale_error || '';
   const actualAgentExecutables = useMemo(
     () => getAgentExecutableSettings(settings),
     [settings],
@@ -200,6 +208,10 @@ export function SettingsModal({
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setProjectsDir(e.target.value);
   }, []);
+
+  const handleToggleTailscale = useCallback(() => {
+    onSetSetting('tailscale_enabled', tailscaleEnabled ? 'false' : 'true');
+  }, [onSetSetting, tailscaleEnabled]);
 
   const handleInputBlur = useCallback(() => {
     if (projectsDir !== actualProjectsDir) {
@@ -400,6 +412,18 @@ export function SettingsModal({
     }
   }, [cancelEditEndpoint, editingEndpointID, onRemoveEndpoint]);
 
+  const handleSetEndpointRemoteWeb = useCallback(async (endpointId: string, enabled: boolean) => {
+    setEndpointError(null);
+    setEndpointActionID(endpointId);
+    try {
+      await onSetEndpointRemoteWeb(endpointId, enabled);
+    } catch (error) {
+      setEndpointError(error instanceof Error ? error.message : 'Failed to update remote web access');
+    } finally {
+      setEndpointActionID(null);
+    }
+  }, [onSetEndpointRemoteWeb]);
+
   if (!isOpen) return null;
 
   return (
@@ -461,6 +485,41 @@ export function SettingsModal({
               <button className="browse-btn" onClick={handleBrowse}>
                 Browse
               </button>
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <h3>Mobile Web Client</h3>
+            <p className="settings-description">
+              Expose the daemon through this machine&apos;s existing Tailscale device identity so the embedded mobile web client can attach to running sessions from Safari or any browser.
+            </p>
+            <div className="settings-row-inline">
+              <span className="settings-label">Tailscale Serve</span>
+              <button className="browse-btn" onClick={handleToggleTailscale}>
+                {tailscaleEnabled ? 'Disable' : 'Enable'}
+              </button>
+            </div>
+            <div className="settings-hint">Status: {tailscaleStatus}</div>
+            {tailscaleDomain && (
+              <div className="settings-hint">Device DNS name: <code>{tailscaleDomain}</code></div>
+            )}
+            {tailscaleURL && (
+              <div className="settings-hint">
+                Web URL: <a href={tailscaleURL} target="_blank" rel="noreferrer">{tailscaleURL}</a>
+              </div>
+            )}
+            {tailscaleAuthURL && (
+              <div className="settings-agent-warning">
+                Sign this machine into Tailscale:
+                {' '}
+                <a href={tailscaleAuthURL} target="_blank" rel="noreferrer">{tailscaleAuthURL}</a>
+              </div>
+            )}
+            {tailscaleError && (
+              <div className="settings-agent-warning">{tailscaleError}</div>
+            )}
+            <div className="settings-hint">
+              This uses the host Tailscale client and does not register a second tailnet device for attn.
             </div>
           </div>
 
@@ -528,6 +587,12 @@ export function SettingsModal({
                   const isEditing = editingEndpointID === endpoint.id;
                   const isBusy = endpointActionID === endpoint.id;
                   const availableAgents = endpoint.capabilities?.agents_available || [];
+                  const remoteWebEnabled = endpoint.capabilities?.tailscale_enabled === true;
+                  const remoteWebStatus = endpoint.capabilities?.tailscale_status || (remoteWebEnabled ? 'starting' : 'disabled');
+                  const remoteWebURL = endpoint.capabilities?.tailscale_url;
+                  const remoteWebAuthURL = endpoint.capabilities?.tailscale_auth_url;
+                  const remoteWebError = endpoint.capabilities?.tailscale_error;
+                  const canToggleRemoteWeb = endpoint.status === 'connected' && !endpointActionInFlight;
                   return (
                     <div key={endpoint.id} className={`endpoint-card status-${endpoint.status}`}>
                       <div className="endpoint-card-header">
@@ -554,6 +619,13 @@ export function SettingsModal({
                           )}
                           <button className="browse-btn" onClick={() => void handleToggleEndpoint(endpoint)} disabled={endpointActionInFlight}>
                             {endpoint.enabled === false ? 'Enable' : 'Disable'}
+                          </button>
+                          <button
+                            className="browse-btn"
+                            onClick={() => void handleSetEndpointRemoteWeb(endpoint.id, !remoteWebEnabled)}
+                            disabled={!canToggleRemoteWeb}
+                          >
+                            {remoteWebEnabled ? 'Disable Web' : 'Enable Web'}
                           </button>
                           <button className="browse-btn danger" onClick={() => void handleRemoveEndpoint(endpoint.id)} disabled={endpointActionInFlight}>
                             Remove
@@ -616,9 +688,35 @@ export function SettingsModal({
                                 <span>{endpoint.session_count ?? 0}</span>
                               </div>
                               <div className="endpoint-meta">
+                                <span className="endpoint-meta-label">Remote Web</span>
+                                <span>{remoteWebStatus}</span>
+                              </div>
+                              <div className="endpoint-meta">
                                 <span className="endpoint-meta-label">Agents</span>
                                 <span>{availableAgents.length > 0 ? availableAgents.join(', ') : 'none reported'}</span>
                               </div>
+                              {remoteWebURL && (
+                                <div className="endpoint-meta">
+                                  <span className="endpoint-meta-label">Remote URL</span>
+                                  <a href={remoteWebURL} target="_blank" rel="noreferrer">{remoteWebURL}</a>
+                                </div>
+                              )}
+                              {remoteWebAuthURL && (
+                                <div className="settings-agent-warning">
+                                  Sign this host into Tailscale:
+                                  {' '}
+                                  <a href={remoteWebAuthURL} target="_blank" rel="noreferrer">{remoteWebAuthURL}</a>
+                                </div>
+                              )}
+                              {endpoint.capabilities.tailscale_domain && !remoteWebURL && (
+                                <div className="endpoint-meta">
+                                  <span className="endpoint-meta-label">Remote DNS</span>
+                                  <code>{endpoint.capabilities.tailscale_domain}</code>
+                                </div>
+                              )}
+                              {remoteWebError && (
+                                <div className="settings-agent-warning">{remoteWebError}</div>
+                              )}
                               {endpoint.capabilities.projects_directory && (
                                 <div className="endpoint-meta">
                                   <span className="endpoint-meta-label">Projects</span>
@@ -626,6 +724,9 @@ export function SettingsModal({
                                 </div>
                               )}
                             </>
+                          )}
+                          {!canToggleRemoteWeb && (
+                            <div className="settings-hint">Connect to the remote daemon before changing its web access.</div>
                           )}
                         </div>
                       )}

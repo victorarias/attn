@@ -1,0 +1,2729 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <title>attn web</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232f2417'/%3E%3Cpath d='M4 12V4h2.3l1.7 4.4L9.7 4H12v8h-1.7V6.6L8.3 12H7.1L5.7 8.5V12z' fill='%23f5f1e8'/%3E%3C/svg%3E"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --terminal-font:
+          ui-monospace,
+          SFMono-Regular,
+          "SF Mono",
+          Consolas,
+          "Liberation Mono",
+          Menlo,
+          monospace;
+        --ui-font:
+          "IBM Plex Sans",
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        --bg: #0b0f14;
+        --bg-elevated: #101720;
+        --bg-panel: rgba(16, 23, 32, 0.9);
+        --bg-panel-strong: rgba(20, 28, 39, 0.98);
+        --bg-terminal: #0d1218;
+        --line: rgba(148, 163, 184, 0.18);
+        --line-strong: rgba(148, 163, 184, 0.32);
+        --text: #e5edf5;
+        --muted: #9ba9ba;
+        --accent: #7dd3fc;
+        --accent-strong: #38bdf8;
+        --success: #34d399;
+        --warning: #f59e0b;
+        --danger: #fb7185;
+        --launching: #60a5fa;
+        --idle: #94a3b8;
+        --unknown: #c084fc;
+        --safe-top: env(safe-area-inset-top, 0px);
+        --safe-right: env(safe-area-inset-right, 0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
+        --safe-left: env(safe-area-inset-left, 0px);
+        --app-width: 100vw;
+        --app-height: 100dvh;
+        --keyboard-inset: 0px;
+        --header-height: 68px;
+        --quick-actions-height: 164px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-height: 100%;
+        background:
+          radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 30%),
+          radial-gradient(circle at bottom right, rgba(125, 211, 252, 0.08), transparent 25%),
+          var(--bg);
+      }
+
+      body {
+        margin: 0;
+        min-height: 100svh;
+        background: transparent;
+        color: var(--text);
+        font-family: var(--ui-font);
+      }
+
+      body[data-view="terminal"] {
+        width: var(--app-width);
+        max-width: var(--app-width);
+        min-height: var(--app-height);
+        overflow: hidden;
+        overflow-x: clip;
+        overscroll-behavior: none;
+      }
+
+      body[data-view="terminal"] #app {
+        width: var(--app-width);
+        max-width: var(--app-width);
+        min-height: var(--app-height);
+        height: var(--app-height);
+        overflow: hidden;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        background: none;
+        color: inherit;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .visually-hidden {
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        padding: 0 !important;
+        margin: -1px !important;
+        overflow: hidden !important;
+        clip: rect(0, 0, 0, 0) !important;
+        white-space: nowrap !important;
+        border: 0 !important;
+      }
+
+      #mobile-input {
+        position: fixed;
+        left: -9999px;
+        top: -9999px;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        border: 0;
+        opacity: 0.01;
+        background: transparent;
+        color: transparent;
+        caret-color: transparent;
+        font-size: 18px;
+        line-height: 1.2;
+        border-radius: 12px;
+        appearance: none;
+        -webkit-appearance: none;
+        pointer-events: none;
+        transform: none;
+        z-index: -1;
+      }
+
+      #app {
+        min-height: 100svh;
+      }
+
+      .banner {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        padding:
+          calc(var(--safe-top) + 10px)
+          calc(var(--safe-right) + 16px)
+          10px
+          calc(var(--safe-left) + 16px);
+        background: rgba(251, 113, 133, 0.92);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        color: #fff8fb;
+        font-size: 14px;
+        line-height: 1.4;
+        backdrop-filter: blur(14px);
+      }
+
+      .banner[data-tone="info"] {
+        background: rgba(15, 23, 42, 0.92);
+      }
+
+      .sessions-view {
+        padding:
+          calc(var(--safe-top) + 18px)
+          calc(var(--safe-right) + 16px)
+          calc(var(--safe-bottom) + 20px)
+          calc(var(--safe-left) + 16px);
+      }
+
+      .hero {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--accent);
+        font-family: var(--terminal-font);
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .hero h1 {
+        margin: 0;
+        font-size: clamp(32px, 8vw, 48px);
+        line-height: 0.95;
+        letter-spacing: -0.03em;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 32rem;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.5;
+      }
+
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      .meta-card {
+        min-height: 88px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--bg-panel);
+        backdrop-filter: blur(12px);
+      }
+
+      .meta-card-label {
+        margin: 0 0 6px;
+        color: var(--muted);
+        font-family: var(--terminal-font);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .meta-card-value {
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.35;
+      }
+
+      .meta-card-small {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+        word-break: break-word;
+      }
+
+      .session-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .session-card {
+        width: 100%;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: var(--bg-panel);
+        text-align: left;
+        box-shadow: 0 16px 40px rgba(2, 6, 23, 0.24);
+      }
+
+      .session-card:active {
+        transform: translateY(1px);
+      }
+
+      .session-card-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .session-card h2 {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.05;
+      }
+
+      .session-path {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+        word-break: break-word;
+      }
+
+      .session-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .session-meta-chip,
+      .state-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 32px;
+        padding: 0 12px;
+        border-radius: 999px;
+        font-family: var(--terminal-font);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .session-meta-chip {
+        background: rgba(148, 163, 184, 0.1);
+        color: var(--muted);
+      }
+
+      .state-pill {
+        background: rgba(148, 163, 184, 0.12);
+        color: var(--text);
+      }
+
+      .state-pill::before {
+        content: "";
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: 0.9;
+      }
+
+      .state-launching {
+        color: var(--launching);
+      }
+
+      .state-working {
+        color: var(--success);
+      }
+
+      .state-pending_approval,
+      .state-waiting_input {
+        color: var(--warning);
+      }
+
+      .state-idle {
+        color: var(--idle);
+      }
+
+      .state-unknown {
+        color: var(--unknown);
+      }
+
+      .empty-state {
+        padding: 18px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 20px;
+        color: var(--muted);
+        background: rgba(15, 23, 42, 0.42);
+      }
+
+      .terminal-view {
+        width: var(--app-width);
+        max-width: var(--app-width);
+        height: var(--app-height);
+        min-height: 0;
+        min-width: 0;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at top, rgba(56, 189, 248, 0.1), transparent 30%),
+          var(--bg);
+      }
+
+      .terminal-topbar {
+        min-height: 42px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding:
+          calc(var(--safe-top) + 4px)
+          calc(var(--safe-right) + 8px)
+          4px
+          calc(var(--safe-left) + 8px);
+        background: rgba(7, 10, 15, 0.92);
+        backdrop-filter: blur(16px);
+      }
+
+      .icon-button,
+      .toolbar-button,
+      .quick-action {
+        min-height: 32px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(15, 23, 42, 0.7);
+        color: var(--text);
+      }
+
+      .icon-button {
+        min-width: 34px;
+        padding: 0 8px;
+        font-weight: 600;
+        font-size: 12px;
+      }
+
+      .icon-button[data-active="true"],
+      .toolbar-button[data-active="true"],
+      .quick-action[data-active="true"] {
+        border-color: rgba(125, 211, 252, 0.5);
+        color: var(--accent);
+        background: rgba(14, 46, 63, 0.92);
+      }
+
+      .terminal-heading {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .terminal-heading h2 {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .terminal-body {
+        min-height: 0;
+        min-width: 0;
+        padding:
+          6px
+          calc(var(--safe-right) + 6px)
+          6px
+          calc(var(--safe-left) + 6px);
+        display: grid;
+        overflow: hidden;
+      }
+
+      .terminal-frame {
+        min-height: 0;
+        height: 100%;
+        width: 100%;
+        min-width: 0;
+      }
+
+      .terminal-stage {
+        position: relative;
+        min-height: 0;
+        min-width: 0;
+        height: 100%;
+        width: 100%;
+        max-width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        overflow: hidden;
+        background: var(--bg-terminal);
+        box-shadow: 0 18px 48px rgba(2, 6, 23, 0.4);
+        overscroll-behavior: contain;
+        touch-action: none;
+      }
+
+      .terminal-host {
+        width: 100%;
+        max-width: 100%;
+        height: 100%;
+        min-height: 100%;
+        min-width: 0;
+        padding: 8px;
+        font-family: var(--terminal-font);
+        touch-action: none;
+        user-select: text;
+        -webkit-user-select: text;
+        caret-color: transparent;
+        outline: none;
+      }
+
+      .terminal-host canvas {
+        display: block;
+      }
+
+      .quick-actions {
+        padding:
+          0
+          calc(var(--safe-right) + 6px)
+          calc(var(--safe-bottom) + 4px)
+          calc(var(--safe-left) + 6px);
+      }
+
+      .quick-actions-shell {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(8, 12, 18, 0.94);
+        backdrop-filter: blur(18px);
+        padding: 6px;
+      }
+
+      .toolbar-button {
+        min-width: 68px;
+        padding: 0 8px;
+        font-family: var(--terminal-font);
+        font-size: 10px;
+      }
+
+      .font-size-button {
+        min-width: 32px;
+        padding: 0 6px;
+      }
+
+      .quick-action-grid {
+        display: grid;
+        grid-template-columns: repeat(8, minmax(0, 1fr));
+        gap: 4px;
+      }
+
+      .quick-action {
+        min-width: 0;
+        padding: 0 4px;
+        font-family: var(--terminal-font);
+        font-size: 10px;
+        line-height: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .quick-action[data-span="2"] {
+        grid-column: span 2;
+      }
+
+      @media (max-width: 560px) {
+        .terminal-heading h2 {
+          font-size: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body data-view="sessions">
+    <div id="app" data-attn-web-client="ghostty-web" data-view="sessions">
+      <div id="banner" class="banner hidden" data-tone="info" role="status" aria-live="polite"></div>
+
+      <section id="sessions-view" class="sessions-view" aria-label="Sessions">
+        <header class="hero">
+          <div class="eyebrow">attn ghostty-web</div>
+          <h1>Live Sessions</h1>
+          <p>
+            Minimal daemon-served terminal client with a fresh Ghostty renderer, explicit PTY
+            sizing, and a direct keyboard path for mobile input.
+          </p>
+        </header>
+
+        <section class="meta-grid" aria-label="Daemon metadata">
+          <article class="meta-card">
+            <p class="meta-card-label">Connection</p>
+            <p id="connection-value" class="meta-card-value">Connecting</p>
+            <p id="connection-detail" class="meta-card-small">Opening WebSocket to the daemon.</p>
+          </article>
+          <article class="meta-card">
+            <p class="meta-card-label">Build</p>
+            <p id="build-version" class="meta-card-value">loading</p>
+            <p id="build-time" class="meta-card-small">waiting for /health</p>
+          </article>
+          <article class="meta-card">
+            <p class="meta-card-label">Protocol</p>
+            <p id="protocol-version" class="meta-card-value">pending</p>
+            <p id="daemon-id" class="meta-card-small">daemon id pending</p>
+          </article>
+        </section>
+
+        <div id="session-list" class="session-list" data-testid="session-list"></div>
+        <p id="empty-state" class="empty-state hidden">No active sessions are currently exposed.</p>
+      </section>
+
+      <section id="terminal-view" class="terminal-view hidden" aria-label="Terminal">
+        <header class="terminal-topbar">
+          <button id="back-button" class="icon-button" type="button" aria-label="Back to sessions">
+            Back
+          </button>
+          <div class="terminal-heading">
+            <h2 id="terminal-title">Session</h2>
+          </div>
+          <button
+            id="font-size-decrease"
+            class="toolbar-button font-size-button"
+            type="button"
+            aria-label="Decrease text size"
+          >
+            A-
+          </button>
+          <button
+            id="font-size-increase"
+            class="toolbar-button font-size-button"
+            type="button"
+            aria-label="Increase text size"
+          >
+            A+
+          </button>
+          <button
+            id="keyboard-toggle"
+            class="toolbar-button"
+            type="button"
+            data-active="false"
+            aria-pressed="false"
+          >
+            Keyboard
+          </button>
+        </header>
+
+        <div class="terminal-body">
+          <div class="terminal-frame">
+            <div
+              id="terminal-stage"
+              class="terminal-stage"
+              data-terminal-ready="false"
+              data-attach-state="detached"
+              data-cols="0"
+              data-rows="0"
+              data-connection-state="connecting"
+              data-current-session=""
+              data-last-seq="0"
+              data-testid="terminal-stage"
+            >
+              <div id="terminal-host" class="terminal-host"></div>
+            </div>
+          </div>
+        </div>
+
+        <section class="quick-actions" aria-label="Quick actions">
+          <div class="quick-actions-shell">
+            <div class="quick-action-grid">
+              <button class="quick-action" data-quick-action="esc" type="button">Esc</button>
+              <button
+                class="quick-action"
+                data-quick-action="ctrl-c"
+                type="button"
+                aria-label="Send Ctrl+C"
+              >
+                ^C
+              </button>
+              <button class="quick-action" data-quick-action="shift-tab" data-span="2" type="button">
+                Shift+Tab
+              </button>
+              <button
+                id="ctrl-toggle"
+                class="quick-action"
+                data-active="false"
+                type="button"
+                aria-pressed="false"
+              >
+                Ctrl
+              </button>
+              <button
+                id="alt-toggle"
+                class="quick-action"
+                data-active="false"
+                type="button"
+                aria-pressed="false"
+              >
+                Alt
+              </button>
+              <button class="quick-action" data-quick-action="yes" type="button">yes</button>
+              <button class="quick-action" data-quick-action="no" type="button">no</button>
+              <button class="quick-action" data-quick-action="new" type="button">
+                /new
+              </button>
+              <button class="quick-action" data-quick-action="compact" type="button">
+                /compact
+              </button>
+              <button class="quick-action" data-quick-action="1" type="button">1</button>
+              <button class="quick-action" data-quick-action="2" type="button">2</button>
+              <button class="quick-action" data-quick-action="3" type="button">3</button>
+              <button class="quick-action" data-quick-action="4" type="button">4</button>
+              <button class="quick-action" data-quick-action="5" type="button">5</button>
+              <button class="quick-action" data-quick-action="6" type="button">6</button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <input
+        id="mobile-input"
+        type="text"
+        autocapitalize="none"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        inputmode="text"
+        enterkeyhint="done"
+        aria-hidden="true"
+      />
+      <pre id="terminal-debug-text" class="visually-hidden" aria-hidden="true"></pre>
+    </div>
+
+    <script type="module">
+      import { FitAddon, Ghostty, Terminal } from "/vendor/ghostty-web/ghostty-web.js";
+
+      const TERMINAL_FONT_FAMILY =
+        'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace';
+      const POINTER_IS_COARSE = window.matchMedia("(pointer: coarse)").matches;
+      const DEFAULT_TERMINAL_FONT_SIZE = 14;
+      const MIN_TERMINAL_FONT_SIZE = 10;
+      const MAX_TERMINAL_FONT_SIZE = 18;
+
+      const QUICK_ACTIONS = {
+        esc: "\u001b",
+        "ctrl-c": "\u0003",
+        "shift-tab": "\u001b[Z",
+        yes: "yes\r",
+        no: "no\r",
+        compact: "/compact\r",
+        new: "/new\r",
+        "1": "1\r",
+        "2": "2\r",
+        "3": "3\r",
+        "4": "4\r",
+        "5": "5\r",
+        "6": "6\r",
+      };
+
+      const SPECIAL_KEY_PAYLOADS = {
+        Enter: "\r",
+        Tab: "\t",
+        Escape: "\u001b",
+        Backspace: "\u007f",
+        Delete: "\u001b[3~",
+        ArrowUp: "\u001b[A",
+        ArrowDown: "\u001b[B",
+        ArrowRight: "\u001b[C",
+        ArrowLeft: "\u001b[D",
+        Home: "\u001b[H",
+        End: "\u001b[F",
+        PageUp: "\u001b[5~",
+        PageDown: "\u001b[6~",
+      };
+
+      const STATE_META = {
+        launching: { label: "launching", className: "state-launching" },
+        working: { label: "working", className: "state-working" },
+        pending_approval: { label: "pending approval", className: "state-pending_approval" },
+        waiting_input: { label: "waiting input", className: "state-waiting_input" },
+        idle: { label: "idle", className: "state-idle" },
+        unknown: { label: "unknown", className: "state-unknown" },
+      };
+
+      const banner = document.getElementById("banner");
+      const app = document.getElementById("app");
+      const sessionsView = document.getElementById("sessions-view");
+      const terminalView = document.getElementById("terminal-view");
+      const sessionList = document.getElementById("session-list");
+      const emptyState = document.getElementById("empty-state");
+      const connectionValue = document.getElementById("connection-value");
+      const connectionDetail = document.getElementById("connection-detail");
+      const buildVersion = document.getElementById("build-version");
+      const buildTime = document.getElementById("build-time");
+      const protocolVersion = document.getElementById("protocol-version");
+      const daemonID = document.getElementById("daemon-id");
+      const backButton = document.getElementById("back-button");
+      const fontSizeDecrease = document.getElementById("font-size-decrease");
+      const fontSizeIncrease = document.getElementById("font-size-increase");
+      const keyboardToggle = document.getElementById("keyboard-toggle");
+      const ctrlToggle = document.getElementById("ctrl-toggle");
+      const altToggle = document.getElementById("alt-toggle");
+      const terminalTitle = document.getElementById("terminal-title");
+      const terminalHost = document.getElementById("terminal-host");
+      const terminalStage = document.getElementById("terminal-stage");
+      const mobileInput = document.getElementById("mobile-input");
+      const terminalDebugText = document.getElementById("terminal-debug-text");
+
+      const state = {
+        ws: null,
+        reconnectDelayMS: 1000,
+        reconnectTimer: null,
+        sessions: [],
+        currentSessionID: null,
+        health: null,
+        protocolVersion: null,
+        terminal: null,
+        fitAddon: null,
+        ghosttyPromise: null,
+        resizeObserver: null,
+        resizeFrame: 0,
+        viewportSettleTimer: 0,
+        viewportSettleToken: 0,
+        fontResizeTimer: 0,
+        fontResizeToken: 0,
+        pendingSettledResizeClaim: false,
+        debugFrame: 0,
+        currentResizeSource: null,
+        suspendResizeMessages: false,
+        lastResizeMessage: null,
+        resizeMessages: [],
+        lastForcedRender: null,
+        lastViewportSettle: null,
+        attachPending: false,
+        attachQueue: [],
+        attachState: "detached",
+        claimOwnershipOnAttach: false,
+        ownershipAwaitingOutput: false,
+        ownershipClearOnOutput: false,
+        ownershipToken: 0,
+        ownershipSessionID: null,
+        ownershipFallbackTimer: 0,
+        ownershipFallbackPayload: null,
+        lastSeqBySession: new Map(),
+        outputDecoder: new TextDecoder(),
+        stickyCtrl: false,
+        stickyAlt: false,
+        terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
+        keyboardMode: false,
+        lastBackspaceAt: 0,
+        followOutput: true,
+        sentInputs: [],
+        connectionState: "connecting",
+        connectionDetail: "Opening WebSocket to the daemon.",
+        pointerIsCoarse: POINTER_IS_COARSE,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        keyboardInset: 0,
+        rawViewportWidth: window.innerWidth,
+        rawViewportHeight: window.innerHeight,
+        rawViewportOffsetTop: 0,
+        rawViewportScale: 1,
+        keyboardTransition: "idle",
+        lastViewportInstrumentationAt: 0,
+        lastViewportInstrumentationSource: "",
+        blurRecoveryTimer: 0,
+        keyboardBaselineViewportHeight: window.innerHeight,
+        keyboardViewportRecoveryUntil: 0,
+        lastViewportWidth: 0,
+        lastViewportHeight: 0,
+        lastStableCols: 0,
+        touchScroll: {
+          active: false,
+          startY: 0,
+          startViewportY: 0,
+          sentSteps: 0,
+          suppressClickUntil: 0,
+        },
+      };
+
+      function isSocketOpen() {
+        return state.ws && state.ws.readyState === WebSocket.OPEN;
+      }
+
+      function showBanner(message, tone = "info") {
+        if (!message) {
+          banner.textContent = "";
+          banner.classList.add("hidden");
+          banner.dataset.tone = "info";
+          return;
+        }
+        banner.textContent = message;
+        banner.dataset.tone = tone;
+        banner.classList.remove("hidden");
+      }
+
+      function setConnectionState(kind, detail) {
+        state.connectionState = kind;
+        state.connectionDetail = detail;
+        connectionValue.textContent = kind;
+        connectionDetail.textContent = detail;
+        terminalStage.dataset.connectionState = kind;
+        updateTerminalStatus();
+      }
+
+      function setView(view) {
+        app.dataset.view = view;
+        document.body.dataset.view = view;
+        sessionsView.classList.toggle("hidden", view !== "sessions");
+        terminalView.classList.toggle("hidden", view !== "terminal");
+      }
+
+      function getRawViewportMetrics() {
+        if (window.visualViewport) {
+          return {
+            width: window.visualViewport.width,
+            height: window.visualViewport.height,
+            offsetTop: window.visualViewport.offsetTop || 0,
+            scale: window.visualViewport.scale || 1,
+          };
+        }
+
+        return {
+          width: window.innerWidth,
+          height: window.innerHeight,
+          offsetTop: 0,
+          scale: 1,
+        };
+      }
+
+      function captureViewportMetrics() {
+        const viewport = getRawViewportMetrics();
+        state.rawViewportWidth = viewport.width;
+        state.rawViewportHeight = viewport.height;
+        state.rawViewportOffsetTop = viewport.offsetTop;
+        state.rawViewportScale = viewport.scale;
+        return viewport;
+      }
+
+      function commitViewportMetrics(viewport, options = {}) {
+        const preserveWidth = Boolean(options.preserveWidth && state.viewportWidth > 0);
+        const committedWidth = preserveWidth ? state.viewportWidth : viewport.width;
+        const committedHeight = Math.max(viewport.height, 1);
+        const keyboardInset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+
+        state.viewportWidth = committedWidth;
+        state.viewportHeight = committedHeight;
+        state.keyboardInset = keyboardInset;
+        document.documentElement.style.setProperty("--app-width", `${Math.max(committedWidth, 1)}px`);
+        document.documentElement.style.setProperty("--app-height", `${committedHeight}px`);
+        document.documentElement.style.setProperty(
+          "--keyboard-inset",
+          `${Math.max(keyboardInset, 0)}px`,
+        );
+      }
+
+      function syncViewportMetrics() {
+        const viewport = captureViewportMetrics();
+        commitViewportMetrics(viewport, {
+          preserveWidth: state.keyboardTransition !== "idle",
+        });
+      }
+
+      function handleViewportSignal(source) {
+        const viewport = captureViewportMetrics();
+        if (!state.currentSessionID || app.dataset.view !== "terminal") {
+          commitViewportMetrics(viewport, { preserveWidth: false });
+          return;
+        }
+
+        instrumentViewportSignal(source, viewport);
+        scheduleViewportSettle(source);
+      }
+
+      function describeInstrumentationElement(element) {
+        if (!(element instanceof HTMLElement)) {
+          return null;
+        }
+        return {
+          tag: element.tagName.toLowerCase(),
+          id: element.id || "",
+          className: typeof element.className === "string" ? element.className : "",
+          ariaLabel: element.getAttribute("aria-label") || "",
+        };
+      }
+
+      function snapshotRect(element) {
+        if (!(element instanceof Element)) {
+          return null;
+        }
+        const rect = element.getBoundingClientRect();
+        return {
+          left: Number(rect.left.toFixed(2)),
+          top: Number(rect.top.toFixed(2)),
+          width: Number(rect.width.toFixed(2)),
+          height: Number(rect.height.toFixed(2)),
+          bottom: Number(rect.bottom.toFixed(2)),
+          right: Number(rect.right.toFixed(2)),
+        };
+      }
+
+      function getLiveViewportSnapshot() {
+        if (window.visualViewport) {
+          return {
+            width: window.visualViewport.width,
+            height: window.visualViewport.height,
+            offsetTop: window.visualViewport.offsetTop || 0,
+            offsetLeft: window.visualViewport.offsetLeft || 0,
+            pageTop: window.visualViewport.pageTop || 0,
+            pageLeft: window.visualViewport.pageLeft || 0,
+            scale: window.visualViewport.scale || 1,
+          };
+        }
+        return {
+          width: window.innerWidth,
+          height: window.innerHeight,
+          offsetTop: 0,
+          offsetLeft: 0,
+          pageTop: window.scrollY || 0,
+          pageLeft: window.scrollX || 0,
+          scale: 1,
+        };
+      }
+
+      function sendWebInstrumentation(event, detail = {}) {
+        if (!state.currentSessionID && app.dataset.view !== "terminal") {
+          return;
+        }
+
+        const payload = {
+          event,
+          detail,
+          clientTime: new Date().toISOString(),
+          sessionID: state.currentSessionID || "",
+          view: app.dataset.view || "",
+          keyboardMode: state.keyboardMode,
+          keyboardTransition: state.keyboardTransition,
+          pendingSettledResizeClaim: state.pendingSettledResizeClaim,
+          committedViewport: {
+            width: state.viewportWidth,
+            height: state.viewportHeight,
+            keyboardInset: state.keyboardInset,
+          },
+          liveViewport: getLiveViewportSnapshot(),
+          windowMetrics: {
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight,
+            scrollX: window.scrollX || 0,
+            scrollY: window.scrollY || 0,
+            devicePixelRatio: window.devicePixelRatio || 1,
+          },
+          activeElement: describeInstrumentationElement(document.activeElement),
+          mobileInput: {
+            focused: document.activeElement === mobileInput,
+            rect: snapshotRect(mobileInput),
+            leftStyle: mobileInput.style.left || "",
+            rightStyle: mobileInput.style.right || "",
+            topStyle: mobileInput.style.top || "",
+            bottomStyle: mobileInput.style.bottom || "",
+            widthStyle: mobileInput.style.width || "",
+            heightStyle: mobileInput.style.height || "",
+            transformStyle: mobileInput.style.transform || "",
+          },
+          terminal: {
+            attachState: state.attachState,
+            cols: state.terminal ? state.terminal.cols : 0,
+            rows: state.terminal ? state.terminal.rows : 0,
+            fontSize: state.terminalFontSize,
+            connectionState: state.connectionState,
+            stageRect: snapshotRect(terminalStage),
+          },
+          css: {
+            appWidth: getComputedStyle(document.documentElement).getPropertyValue("--app-width").trim(),
+            appHeight: getComputedStyle(document.documentElement).getPropertyValue("--app-height").trim(),
+            keyboardInset: getComputedStyle(document.documentElement)
+              .getPropertyValue("--keyboard-inset")
+              .trim(),
+          },
+          lastResizeMessage: state.lastResizeMessage,
+          lastViewportSettle: state.lastViewportSettle,
+        };
+        const body = JSON.stringify(payload);
+
+        try {
+          if (navigator.sendBeacon) {
+            const blob = new Blob([body], { type: "application/json" });
+            if (navigator.sendBeacon("/web-instrumentation", blob)) {
+              return;
+            }
+          }
+        } catch (error) {}
+
+        fetch("/web-instrumentation", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          cache: "no-store",
+          keepalive: true,
+          body,
+        }).catch(() => {});
+      }
+
+      function instrumentViewportSignal(source, viewport) {
+        if (
+          !state.keyboardMode &&
+          state.keyboardTransition === "idle" &&
+          state.keyboardInset <= 0
+        ) {
+          return;
+        }
+        const now = Date.now();
+        if (
+          state.lastViewportInstrumentationSource === source &&
+          now - state.lastViewportInstrumentationAt < 120
+        ) {
+          return;
+        }
+        state.lastViewportInstrumentationAt = now;
+        state.lastViewportInstrumentationSource = source;
+        sendWebInstrumentation("viewport-signal", {
+          source,
+          viewport,
+        });
+      }
+
+      function escapeHTML(text) {
+        return String(text ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function currentSession() {
+        return state.sessions.find((session) => session.id === state.currentSessionID) || null;
+      }
+
+      function sortSessions(list) {
+        return [...list].sort((left, right) => {
+          const leftStamp = Date.parse(left.state_updated_at || left.last_seen || "") || 0;
+          const rightStamp = Date.parse(right.state_updated_at || right.last_seen || "") || 0;
+          if (rightStamp !== leftStamp) return rightStamp - leftStamp;
+          return left.label.localeCompare(right.label);
+        });
+      }
+
+      function renderHealth() {
+        const health = state.health || {};
+        buildVersion.textContent = health.version || "unknown";
+        buildTime.textContent = health.build_time ? `built ${health.build_time}` : "build time unknown";
+        protocolVersion.textContent =
+          state.protocolVersion || health.protocol || "waiting for daemon";
+        daemonID.textContent = health.daemon_instance_id
+          ? `daemon ${health.daemon_instance_id}`
+          : "daemon id pending";
+      }
+
+      function renderTerminalHeader() {
+        const session = currentSession();
+        if (!session) {
+          terminalTitle.textContent = "Session";
+          terminalTitle.title = "";
+          return;
+        }
+        terminalTitle.textContent = session.label || session.id;
+        terminalTitle.title = session.directory || session.id;
+      }
+
+      function renderSessions() {
+        const sessions = sortSessions(state.sessions);
+        state.sessions = sessions;
+        sessionList.innerHTML = "";
+        emptyState.classList.toggle("hidden", sessions.length > 0);
+
+        for (const session of sessions) {
+          const meta = STATE_META[session.state] || STATE_META.unknown;
+          const button = document.createElement("button");
+          button.className = "session-card";
+          button.type = "button";
+          button.dataset.sessionId = session.id;
+          button.dataset.sessionState = session.state || "unknown";
+          button.innerHTML = `
+            <div class="session-card-top">
+              <div>
+                <h2>${escapeHTML(session.label || session.id)}</h2>
+                <p class="session-path">${escapeHTML(session.directory || "")}</p>
+              </div>
+              <span class="state-pill ${meta.className}">${escapeHTML(meta.label)}</span>
+            </div>
+            <div class="session-meta">
+              <span class="session-meta-chip">${escapeHTML(session.agent || "session")}</span>
+              ${
+                session.branch
+                  ? `<span class="session-meta-chip">${escapeHTML(session.branch)}</span>`
+                  : ""
+              }
+              ${
+                session.endpoint_id
+                  ? `<span class="session-meta-chip">${escapeHTML(session.endpoint_id)}</span>`
+                  : ""
+              }
+            </div>
+          `;
+          button.addEventListener("click", () => openSession(session.id));
+          sessionList.appendChild(button);
+        }
+
+        renderTerminalHeader();
+      }
+
+      function updateTerminalStatus() {
+        terminalStage.dataset.attachState = state.attachState;
+        terminalStage.dataset.currentSession = state.currentSessionID || "";
+        terminalStage.dataset.connectionState = state.connectionState;
+        terminalStage.dataset.keyboardMode = state.keyboardMode ? "armed" : "idle";
+        terminalStage.dataset.cols = state.terminal ? String(state.terminal.cols) : "0";
+        terminalStage.dataset.rows = state.terminal ? String(state.terminal.rows) : "0";
+      }
+
+      function syncModifierButtons() {
+        ctrlToggle.dataset.active = String(state.stickyCtrl);
+        ctrlToggle.setAttribute("aria-pressed", String(state.stickyCtrl));
+        altToggle.dataset.active = String(state.stickyAlt);
+        altToggle.setAttribute("aria-pressed", String(state.stickyAlt));
+      }
+
+      function syncKeyboardButton() {
+        keyboardToggle.dataset.active = String(state.keyboardMode);
+        keyboardToggle.setAttribute("aria-pressed", String(state.keyboardMode));
+        updateTerminalStatus();
+      }
+
+      function clampTerminalFontSize(size) {
+        const numericSize = Number(size);
+        if (!Number.isFinite(numericSize)) {
+          return DEFAULT_TERMINAL_FONT_SIZE;
+        }
+        return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, Math.round(numericSize)));
+      }
+
+      function syncFontSizeButtons() {
+        const size = clampTerminalFontSize(state.terminalFontSize);
+        state.terminalFontSize = size;
+        fontSizeDecrease.disabled = size <= MIN_TERMINAL_FONT_SIZE;
+        fontSizeIncrease.disabled = size >= MAX_TERMINAL_FONT_SIZE;
+        fontSizeDecrease.title = `Decrease text size (${size}px)`;
+        fontSizeIncrease.title = `Increase text size (${size}px)`;
+      }
+
+      function scheduleFontResizeTransaction(source) {
+        if (!state.terminal) {
+          return;
+        }
+
+        clearFontResizeTimer();
+        state.fontResizeToken += 1;
+        const token = state.fontResizeToken;
+        state.suspendResizeMessages = true;
+
+        state.fontResizeTimer = window.setTimeout(() => {
+          if (token !== state.fontResizeToken) {
+            return;
+          }
+          state.fontResizeTimer = 0;
+          requestAnimationFrame(() => {
+            if (token !== state.fontResizeToken || !state.terminal) {
+              return;
+            }
+            requestAnimationFrame(() => {
+              if (token !== state.fontResizeToken || !state.terminal) {
+                return;
+              }
+
+              const resizeSource = `font-size-${source}`;
+              const fit = fitTerminal(resizeSource, false);
+              state.suspendResizeMessages = false;
+
+              if (fit?.changed && state.currentSessionID) {
+                sendResizeMessage(state.currentSessionID, fit.cols, fit.rows, resizeSource);
+              }
+
+              forceTerminalRender(resizeSource);
+            });
+          });
+        }, 40);
+      }
+
+      function applyTerminalFontSize(nextSize, source = "toolbar") {
+        const size = clampTerminalFontSize(nextSize);
+        const changed = size !== state.terminalFontSize;
+        state.terminalFontSize = size;
+        syncFontSizeButtons();
+
+        if (!state.terminal || state.terminal.options.fontSize === size) {
+          return changed;
+        }
+
+        state.terminal.options.fontSize = size;
+        scheduleFontResizeTransaction(source);
+        return true;
+      }
+
+      function updateMobileInputPosition() {
+        if (state.keyboardMode || state.keyboardTransition === "closing") {
+          mobileInput.style.left = "calc(var(--safe-left) + 12px)";
+          mobileInput.style.right = "calc(var(--safe-right) + 12px)";
+          mobileInput.style.top = "auto";
+          mobileInput.style.bottom = "calc(var(--safe-bottom) + 72px)";
+          mobileInput.style.width = "auto";
+          mobileInput.style.height = "40px";
+          mobileInput.style.padding = "0 12px";
+          mobileInput.style.transform = "none";
+          mobileInput.style.pointerEvents = "none";
+          mobileInput.style.zIndex = "4";
+          return;
+        }
+
+        mobileInput.style.left = "-9999px";
+        mobileInput.style.right = "auto";
+        mobileInput.style.top = "-9999px";
+        mobileInput.style.bottom = "auto";
+        mobileInput.style.width = "1px";
+        mobileInput.style.height = "1px";
+        mobileInput.style.padding = "0";
+        mobileInput.style.transform = "none";
+        mobileInput.style.pointerEvents = "none";
+        mobileInput.style.zIndex = "-1";
+      }
+
+      function clearStickyModifiers() {
+        if (!state.stickyCtrl && !state.stickyAlt) return;
+        state.stickyCtrl = false;
+        state.stickyAlt = false;
+        syncModifierButtons();
+      }
+
+      function clearOwnershipState() {
+        state.ownershipAwaitingOutput = false;
+        state.ownershipClearOnOutput = false;
+        state.ownershipSessionID = null;
+        state.ownershipFallbackPayload = null;
+        if (state.ownershipFallbackTimer) {
+          clearTimeout(state.ownershipFallbackTimer);
+          state.ownershipFallbackTimer = 0;
+        }
+      }
+
+      function recordSentInput(source, data) {
+        state.sentInputs.push({
+          at: new Date().toISOString(),
+          source,
+          data,
+        });
+        if (state.sentInputs.length > 24) {
+          state.sentInputs.splice(0, state.sentInputs.length - 24);
+        }
+        queueDebugUpdate();
+      }
+
+      function send(message) {
+        if (!isSocketOpen()) {
+          showBanner("The daemon websocket is not connected.", "warn");
+          return false;
+        }
+        state.ws.send(JSON.stringify(message));
+        return true;
+      }
+
+      function sendResizeMessage(sessionID, cols, rows, source) {
+        if (
+          state.suspendResizeMessages ||
+          !sessionID ||
+          !Number.isFinite(cols) ||
+          !Number.isFinite(rows) ||
+          !isSocketOpen()
+        ) {
+          return;
+        }
+        state.lastResizeMessage = {
+          sessionID,
+          cols,
+          rows,
+          source,
+          at: new Date().toISOString(),
+        };
+        state.resizeMessages.push(state.lastResizeMessage);
+        if (state.resizeMessages.length > 24) {
+          state.resizeMessages.splice(0, state.resizeMessages.length - 24);
+        }
+        send({
+          cmd: "pty_resize",
+          id: sessionID,
+          cols,
+          rows,
+        });
+      }
+
+      function applyControlCharacter(text) {
+        if (!text || text.length !== 1) return text;
+        const code = text.charCodeAt(0);
+        if (text === " ") return "\u0000";
+        if (text === "?") return "\u007f";
+        if (code >= 97 && code <= 122) return String.fromCharCode(code - 96);
+        if (code >= 65 && code <= 90) return String.fromCharCode(code - 64);
+        if (code >= 64 && code <= 95) return String.fromCharCode(code - 64);
+        return text;
+      }
+
+      function applyKeyboardModifiers(text, modifiers = {}) {
+        const ctrlActive = Boolean(modifiers.ctrl || state.stickyCtrl);
+        const altActive = Boolean(modifiers.alt || state.stickyAlt);
+        let output = text;
+
+        if (ctrlActive) {
+          output = applyControlCharacter(output);
+        }
+
+        if (altActive) {
+          output = `\u001b${output}`;
+        }
+
+        if (state.stickyCtrl || state.stickyAlt) {
+          clearStickyModifiers();
+        }
+
+        return output;
+      }
+
+      function sendKeyboardInput(text, source, modifiers = {}) {
+        if (!state.currentSessionID || !text) return;
+        const payload = applyKeyboardModifiers(text, modifiers);
+        if (!payload) return;
+        if (
+          send({
+            cmd: "pty_input",
+            id: state.currentSessionID,
+            data: payload,
+            source,
+          })
+        ) {
+          recordSentInput(source, payload);
+        }
+      }
+
+      function sendRawInput(text, source) {
+        if (!state.currentSessionID || !text) return;
+        if (
+          send({
+            cmd: "pty_input",
+            id: state.currentSessionID,
+            data: text,
+            source,
+          })
+        ) {
+          recordSentInput(source, text);
+        }
+      }
+
+      function resetInputPlaceholder() {
+        if (document.activeElement !== mobileInput) return;
+        requestAnimationFrame(() => {
+          mobileInput.value = " ";
+          mobileInput.setSelectionRange(1, 1);
+        });
+      }
+
+      function focusMobileInput() {
+        if (!state.currentSessionID) return;
+        clearBlurRecoveryTimer();
+        updateMobileInputPosition();
+        mobileInput.focus({ preventScroll: true });
+        mobileInput.value = " ";
+        mobileInput.setSelectionRange(1, 1);
+      }
+
+      function activateKeyboard() {
+        if (!state.currentSessionID) return;
+        clearBlurRecoveryTimer();
+        if (state.keyboardMode) {
+          focusMobileInput();
+          return;
+        }
+        state.keyboardMode = true;
+        state.keyboardTransition = "opening";
+        state.pendingSettledResizeClaim = true;
+        state.keyboardViewportRecoveryUntil = 0;
+        captureViewportMetrics();
+        syncKeyboardButton();
+        sendWebInstrumentation("keyboard-open-request");
+        focusMobileInput();
+        scheduleViewportSettle("keyboard-open");
+      }
+
+      function deactivateKeyboard() {
+        clearBlurRecoveryTimer();
+        const wasKeyboardMode = state.keyboardMode;
+        if (wasKeyboardMode) {
+          state.keyboardTransition = "closing";
+          state.keyboardViewportRecoveryUntil = Date.now() + 1600;
+        }
+        state.keyboardMode = false;
+        syncKeyboardButton();
+        updateMobileInputPosition();
+        if (wasKeyboardMode) {
+          sendWebInstrumentation("keyboard-close-request");
+        }
+        mobileInput.blur();
+        if (!wasKeyboardMode) {
+          return;
+        }
+        state.pendingSettledResizeClaim = true;
+        captureViewportMetrics();
+        scheduleViewportSettle("keyboard-close");
+      }
+
+      function shouldTreatBlurAsNativeKeyboardClose(viewport) {
+        const baseline = state.keyboardBaselineViewportHeight || 0;
+        const heightRecovered = baseline > 0 && viewport.height >= baseline - 24;
+        const viewportExpanded = state.viewportHeight > 0 && viewport.height >= state.viewportHeight + 80;
+        const zoomedViewport = viewport.scale > 1.05;
+        return heightRecovered || viewportExpanded || zoomedViewport;
+      }
+
+      function handleNativeKeyboardDismiss(viewport) {
+        if (!state.keyboardMode) return;
+        clearBlurRecoveryTimer();
+        state.keyboardMode = false;
+        state.keyboardTransition = "closing";
+        state.pendingSettledResizeClaim = true;
+        state.keyboardViewportRecoveryUntil = Date.now() + 1600;
+        syncKeyboardButton();
+        updateMobileInputPosition();
+        sendWebInstrumentation("keyboard-native-close-detected", {
+          viewport,
+        });
+        captureViewportMetrics();
+        scheduleViewportSettle("keyboard-native-close");
+      }
+
+      function shouldDelayClosingViewportCommit(viewport) {
+        if (state.keyboardTransition !== "closing") {
+          return false;
+        }
+        const stillZoomed = viewport.scale > 1.05;
+        const stillShifted = Math.abs(viewport.offsetTop || 0) > 2;
+        return stillZoomed || stillShifted;
+      }
+
+      function decodeBase64Payload(payload) {
+        const raw = atob(payload);
+        const bytes = new Uint8Array(raw.length);
+        for (let index = 0; index < raw.length; index += 1) {
+          bytes[index] = raw.charCodeAt(index);
+        }
+        return bytes;
+      }
+
+      function readTerminalText(maxLines = 120) {
+        if (!state.terminal) return "";
+        try {
+          const buffer = state.terminal.buffer.active;
+          const totalLines = buffer.length;
+          const start = Math.max(0, totalLines - maxLines);
+          const lines = [];
+          for (let index = start; index < totalLines; index += 1) {
+            const line = buffer.getLine(index);
+            lines.push(line ? line.translateToString(true) : "");
+          }
+          return lines.join("\n");
+        } catch (error) {
+          return `debug-buffer-error: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      }
+
+      function queueDebugUpdate() {
+        if (state.debugFrame) return;
+        state.debugFrame = requestAnimationFrame(() => {
+          state.debugFrame = 0;
+          terminalDebugText.textContent = readTerminalText();
+          updateTerminalStatus();
+        });
+      }
+
+      function clearViewportSettleTimer() {
+        if (!state.viewportSettleTimer) return;
+        clearTimeout(state.viewportSettleTimer);
+        state.viewportSettleTimer = 0;
+      }
+
+      function clearFontResizeTimer() {
+        if (!state.fontResizeTimer) return;
+        clearTimeout(state.fontResizeTimer);
+        state.fontResizeTimer = 0;
+      }
+
+      function clearBlurRecoveryTimer() {
+        if (!state.blurRecoveryTimer) return;
+        clearTimeout(state.blurRecoveryTimer);
+        state.blurRecoveryTimer = 0;
+      }
+
+      function configureGhosttyInputSurface(terminal) {
+        terminalHost.style.caretColor = "transparent";
+
+        const ghosttyTextarea = terminal.textarea;
+        if (!(ghosttyTextarea instanceof HTMLTextAreaElement)) {
+          return;
+        }
+
+        ghosttyTextarea.readOnly = true;
+        ghosttyTextarea.tabIndex = -1;
+        ghosttyTextarea.setAttribute("inputmode", "none");
+        ghosttyTextarea.setAttribute("aria-hidden", "true");
+        ghosttyTextarea.style.pointerEvents = "none";
+        ghosttyTextarea.style.caretColor = "transparent";
+
+        if (!ghosttyTextarea.dataset.attnManaged) {
+          ghosttyTextarea.dataset.attnManaged = "true";
+          ghosttyTextarea.addEventListener("focus", () => {
+            if (document.activeElement !== ghosttyTextarea) return;
+            ghosttyTextarea.blur();
+            if (state.keyboardMode) {
+              requestAnimationFrame(() => {
+                focusMobileInput();
+              });
+            }
+          });
+        }
+
+        if (!terminalHost.dataset.attnManaged) {
+          terminalHost.dataset.attnManaged = "true";
+          terminalHost.addEventListener(
+            "focusin",
+            (event) => {
+              if (!state.pointerIsCoarse) return;
+              if (event.target !== terminalHost) return;
+              terminal.blur();
+              if (state.keyboardMode) {
+                requestAnimationFrame(() => {
+                  focusMobileInput();
+                });
+              }
+            },
+            true,
+          );
+        }
+      }
+
+      function getTerminalLineHeight() {
+        if (!state.terminal) return 16;
+        return Math.max(terminalHost.clientHeight / Math.max(state.terminal.rows, 1), 1);
+      }
+
+      function isAlternateScreenActive() {
+        const wasmTerm = state.terminal && state.terminal.wasmTerm;
+        return Boolean(wasmTerm && typeof wasmTerm.isAlternateScreen === "function" && wasmTerm.isAlternateScreen());
+      }
+
+      function hasMouseTrackingEnabled() {
+        return Boolean(
+          state.terminal && typeof state.terminal.hasMouseTracking === "function" && state.terminal.hasMouseTracking(),
+        );
+      }
+
+      function hasAlternateScrollEnabled() {
+        return Boolean(
+          state.terminal && typeof state.terminal.getMode === "function" && state.terminal.getMode(1007, false),
+        );
+      }
+
+      function getTerminalCellFromTouch(touch) {
+        if (!state.terminal) {
+          return null;
+        }
+
+        const target = state.terminal.canvas instanceof HTMLCanvasElement
+          ? state.terminal.canvas
+          : terminalHost;
+        const rect = target.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          return null;
+        }
+
+        const cols = Math.max(state.terminal.cols || 0, 1);
+        const rows = Math.max(state.terminal.rows || 0, 1);
+        const relativeX = Math.max(0, Math.min(rect.width - 1, touch.clientX - rect.left));
+        const relativeY = Math.max(0, Math.min(rect.height - 1, touch.clientY - rect.top));
+
+        return {
+          col: Math.max(1, Math.min(cols, Math.floor((relativeX / rect.width) * cols) + 1)),
+          row: Math.max(1, Math.min(rows, Math.floor((relativeY / rect.height) * rows) + 1)),
+        };
+      }
+
+      function encodeTerminalWheelSequence(direction, col, row) {
+        if (!state.terminal || typeof state.terminal.getMode !== "function") {
+          return "";
+        }
+
+        const button = direction === "up" ? 64 : 65;
+        if (state.terminal.getMode(1006, false)) {
+          return `\u001b[<${button};${col};${row}M`;
+        }
+
+        const x10Button = String.fromCharCode(Math.min(button + 32, 255));
+        const x10Col = String.fromCharCode(Math.min(col + 32, 255));
+        const x10Row = String.fromCharCode(Math.min(row + 32, 255));
+        return `\u001b[M${x10Button}${x10Col}${x10Row}`;
+      }
+
+      function sendAlternateScreenTouchScroll(diff, touch) {
+        if (diff === 0) {
+          return;
+        }
+
+        if (hasMouseTrackingEnabled()) {
+          const cell = getTerminalCellFromTouch(touch);
+          if (!cell) {
+            return;
+          }
+
+          const direction = diff > 0 ? "up" : "down";
+          const count = Math.min(Math.abs(diff), 5);
+          const sequence = encodeTerminalWheelSequence(direction, cell.col, cell.row).repeat(count);
+          if (sequence) {
+            sendRawInput(sequence, "web_touch_scroll");
+          }
+          return;
+        }
+
+        if (hasAlternateScrollEnabled()) {
+          if (diff > 0) {
+            sendRawInput("\u001b[A".repeat(Math.min(diff, 5)), "web_touch_scroll");
+            return;
+          }
+          sendRawInput("\u001b[B".repeat(Math.min(Math.abs(diff), 5)), "web_touch_scroll");
+        }
+      }
+
+      function handleTerminalTouchStart(event) {
+        if (!state.currentSessionID || !state.terminal || event.touches.length !== 1) return;
+        const touch = event.touches[0];
+        state.touchScroll.active = false;
+        state.touchScroll.startY = touch.clientY;
+        state.touchScroll.sentSteps = 0;
+        state.touchScroll.suppressClickUntil = 0;
+        try {
+          state.touchScroll.startViewportY = state.terminal.getViewportY();
+        } catch (error) {
+          state.touchScroll.startViewportY = 0;
+        }
+      }
+
+      function handleTerminalTouchMove(event) {
+        if (!state.currentSessionID || !state.terminal || event.touches.length !== 1) return;
+        const touch = event.touches[0];
+        const deltaFromStart = touch.clientY - state.touchScroll.startY;
+        if (!state.touchScroll.active && Math.abs(deltaFromStart) < 6) {
+          return;
+        }
+
+        state.touchScroll.active = true;
+        event.preventDefault();
+        event.stopPropagation();
+
+        const scrollbackLength =
+          typeof state.terminal.getScrollbackLength === "function"
+            ? state.terminal.getScrollbackLength()
+            : 0;
+
+        if (scrollbackLength > 0) {
+          const lineHeight = getTerminalLineHeight();
+          const targetViewportY = state.touchScroll.startViewportY + deltaFromStart / lineHeight;
+          state.terminal.scrollToLine(targetViewportY);
+          try {
+            state.followOutput = state.terminal.getViewportY() <= 0.5;
+          } catch (error) {
+            state.followOutput = true;
+          }
+          queueDebugUpdate();
+          return;
+        }
+
+        if (!isAlternateScreenActive()) {
+          return;
+        }
+
+        const totalSteps = Math.trunc(deltaFromStart / 28);
+        const diff = totalSteps - state.touchScroll.sentSteps;
+        if (diff === 0) return;
+
+        state.touchScroll.sentSteps = totalSteps;
+        sendAlternateScreenTouchScroll(diff, touch);
+        queueDebugUpdate();
+      }
+
+      function handleTerminalTouchEnd(event) {
+        const hadScroll = state.touchScroll.active;
+        state.touchScroll.suppressClickUntil = Date.now() + 400;
+        state.touchScroll.active = false;
+        state.touchScroll.sentSteps = 0;
+
+        if (hadScroll || !state.currentSessionID || !state.pointerIsCoarse) {
+          return;
+        }
+
+        if (event.cancelable) {
+          event.preventDefault();
+        }
+        event.stopPropagation();
+        activateKeyboard();
+      }
+
+      function writeBase64Payload(payload) {
+        if (!state.terminal || !payload) return;
+        const text = state.outputDecoder.decode(decodeBase64Payload(payload), { stream: true });
+        if (!text) return;
+        state.terminal.write(text, () => {
+          if (state.followOutput) {
+            state.terminal.scrollToBottom();
+          }
+        });
+        queueDebugUpdate();
+      }
+
+      function renderAttachPayload(payload) {
+        if (!payload) return;
+        if (payload.scrollback) {
+          writeBase64Payload(payload.scrollback);
+        }
+        if (payload.screenSnapshot) {
+          writeBase64Payload(payload.screenSnapshot);
+        }
+      }
+
+      function renderQueuedOutputs(sessionID, queuedOutputs) {
+        for (const queued of queuedOutputs) {
+          if (typeof queued.seq === "number") {
+            state.lastSeqBySession.set(sessionID, queued.seq);
+            terminalStage.dataset.lastSeq = String(queued.seq);
+          }
+          writeBase64Payload(queued.data);
+        }
+      }
+
+      function filteredQueuedAttachOutputs(sessionID) {
+        const lastSeq = state.lastSeqBySession.get(sessionID) || 0;
+        return state.attachQueue.filter((queued) => {
+          if (typeof queued.seq !== "number") return true;
+          return queued.seq > lastSeq;
+        });
+      }
+
+      function claimTerminalOwnership(reason, fallbackPayload = null, clearOnOutput = false) {
+        if (!state.currentSessionID || !state.terminal) return false;
+
+        clearOwnershipState();
+        state.ownershipToken += 1;
+        const token = state.ownershipToken;
+        state.ownershipAwaitingOutput = true;
+        state.ownershipClearOnOutput = clearOnOutput;
+        state.ownershipSessionID = state.currentSessionID;
+        state.ownershipFallbackPayload = fallbackPayload;
+
+        const fit = fitTerminal(`owner-${reason}`, true);
+        const cols = fit?.cols || state.terminal.cols;
+        const rows = fit?.rows || state.terminal.rows;
+        if (!cols || !rows) {
+          clearOwnershipState();
+          return false;
+        }
+
+        state.ownershipFallbackTimer = window.setTimeout(() => {
+          if (
+            !state.ownershipAwaitingOutput ||
+            state.ownershipToken !== token ||
+            state.ownershipSessionID !== state.currentSessionID
+          ) {
+            return;
+          }
+
+          state.ownershipAwaitingOutput = false;
+          state.ownershipSessionID = null;
+          state.ownershipFallbackTimer = 0;
+          if (fallbackPayload) {
+            renderAttachPayload(fallbackPayload);
+            if (state.terminal) {
+              state.terminal.scrollToBottom();
+            }
+          }
+          state.ownershipFallbackPayload = null;
+        }, 250);
+
+        if (!fit) {
+          sendResizeMessage(state.currentSessionID, cols, rows, `owner-${reason}`);
+        }
+        return true;
+      }
+
+      function forceTerminalRender(source) {
+        const terminal = state.terminal;
+        const renderer = terminal?.renderer;
+        const wasmTerm = terminal?.wasmTerm;
+        if (!terminal || !renderer || !wasmTerm || typeof renderer.render !== "function") {
+          return false;
+        }
+
+        try {
+          const viewportY =
+            typeof terminal.getViewportY === "function" ? terminal.getViewportY() : terminal.viewportY || 0;
+
+          // Keyboard viewport changes can settle without changing cols/rows.
+          // Repaint the live Ghostty buffer locally instead of replaying daemon attach data.
+          renderer.render(wasmTerm, true, viewportY, terminal);
+          state.lastForcedRender = {
+            source,
+            at: new Date().toISOString(),
+          };
+          queueDebugUpdate();
+          return true;
+        } catch (error) {
+          return false;
+        }
+      }
+
+      async function ensureGhostty() {
+        if (!state.ghosttyPromise) {
+          state.ghosttyPromise = Ghostty.load("/vendor/ghostty-web/ghostty-vt.wasm");
+        }
+        return state.ghosttyPromise;
+      }
+
+      async function ensureTerminal() {
+        if (state.terminal) return state.terminal;
+
+        terminalHost.innerHTML = "";
+        const ghostty = await ensureGhostty();
+        const terminal = new Terminal({
+          cols: 80,
+          rows: 24,
+          fontSize: state.terminalFontSize,
+          fontFamily: TERMINAL_FONT_FAMILY,
+          cursorBlink: false,
+          smoothScrollDuration: 120,
+          disableStdin: true,
+          theme: {
+            background: "#0d1218",
+            foreground: "#e5edf5",
+            cursor: "rgba(0, 0, 0, 0)",
+            cursorAccent: "rgba(0, 0, 0, 0)",
+            selectionBackground: "#1f3a4a",
+          },
+          ghostty,
+        });
+
+        const fitAddon = new FitAddon();
+        terminal.loadAddon(fitAddon);
+        terminal.open(terminalHost);
+        configureGhosttyInputSurface(terminal);
+
+        terminal.onResize(({ cols, rows }) => {
+          state.currentResizeSource = state.currentResizeSource || "terminal-resize";
+          if (state.currentSessionID && !state.suspendResizeMessages) {
+            sendResizeMessage(state.currentSessionID, cols, rows, state.currentResizeSource);
+          }
+          terminalStage.dataset.cols = String(cols);
+          terminalStage.dataset.rows = String(rows);
+          state.currentResizeSource = null;
+          updateTerminalStatus();
+          queueDebugUpdate();
+        });
+
+        terminal.onScroll(() => {
+          try {
+            state.followOutput = terminal.getViewportY() <= 0.5;
+          } catch (error) {
+            state.followOutput = true;
+          }
+          queueDebugUpdate();
+        });
+
+        state.terminal = terminal;
+        state.fitAddon = fitAddon;
+        terminalStage.dataset.terminalReady = "true";
+        terminal.blur();
+        updateTerminalStatus();
+        queueDebugUpdate();
+
+        if (state.resizeObserver) {
+          state.resizeObserver.disconnect();
+          state.resizeObserver = null;
+        }
+
+        return terminal;
+      }
+
+      function fitTerminal(source, forceSendCurrentSize = false) {
+        if (!state.terminal || !state.fitAddon || app.dataset.view !== "terminal") {
+          return null;
+        }
+
+        const viewport = {
+          width: state.viewportWidth || state.rawViewportWidth || window.innerWidth,
+          height: state.viewportHeight || state.rawViewportHeight || window.innerHeight,
+        };
+        const isMobileViewport = state.pointerIsCoarse || viewport.width <= 820;
+        const widthDelta = state.lastViewportWidth
+          ? Math.abs(viewport.width - state.lastViewportWidth)
+          : 0;
+        const heightDelta = state.lastViewportHeight
+          ? Math.abs(viewport.height - state.lastViewportHeight)
+          : 0;
+        const heightOnlyViewportChange =
+          isMobileViewport &&
+          state.lastViewportWidth > 0 &&
+          widthDelta < 4 &&
+          heightDelta >= 4;
+        const proposed = state.fitAddon.proposeDimensions();
+        if (!proposed) {
+          state.lastViewportWidth = viewport.width;
+          state.lastViewportHeight = viewport.height;
+          return null;
+        }
+
+        let cols = Math.max(20, Math.floor(proposed.cols));
+        const rows = Math.max(6, Math.floor(proposed.rows));
+        if ((heightOnlyViewportChange || state.keyboardTransition !== "idle") && state.lastStableCols > 0) {
+          cols = state.lastStableCols;
+        }
+        const changed = cols !== state.terminal.cols || rows !== state.terminal.rows;
+        state.currentResizeSource = source;
+        state.lastViewportWidth = viewport.width;
+        state.lastViewportHeight = viewport.height;
+        if (!heightOnlyViewportChange || state.lastStableCols === 0) {
+          state.lastStableCols = cols;
+        }
+
+        if (changed) {
+          state.terminal.resize(cols, rows);
+        } else {
+          state.currentResizeSource = null;
+          if (forceSendCurrentSize && state.currentSessionID) {
+            sendResizeMessage(state.currentSessionID, cols, rows, source);
+          }
+          updateTerminalStatus();
+          queueDebugUpdate();
+        }
+
+        return { cols, rows, changed };
+      }
+
+      function scheduleFit(source) {
+        if (
+          (state.pendingSettledResizeClaim || state.keyboardTransition !== "idle") &&
+          (source === "window-resize" || source === "visual-viewport" || source === "resize-observer")
+        ) {
+          scheduleViewportSettle(source);
+          return;
+        }
+
+        if (state.resizeFrame) cancelAnimationFrame(state.resizeFrame);
+        state.resizeFrame = requestAnimationFrame(() => {
+          state.resizeFrame = 0;
+          fitTerminal(source);
+        });
+      }
+
+      function scheduleViewportSettle(source) {
+        if (!state.currentSessionID || app.dataset.view !== "terminal") {
+          return;
+        }
+
+        const viewport = captureViewportMetrics();
+        if (!state.pointerIsCoarse && viewport.width > 820) {
+          return;
+        }
+
+        clearViewportSettleTimer();
+        state.viewportSettleToken += 1;
+        const settleToken = state.viewportSettleToken;
+        state.viewportSettleTimer = window.setTimeout(() => {
+          if (settleToken !== state.viewportSettleToken) {
+            return;
+          }
+          state.viewportSettleTimer = 0;
+          requestAnimationFrame(() => {
+            if (settleToken !== state.viewportSettleToken) {
+              return;
+            }
+            requestAnimationFrame(() => {
+              if (settleToken !== state.viewportSettleToken) {
+                return;
+              }
+              if (!state.currentSessionID || app.dataset.view !== "terminal") {
+                return;
+              }
+
+              const rawViewport = captureViewportMetrics();
+              if (
+                shouldDelayClosingViewportCommit(rawViewport) &&
+                Date.now() < state.keyboardViewportRecoveryUntil
+              ) {
+                sendWebInstrumentation("viewport-close-recovery-wait", {
+                  source,
+                  viewport: rawViewport,
+                });
+                scheduleViewportSettle(source);
+                return;
+              }
+              if (shouldDelayClosingViewportCommit(rawViewport)) {
+                sendWebInstrumentation("viewport-close-recovery-timeout", {
+                  source,
+                  viewport: rawViewport,
+                });
+              }
+              const settledSource = `${source}-settled`;
+              state.lastViewportSettle = {
+                source: settledSource,
+                at: new Date().toISOString(),
+              };
+              commitViewportMetrics(rawViewport, {
+                preserveWidth: state.keyboardTransition !== "idle",
+              });
+              const shouldForceSettledResize =
+                state.pendingSettledResizeClaim ||
+                state.keyboardTransition !== "idle" ||
+                state.keyboardMode ||
+                state.keyboardInset > 0;
+              const fit = fitTerminal(settledSource, shouldForceSettledResize);
+
+              if (shouldForceSettledResize && !fit && state.currentSessionID && state.terminal) {
+                sendResizeMessage(
+                  state.currentSessionID,
+                  state.terminal.cols,
+                  state.terminal.rows,
+                  settledSource,
+                );
+              }
+              state.pendingSettledResizeClaim = false;
+              state.keyboardTransition = "idle";
+              state.keyboardViewportRecoveryUntil = 0;
+              if (!state.keyboardMode && state.keyboardInset <= 0) {
+                state.keyboardBaselineViewportHeight = state.viewportHeight;
+              }
+              updateMobileInputPosition();
+              sendWebInstrumentation("viewport-settled", {
+                source: settledSource,
+              });
+
+              if (fit?.changed) {
+                requestAnimationFrame(() => {
+                  forceTerminalRender(settledSource);
+                });
+                return;
+              }
+
+              forceTerminalRender(settledSource);
+            });
+          });
+        }, 180);
+      }
+
+      function detachSession(sessionID) {
+        if (!sessionID) return;
+        send({ cmd: "detach_session", id: sessionID });
+      }
+
+      function resetTerminalState() {
+        clearOwnershipState();
+        clearViewportSettleTimer();
+        clearFontResizeTimer();
+        clearBlurRecoveryTimer();
+        state.viewportSettleToken += 1;
+        state.fontResizeToken += 1;
+        state.pendingSettledResizeClaim = false;
+        state.keyboardTransition = "idle";
+        state.keyboardViewportRecoveryUntil = 0;
+        state.claimOwnershipOnAttach = false;
+        state.suspendResizeMessages = false;
+        state.resizeMessages = [];
+        state.attachPending = false;
+        state.attachQueue = [];
+        state.attachState = "detached";
+        state.outputDecoder = new TextDecoder();
+        state.followOutput = true;
+        if (state.terminal) {
+          state.terminal.clear();
+        }
+        updateMobileInputPosition();
+        updateTerminalStatus();
+        queueDebugUpdate();
+      }
+
+      async function attachCurrentSession() {
+        if (!state.currentSessionID || !isSocketOpen()) return;
+        await ensureTerminal();
+        fitTerminal("attach");
+        state.attachPending = true;
+        state.attachQueue = [];
+        state.attachState = "attaching";
+        state.outputDecoder = new TextDecoder();
+        state.lastSeqBySession.delete(state.currentSessionID);
+        state.followOutput = true;
+        if (state.terminal) {
+          state.terminal.clear();
+        }
+        updateTerminalStatus();
+        queueDebugUpdate();
+        send({
+          cmd: "attach_session",
+          id: state.currentSessionID,
+        });
+      }
+
+      async function openSession(sessionID) {
+        if (!sessionID) return;
+
+        if (state.currentSessionID && state.currentSessionID !== sessionID) {
+          detachSession(state.currentSessionID);
+          resetTerminalState();
+        }
+
+        state.currentSessionID = sessionID;
+        state.claimOwnershipOnAttach = true;
+        state.suspendResizeMessages = true;
+        terminalStage.dataset.currentSession = sessionID;
+        setView("terminal");
+        renderTerminalHeader();
+        updateTerminalStatus();
+        await ensureTerminal();
+        if (state.terminal) {
+          state.terminal.blur();
+        }
+        fitTerminal("session-open");
+        deactivateKeyboard();
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        attachCurrentSession();
+      }
+
+      function leaveSession(notice = "") {
+        if (state.currentSessionID) {
+          detachSession(state.currentSessionID);
+        }
+        state.currentSessionID = null;
+        terminalStage.dataset.currentSession = "";
+        resetTerminalState();
+        clearStickyModifiers();
+        deactivateKeyboard();
+        renderTerminalHeader();
+        setView("sessions");
+        if (notice) {
+          showBanner(notice, "info");
+        }
+      }
+
+      function applyAttachResult(message) {
+        if (!state.terminal || message.id !== state.currentSessionID) return;
+
+        state.attachPending = false;
+        state.attachState = "attached";
+        state.outputDecoder = new TextDecoder();
+        state.terminal.clear();
+        state.followOutput = true;
+
+        if (typeof message.last_seq === "number") {
+          state.lastSeqBySession.set(message.id, message.last_seq);
+          terminalStage.dataset.lastSeq = String(message.last_seq);
+        }
+
+        const fallbackPayload = {
+          scrollback: message.scrollback || "",
+          screenSnapshot:
+            message.screen_snapshot && message.screen_snapshot_fresh !== false
+              ? message.screen_snapshot
+              : "",
+        };
+        const queuedOutputs = filteredQueuedAttachOutputs(message.id);
+        state.attachQueue = [];
+        state.suspendResizeMessages = false;
+
+        if (state.claimOwnershipOnAttach) {
+          state.claimOwnershipOnAttach = false;
+          renderAttachPayload(fallbackPayload);
+          renderQueuedOutputs(message.id, queuedOutputs);
+          claimTerminalOwnership("attach", null, true);
+        } else {
+          renderAttachPayload(fallbackPayload);
+          renderQueuedOutputs(message.id, queuedOutputs);
+        }
+
+        if (state.terminal) {
+          state.terminal.blur();
+          state.terminal.scrollToBottom();
+        }
+        updateTerminalStatus();
+        queueDebugUpdate();
+      }
+
+      function handlePtyOutput(message) {
+        if (!state.terminal || message.id !== state.currentSessionID || !message.data) {
+          return;
+        }
+
+        if (state.attachPending) {
+          state.attachQueue.push({
+            data: message.data,
+            seq: typeof message.seq === "number" ? message.seq : null,
+          });
+          return;
+        }
+
+        if (typeof message.seq === "number") {
+          const lastSeq = state.lastSeqBySession.get(message.id) || 0;
+          if (message.seq <= lastSeq) return;
+          state.lastSeqBySession.set(message.id, message.seq);
+          terminalStage.dataset.lastSeq = String(message.seq);
+        }
+
+        if (state.ownershipAwaitingOutput && state.ownershipSessionID === message.id) {
+          const shouldClear = state.ownershipClearOnOutput;
+          clearOwnershipState();
+          state.followOutput = true;
+          if (shouldClear && state.terminal) {
+            state.terminal.clear();
+          }
+        }
+
+        writeBase64Payload(message.data);
+      }
+
+      function upsertSession(session) {
+        const existingIndex = state.sessions.findIndex((entry) => entry.id === session.id);
+        if (existingIndex === -1) {
+          state.sessions = state.sessions.concat(session);
+        } else {
+          state.sessions = [
+            ...state.sessions.slice(0, existingIndex),
+            session,
+            ...state.sessions.slice(existingIndex + 1),
+          ];
+        }
+        renderSessions();
+      }
+
+      function removeSession(sessionID) {
+        state.sessions = state.sessions.filter((session) => session.id !== sessionID);
+        renderSessions();
+      }
+
+      function applyInitialState(message) {
+        state.protocolVersion = message.protocol_version || state.protocolVersion;
+        renderHealth();
+        state.sessions = Array.isArray(message.sessions) ? message.sessions : [];
+        renderSessions();
+
+        if (state.currentSessionID) {
+          const exists = state.sessions.some((session) => session.id === state.currentSessionID);
+          if (!exists) {
+            leaveSession("The selected session is no longer available.");
+            return;
+          }
+          attachCurrentSession();
+        }
+      }
+
+      function handleSocketMessage(event) {
+        let message;
+        try {
+          message = JSON.parse(event.data);
+        } catch (error) {
+          return;
+        }
+
+        switch (message.event) {
+          case "initial_state":
+            applyInitialState(message);
+            break;
+          case "sessions_updated":
+            state.sessions = Array.isArray(message.sessions) ? message.sessions : [];
+            renderSessions();
+            break;
+          case "session_registered":
+          case "session_state_changed":
+            if (message.session) {
+              upsertSession(message.session);
+            }
+            break;
+          case "session_unregistered":
+            if (message.session && message.session.id) {
+              removeSession(message.session.id);
+              if (message.session.id === state.currentSessionID) {
+                leaveSession("The selected session exited.");
+              }
+            }
+            break;
+          case "attach_result":
+            if (message.success) {
+              applyAttachResult(message);
+            } else if (message.id === state.currentSessionID) {
+              state.suspendResizeMessages = false;
+              state.attachPending = false;
+              state.attachState = "error";
+              updateTerminalStatus();
+              showBanner(message.error || "Failed to attach to the selected session.", "warn");
+            }
+            break;
+          case "pty_output":
+            handlePtyOutput(message);
+            break;
+          case "pty_desync":
+            if (message.id === state.currentSessionID) {
+              showBanner("PTY stream desynced. Reattaching.", "warn");
+              attachCurrentSession();
+            }
+            break;
+          case "session_exited":
+            if (message.id === state.currentSessionID) {
+              showBanner("The selected session exited.", "info");
+            }
+            break;
+          case "command_error":
+            showBanner(message.error || "Daemon command failed.", "warn");
+            break;
+          default:
+            break;
+        }
+      }
+
+      function connectWebSocket() {
+        clearTimeout(state.reconnectTimer);
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const socketURL = `${protocol}//${window.location.host}/ws`;
+
+        setConnectionState("connecting", "Opening WebSocket to the daemon.");
+        showBanner("Connecting to the daemon.", "info");
+
+        const socket = new WebSocket(socketURL);
+        state.ws = socket;
+
+        socket.addEventListener("open", () => {
+          state.reconnectDelayMS = 1000;
+          setConnectionState("connected", "WebSocket connected to the daemon.");
+          showBanner("");
+        });
+
+        socket.addEventListener("message", handleSocketMessage);
+
+        socket.addEventListener("close", () => {
+          state.suspendResizeMessages = false;
+          state.attachPending = false;
+          state.attachState = state.currentSessionID ? "reconnecting" : "detached";
+          setConnectionState("disconnected", "Socket closed. Reconnecting.");
+          showBanner("Disconnected from the daemon. Reconnecting.", "warn");
+          updateTerminalStatus();
+          const delay = state.reconnectDelayMS;
+          state.reconnectTimer = window.setTimeout(connectWebSocket, delay);
+          state.reconnectDelayMS = Math.min(delay * 2, 30000);
+        });
+
+        socket.addEventListener("error", () => {
+          setConnectionState("error", "Socket error while talking to the daemon.");
+          showBanner("Daemon socket error.", "warn");
+        });
+      }
+
+      async function loadHealth() {
+        try {
+          const response = await fetch("/health", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`health ${response.status}`);
+          }
+          state.health = await response.json();
+          if (state.health.protocol && !state.protocolVersion) {
+            state.protocolVersion = state.health.protocol;
+          }
+          renderHealth();
+        } catch (error) {
+          buildVersion.textContent = "unavailable";
+          buildTime.textContent = "health endpoint unavailable";
+          if (!state.protocolVersion) {
+            protocolVersion.textContent = "unavailable";
+          }
+        }
+      }
+
+      function handleQuickAction(action) {
+        if (action === "ctrl") {
+          state.stickyCtrl = !state.stickyCtrl;
+          syncModifierButtons();
+          return;
+        }
+
+        if (action === "alt") {
+          state.stickyAlt = !state.stickyAlt;
+          syncModifierButtons();
+          return;
+        }
+
+        const payload = QUICK_ACTIONS[action];
+        if (!payload) return;
+        sendRawInput(payload, "web_quick_action");
+      }
+
+      terminalStage.addEventListener("click", () => {
+        if (!state.currentSessionID) return;
+        if (state.pointerIsCoarse) return;
+        if (Date.now() < state.touchScroll.suppressClickUntil) return;
+        activateKeyboard();
+      });
+      terminalStage.addEventListener("touchstart", handleTerminalTouchStart, { passive: true });
+      terminalStage.addEventListener("touchmove", handleTerminalTouchMove, { passive: false });
+      terminalStage.addEventListener("touchend", handleTerminalTouchEnd, { passive: false, capture: true });
+      terminalStage.addEventListener("touchcancel", handleTerminalTouchEnd, { passive: true });
+
+      backButton.addEventListener("click", () => {
+        leaveSession();
+      });
+
+      keyboardToggle.addEventListener("click", () => {
+        if (state.keyboardMode) {
+          deactivateKeyboard();
+        } else {
+          activateKeyboard();
+        }
+      });
+
+      fontSizeDecrease.addEventListener("click", () => {
+        applyTerminalFontSize(state.terminalFontSize - 1, "decrease");
+      });
+
+      fontSizeIncrease.addEventListener("click", () => {
+        applyTerminalFontSize(state.terminalFontSize + 1, "increase");
+      });
+
+      ctrlToggle.addEventListener("click", () => {
+        handleQuickAction("ctrl");
+      });
+
+      altToggle.addEventListener("click", () => {
+        handleQuickAction("alt");
+      });
+
+      document.querySelectorAll("[data-quick-action]").forEach((button) => {
+        button.addEventListener("click", () => {
+          handleQuickAction(button.dataset.quickAction);
+        });
+      });
+
+      mobileInput.addEventListener("focus", () => {
+        if (!state.keyboardMode) return;
+        updateMobileInputPosition();
+        mobileInput.value = " ";
+        mobileInput.setSelectionRange(1, 1);
+        sendWebInstrumentation("mobile-input-focus");
+      });
+
+      mobileInput.addEventListener("blur", () => {
+        sendWebInstrumentation("mobile-input-blur");
+        if (!state.keyboardMode) return;
+        clearBlurRecoveryTimer();
+        state.blurRecoveryTimer = window.setTimeout(() => {
+          state.blurRecoveryTimer = 0;
+          if (!state.keyboardMode || document.activeElement === mobileInput) {
+            return;
+          }
+
+          const viewport = captureViewportMetrics();
+          if (shouldTreatBlurAsNativeKeyboardClose(viewport)) {
+            handleNativeKeyboardDismiss(viewport);
+            return;
+          }
+
+          sendWebInstrumentation("mobile-input-refocus", {
+            viewport,
+          });
+          focusMobileInput();
+        }, 220);
+      });
+
+      mobileInput.addEventListener("compositionstart", () => {
+        mobileInput.dataset.composing = "true";
+      });
+
+      mobileInput.addEventListener("compositionend", (event) => {
+        mobileInput.dataset.composing = "false";
+        const text = event.data || mobileInput.value.replace(/^ /, "");
+        if (text) {
+          sendKeyboardInput(text, "web_keyboard");
+        }
+        resetInputPlaceholder();
+      });
+
+      mobileInput.addEventListener("input", (event) => {
+        if (mobileInput.dataset.composing === "true") return;
+        const inputEvent = event;
+
+        if (inputEvent.inputType === "deleteContentBackward") {
+          const now = Date.now();
+          if (now - state.lastBackspaceAt > 50) {
+            sendKeyboardInput("\u007f", "web_keyboard");
+            state.lastBackspaceAt = now;
+          }
+          resetInputPlaceholder();
+          return;
+        }
+
+        if (inputEvent.inputType === "deleteContentForward") {
+          sendKeyboardInput("\u001b[3~", "web_keyboard");
+          resetInputPlaceholder();
+          return;
+        }
+
+        const typed = mobileInput.value.replace(/^ /, "");
+        if (!typed) {
+          resetInputPlaceholder();
+          return;
+        }
+
+        sendKeyboardInput(typed, "web_keyboard");
+        resetInputPlaceholder();
+      });
+
+      mobileInput.addEventListener("keydown", (event) => {
+        if (!state.currentSessionID) return;
+
+        if (event.key === "Tab" && event.shiftKey) {
+          event.preventDefault();
+          sendKeyboardInput("\u001b[Z", "web_keyboard", {
+            ctrl: event.ctrlKey,
+            alt: event.altKey,
+          });
+          resetInputPlaceholder();
+          return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(SPECIAL_KEY_PAYLOADS, event.key)) {
+          if (event.key !== "Backspace") {
+            event.preventDefault();
+          }
+          if (event.key === "Backspace") {
+            state.lastBackspaceAt = Date.now();
+          }
+          sendKeyboardInput(SPECIAL_KEY_PAYLOADS[event.key], "web_keyboard", {
+            ctrl: event.ctrlKey,
+            alt: event.altKey,
+          });
+          if (event.key !== "Backspace") {
+            resetInputPlaceholder();
+          }
+          return;
+        }
+
+        if ((event.ctrlKey || event.altKey) && event.key.length === 1) {
+          event.preventDefault();
+          sendKeyboardInput(event.key, "web_keyboard", {
+            ctrl: event.ctrlKey,
+            alt: event.altKey,
+          });
+          resetInputPlaceholder();
+        }
+      });
+
+      mobileInput.addEventListener("paste", (event) => {
+        const text = event.clipboardData?.getData("text/plain") || "";
+        if (!text) return;
+        event.preventDefault();
+        sendRawInput(text, "web_paste");
+        resetInputPlaceholder();
+      });
+
+      window.addEventListener("paste", (event) => {
+        if (!state.currentSessionID) return;
+        const text = event.clipboardData?.getData("text/plain") || "";
+        if (!text) return;
+        event.preventDefault();
+        sendRawInput(text, "web_paste");
+        if (state.keyboardMode) {
+          focusMobileInput();
+        }
+      });
+
+      window.addEventListener("resize", () => {
+        handleViewportSignal("window-resize");
+      });
+
+      if (window.visualViewport) {
+        const handleVisualViewportChange = () => {
+          handleViewportSignal("visual-viewport");
+        };
+        window.visualViewport.addEventListener("resize", handleVisualViewportChange);
+        window.visualViewport.addEventListener("scroll", handleVisualViewportChange);
+      }
+
+      window.addEventListener("pagehide", () => {
+        if (state.currentSessionID) {
+          detachSession(state.currentSessionID);
+        }
+      });
+
+      window.__ATTN_WEB_CLIENT__ = {
+        getState() {
+          return {
+            connectionState: state.connectionState,
+            currentSessionID: state.currentSessionID,
+            attachState: state.attachState,
+            keyboardMode: state.keyboardMode,
+            stickyCtrl: state.stickyCtrl,
+            stickyAlt: state.stickyAlt,
+            terminalFontSize: state.terminalFontSize,
+            cols: state.terminal ? state.terminal.cols : 0,
+            rows: state.terminal ? state.terminal.rows : 0,
+            viewportWidth: state.viewportWidth,
+            viewportHeight: state.viewportHeight,
+            keyboardInset: state.keyboardInset,
+            rawViewportWidth: state.rawViewportWidth,
+            rawViewportHeight: state.rawViewportHeight,
+            rawViewportOffsetTop: state.rawViewportOffsetTop,
+            rawViewportScale: state.rawViewportScale,
+            keyboardTransition: state.keyboardTransition,
+            lastStableCols: state.lastStableCols,
+            lastResizeMessage: state.lastResizeMessage,
+            resizeMessages: state.resizeMessages,
+            lastForcedRender: state.lastForcedRender,
+            lastViewportSettle: state.lastViewportSettle,
+            scrollbackLength:
+              state.terminal && typeof state.terminal.getScrollbackLength === "function"
+                ? state.terminal.getScrollbackLength()
+                : 0,
+            viewportY:
+              state.terminal && typeof state.terminal.getViewportY === "function"
+                ? state.terminal.getViewportY()
+                : 0,
+            alternateScreenActive: isAlternateScreenActive(),
+            claimOwnershipOnAttach: state.claimOwnershipOnAttach,
+            ownershipAwaitingOutput: state.ownershipAwaitingOutput,
+            ownershipClearOnOutput: state.ownershipClearOnOutput,
+            touchScrollSuppressClickUntil: state.touchScroll.suppressClickUntil,
+            mobileInputFocused: document.activeElement === mobileInput,
+            terminalHostFocused: document.activeElement === terminalHost,
+            ghosttyTextareaFocused: Boolean(
+              state.terminal &&
+                state.terminal.textarea &&
+                document.activeElement === state.terminal.textarea,
+            ),
+            sentInputs: state.sentInputs.slice(),
+            terminalText: readTerminalText(),
+          };
+        },
+        getTerminalText(maxLines = 120) {
+          return readTerminalText(maxLines);
+        },
+      };
+
+      renderHealth();
+      renderSessions();
+      renderTerminalHeader();
+      syncModifierButtons();
+      syncFontSizeButtons();
+      syncViewportMetrics();
+      updateMobileInputPosition();
+      syncKeyboardButton();
+      updateTerminalStatus();
+      loadHealth();
+      connectWebSocket();
+    </script>
+  </body>
+</html>

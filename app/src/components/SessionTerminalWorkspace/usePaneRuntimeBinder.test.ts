@@ -1,5 +1,6 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, render, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createElement, useLayoutEffect } from 'react';
 import { installTerminalKeyHandler, usePaneRuntimeBinder } from './usePaneRuntimeBinder';
 import type { PaneRuntimeEventBinding, PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 
@@ -188,7 +189,7 @@ describe('usePaneRuntimeBinder', () => {
       await Promise.resolve();
     });
 
-    expect(xterm.write).toHaveBeenNthCalledWith(2, new TextEncoder().encode(' live output'), expect.any(Function));
+    expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode(' live output'), expect.any(Function));
   });
 
   it('keeps reset ordered behind pending terminal writes', async () => {
@@ -220,6 +221,17 @@ describe('usePaneRuntimeBinder', () => {
     });
 
     expect(xterm.write).toHaveBeenCalledWith(new TextEncoder().encode('queued output'), expect.any(Function));
+    // Reset fence is not even enqueued until the preceding write callback fires.
+    expect(xterm.write).not.toHaveBeenCalledWith(new Uint8Array(0), expect.any(Function));
+    expect(xterm.reset).not.toHaveBeenCalled();
+
+    await act(async () => {
+      (xterm as any).__flushPendingWrites();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(xterm.write).toHaveBeenCalledWith(new Uint8Array(0), expect.any(Function));
     expect(xterm.reset).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -229,6 +241,104 @@ describe('usePaneRuntimeBinder', () => {
     });
 
     expect(xterm.reset).toHaveBeenCalledOnce();
+  });
+
+  it('preserves early terminal input before the pane map effect hydrates', async () => {
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const xterm = createMockXterm();
+
+    function Child({ binder }: { binder: ReturnType<typeof usePaneRuntimeBinder> }) {
+      useLayoutEffect(() => {
+        binder.handleTerminalReady('pane-1')(xterm as any);
+        const onDataCalls = xterm.onData.mock.calls as Array<[((data: string) => void)?]>;
+        const latestOnDataCall = onDataCalls[onDataCalls.length - 1];
+        const sendToPty = latestOnDataCall?.[0] as ((data: string) => void) | undefined;
+        sendToPty?.('\u001bc');
+      }, [binder]);
+      return null;
+    }
+
+    function Harness() {
+      const binder = usePaneRuntimeBinder([
+        {
+          paneId: 'pane-1',
+          runtimeId: 'runtime-1',
+          testSessionId: 'session-1',
+          getSpawnArgs: ({ cols, rows }) => ({
+            id: 'runtime-1',
+            cwd: '/tmp/repo',
+            cols,
+            rows,
+            shell: true,
+          }),
+        },
+      ], 'pane-1', eventRouter);
+      return createElement(Child, { binder });
+    }
+
+    await act(async () => {
+      render(createElement(Harness));
+      await Promise.resolve();
+    });
+
+    expect(mockPtyWrite).toHaveBeenCalledWith({
+      id: 'runtime-1',
+      data: '\u001bc',
+      source: 'user',
+    });
+    expect(mockPtySpawn).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-1',
+        cwd: '/tmp/repo',
+        cols: 80,
+        rows: 24,
+        shell: true,
+      },
+    });
+  });
+
+  it('waits for xterm write callbacks before drain resolves', async () => {
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: () => null,
+      },
+    ], 'pane-1', eventRouter));
+
+    const xterm = createMockXterm({ manualWriteCallbacks: true });
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(xterm as any);
+      await Promise.resolve();
+    });
+
+    act(() => {
+      bindings.get('runtime-1')?.onEvent({ event: 'data', id: 'runtime-1', data: btoa('queued output') });
+    });
+
+    let drained = false;
+    const drainPromise = result.current.drainPaneTerminal('pane-1').then((value) => {
+      drained = value;
+      return value;
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(drained).toBe(false);
+
+    await act(async () => {
+      (xterm as any).__flushPendingWrites();
+      await Promise.resolve();
+    });
+
+    await expect(drainPromise).resolves.toBe(true);
   });
 
   it('ensures the runtime from the first resize when terminal ready is missed', async () => {

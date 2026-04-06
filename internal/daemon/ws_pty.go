@@ -141,6 +141,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		CodexExecutable:   protocol.Deref(msg.CodexExecutable),
 		CopilotExecutable: protocol.Deref(msg.CopilotExecutable),
 		PiExecutable:      protocol.Deref(msg.PiExecutable),
+		LoginShellEnv:     d.cachedLoginShellEnv(),
 	}
 
 	if err := d.ptyBackend.Spawn(context.Background(), spawnOpts); err != nil {
