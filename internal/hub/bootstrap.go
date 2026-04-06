@@ -327,7 +327,16 @@ func (b *Bootstrapper) buildBinaryFromSource(ctx context.Context, platform Remot
 		return fmt.Errorf("source checkout not available for fallback build")
 	}
 
-	cmd := exec.CommandContext(ctx, "go", "build", "-ldflags", "-X main.version="+version, "-o", outputPath, "./cmd/attn")
+	cmd := exec.CommandContext(
+		ctx,
+		"go",
+		"build",
+		"-ldflags",
+		"-X github.com/victorarias/attn/internal/buildinfo.Version="+version,
+		"-o",
+		outputPath,
+		"./cmd/attn",
+	)
 	cmd.Dir = root
 	env := append(os.Environ(), "GOOS="+platform.GOOS, "GOARCH="+platform.GOARCH)
 	if platform.GOOS == "linux" {

@@ -9,7 +9,7 @@ class Attn < Formula
   depends_on "go" => :build
 
   def install
-    system "go", "build", *std_go_args(output: bin/"attn", ldflags: "-X main.version=#{version}"), "./cmd/attn"
+    system "go", "build", *std_go_args(output: bin/"attn", ldflags: "-X github.com/victorarias/attn/internal/buildinfo.Version=#{version}"), "./cmd/attn"
   end
 
   test do

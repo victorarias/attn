@@ -1891,15 +1891,34 @@ func TestDaemon_WebGhosttyAssetsServeNoStore(t *testing.T) {
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
-	wsPort := "19854"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	port, err := freeTCPPort()
+	if err != nil {
+		t.Fatalf("freeTCPPort: %v", err)
+	}
+	wsPort := strconv.Itoa(port)
+	t.Setenv("ATTN_WS_PORT", wsPort)
 
 	d := NewForTesting(sockPath)
 	go d.Start()
 	defer d.Stop()
 
 	waitForSocket(t, sockPath, 5*time.Second)
+
+	healthURL := "http://127.0.0.1:" + wsPort + "/health"
+	healthReady := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(healthURL)
+		if err == nil {
+			resp.Body.Close()
+			healthReady = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !healthReady {
+		t.Fatalf("health endpoint not ready after 5s")
+	}
 
 	jsURL := "http://127.0.0.1:" + wsPort + "/vendor/ghostty-web/ghostty-web.js"
 	jsResp, err := http.Get(jsURL)

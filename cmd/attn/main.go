@@ -27,6 +27,13 @@ import (
 	"github.com/victorarias/attn/internal/wrapper"
 )
 
+var (
+	// Backward-compatible ldflags targets for builders that still inject
+	// build metadata into the main package instead of internal/buildinfo.
+	version   = ""
+	buildTime = ""
+)
+
 // hookInput represents the JSON input from Claude Code hooks
 type hookInput struct {
 	SessionID      string          `json:"session_id"`
@@ -40,6 +47,23 @@ type todoWriteInput struct {
 		Content string `json:"content"`
 		Status  string `json:"status"`
 	} `json:"todos"`
+}
+
+func init() {
+	applyLegacyBuildInfoOverrides()
+}
+
+func applyLegacyBuildInfoOverrides() {
+	if buildinfo.Version == "dev" {
+		if legacyVersion := strings.TrimSpace(version); legacyVersion != "" {
+			buildinfo.Version = legacyVersion
+		}
+	}
+	if buildinfo.BuildTime == "unknown" {
+		if legacyBuildTime := strings.TrimSpace(buildTime); legacyBuildTime != "" {
+			buildinfo.BuildTime = legacyBuildTime
+		}
+	}
 }
 
 func main() {
@@ -106,6 +130,7 @@ func isProtocolVersionCommand(args []string) bool {
 }
 
 func runVersion() {
+	applyLegacyBuildInfoOverrides()
 	fmt.Println(buildinfo.Version)
 }
 

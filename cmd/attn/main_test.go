@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/transcript"
 )
 
@@ -270,5 +271,59 @@ func TestIsProtocolVersionCommand(t *testing.T) {
 				t.Fatalf("isProtocolVersionCommand(%v) = %v, want %v", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestApplyLegacyBuildInfoOverrides_UsesLegacyMainInjectionWhenNeeded(t *testing.T) {
+	previousBuildinfoVersion := buildinfo.Version
+	previousBuildinfoBuildTime := buildinfo.BuildTime
+	previousVersion := version
+	previousBuildTime := buildTime
+	t.Cleanup(func() {
+		buildinfo.Version = previousBuildinfoVersion
+		buildinfo.BuildTime = previousBuildinfoBuildTime
+		version = previousVersion
+		buildTime = previousBuildTime
+	})
+
+	buildinfo.Version = "dev"
+	buildinfo.BuildTime = "unknown"
+	version = "1.2.3"
+	buildTime = "2026-04-06T00:00:00Z"
+
+	applyLegacyBuildInfoOverrides()
+
+	if buildinfo.Version != "1.2.3" {
+		t.Fatalf("buildinfo.Version = %q, want legacy main.version value", buildinfo.Version)
+	}
+	if buildinfo.BuildTime != "2026-04-06T00:00:00Z" {
+		t.Fatalf("buildinfo.BuildTime = %q, want legacy main.buildTime value", buildinfo.BuildTime)
+	}
+}
+
+func TestApplyLegacyBuildInfoOverrides_PreservesInjectedBuildinfo(t *testing.T) {
+	previousBuildinfoVersion := buildinfo.Version
+	previousBuildinfoBuildTime := buildinfo.BuildTime
+	previousVersion := version
+	previousBuildTime := buildTime
+	t.Cleanup(func() {
+		buildinfo.Version = previousBuildinfoVersion
+		buildinfo.BuildTime = previousBuildinfoBuildTime
+		version = previousVersion
+		buildTime = previousBuildTime
+	})
+
+	buildinfo.Version = "9.9.9"
+	buildinfo.BuildTime = "2026-04-06T12:34:56Z"
+	version = "1.2.3"
+	buildTime = "2001-01-01T00:00:00Z"
+
+	applyLegacyBuildInfoOverrides()
+
+	if buildinfo.Version != "9.9.9" {
+		t.Fatalf("buildinfo.Version = %q, want primary buildinfo injection to win", buildinfo.Version)
+	}
+	if buildinfo.BuildTime != "2026-04-06T12:34:56Z" {
+		t.Fatalf("buildinfo.BuildTime = %q, want primary buildinfo injection to win", buildinfo.BuildTime)
 	}
 }

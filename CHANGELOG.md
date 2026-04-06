@@ -14,7 +14,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Embedded Phone Terminal Stability**: Real-phone scrolling, typing, quick actions, keyboard open/close, and keyboard-dismiss behavior now work without depending on attach replay hacks, including a dedicated `Ctrl+C` shortcut and no-store asset serving.
 - **Embedded Phone Terminal Diagnostics**: Add daemon-backed viewport instrumentation plus PTY rendering guidance so focus and viewport bugs can be diagnosed from real-device traces instead of browser emulation alone.
-- **Build Metadata Injection**: Share version and build-time metadata across `attn --version`, daemon health output, and build/install flows so it is easier to identify the running daemon build and `install-all` leaves the newest daemon running.
+- **Build Metadata Injection**: Share version and build-time metadata across `attn --version`, daemon health output, source/bootstrap builds, Homebrew packaging, and build/install flows so it is easier to identify the running daemon build and `install-all` leaves the newest daemon running.
 - **Pane Runtime Binder Ordering**: Preserve early split-pane terminal input during initial mount and keep pane drain sequencing tied to xterm flush callbacks so shell startup probes and terminal automation no longer race the pane lifecycle.
 
 ## [2026-04-04]
