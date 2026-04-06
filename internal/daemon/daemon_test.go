@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,12 +11,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/github"
@@ -1798,12 +1801,21 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 	if health["protocol"] != protocol.ProtocolVersion {
 		t.Errorf("protocol = %v, want %s", health["protocol"], protocol.ProtocolVersion)
 	}
+	if health["version"] != buildinfo.Version {
+		t.Errorf("version = %v, want %s", health["version"], buildinfo.Version)
+	}
+	if health["build_time"] != buildinfo.BuildTime {
+		t.Errorf("build_time = %v, want %s", health["build_time"], buildinfo.BuildTime)
+	}
 	if daemonID, ok := health["daemon_instance_id"].(string); !ok || daemonID == "" {
 		t.Errorf("daemon_instance_id = %v, want non-empty string", health["daemon_instance_id"])
 	}
 	// sessions should be 1.0 (float64 from JSON)
 	if sessions, ok := health["sessions"].(float64); !ok || sessions != 1 {
 		t.Errorf("sessions = %v, want 1", health["sessions"])
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
+		t.Errorf("health Cache-Control = %q, want no-store, max-age=0", got)
 	}
 }
 
@@ -1844,11 +1856,115 @@ func TestDaemon_WebRootServesEmbeddedClient(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("root status = %d, want 200", resp.StatusCode)
 	}
-	if !strings.Contains(string(body), "attn web") {
-		t.Fatalf("root body did not contain web client marker")
+	bodyText := string(body)
+	if !strings.Contains(bodyText, `data-attn-web-client="ghostty-web"`) {
+		t.Fatalf("root body did not contain ghostty-web client marker")
 	}
-	if !strings.Contains(string(body), "rel=\"icon\"") {
+	if !strings.Contains(bodyText, `rel="icon"`) {
 		t.Fatalf("root body did not include favicon link")
+	}
+	if !strings.Contains(bodyText, "/vendor/ghostty-web/ghostty-web.js") {
+		t.Fatalf("root body did not reference ghostty-web bundle")
+	}
+	if !strings.Contains(bodyText, "/vendor/ghostty-web/ghostty-vt.wasm") {
+		t.Fatalf("root body did not reference ghostty-web wasm asset")
+	}
+	if !strings.Contains(bodyText, `data-testid="session-list"`) {
+		t.Fatalf("root body did not include session list marker")
+	}
+	if !strings.Contains(bodyText, `data-quick-action="esc"`) {
+		t.Fatalf("root body did not include quick action markers")
+	}
+	if !strings.Contains(bodyText, "attn ghostty-web") {
+		t.Fatalf("root body did not include ghostty-web heading")
+	}
+	if strings.Contains(bodyText, "xterm.min.js") || strings.Contains(bodyText, "xterm-addon-fit") {
+		t.Fatalf("root body still referenced xterm-era assets")
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
+		t.Fatalf("root Cache-Control = %q, want no-store, max-age=0", got)
+	}
+}
+
+func TestDaemon_WebGhosttyAssetsServeNoStore(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	wsPort := "19854"
+	os.Setenv("ATTN_WS_PORT", wsPort)
+	defer os.Unsetenv("ATTN_WS_PORT")
+
+	d := NewForTesting(sockPath)
+	go d.Start()
+	defer d.Stop()
+
+	waitForSocket(t, sockPath, 5*time.Second)
+
+	jsURL := "http://127.0.0.1:" + wsPort + "/vendor/ghostty-web/ghostty-web.js"
+	jsResp, err := http.Get(jsURL)
+	if err != nil {
+		t.Fatalf("get ghostty-web bundle: %v", err)
+	}
+	defer jsResp.Body.Close()
+
+	jsBody, err := io.ReadAll(jsResp.Body)
+	if err != nil {
+		t.Fatalf("read ghostty-web bundle: %v", err)
+	}
+	if jsResp.StatusCode != http.StatusOK {
+		t.Fatalf("ghostty-web bundle status = %d, want 200", jsResp.StatusCode)
+	}
+	if !strings.Contains(string(jsBody), "ghostty-vt.wasm") {
+		t.Fatalf("ghostty-web bundle did not reference wasm payload")
+	}
+	if got := jsResp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
+		t.Fatalf("ghostty-web bundle Cache-Control = %q, want no-store, max-age=0", got)
+	}
+
+	sidecar := extractGhosttySidecarPath(string(jsBody))
+	if sidecar == "" {
+		t.Fatal("ghostty-web bundle did not include vite browser external sidecar path")
+	}
+	sidecarURL := "http://127.0.0.1:" + wsPort + "/vendor/ghostty-web/" + sidecar
+	sidecarResp, err := http.Get(sidecarURL)
+	if err != nil {
+		t.Fatalf("get ghostty-web sidecar: %v", err)
+	}
+	defer sidecarResp.Body.Close()
+
+	sidecarBody, err := io.ReadAll(sidecarResp.Body)
+	if err != nil {
+		t.Fatalf("read ghostty-web sidecar: %v", err)
+	}
+	if sidecarResp.StatusCode != http.StatusOK {
+		t.Fatalf("ghostty-web sidecar status = %d, want 200", sidecarResp.StatusCode)
+	}
+	if len(sidecarBody) == 0 {
+		t.Fatal("ghostty-web sidecar was empty")
+	}
+	if got := sidecarResp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
+		t.Fatalf("ghostty-web sidecar Cache-Control = %q, want no-store, max-age=0", got)
+	}
+
+	wasmURL := "http://127.0.0.1:" + wsPort + "/vendor/ghostty-web/ghostty-vt.wasm"
+	wasmResp, err := http.Get(wasmURL)
+	if err != nil {
+		t.Fatalf("get ghostty-web wasm: %v", err)
+	}
+	defer wasmResp.Body.Close()
+
+	wasmBody, err := io.ReadAll(wasmResp.Body)
+	if err != nil {
+		t.Fatalf("read ghostty-web wasm: %v", err)
+	}
+	if wasmResp.StatusCode != http.StatusOK {
+		t.Fatalf("ghostty-web wasm status = %d, want 200", wasmResp.StatusCode)
+	}
+	if len(wasmBody) < 100000 {
+		t.Fatalf("ghostty-web wasm length = %d, want substantial payload", len(wasmBody))
+	}
+	if got := wasmResp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
+		t.Fatalf("ghostty-web wasm Cache-Control = %q, want no-store, max-age=0", got)
 	}
 }
 
@@ -1892,6 +2008,235 @@ func TestDaemon_WebFaviconDoesNot404(t *testing.T) {
 	if len(body) != 0 {
 		t.Fatalf("favicon body length = %d, want 0", len(body))
 	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
+		t.Fatalf("favicon Cache-Control = %q, want no-store, max-age=0", got)
+	}
+}
+
+func TestDaemon_WebClientAttachFlowOverWebSocket(t *testing.T) {
+	port, err := freeTCPPort()
+	if err != nil {
+		t.Fatalf("freeTCPPort: %v", err)
+	}
+	t.Setenv("ATTN_WS_PORT", strconv.Itoa(port))
+
+	tmpDir := shortTempDir(t)
+	sockPath := filepath.Join(tmpDir, "test.sock")
+
+	d := NewForTesting(sockPath)
+	go d.Start()
+	defer d.Stop()
+
+	waitForSocket(t, sockPath, 5*time.Second)
+
+	sessionID := "web-client-smoke"
+	cwd := t.TempDir()
+	if err := d.ptyBackend.Spawn(context.Background(), ptybackend.SpawnOptions{
+		ID:    sessionID,
+		CWD:   cwd,
+		Agent: protocol.AgentShellValue,
+		Label: "web-client-smoke",
+		Cols:  80,
+		Rows:  24,
+	}); err != nil {
+		t.Fatalf("spawn shell PTY: %v", err)
+	}
+	defer func() {
+		_ = d.ptyBackend.Kill(context.Background(), sessionID, syscall.SIGTERM)
+	}()
+
+	c := client.New(sockPath)
+	if err := c.Register(sessionID, "web-client-smoke", cwd); err != nil {
+		t.Fatalf("register smoke session: %v", err)
+	}
+	if err := c.UpdateState(sessionID, protocol.StateWorking); err != nil {
+		t.Fatalf("update smoke session state: %v", err)
+	}
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", port)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	cancel()
+	if err != nil {
+		t.Fatalf("websocket dial: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	initial := waitForDaemonWebSocketEvent(t, conn, 10*time.Second, func(evt map[string]interface{}) bool {
+		return asString(evt["event"]) == protocol.EventInitialState
+	})
+	if !initialStateIncludesSession(initial, sessionID) {
+		t.Fatalf("initial_state did not include smoke session %q", sessionID)
+	}
+
+	if err := writeWS(conn, map[string]interface{}{
+		"cmd": protocol.CmdAttachSession,
+		"id":  sessionID,
+	}); err != nil {
+		t.Fatalf("attach write failed: %v", err)
+	}
+
+	attach := waitForDaemonWebSocketEvent(t, conn, 10*time.Second, func(evt map[string]interface{}) bool {
+		return asString(evt["event"]) == protocol.EventAttachResult && asString(evt["id"]) == sessionID
+	})
+	if !asBool(attach["success"]) {
+		t.Fatalf("attach_result success = %v, error=%q", attach["success"], asString(attach["error"]))
+	}
+
+	if err := writeWS(conn, map[string]interface{}{
+		"cmd":  protocol.CmdPtyInput,
+		"id":   sessionID,
+		"data": "echo __ATTN_WEB_CLIENT_SMOKE__\r",
+	}); err != nil {
+		t.Fatalf("pty_input write failed: %v", err)
+	}
+
+	output := waitForPtyOutputContaining(t, conn, sessionID, "__ATTN_WEB_CLIENT_SMOKE__", 10*time.Second)
+	if !strings.Contains(output, "__ATTN_WEB_CLIENT_SMOKE__") {
+		t.Fatalf("pty output %q did not contain smoke marker", output)
+	}
+
+	if err := writeWS(conn, map[string]interface{}{
+		"cmd":  protocol.CmdPtyResize,
+		"id":   sessionID,
+		"cols": 90,
+		"rows": 30,
+	}); err != nil {
+		t.Fatalf("pty_resize write failed: %v", err)
+	}
+
+	infoProvider, ok := d.ptyBackend.(ptybackend.SessionInfoProvider)
+	if !ok {
+		t.Fatal("pty backend does not expose SessionInfoProvider")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		info, err := infoProvider.SessionInfo(context.Background(), sessionID)
+		if err == nil && info.Cols == 90 && info.Rows == 30 {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	info, err := infoProvider.SessionInfo(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("session info after resize: %v", err)
+	}
+	if info.Cols != 90 || info.Rows != 30 {
+		t.Fatalf("session size after resize = %dx%d, want 90x30", info.Cols, info.Rows)
+	}
+
+	if err := writeWS(conn, map[string]interface{}{
+		"cmd": protocol.CmdDetachSession,
+		"id":  sessionID,
+	}); err != nil {
+		t.Fatalf("detach write failed: %v", err)
+	}
+}
+
+func extractGhosttySidecarPath(bundle string) string {
+	const prefix = "./__vite-browser-external-"
+	start := strings.Index(bundle, prefix)
+	if start == -1 {
+		return ""
+	}
+	rest := bundle[start+2:]
+	end := strings.Index(rest, ".js")
+	if end == -1 {
+		return ""
+	}
+	return rest[:end+3]
+}
+
+func waitForDaemonWebSocketEvent(
+	t *testing.T,
+	conn *websocket.Conn,
+	timeout time.Duration,
+	match func(map[string]interface{}) bool,
+) map[string]interface{} {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Until(deadline))
+		_, payload, err := conn.Read(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("websocket read failed: %v", err)
+		}
+
+		var event map[string]interface{}
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("decode websocket event: %v", err)
+		}
+		if match(event) {
+			return event
+		}
+	}
+
+	t.Fatalf("timed out waiting for websocket event after %v", timeout)
+	return nil
+}
+
+func initialStateIncludesSession(event map[string]interface{}, sessionID string) bool {
+	rawSessions, ok := event["sessions"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, raw := range rawSessions {
+		session, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if asString(session["id"]) == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForPtyOutputContaining(
+	t *testing.T,
+	conn *websocket.Conn,
+	sessionID string,
+	want string,
+	timeout time.Duration,
+) string {
+	t.Helper()
+
+	var combined strings.Builder
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Until(deadline))
+		_, payload, err := conn.Read(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("websocket read while waiting for pty_output: %v", err)
+		}
+
+		var event map[string]interface{}
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("decode pty_output event: %v", err)
+		}
+		if asString(event["event"]) != protocol.EventPtyOutput || asString(event["id"]) != sessionID {
+			continue
+		}
+
+		encoded := asString(event["data"])
+		if encoded == "" {
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			t.Fatalf("decode pty_output base64: %v", err)
+		}
+		combined.Write(decoded)
+		if strings.Contains(combined.String(), want) {
+			return combined.String()
+		}
+	}
+
+	t.Fatalf("timed out waiting for pty output containing %q after %v", want, timeout)
+	return ""
 }
 
 func TestDaemon_SettingsValidation(t *testing.T) {

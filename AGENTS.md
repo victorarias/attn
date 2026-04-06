@@ -267,6 +267,17 @@ Verification:
   - `Cmd+T` terminal accepts typing without extra click.
   - Switch to another session and back; utility terminal still accepts typing without extra click.
 
+### 8. PTY Geometry And Replay Discipline (REQUIRED)
+
+Before changing PTY attach/replay, terminal resize, mobile keyboard viewport handling, or daemon-served terminal rendering, read [docs/PTY_RENDERING.md](/Users/victor.arias/projects/victor/attn/docs/PTY_RENDERING.md).
+
+Treat that document as the standing guidance for:
+- geometry ownership rules
+- why `attach_session` replay is provisional rather than authoritative
+- mobile keyboard and `visualViewport` pitfalls
+- anti-patterns that have already caused regressions in this repo
+- minimum verification expectations for PTY/mobile terminal changes
+
 ## Communication
 
 All IPC uses JSON over unix socket at `~/.attn/attn.sock`. Messages have a `cmd` field to identify type. Hooks use shell commands with `nc` to send state updates. WebSocket at `ws://localhost:9849` for real-time updates to the Tauri app.
