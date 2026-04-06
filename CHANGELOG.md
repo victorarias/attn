@@ -9,41 +9,17 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-04-06]
 
 ### Changed
-- **Embedded Phone Terminal Engine**: Rebuild the daemon-served mobile web client around `ghostty-web` with a fresh session list view, a dedicated terminal view, embedded build metadata, and the existing PTY websocket protocol instead of iterating further on the previous xterm-era page.
+- **Embedded Phone Terminal**: Rebuild the daemon-served mobile web client around `ghostty-web` with a dedicated session list, a terminal-first phone layout, embedded build metadata, and the existing PTY websocket protocol.
 
 ### Fixed
-- **Embedded Phone Terminal Integration**: Vendor the required `ghostty-web` browser bundle, Vite sidecar, and WASM payload directly into the daemon web assets, serve them with `no-store` headers, and keep attach/input/resize/output on the existing `attach_session`, `pty_input`, `pty_resize`, `pty_output`, and `attach_result` protocol flow.
-- **Embedded Phone Keyboard Path**: Replace Ghostty focus assumptions with a separate offscreen input path for mobile-safe typing, IME commits, backspace handling, sticky `Ctrl`/`Alt`, and quick-action sends while keeping the terminal renderer itself focused on output.
-- **Embedded Phone Keyboard Repaint**: Let keyboard-driven viewport changes settle, then refit and locally repaint the live Ghostty buffer without reattaching or replaying daemon snapshots, so opening or closing the keyboard no longer depends on broken attach-replay repair paths.
-- **Embedded Phone Keyboard Resize Ownership**: Treat keyboard-open and keyboard-close transitions as authoritative PTY size claims after the viewport settles, even when the final rounded `cols/rows` match the previous size, so the remote process still gets one final redraw opportunity for the phone state.
-- **Embedded Phone Keyboard Transition Stability**: Stop driving PTY resizes from every transient `visualViewport` and `ResizeObserver` tick during keyboard animation, and stop seizing ownership again on hidden-input focus, so the phone client waits for the keyboard viewport to settle before asking the running process to redraw.
-- **Embedded Phone Geometry Authority**: Separate raw browser viewport measurements from committed terminal geometry, keep keyboard transitions in an explicit opening/closing state, and stop using `ResizeObserver` as a second terminal-size authority so the PTY only resizes from committed viewport transactions.
-- **Embedded Phone Keyboard + Quick Actions**: Keep quick actions from implicitly opening the software keyboard, and move the hidden mobile input off the terminal centerline so keyboard focus is less likely to trigger browser pan/zoom around the middle of the screen.
-- **Embedded Phone Keyboard Close Recovery**: Treat keyboard dismissal as a viewport-recovery phase, keep the mobile input anchored as a normal-sized focus surface instead of a transformed 1px point, and wait for Safari's visual viewport to normalize before committing the close-state terminal geometry.
-- **Embedded Phone Quick Actions**: Add a dedicated `Ctrl+C` interrupt quick action while keeping the compact mobile quick-key strip within two rows.
-- **Embedded Phone Viewport Instrumentation**: Add a daemon-side `/web-instrumentation` log sink and structured client snapshots around keyboard, focus, viewport, and settled-layout transitions so real-phone viewport bugs can be diagnosed from daemon logs instead of guesswork.
-- **Embedded Phone Resize + Replay**: Resize the Ghostty terminal from `FitAddon.proposeDimensions()` and explicit `terminal.resize(cols, rows)` calls, send PTY resizes when the stage changes, and preserve attach replay correctness by queueing live `pty_output` until the `attach_result` snapshot finishes applying.
-- **Embedded Phone Regression Coverage**: Update the daemon web tests to assert the new Ghostty markers and vendored assets, add a daemon-backed attach/input/resize smoke path, and expose lightweight browser diagnostics so the embedded client can be verified against a real session load.
-- **`make install-all` Daemon Freshness**: Reorder the combined app+daemon install so the final daemon restart happens after the app bundle copy, which prevents an already-open app from respawning and continuing to serve an older in-memory daemon build on port `9849`.
-
-## [2026-04-05]
-
-### Changed
-- **Mobile Web Terminal Layout**: Keep the embedded phone terminal full-width, hide the temporary top debug strip while preserving its height, reduce the terminal font further, defer web attach until after the fitted PTY resize so the initial replay uses the final mobile row count, and compact the terminal header controls even further so the back button, title, and state badge take minimal visual space.
-
-### Fixed
-- **Mobile Web Terminal Scrollback Drift**: Keep the embedded phone terminal pinned to the live bottom during initial attach and normal streaming output unless the user intentionally scrolls away, so opening a busy session no longer drifts upward through scrollback on its own.
-- **Mobile Web Terminal Attach Races**: Treat mobile attach as geometry-sensitive by forcing a PTY resize before attach, skipping automatic xterm focus on touch devices so the keyboard does not resize the viewport during open, and reattaching if the terminal size changes before the snapshot arrives.
-- **Mobile Web Terminal Scrollback Restore**: Replay terminal scrollback before applying the visible-frame snapshot so reopened sessions keep their scroll history on phones instead of showing only the last screenful.
-- **Mobile Web Terminal Touch Scrolling**: Keep the phone terminal page itself fixed while the terminal is open, let visual viewport changes update layout without forcing PTY refits, keep xterm's hidden helper textarea inside the viewport on touch devices, and drive xterm's internal scrollable viewport from touch drags so mobile browsers stop fighting the terminal for focus and scroll ownership.
-- **Embedded Web Client Caching**: Disable HTTP caching for the phone web client and favicon route so Safari and Chrome always fetch the current embedded HTML and JS instead of reusing stale assets after daemon changes.
-- **Embedded Web Build Stamp**: Show the daemon build time on the phone sessions page and fetch it from a no-store health endpoint so it is obvious which embedded web build a device has loaded.
+- **Embedded Phone Terminal Stability**: Real-phone scrolling, typing, quick actions, keyboard open/close, and keyboard-dismiss behavior now work without depending on attach replay hacks, including a dedicated `Ctrl+C` shortcut and no-store asset serving.
+- **Embedded Phone Terminal Diagnostics**: Add daemon-backed viewport instrumentation plus PTY rendering guidance so focus and viewport bugs can be diagnosed from real-device traces instead of browser emulation alone.
+- **Build Metadata Injection**: Share version and build-time metadata across `attn --version`, daemon health output, and build/install flows so it is easier to identify the running daemon build and `install-all` leaves the newest daemon running.
 
 ## [2026-04-04]
 
 ### Added
 - **Launch YOLO Preference**: The new-session location picker and repo/worktree picker now expose a keyboard-friendly `YOLO` toggle that launches sessions with each agent's approval-bypass equivalent, and the chosen value is remembered per target daemon so local and remote hosts keep independent defaults.
-- **Mobile Web Client**: The daemon now serves an embedded browser client at `/` with a mobile-first session list, live PTY terminal attachment, quick approval/input shortcuts, and vendored xterm assets so running sessions can be controlled from Safari or any browser.
 
 ### Changed
 - **Release Signing & Notarization**: The GitHub macOS release workflow now imports a `Developer ID Application` certificate from GitHub Actions secrets, signs release builds with the real Apple identity, notarizes both the packaged app and the rebuilt DMG, and staples the notarization tickets before publishing the Homebrew cask artifacts.
@@ -53,7 +29,6 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Remote Sidebar Session Actions**: Remote-host sessions now show the same hover-only reload and close buttons as local sessions in the left sidebar.
 - **Hidden Session Terminal Repaint**: Switching back to a previously hidden session now forces xterm through a real size bounce when the measured cols/rows are unchanged, so main panes no longer stay rendered as a narrow stale column until some later resize shakes them loose.
-- **Web Client Favicon Noise**: The embedded browser client now ships with an explicit inline favicon and fallback handling for `/favicon.ico`, so opening it from Safari or Chrome no longer produces a spurious 404 in the console or daemon access log.
 
 ## [2026-04-03]
 
