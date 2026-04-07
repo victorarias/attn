@@ -163,7 +163,7 @@ git clone https://github.com/victorarias/attn.git && cd attn
 | [CLI reference](docs/CLI.md) | Commands and flags |
 | [Configuration](docs/CONFIGURATION.md) | Settings |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | When things go sideways |
-| [PR review automation](docs/PR_REVIEW.md) | Hodor workflow and required GitHub secrets |
+| [PR review automation](docs/PR_REVIEW.md) | shitty-reviewing-agent workflow and required GitHub secrets |
 | [Release](docs/RELEASE.md) | Maintainer runbook |
 
 ## Status

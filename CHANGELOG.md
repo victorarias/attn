@@ -20,6 +20,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **`Cmd+W` Close Semantics**: `Cmd+W` now stays inside the app and closes the active utility pane when one is selected, otherwise closes the active session, so it no longer falls through to closing the whole app window just because focus is outside a split terminal.
 - **Split Session Close Confirmation**: Closing a session that still has split terminals open now asks for confirmation before tearing down the whole session, with `Enter`, `Space`, or `Y` confirming and `N` or `Esc` canceling.
+- **PR Review Provider**: Replace the patched Hodor GitHub workflow with `victorarias/shitty-reviewing-agent`, running on OpenRouter with `minimax/minimax-m2.7` and the `OPEN_ROUTER_API_KEY` secret. Removes the `.github/hodor` patch and `.hodor` skill directory along with it.
+
+---
 
 ## [2026-04-06]
 
