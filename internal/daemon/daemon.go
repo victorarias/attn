@@ -1785,6 +1785,7 @@ func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout t
 			driver,
 			text,
 			d.store.GetSetting(executableSettingKey(string(session.Agent))),
+			session.Directory,
 			timeout,
 		); ok {
 			return state, err

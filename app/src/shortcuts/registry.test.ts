@@ -14,6 +14,10 @@ function withNavigatorPlatform<T>(platform: string, fn: () => T): T {
 }
 
 describe('shortcut registry', () => {
+  const isAllowedConflict = (a: string, b: string) => (
+    [a, b].sort().join('|') === 'session.close|terminal.close'
+  );
+
   describe('matchesShortcut', () => {
     it('matches cmd+key shortcut on macOS', () => {
       withNavigatorPlatform('MacIntel', () => {
@@ -175,6 +179,9 @@ describe('shortcut registry', () => {
 
         const existing = seen.get(key);
         if (existing) {
+          if (isAllowedConflict(existing, id)) {
+            continue;
+          }
           throw new Error(`Duplicate shortcut: "${id}" and "${existing}" both use ${key}`);
         }
         seen.set(key, id);
@@ -198,7 +205,7 @@ describe('shortcut registry', () => {
 
     it('has expected session shortcuts defined', () => {
       expect(SHORTCUTS['session.new']).toEqual({ key: 'n', meta: true });
-      expect(SHORTCUTS['session.close']).toEqual({ key: 'w', meta: true, shift: true });
+      expect(SHORTCUTS['session.close']).toEqual({ key: 'w', meta: true });
       expect(SHORTCUTS['session.goToDashboard']).toEqual({ key: 'g', meta: true });
       expect(SHORTCUTS['dock.diff']).toEqual({ key: 'g', meta: true, shift: true });
     });

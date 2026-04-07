@@ -13,11 +13,17 @@ const mockEventRouter: PaneRuntimeEventRouter = {
   registerBinding: vi.fn(() => () => {}),
 };
 
+const { mockPtyResize, mockPtySpawn, mockPtyWrite } = vi.hoisted(() => ({
+  mockPtyResize: vi.fn(() => Promise.resolve()),
+  mockPtySpawn: vi.fn(() => Promise.resolve()),
+  mockPtyWrite: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock('../pty/bridge', () => ({
   listenPtyEvents: vi.fn(() => Promise.resolve(() => {})),
-  ptyResize: vi.fn(() => Promise.resolve()),
-  ptySpawn: vi.fn(() => Promise.resolve()),
-  ptyWrite: vi.fn(() => Promise.resolve()),
+  ptyResize: mockPtyResize,
+  ptySpawn: mockPtySpawn,
+  ptyWrite: mockPtyWrite,
 }));
 
 const { mockTerminalFocus } = vi.hoisted(() => ({
@@ -28,14 +34,22 @@ const { mockTerminalFit } = vi.hoisted(() => ({
   mockTerminalFit: vi.fn(),
 }));
 
+const { renderedTerminalProps } = vi.hoisted(() => ({
+  renderedTerminalProps: new Map<string, any>(),
+}));
+
 vi.mock('./Terminal', () => ({
-  Terminal: forwardRef((_props, ref) => {
+  Terminal: forwardRef((props: any, ref) => {
+    renderedTerminalProps.set(props.debugName, props);
     useImperativeHandle(ref, () => ({
       terminal: {} as any,
       fit: mockTerminalFit,
       focus: mockTerminalFocus,
     }));
-    return <div data-testid="mock-terminal">Main terminal</div>;
+    const label = typeof props.debugName === 'string' && props.debugName.startsWith('utility:')
+      ? props.debugName.split(':')[2]
+      : 'Main terminal';
+    return <div data-testid="mock-terminal">{label}</div>;
   }),
 }));
 
@@ -53,11 +67,36 @@ vi.mock('../shortcuts/useShortcut', () => ({
   triggerShortcut: vi.fn(() => false),
 }));
 
+function createMockXterm() {
+  return {
+    cols: 80,
+    rows: 24,
+    write: vi.fn((_data: string | Uint8Array, callback?: () => void) => {
+      callback?.();
+    }),
+    reset: vi.fn(),
+    focus: vi.fn(),
+    onData: vi.fn(() => ({ dispose: vi.fn() })),
+    onWriteParsed: vi.fn(() => ({ dispose: vi.fn() })),
+    attachCustomKeyEventHandler: vi.fn(),
+    buffer: {
+      active: {
+        length: 0,
+        getLine: vi.fn(() => null),
+      },
+    },
+  };
+}
+
 describe('SessionTerminalWorkspace', () => {
   afterEach(() => {
     registeredShortcuts.clear();
+    renderedTerminalProps.clear();
     vi.mocked(mockEventRouter.registerBinding).mockClear();
     mockTerminalFit.mockReset();
+    mockPtyResize.mockReset();
+    mockPtySpawn.mockReset();
+    mockPtyWrite.mockReset();
     vi.useRealTimers();
   });
 
@@ -176,7 +215,7 @@ describe('SessionTerminalWorkspace', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByText('Shell 1'));
+    fireEvent.mouseDown(screen.getAllByText('Shell 1')[1]);
 
     expect(onFocusPane).toHaveBeenCalledWith('pane-shell-1');
     expect(mockTerminalFocus).toHaveBeenCalled();
@@ -521,5 +560,59 @@ describe('SessionTerminalWorkspace', () => {
     vi.runAllTimers();
 
     expect(mockTerminalFit).toHaveBeenCalled();
+  });
+
+  it('passes the parent session endpoint to utility pane spawns', async () => {
+    render(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        sessionEndpointId="ep-remote"
+        cwd="/tmp/repo"
+        workspace={{
+          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+              { type: 'pane', paneId: 'pane-shell-1' },
+            ],
+          },
+        }}
+        activePaneId="pane-shell-1"
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    const utilityTerminalProps = renderedTerminalProps.get('utility:session-1:Shell 1:pane-shell-1');
+    expect(utilityTerminalProps).toBeDefined();
+
+    await act(async () => {
+      utilityTerminalProps.onReady(createMockXterm() as any);
+      await Promise.resolve();
+    });
+
+    expect(mockPtySpawn).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-shell-1',
+        cwd: '/tmp/repo',
+        endpoint_id: 'ep-remote',
+        cols: 80,
+        rows: 24,
+        shell: true,
+      },
+    });
   });
 });

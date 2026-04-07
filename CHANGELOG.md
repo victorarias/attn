@@ -6,6 +6,21 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-07]
+
+### Fixed
+- **Codex Idle Classification On Remote Daemons**: Stop-time Codex classification now runs from the session repository directory instead of the daemon's ambient working directory, so remote Codex sessions no longer fall back to `unknown` just because the classifier subprocess hit the CLI trust check.
+- **Remote Split Freeze On Codex Sessions**: WebSocket attach replay now drops redundant full scrollback when a fresh screen snapshot is available, so opening a split on a remote Codex session no longer has to push multi-megabyte replay payloads through the UI just to redraw the current screen.
+- **Remote Split Shell Reattach Routing**: Split-pane utility runtimes now inherit their parent session's endpoint and are treated as daemon-known PTYs, so reopening or remounting a remote split attaches to the existing remote shell before falling back to respawn instead of hanging on a misrouted local `spawn_session`.
+- **App Launch Terminal Replay Weight**: WebSocket attaches now derive a visible-frame snapshot from buffered PTY output when no live snapshot exists, so reopening the app no longer has to replay multi-megabyte hidden-session scrollback just to restore the current screen.
+
+### Added
+- **Endpoint Re-bootstrap Action**: Remote endpoint cards in Settings now include a `Re-bootstrap` action that disables and re-enables the endpoint in one click, making it easier to force the local daemon to re-push and reconnect a remote daemon after local installs.
+
+### Changed
+- **`Cmd+W` Close Semantics**: `Cmd+W` now stays inside the app and closes the active utility pane when one is selected, otherwise closes the active session, so it no longer falls through to closing the whole app window just because focus is outside a split terminal.
+- **Split Session Close Confirmation**: Closing a session that still has split terminals open now asks for confirmation before tearing down the whole session, with `Enter`, `Space`, or `Y` confirming and `N` or `Esc` canceling.
+
 ## [2026-04-06]
 
 ### Changed

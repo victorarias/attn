@@ -10,6 +10,7 @@ import { LocationPicker } from './components/LocationPicker';
 import { BranchPicker } from './components/BranchPicker';
 import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
+import { CloseSessionPrompt } from './components/CloseSessionPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
@@ -617,6 +618,11 @@ function AppContent({
 
   // Worktree cleanup prompt state
   const [closedWorktree, setClosedWorktree] = useState<{ path: string; branch?: string } | null>(null);
+  const [pendingSessionClose, setPendingSessionClose] = useState<{
+    id: string;
+    label: string;
+    splitCount: number;
+  } | null>(null);
   const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(false);
 
   const [initialReviewFile, setInitialReviewFile] = useState<string | null>(null);
@@ -1314,6 +1320,36 @@ function AppContent({
     [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession, showError]
   );
 
+  const handleRequestCloseSession = useCallback((id: string) => {
+    const session = sessions.find((entry) => entry.id === id);
+    if (!session) {
+      return;
+    }
+    const splitCount = session.workspace.terminals.length;
+    if (splitCount > 0) {
+      setPendingSessionClose({
+        id: session.id,
+        label: session.label,
+        splitCount,
+      });
+      return;
+    }
+    handleCloseSession(id);
+  }, [handleCloseSession, sessions]);
+
+  const handleCancelSessionClose = useCallback(() => {
+    setPendingSessionClose(null);
+  }, []);
+
+  const handleConfirmSessionClose = useCallback(() => {
+    if (!pendingSessionClose) {
+      return;
+    }
+    const sessionID = pendingSessionClose.id;
+    setPendingSessionClose(null);
+    handleCloseSession(sessionID);
+  }, [handleCloseSession, pendingSessionClose]);
+
   const handleSelectSession = useCallback(
     (id: string) => {
       setActiveSession(id);
@@ -1541,13 +1577,10 @@ function AppContent({
         });
         return;
       }
-
-      showError('Use the sidebar close button to close a session with split panes.');
-      return;
     }
 
-    handleCloseSession(activeSessionId);
-  }, [activeSessionId, getActivePaneIdForSession, handleCloseSession, sendWorkspaceClosePane, sessions, showError]);
+    handleRequestCloseSession(activeSessionId);
+  }, [activeSessionId, getActivePaneIdForSession, handleRequestCloseSession, sendWorkspaceClosePane, sessions, showError]);
 
   const handleReloadSession = useCallback((id: string) => {
     const size = getPaneSize(id, MAIN_TERMINAL_PANE_ID) || undefined;
@@ -1939,7 +1972,7 @@ function AppContent({
           footerShortcuts={sidebarFooterShortcuts}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
-          onCloseSession={handleCloseSession}
+          onCloseSession={handleRequestCloseSession}
           onReloadSession={handleReloadSession}
           onGoToDashboard={goToDashboard}
           onToggleCollapse={toggleSidebarCollapse}
@@ -1956,6 +1989,7 @@ function AppContent({
                   sessionId={session.id}
                   sessionLabel={session.label}
                   sessionAgent={session.agent}
+                  sessionEndpointId={session.endpointId}
                   cwd={session.cwd}
                   workspace={session.workspace}
                   activePaneId={getActivePaneIdForSession(session)}
@@ -2125,6 +2159,13 @@ function AppContent({
         onKeep={handleWorktreeKeep}
         onDelete={handleWorktreeDelete}
         onAlwaysKeep={handleWorktreeAlwaysKeep}
+      />
+      <CloseSessionPrompt
+        isVisible={pendingSessionClose !== null}
+        sessionLabel={pendingSessionClose?.label || ''}
+        splitCount={pendingSessionClose?.splitCount || 0}
+        onConfirm={handleConfirmSessionClose}
+        onCancel={handleCancelSessionClose}
       />
       <ThumbsModal
         isOpen={thumbsOpen}

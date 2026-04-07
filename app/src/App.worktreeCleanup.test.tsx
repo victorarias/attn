@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
 
@@ -7,6 +7,9 @@ const mockUseSessionStore = vi.fn();
 const mockUseDaemonStore = vi.fn();
 const mockUseDaemonSocket = vi.fn();
 const mockSendUnregisterSession = vi.fn();
+const mockUseKeyboardShortcuts = vi.fn();
+const mockSendWorkspaceClosePane = vi.fn(async () => ({ success: true }));
+const mockCloseSession = vi.fn();
 
 vi.mock('@tauri-apps/plugin-deep-link', () => ({
   onOpenUrl: vi.fn(async () => () => {}),
@@ -68,7 +71,7 @@ vi.mock('./components/ErrorToast', () => ({
 }));
 
 vi.mock('./hooks/useKeyboardShortcuts', () => ({
-  useKeyboardShortcuts: vi.fn(),
+  useKeyboardShortcuts: (args: unknown) => mockUseKeyboardShortcuts(args),
 }));
 
 vi.mock('./hooks/useUIScale', () => ({
@@ -94,6 +97,7 @@ vi.mock('./hooks/usePRsNeedingAttention', () => ({
 }));
 
 vi.mock('./store/sessions', () => ({
+  MAIN_TERMINAL_PANE_ID: 'main',
   useSessionStore: () => mockUseSessionStore(),
 }));
 
@@ -110,6 +114,7 @@ describe('worktree cleanup prompt', () => {
     vi.clearAllMocks();
     localStorage.clear();
     vi.useRealTimers();
+    mockSendWorkspaceClosePane.mockResolvedValue({ success: true });
 
     mockUseSessionStore.mockReturnValue({
       sessions: [
@@ -134,7 +139,7 @@ describe('worktree cleanup prompt', () => {
       connected: true,
       launcherConfig: { executables: {} },
       createSession: vi.fn(async () => 's1'),
-      closeSession: vi.fn(),
+      closeSession: mockCloseSession,
       setActiveSession: vi.fn(),
       takeSessionSpawnArgs: vi.fn(() => null),
       reloadSession: vi.fn(async () => {}),
@@ -194,6 +199,8 @@ describe('worktree cleanup prompt', () => {
       sendSubscribeGitStatus: fn,
       sendUnsubscribeGitStatus: fn,
       sendSessionVisualized: fn,
+      sendWorkspaceClosePane: mockSendWorkspaceClosePane,
+      sendWorkspaceSplitPane: fn,
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
       sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
       getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
@@ -261,7 +268,7 @@ describe('worktree cleanup prompt', () => {
       connected: true,
       launcherConfig: { executables: {} },
       createSession: vi.fn(async () => 'remote-1'),
-      closeSession: vi.fn(),
+      closeSession: mockCloseSession,
       setActiveSession: vi.fn(),
       takeSessionSpawnArgs: vi.fn(() => null),
       reloadSession: vi.fn(async () => {}),
@@ -321,6 +328,8 @@ describe('worktree cleanup prompt', () => {
       sendSubscribeGitStatus: fn,
       sendUnsubscribeGitStatus: fn,
       sendSessionVisualized,
+      sendWorkspaceClosePane: mockSendWorkspaceClosePane,
+      sendWorkspaceSplitPane: fn,
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
       sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
       getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
@@ -354,5 +363,176 @@ describe('worktree cleanup prompt', () => {
     });
 
     expect(sendSessionVisualized).toHaveBeenCalledWith('remote-1');
+  });
+
+  it('prompts before closing a split session from the main pane with Cmd+W', async () => {
+    mockUseSessionStore.mockReturnValue({
+      sessions: [
+        {
+          id: 's1',
+          label: 'session-with-split',
+          state: 'working',
+          cwd: '/tmp/repo',
+          agent: 'claude',
+          transcriptMatched: true,
+          daemonActivePaneId: 'main',
+          workspace: {
+            terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'main' },
+                { type: 'pane', paneId: 'pane-shell-1' },
+              ],
+            },
+          },
+        },
+      ],
+      activeSessionId: 's1',
+      connect: vi.fn(async () => {}),
+      connected: true,
+      launcherConfig: { executables: {} },
+      createSession: vi.fn(async () => 's1'),
+      closeSession: mockCloseSession,
+      setActiveSession: vi.fn(),
+      takeSessionSpawnArgs: vi.fn(() => null),
+      reloadSession: vi.fn(async () => {}),
+      setForkParams: vi.fn(),
+      setLauncherConfig: vi.fn(),
+      syncFromDaemonSessions: vi.fn(),
+      syncFromDaemonWorkspaces: vi.fn(),
+    });
+
+    render(<App />);
+
+    const keyboardCall = mockUseKeyboardShortcuts.mock.calls[mockUseKeyboardShortcuts.mock.calls.length - 1];
+    const keyboardArgs = keyboardCall?.[0] as { onCloseSession: () => void } | undefined;
+    expect(keyboardArgs).toBeDefined();
+
+    act(() => {
+      keyboardArgs?.onCloseSession();
+    });
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(mockCloseSession).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(dialog, { key: 'y' });
+
+    expect(mockCloseSession).toHaveBeenCalledWith('s1');
+    expect(mockSendWorkspaceClosePane).not.toHaveBeenCalled();
+  });
+
+  it('cancels split-session close from the sidebar with Escape', async () => {
+    mockUseSessionStore.mockReturnValue({
+      sessions: [
+        {
+          id: 's1',
+          label: 'session-with-split',
+          state: 'working',
+          cwd: '/tmp/repo',
+          agent: 'claude',
+          transcriptMatched: true,
+          daemonActivePaneId: 'main',
+          workspace: {
+            terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'main' },
+                { type: 'pane', paneId: 'pane-shell-1' },
+              ],
+            },
+          },
+        },
+      ],
+      activeSessionId: 's1',
+      connect: vi.fn(async () => {}),
+      connected: true,
+      launcherConfig: { executables: {} },
+      createSession: vi.fn(async () => 's1'),
+      closeSession: mockCloseSession,
+      setActiveSession: vi.fn(),
+      takeSessionSpawnArgs: vi.fn(() => null),
+      reloadSession: vi.fn(async () => {}),
+      setForkParams: vi.fn(),
+      setLauncherConfig: vi.fn(),
+      syncFromDaemonSessions: vi.fn(),
+      syncFromDaemonWorkspaces: vi.fn(),
+    });
+
+    render(<App />);
+
+    await userEvent.click(screen.getByTestId('close-session'));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    expect(mockCloseSession).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('uses Cmd+W to close the active utility pane before closing the session', async () => {
+    mockUseSessionStore.mockReturnValue({
+      sessions: [
+        {
+          id: 's1',
+          label: 'session-with-split',
+          state: 'working',
+          cwd: '/tmp/repo',
+          agent: 'claude',
+          transcriptMatched: true,
+          daemonActivePaneId: 'pane-shell-1',
+          workspace: {
+            terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+            layoutTree: {
+              type: 'split',
+              splitId: 'root',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: 'main' },
+                { type: 'pane', paneId: 'pane-shell-1' },
+              ],
+            },
+          },
+        },
+      ],
+      activeSessionId: 's1',
+      connect: vi.fn(async () => {}),
+      connected: true,
+      launcherConfig: { executables: {} },
+      createSession: vi.fn(async () => 's1'),
+      closeSession: mockCloseSession,
+      setActiveSession: vi.fn(),
+      takeSessionSpawnArgs: vi.fn(() => null),
+      reloadSession: vi.fn(async () => {}),
+      setForkParams: vi.fn(),
+      setLauncherConfig: vi.fn(),
+      syncFromDaemonSessions: vi.fn(),
+      syncFromDaemonWorkspaces: vi.fn(),
+    });
+
+    render(<App />);
+
+    const keyboardCall = mockUseKeyboardShortcuts.mock.calls[mockUseKeyboardShortcuts.mock.calls.length - 1];
+    const keyboardArgs = keyboardCall?.[0] as { onCloseSession: () => void } | undefined;
+    expect(keyboardArgs).toBeDefined();
+
+    act(() => {
+      keyboardArgs?.onCloseSession();
+    });
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(mockSendWorkspaceClosePane).toHaveBeenCalledWith('s1', 'pane-shell-1');
+    expect(mockCloseSession).not.toHaveBeenCalled();
   });
 });

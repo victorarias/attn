@@ -1095,6 +1095,8 @@ type fakeAttachBackend struct {
 	mu      sync.Mutex
 	streams []*fakeOutputStream
 	failErr error
+	info    ptybackend.AttachInfo
+	infoSet bool
 }
 
 func (b *fakeAttachBackend) Spawn(context.Context, ptybackend.SpawnOptions) error { return nil }
@@ -1105,13 +1107,18 @@ func (b *fakeAttachBackend) Attach(context.Context, string, string) (ptybackend.
 		b.mu.Unlock()
 		return ptybackend.AttachInfo{}, nil, err
 	}
+	info := b.info
+	infoSet := b.infoSet
 	b.mu.Unlock()
 
 	stream := newFakeOutputStream()
 	b.mu.Lock()
 	b.streams = append(b.streams, stream)
 	b.mu.Unlock()
-	return ptybackend.AttachInfo{Running: true}, stream, nil
+	if !infoSet {
+		info = ptybackend.AttachInfo{Running: true}
+	}
+	return info, stream, nil
 }
 func (b *fakeAttachBackend) Input(context.Context, string, []byte) error { return nil }
 func (b *fakeAttachBackend) Resize(context.Context, string, uint16, uint16) error {
@@ -1137,6 +1144,13 @@ func (b *fakeAttachBackend) FailNextAttach(err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.failErr = err
+}
+
+func (b *fakeAttachBackend) SetAttachInfo(info ptybackend.AttachInfo) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.info = info
+	b.infoSet = true
 }
 
 type fakeSpawnBackend struct {
@@ -1448,6 +1462,98 @@ func TestDaemon_HandleAttachSession_ReattachClosesOldStream(t *testing.T) {
 	}
 
 	d.detachSession(client, "sess-1")
+}
+
+func TestDaemon_HandleAttachSession_OmitsScrollbackWhenFreshSnapshotIsAvailable(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+	backend.SetAttachInfo(ptybackend.AttachInfo{
+		Running:             true,
+		Scrollback:          []byte("very large scrollback"),
+		ScrollbackTruncated: true,
+		ScreenSnapshot:      []byte("\x1b[2Jsnapshot"),
+		ScreenSnapshotFresh: true,
+		ScreenCols:          10,
+		ScreenRows:          6,
+	})
+	d.ptyBackend = backend
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.AttachResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode attach_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
+		}
+		if result.Scrollback != nil {
+			t.Fatal("expected scrollback to be omitted when fresh screen snapshot is available")
+		}
+		if protocol.Deref(result.ScreenSnapshot) == "" {
+			t.Fatal("expected screen snapshot to be present")
+		}
+		if !protocol.Deref(result.ScreenSnapshotFresh) {
+			t.Fatal("expected screen snapshot to be marked fresh")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for attach_result")
+	}
+}
+
+func TestDaemon_HandleAttachSession_DerivesScreenSnapshotWhenLiveSnapshotMissing(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+	backend.SetAttachInfo(ptybackend.AttachInfo{
+		Running:    true,
+		Scrollback: []byte("hello\r\nworld"),
+		Cols:       20,
+		Rows:       6,
+	})
+	d.ptyBackend = backend
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.AttachResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode attach_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
+		}
+		if result.Scrollback != nil {
+			t.Fatal("expected scrollback to be omitted when snapshot can be derived from replay")
+		}
+		if protocol.Deref(result.ScreenSnapshot) == "" {
+			t.Fatal("expected derived screen snapshot to be present")
+		}
+		if !protocol.Deref(result.ScreenSnapshotFresh) {
+			t.Fatal("expected derived screen snapshot to be marked fresh")
+		}
+		decoded, err := base64.StdEncoding.DecodeString(protocol.Deref(result.ScreenSnapshot))
+		if err != nil {
+			t.Fatalf("decode derived screen snapshot: %v", err)
+		}
+		if !strings.Contains(string(decoded), "hello") {
+			t.Fatalf("expected derived screen snapshot payload to contain hello, got %q", decoded)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for attach_result")
+	}
 }
 
 func TestDaemon_NewAddsWarningWhenPersistenceFallsBackToMemory(t *testing.T) {

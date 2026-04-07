@@ -26,6 +26,15 @@ type screenSnapshot struct {
 	cursorVisible bool
 }
 
+type ReplayScreenSnapshot struct {
+	Payload       []byte
+	Cols          uint16
+	Rows          uint16
+	CursorX       uint16
+	CursorY       uint16
+	CursorVisible bool
+}
+
 type virtualScreen struct {
 	mu    sync.Mutex
 	term  vt10x.Terminal
@@ -52,6 +61,29 @@ func newVirtualScreen(cols, rows uint16) *virtualScreen {
 	return &virtualScreen{
 		term: vt10x.New(vt10x.WithSize(int(cols), int(rows))),
 	}
+}
+
+func ScreenSnapshotFromReplay(data []byte, cols, rows uint16) (ReplayScreenSnapshot, bool) {
+	if len(data) == 0 || cols == 0 || rows == 0 {
+		return ReplayScreenSnapshot{}, false
+	}
+
+	screen := newVirtualScreen(cols, rows)
+	screen.Observe(data)
+
+	snap, ok := screen.Snapshot()
+	if !ok {
+		return ReplayScreenSnapshot{}, false
+	}
+
+	return ReplayScreenSnapshot{
+		Payload:       snap.payload,
+		Cols:          snap.cols,
+		Rows:          snap.rows,
+		CursorX:       snap.cursorX,
+		CursorY:       snap.cursorY,
+		CursorVisible: snap.cursorVisible,
+	}, true
 }
 
 func (v *virtualScreen) Observe(data []byte) {

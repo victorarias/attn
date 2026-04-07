@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { ptyKill } from '../pty/bridge';
+import { ptyKill, ptySpawn } from '../pty/bridge';
 import { retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 
 class FakeWebSocket {
@@ -305,5 +305,203 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     expect(attach).toHaveBeenCalledTimes(2);
     expect(waits).toEqual([25]);
+  });
+
+  it('attaches daemon-known workspace runtimes before attempting to spawn them', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '49',
+        sessions: [],
+        workspaces: [{
+          session_id: 'sess-remote',
+          active_pane_id: 'main',
+          layout_json: '',
+          panes: [{
+            pane_id: 'pane-shell-1',
+            kind: 'shell',
+            runtime_id: 'runtime-shell-1',
+            title: 'Shell 1',
+          }],
+        }],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const spawnPromise = ptySpawn({
+      args: {
+        id: 'runtime-shell-1',
+        cwd: '/tmp/repo',
+        endpoint_id: 'ep-remote',
+        cols: 80,
+        rows: 24,
+        shell: true,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1' });
+    });
+
+    const sent = ws.sent.map((entry) => JSON.parse(entry));
+    expect(sent.find((entry) => entry.cmd === 'spawn_session' && entry.id === 'runtime-shell-1')).toBeUndefined();
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'runtime-shell-1',
+        success: true,
+        cols: 80,
+        rows: 24,
+        running: true,
+      });
+    });
+
+    await expect(spawnPromise).resolves.toBeUndefined();
+    unmount();
+  });
+
+  it('re-spawns remote workspace runtimes on the correct endpoint after attach failure', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '49',
+        sessions: [],
+        workspaces: [{
+          session_id: 'sess-remote',
+          active_pane_id: 'main',
+          layout_json: '',
+          panes: [{
+            pane_id: 'pane-shell-1',
+            kind: 'shell',
+            runtime_id: 'runtime-shell-1',
+            title: 'Shell 1',
+          }],
+        }],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const spawnPromise = ptySpawn({
+      args: {
+        id: 'runtime-shell-1',
+        cwd: '/tmp/repo',
+        endpoint_id: 'ep-remote',
+        cols: 80,
+        rows: 24,
+        shell: true,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1' });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'runtime-shell-1',
+        success: false,
+        error: 'session not found',
+      });
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({
+        cmd: 'spawn_session',
+        id: 'runtime-shell-1',
+        cwd: '/tmp/repo',
+        endpoint_id: 'ep-remote',
+        agent: 'shell',
+        cols: 80,
+        rows: 24,
+      });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'spawn_result',
+        id: 'runtime-shell-1',
+        success: true,
+      });
+    });
+
+    await waitFor(() => {
+      const attachCommands = ws.sent
+        .map((entry) => JSON.parse(entry))
+        .filter((entry) => entry.cmd === 'attach_session' && entry.id === 'runtime-shell-1');
+      expect(attachCommands).toHaveLength(2);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'runtime-shell-1',
+        success: true,
+        cols: 80,
+        rows: 24,
+        running: true,
+      });
+    });
+
+    await expect(spawnPromise).resolves.toBeUndefined();
+    unmount();
   });
 });

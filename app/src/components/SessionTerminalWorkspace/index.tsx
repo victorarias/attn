@@ -73,6 +73,7 @@ interface SessionTerminalWorkspaceProps {
   sessionId: string;
   sessionLabel: string;
   sessionAgent: SessionAgent;
+  sessionEndpointId?: string;
   cwd: string;
   workspace: TerminalWorkspaceState;
   activePaneId: string;
@@ -95,6 +96,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     sessionId,
     sessionLabel,
     sessionAgent,
+    sessionEndpointId,
     cwd,
     workspace,
     activePaneId,
@@ -148,12 +150,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         getSpawnArgs: ({ cols, rows }: { cols: number; rows: number }) => ({
           id: terminal.ptyId,
           cwd,
+          ...(sessionEndpointId ? { endpoint_id: sessionEndpointId } : {}),
           cols,
           rows,
           shell: true,
         }),
       })),
-    ]), [cwd, getMainPaneSpawnArgs, sessionId, workspace.terminals]);
+    ]), [cwd, getMainPaneSpawnArgs, sessionEndpointId, sessionId, workspace.terminals]);
 
     const binder = usePaneRuntimeBinder(runtimePanes, activePaneId, eventRouter);
     const fitPane = binder.fitPane;
@@ -429,7 +432,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     useShortcut('terminal.splitHorizontal', () => { handleSplit('horizontal'); }, enabled && isActiveSession);
     useShortcut('terminal.toggleZoom', toggleZoomActivePane, enabled && isActiveSession);
     useShortcut('terminal.toggleMaximize', toggleMaximizeActivePane, enabled && isActiveSession);
-    useShortcut('terminal.close', handleCloseActiveTerminal, enabled && isActiveSession && splitLayoutActive);
+    useShortcut('terminal.close', handleCloseActiveTerminal, enabled && isActiveSession && splitLayoutActive && activePaneId !== MAIN_TERMINAL_PANE_ID);
     useShortcut('terminal.focusLeft', () => handleMovePane('left'), enabled && isActiveSession);
     useShortcut('terminal.focusRight', () => handleMovePane('right'), enabled && isActiveSession);
     useShortcut('terminal.focusUp', () => handleMovePane('up'), enabled && isActiveSession);

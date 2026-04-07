@@ -23,6 +23,58 @@ func wsSubscriberID(client *wsClient, sessionID string) string {
 	return fmt.Sprintf("%p:%s", client, sessionID)
 }
 
+type attachReplayPayload struct {
+	scrollback          []byte
+	scrollbackTruncated bool
+	screenSnapshot      []byte
+	screenCols          uint16
+	screenRows          uint16
+	screenCursorX       uint16
+	screenCursorY       uint16
+	screenCursorVisible bool
+	screenSnapshotFresh bool
+	derivedSnapshot     bool
+}
+
+func buildAttachReplayPayload(info ptybackend.AttachInfo) attachReplayPayload {
+	payload := attachReplayPayload{
+		scrollbackTruncated: info.ScrollbackTruncated,
+		screenSnapshot:      info.ScreenSnapshot,
+		screenCols:          info.ScreenCols,
+		screenRows:          info.ScreenRows,
+		screenCursorX:       info.ScreenCursorX,
+		screenCursorY:       info.ScreenCursorY,
+		screenCursorVisible: info.ScreenCursorVisible,
+		screenSnapshotFresh: info.ScreenSnapshotFresh,
+	}
+
+	// When no live screen model is available, derive the visible frame from the
+	// buffered PTY output so attaches can restore the current screen without
+	// shipping the entire scrollback blob to the client.
+	if len(payload.screenSnapshot) == 0 && len(info.Scrollback) > 0 {
+		if snap, ok := pty.ScreenSnapshotFromReplay(info.Scrollback, info.Cols, info.Rows); ok {
+			payload.screenSnapshot = snap.Payload
+			payload.screenCols = snap.Cols
+			payload.screenRows = snap.Rows
+			payload.screenCursorX = snap.CursorX
+			payload.screenCursorY = snap.CursorY
+			payload.screenCursorVisible = snap.CursorVisible
+			payload.screenSnapshotFresh = true
+			payload.derivedSnapshot = true
+		}
+	}
+
+	// Fresh visible-frame snapshots are enough for current websocket clients to
+	// restore the screen while live output catches up. Sending full scrollback in
+	// addition to that snapshot turns split/remount attaches into multi-megabyte
+	// JSON payloads with no UI benefit.
+	if len(info.Scrollback) > 0 && !(len(payload.screenSnapshot) > 0 && payload.screenSnapshotFresh) {
+		payload.scrollback = info.Scrollback
+	}
+
+	return payload
+}
+
 func (d *Daemon) detachSession(client *wsClient, sessionID string) {
 	client.attachMu.Lock()
 	stream, hasStream := client.attachedStreams[sessionID]
@@ -224,18 +276,21 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		})
 		return
 	}
+	replay := buildAttachReplayPayload(info)
 	d.logf(
-		"PTY attach result: id=%s running=%v last_seq=%d scrollback_bytes=%d snapshot_bytes=%d snapshot_fresh=%v size=%dx%d screen=%dx%d",
+		"PTY attach result: id=%s running=%v last_seq=%d scrollback_bytes=%d replay_bytes=%d snapshot_bytes=%d snapshot_fresh=%v derived_snapshot=%v size=%dx%d screen=%dx%d",
 		msg.ID,
 		info.Running,
 		info.LastSeq,
 		len(info.Scrollback),
-		len(info.ScreenSnapshot),
-		info.ScreenSnapshotFresh,
+		len(replay.scrollback),
+		len(replay.screenSnapshot),
+		replay.screenSnapshotFresh,
+		replay.derivedSnapshot,
 		info.Cols,
 		info.Rows,
-		info.ScreenCols,
-		info.ScreenRows,
+		replay.screenCols,
+		replay.screenRows,
 	)
 
 	client.attachMu.Lock()
@@ -251,26 +306,26 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		Event:               protocol.EventAttachResult,
 		ID:                  msg.ID,
 		Success:             true,
-		ScrollbackTruncated: protocol.Ptr(info.ScrollbackTruncated),
+		ScrollbackTruncated: protocol.Ptr(replay.scrollbackTruncated),
 		LastSeq:             protocol.Ptr(int(info.LastSeq)),
 		Cols:                protocol.Ptr(int(info.Cols)),
 		Rows:                protocol.Ptr(int(info.Rows)),
 		Pid:                 protocol.Ptr(info.PID),
 		Running:             protocol.Ptr(info.Running),
 	}
-	if len(info.Scrollback) > 0 {
-		encoded := base64.StdEncoding.EncodeToString(info.Scrollback)
+	if len(replay.scrollback) > 0 {
+		encoded := base64.StdEncoding.EncodeToString(replay.scrollback)
 		result.Scrollback = protocol.Ptr(encoded)
 	}
-	if len(info.ScreenSnapshot) > 0 {
-		encoded := base64.StdEncoding.EncodeToString(info.ScreenSnapshot)
+	if len(replay.screenSnapshot) > 0 {
+		encoded := base64.StdEncoding.EncodeToString(replay.screenSnapshot)
 		result.ScreenSnapshot = protocol.Ptr(encoded)
-		result.ScreenRows = protocol.Ptr(int(info.ScreenRows))
-		result.ScreenCols = protocol.Ptr(int(info.ScreenCols))
-		result.ScreenCursorX = protocol.Ptr(int(info.ScreenCursorX))
-		result.ScreenCursorY = protocol.Ptr(int(info.ScreenCursorY))
-		result.ScreenCursorVisible = protocol.Ptr(info.ScreenCursorVisible)
-		result.ScreenSnapshotFresh = protocol.Ptr(info.ScreenSnapshotFresh)
+		result.ScreenRows = protocol.Ptr(int(replay.screenRows))
+		result.ScreenCols = protocol.Ptr(int(replay.screenCols))
+		result.ScreenCursorX = protocol.Ptr(int(replay.screenCursorX))
+		result.ScreenCursorY = protocol.Ptr(int(replay.screenCursorY))
+		result.ScreenCursorVisible = protocol.Ptr(replay.screenCursorVisible)
+		result.ScreenSnapshotFresh = protocol.Ptr(replay.screenSnapshotFresh)
 	}
 	d.sendToClient(client, result)
 }

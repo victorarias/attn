@@ -86,6 +86,32 @@ func TestVirtualScreenSnapshot_PreservesForegroundColor(t *testing.T) {
 	}
 }
 
+func TestScreenSnapshotFromReplay(t *testing.T) {
+	snap, ok := ScreenSnapshotFromReplay([]byte("hello\r\nworld"), 20, 6)
+	if !ok {
+		t.Fatal("expected replay-derived snapshot to be available")
+	}
+	if snap.Cols != 20 || snap.Rows != 6 {
+		t.Fatalf("snapshot size = %dx%d, want 20x6", snap.Cols, snap.Rows)
+	}
+	if len(snap.Payload) == 0 {
+		t.Fatal("expected non-empty replay-derived snapshot payload")
+	}
+
+	replayed := vt10x.New(vt10x.WithSize(int(snap.Cols), int(snap.Rows)))
+	if _, err := replayed.Write(snap.Payload); err != nil {
+		t.Fatalf("replay write error: %v", err)
+	}
+
+	got := replayed.String()
+	if !strings.Contains(got, "hello") {
+		t.Fatalf("expected replayed screen to contain hello, got:\n%s", got)
+	}
+	if !strings.Contains(got, "world") {
+		t.Fatalf("expected replayed screen to contain world, got:\n%s", got)
+	}
+}
+
 func TestSessionInfo_IncludesScreenSnapshotWhenAvailable(t *testing.T) {
 	session := &Session{
 		id:         "codex-1",
