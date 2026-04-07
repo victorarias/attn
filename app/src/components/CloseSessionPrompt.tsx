@@ -31,6 +31,7 @@ export function CloseSessionPrompt({
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     const buttons = [confirmRef.current, cancelRef.current].filter(Boolean) as HTMLButtonElement[];
     const key = event.key.toLowerCase();
+    const active = document.activeElement as HTMLButtonElement | null;
 
     if (event.key === 'Escape' || key === 'n') {
       event.preventDefault();
@@ -38,15 +39,24 @@ export function CloseSessionPrompt({
       return;
     }
 
-    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Space' || event.key === 'Spacebar' || key === 'y') {
+    if (key === 'y') {
       event.preventDefault();
+      onConfirm();
+      return;
+    }
+
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Space' || event.key === 'Spacebar') {
+      event.preventDefault();
+      if (active === cancelRef.current) {
+        onCancel();
+        return;
+      }
       onConfirm();
       return;
     }
 
     if (event.key === 'Tab') {
       if (buttons.length === 0) return;
-      const active = document.activeElement as HTMLButtonElement | null;
       const currentIndex = Math.max(0, buttons.indexOf(active || buttons[0]));
       const delta = event.shiftKey ? -1 : 1;
       const nextIndex = (currentIndex + delta + buttons.length) % buttons.length;
@@ -60,7 +70,6 @@ export function CloseSessionPrompt({
     }
 
     if (buttons.length === 0) return;
-    const active = document.activeElement as HTMLButtonElement | null;
     const currentIndex = Math.max(0, buttons.indexOf(active || buttons[0]));
     const delta = event.key === 'ArrowRight' ? 1 : -1;
     const nextIndex = (currentIndex + delta + buttons.length) % buttons.length;
@@ -102,7 +111,7 @@ export function CloseSessionPrompt({
           Close the session and all split terminals?
         </div>
         <div className="close-session-hint">
-          Enter / Space / Y confirm, N / Esc cancel
+          Enter / Space uses the focused button, Y confirms, N / Esc cancel
         </div>
         <div className="close-session-actions">
           <button ref={confirmRef} className="close-session-btn confirm" onClick={handleConfirm}>

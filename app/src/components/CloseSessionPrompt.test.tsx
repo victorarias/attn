@@ -77,4 +77,31 @@ describe('CloseSessionPrompt', () => {
     expect(onCancel).toHaveBeenCalledTimes(2);
     expect(onConfirm).not.toHaveBeenCalled();
   });
+
+  it('uses the focused button for Enter and Space', () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+
+    render(
+      <CloseSessionPrompt
+        isVisible
+        sessionLabel="repo-a"
+        splitCount={1}
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />,
+    );
+
+    const dialog = screen.getByRole('dialog');
+    const cancelButton = screen.getByRole('button', { name: 'Keep Session' });
+    cancelButton.focus();
+
+    fireEvent.keyDown(dialog, { key: 'Enter' });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(dialog, { key: ' ' });
+    expect(onCancel).toHaveBeenCalledTimes(2);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
 });
