@@ -469,7 +469,7 @@ echo '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","tex
 	t.Setenv("ATTN_CODEX_CLASSIFIER_MODELS", "base")
 	t.Setenv("ATTN_CODEX_CLASSIFIER_REASONING_EFFORT", "low")
 
-	got, err := ClassifyWithCodexExecutable("done text", scriptPath, 3*time.Second)
+	got, err := ClassifyWithCodexExecutable("done text", scriptPath, 10*time.Second)
 	if err != nil {
 		t.Fatalf("ClassifyWithCodexExecutable unexpected err: %v", err)
 	}
@@ -479,6 +479,59 @@ echo '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","tex
 
 	if _, err := os.Stat(logPath); err != nil {
 		t.Fatalf("expected configured codex executable to be invoked, stat err: %v", err)
+	}
+}
+
+func TestClassifyWithCodexExecutableInDir_UsesWorkDir(t *testing.T) {
+	tmp := t.TempDir()
+	workDir := filepath.Join(tmp, "repo")
+	if err := os.Mkdir(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workDir: %v", err)
+	}
+
+	pwdPath := filepath.Join(tmp, "pwd.log")
+	scriptPath := filepath.Join(tmp, "custom-codex")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+last=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output-last-message)
+      last="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+pwd > %s
+printf '{"verdict":"DONE"}\n' > "$last"
+echo '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"{\"verdict\":\"DONE\"}"}}'
+`, shellEscapeSingleQuotes(pwdPath))
+
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	t.Setenv("ATTN_CODEX_EXECUTABLE", "")
+	t.Setenv("ATTN_CODEX_CLASSIFIER_MODELS", "base")
+	t.Setenv("ATTN_CODEX_CLASSIFIER_REASONING_EFFORT", "low")
+
+	got, err := ClassifyWithCodexExecutableInDir("done text", scriptPath, workDir, 10*time.Second)
+	if err != nil {
+		t.Fatalf("ClassifyWithCodexExecutableInDir unexpected err: %v", err)
+	}
+	if got != "idle" {
+		t.Fatalf("ClassifyWithCodexExecutableInDir() = %q, want idle", got)
+	}
+
+	pwdBytes, err := os.ReadFile(pwdPath)
+	if err != nil {
+		t.Fatalf("read pwd log: %v", err)
+	}
+	if got := strings.TrimSpace(string(pwdBytes)); got != workDir {
+		t.Fatalf("classifier work dir = %q, want %q", got, workDir)
 	}
 }
 

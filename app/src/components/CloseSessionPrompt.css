@@ -1,0 +1,104 @@
+.close-session-prompt {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-overlay);
+  z-index: 220;
+  animation: close-session-fade-in 0.18s ease-out;
+}
+
+@keyframes close-session-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.close-session-content {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 18px 22px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.42);
+  min-width: 360px;
+  max-width: min(92vw, 460px);
+  text-align: center;
+}
+
+.close-session-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 10px;
+}
+
+.close-session-message {
+  font-size: 14px;
+  color: var(--color-text-primary);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.close-session-label,
+.close-session-count {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--color-text-primary);
+}
+
+.close-session-count {
+  color: #ffcf7a;
+}
+
+.close-session-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-bottom: 16px;
+}
+
+.close-session-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.close-session-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.close-session-btn:focus-visible {
+  outline: 2px solid rgba(255, 207, 122, 0.7);
+  outline-offset: 2px;
+}
+
+.close-session-btn.confirm {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.26);
+}
+
+.close-session-btn.confirm:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.close-session-btn.cancel {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.close-session-btn.cancel:hover {
+  background: var(--color-border-hover);
+}

@@ -114,9 +114,9 @@ func (c *Codex) ShouldApplyPTYState(current protocol.SessionState, incoming stri
 // --- ClassifierProvider ---
 
 func (c *Codex) Classify(text string, timeout time.Duration) (string, error) {
-	return c.ClassifyWithExecutable(text, "", timeout)
+	return c.ClassifyWithExecutable(text, "", "", timeout)
 }
 
-func (c *Codex) ClassifyWithExecutable(text, executable string, timeout time.Duration) (string, error) {
-	return classifier.ClassifyWithCodexExecutable(text, executable, timeout)
+func (c *Codex) ClassifyWithExecutable(text, executable, workDir string, timeout time.Duration) (string, error) {
+	return classifier.ClassifyWithCodexExecutableInDir(text, executable, workDir, timeout)
 }

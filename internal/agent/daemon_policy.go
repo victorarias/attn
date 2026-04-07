@@ -46,7 +46,7 @@ type TranscriptClassificationExtractor interface {
 // ExecutableClassifierProvider is an optional classifier extension for agents
 // that need an explicit executable path at classification time.
 type ExecutableClassifierProvider interface {
-	ClassifyWithExecutable(text, executable string, timeout time.Duration) (string, error)
+	ClassifyWithExecutable(text, executable, workDir string, timeout time.Duration) (string, error)
 }
 
 func RecoverOnMissingPTY(d Driver) bool {
@@ -124,13 +124,13 @@ func ExtractLastAssistantForClassification(
 	return content, "", err
 }
 
-func ClassifyWithDriver(d Driver, text, executable string, timeout time.Duration) (state string, err error, ok bool) {
+func ClassifyWithDriver(d Driver, text, executable, workDir string, timeout time.Duration) (state string, err error, ok bool) {
 	cp, hasClassifier := GetClassifier(d)
 	if !hasClassifier {
 		return "", nil, false
 	}
 	if ecp, supportsExecutable := cp.(ExecutableClassifierProvider); supportsExecutable {
-		state, err = ecp.ClassifyWithExecutable(text, strings.TrimSpace(executable), timeout)
+		state, err = ecp.ClassifyWithExecutable(text, strings.TrimSpace(executable), strings.TrimSpace(workDir), timeout)
 		return state, err, true
 	}
 	state, err = cp.Classify(text, timeout)

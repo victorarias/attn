@@ -397,6 +397,22 @@ export function SettingsModal({
     }
   }, [onUpdateEndpoint]);
 
+  const handleRebootstrapEndpoint = useCallback(async (endpoint: DaemonEndpoint) => {
+    if (endpoint.enabled === false) {
+      return;
+    }
+    setEndpointError(null);
+    setEndpointActionID(endpoint.id);
+    try {
+      await onUpdateEndpoint(endpoint.id, { enabled: false });
+      await onUpdateEndpoint(endpoint.id, { enabled: true });
+    } catch (error) {
+      setEndpointError(error instanceof Error ? error.message : 'Failed to re-bootstrap endpoint');
+    } finally {
+      setEndpointActionID(null);
+    }
+  }, [onUpdateEndpoint]);
+
   const handleRemoveEndpoint = useCallback(async (endpointId: string) => {
     setEndpointError(null);
     setEndpointActionID(endpointId);
@@ -593,6 +609,7 @@ export function SettingsModal({
                   const remoteWebAuthURL = endpoint.capabilities?.tailscale_auth_url;
                   const remoteWebError = endpoint.capabilities?.tailscale_error;
                   const canToggleRemoteWeb = endpoint.status === 'connected' && !endpointActionInFlight;
+                  const canRebootstrap = endpoint.enabled !== false && !endpointActionInFlight;
                   return (
                     <div key={endpoint.id} className={`endpoint-card status-${endpoint.status}`}>
                       <div className="endpoint-card-header">
@@ -619,6 +636,13 @@ export function SettingsModal({
                           )}
                           <button className="browse-btn" onClick={() => void handleToggleEndpoint(endpoint)} disabled={endpointActionInFlight}>
                             {endpoint.enabled === false ? 'Enable' : 'Disable'}
+                          </button>
+                          <button
+                            className="browse-btn"
+                            onClick={() => void handleRebootstrapEndpoint(endpoint)}
+                            disabled={!canRebootstrap}
+                          >
+                            Re-bootstrap
                           </button>
                           <button
                             className="browse-btn"

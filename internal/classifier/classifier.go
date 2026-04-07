@@ -355,7 +355,7 @@ func parseVerdictFromCodexJSONL(output []byte) (string, bool) {
 	return "", false
 }
 
-func runCodexClassifierAttempt(ctx context.Context, executable, model, reasoningEffort, prompt string) (string, string, error) {
+func runCodexClassifierAttempt(ctx context.Context, executable, model, reasoningEffort, prompt, workDir string) (string, string, error) {
 	tempDir, err := os.MkdirTemp("", "attn-codex-classifier-*")
 	if err != nil {
 		return "", "", err
@@ -374,6 +374,9 @@ func runCodexClassifierAttempt(ctx context.Context, executable, model, reasoning
 	}
 
 	cmd := exec.CommandContext(ctx, executable, args...)
+	if wd := strings.TrimSpace(workDir); wd != "" {
+		cmd.Dir = wd
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -566,6 +569,12 @@ func ClassifyWithCodex(text string, timeout time.Duration) (string, error) {
 // 3) "codex"
 // Returns "waiting_input", "idle", or "unknown".
 func ClassifyWithCodexExecutable(text, configuredExecutable string, timeout time.Duration) (string, error) {
+	return ClassifyWithCodexExecutableInDir(text, configuredExecutable, "", timeout)
+}
+
+// ClassifyWithCodexExecutableInDir is like ClassifyWithCodexExecutable but runs
+// the Codex subprocess from the provided working directory when one is set.
+func ClassifyWithCodexExecutableInDir(text, configuredExecutable, workDir string, timeout time.Duration) (string, error) {
 	if text == "" {
 		DefaultLogger("classifier: empty text, returning idle")
 		return "idle", nil
@@ -592,14 +601,15 @@ func ClassifyWithCodexExecutable(text, configuredExecutable string, timeout time
 	var lastErr error
 	for _, model := range models {
 		DefaultLogger(
-			"classifier: calling codex CLI executable=%s model=%s reasoning_effort=%s timeout=%d seconds",
+			"classifier: calling codex CLI executable=%s model=%s reasoning_effort=%s timeout=%d seconds work_dir=%q",
 			executable,
 			model,
 			reasoningEffort,
 			int(timeout.Seconds()),
+			strings.TrimSpace(workDir),
 		)
 
-		lastMessage, rawJSONL, err := runCodexClassifierAttempt(ctx, executable, model, reasoningEffort, prompt)
+		lastMessage, rawJSONL, err := runCodexClassifierAttempt(ctx, executable, model, reasoningEffort, prompt, workDir)
 		if err != nil {
 			DefaultLogger("classifier: codex CLI attempt failed model=%s err=%v", model, err)
 			lastErr = err

@@ -10,11 +10,32 @@ export interface ShortcutDef {
   alt?: boolean;
 }
 
+const ALLOWED_CONFLICT_PAIRS = new Set([
+  'session.close|terminal.close',
+]);
+
 export const SHORTCUTS = {
-  // Session management (existing)
+  // Terminal panel
+  'terminal.open': { key: '`', meta: true },
+  'terminal.collapse': { key: '~', shift: true },  // Shift+` produces ~ on US keyboards
+  'terminal.new': { key: 't', meta: true },
+  'terminal.splitVertical': { key: 'd', meta: true },
+  'terminal.splitHorizontal': { key: 'd', meta: true, shift: true },
+  'terminal.toggleZoom': { key: 'z', meta: true, shift: true },
+  'terminal.toggleMaximize': { key: 'Enter', meta: true, shift: true },
+  'terminal.close': { key: 'w', meta: true },
+  'terminal.focusLeft': { key: 'ArrowLeft', meta: true, alt: true },
+  'terminal.focusRight': { key: 'ArrowRight', meta: true, alt: true },
+  'terminal.focusUp': { key: 'ArrowUp', meta: true, alt: true },
+  'terminal.focusDown': { key: 'ArrowDown', meta: true, alt: true },
+
+  // Quick Find (thumbs)
+  'terminal.quickFind': { key: 'f', meta: true },
+
+  // Session management
   'session.new': { key: 'n', meta: true },
   'session.newWorktree': { key: 'n', meta: true, shift: true },
-  'session.close': { key: 'w', meta: true, shift: true },
+  'session.close': { key: 'w', meta: true },
   'session.prev': { key: 'ArrowUp', meta: true },
   'session.next': { key: 'ArrowDown', meta: true },
   'session.goToDashboard': { key: 'g', meta: true },
@@ -40,23 +61,6 @@ export const SHORTCUTS = {
   'ui.increaseFontSize': { key: '=', meta: true },
   'ui.decreaseFontSize': { key: '-', meta: true },
   'ui.resetFontSize': { key: '0', meta: true },
-
-  // Quick Find (thumbs)
-  'terminal.quickFind': { key: 'f', meta: true },
-
-  // Terminal panel
-  'terminal.open': { key: '`', meta: true },
-  'terminal.collapse': { key: '~', shift: true },  // Shift+` produces ~ on US keyboards
-  'terminal.new': { key: 't', meta: true },
-  'terminal.splitVertical': { key: 'd', meta: true },
-  'terminal.splitHorizontal': { key: 'd', meta: true, shift: true },
-  'terminal.toggleZoom': { key: 'z', meta: true, shift: true },
-  'terminal.toggleMaximize': { key: 'Enter', meta: true, shift: true },
-  'terminal.close': { key: 'w', meta: true },
-  'terminal.focusLeft': { key: 'ArrowLeft', meta: true, alt: true },
-  'terminal.focusRight': { key: 'ArrowRight', meta: true, alt: true },
-  'terminal.focusUp': { key: 'ArrowUp', meta: true, alt: true },
-  'terminal.focusDown': { key: 'ArrowDown', meta: true, alt: true },
 } as const;
 
 export type ShortcutId = keyof typeof SHORTCUTS;
@@ -74,6 +78,11 @@ function shortcutToKey(def: ShortcutDef): string {
   return parts.join('+');
 }
 
+function isAllowedConflict(idA: ShortcutId, idB: ShortcutId): boolean {
+  const pair = [idA, idB].sort().join('|');
+  return ALLOWED_CONFLICT_PAIRS.has(pair);
+}
+
 /**
  * Validate that no two shortcuts have the same key combination.
  * Throws an error at startup if conflicts are found.
@@ -85,6 +94,9 @@ export function validateNoConflicts(): void {
     const key = shortcutToKey(def as ShortcutDef);
     const existing = seen.get(key);
     if (existing) {
+      if (isAllowedConflict(existing, id as ShortcutId)) {
+        continue;
+      }
       throw new Error(
         `Shortcut conflict: "${id}" and "${existing}" both use ${key}`
       );

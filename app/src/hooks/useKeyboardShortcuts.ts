@@ -85,6 +85,25 @@ export function useKeyboardShortcuts({
   useShortcut('ui.decreaseFontSize', onDecreaseFontSize ?? (() => {}), !!onDecreaseFontSize);
   useShortcut('ui.resetFontSize', onResetFontSize ?? (() => {}), !!onResetFontSize);
 
+  useEffect(() => {
+    const preventWindowCloseShortcut = (e: KeyboardEvent) => {
+      if (!isAccelKeyPressed(e) || e.shiftKey || e.altKey) {
+        return;
+      }
+      if (e.key.toLowerCase() !== 'w') {
+        return;
+      }
+      // Keep Cmd/Ctrl+W inside the app so shortcut handlers can decide
+      // whether to close a pane, close a session, or do nothing.
+      e.preventDefault();
+    };
+
+    window.addEventListener('keydown', preventWindowCloseShortcut, true);
+    return () => {
+      window.removeEventListener('keydown', preventWindowCloseShortcut, true);
+    };
+  }, []);
+
   // ⌘1-9 for session selection - kept as manual implementation since it needs special handling
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {

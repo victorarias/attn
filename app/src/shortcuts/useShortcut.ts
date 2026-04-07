@@ -26,11 +26,15 @@ function installGlobalListener() {
   listenerInstalled = true;
 
   window.addEventListener('keydown', (e: KeyboardEvent) => {
+    const terminalTarget = isTerminalTarget(e.target);
     for (const [id, def] of Object.entries(SHORTCUTS)) {
+      if (id === 'terminal.close' && !terminalTarget) {
+        continue;
+      }
       if (matchesShortcut(e, def)) {
         const shortcutHandlers = handlers.get(id as ShortcutId);
         if (shortcutHandlers && shortcutHandlers.size > 0) {
-          if (id === 'session.refreshPRs' && isTerminalTarget(e.target)) {
+          if (id === 'session.refreshPRs' && terminalTarget) {
             return;
           }
           e.preventDefault();

@@ -290,7 +290,7 @@ test.describe('Keyboard Shortcuts', () => {
       await page.locator('[data-testid="session-s1"]').click();
       await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
 
-      await page.keyboard.press('Meta+Shift+w');
+      await page.keyboard.press('Meta+w');
 
       const dialog = page.locator('.worktree-cleanup-prompt .cleanup-content');
       await expect(dialog).toBeVisible({ timeout: 2000 });

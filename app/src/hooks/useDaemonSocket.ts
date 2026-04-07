@@ -422,6 +422,17 @@ function workspaceRuntimeIDs(workspaces: DaemonWorkspace[]): Set<string> {
   return ids;
 }
 
+function workspacesIncludeRuntimeID(workspaces: DaemonWorkspace[], runtimeID: string): boolean {
+  for (const workspace of workspaces) {
+    for (const pane of workspace.panes || []) {
+      if (pane.runtime_id === runtimeID) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function upsertEndpointByID(endpoints: DaemonEndpoint[], endpoint: DaemonEndpoint): DaemonEndpoint[] {
   const index = endpoints.findIndex((entry) => entry.id === endpoint.id);
   if (index === -1) {
@@ -2053,7 +2064,8 @@ export function useDaemonSocket({
     setPtyBackend({
       spawn: async (args: PtySpawnArgs) => {
         const existingSession = sessionsRef.current.find((session) => session.id === args.id);
-        const sessionKnownToDaemon = !!existingSession;
+        const runtimeKnownToDaemon = Boolean(existingSession)
+          || workspacesIncludeRuntimeID(workspacesRef.current, args.id);
         const forceRespawn = args.reload === true;
         const alreadyAttached = attachedPtySessionsRef.current.has(args.id);
 
@@ -2065,15 +2077,15 @@ export function useDaemonSocket({
         // For new spawns, prime PTY size before attach.
         // For existing daemon sessions, avoid transient bootstrap resizes
         // (hidden terminals can report placeholder dimensions briefly).
-        if (!sessionKnownToDaemon) {
+        if (!runtimeKnownToDaemon) {
           sendPtyResize(args.id, args.cols, args.rows);
         }
 
-        // For sessions the daemon already knows about, try to attach to the
-        // existing PTY first.  For brand-new sessions (shells, first launch)
-        // skip this — the attach will always fail with "session not found" and
-        // just adds a wasted round-trip.
-        if (!forceRespawn && sessionKnownToDaemon) {
+        // If the daemon already advertises this runtime — either as a top-level
+        // session or as a workspace utility pane — attach before attempting a
+        // spawn. Remote split panes are created on the endpoint first, and
+        // re-spawning them locally would hang until the frontend times out.
+        if (!forceRespawn && runtimeKnownToDaemon) {
           try {
             await sendAttachSessionWithRetry(args.id);
             return;
@@ -2083,7 +2095,7 @@ export function useDaemonSocket({
             // This keeps the first-run contract:
             //   first run: --session-id <id>
             //   recover:   --resume <id>
-            if (existingSession.agent === 'claude') {
+            if (existingSession?.agent === 'claude') {
               const resumeArgs: PtySpawnArgs = {
                 ...args,
                 resume_session_id: args.id,
@@ -2108,9 +2120,19 @@ export function useDaemonSocket({
               await sendAttachSessionWithRetry(args.id);
               return;
             }
-            throw new Error(
-              'No live PTY found for this session. It likely ended when the daemon restarted. Close it and start a new session.'
-            );
+            if (!existingSession) {
+              // Workspace utility panes can be recreated in place; fall through to
+              // spawn_session using the pane's runtime ID and endpoint metadata.
+              console.warn('[DaemonSocket] Known workspace runtime attach failed, respawning shell pane', {
+                id: args.id,
+                endpoint_id: args.endpoint_id,
+                error: attachErr instanceof Error ? attachErr.message : String(attachErr),
+              });
+            } else {
+              throw new Error(
+                'No live PTY found for this session. It likely ended when the daemon restarted. Close it and start a new session.'
+              );
+            }
           }
         }
 
@@ -2141,7 +2163,7 @@ export function useDaemonSocket({
     return () => {
       setPtyBackend(null);
     };
-  }, [sendAttachSession, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendSpawnSession]);
+  }, [sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendSpawnSession]);
 
   const sendPRAction = useCallback((
     action: 'approve' | 'merge',

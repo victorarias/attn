@@ -22,8 +22,8 @@ func (d executableClassifierDriver) Classify(text string, timeout time.Duration)
 	return "idle", nil
 }
 
-func (d executableClassifierDriver) ClassifyWithExecutable(text, executable string, timeout time.Duration) (string, error) {
-	if executable == "custom-bin" {
+func (d executableClassifierDriver) ClassifyWithExecutable(text, executable, workDir string, timeout time.Duration) (string, error) {
+	if executable == "custom-bin" && workDir == "/tmp/repo" {
 		return "waiting_input", nil
 	}
 	return "idle", nil
@@ -147,7 +147,7 @@ func TestClassifyWithDriver_ExecutableProvider(t *testing.T) {
 			},
 		},
 	}
-	state, err, ok := ClassifyWithDriver(d, "test", "custom-bin", 5*time.Second)
+	state, err, ok := ClassifyWithDriver(d, "test", "custom-bin", "/tmp/repo", 5*time.Second)
 	if !ok {
 		t.Fatal("expected classifier dispatch")
 	}
@@ -166,7 +166,7 @@ func TestClassifyWithDriver_NoClassifier(t *testing.T) {
 			caps: Capabilities{},
 		},
 	}
-	_, _, ok := ClassifyWithDriver(d, "test", "", time.Second)
+	_, _, ok := ClassifyWithDriver(d, "test", "", "", time.Second)
 	if ok {
 		t.Fatal("expected no classifier dispatch when capability disabled")
 	}

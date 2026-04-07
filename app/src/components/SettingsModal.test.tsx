@@ -185,4 +185,42 @@ describe('SettingsModal review loop prompts', () => {
     });
     expect(screen.getByText(/sign this host into tailscale/i)).toBeInTheDocument();
   });
+
+  it('re-bootstraps an enabled endpoint by disabling and re-enabling it', async () => {
+    const onUpdateEndpoint = vi.fn().mockResolvedValue({ success: true });
+
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        connectedHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{}}
+        endpoints={[{
+          id: 'ep-1',
+          name: 'gpu-box',
+          ssh_target: 'user@gpu-box',
+          status: 'error',
+          enabled: true,
+        }]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={onUpdateEndpoint}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={vi.fn()}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Re-bootstrap'));
+
+    await waitFor(() => {
+      expect(onUpdateEndpoint).toHaveBeenNthCalledWith(1, 'ep-1', { enabled: false });
+      expect(onUpdateEndpoint).toHaveBeenNthCalledWith(2, 'ep-1', { enabled: true });
+    });
+  });
 });
