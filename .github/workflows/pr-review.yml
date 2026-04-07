@@ -1,4 +1,4 @@
-name: Hodor PR Review
+name: PR Review
 
 on:
   pull_request:
@@ -7,125 +7,24 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  issues: write
 
 concurrency:
-  group: hodor-review-${{ github.event.pull_request.number }}
+  group: shitty-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   review:
     if: ${{ !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      OPENROUTER_API_KEY: ${{ secrets.open_router_api_key }}
-      HODOR_VERSION: v0.3.4
-      HODOR_MODEL: qwen/qwen3-coder-next
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.10
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.24.0
-
-      - name: Validate review configuration
-        if: ${{ env.OPENROUTER_API_KEY != '' }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
-            echo "open_router_api_key secret is required." >&2
-            exit 1
-          fi
-
-          gh --version
-          echo "Using Hodor ${HODOR_VERSION} with model ${HODOR_MODEL}"
-
-      - name: Install patched Hodor
-        if: ${{ env.OPENROUTER_API_KEY != '' }}
-        run: |
-          set -euo pipefail
-          git clone --depth=1 --branch "${HODOR_VERSION}" https://github.com/mr-karan/hodor /tmp/hodor
-          cd /tmp/hodor
-          git apply "${GITHUB_WORKSPACE}/.github/hodor/v0.3.4-openrouter.patch"
-          bun install --frozen-lockfile
-          bun run build
-
-      - name: Configure OpenRouter model routing
-        if: ${{ env.OPENROUTER_API_KEY != '' }}
-        run: |
-          set -euo pipefail
-          mkdir -p "${HOME}/.pi/agent"
-          cat > "${HOME}/.pi/agent/models.json" <<'EOF'
-          {
-            "providers": {
-              "openrouter": {}
-            }
-          }
-          EOF
-
-      - name: Install app dependencies
-        if: ${{ env.OPENROUTER_API_KEY != '' }}
-        run: |
-          set -euo pipefail
-          cd "${GITHUB_WORKSPACE}/app"
-          pnpm install --frozen-lockfile
-
-      - name: Run Hodor review
-        id: hodor
-        if: ${{ env.OPENROUTER_API_KEY != '' }}
-        continue-on-error: true
+      - uses: actions/checkout@v4
+      - uses: victorarias/shitty-reviewing-agent@main
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          PR_URL="https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
-          cd /tmp/hodor
-          bun run dist/cli.js "$PR_URL" \
-            --model "${HODOR_MODEL}" \
-            --reasoning-effort medium \
-            --post | tee /tmp/hodor-review.log
-
-      - name: Upload Hodor logs
-        if: ${{ always() && env.OPENROUTER_API_KEY != '' }}
-        uses: actions/upload-artifact@v4
+          GITHUB_TOKEN: ${{ github.token }}
         with:
-          name: hodor-review-${{ github.run_id }}
-          path: /tmp/hodor-review.log
-          retention-days: 7
-
-      - name: Skip Hodor review
-        if: ${{ env.OPENROUTER_API_KEY == '' }}
-        run: echo "Skipping Hodor review because the required OpenRouter secret is unavailable."
-
-      - name: Summarize Hodor review outcome
-        if: ${{ always() && env.OPENROUTER_API_KEY != '' }}
-        run: |
-          outcome='${{ steps.hodor.outcome }}'
-          {
-            echo "### Hodor review status: ${outcome}"
-            echo
-            echo "- Model: \`${HODOR_MODEL}\`"
-            echo "- Hodor version: \`${HODOR_VERSION}\`"
-            echo
-            if [[ "$outcome" == "success" ]]; then
-              echo "Hodor completed successfully and posted an advisory review comment to the PR."
-            elif [[ "$outcome" == "failure" ]]; then
-              echo "The Hodor run failed. This workflow remains advisory; inspect the uploaded log artifact for details."
-            elif [[ "$outcome" == "cancelled" ]]; then
-              echo "The Hodor run was cancelled."
-            else
-              echo "Hodor step outcome: $outcome"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          provider: openrouter
+          api-key: ${{ secrets.OPEN_ROUTER_API_KEY }}
+          model: minimax/minimax-m2.7
+          reasoning: xhigh
+          max-files: 100
+          debug: "true"
