@@ -6,6 +6,24 @@ export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function compactTerminalText(text) {
+  return String(text || '').replace(/\s+/g, '');
+}
+
+export function terminalTextIncludes(text, needle, { allowWrapped = false } = {}) {
+  if (!needle) {
+    return true;
+  }
+  const source = String(text || '');
+  if (source.includes(needle)) {
+    return true;
+  }
+  if (!allowWrapped) {
+    return false;
+  }
+  return compactTerminalText(source).includes(compactTerminalText(needle));
+}
+
 export function shellPanes(workspace) {
   return (workspace?.panes || []).filter((pane) => pane.kind === 'shell');
 }
@@ -126,6 +144,7 @@ export async function assertPaneVisibleContent(
   paneId,
   {
     contains = null,
+    allowWrappedContains = false,
     minNonEmptyLines = 2,
     minDenseLines = 1,
     minCharCount = 20,
@@ -144,7 +163,7 @@ export async function assertPaneVisibleContent(
       }
       const summary = visibleContent.summary || {};
       const joined = (visibleContent.lines || []).join('\n');
-      if (contains && !joined.includes(contains)) {
+      if (contains && !terminalTextIncludes(joined, contains, { allowWrapped: allowWrappedContains })) {
         return false;
       }
       return (

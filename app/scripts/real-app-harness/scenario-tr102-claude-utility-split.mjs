@@ -7,6 +7,7 @@ import { createScenarioRunner } from './scenarioRunner.mjs';
 import {
   assertPaneCoverage,
   assertPaneVisibleContent,
+  compactTerminalText,
   captureSessionArtifacts,
   waitForNewShellPane,
   waitForPaneInputFocus,
@@ -192,16 +193,17 @@ async function main() {
         client,
         sessionId,
         firstShellPaneId,
-        (text) => text.includes(revisitToken),
+        (text) => compactTerminalText(text).includes(revisitToken),
         'revisited first utility pane token',
         15_000,
       );
       await assertPaneVisibleContent(client, sessionId, firstShellPaneId, {
         contains: revisitToken,
+        allowWrappedContains: true,
         minNonEmptyLines: 1,
         minDenseLines: 0,
         minCharCount: revisitToken.length,
-        minMaxLineLength: revisitToken.length,
+        minMaxLineLength: 8,
         timeoutMs: 15_000,
         description: 'first utility pane visible content after revisit',
       });
