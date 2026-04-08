@@ -29,6 +29,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Same-Direction Split Width Decay**: Repeated vertical or horizontal splits in one workspace no longer degenerate into `50/25/25` or `25/25/50` pane chains. Stored and newly created chained splits now rebalance to evenly sized siblings, so older sessions like `blubs` recover from the tiny-column layout on the next daemon snapshot.
 - **Truecolor PTY Snapshot Replay**: Attach-time screen snapshots now preserve packed RGB terminal colors when re-emitting visible-frame SGR, so Codex-style truecolor output no longer replays as mostly monochrome after remounts or app relaunches.
 - **`TR-101` Harness Validity**: The local Claude split-from-main packaged-app scenario now runs against the rebuilt automation-enabled app, carries visible-row instrumentation through the live bridge, and treats split-time text reflow as allowed while still failing true paint-collapse regressions.
+- **`TR-502` Readiness Gate**: The remote relaunch split scenario now waits for visible remote main-pane content before native paint assertions and accepts wrapped shell tokens in narrow panes, avoiding false failures that were actually timing or wrapping artifacts rather than rendering regressions.
 
 ## [2026-04-07]
 

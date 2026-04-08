@@ -270,4 +270,5 @@ describe('Terminal', () => {
       reason: 'font-change',
     });
   });
+
 });

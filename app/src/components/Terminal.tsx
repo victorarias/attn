@@ -310,7 +310,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
       const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
       const setValue = descriptor?.set;
-
       for (const char of text) {
         if (setValue) {
           setValue.call(textarea, char);

@@ -9,6 +9,7 @@ import {
   assertPaneNativePaintCoverage,
   assertPaneNativePaintStable,
   assertPaneVisibleContent,
+  compactTerminalText,
   captureSessionArtifacts,
   shellPanes,
   waitForNewShellPane,
@@ -146,6 +147,14 @@ async function main() {
     initialShellPaneId = await runner.step('create_initial_split_before_relaunch', async () => {
       await client.request('select_session', { sessionId });
       await waitForPaneVisible(client, sessionId, 'main', 30_000);
+      await assertPaneVisibleContent(client, sessionId, 'main', {
+        minNonEmptyLines: 2,
+        minDenseLines: 0,
+        minCharCount: 20,
+        minMaxLineLength: 12,
+        timeoutMs: 30_000,
+        description: 'remote main pane visible content before relaunch',
+      });
       await assertPaneCoverage(client, sessionId, 'main', {
         minWidthRatio: 0.8,
         minHeightRatio: 0.7,
@@ -195,16 +204,17 @@ async function main() {
         client,
         sessionId,
         initialShellPaneId,
-        (text) => text.includes(preRelaunchToken),
+        (text) => compactTerminalText(text).includes(preRelaunchToken),
         'initial remote shell token before relaunch',
         20_000,
       );
       await assertPaneVisibleContent(client, sessionId, initialShellPaneId, {
         contains: preRelaunchToken,
+        allowWrappedContains: true,
         minNonEmptyLines: 1,
         minDenseLines: 0,
         minCharCount: preRelaunchToken.length,
-        minMaxLineLength: preRelaunchToken.length,
+        minMaxLineLength: 8,
         timeoutMs: 20_000,
         description: 'initial remote shell content before relaunch',
       });
@@ -235,6 +245,14 @@ async function main() {
       await client.request('select_session', { sessionId });
       await waitForPaneVisible(client, sessionId, 'main', 30_000);
       await waitForPaneVisible(client, sessionId, initialShellPaneId, 30_000);
+      await assertPaneVisibleContent(client, sessionId, 'main', {
+        minNonEmptyLines: 2,
+        minDenseLines: 0,
+        minCharCount: 20,
+        minMaxLineLength: 12,
+        timeoutMs: 30_000,
+        description: 'remote main pane visible content after relaunch',
+      });
       await assertPaneCoverage(client, sessionId, 'main', {
         minWidthRatio: 0.8,
         minHeightRatio: 0.7,
@@ -271,10 +289,11 @@ async function main() {
       );
       await assertPaneVisibleContent(client, sessionId, initialShellPaneId, {
         contains: preRelaunchToken,
+        allowWrappedContains: true,
         minNonEmptyLines: 1,
         minDenseLines: 0,
         minCharCount: preRelaunchToken.length,
-        minMaxLineLength: preRelaunchToken.length,
+        minMaxLineLength: 8,
         timeoutMs: 20_000,
         description: 'initial remote shell content after relaunch',
       });
@@ -336,16 +355,17 @@ async function main() {
         client,
         sessionId,
         postRelaunchMainSplitPaneId,
-        (text) => text.includes(postRelaunchMainToken),
+        (text) => compactTerminalText(text).includes(postRelaunchMainToken),
         'remote shell token after main split',
         20_000,
       );
       await assertPaneVisibleContent(client, sessionId, postRelaunchMainSplitPaneId, {
         contains: postRelaunchMainToken,
+        allowWrappedContains: true,
         minNonEmptyLines: 1,
         minDenseLines: 0,
         minCharCount: postRelaunchMainToken.length,
-        minMaxLineLength: postRelaunchMainToken.length,
+        minMaxLineLength: 8,
         timeoutMs: 20_000,
         description: 'remote shell content after main split',
       });
@@ -385,16 +405,17 @@ async function main() {
         client,
         sessionId,
         postRelaunchShellSplitPaneId,
-        (text) => text.includes(postRelaunchShellToken),
+        (text) => compactTerminalText(text).includes(postRelaunchShellToken),
         'remote shell token after shell split',
         20_000,
       );
       await assertPaneVisibleContent(client, sessionId, postRelaunchShellSplitPaneId, {
         contains: postRelaunchShellToken,
+        allowWrappedContains: true,
         minNonEmptyLines: 1,
         minDenseLines: 0,
         minCharCount: postRelaunchShellToken.length,
-        minMaxLineLength: postRelaunchShellToken.length,
+        minMaxLineLength: 8,
         timeoutMs: 20_000,
         description: 'remote shell content after shell split',
       });
