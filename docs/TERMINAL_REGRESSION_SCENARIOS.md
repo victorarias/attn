@@ -132,8 +132,8 @@ Every scenario should validate some combination of these invariants:
 
 - `TR-502 Remote Relaunch Split Persistence`
   Create a remote split session, relaunch the packaged app, then split again from both the main pane and an existing utility pane.
-  Assertions: pre-existing panes survive relaunch with meaningful visible content, and new post-relaunch splits from both sources appear, accept typing, and preserve content in both source and target panes.
-  Automation: initial remote real-agent automation implemented via `real-app:scenario-tr502`, including pre/post native paint stability checks for restored panes; dedicated visible agent-content assertions are still partial
+  Assertions: pre-existing panes survive relaunch with meaningful visible content, new post-relaunch splits from both sources appear, accept typing, preserve content in both source and target panes, and shell echo after each split stays within the configured tolerance.
+  Automation: initial remote real-agent automation implemented via `real-app:scenario-tr502`, including pre/post native paint stability checks for restored panes, a default shell echo threshold of `2500ms`, and pane/runtime trace artifacts when the delay regresses; dedicated visible agent-content assertions are still partial
 
 - `TR-503 Remote Agent Pane Remains Visible After Split`
   Split a remote agent session and verify the agent pane still shows meaningful visible content rather than collapsing to an effectively empty bottom strip.

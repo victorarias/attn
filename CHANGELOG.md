@@ -22,6 +22,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Remote Relaunch Pane Stability Coverage**: Extend `TR-502` so the restored main pane and original utility pane are checked for both absolute native paint health and acceptable pre/post relaunch drift, not just visibility and typing.
 - **Initial Tiered Scenarios**: Add three first-pass scenario scripts for review: local Claude split-from-main (`TR-101`), local Claude split-from-utility (`TR-102`), and remote relaunch split persistence (`TR-502`).
 - **Pure-Node Native Pane Fixtures**: The native pane screenshot analyzer, fixture tests, and demo generator now use in-repo PNG processing instead of a host-local Pillow dependency, so the packaged-app harness and its pixel assertions run consistently on a clean machine.
+- **Remote Split Echo Thresholds**: `TR-502` now measures typed-shell echo latency with a configurable threshold (`2500ms` by default), records whether the shell terminal was ready when typing began, and saves pane-debug plus terminal-runtime traces so slow split input can be localized instead of waved through as eventual success.
 
 ### Fixed
 - **Relaunch Terminal Bootstrap Geometry**: Terminals no longer declare themselves ready from the mount-time font-size effect before the real container measurement arrives, so restored sessions avoid bootstrapping at placeholder geometries like `10x6` that could leave remote panes visually collapsed into tiny wrapped squares after app reopen.

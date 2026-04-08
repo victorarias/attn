@@ -175,6 +175,8 @@ Current scenarios:
   Creates one remote Codex-style session on `ai-sandbox`, splits the main pane twice, and fails if rendered pane widths drift too far from the workspace model. The artifacts include render health, structured DOM/model snapshots, and per-runtime PTY resize bursts so split-layout regressions can be separated from PTY redraw issues.
 - `real-app:bridge-remote-relaunch-splits`
   Creates one remote split session on `ai-sandbox`, relaunches the packaged app, returns to the same session, then splits again from both the main pane and the original utility pane. The run fails if pre-existing panes do not restore visibly or if post-relaunch splits do not appear and accept typing.
+- `real-app:scenario-tr502`
+  The tiered remote relaunch scenario for `TR-502`. It uses real macOS typing into post-split shell panes, fails if typed echo exceeds the configured threshold (`ATTN_REMOTE_RELAUNCH_SPLITS_ECHO_THRESHOLD_MS`, default `2500`), and artifacts pane-debug plus terminal-runtime traces so input lag can be attributed to focus, attach/replay, or PTY delivery.
 - `real-app:bridge-perf`
   Uses the bridge to create a feature-branch session in a synthetic git repo, sample the packaged app, daemon, and child WebKit processes for CPU/RSS, then capture frontend terminal, PTY transport, and diff/review perf snapshots across app-ready, session-open, split-pane, terminal-output, and diff-detail checkpoints. The terminal stage records command-completion time plus delivered scrollback bytes/lines.
 - `real-app:bridge-pty-bench`

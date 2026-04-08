@@ -380,6 +380,8 @@ export async function captureSessionArtifacts(client, runDir, prefix, sessionId)
     settleFrames: 2,
     includeMemory: false,
   });
+  await writeJson(`${prefix}-pane-debug.json`, 'dump_pane_debug', {});
+  await writeJson(`${prefix}-terminal-runtime-trace.json`, 'dump_terminal_runtime_trace', {});
 
   try {
     await captureFrontWindowScreenshot(`${runDir}/${prefix}-native-window.png`);

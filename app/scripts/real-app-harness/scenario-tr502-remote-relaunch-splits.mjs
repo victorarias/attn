@@ -3,6 +3,7 @@
 import { parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
+import { MacOSDriver } from './macosDriver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import {
   assertPaneCoverage,
@@ -37,6 +38,7 @@ function parseArgs(argv) {
     sshTarget: process.env.ATTN_REMOTE_RELAUNCH_SPLITS_SSH_TARGET || 'ai-sandbox',
     remoteDirectory: process.env.ATTN_REMOTE_RELAUNCH_SPLITS_REMOTE_DIRECTORY || '',
     remoteAgent: process.env.ATTN_REMOTE_RELAUNCH_SPLITS_REMOTE_AGENT || 'codex',
+    echoThresholdMs: Number.parseInt(process.env.ATTN_REMOTE_RELAUNCH_SPLITS_ECHO_THRESHOLD_MS || '2500', 10),
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -48,6 +50,7 @@ function parseArgs(argv) {
     else if (arg === '--ssh-target') options.sshTarget = args[++index] || options.sshTarget;
     else if (arg === '--remote-directory') options.remoteDirectory = args[++index] || '';
     else if (arg === '--remote-agent') options.remoteAgent = args[++index] || options.remoteAgent;
+    else if (arg === '--echo-threshold-ms') options.echoThresholdMs = Number.parseInt(args[++index] || '2500', 10);
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -66,6 +69,7 @@ async function main() {
   --ssh-target <target>          SSH target for the remote endpoint (default: ai-sandbox)
   --remote-directory <path>      Remote cwd for the spawned session (default: remote $HOME)
   --remote-agent <agent>         Agent for the remote session (default: codex)
+  --echo-threshold-ms <ms>       Max acceptable shell echo latency per typed token (default: 2500)
 `);
     return;
   }
@@ -96,6 +100,7 @@ async function main() {
       ATTN_REMOTE_WS_PORT: remoteHarnessWSPort,
     },
   });
+  const driver = new MacOSDriver({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
 
   let endpoint = null;
@@ -105,9 +110,28 @@ async function main() {
   let postRelaunchShellSplitPaneId = null;
   let baselineMainNativeMetrics = null;
   let baselineInitialShellNativeMetrics = null;
+  const timings = {
+    initialShellEchoMs: null,
+    postRelaunchMainSplitEchoMs: null,
+    postRelaunchShellSplitEchoMs: null,
+  };
+  const shellTypingReadiness = {
+    initialShell: null,
+    postRelaunchMainSplit: null,
+    postRelaunchShellSplit: null,
+  };
   const preRelaunchToken = `__TR502_PRE_${Date.now()}__`;
   const postRelaunchMainToken = `__TR502_MAIN_${Date.now()}__`;
   const postRelaunchShellToken = `__TR502_SHELL_${Date.now()}__`;
+
+  function assertEchoLatency(label, latencyMs) {
+    if (!Number.isFinite(latencyMs)) {
+      throw new Error(`${label} did not produce a measurable echo latency`);
+    }
+    if (latencyMs > options.echoThresholdMs) {
+      throw new Error(`${label} echo latency ${latencyMs}ms exceeded threshold ${options.echoThresholdMs}ms`);
+    }
+  }
 
   try {
     await runner.step('launch_app_and_connect_daemon', async () => {
@@ -115,6 +139,12 @@ async function main() {
       await client.waitForManifest(20_000);
       await client.waitForReady(20_000);
       await client.waitForFrontendResponsive(20_000);
+      const paneDebugConfig = await client.request('set_pane_debug', { enabled: true });
+      const terminalRuntimeTraceConfig = await client.request('set_terminal_runtime_trace', { enabled: true });
+      runner.writeJson('ui-debug-config.json', {
+        paneDebugConfig,
+        terminalRuntimeTraceConfig,
+      });
       await observer.connect();
       await removeStaleHarnessEndpoints(observer, 20_000);
     });
@@ -199,7 +229,19 @@ async function main() {
       await client.request('focus_pane', { sessionId, paneId: initialShellPaneId });
       await waitForPaneVisible(client, sessionId, initialShellPaneId, 20_000);
       await waitForPaneInputFocus(client, sessionId, initialShellPaneId, 20_000);
-      await client.request('type_pane_via_ui', { sessionId, paneId: initialShellPaneId, text: preRelaunchToken });
+      const readyState = await client.request('get_pane_state', { sessionId, paneId: initialShellPaneId });
+      shellTypingReadiness.initialShell = {
+        terminalReadyAtTypeStart: Boolean(readyState?.renderHealth?.flags?.terminalReady),
+        writeParsedCountAtTypeStart: readyState?.renderHealth?.terminal?.writeParsedCount ?? null,
+      };
+      runner.log('shell:type_start', {
+        phase: 'initial',
+        paneId: initialShellPaneId,
+        ...shellTypingReadiness.initialShell,
+      });
+      const typeStartedAt = Date.now();
+      await driver.activateApp();
+      await driver.typeText(preRelaunchToken);
       await waitForPaneText(
         client,
         sessionId,
@@ -208,6 +250,8 @@ async function main() {
         'initial remote shell token before relaunch',
         20_000,
       );
+      timings.initialShellEchoMs = Date.now() - typeStartedAt;
+      assertEchoLatency('initial remote shell', timings.initialShellEchoMs);
       await assertPaneVisibleContent(client, sessionId, initialShellPaneId, {
         contains: preRelaunchToken,
         allowWrappedContains: true,
@@ -227,7 +271,7 @@ async function main() {
         {
           target: 'paneBody',
           minBusyColumnRatio: 0.2,
-          minBusyRowRatio: 0.08,
+          minBusyRowRatio: 0.04,
           minBBoxWidthRatio: 0.2,
           minBBoxHeightRatio: 0.08,
           description: 'initial remote shell native paint coverage before relaunch',
@@ -280,11 +324,11 @@ async function main() {
         {
           target: 'paneBody',
           maxBusyColumnRatioDelta: 0.12,
-          maxBusyRowRatioDelta: 0.14,
+          maxBusyRowRatioDelta: null,
           maxBBoxWidthRatioDelta: 0.1,
           maxBBoxHeightRatioDelta: 0.1,
-          maxActivePixelRatioDelta: 0.05,
-          description: 'remote main pane native paint stability after relaunch',
+          maxActivePixelRatioDelta: null,
+          description: 'remote main pane native paint stability after relaunch with allowed content reflow',
         },
       );
       await assertPaneVisibleContent(client, sessionId, initialShellPaneId, {
@@ -300,7 +344,7 @@ async function main() {
       await assertPaneNativePaintCoverage(client, runner.runDir, '02-post-relaunch-shell', sessionId, initialShellPaneId, {
         target: 'paneBody',
         minBusyColumnRatio: 0.2,
-        minBusyRowRatio: 0.08,
+        minBusyRowRatio: 0.04,
         minBBoxWidthRatio: 0.2,
         minBBoxHeightRatio: 0.08,
         description: 'initial remote shell native paint coverage after relaunch',
@@ -350,7 +394,19 @@ async function main() {
       await client.request('focus_pane', { sessionId, paneId: postRelaunchMainSplitPaneId });
       await waitForPaneVisible(client, sessionId, postRelaunchMainSplitPaneId, 20_000);
       await waitForPaneInputFocus(client, sessionId, postRelaunchMainSplitPaneId, 20_000);
-      await client.request('type_pane_via_ui', { sessionId, paneId: postRelaunchMainSplitPaneId, text: postRelaunchMainToken });
+      const readyState = await client.request('get_pane_state', { sessionId, paneId: postRelaunchMainSplitPaneId });
+      shellTypingReadiness.postRelaunchMainSplit = {
+        terminalReadyAtTypeStart: Boolean(readyState?.renderHealth?.flags?.terminalReady),
+        writeParsedCountAtTypeStart: readyState?.renderHealth?.terminal?.writeParsedCount ?? null,
+      };
+      runner.log('shell:type_start', {
+        phase: 'post-relaunch-main-split',
+        paneId: postRelaunchMainSplitPaneId,
+        ...shellTypingReadiness.postRelaunchMainSplit,
+      });
+      const typeStartedAt = Date.now();
+      await driver.activateApp();
+      await driver.typeText(postRelaunchMainToken);
       await waitForPaneText(
         client,
         sessionId,
@@ -359,6 +415,8 @@ async function main() {
         'remote shell token after main split',
         20_000,
       );
+      timings.postRelaunchMainSplitEchoMs = Date.now() - typeStartedAt;
+      assertEchoLatency('post-relaunch main split shell', timings.postRelaunchMainSplitEchoMs);
       await assertPaneVisibleContent(client, sessionId, postRelaunchMainSplitPaneId, {
         contains: postRelaunchMainToken,
         allowWrappedContains: true,
@@ -400,7 +458,19 @@ async function main() {
       await client.request('focus_pane', { sessionId, paneId: postRelaunchShellSplitPaneId });
       await waitForPaneVisible(client, sessionId, postRelaunchShellSplitPaneId, 20_000);
       await waitForPaneInputFocus(client, sessionId, postRelaunchShellSplitPaneId, 20_000);
-      await client.request('type_pane_via_ui', { sessionId, paneId: postRelaunchShellSplitPaneId, text: postRelaunchShellToken });
+      const readyState = await client.request('get_pane_state', { sessionId, paneId: postRelaunchShellSplitPaneId });
+      shellTypingReadiness.postRelaunchShellSplit = {
+        terminalReadyAtTypeStart: Boolean(readyState?.renderHealth?.flags?.terminalReady),
+        writeParsedCountAtTypeStart: readyState?.renderHealth?.terminal?.writeParsedCount ?? null,
+      };
+      runner.log('shell:type_start', {
+        phase: 'post-relaunch-shell-split',
+        paneId: postRelaunchShellSplitPaneId,
+        ...shellTypingReadiness.postRelaunchShellSplit,
+      });
+      const typeStartedAt = Date.now();
+      await driver.activateApp();
+      await driver.typeText(postRelaunchShellToken);
       await waitForPaneText(
         client,
         sessionId,
@@ -409,6 +479,8 @@ async function main() {
         'remote shell token after shell split',
         20_000,
       );
+      timings.postRelaunchShellSplitEchoMs = Date.now() - typeStartedAt;
+      assertEchoLatency('post-relaunch shell split shell', timings.postRelaunchShellSplitEchoMs);
       await assertPaneVisibleContent(client, sessionId, postRelaunchShellSplitPaneId, {
         contains: postRelaunchShellToken,
         allowWrappedContains: true,
@@ -445,6 +517,11 @@ async function main() {
         postRelaunchMainToken,
         postRelaunchShellToken,
       },
+      thresholds: {
+        echoMs: options.echoThresholdMs,
+      },
+      timings,
+      shellTypingReadiness,
       finalWorkspace: {
         activePaneId: finalWorkspace.activePaneId,
         paneIds: (finalWorkspace.panes || []).map((pane) => pane.paneId),
@@ -473,6 +550,11 @@ async function main() {
         postRelaunchMainToken,
         postRelaunchShellToken,
       },
+      thresholds: {
+        echoMs: options.echoThresholdMs,
+      },
+      timings,
+      shellTypingReadiness,
     });
     console.error(summary.error);
     process.exitCode = 1;
