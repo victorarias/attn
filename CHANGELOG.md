@@ -6,9 +6,33 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-08]
+
+### Added
+- **Isolated Remote PTY Harness**: The packaged-app remote split latency harness now launches a fresh app against a hermetic remote daemon on the SSH host, with dedicated binary, socket, database, websocket port, and artifacted binary provenance so terminal regressions can be verified without piggybacking on ambient remote state.
+- **Workspace Split Span Diagnostics**: The packaged-app session diagnostics now record how many visual slots each split child spans within a same-direction chain, and nested split DOM snapshots now report direct child widths instead of whichever descendant matched first.
+- **Native Window Harness Capture**: Packaged-app diagnosis bundles now include a native macOS window screenshot so WebGL terminal regressions can be verified from real pixels instead of relying only on DOM-rendered screenshots.
+- **Terminal Startup Render Trace**: Packaged-app session diagnostics now record each terminal's initial container size, first observed layout size, and which path declared the terminal ready, with a no-select relaunch capture mode for bugs that self-heal when the harness focuses the session.
+- **Terminal Regression Scenario Matrix**: Add `docs/TERMINAL_REGRESSION_SCENARIOS.md` to track the packaged-app PTY/UI cases we need to keep stable and tie harness scripts back to explicit scenario IDs.
+- **Remote Relaunch Split Harness**: Add `real-app:bridge-remote-relaunch-splits` for scenario `TR-502`, which creates a remote split session, relaunches the app, and verifies post-relaunch splits from both the main pane and an existing utility pane.
+- **Terminal Scenario Runner Foundation**: Add shared packaged-app scenario runner, assertion, agent, and remote-helper modules plus a short architecture note in `docs/TERMINAL_TEST_ARCHITECTURE.md`.
+- **Visible Viewport Content Instrumentation**: Expose each pane's currently visible terminal rows and summary metrics through the UI automation bridge so split and relaunch scenarios can assert rendered content instead of only pane geometry and full-buffer text.
+- **Pane-Cropped Native Pixel Assertions**: Add a pane-level native screenshot analyzer that crops the real macOS window to one pane body and measures painted row/column spread, so scenarios can prove on-screen content occupies the pane instead of collapsing into a narrow strip or footer band.
+- **Range-Based Native Pane Stability Checks**: Add optional before/after tolerance checks for pane paint coverage so split and relaunch scenarios can detect material regressions without requiring exact pixel equality between screenshots.
+- **Remote Relaunch Pane Stability Coverage**: Extend `TR-502` so the restored main pane and original utility pane are checked for both absolute native paint health and acceptable pre/post relaunch drift, not just visibility and typing.
+- **Initial Tiered Scenarios**: Add three first-pass scenario scripts for review: local Claude split-from-main (`TR-101`), local Claude split-from-utility (`TR-102`), and remote relaunch split persistence (`TR-502`).
+
+### Fixed
+- **Relaunch Terminal Bootstrap Geometry**: Terminals no longer declare themselves ready from the mount-time font-size effect before the real container measurement arrives, so restored sessions avoid bootstrapping at placeholder geometries like `10x6` that could leave remote panes visually collapsed into tiny wrapped squares after app reopen.
+- **Remote Split Input Delay**: Remote utility panes no longer wait seconds before accepting visible input after the prompt appears. Startup terminal query handling now completes through the real remote worker path, and the packaged-app harness now verifies the exercised local and remote binaries instead of accidentally talking to stale daemons.
+- **Same-Direction Split Width Decay**: Repeated vertical or horizontal splits in one workspace no longer degenerate into `50/25/25` or `25/25/50` pane chains. Stored and newly created chained splits now rebalance to evenly sized siblings, so older sessions like `blubs` recover from the tiny-column layout on the next daemon snapshot.
+- **Truecolor PTY Snapshot Replay**: Attach-time screen snapshots now preserve packed RGB terminal colors when re-emitting visible-frame SGR, so Codex-style truecolor output no longer replays as mostly monochrome after remounts or app relaunches.
+
 ## [2026-04-07]
 
 ### Fixed
+- **Terminal Remount Stability**: Session workspaces now keep stable terminal refs across ordinary rerenders, reducing false pane remount churn that could disturb terminal state and formatting.
+- **Session Switch Geometry Handoff**: Hidden terminals now avoid tiny startup measurements and selected sessions fit on animation frames instead of a coarse timeout, so switching sessions does not flash a skinny provisional terminal before the real geometry arrives.
 - **Codex Idle Classification On Remote Daemons**: Stop-time Codex classification now runs from the session repository directory instead of the daemon's ambient working directory, so remote Codex sessions no longer fall back to `unknown` just because the classifier subprocess hit the CLI trust check.
 - **Remote Split Freeze On Codex Sessions**: WebSocket attach replay now drops redundant full scrollback when a fresh screen snapshot is available, so opening a split on a remote Codex session no longer has to push multi-megabyte replay payloads through the UI just to redraw the current screen.
 - **Remote Split Shell Reattach Routing**: Split-pane utility runtimes now inherit their parent session's endpoint and are treated as daemon-known PTYs, so reopening or remounting a remote split attaches to the existing remote shell before falling back to respawn instead of hanging on a misrouted local `spawn_session`.

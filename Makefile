@@ -113,12 +113,12 @@ build-app-ui-automation: build
 		codesign -s - -f app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn; \
 	fi
 
-# Install Tauri app to ~/Applications
-install-app: build-app
+# Install Tauri app to ~/Applications with the UI automation bridge enabled.
+install-app: build-app-ui-automation
 	@mkdir -p ~/Applications
 	@rm -rf ~/Applications/attn.app
 	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
-	@echo "Installed attn.app to ~/Applications"
+	@echo "Installed attn.app to ~/Applications with UI automation bridge enabled"
 
 install-app-ui-automation: build-app-ui-automation
 	@mkdir -p ~/Applications

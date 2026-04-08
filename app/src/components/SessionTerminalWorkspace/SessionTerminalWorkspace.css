@@ -88,6 +88,7 @@
   background: var(--color-bg-editor);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   opacity: 0.58;
   transition: opacity 120ms ease;
 }
@@ -104,7 +105,7 @@
 }
 
 .workspace-split {
-  display: flex;
+  display: grid;
   min-width: 0;
   min-height: 0;
   gap: 1px;
@@ -114,26 +115,28 @@
 }
 
 .workspace-split.split-vertical {
-  flex-direction: row;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .workspace-split.split-horizontal {
-  flex-direction: column;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .workspace-split-child {
   min-width: 0;
   min-height: 0;
   display: flex;
-  flex: 1 1 0;
-  transition: flex-grow 160ms ease;
+  overflow: hidden;
 }
 
 .workspace-split-child > .workspace-pane,
 .workspace-split-child > .workspace-split {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .workspace-pane-header {
@@ -163,6 +166,7 @@
   min-height: 0;
   min-width: 0;
   position: relative;
+  overflow: hidden;
 }
 
 .workspace-pane-close {

@@ -389,6 +389,91 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('claims visible geometry after attaching a daemon-known session with stale replay dimensions', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '49',
+        sessions: [{
+          id: 'sess-existing',
+          label: 'attn',
+          agent: 'codex',
+          directory: '/tmp/repo',
+          state: 'idle',
+          state_since: '2026-04-08T00:00:00Z',
+          state_updated_at: '2026-04-08T00:00:00Z',
+          last_seen: '2026-04-08T00:00:00Z',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const spawnPromise = ptySpawn({
+      args: {
+        id: 'sess-existing',
+        cwd: '/tmp/repo',
+        agent: 'codex',
+        cols: 58,
+        rows: 46,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-existing',
+        success: true,
+        cols: 80,
+        rows: 24,
+        screen_cols: 80,
+        screen_rows: 24,
+        running: true,
+      });
+    });
+
+    await expect(spawnPromise).resolves.toBeUndefined();
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
+    });
+
+    unmount();
+  });
+
   it('re-spawns remote workspace runtimes on the correct endpoint after attach failure', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();

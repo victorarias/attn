@@ -130,7 +130,18 @@ func (b *Bootstrapper) detectRemotePlatform(ctx context.Context, sshTarget strin
 }
 
 func (b *Bootstrapper) remoteVersion(ctx context.Context, sshTarget string) (string, error) {
-	out, err := runSSH(ctx, sshTarget, remoteAttnCommand("--version")+" 2>/dev/null || printf NOT_FOUND")
+	script := fmt.Sprintf(`
+ATTN_BIN="${ATTN_REMOTE_ATTN_BIN:-$HOME/.local/bin/%s}"
+if [ ! -x "$ATTN_BIN" ] && [ -z "${ATTN_REMOTE_ATTN_BIN:-}" ]; then
+  ATTN_BIN="$(command -v %s 2>/dev/null || true)"
+fi
+if [ -z "$ATTN_BIN" ] || [ ! -x "$ATTN_BIN" ]; then
+  printf NOT_FOUND
+  exit 0
+fi
+"$ATTN_BIN" --version 2>/dev/null || printf NOT_FOUND
+`, config.BinaryName(), config.BinaryName())
+	out, err := runSSH(ctx, sshTarget, script)
 	if err != nil {
 		return "", err
 	}
@@ -255,8 +266,8 @@ func fileSHA256(path string) (string, error) {
 
 func (b *Bootstrapper) remoteBinarySHA256(ctx context.Context, sshTarget string) (string, error) {
 	script := fmt.Sprintf(`
-ATTN_BIN="$HOME/.local/bin/%s"
-if [ ! -x "$ATTN_BIN" ]; then
+ATTN_BIN="${ATTN_REMOTE_ATTN_BIN:-$HOME/.local/bin/%s}"
+if [ ! -x "$ATTN_BIN" ] && [ -z "${ATTN_REMOTE_ATTN_BIN:-}" ]; then
   ATTN_BIN="$(command -v %s 2>/dev/null || true)"
 fi
 if [ -z "$ATTN_BIN" ] || [ ! -f "$ATTN_BIN" ]; then
@@ -367,21 +378,60 @@ func (b *Bootstrapper) buildBinaryFromSource(ctx context.Context, platform Remot
 	return nil
 }
 
-func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, localBinary string) error {
-	if _, err := runSSH(ctx, sshTarget, "mkdir -p ~/.local/bin ~/.attn"); err != nil {
-		return err
+func resolveRemoteInstallPath(remoteHome, override string) string {
+	path := strings.TrimSpace(override)
+	if path == "" {
+		return filepath.Join(remoteHome, ".local", "bin", config.BinaryName())
 	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(remoteHome, path[2:])
+	}
+	return path
+}
+
+func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, localBinary string) error {
 	remoteHome, err := runSSH(ctx, sshTarget, `printf '%s' "$HOME"`)
 	if err != nil {
 		return err
 	}
-	remoteTmpPath := strings.TrimSpace(remoteHome) + "/.local/bin/" + config.BinaryName() + ".tmp"
-	cmd := exec.CommandContext(ctx, "scp", localBinary, sshTarget+":"+remoteTmpPath)
+	remoteInstallPath := resolveRemoteInstallPath(strings.TrimSpace(remoteHome), os.Getenv("ATTN_REMOTE_ATTN_BIN"))
+	remoteInstallDir := filepath.Dir(remoteInstallPath)
+	remoteTmpPath := filepath.Join("/tmp", fmt.Sprintf("%s.%d.%d.tmp", filepath.Base(remoteInstallPath), os.Getpid(), time.Now().UnixNano()))
+	if _, err := runSSH(ctx, sshTarget, fmt.Sprintf("mkdir -p %s ~/.attn", shellQuote(remoteInstallDir))); err != nil {
+		return err
+	}
+	file, err := os.Open(localBinary)
+	if err != nil {
+		return fmt.Errorf("open local binary: %w", err)
+	}
+	defer file.Close()
+	cmd := exec.CommandContext(
+		ctx,
+		"ssh",
+		append(sshBaseArgs(sshTarget), remoteShellCommand(fmt.Sprintf("cat > %s", shellQuote(remoteTmpPath))))...,
+	)
+	cmd.Stdin = file
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("scp binary: %s", strings.TrimSpace(string(out)))
+		return fmt.Errorf("copy binary over ssh: %s", strings.TrimSpace(string(out)))
 	}
-	_, err = runSSH(ctx, sshTarget, fmt.Sprintf("chmod +x %s && mv %s %s", shellQuote(remoteTmpPath), shellQuote(remoteTmpPath), shellQuote(strings.TrimSpace(remoteHome)+"/.local/bin/"+config.BinaryName())))
+	if probe, probeErr := runSSH(
+		ctx,
+		sshTarget,
+		fmt.Sprintf("if [ -f %s ]; then wc -c < %s; else printf MISSING; fi", shellQuote(remoteTmpPath), shellQuote(remoteTmpPath)),
+	); probeErr == nil {
+		b.logf("remote binary upload probe: target=%s tmp=%s result=%s", sshTarget, remoteTmpPath, strings.TrimSpace(probe))
+	}
+	_, err = runSSH(
+		ctx,
+		sshTarget,
+		fmt.Sprintf(
+			"install -m 755 %s %s && rm -f %s",
+			shellQuote(remoteTmpPath),
+			shellQuote(remoteInstallPath),
+			shellQuote(remoteTmpPath),
+		),
+	)
 	return err
 }
 
@@ -500,23 +550,23 @@ func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget 
 	return fmt.Errorf("daemon did not become ready")
 }
 
-func remoteDaemonEnvScript() string {
-	assignments := make([]string, 0, 1)
-	if value := strings.TrimSpace(os.Getenv("ATTN_REVIEW_LOOP_SCRIPT_B64")); value != "" {
-		assignments = append(assignments, "export ATTN_REVIEW_LOOP_SCRIPT_B64="+shellQuote(value))
-	}
-	if len(assignments) == 0 {
-		return ""
-	}
-	return strings.Join(assignments, "; ") + "; "
-}
-
 func (b *Bootstrapper) startRemoteDaemon(ctx context.Context, sshTarget string) error {
-	launchScript := remoteDaemonEnvScript() + remoteAttnCommand("daemon")
+	launchScript := fmt.Sprintf(`
+mkdir -p ~/.attn
+ATTN_BIN="${ATTN_REMOTE_ATTN_BIN:-$HOME/.local/bin/%s}"
+if [ ! -x "$ATTN_BIN" ] && [ -z "${ATTN_REMOTE_ATTN_BIN:-}" ]; then
+  ATTN_BIN="$(command -v %s 2>/dev/null || true)"
+fi
+if [ -z "$ATTN_BIN" ] || [ ! -x "$ATTN_BIN" ]; then
+  printf 'missing attn binary\n' >&2
+  exit 127
+fi
+nohup setsid "$ATTN_BIN" daemon </dev/null >>~/.attn/daemon.log 2>&1 &
+`, config.BinaryName(), config.BinaryName())
 	_, err := runSSH(
 		ctx,
 		sshTarget,
-		"mkdir -p ~/.attn && nohup setsid sh -lc "+shellQuote(launchScript)+` </dev/null >>~/.attn/daemon.log 2>&1 &`,
+		launchScript,
 	)
 	return err
 }

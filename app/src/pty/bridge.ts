@@ -1,4 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core';
+import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
+import { recordPtyListenerError } from '../utils/ptyPerf';
 
 export interface PtySpawnArgs {
   id: string;
@@ -33,7 +35,7 @@ type PtyEventHandler = (event: { payload: PtyEventPayload }) => void;
 export interface PtyBackend {
   spawn: (args: PtySpawnArgs) => Promise<void>;
   write: (id: string, data: string, source?: string) => Promise<void>;
-  resize: (id: string, cols: number, rows: number) => Promise<void>;
+  resize: (id: string, cols: number, rows: number, reason?: string) => Promise<void>;
   kill: (id: string) => Promise<void>;
 }
 
@@ -63,8 +65,24 @@ export function emitPtyEvent(payload: PtyEventPayload) {
       (window as unknown as { __TEST_PTY_EVENTS?: PtyEventPayload[] }).__TEST_PTY_EVENTS = [payload];
     }
   }
+  let listenerIndex = 0;
   for (const handler of listeners) {
-    handler(event);
+    listenerIndex += 1;
+    try {
+      handler(event);
+    } catch (error) {
+      recordPtyListenerError(payload.event, payload.id, error);
+      recordPaneRuntimeDebugEvent({
+        scope: 'pty-bridge',
+        runtimeId: payload.id,
+        message: 'PTY listener threw while handling event',
+        details: {
+          event: payload.event,
+          listenerIndex,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 }
 
@@ -112,7 +130,7 @@ export async function ptyWrite(request: { id: string; data: string; source?: str
   await backend.write(request.id, request.data, request.source);
 }
 
-export async function ptyResize(request: { id: string; cols: number; rows: number }) {
+export async function ptyResize(request: { id: string; cols: number; rows: number; reason?: string }) {
   if (mockEnabled()) {
     if (!mockSessions.has(request.id)) {
       return;
@@ -122,7 +140,7 @@ export async function ptyResize(request: { id: string; cols: number; rows: numbe
   if (!backend) {
     throw new Error('PTY backend is not configured');
   }
-  await backend.resize(request.id, request.cols, request.rows);
+  await backend.resize(request.id, request.cols, request.rows, request.reason);
 }
 
 export async function ptyKill(request: { id: string }) {

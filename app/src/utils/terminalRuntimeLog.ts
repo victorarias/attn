@@ -8,6 +8,7 @@ const MAX_TERMINAL_RUNTIME_EVENTS = 500;
 export interface TerminalRuntimeLogEvent {
   at: string;
   category: string;
+  event?: string;
   sessionId?: string;
   paneId?: string;
   runtimeId?: string;

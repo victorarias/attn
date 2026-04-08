@@ -346,10 +346,16 @@ describe('SessionTerminalWorkspace', () => {
     const split = container.querySelector('[data-split-id="root"]');
     const firstChild = container.querySelector('[data-split-id="root"] [data-split-child-index="0"]') as HTMLElement | null;
     const secondChild = container.querySelector('[data-split-id="root"] [data-split-child-index="1"]') as HTMLElement | null;
+    const mainPane = container.querySelector(`[data-pane-id="${MAIN_TERMINAL_PANE_ID}"]`);
+    const shellPane = container.querySelector('[data-pane-id="pane-shell-1"]');
 
     expect(split).toHaveAttribute('data-split-ratio', '0.300');
-    expect(firstChild?.style.flexGrow).toBe('0.3');
-    expect(secondChild?.style.flexGrow).toBe('0.7');
+    expect(split).toHaveAttribute('data-split-path', 'root');
+    expect((split as HTMLElement | null)?.style.gridTemplateColumns).toBe('minmax(0, 0.3fr) minmax(0, 0.7fr)');
+    expect(firstChild).toHaveAttribute('data-split-child-path', 'root/0');
+    expect(secondChild).toHaveAttribute('data-split-child-path', 'root/1');
+    expect(mainPane).toHaveAttribute('data-pane-path', 'root/0');
+    expect(shellPane).toHaveAttribute('data-pane-path', 'root/1');
   });
 
   it('lets zoom arm before splitting and applies once a split exists', () => {
@@ -562,7 +568,137 @@ describe('SessionTerminalWorkspace', () => {
     expect(mockTerminalFit).toHaveBeenCalled();
   });
 
+  it('re-fits every visible pane when an inactive split session becomes active', () => {
+    mockTerminalFit.mockReset();
+
+    const workspace: TerminalWorkspaceState = {
+      terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+      layoutTree: {
+        type: 'split',
+        splitId: 'root',
+        direction: 'vertical',
+        ratio: 0.5,
+        children: [
+          { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+          { type: 'pane', paneId: 'pane-shell-1' },
+        ],
+      },
+    };
+
+    const { rerender } = render(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={workspace}
+        activePaneId="pane-shell-1"
+        fontSize={14}
+        enabled
+        isActiveSession={false}
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    expect(mockTerminalFit).not.toHaveBeenCalled();
+
+    rerender(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={workspace}
+        activePaneId="pane-shell-1"
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    expect(mockTerminalFit).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits until the session view is visible before refitting and focusing the active pane', () => {
+    mockTerminalFit.mockReset();
+    mockTerminalFocus.mockReset().mockReturnValue(true);
+
+    const workspace: TerminalWorkspaceState = {
+      terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+      layoutTree: {
+        type: 'split',
+        splitId: 'root',
+        direction: 'vertical',
+        ratio: 0.5,
+        children: [
+          { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+          { type: 'pane', paneId: 'pane-shell-1' },
+        ],
+      },
+    };
+
+    const { rerender } = render(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={workspace}
+        activePaneId="pane-shell-1"
+        fontSize={14}
+        enabled
+        isActiveSession
+        isSessionViewVisible={false}
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    expect(mockTerminalFit).not.toHaveBeenCalled();
+    expect(mockTerminalFocus).not.toHaveBeenCalled();
+
+    rerender(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="claude"
+        cwd="/tmp/repo"
+        workspace={workspace}
+        activePaneId="pane-shell-1"
+        fontSize={14}
+        enabled
+        isActiveSession
+        isSessionViewVisible
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    expect(mockTerminalFit).toHaveBeenCalledTimes(2);
+    expect(mockTerminalFocus).toHaveBeenCalled();
+  });
+
   it('passes the parent session endpoint to utility pane spawns', async () => {
+    vi.useFakeTimers();
     render(
       <SessionTerminalWorkspace
         sessionId="session-1"
@@ -601,6 +737,7 @@ describe('SessionTerminalWorkspace', () => {
 
     await act(async () => {
       utilityTerminalProps.onReady(createMockXterm() as any);
+      await vi.advanceTimersByTimeAsync(100);
       await Promise.resolve();
     });
 

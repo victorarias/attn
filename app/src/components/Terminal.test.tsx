@@ -190,7 +190,7 @@ describe('Terminal', () => {
     vi.unstubAllGlobals();
   });
 
-  it('forces a real xterm resize when fit lands on the current size', () => {
+  it('waits for the first real ResizeObserver measurement before reporting readiness', () => {
     const handleRef = createRef<TerminalHandle>();
     const onResize = vi.fn();
 
@@ -206,6 +206,47 @@ describe('Terminal', () => {
 
     expect(mockState.terminals).toHaveLength(1);
     expect(mockState.resizeObservers).toHaveLength(1);
+    expect(onResize).not.toHaveBeenCalled();
+
+    act(() => {
+      mockState.resizeObservers[0].trigger(1000, 900);
+    });
+
+    const term = mockState.terminals[0];
+    expect(onResize).toHaveBeenCalledTimes(1);
+    expect(onResize).toHaveBeenLastCalledWith(109, 50, {
+      reason: 'ready',
+    });
+    const baselineResizeCalls = term.resizeMock.mock.calls.length;
+
+    act(() => {
+      handleRef.current?.fit();
+    });
+
+    expect(term.resizeMock.mock.calls.length).toBe(baselineResizeCalls);
+    expect(onResize).toHaveBeenLastCalledWith(109, 50, {
+      forceRedraw: true,
+      reason: 'fit_same_size',
+    });
+    expect(onResize.mock.calls).toEqual([
+      [109, 50, { reason: 'ready' }],
+      [109, 50, { forceRedraw: true, reason: 'fit_same_size' }],
+    ]);
+  });
+
+  it('applies font-size changes after the terminal is ready', () => {
+    const handleRef = createRef<TerminalHandle>();
+    const onResize = vi.fn();
+
+    const { rerender } = render(
+      <Terminal
+        ref={handleRef}
+        fontSize={14}
+        resolvedTheme="dark"
+        tuiCursor
+        onResize={onResize}
+      />
+    );
 
     act(() => {
       mockState.resizeObservers[0].trigger(1000, 900);
@@ -214,17 +255,19 @@ describe('Terminal', () => {
     const term = mockState.terminals[0];
     const baselineResizeCalls = term.resizeMock.mock.calls.length;
 
-    act(() => {
-      handleRef.current?.fit();
-    });
-    act(() => {
-      vi.advanceTimersByTime(0);
-    });
+    rerender(
+      <Terminal
+        ref={handleRef}
+        fontSize={16}
+        resolvedTheme="dark"
+        tuiCursor
+        onResize={onResize}
+      />
+    );
 
-    expect(term.resizeMock.mock.calls.length).toBe(baselineResizeCalls + 2);
-    expect(term.resizeMock.mock.calls.slice(-2)).toEqual([
-      [109, 49],
-      [109, 50],
-    ]);
+    expect(term.resizeMock.mock.calls.length).toBe(baselineResizeCalls + 1);
+    expect(onResize).toHaveBeenLastCalledWith(109, 50, {
+      reason: 'font-change',
+    });
   });
 });

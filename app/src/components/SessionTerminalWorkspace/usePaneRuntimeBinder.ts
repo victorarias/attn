@@ -9,10 +9,14 @@ import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { recordPtyDecode } from '../../utils/ptyPerf';
 import { resetTerminalScrollPin } from '../../utils/terminalScrollPin';
 import { recordTerminalRuntimeLog } from '../../utils/terminalRuntimeLog';
+import { snapshotVisibleTerminalContent, type TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
 
 const MAX_PENDING_TERMINAL_EVENTS = 256;
 const RUNTIME_ENSURE_TIMEOUT_MS = 20_000;
 const RUNTIME_ENSURE_RETRY_DELAY_MS = 150;
+const PTY_GEOMETRY_SETTLE_MS = 90;
+const PTY_READY_SETTLE_MS = 60;
+const PTY_REDRAW_BOUNCE_DELAY_MS = 16;
 const terminalTextEncoder = new TextEncoder();
 
 interface PaneRuntimeSize {
@@ -32,7 +36,7 @@ export interface PaneRuntimeBinder {
   setTerminalHandle: (paneId: string, handle: TerminalHandle | null) => void;
   handleTerminalInit: (paneId: string) => (xterm: XTerm) => void;
   handleTerminalReady: (paneId: string) => (xterm: XTerm) => void;
-  handleTerminalResize: (paneId: string) => (cols: number, rows: number) => void;
+  handleTerminalResize: (paneId: string) => (cols: number, rows: number, options?: { forceRedraw?: boolean; reason?: string }) => void;
   focusPaneWithRetry: (paneId: string, retries?: number) => void;
   fitPane: (paneId: string) => void;
   fitActivePane: () => void;
@@ -40,6 +44,7 @@ export interface PaneRuntimeBinder {
   isPaneInputFocused: (paneId: string) => boolean;
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => PaneRuntimeSize | null;
+  getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
   resetPaneTerminal: (paneId: string) => boolean;
   injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectPaneBase64: (paneId: string, payload: string) => Promise<boolean>;
@@ -55,6 +60,14 @@ interface PaneWriteLogState {
   writeCount: number;
   bytes: number;
   lastSeq?: number;
+}
+
+interface PendingGeometrySync {
+  cols: number;
+  rows: number;
+  forceRedraw: boolean;
+  reason: string;
+  xterm: XTerm;
 }
 
 function decodePtyBytes(payload: string): Uint8Array {
@@ -167,11 +180,13 @@ export function usePaneRuntimeBinder(
   const pendingEnsuresRef = useRef<Map<string, Promise<void>>>(new Map());
   const ensuredRuntimeIdsRef = useRef<Set<string>>(new Set());
   const cachedSpawnArgsRef = useRef<Map<string, PtySpawnArgs | null>>(new Map());
-  const cachedTerminalTextRef = useRef<Map<string, string>>(new Map());
   const pendingUnmountCleanupRef = useRef<Map<string, number>>(new Map());
   const runtimeBindingDisposersRef = useRef<Map<string, { paneId: string; testSessionId?: string; dispose: () => void }>>(new Map());
   const paneWriteStatesRef = useRef<Map<string, PaneTerminalWriteState>>(new Map());
   const paneWriteLogStatesRef = useRef<Map<string, PaneWriteLogState>>(new Map());
+  const pendingGeometrySyncRef = useRef<Map<string, PendingGeometrySync>>(new Map());
+  const pendingGeometryTimersRef = useRef<Map<string, number>>(new Map());
+  const lastCommittedGeometryRef = useRef<Map<string, PaneRuntimeSize>>(new Map());
 
   const getCurrentPane = useCallback((paneId: string): PaneRuntimeSpec | undefined => {
     return paneByIdRef.current.get(paneId) || panesRef.current.find((pane) => pane.paneId === paneId);
@@ -274,6 +289,14 @@ export function usePaneRuntimeBinder(
     state.lastLoggedAt = now;
     state.writeCount = 0;
     state.bytes = 0;
+  }, [getCurrentPane]);
+
+  const primeSpawnArgsForSize = useCallback((paneId: string, cols: number, rows: number) => {
+    const pane = getCurrentPane(paneId);
+    if (!pane) {
+      return;
+    }
+    cachedSpawnArgsRef.current.set(paneId, pane.getSpawnArgs({ cols, rows }));
   }, [getCurrentPane]);
 
   const writeToTerminal = useCallback((xterm: XTerm, data: string | Uint8Array): Promise<void> => {
@@ -393,10 +416,14 @@ export function usePaneRuntimeBinder(
         cachedSpawnArgsRef.current.delete(paneId);
       }
     }
-    for (const paneId of Array.from(cachedTerminalTextRef.current.keys())) {
-      if (!activePaneIds.has(paneId)) {
-        cachedTerminalTextRef.current.delete(paneId);
+    for (const [paneId, timeoutId] of pendingGeometryTimersRef.current.entries()) {
+      if (activePaneIds.has(paneId)) {
+        continue;
       }
+      window.clearTimeout(timeoutId);
+      pendingGeometryTimersRef.current.delete(paneId);
+      pendingGeometrySyncRef.current.delete(paneId);
+      lastCommittedGeometryRef.current.delete(paneId);
     }
     for (const paneId of Array.from(paneWriteStatesRef.current.keys())) {
       if (activePaneIds.has(paneId)) {
@@ -480,6 +507,12 @@ export function usePaneRuntimeBinder(
 
   useEffect(() => {
     return () => {
+      for (const timeoutId of pendingGeometryTimersRef.current.values()) {
+        window.clearTimeout(timeoutId);
+      }
+      pendingGeometryTimersRef.current.clear();
+      pendingGeometrySyncRef.current.clear();
+      lastCommittedGeometryRef.current.clear();
       for (const timeoutId of pendingUnmountCleanupRef.current.values()) {
         window.clearTimeout(timeoutId);
       }
@@ -508,6 +541,12 @@ export function usePaneRuntimeBinder(
     }
 
     if (!handle) {
+      const pendingGeometryTimer = pendingGeometryTimersRef.current.get(paneId);
+      if (pendingGeometryTimer !== undefined) {
+        window.clearTimeout(pendingGeometryTimer);
+        pendingGeometryTimersRef.current.delete(paneId);
+      }
+      pendingGeometrySyncRef.current.delete(paneId);
       recordPaneRuntimeDebugEvent({
         scope: 'binder',
         paneId,
@@ -522,11 +561,6 @@ export function usePaneRuntimeBinder(
           runtimeId: pane.runtimeId,
           message: 'terminal handle cleared',
         });
-      }
-      const currentXterm = xtermsRef.current.get(paneId);
-      const currentText = snapshotTerminalText(currentXterm || null);
-      if (currentText) {
-        cachedTerminalTextRef.current.set(paneId, currentText);
       }
       terminalHandlesRef.current.delete(paneId);
       const timeoutId = window.setTimeout(() => {
@@ -630,6 +664,20 @@ export function usePaneRuntimeBinder(
             shell: spawnArgs.shell ?? false,
           },
         });
+        recordTerminalRuntimeLog({
+          category: 'binding',
+          event: 'runtime.ensure.requested',
+          sessionId: pane.sessionId ?? pane.testSessionId,
+          paneId,
+          runtimeId: pane.runtimeId,
+          message: attempt === 1 ? 'spawn/attach runtime' : 'retry spawn/attach runtime',
+          details: {
+            attempt,
+            cols: spawnArgs.cols,
+            rows: spawnArgs.rows,
+            shell: spawnArgs.shell ?? false,
+          },
+        });
         try {
           await ptySpawn({ args: spawnArgs });
           break;
@@ -667,6 +715,14 @@ export function usePaneRuntimeBinder(
         runtimeId: pane.runtimeId,
         message: 'runtime ensured',
       });
+      recordTerminalRuntimeLog({
+        category: 'binding',
+        event: 'runtime.ensured',
+        sessionId: pane.sessionId ?? pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: 'runtime ensured',
+      });
       ensuredRuntimeIdsRef.current.add(pane.runtimeId);
     })().finally(() => {
       pendingEnsuresRef.current.delete(pane.runtimeId);
@@ -690,6 +746,7 @@ export function usePaneRuntimeBinder(
       });
       recordTerminalRuntimeLog({
         category: 'binding',
+        event: 'binding.wire',
         sessionId: pane.sessionId ?? pane.testSessionId,
         paneId,
         runtimeId: pane.runtimeId,
@@ -732,19 +789,6 @@ export function usePaneRuntimeBinder(
     inputSubscriptionsRef.current.set(paneId, xterm.onData(sendToPty));
     xterm.attachCustomKeyEventHandler(installTerminalKeyHandler(sendToPty));
 
-    const cachedText = cachedTerminalTextRef.current.get(paneId);
-    if (cachedText && snapshotTerminalText(xterm).trim().length === 0) {
-      recordPaneRuntimeDebugEvent({
-        scope: 'binder',
-        sessionId: pane?.testSessionId,
-        paneId,
-        runtimeId: pane?.runtimeId,
-        message: 'hydrate terminal from cached text',
-        details: { textLength: cachedText.length },
-      });
-      xterm.write(cachedText.replace(/\n/g, '\r\n'));
-    }
-
     const pendingEvents = pendingTerminalEventsRef.current.get(paneId);
     if (pendingEvents?.length) {
       recordPaneRuntimeDebugEvent({
@@ -762,22 +806,66 @@ export function usePaneRuntimeBinder(
     }
   }, [getCurrentPane, replayPendingTerminalEvent]);
 
-  const requestPaneRuntimeEnsure = useCallback((
-    paneId: string,
-    xterm: XTerm,
-    source: 'ready' | 'resize',
-  ) => {
+  const requestRuntimeRedraw = useCallback((paneId: string, cols: number, rows: number, reason: string) => {
     const pane = getCurrentPane(paneId);
     if (!pane) {
       return;
     }
-    if (
-      ensuredRuntimeIdsRef.current.has(pane.runtimeId) ||
-      pendingEnsuresRef.current.has(pane.runtimeId)
-    ) {
+
+    let bounceCols = cols;
+    let bounceRows = rows;
+    if (rows > 1) {
+      bounceRows = rows - 1;
+    } else if (cols > 1) {
+      bounceCols = cols - 1;
+    } else {
       return;
     }
-    void ensurePaneRuntime(paneId, xterm).catch((error) => {
+
+    recordTerminalRuntimeLog({
+      category: 'geometry',
+      event: 'pty.redraw.requested',
+      sessionId: pane.sessionId ?? pane.testSessionId,
+      paneId,
+      runtimeId: pane.runtimeId,
+      message: 'request PTY redraw bounce',
+      details: {
+        reason,
+        cols,
+        rows,
+        bounceCols,
+        bounceRows,
+      },
+    });
+
+    ptyResize({
+      id: pane.runtimeId,
+      cols: bounceCols,
+      rows: bounceRows,
+      reason: `${reason}:bounce`,
+    }).catch(console.error);
+    window.setTimeout(() => {
+      const livePane = getCurrentPane(paneId);
+      if (!livePane || livePane.runtimeId !== pane.runtimeId) {
+        return;
+      }
+      ptyResize({
+        id: pane.runtimeId,
+        cols,
+        rows,
+        reason: `${reason}:restore`,
+      }).catch(console.error);
+    }, PTY_REDRAW_BOUNCE_DELAY_MS);
+  }, [getCurrentPane]);
+
+  const reportRuntimeEnsureFailure = useCallback((
+    paneId: string,
+    xterm: XTerm,
+    source: 'ready' | 'resize',
+    error: unknown,
+  ) => {
+    const pane = getCurrentPane(paneId);
+    if (pane) {
       recordPaneRuntimeDebugEvent({
         scope: 'binder',
         sessionId: pane.testSessionId,
@@ -786,10 +874,141 @@ export function usePaneRuntimeBinder(
         message: `runtime ensure failed from ${source}`,
         details: { error: error instanceof Error ? error.message : String(error) },
       });
-      console.error('[PaneRuntimeBinder] Failed to ensure runtime:', error);
-      xterm.write(`\r\n[Failed to connect PTY: ${error}]\r\n`);
+    }
+    console.error('[PaneRuntimeBinder] Failed to ensure runtime:', error);
+    xterm.write(`\r\n[Failed to connect PTY: ${error}]\r\n`);
+  }, [getCurrentPane]);
+
+  const flushPendingGeometrySync = useCallback(async (
+    paneId: string,
+    source: 'ready' | 'resize',
+  ) => {
+    pendingGeometryTimersRef.current.delete(paneId);
+    const pending = pendingGeometrySyncRef.current.get(paneId);
+    if (!pending) {
+      return;
+    }
+    pendingGeometrySyncRef.current.delete(paneId);
+
+    const pane = getCurrentPane(paneId);
+    const liveXterm = xtermsRef.current.get(paneId);
+    if (!pane || !liveXterm || liveXterm !== pending.xterm) {
+      return;
+    }
+
+    primeSpawnArgsForSize(paneId, pending.cols, pending.rows);
+
+    const lastCommitted = lastCommittedGeometryRef.current.get(paneId);
+    const geometryChanged = !lastCommitted || lastCommitted.cols !== pending.cols || lastCommitted.rows !== pending.rows;
+
+    recordTerminalRuntimeLog({
+      category: 'geometry',
+      event: 'pty.geometry.flush',
+      sessionId: pane.sessionId ?? pane.testSessionId,
+      paneId,
+      runtimeId: pane.runtimeId,
+      message: 'flush settled PTY geometry',
+      details: {
+        reason: pending.reason,
+        cols: pending.cols,
+        rows: pending.rows,
+        forceRedraw: pending.forceRedraw,
+        geometryChanged,
+        lastCommittedCols: lastCommitted?.cols ?? null,
+        lastCommittedRows: lastCommitted?.rows ?? null,
+      },
     });
-  }, [ensurePaneRuntime, getCurrentPane]);
+
+    const runtimeReady = ensuredRuntimeIdsRef.current.has(pane.runtimeId);
+    if (!runtimeReady) {
+      if (pendingEnsuresRef.current.has(pane.runtimeId)) {
+        pendingGeometrySyncRef.current.set(paneId, pending);
+        const retryTimeoutId = window.setTimeout(() => {
+          void flushPendingGeometrySync(paneId, source);
+        }, PTY_REDRAW_BOUNCE_DELAY_MS);
+        pendingGeometryTimersRef.current.set(paneId, retryTimeoutId);
+        return;
+      }
+      try {
+        await ensurePaneRuntime(paneId, pending.xterm);
+      } catch (error) {
+        reportRuntimeEnsureFailure(paneId, pending.xterm, source, error);
+        return;
+      }
+      lastCommittedGeometryRef.current.set(paneId, { cols: pending.cols, rows: pending.rows });
+      return;
+    }
+
+    if (geometryChanged) {
+      ptyResize({
+        id: pane.runtimeId,
+        cols: pending.cols,
+        rows: pending.rows,
+        reason: pending.reason,
+      }).catch(console.error);
+      lastCommittedGeometryRef.current.set(paneId, { cols: pending.cols, rows: pending.rows });
+      return;
+    }
+
+    if (pending.forceRedraw) {
+      requestRuntimeRedraw(paneId, pending.cols, pending.rows, pending.reason);
+    }
+  }, [ensurePaneRuntime, getCurrentPane, primeSpawnArgsForSize, reportRuntimeEnsureFailure, requestRuntimeRedraw]);
+
+  const scheduleGeometrySync = useCallback((
+    paneId: string,
+    xterm: XTerm,
+    cols: number,
+    rows: number,
+    source: 'ready' | 'resize',
+    options?: { forceRedraw?: boolean; reason?: string },
+  ) => {
+    const pane = getCurrentPane(paneId);
+    if (!pane) {
+      return;
+    }
+
+    primeSpawnArgsForSize(paneId, cols, rows);
+    const delayMs = source === 'ready' ? PTY_READY_SETTLE_MS : PTY_GEOMETRY_SETTLE_MS;
+    const previous = pendingGeometrySyncRef.current.get(paneId);
+    const forceRedraw = Boolean(options?.forceRedraw || previous?.forceRedraw);
+    const reason = options?.reason || previous?.reason || source;
+
+    pendingGeometrySyncRef.current.set(paneId, {
+      cols,
+      rows,
+      forceRedraw,
+      reason,
+      xterm,
+    });
+
+    const existingTimer = pendingGeometryTimersRef.current.get(paneId);
+    if (existingTimer !== undefined) {
+      window.clearTimeout(existingTimer);
+    }
+
+    recordTerminalRuntimeLog({
+      category: 'geometry',
+      event: 'pty.geometry.scheduled',
+      sessionId: pane.sessionId ?? pane.testSessionId,
+      paneId,
+      runtimeId: pane.runtimeId,
+      message: 'schedule settled PTY geometry',
+      details: {
+        source,
+        reason,
+        cols,
+        rows,
+        delayMs,
+        forceRedraw,
+      },
+    });
+
+    const timeoutId = window.setTimeout(() => {
+      void flushPendingGeometrySync(paneId, source);
+    }, delayMs);
+    pendingGeometryTimersRef.current.set(paneId, timeoutId);
+  }, [flushPendingGeometrySync, getCurrentPane, primeSpawnArgsForSize]);
 
   const handleTerminalInit = useCallback((paneId: string) => (xterm: XTerm) => {
     const pane = getCurrentPane(paneId);
@@ -815,10 +1034,14 @@ export function usePaneRuntimeBinder(
       details: { cols: xterm.cols, rows: xterm.rows },
     });
     wireTerminal(paneId, xterm);
-    requestPaneRuntimeEnsure(paneId, xterm, 'ready');
-  }, [getCurrentPane, requestPaneRuntimeEnsure, wireTerminal]);
+    scheduleGeometrySync(paneId, xterm, xterm.cols, xterm.rows, 'ready', { reason: 'ready' });
+  }, [getCurrentPane, scheduleGeometrySync, wireTerminal]);
 
-  const handleTerminalResize = useCallback((paneId: string) => (cols: number, rows: number) => {
+  const handleTerminalResize = useCallback((paneId: string) => (
+    cols: number,
+    rows: number,
+    options?: { forceRedraw?: boolean; reason?: string },
+  ) => {
     const pane = getCurrentPane(paneId);
     if (!pane) {
       return;
@@ -829,14 +1052,18 @@ export function usePaneRuntimeBinder(
       paneId,
       runtimeId: pane.runtimeId,
       message: 'resize pane runtime',
-      details: { cols, rows },
+      details: {
+        cols,
+        rows,
+        forceRedraw: options?.forceRedraw ?? false,
+        reason: options?.reason ?? null,
+      },
     });
-    ptyResize({ id: pane.runtimeId, cols, rows }).catch(console.error);
     const xterm = xtermsRef.current.get(paneId);
     if (xterm) {
-      requestPaneRuntimeEnsure(paneId, xterm, 'resize');
+      scheduleGeometrySync(paneId, xterm, cols, rows, 'resize', options);
     }
-  }, [getCurrentPane, requestPaneRuntimeEnsure]);
+  }, [getCurrentPane, scheduleGeometrySync]);
 
   const focusPaneWithRetry = useCallback((paneId: string, retries = 20) => {
     const tryFocus = (remaining: number) => {
@@ -851,6 +1078,15 @@ export function usePaneRuntimeBinder(
           message: 'focus via terminal handle succeeded',
           details: activeElementSummary(),
         });
+        recordTerminalRuntimeLog({
+          category: 'focus',
+          event: 'focus.acquired',
+          sessionId: pane?.sessionId ?? pane?.testSessionId,
+          paneId,
+          runtimeId: pane?.runtimeId,
+          message: 'focus acquired via terminal handle',
+          details: activeElementSummary(),
+        });
         return;
       }
       const xterm = xtermsRef.current.get(paneId);
@@ -862,6 +1098,15 @@ export function usePaneRuntimeBinder(
           paneId,
           runtimeId: pane?.runtimeId,
           message: 'focus via xterm fallback',
+          details: activeElementSummary(),
+        });
+        recordTerminalRuntimeLog({
+          category: 'focus',
+          event: 'focus.acquired',
+          sessionId: pane?.sessionId ?? pane?.testSessionId,
+          paneId,
+          runtimeId: pane?.runtimeId,
+          message: 'focus acquired via xterm fallback',
           details: activeElementSummary(),
         });
         return;
@@ -912,6 +1157,10 @@ export function usePaneRuntimeBinder(
     return { cols: xterm.cols, rows: xterm.rows };
   }, []);
 
+  const getPaneVisibleContent = useCallback((paneId: string) => {
+    return snapshotVisibleTerminalContent(xtermsRef.current.get(paneId) || null);
+  }, []);
+
   const resetPaneTerminal = useCallback((paneId: string) => {
     const xterm = xtermsRef.current.get(paneId);
     if (!xterm) {
@@ -919,7 +1168,6 @@ export function usePaneRuntimeBinder(
     }
     resetTerminalScrollPin(xterm);
     xterm.reset();
-    cachedTerminalTextRef.current.delete(paneId);
     pendingTerminalEventsRef.current.delete(paneId);
     return true;
   }, []);
@@ -964,6 +1212,7 @@ export function usePaneRuntimeBinder(
     isPaneInputFocused,
     getPaneText,
     getPaneSize,
+    getPaneVisibleContent,
     resetPaneTerminal,
     injectPaneBytes,
     injectPaneBase64,

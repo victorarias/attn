@@ -10,6 +10,11 @@ import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
 import { getAllResizeEvents } from '../utils/terminalDebug';
 import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
+import { buildSessionRenderHealth } from '../utils/renderHealth';
+import { buildRuntimeTimelineSnapshot } from '../utils/runtimeTimeline';
+import { collectWorkspaceLayoutDiagnostics, projectWorkspaceBounds } from '../utils/workspaceDiagnostics';
+import { clearTerminalRuntimeLog, setTerminalRuntimeTraceEnabled } from '../utils/terminalRuntimeLog';
+import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 
 const UI_AUTOMATION_REQUEST_EVENT = 'attn://ui-automation/request';
 const UI_AUTOMATION_RESPONSE_EVENT = 'attn://ui-automation/response';
@@ -45,6 +50,7 @@ interface UseUiAutomationBridgeArgs {
   isSessionPaneInputFocused: (sessionId: string, paneId: string) => boolean;
   getPaneText: (sessionId: string, paneId: string) => string;
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null;
+  getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot;
   fitSessionActivePane: (sessionId: string) => void;
   sendRuntimeInput: (runtimeId: string, data: string, source?: string) => void;
   getReviewState?: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: unknown; error?: string }>;
@@ -111,29 +117,49 @@ function resolveRuntimeId(session: Session, paneId: string): string {
   return terminal.ptyId;
 }
 
+function paneEntries(session: Session) {
+  return [
+    {
+      paneId: MAIN_TERMINAL_PANE_ID,
+      runtimeId: session.id,
+      kind: 'main',
+      title: 'Session',
+    },
+    ...session.workspace.terminals.map((terminal) => ({
+      paneId: terminal.id,
+      runtimeId: terminal.ptyId,
+      kind: 'shell',
+      title: terminal.title,
+    })),
+  ];
+}
+
+function serializeWorkspaceModel(
+  session: Session,
+  getActivePaneIdForSession: (session: Session | undefined | null) => string,
+) {
+  return {
+    activePaneId: getActivePaneIdForSession(session),
+    daemonActivePaneId: session.daemonActivePaneId,
+    panes: paneEntries(session),
+    layoutTree: session.workspace.layoutTree,
+    layout: collectWorkspaceLayoutDiagnostics(session.workspace.layoutTree),
+    shellPaneCount: session.workspace.terminals.length,
+  };
+}
+
 function serializeSession(session: Session, getActivePaneIdForSession: (session: Session | undefined | null) => string) {
+  const workspace = serializeWorkspaceModel(session, getActivePaneIdForSession);
   return {
     id: session.id,
     label: session.label,
     state: session.state,
     cwd: session.cwd,
     agent: session.agent,
-    activePaneId: getActivePaneIdForSession(session),
-    daemonActivePaneId: session.daemonActivePaneId,
-    panes: [
-      {
-        paneId: MAIN_TERMINAL_PANE_ID,
-        runtimeId: session.id,
-        kind: 'main',
-        title: 'Session',
-      },
-      ...session.workspace.terminals.map((terminal) => ({
-        paneId: terminal.id,
-        runtimeId: terminal.ptyId,
-        kind: 'shell',
-        title: terminal.title,
-      })),
-    ],
+    activePaneId: workspace.activePaneId,
+    daemonActivePaneId: workspace.daemonActivePaneId,
+    panes: workspace.panes,
+    workspace,
   };
 }
 
@@ -166,6 +192,138 @@ function rectSnapshot(element: Element | null) {
   };
 }
 
+function boxFromRect(rect: { width: number; height: number } | null | undefined) {
+  if (!rect) {
+    return null;
+  }
+  return {
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function parseDataFlag(value: string | null | undefined) {
+  if (value === '1' || value === 'true') {
+    return true;
+  }
+  if (value === '0' || value === 'false') {
+    return false;
+  }
+  return null;
+}
+
+function elementMetrics(element: Element | null) {
+  if (!(element instanceof HTMLElement)) {
+    return null;
+  }
+  const style = getComputedStyle(element);
+  return {
+    bounds: rectSnapshot(element),
+    clientWidth: element.clientWidth,
+    clientHeight: element.clientHeight,
+    scrollWidth: element.scrollWidth,
+    scrollHeight: element.scrollHeight,
+    offsetWidth: element.offsetWidth,
+    offsetHeight: element.offsetHeight,
+    display: style.display,
+    visibility: style.visibility,
+  };
+}
+
+function getSessionWorkspaceRoot(sessionId: string) {
+  const root = document.querySelector(`[data-session-terminal-workspace="${sessionId}"]`);
+  return root instanceof HTMLElement ? root : null;
+}
+
+function collectWorkspaceShellMetrics(sessionId: string) {
+  const workspaceRoot = getSessionWorkspaceRoot(sessionId);
+  const terminalWrapper = workspaceRoot?.closest('.terminal-wrapper') ?? null;
+  const terminalMainArea = terminalWrapper?.closest('.terminal-main-area') ?? null;
+  const terminalPane = terminalMainArea?.closest('.terminal-pane') ?? null;
+  const viewContainer = terminalPane?.closest('.view-container') ?? null;
+
+  return {
+    viewContainer: elementMetrics(viewContainer),
+    terminalPane: elementMetrics(terminalPane),
+    terminalMainArea: elementMetrics(terminalMainArea),
+    terminalWrapper: elementMetrics(terminalWrapper),
+    workspaceRoot: elementMetrics(workspaceRoot),
+  };
+}
+
+function collectWorkspaceViewState(sessionId: string) {
+  const workspaceRoot = getSessionWorkspaceRoot(sessionId);
+  return {
+    sessionVisible: parseDataFlag(workspaceRoot?.dataset.sessionVisible),
+    activePaneId: workspaceRoot?.dataset.activePaneId || null,
+    zoomedPaneId: workspaceRoot?.dataset.zoomedPaneId || null,
+    maximizedPaneId: workspaceRoot?.dataset.maximizedPaneId || null,
+  };
+}
+
+function collectSplitDomMetrics(sessionId: string) {
+  const workspaceRoot = getSessionWorkspaceRoot(sessionId);
+  if (!workspaceRoot) {
+    return [];
+  }
+  return Array.from(workspaceRoot.querySelectorAll('[data-split-id]'))
+    .filter((element): element is HTMLElement => element instanceof HTMLElement)
+    .map((element) => {
+      const childElements = Array.from(element.children)
+        .filter((child): child is HTMLElement => child instanceof HTMLElement && child.matches('[data-split-child-index]'));
+      const firstChild = childElements.find((child) => child.dataset.splitChildIndex === '0') ?? null;
+      const secondChild = childElements.find((child) => child.dataset.splitChildIndex === '1') ?? null;
+      return {
+        splitId: element.dataset.splitId || '',
+        path: element.dataset.splitPath || '',
+        direction: element.dataset.splitDirection || '',
+        ratio: element.dataset.splitRatio ? Number.parseFloat(element.dataset.splitRatio) : null,
+        dom: elementMetrics(element),
+        firstChild: {
+          path: firstChild instanceof HTMLElement ? firstChild.dataset.splitChildPath || '' : '',
+          dom: elementMetrics(firstChild),
+        },
+        secondChild: {
+          path: secondChild instanceof HTMLElement ? secondChild.dataset.splitChildPath || '' : '',
+          dom: elementMetrics(secondChild),
+        },
+      };
+    });
+}
+
+function collectPaneDomMetrics(paneElement: Element | null) {
+  if (!(paneElement instanceof HTMLElement)) {
+    return null;
+  }
+  const paneBody = paneElement.querySelector('.workspace-pane-body');
+  const terminalContainer = paneElement.querySelector('.terminal-container');
+  const xterm = paneElement.querySelector('.xterm');
+  const xtermScreen = paneElement.querySelector('.xterm-screen');
+  const xtermViewport = paneElement.querySelector('.xterm-viewport');
+  const scrollArea = paneElement.querySelector('.xterm-scroll-area');
+  const canvas = paneElement.querySelector('.xterm-screen canvas');
+  const helperTextarea = paneElement.querySelector('textarea.xterm-helper-textarea');
+
+  return {
+    paneBody: elementMetrics(paneBody),
+    terminalContainer: elementMetrics(terminalContainer),
+    xterm: elementMetrics(xterm),
+    xtermScreen: elementMetrics(xtermScreen),
+    xtermViewport: elementMetrics(xtermViewport),
+    scrollArea: elementMetrics(scrollArea),
+    canvas: elementMetrics(canvas),
+    helperTextarea: helperTextarea instanceof HTMLTextAreaElement
+      ? {
+          ...elementMetrics(helperTextarea),
+          focused: document.activeElement === helperTextarea,
+          disabled: helperTextarea.disabled,
+          readOnly: helperTextarea.readOnly,
+          valueLength: helperTextarea.value.length,
+        }
+      : null,
+  };
+}
+
 async function captureDomScreenshotData() {
   const target = document.getElementById('root') || document.body;
   if (!(target instanceof HTMLElement)) {
@@ -192,6 +350,7 @@ function collectVisualSnapshot(
   getActivePaneIdForSession: (session: Session | undefined | null) => string,
   getPaneText: (sessionId: string, paneId: string) => string,
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null,
+  getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot,
   options?: {
     includePaneText?: boolean;
     sessionIds?: Set<string> | null;
@@ -210,8 +369,25 @@ function collectVisualSnapshot(
       text: document.activeElement?.textContent?.slice(0, 120) || '',
     },
     sessions: filteredSessions.map((session) => {
-      const activePaneId = getActivePaneIdForSession(session);
-      const paneIds = [MAIN_TERMINAL_PANE_ID, ...session.workspace.terminals.map((terminal) => terminal.id)];
+      const workspaceModel = serializeWorkspaceModel(session, getActivePaneIdForSession);
+      const activePaneId = workspaceModel.activePaneId;
+      const paneIds = workspaceModel.panes.map((pane) => pane.paneId);
+      const workspaceDom = collectWorkspaceShellMetrics(session.id);
+      const workspaceView = collectWorkspaceViewState(session.id);
+      const rootBounds = workspaceDom.workspaceRoot?.bounds;
+      const paneLayoutById = new Map(
+        workspaceModel.layout.panes.map((pane) => [
+          pane.paneId,
+          {
+            path: pane.path,
+            depth: pane.depth,
+            normalizedBounds: pane.bounds,
+            projectedBounds: rootBounds
+              ? projectWorkspaceBounds(pane.bounds, rootBounds.width, rootBounds.height)
+              : null,
+          },
+        ]),
+      );
       const sidebarItem = document.querySelector(
         `[data-testid="sidebar-session-${session.id}"]`
       );
@@ -220,25 +396,34 @@ function collectVisualSnapshot(
         label: session.label,
         activePaneId,
         daemonActivePaneId: session.daemonActivePaneId,
+        workspace: {
+          model: workspaceModel,
+          view: workspaceView,
+          dom: workspaceDom,
+          splits: collectSplitDomMetrics(session.id),
+        },
         sidebarItem: sidebarItem instanceof HTMLElement
           ? {
               text: sidebarItem.textContent || '',
               bounds: rectSnapshot(sidebarItem),
             }
           : null,
-        workspaceBounds: rectSnapshot(
-          document.querySelector(`[data-session-terminal-workspace="${session.id}"]`)
-        ),
+        workspaceBounds: workspaceDom.workspaceRoot?.bounds ?? null,
         panes: paneIds.map((paneId) => {
           const paneElement = document.querySelector(
             `[data-pane-session-id="${session.id}"][data-pane-id="${paneId}"]`
           );
+          const modelLayout = paneLayoutById.get(paneId) ?? null;
           return {
             paneId,
             active: activePaneId === paneId,
             kind: paneId === MAIN_TERMINAL_PANE_ID ? 'main' : 'shell',
+            path: paneElement instanceof HTMLElement ? paneElement.dataset.panePath || null : null,
             bounds: rectSnapshot(paneElement),
             className: paneElement instanceof HTMLElement ? paneElement.className : null,
+            dom: collectPaneDomMetrics(paneElement),
+            layout: modelLayout,
+            visibleContent: getPaneVisibleContent(session.id, paneId),
             text: includePaneText ? getPaneText(session.id, paneId) : '',
             size: getPaneSize(session.id, paneId),
           };
@@ -276,6 +461,9 @@ function collectSessionUiState(
   const mainPane = document.querySelector(
     `[data-pane-session-id="${session.id}"][data-pane-id="${MAIN_TERMINAL_PANE_ID}"]`
   );
+  const workspaceDom = collectWorkspaceShellMetrics(session.id);
+  const workspaceView = collectWorkspaceViewState(session.id);
+  const workspaceModel = serializeWorkspaceModel(session, getActivePaneIdForSession);
 
   return {
     sessionId,
@@ -291,10 +479,220 @@ function collectSessionUiState(
           bounds: rectSnapshot(sidebarItem),
         }
       : null,
-    workspaceBounds: rectSnapshot(
-      document.querySelector(`[data-session-terminal-workspace="${session.id}"]`)
-    ),
+    workspaceBounds: workspaceDom.workspaceRoot?.bounds ?? null,
+    workspace: {
+      model: workspaceModel,
+      view: workspaceView,
+      dom: workspaceDom,
+      splits: collectSplitDomMetrics(session.id),
+    },
     mainPaneBounds: rectSnapshot(mainPane),
+  };
+}
+
+function collectRenderHealthSnapshot(
+  sessions: Session[],
+  activeSessionId: string | null,
+  getActivePaneIdForSession: (session: Session | undefined | null) => string,
+  getPaneText: (sessionId: string, paneId: string) => string,
+  getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null,
+  getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot,
+  isSessionPaneInputFocused: (sessionId: string, paneId: string) => boolean,
+  options?: {
+    sessionIds?: Set<string> | null;
+  },
+) {
+  const visualSnapshot = collectVisualSnapshot(
+    sessions,
+    activeSessionId,
+    getActivePaneIdForSession,
+    getPaneText,
+    getPaneSize,
+    getPaneVisibleContent,
+    {
+      includePaneText: false,
+      sessionIds: options?.sessionIds || null,
+    },
+  );
+  const terminalPerf = getTerminalPerfSnapshot();
+  const filteredSessions = visualSnapshot.sessions || [];
+  const terminalNames = new Set<string>();
+
+  const sessionHealth = filteredSessions.map((session) => {
+    const terminalsByPaneId = new Map(
+      terminalPerf
+        .filter((terminal) => terminal.sessionId === session.id)
+        .map((terminal) => {
+          terminalNames.add(terminal.terminalName);
+          return [terminal.paneId || '', terminal] as const;
+        }),
+    );
+
+    return buildSessionRenderHealth({
+      sessionId: session.id,
+      label: session.label,
+      activePaneId: session.activePaneId,
+      selected: activeSessionId === session.id,
+      panes: (session.panes || []).map((pane) => {
+        const terminal = terminalsByPaneId.get(pane.paneId) || null;
+        return {
+          paneId: pane.paneId,
+          kind: pane.kind as 'main' | 'shell',
+          active: pane.active,
+          inputFocused: isSessionPaneInputFocused(session.id, pane.paneId),
+          size: pane.size,
+          paneBounds: boxFromRect(pane.bounds),
+          projectedBounds: boxFromRect(pane.layout?.projectedBounds),
+          paneBodyBounds: boxFromRect(pane.dom?.paneBody?.bounds),
+          terminalContainerBounds: boxFromRect(pane.dom?.terminalContainer?.bounds),
+          xtermScreenBounds: boxFromRect(pane.dom?.xtermScreen?.bounds),
+          canvasBounds: boxFromRect(pane.dom?.canvas?.bounds),
+          helperTextarea: pane.dom?.helperTextarea
+            ? {
+                focused: pane.dom.helperTextarea.focused,
+                disabled: pane.dom.helperTextarea.disabled,
+                readOnly: pane.dom.helperTextarea.readOnly,
+                width: pane.dom.helperTextarea.bounds?.width ?? null,
+                height: pane.dom.helperTextarea.bounds?.height ?? null,
+              }
+            : null,
+          terminal,
+        };
+      }),
+    });
+  });
+
+  let warningPaneCount = 0;
+  let errorPaneCount = 0;
+  let paneCount = 0;
+  for (const session of sessionHealth) {
+    warningPaneCount += session.summary.warningPaneCount;
+    errorPaneCount += session.summary.errorPaneCount;
+    paneCount += session.summary.paneCount;
+  }
+
+  const resizeEvents = getAllResizeEvents().filter((event) => terminalNames.has(event.terminalName));
+
+  return {
+    activeSessionId,
+    capturedAt: new Date().toISOString(),
+    summary: {
+      sessionCount: sessionHealth.length,
+      paneCount,
+      warningPaneCount,
+      errorPaneCount,
+    },
+    sessions: sessionHealth,
+    resizeEvents,
+  };
+}
+
+function collectSessionRuntimeIds(sessions: Session[]) {
+  const runtimeIds = new Set<string>();
+  for (const session of sessions) {
+    runtimeIds.add(session.id);
+    for (const terminal of session.workspace.terminals) {
+      if (terminal.ptyId) {
+        runtimeIds.add(terminal.ptyId);
+      }
+    }
+  }
+  return runtimeIds;
+}
+
+function summarizePtyRecentTraffic(
+  recentEvents: ReturnType<typeof getPtyPerfSnapshot>['recentEvents'],
+  runtimeIds: Set<string> | null,
+) {
+  const relevantEvents = runtimeIds && runtimeIds.size > 0
+    ? recentEvents.filter((event) => typeof event.runtimeId === 'string' && runtimeIds.has(event.runtimeId))
+    : recentEvents.slice();
+  const foreignEvents = runtimeIds && runtimeIds.size > 0
+    ? recentEvents.filter((event) => typeof event.runtimeId === 'string' && !runtimeIds.has(event.runtimeId))
+    : [];
+
+  const summarizeByRuntime = (events: typeof recentEvents) => {
+    const byRuntime = new Map<string, {
+      runtimeId: string;
+      eventCount: number;
+      wsEventCount: number;
+      commandCount: number;
+      ptyOutputCount: number;
+      ptyInputCount: number;
+      outputBase64Chars: number;
+      inputBytes: number;
+      lastAt: string | null;
+      lastSeq: number | null;
+      sources: Set<string>;
+    }>();
+
+    for (const event of events) {
+      const runtimeId = event.runtimeId;
+      if (!runtimeId) {
+        continue;
+      }
+
+      let summary = byRuntime.get(runtimeId);
+      if (!summary) {
+        summary = {
+          runtimeId,
+          eventCount: 0,
+          wsEventCount: 0,
+          commandCount: 0,
+          ptyOutputCount: 0,
+          ptyInputCount: 0,
+          outputBase64Chars: 0,
+          inputBytes: 0,
+          lastAt: null,
+          lastSeq: null,
+          sources: new Set<string>(),
+        };
+        byRuntime.set(runtimeId, summary);
+      }
+
+      summary.eventCount += 1;
+      summary.lastAt = event.at || summary.lastAt;
+      summary.lastSeq = typeof event.seq === 'number' ? event.seq : summary.lastSeq;
+
+      if (event.kind === 'ws_event') {
+        summary.wsEventCount += 1;
+        if (event.event === 'pty_output') {
+          summary.ptyOutputCount += 1;
+          summary.outputBase64Chars += event.base64Chars;
+        }
+      } else {
+        summary.commandCount += 1;
+        if (event.command === 'pty_input') {
+          summary.ptyInputCount += 1;
+          summary.inputBytes += event.dataBytes;
+        }
+        if (event.source) {
+          summary.sources.add(event.source);
+        }
+      }
+    }
+
+    return Array.from(byRuntime.values())
+      .map((summary) => ({
+        ...summary,
+        sources: Array.from(summary.sources).sort(),
+      }))
+      .sort((left, right) => {
+        if (left.eventCount !== right.eventCount) {
+          return right.eventCount - left.eventCount;
+        }
+        return (right.lastAt || '').localeCompare(left.lastAt || '');
+      });
+  };
+
+  return {
+    runtimeIds: runtimeIds ? Array.from(runtimeIds).sort() : [],
+    relevantEventCount: relevantEvents.length,
+    foreignEventCount: foreignEvents.length,
+    relevantRuntimes: summarizeByRuntime(relevantEvents).slice(0, 8),
+    foreignRuntimes: summarizeByRuntime(foreignEvents).slice(0, 8),
+    recentRelevantEvents: relevantEvents.slice(-24),
+    recentForeignEvents: foreignEvents.slice(-24),
   };
 }
 
@@ -536,8 +934,23 @@ async function capturePerfSnapshot(
   sessions: Session[],
   activeSessionId: string | null,
   getActivePaneIdForSession: (session: Session | undefined | null) => string,
-  options?: { includeMemory?: boolean },
+  options?: { includeMemory?: boolean; sessionIds?: Set<string> | null },
 ) {
+  const scopedSessions = options?.sessionIds
+    ? sessions.filter((session) => options.sessionIds?.has(session.id))
+    : sessions;
+  const scopedSessionIds = new Set(scopedSessions.map((session) => session.id));
+  const scopedRuntimeIds = collectSessionRuntimeIds(scopedSessions);
+  const allTerminalPerf = getTerminalPerfSnapshot();
+  const terminals = options?.sessionIds
+    ? allTerminalPerf.filter((terminal) => terminal.sessionId && scopedSessionIds.has(terminal.sessionId))
+    : allTerminalPerf;
+  const terminalNames = new Set(terminals.map((terminal) => terminal.terminalName));
+  const resizeEvents = terminalNames.size > 0
+    ? getAllResizeEvents().filter((event) => terminalNames.has(event.terminalName))
+    : getAllResizeEvents();
+  const ptySnapshot = getPtyPerfSnapshot();
+  const terminalRuntimeTrace = window.__ATTN_TERMINAL_RUNTIME_DUMP?.() || [];
   const browserMemory = options?.includeMemory === false
     ? {
         performanceMemory: null,
@@ -545,7 +958,7 @@ async function capturePerfSnapshot(
         userAgentSpecificMemoryError: null,
       }
     : await getBrowserMemorySnapshot();
-  const totalPaneCount = sessions.reduce(
+  const totalPaneCount = scopedSessions.reduce(
     (sum, session) => sum + 1 + session.workspace.terminals.length,
     0,
   );
@@ -568,10 +981,12 @@ async function capturePerfSnapshot(
       reviewLoopOpen: document.querySelectorAll('.dock-panel--review-loop, .dock-panel--reviewLoop').length > 0,
     },
     sessions: {
-      count: sessions.length,
-      activeSessionId,
+      count: scopedSessions.length,
+      activeSessionId: scopedSessionIds.size === 0 || scopedSessionIds.has(activeSessionId || '')
+        ? activeSessionId
+        : null,
       totalPaneCount,
-      items: sessions.map((session) => ({
+      items: scopedSessions.map((session) => ({
         id: session.id,
         label: session.label,
         state: session.state,
@@ -580,11 +995,23 @@ async function capturePerfSnapshot(
       })),
     },
     browserMemory,
-    terminals: getTerminalPerfSnapshot(),
+    terminals,
+    terminalRuntimeTraceEventCount: terminalRuntimeTrace.length,
     review: getReviewPerfSnapshot(),
     paneDebugEventCount: window.__ATTN_PANE_DEBUG_DUMP?.().length || 0,
-    resizeEventCount: getAllResizeEvents().length,
-    pty: getPtyPerfSnapshot(),
+    resizeEventCount: resizeEvents.length,
+    resizeEvents,
+    pty: ptySnapshot,
+    ptyFocus: summarizePtyRecentTraffic(
+      ptySnapshot.recentEvents,
+      scopedRuntimeIds.size > 0 ? scopedRuntimeIds : null,
+    ),
+    runtimeTimeline: buildRuntimeTimelineSnapshot({
+      events: terminalRuntimeTrace,
+      terminals,
+      pty: ptySnapshot,
+      runtimeIds: scopedRuntimeIds.size > 0 ? scopedRuntimeIds : null,
+    }),
   };
 }
 
@@ -674,6 +1101,7 @@ export function useUiAutomationBridge({
   isSessionPaneInputFocused,
   getPaneText,
   getPaneSize,
+  getPaneVisibleContent,
   fitSessionActivePane,
   sendRuntimeInput,
   getReviewState,
@@ -1055,6 +1483,7 @@ export function useUiAutomationBridge({
           getActivePaneIdForSession,
           getPaneText,
           getPaneSize,
+          getPaneVisibleContent,
         );
         return {
           sessionId,
@@ -1062,6 +1491,15 @@ export function useUiAutomationBridge({
           inputFocused: isSessionPaneInputFocused(sessionId, paneId),
           activePaneId: getActivePaneIdForSession(session),
           pane: snapshot.sessions[0]?.panes.find((pane) => pane.paneId === paneId) || null,
+          renderHealth: collectRenderHealthSnapshot(
+            [session],
+            activeSessionId,
+            getActivePaneIdForSession,
+            getPaneText,
+            getPaneSize,
+            getPaneVisibleContent,
+            isSessionPaneInputFocused,
+          ).sessions[0]?.panes.find((pane) => pane.paneId === paneId) || null,
         };
       }
       case 'review_get_state': {
@@ -1208,6 +1646,24 @@ export function useUiAutomationBridge({
           state: window.__ATTN_PANE_DEBUG_STATE?.() || null,
           events: window.__ATTN_PANE_DEBUG_DUMP?.() || [],
         };
+      case 'set_terminal_runtime_trace': {
+        const enabled = payload.enabled !== false;
+        setTerminalRuntimeTraceEnabled(enabled);
+        if (enabled) {
+          window.__ATTN_TERMINAL_RUNTIME_CLEAR?.();
+        } else {
+          clearTerminalRuntimeLog();
+        }
+        return {
+          enabled,
+          file: window.__ATTN_TERMINAL_RUNTIME_FILE || null,
+        };
+      }
+      case 'dump_terminal_runtime_trace':
+        return {
+          file: window.__ATTN_TERMINAL_RUNTIME_FILE || null,
+          events: window.__ATTN_TERMINAL_RUNTIME_DUMP?.() || [],
+        };
       case 'capture_structured_snapshot':
         return collectVisualSnapshot(
           sessions,
@@ -1215,8 +1671,24 @@ export function useUiAutomationBridge({
           getActivePaneIdForSession,
           getPaneText,
           getPaneSize,
+          getPaneVisibleContent,
           {
             includePaneText: payload.includePaneText !== false,
+            sessionIds: Array.isArray(payload.sessionIds)
+              ? new Set(payload.sessionIds.filter((value): value is string => typeof value === 'string'))
+              : null,
+          },
+        );
+      case 'capture_render_health':
+        return collectRenderHealthSnapshot(
+          sessions,
+          activeSessionId,
+          getActivePaneIdForSession,
+          getPaneText,
+          getPaneSize,
+          getPaneVisibleContent,
+          isSessionPaneInputFocused,
+          {
             sessionIds: Array.isArray(payload.sessionIds)
               ? new Set(payload.sessionIds.filter((value): value is string => typeof value === 'string'))
               : null,
@@ -1225,12 +1697,15 @@ export function useUiAutomationBridge({
       case 'capture_perf_snapshot': {
         const settleFrames = typeof payload.settleFrames === 'number' ? payload.settleFrames : 2;
         const includeMemory = payload.includeMemory !== false;
+        const sessionIds = Array.isArray(payload.sessionIds)
+          ? new Set(payload.sessionIds.filter((value): value is string => typeof value === 'string'))
+          : null;
         await settleUi(settleFrames);
         return capturePerfSnapshot(
           sessions,
           activeSessionId,
           getActivePaneIdForSession,
-          { includeMemory },
+          { includeMemory, sessionIds },
         );
       }
       case 'clear_perf_counters':
@@ -1317,7 +1792,7 @@ export function useUiAutomationBridge({
           });
           const parseStartedAt = performance.now();
           const parsed = JSON.parse(raw) as { id: string; data: string };
-          recordWsJsonParse(raw.length, performance.now() - parseStartedAt, 'pty_output', parsed.data.length);
+        recordWsJsonParse(raw.length, performance.now() - parseStartedAt, 'pty_output', parsed.data.length);
           if (flushEvery === 1) {
             const ok = await injectSessionPaneBase64(sessionId, paneId, parsed.data);
             if (!ok) {

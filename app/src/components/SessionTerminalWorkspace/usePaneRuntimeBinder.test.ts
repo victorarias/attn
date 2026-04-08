@@ -137,6 +137,7 @@ describe('usePaneRuntimeBinder', () => {
   });
 
   it('replays queued PTY output after a pane remounts', async () => {
+    vi.useFakeTimers();
     const bindings = new Map<string, PaneRuntimeEventBinding>();
     const eventRouter = createMockEventRouter(bindings);
     const { result } = renderHook(() => usePaneRuntimeBinder([
@@ -165,6 +166,7 @@ describe('usePaneRuntimeBinder', () => {
 
     await act(async () => {
       result.current.handleTerminalReady('pane-1')(xterm as any);
+      await vi.advanceTimersByTimeAsync(100);
       await result.current.drainPaneTerminal('pane-1');
       await Promise.resolve();
     });
@@ -244,6 +246,7 @@ describe('usePaneRuntimeBinder', () => {
   });
 
   it('preserves early terminal input before the pane map effect hydrates', async () => {
+    vi.useFakeTimers();
     const bindings = new Map<string, PaneRuntimeEventBinding>();
     const eventRouter = createMockEventRouter(bindings);
     const xterm = createMockXterm();
@@ -279,6 +282,7 @@ describe('usePaneRuntimeBinder', () => {
 
     await act(async () => {
       render(createElement(Harness));
+      await vi.advanceTimersByTimeAsync(100);
       await Promise.resolve();
     });
 
@@ -286,15 +290,6 @@ describe('usePaneRuntimeBinder', () => {
       id: 'runtime-1',
       data: '\u001bc',
       source: 'user',
-    });
-    expect(mockPtySpawn).toHaveBeenCalledWith({
-      args: {
-        id: 'runtime-1',
-        cwd: '/tmp/repo',
-        cols: 80,
-        rows: 24,
-        shell: true,
-      },
     });
   });
 
@@ -341,7 +336,8 @@ describe('usePaneRuntimeBinder', () => {
     await expect(drainPromise).resolves.toBe(true);
   });
 
-  it('ensures the runtime from the first resize when terminal ready is missed', async () => {
+  it('ensures the runtime from the settled resize when terminal ready is missed', async () => {
+    vi.useFakeTimers();
     const bindings = new Map<string, PaneRuntimeEventBinding>();
     const eventRouter = createMockEventRouter(bindings);
     const { result } = renderHook(() => usePaneRuntimeBinder([
@@ -365,20 +361,65 @@ describe('usePaneRuntimeBinder', () => {
       result.current.handleTerminalInit('pane-1')(xterm as any);
       result.current.handleTerminalResize('pane-1')(132, 41);
       result.current.handleTerminalResize('pane-1')(140, 43);
+      await vi.advanceTimersByTimeAsync(100);
       await Promise.resolve();
     });
 
-    expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 132, rows: 41 });
-    expect(mockPtyResize).toHaveBeenCalledWith({ id: 'runtime-1', cols: 140, rows: 43 });
+    expect(mockPtyResize).not.toHaveBeenCalled();
     expect(mockPtySpawn).toHaveBeenCalledWith({
       args: {
         id: 'runtime-1',
         cwd: '/tmp/repo',
-        cols: 80,
-        rows: 24,
+        cols: 140,
+        rows: 43,
         shell: true,
       },
     });
     expect(mockPtySpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces rapid runtime resizes after ensure and sends only the settled size', async () => {
+    vi.useFakeTimers();
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: true,
+        }),
+      },
+    ], 'pane-1', eventRouter));
+
+    const xterm = createMockXterm();
+
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(xterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    mockPtyResize.mockClear();
+
+    await act(async () => {
+      result.current.handleTerminalResize('pane-1')(132, 41, { reason: 'resize_both' });
+      result.current.handleTerminalResize('pane-1')(140, 43, { reason: 'resize_both' });
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    expect(mockPtyResize).toHaveBeenCalledTimes(1);
+    expect(mockPtyResize).toHaveBeenCalledWith({
+      id: 'runtime-1',
+      cols: 140,
+      rows: 43,
+      reason: 'resize_both',
+    });
   });
 });

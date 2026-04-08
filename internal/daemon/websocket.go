@@ -30,6 +30,8 @@ type wsClient struct {
 
 	// PTY subscriptions keyed by session ID
 	attachedStreams map[string]ptybackend.Stream // session -> stream
+	attachedRemote  map[string]struct{}          // remote runtime IDs attached for this client
+	pendingRemote   map[string]struct{}          // remote runtime IDs awaiting attach_result
 	attachMu        sync.Mutex
 
 	// Git status subscription state
@@ -117,6 +119,79 @@ func (c *wsClient) gitStatusEndpointIDValue() string {
 	c.gitStatusMu.Lock()
 	defer c.gitStatusMu.Unlock()
 	return c.gitStatusEndpointID
+}
+
+func (c *wsClient) notePendingRemoteAttach(sessionID string) {
+	if c == nil || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	c.attachMu.Lock()
+	defer c.attachMu.Unlock()
+	if c.pendingRemote == nil {
+		c.pendingRemote = make(map[string]struct{})
+	}
+	c.pendingRemote[sessionID] = struct{}{}
+}
+
+func (c *wsClient) resolvePendingRemoteAttach(sessionID string, success bool) bool {
+	if c == nil || strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+	c.attachMu.Lock()
+	defer c.attachMu.Unlock()
+	if c.pendingRemote == nil {
+		return false
+	}
+	if _, ok := c.pendingRemote[sessionID]; !ok {
+		return false
+	}
+	delete(c.pendingRemote, sessionID)
+	if success {
+		if c.attachedRemote == nil {
+			c.attachedRemote = make(map[string]struct{})
+		}
+		c.attachedRemote[sessionID] = struct{}{}
+	} else if c.attachedRemote != nil {
+		delete(c.attachedRemote, sessionID)
+	}
+	return true
+}
+
+func (c *wsClient) hasRemoteAttach(sessionID string) bool {
+	if c == nil || strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+	c.attachMu.Lock()
+	defer c.attachMu.Unlock()
+	if c.attachedRemote == nil {
+		return false
+	}
+	_, ok := c.attachedRemote[sessionID]
+	return ok
+}
+
+func (c *wsClient) clearRemoteAttach(sessionID string) {
+	if c == nil || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	c.attachMu.Lock()
+	defer c.attachMu.Unlock()
+	if c.pendingRemote != nil {
+		delete(c.pendingRemote, sessionID)
+	}
+	if c.attachedRemote != nil {
+		delete(c.attachedRemote, sessionID)
+	}
+}
+
+func (c *wsClient) clearAllRemoteAttaches() {
+	if c == nil {
+		return
+	}
+	c.attachMu.Lock()
+	defer c.attachMu.Unlock()
+	c.pendingRemote = make(map[string]struct{})
+	c.attachedRemote = make(map[string]struct{})
 }
 
 // BroadcastListener is called for each broadcast event (for testing)
@@ -235,14 +310,49 @@ func (h *wsHub) BroadcastValue(message interface{}) {
 }
 
 func (h *wsHub) BroadcastRawText(payload []byte) {
+	h.SendRawTextToMatchingClients(payload, nil)
+}
+
+func (h *wsHub) SendRawTextToMatchingClients(payload []byte, match func(*wsClient) bool) {
 	if len(payload) == 0 {
 		return
 	}
 	cloned := append([]byte(nil), payload...)
-	select {
-	case h.broadcast <- outboundMessage{kind: messageKindText, payload: cloned}:
-	default:
-		h.logf("WebSocket broadcast channel full, dropping raw outbound message")
+	message := outboundMessage{kind: messageKindText, payload: cloned}
+
+	h.mu.Lock()
+	var toRemove []*wsClient
+	for client := range h.clients {
+		if match != nil && !match(client) {
+			continue
+		}
+		if client.trySend(message) {
+			client.slowCount = 0
+			continue
+		}
+		client.slowCount++
+		if client.slowCount >= maxSlowCount {
+			h.logf("WebSocket client too slow (%d missed), disconnecting", client.slowCount)
+			toRemove = append(toRemove, client)
+		} else {
+			h.logf("WebSocket client slow (%d/%d missed)", client.slowCount, maxSlowCount)
+		}
+	}
+	for _, client := range toRemove {
+		delete(h.clients, client)
+		client.closeSendChannel()
+	}
+	h.mu.Unlock()
+}
+
+func (h *wsHub) ForEachClient(fn func(*wsClient)) {
+	if fn == nil {
+		return
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for client := range h.clients {
+		fn(client)
 	}
 }
 
@@ -363,6 +473,8 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 		send:            make(chan outboundMessage, 256),
 		recv:            make(chan []byte, 256), // buffer for incoming messages
 		attachedStreams: make(map[string]ptybackend.Stream),
+		attachedRemote:  make(map[string]struct{}),
+		pendingRemote:   make(map[string]struct{}),
 	}
 
 	d.wsHub.register <- client
@@ -711,7 +823,16 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 		if _, ok := d.hubManager.EndpointIDForPTYTarget(ptyTargetID); !ok {
 			return false
 		}
+		switch cmd {
+		case protocol.CmdAttachSession:
+			client.notePendingRemoteAttach(ptyTargetID)
+		case protocol.CmdDetachSession:
+			client.clearRemoteAttach(ptyTargetID)
+		}
 		if err := d.hubManager.ForwardPTYCommand(context.Background(), ptyTargetID, raw); err != nil {
+			if cmd == protocol.CmdAttachSession {
+				client.clearRemoteAttach(ptyTargetID)
+			}
 			d.sendCommandError(client, cmd, err.Error())
 			return true
 		}
@@ -1021,5 +1142,42 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 	if d.wsHub == nil {
 		return
 	}
+	var envelope struct {
+		Event   string `json:"event"`
+		ID      string `json:"id"`
+		Success bool   `json:"success"`
+	}
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		d.wsHub.BroadcastRawText(payload)
+		return
+	}
+
+	switch envelope.Event {
+	case protocol.EventAttachResult:
+		if strings.TrimSpace(envelope.ID) == "" {
+			d.wsHub.BroadcastRawText(payload)
+			return
+		}
+		d.wsHub.SendRawTextToMatchingClients(payload, func(client *wsClient) bool {
+			return client.resolvePendingRemoteAttach(envelope.ID, envelope.Success)
+		})
+		return
+	case protocol.EventPtyOutput, protocol.EventPtyDesync:
+		if strings.TrimSpace(envelope.ID) == "" {
+			d.wsHub.BroadcastRawText(payload)
+			return
+		}
+		d.wsHub.SendRawTextToMatchingClients(payload, func(client *wsClient) bool {
+			return client.hasRemoteAttach(envelope.ID)
+		})
+		return
+	case protocol.EventSessionExited:
+		if strings.TrimSpace(envelope.ID) != "" {
+			d.wsHub.ForEachClient(func(client *wsClient) {
+				client.clearRemoteAttach(envelope.ID)
+			})
+		}
+	}
+
 	d.wsHub.BroadcastRawText(payload)
 }

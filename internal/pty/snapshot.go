@@ -290,6 +290,20 @@ func appendColorParams(params []int, color vt10x.Color, foreground bool) []int {
 	if n < 0 {
 		return append(params, defaultCode)
 	}
+	// vt10x represents xterm 256-color palette indexes as [16, 256), but it
+	// also stores truecolor values as packed 0xRRGGBB integers. The encoding is
+	// ambiguous for values <= 255, so preserve palette indexes in that range and
+	// emit truecolor SGR only once the packed RGB value is unambiguously outside
+	// the 256-color palette.
+	if n > 0xff && n <= 0xffffff {
+		r := (n >> 16) & 0xff
+		g := (n >> 8) & 0xff
+		b := n & 0xff
+		if foreground {
+			return append(params, 38, 2, r, g, b)
+		}
+		return append(params, 48, 2, r, g, b)
+	}
 	if foreground {
 		return append(params, 38, 5, n)
 	}

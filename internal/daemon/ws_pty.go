@@ -81,6 +81,12 @@ func (d *Daemon) detachSession(client *wsClient, sessionID string) {
 	if hasStream {
 		delete(client.attachedStreams, sessionID)
 	}
+	if client.pendingRemote != nil {
+		delete(client.pendingRemote, sessionID)
+	}
+	if client.attachedRemote != nil {
+		delete(client.attachedRemote, sessionID)
+	}
 	client.attachMu.Unlock()
 	if hasStream {
 		_ = stream.Close()
@@ -94,6 +100,8 @@ func (d *Daemon) detachAllSessions(client *wsClient) {
 		streams = append(streams, stream)
 	}
 	client.attachedStreams = make(map[string]ptybackend.Stream)
+	client.pendingRemote = make(map[string]struct{})
+	client.attachedRemote = make(map[string]struct{})
 	client.attachMu.Unlock()
 	for _, stream := range streams {
 		_ = stream.Close()

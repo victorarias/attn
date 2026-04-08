@@ -1,0 +1,375 @@
+import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
+import { comparePaneNativePaintCoverage, evaluatePaneNativePaintCoverage } from './paneNativeAnalysis.mjs';
+import { capturePaneNativeMetrics } from './paneNativeMetrics.mjs';
+
+export function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function shellPanes(workspace) {
+  return (workspace?.panes || []).filter((pane) => pane.kind === 'shell');
+}
+
+export async function waitForPaneState(client, sessionId, paneId, predicate, description, timeoutMs = 20_000) {
+  const startedAt = Date.now();
+  let lastState = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastState = await client.request('get_pane_state', { sessionId, paneId }, { timeoutMs: 20_000 });
+    if (predicate(lastState)) {
+      return lastState;
+    }
+    await sleep(200);
+  }
+
+  throw new Error(
+    `Timed out waiting for ${description}. Last pane state:\n${JSON.stringify(lastState, null, 2)}`
+  );
+}
+
+export async function waitForPaneVisible(client, sessionId, paneId, timeoutMs = 20_000) {
+  return waitForPaneState(
+    client,
+    sessionId,
+    paneId,
+    (state) => Boolean(
+      state?.pane?.bounds &&
+      state.pane.bounds.width >= 120 &&
+      state.pane.bounds.height >= 80 &&
+      state?.renderHealth?.flags?.terminalVisible !== false
+    ),
+    `pane ${paneId} visible`,
+    timeoutMs,
+  );
+}
+
+export async function waitForPaneInputFocus(client, sessionId, paneId, timeoutMs = 12_000) {
+  return waitForPaneState(
+    client,
+    sessionId,
+    paneId,
+    (state) => Boolean(state?.inputFocused),
+    `pane ${paneId} input focus`,
+    timeoutMs,
+  );
+}
+
+export async function waitForPaneText(client, sessionId, paneId, predicate, description, timeoutMs = 15_000) {
+  const startedAt = Date.now();
+  let lastPayload = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastPayload = await client.request('read_pane_text', { sessionId, paneId }, { timeoutMs: 20_000 });
+    if (predicate(lastPayload?.text || '')) {
+      return lastPayload;
+    }
+    await sleep(200);
+  }
+
+  throw new Error(
+    `Timed out waiting for ${description}. Last pane text tail:\n${(lastPayload?.text || '').slice(-800)}`
+  );
+}
+
+export async function waitForSessionWorkspace(client, sessionId, predicate, description, timeoutMs = 20_000) {
+  const startedAt = Date.now();
+  let lastWorkspace = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastWorkspace = await client.request('get_workspace', { sessionId }, { timeoutMs: 20_000 });
+    if (predicate(lastWorkspace)) {
+      return lastWorkspace;
+    }
+    await sleep(200);
+  }
+
+  throw new Error(
+    `Timed out waiting for ${description}. Last workspace:\n${JSON.stringify(lastWorkspace, null, 2)}`
+  );
+}
+
+export async function waitForNewShellPane(client, sessionId, existingPaneIds, description, timeoutMs = 20_000) {
+  return waitForSessionWorkspace(
+    client,
+    sessionId,
+    (workspace) => shellPanes(workspace).some((pane) => !existingPaneIds.has(pane.paneId)),
+    description,
+    timeoutMs,
+  ).then((workspace) => {
+    const newShells = shellPanes(workspace).filter((pane) => !existingPaneIds.has(pane.paneId));
+    const activeShell = newShells.find((pane) => pane.paneId === workspace.activePaneId);
+    return activeShell || newShells[0];
+  });
+}
+
+export async function waitForPaneVisibleContent(
+  client,
+  sessionId,
+  paneId,
+  predicate,
+  description,
+  timeoutMs = 20_000,
+) {
+  return waitForPaneState(
+    client,
+    sessionId,
+    paneId,
+    (state) => predicate(state?.pane?.visibleContent || null, state),
+    description,
+    timeoutMs,
+  );
+}
+
+export async function assertPaneVisibleContent(
+  client,
+  sessionId,
+  paneId,
+  {
+    contains = null,
+    minNonEmptyLines = 2,
+    minDenseLines = 1,
+    minCharCount = 20,
+    minMaxLineLength = 20,
+    timeoutMs = 20_000,
+    description = `pane ${paneId} visible content`,
+  } = {},
+) {
+  return waitForPaneVisibleContent(
+    client,
+    sessionId,
+    paneId,
+    (visibleContent) => {
+      if (!visibleContent) {
+        return false;
+      }
+      const summary = visibleContent.summary || {};
+      const joined = (visibleContent.lines || []).join('\n');
+      if (contains && !joined.includes(contains)) {
+        return false;
+      }
+      return (
+        (summary.nonEmptyLineCount || 0) >= minNonEmptyLines &&
+        (summary.denseLineCount || 0) >= minDenseLines &&
+        (summary.charCount || 0) >= minCharCount &&
+        (summary.maxLineLength || 0) >= minMaxLineLength
+      );
+    },
+    description,
+    timeoutMs,
+  );
+}
+
+export async function assertPaneUsesVisibleWidth(
+  client,
+  sessionId,
+  paneId,
+  {
+    minMaxOccupiedWidthRatio = 0.65,
+    minWideLineCount = 2,
+    minMedianOccupiedWidthRatio = 0.45,
+    timeoutMs = 20_000,
+    description = `pane ${paneId} uses visible width`,
+  } = {},
+) {
+  return waitForPaneVisibleContent(
+    client,
+    sessionId,
+    paneId,
+    (visibleContent) => {
+      if (!visibleContent) {
+        return false;
+      }
+      const summary = visibleContent.summary || {};
+      return (
+        (summary.maxOccupiedWidthRatio || 0) >= minMaxOccupiedWidthRatio &&
+        (summary.wideLineCount || 0) >= minWideLineCount &&
+        (summary.medianOccupiedWidthRatio || 0) >= minMedianOccupiedWidthRatio
+      );
+    },
+    description,
+    timeoutMs,
+  );
+}
+
+export async function assertPaneCoverage(
+  client,
+  sessionId,
+  paneId,
+  {
+    minWidthRatio = 0.85,
+    minHeightRatio = 0.85,
+    timeoutMs = 20_000,
+    description = `pane ${paneId} coverage`,
+  } = {},
+) {
+  return waitForPaneState(
+    client,
+    sessionId,
+    paneId,
+    (state) => {
+      const widthRatio = state?.renderHealth?.fill?.xtermScreenVsPaneBody?.width ?? 0;
+      const heightRatio = state?.renderHealth?.fill?.xtermScreenVsPaneBody?.height ?? 0;
+      return widthRatio >= minWidthRatio && heightRatio >= minHeightRatio;
+    },
+    description,
+    timeoutMs,
+  );
+}
+
+export async function assertPaneNativePaintCoverage(
+  client,
+  runDir,
+  prefix,
+  sessionId,
+  paneId,
+  {
+    target = 'paneBody',
+    minBusyColumnRatio = 0.45,
+    minBusyRowRatio = 0.18,
+    minBBoxWidthRatio = 0.45,
+    minBBoxHeightRatio = 0.18,
+    activityThreshold = 18,
+    insetPx = 2,
+    description = `pane ${paneId} native paint coverage`,
+  } = {},
+) {
+  const metrics = await capturePaneNativeMetrics(
+    client,
+    runDir,
+    prefix,
+    sessionId,
+    paneId,
+    {
+      target,
+      activityThreshold,
+      insetPx,
+    },
+  );
+
+  const analysis = metrics.analysis || {};
+  const evaluation = evaluatePaneNativePaintCoverage(analysis, {
+    minBusyColumnRatio,
+    minBusyRowRatio,
+    minBBoxWidthRatio,
+    minBBoxHeightRatio,
+  });
+
+  if (!evaluation.ok) {
+    throw new Error(
+      `${description} failed: ${evaluation.failures.join(', ')}.\n${JSON.stringify(metrics, null, 2)}`
+    );
+  }
+
+  return metrics;
+}
+
+export function assertPaneNativePaintDelta(
+  baselineMetrics,
+  candidateMetrics,
+  {
+    maxBusyColumnRatioDelta = 0.08,
+    maxBusyRowRatioDelta = 0.08,
+    maxBBoxWidthRatioDelta = 0.08,
+    maxBBoxHeightRatioDelta = 0.08,
+    maxActivePixelRatioDelta = 0.03,
+    description = 'pane native paint delta',
+  } = {},
+) {
+  const evaluation = comparePaneNativePaintCoverage(
+    baselineMetrics?.analysis || null,
+    candidateMetrics?.analysis || null,
+    {
+      maxBusyColumnRatioDelta,
+      maxBusyRowRatioDelta,
+      maxBBoxWidthRatioDelta,
+      maxBBoxHeightRatioDelta,
+      maxActivePixelRatioDelta,
+    },
+  );
+
+  if (!evaluation.ok) {
+    throw new Error(
+      `${description} failed: ${evaluation.failures.join(', ')}.\n${JSON.stringify({
+        baseline: baselineMetrics,
+        candidate: candidateMetrics,
+        comparison: evaluation,
+      }, null, 2)}`
+    );
+  }
+
+  return evaluation;
+}
+
+export async function assertPaneNativePaintStable(
+  client,
+  runDir,
+  prefix,
+  sessionId,
+  paneId,
+  baselineMetrics,
+  options = {},
+) {
+  const candidateMetrics = await capturePaneNativeMetrics(
+    client,
+    runDir,
+    prefix,
+    sessionId,
+    paneId,
+    {
+      target: options.target || 'paneBody',
+      activityThreshold: options.activityThreshold ?? 18,
+      insetPx: options.insetPx ?? 2,
+      bundleId: options.bundleId || 'com.attn.manager',
+    },
+  );
+
+  const comparison = assertPaneNativePaintDelta(baselineMetrics, candidateMetrics, options);
+  return {
+    baselineMetrics,
+    candidateMetrics,
+    comparison,
+  };
+}
+
+export async function captureSessionArtifacts(client, runDir, prefix, sessionId) {
+  const writeJson = async (name, action, payload) => {
+    try {
+      const result = await client.request(action, payload);
+      const fs = await import('node:fs');
+      fs.writeFileSync(`${runDir}/${name}`, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+    } catch (error) {
+      const fs = await import('node:fs');
+      fs.writeFileSync(
+        `${runDir}/${name.replace(/\.json$/, '.txt')}`,
+        error instanceof Error ? error.stack || error.message : String(error),
+        'utf8',
+      );
+    }
+  };
+
+  await writeJson(`${prefix}-workspace.json`, 'get_workspace', { sessionId });
+  await writeJson(`${prefix}-session-ui-state.json`, 'get_session_ui_state', { sessionId });
+  await writeJson(`${prefix}-structured-snapshot.json`, 'capture_structured_snapshot', {
+    sessionIds: [sessionId],
+    includePaneText: false,
+  });
+  await writeJson(`${prefix}-render-health.json`, 'capture_render_health', {
+    sessionIds: [sessionId],
+  });
+  await writeJson(`${prefix}-perf-snapshot.json`, 'capture_perf_snapshot', {
+    sessionIds: [sessionId],
+    settleFrames: 2,
+    includeMemory: false,
+  });
+
+  try {
+    await captureFrontWindowScreenshot(`${runDir}/${prefix}-native-window.png`);
+  } catch (error) {
+    const fs = await import('node:fs');
+    fs.writeFileSync(
+      `${runDir}/${prefix}-native-window.txt`,
+      error instanceof Error ? error.stack || error.message : String(error),
+      'utf8',
+    );
+  }
+}

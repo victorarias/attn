@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -88,6 +89,10 @@ type workerSession struct {
 	ControlToken string
 
 	mu              sync.Mutex
+	controlMu       sync.Mutex
+	controlConn     net.Conn
+	controlEnc      *json.Encoder
+	controlDec      *json.Decoder
 	lastState       string
 	lastStateSentAt time.Time
 	exitNotified    bool
@@ -635,6 +640,7 @@ func (b *WorkerBackend) Remove(ctx context.Context, sessionID string) error {
 		if errors.Is(callErr, pty.ErrSessionNotFound) || errors.Is(callErr, os.ErrNotExist) {
 			b.stopMonitor(session)
 			b.stopPoller(session)
+			b.closePersistentControlConn(session, "remove_missing")
 			b.mu.Lock()
 			delete(b.sessions, sessionID)
 			b.mu.Unlock()
@@ -644,6 +650,7 @@ func (b *WorkerBackend) Remove(ctx context.Context, sessionID string) error {
 	}
 	b.stopMonitor(session)
 	b.stopPoller(session)
+	b.closePersistentControlConn(session, "remove")
 	b.mu.Lock()
 	delete(b.sessions, sessionID)
 	b.mu.Unlock()
@@ -876,7 +883,17 @@ func (b *WorkerBackend) SessionLikelyAlive(ctx context.Context, sessionID string
 		RegistryPath: registryPath,
 		ControlToken: entry.ControlToken,
 	}
-	if err := b.callSimple(probeCtx, session, ptyworker.MethodHealth, map[string]any{}); err != nil {
+	// Liveness probes should not establish a persistent control connection.
+	// They only need one authenticated health check, and leaving a control
+	// socket open here leaks test/fake-server goroutines and skews ownership.
+	if err := b.callSimpleWithIdentity(
+		probeCtx,
+		session,
+		b.cfg.DaemonInstanceID,
+		entry.ControlToken,
+		ptyworker.MethodHealth,
+		map[string]any{},
+	); err != nil {
 		if errors.Is(err, pty.ErrSessionNotFound) || errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
@@ -899,6 +916,7 @@ func (b *WorkerBackend) Shutdown(_ context.Context) error {
 			defer wg.Done()
 			b.stopMonitor(session)
 			b.stopPoller(session)
+			b.closePersistentControlConn(session, "shutdown")
 		}(s)
 	}
 	wg.Wait()
@@ -1000,7 +1018,7 @@ func (b *WorkerBackend) getSession(sessionID string) (*workerSession, error) {
 }
 
 func (b *WorkerBackend) callSimple(ctx context.Context, session *workerSession, method string, params any) error {
-	return b.callSimpleWithIdentity(ctx, session, b.cfg.DaemonInstanceID, session.ControlToken, method, params)
+	return b.callSimplePersistent(ctx, session, method, params)
 }
 
 func (b *WorkerBackend) callSimpleWithIdentity(
@@ -1039,6 +1057,123 @@ func (b *WorkerBackend) callSimpleWithIdentity(
 		}
 		return nil
 	}
+}
+
+func (b *WorkerBackend) callSimplePersistent(ctx context.Context, session *workerSession, method string, params any) error {
+	rpcCtx, cancel := withDefaultRPCTimeout(ctx)
+	defer cancel()
+
+	session.controlMu.Lock()
+	defer session.controlMu.Unlock()
+
+	err := b.ensurePersistentControlConnLocked(rpcCtx, session)
+	if err != nil {
+		return err
+	}
+	err = b.callSimpleOnPersistentConnLocked(rpcCtx, session, method, params)
+	if err == nil || !isRetryablePersistentConnError(err) || rpcCtx.Err() != nil {
+		return err
+	}
+
+	b.closePersistentControlConnLocked(session, "retry_after_error")
+	if err := b.ensurePersistentControlConnLocked(rpcCtx, session); err != nil {
+		return err
+	}
+	return b.callSimpleOnPersistentConnLocked(rpcCtx, session, method, params)
+}
+
+func (b *WorkerBackend) ensurePersistentControlConnLocked(ctx context.Context, session *workerSession) error {
+	if session.controlConn != nil && session.controlEnc != nil && session.controlDec != nil {
+		return nil
+	}
+	conn, enc, dec, err := b.connectAuthed(ctx, session)
+	if err != nil {
+		return err
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_ = conn.Close()
+		return err
+	}
+	session.controlConn = conn
+	session.controlEnc = enc
+	session.controlDec = dec
+	if b.cfg.Logf != nil {
+		b.cfg.Logf("worker backend control connected: session=%s socket=%s", session.SessionID, session.SocketPath)
+	}
+	return nil
+}
+
+func (b *WorkerBackend) callSimpleOnPersistentConnLocked(ctx context.Context, session *workerSession, method string, params any) error {
+	if session.controlConn == nil || session.controlEnc == nil || session.controlDec == nil {
+		return errors.New("worker backend persistent control connection not initialized")
+	}
+	conn := session.controlConn
+	enc := session.controlEnc
+	dec := session.controlDec
+	if err := applyConnDeadline(conn, ctx); err != nil {
+		b.closePersistentControlConnLocked(session, "set_deadline_failed")
+		return err
+	}
+	defer func() {
+		_ = conn.SetDeadline(time.Time{})
+	}()
+
+	reqID := b.nextReqID(method)
+	if err := writeRequest(enc, reqID, method, params); err != nil {
+		b.closePersistentControlConnLocked(session, "write_failed")
+		return err
+	}
+	for {
+		frameType, res, _, err := readFrame(dec)
+		if err != nil {
+			b.closePersistentControlConnLocked(session, "read_failed")
+			return err
+		}
+		if frameType != "res" || res.ID != reqID {
+			continue
+		}
+		if !res.OK {
+			return b.rpcError(session.SessionID, res.Error)
+		}
+		return nil
+	}
+}
+
+func (b *WorkerBackend) closePersistentControlConn(session *workerSession, reason string) {
+	session.controlMu.Lock()
+	defer session.controlMu.Unlock()
+	b.closePersistentControlConnLocked(session, reason)
+}
+
+func (b *WorkerBackend) closePersistentControlConnLocked(session *workerSession, reason string) {
+	conn := session.controlConn
+	session.controlConn = nil
+	session.controlEnc = nil
+	session.controlDec = nil
+	if conn == nil {
+		return
+	}
+	_ = conn.Close()
+	if b.cfg.Logf != nil {
+		b.cfg.Logf("worker backend control disconnected: session=%s reason=%s", session.SessionID, reason)
+	}
+}
+
+func isRetryablePersistentConnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op != "" {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "broken pipe") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "closed network connection")
 }
 
 func (b *WorkerBackend) callInfo(ctx context.Context, session *workerSession) (ptyworker.InfoResult, error) {
@@ -1399,6 +1534,8 @@ func (b *WorkerBackend) pruneRegistryAndSocket(registryPath, socketPath string) 
 
 func (b *WorkerBackend) forceSessionEviction(session *workerSession) {
 	b.stopMonitor(session)
+	b.stopPoller(session)
+	b.closePersistentControlConn(session, "force_evict")
 	b.mu.Lock()
 	delete(b.sessions, session.SessionID)
 	b.mu.Unlock()

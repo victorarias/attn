@@ -1,6 +1,6 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
-import { Terminal, type ResolvedTheme } from '../Terminal';
+import { Terminal, type ResolvedTheme, type TerminalHandle } from '../Terminal';
 import { useShortcut } from '../../shortcuts';
 import {
   MAIN_TERMINAL_PANE_ID,
@@ -17,7 +17,9 @@ import { usePaneRuntimeBinder } from './usePaneRuntimeBinder';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { activeElementSummary, recordPaneRuntimeDebugEvent } from '../../utils/paneRuntimeDebug';
 import { recordTerminalRuntimeLog } from '../../utils/terminalRuntimeLog';
+import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
 import './SessionTerminalWorkspace.css';
+import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
 
 const ZOOM_PATH_RATIO = 0.76;
 
@@ -63,6 +65,7 @@ export interface SessionTerminalWorkspaceHandle {
   isPaneInputFocused: (paneId: string) => boolean;
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => { cols: number; rows: number } | null;
+  getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
   resetPaneTerminal: (paneId: string) => boolean;
   injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectPaneBase64: (paneId: string, payload: string) => Promise<boolean>;
@@ -82,6 +85,7 @@ interface SessionTerminalWorkspaceProps {
   focusRequestToken?: number;
   enabled: boolean;
   isActiveSession: boolean;
+  isSessionViewVisible?: boolean;
   eventRouter: PaneRuntimeEventRouter;
   getMainPaneSpawnArgs: (cols: number, rows: number) => PtySpawnArgs | null;
   onSplitPane: (targetPaneId: string, direction: TerminalSplitDirection) => void;
@@ -105,6 +109,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     focusRequestToken,
     enabled,
     isActiveSession,
+    isSessionViewVisible = true,
     eventRouter,
     getMainPaneSpawnArgs,
     onSplitPane,
@@ -117,9 +122,11 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     const [zoomedPaneId, setZoomedPaneId] = useState<string | null>(null);
     const activePaneIdRef = useRef(activePaneId);
     const isActiveSessionRef = useRef(isActiveSession);
+    const sessionViewVisibleRef = useRef(isSessionViewVisible);
 
     activePaneIdRef.current = activePaneId;
     isActiveSessionRef.current = isActiveSession;
+    sessionViewVisibleRef.current = isSessionViewVisible;
 
     const paneIds = useMemo(() => {
       const ids: string[] = [];
@@ -160,6 +167,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
 
     const binder = usePaneRuntimeBinder(runtimePanes, activePaneId, eventRouter);
     const fitPane = binder.fitPane;
+    const getPaneSize = binder.getPaneSize;
+    const setTerminalHandle = binder.setTerminalHandle;
+    const terminalHandleRefCallbacksRef = useRef(new Map<string, (handle: TerminalHandle | null) => void>());
     const activeRuntimeId = useMemo(
       () => runtimePanes.find((pane) => pane.paneId === activePaneId)?.runtimeId,
       [activePaneId, runtimePanes],
@@ -199,7 +209,31 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       walk(renderedLayoutTree, '');
       return paths;
     }, [renderedLayoutTree]);
+    const renderedPaneIds = useMemo(() => Array.from(panePaths.keys()), [panePaths]);
+    const renderedPaneIdsKey = renderedPaneIds.join('|');
     const prevPanePathsRef = useRef(panePaths);
+    const sessionVisibleRef = useRef(false);
+    const sessionVisible = enabled && isActiveSession && isSessionViewVisible;
+
+    useEffect(() => {
+      const livePaneIDs = new Set(paneIds);
+      for (const paneId of Array.from(terminalHandleRefCallbacksRef.current.keys())) {
+        if (!livePaneIDs.has(paneId)) {
+          terminalHandleRefCallbacksRef.current.delete(paneId);
+        }
+      }
+    }, [paneIds]);
+
+    const getTerminalHandleRef = useCallback((paneId: string) => {
+      let callback = terminalHandleRefCallbacksRef.current.get(paneId);
+      if (!callback) {
+        callback = (handle) => {
+          setTerminalHandle(paneId, handle);
+        };
+        terminalHandleRefCallbacksRef.current.set(paneId, callback);
+      }
+      return callback;
+    }, [setTerminalHandle]);
 
     useImperativeHandle(ref, () => ({
       fitPane: binder.fitPane,
@@ -210,6 +244,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       isPaneInputFocused: binder.isPaneInputFocused,
       getPaneText: binder.getPaneText,
       getPaneSize: binder.getPaneSize,
+      getPaneVisibleContent: binder.getPaneVisibleContent,
       resetPaneTerminal: binder.resetPaneTerminal,
       injectPaneBytes: binder.injectPaneBytes,
       injectPaneBase64: binder.injectPaneBase64,
@@ -270,7 +305,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [activePaneId, binder]);
 
     useEffect(() => {
-      if (!isActiveSession || !enabled) {
+      if (!sessionVisible) {
         return;
       }
       recordPaneRuntimeDebugEvent({
@@ -281,15 +316,52 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         details: {
           enabled,
           isActiveSession,
+          isSessionViewVisible,
           focusRequestToken,
           ...activeElementSummary(),
         },
       });
       focusActivePane();
-    }, [activePaneId, enabled, focusActivePane, focusRequestToken, isActiveSession, sessionId]);
+    }, [activePaneId, focusActivePane, focusRequestToken, isActiveSession, isSessionViewVisible, sessionId, sessionVisible]);
 
-    useEffect(() => {
-      if (!isActiveSession || !enabled) {
+    const refitPanesNowAndIfStillTiny = useCallback((targetPaneIds: string[]) => {
+      const paneIdsToFit = Array.from(new Set(targetPaneIds));
+      if (paneIdsToFit.length === 0) {
+        return undefined;
+      }
+
+      for (const paneId of paneIdsToFit) {
+        fitPane(paneId);
+      }
+
+      const lateRefitTimeout = window.setTimeout(() => {
+        for (const paneId of paneIdsToFit) {
+          const size = getPaneSize(paneId);
+          if (size && isSuspiciousTerminalSize(size.cols, size.rows)) {
+            fitPane(paneId);
+          }
+        }
+      }, 75);
+
+      return () => {
+        window.clearTimeout(lateRefitTimeout);
+      };
+    }, [fitPane, getPaneSize]);
+
+    useLayoutEffect(() => {
+      if (!sessionVisible) {
+        sessionVisibleRef.current = false;
+        return;
+      }
+      if (sessionVisibleRef.current) {
+        return;
+      }
+      sessionVisibleRef.current = true;
+      return refitPanesNowAndIfStillTiny(renderedPaneIds);
+    }, [refitPanesNowAndIfStillTiny, renderedPaneIds, renderedPaneIdsKey, sessionVisible]);
+
+    useLayoutEffect(() => {
+      if (!sessionVisible) {
         prevPanePathsRef.current = panePaths;
         return;
       }
@@ -306,21 +378,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       if (movedPanes.length === 0) {
         return;
       }
-      const fitSoon = window.setTimeout(() => {
-        for (const paneId of movedPanes) {
-          fitPane(paneId);
-        }
-      }, 0);
-      const fitAfterLayoutSettles = window.setTimeout(() => {
-        for (const paneId of movedPanes) {
-          fitPane(paneId);
-        }
-      }, 75);
-      return () => {
-        window.clearTimeout(fitSoon);
-        window.clearTimeout(fitAfterLayoutSettles);
-      };
-    }, [activePaneId, enabled, fitPane, isActiveSession, panePaths, workspaceTopologyKey]);
+      return refitPanesNowAndIfStillTiny(movedPanes);
+    }, [panePaths, refitPanesNowAndIfStillTiny, sessionVisible, workspaceTopologyKey]);
 
     const handleSplit = useCallback((direction: TerminalSplitDirection) => {
       onSplitPane(activePaneId, direction);
@@ -403,7 +462,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [binder, onFocusPane, sessionId]);
 
     const focusPaneIfCurrentlyActive = useCallback((paneId: string, phase: 'init' | 'ready') => {
-      if (!isActiveSessionRef.current || activePaneIdRef.current !== paneId) {
+      if (!isActiveSessionRef.current || !sessionViewVisibleRef.current || activePaneIdRef.current !== paneId) {
         return;
       }
       recordPaneRuntimeDebugEvent({
@@ -426,43 +485,50 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       focusPaneIfCurrentlyActive(paneId, 'ready');
     }, [binder, focusPaneIfCurrentlyActive]);
 
-    useShortcut('terminal.open', focusActivePane, enabled && isActiveSession);
-    useShortcut('terminal.new', () => { void handleNewTerminal(); }, enabled && isActiveSession);
-    useShortcut('terminal.splitVertical', () => { handleSplit('vertical'); }, enabled && isActiveSession);
-    useShortcut('terminal.splitHorizontal', () => { handleSplit('horizontal'); }, enabled && isActiveSession);
-    useShortcut('terminal.toggleZoom', toggleZoomActivePane, enabled && isActiveSession);
-    useShortcut('terminal.toggleMaximize', toggleMaximizeActivePane, enabled && isActiveSession);
-    useShortcut('terminal.close', handleCloseActiveTerminal, enabled && isActiveSession && splitLayoutActive && activePaneId !== MAIN_TERMINAL_PANE_ID);
-    useShortcut('terminal.focusLeft', () => handleMovePane('left'), enabled && isActiveSession);
-    useShortcut('terminal.focusRight', () => handleMovePane('right'), enabled && isActiveSession);
-    useShortcut('terminal.focusUp', () => handleMovePane('up'), enabled && isActiveSession);
-    useShortcut('terminal.focusDown', () => handleMovePane('down'), enabled && isActiveSession);
+    useShortcut('terminal.open', focusActivePane, sessionVisible);
+    useShortcut('terminal.new', () => { void handleNewTerminal(); }, sessionVisible);
+    useShortcut('terminal.splitVertical', () => { handleSplit('vertical'); }, sessionVisible);
+    useShortcut('terminal.splitHorizontal', () => { handleSplit('horizontal'); }, sessionVisible);
+    useShortcut('terminal.toggleZoom', toggleZoomActivePane, sessionVisible);
+    useShortcut('terminal.toggleMaximize', toggleMaximizeActivePane, sessionVisible);
+    useShortcut('terminal.close', handleCloseActiveTerminal, sessionVisible && splitLayoutActive && activePaneId !== MAIN_TERMINAL_PANE_ID);
+    useShortcut('terminal.focusLeft', () => handleMovePane('left'), sessionVisible);
+    useShortcut('terminal.focusRight', () => handleMovePane('right'), sessionVisible);
+    useShortcut('terminal.focusUp', () => handleMovePane('up'), sessionVisible);
+    useShortcut('terminal.focusDown', () => handleMovePane('down'), sessionVisible);
 
-    const renderPane = useCallback((node: TerminalLayoutNode): React.ReactNode => {
+    const renderPane = useCallback((node: TerminalLayoutNode, path = 'root'): React.ReactNode => {
       if (node.type === 'split') {
         const firstRatio = clampSplitRatio(node.ratio);
         const secondRatio = clampSplitRatio(1 - firstRatio);
+        const firstPath = `${path}/0`;
+        const secondPath = `${path}/1`;
+        const splitStyle = node.direction === 'vertical'
+          ? { gridTemplateColumns: `minmax(0, ${firstRatio}fr) minmax(0, ${secondRatio}fr)` }
+          : { gridTemplateRows: `minmax(0, ${firstRatio}fr) minmax(0, ${secondRatio}fr)` };
         return (
           <div
             key={node.splitId}
             className={`workspace-split split-${node.direction}`}
             data-split-id={node.splitId}
+            data-split-path={path}
             data-split-direction={node.direction}
             data-split-ratio={firstRatio.toFixed(3)}
+            style={splitStyle}
           >
             <div
               className="workspace-split-child"
               data-split-child-index="0"
-              style={{ flexGrow: firstRatio }}
+              data-split-child-path={firstPath}
             >
-              {renderPane(node.children[0])}
+              {renderPane(node.children[0], firstPath)}
             </div>
             <div
               className="workspace-split-child"
               data-split-child-index="1"
-              style={{ flexGrow: secondRatio }}
+              data-split-child-path={secondPath}
             >
-              {renderPane(node.children[1])}
+              {renderPane(node.children[1], secondPath)}
             </div>
           </div>
         );
@@ -477,6 +543,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
             data-pane-session-id={sessionId}
             data-pane-id={MAIN_TERMINAL_PANE_ID}
             data-pane-kind="main"
+            data-pane-path={path}
           >
             {showMainHeader && (
               <div className="workspace-pane-header">
@@ -485,7 +552,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
             )}
             <div className="workspace-pane-body">
               <Terminal
-                ref={(handle) => binder.setTerminalHandle(MAIN_TERMINAL_PANE_ID, handle)}
+                ref={getTerminalHandleRef(MAIN_TERMINAL_PANE_ID)}
                 fontSize={fontSize}
                 resolvedTheme={resolvedTheme}
                 tuiCursor
@@ -519,6 +586,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           data-pane-session-id={sessionId}
           data-pane-id={terminal.id}
           data-pane-kind="shell"
+          data-pane-path={path}
         >
           <div className="workspace-pane-header">
             <span className="workspace-pane-title">{terminal.title}</span>
@@ -536,7 +604,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           </div>
           <div className="workspace-pane-body">
             <Terminal
-              ref={(handle) => binder.setTerminalHandle(terminal.id, handle)}
+              ref={getTerminalHandleRef(terminal.id)}
               fontSize={fontSize}
               resolvedTheme={resolvedTheme}
               debugName={`utility:${sessionId}:${terminal.title}:${terminal.id}`}
@@ -559,6 +627,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       activePaneId,
       binder,
       fontSize,
+      getTerminalHandleRef,
       handleCloseTerminal,
       handleMainPaneMouseDown,
       handleTerminalInit,
@@ -586,6 +655,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       <div
         className={`session-terminal-workspace ${effectivePaneId ? 'focus-mode' : ''} ${effectiveZoomedPaneId && !effectivePaneId ? 'zoom-mode' : ''}`.trim()}
         data-session-terminal-workspace={sessionId}
+        data-active-pane-id={activePaneId}
+        data-maximized-pane-id={effectivePaneId || ''}
+        data-session-visible={sessionVisible ? '1' : '0'}
         data-zoomed-pane-id={effectiveZoomedPaneId || ''}
       >
         {effectivePaneId && (

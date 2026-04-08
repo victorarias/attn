@@ -767,6 +767,7 @@ function AppContent({
     fitSessionActivePane,
     getPaneText,
     getPaneSize,
+    getPaneVisibleContent,
     resetSessionPaneTerminal,
     injectSessionPaneBytes,
     injectSessionPaneBase64,
@@ -1177,13 +1178,9 @@ function AppContent({
       // Note: Location is automatically tracked by daemon when session registers
       const folderName = path.split('/').pop() || 'session';
       const selectedAgent = resolvePreferredAgent(agent, agentAvailability, 'codex');
-      const sessionId = await createSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode);
-      // Fit terminal after view becomes visible
-      setTimeout(() => {
-        fitSessionActivePane(sessionId);
-      }, 100);
+      await createSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode);
     },
-    [agentAvailability, createSession, daemonEndpoints, fitSessionActivePane, hasAvailableAgents, showError]
+    [agentAvailability, createSession, daemonEndpoints, hasAvailableAgents, showError]
   );
 
   const closeLocationPicker = useCallback(() => {
@@ -1272,10 +1269,6 @@ function AppContent({
       setForkTargetSession(null);
       setForkError(null);
 
-      // Fit terminal after view becomes visible
-      setTimeout(() => {
-        fitSessionActivePane(sessionId);
-      }, 100);
     } catch (err) {
       console.error('[App] Fork failed:', err);
       // Clean up worktree if it was created but downstream steps failed
@@ -1286,7 +1279,7 @@ function AppContent({
       }
       setForkError(err instanceof Error ? err.message : 'Fork failed');
     }
-  }, [createSession, fitSessionActivePane, forkTargetSession, sendCreateWorktree, sendDeleteWorktree, setForkParams]);
+  }, [createSession, forkTargetSession, sendCreateWorktree, sendDeleteWorktree, setForkParams]);
 
   const handleForkClose = useCallback(() => {
     setForkDialogOpen(false);
@@ -1354,12 +1347,8 @@ function AppContent({
     (id: string) => {
       setActiveSession(id);
       setUtilityFocusRequestToken((token) => token + 1);
-      // Fit after a short delay so the selected workspace has visible dimensions.
-      setTimeout(() => {
-        fitSessionActivePane(id);
-      }, 50);
     },
-    [fitSessionActivePane, setActiveSession]
+    [setActiveSession]
   );
 
   useUiAutomationBridge({
@@ -1384,6 +1373,7 @@ function AppContent({
     isSessionPaneInputFocused,
     getPaneText,
     getPaneSize,
+    getPaneVisibleContent,
     fitSessionActivePane,
     sendRuntimeInput,
     getReviewState,
@@ -1435,10 +1425,6 @@ function AppContent({
       const result = await openPR(pr, defaultAgent);
       if (result.success) {
         console.log(`[App] Worktree created at ${result.worktreePath}`);
-        // Fit terminal after view becomes visible
-        setTimeout(() => {
-          fitSessionActivePane(result.sessionId);
-        }, 100);
         return;
       }
 
@@ -1468,7 +1454,7 @@ function AppContent({
         }
       }
     },
-    [agentAvailability, fitSessionActivePane, hasAvailableAgents, openPR, settings.new_session_agent]
+    [agentAvailability, hasAvailableAgents, openPR, settings.new_session_agent]
   );
 
   // Worktree cleanup prompt handlers
@@ -1998,6 +1984,7 @@ function AppContent({
                   focusRequestToken={utilityFocusRequestToken}
                   enabled={!locationPickerOpen && !branchPickerOpen}
                   isActiveSession={session.id === activeSessionId}
+                  isSessionViewVisible={view === 'session'}
                   eventRouter={paneRuntimeEventRouter}
                   getMainPaneSpawnArgs={(cols, rows) => takeSessionSpawnArgs(session.id, cols, rows)}
                   onSplitPane={(targetPaneId, direction) => {

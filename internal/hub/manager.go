@@ -459,9 +459,59 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 		default:
 			if forwardsRawEvent(peek.Event) {
 				m.observeRemoteEvent(id, peek.Event, data)
+				m.logRemoteRawEvent(id, peek.Event, data)
 				m.publishRawEvent(data)
 			}
 		}
+	}
+}
+
+func (m *Manager) logRemoteRawEvent(endpointID, event string, data []byte) {
+	if m.logf == nil {
+		return
+	}
+
+	switch event {
+	case protocol.EventPtyOutput:
+		var msg struct {
+			ID   *string `json:"id"`
+			Seq  *int    `json:"seq"`
+			Data *string `json:"data"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			m.logf("remote raw event relay: endpoint=%s event=%s decode_err=%v", endpointID, event, err)
+			return
+		}
+		m.logf(
+			"remote pty_output relay: endpoint=%s id=%s seq=%d base64_bytes=%d",
+			endpointID,
+			protocol.Deref(msg.ID),
+			protocol.Deref(msg.Seq),
+			len(protocol.Deref(msg.Data)),
+		)
+	case protocol.EventAttachResult:
+		var msg struct {
+			ID      *string `json:"id"`
+			Success bool    `json:"success"`
+			LastSeq *int    `json:"last_seq"`
+			Cols    *int    `json:"cols"`
+			Rows    *int    `json:"rows"`
+			Error   *string `json:"error"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			m.logf("remote raw event relay: endpoint=%s event=%s decode_err=%v", endpointID, event, err)
+			return
+		}
+		m.logf(
+			"remote attach_result relay: endpoint=%s id=%s success=%v last_seq=%d size=%dx%d error=%q",
+			endpointID,
+			protocol.Deref(msg.ID),
+			msg.Success,
+			protocol.Deref(msg.LastSeq),
+			protocol.Deref(msg.Cols),
+			protocol.Deref(msg.Rows),
+			protocol.Deref(msg.Error),
+		)
 	}
 }
 

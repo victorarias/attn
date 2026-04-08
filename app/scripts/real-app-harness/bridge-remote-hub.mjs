@@ -25,6 +25,111 @@ function normalizeSshTarget(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+const sshTargetIdentityCache = new Map();
+
+function fallbackSshTargetIdentity(value) {
+  const raw = String(value || '').trim();
+  const normalizedRaw = normalizeSshTarget(raw);
+  if (!normalizedRaw) {
+    return {
+      raw,
+      user: '',
+      host: '',
+      port: '',
+      canonical: '',
+    };
+  }
+
+  const withoutScheme = normalizedRaw.replace(/^ssh:\/\//, '');
+  const atIndex = withoutScheme.lastIndexOf('@');
+  const user = atIndex >= 0 ? withoutScheme.slice(0, atIndex) : '';
+  const hostPort = atIndex >= 0 ? withoutScheme.slice(atIndex + 1) : withoutScheme;
+  const colonIndex = hostPort.lastIndexOf(':');
+  const hasPort = colonIndex > -1 && /^[0-9]+$/.test(hostPort.slice(colonIndex + 1));
+  const host = hasPort ? hostPort.slice(0, colonIndex) : hostPort;
+  const port = hasPort ? hostPort.slice(colonIndex + 1) : '';
+
+  return {
+    raw,
+    user,
+    host,
+    port,
+    canonical: `${user}@${host}:${port}`.toLowerCase(),
+  };
+}
+
+async function resolveSshTargetIdentity(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return fallbackSshTargetIdentity(raw);
+  }
+  if (sshTargetIdentityCache.has(raw)) {
+    return sshTargetIdentityCache.get(raw);
+  }
+
+  const pending = (async () => {
+    try {
+      const { stdout } = await execFileAsync(
+        'ssh',
+        ['-G', raw],
+        {
+          timeout: 10_000,
+          maxBuffer: 1024 * 1024,
+        },
+      );
+      const resolved = {
+        raw,
+        user: '',
+        host: '',
+        port: '',
+      };
+      for (const line of stdout.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+        const spaceIndex = trimmed.indexOf(' ');
+        if (spaceIndex <= 0) {
+          continue;
+        }
+        const key = trimmed.slice(0, spaceIndex).toLowerCase();
+        const nextValue = trimmed.slice(spaceIndex + 1).trim();
+        if (key === 'user') {
+          resolved.user = nextValue;
+        } else if (key === 'hostname') {
+          resolved.host = nextValue.toLowerCase();
+        } else if (key === 'port') {
+          resolved.port = nextValue;
+        }
+      }
+
+      if (!resolved.host) {
+        return fallbackSshTargetIdentity(raw);
+      }
+
+      return {
+        raw,
+        user: resolved.user.toLowerCase(),
+        host: resolved.host,
+        port: resolved.port,
+        canonical: `${resolved.user}@${resolved.host}:${resolved.port}`.toLowerCase(),
+      };
+    } catch {
+      return fallbackSshTargetIdentity(raw);
+    }
+  })();
+
+  sshTargetIdentityCache.set(raw, pending);
+  return pending;
+}
+
+function sshTargetIdentitiesMatch(left, right) {
+  if (!left?.host || !right?.host) {
+    return normalizeSshTarget(left?.raw) === normalizeSshTarget(right?.raw);
+  }
+  return left.host === right.host && left.user === right.user && left.port === right.port;
+}
+
 function saveJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
@@ -691,6 +796,48 @@ async function waitForPaneTextContains(client, sessionId, paneId, needle, timeou
   );
 }
 
+async function waitForPaneTextChange(client, sessionId, paneId, previousText, timeoutMs = 20_000) {
+  const startedAt = Date.now();
+  let lastState = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    lastState = await client.request('read_pane_text', {
+      sessionId,
+      paneId,
+    }, {
+      timeoutMs: 15_000,
+    });
+    if (typeof lastState?.text === 'string' && lastState.text !== previousText) {
+      return lastState;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(
+    `Timed out waiting for pane ${paneId} text to change. Last state:\n${JSON.stringify(lastState, null, 2)}`
+  );
+}
+
+async function waitForPaneState(client, sessionId, paneId, predicate, description, timeoutMs = 20_000) {
+  const startedAt = Date.now();
+  let lastState = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    lastState = await client.request('get_pane_state', {
+      sessionId,
+      paneId,
+    }, {
+      timeoutMs: 15_000,
+    });
+    if (predicate(lastState)) {
+      return lastState;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(
+    `Timed out waiting for ${description}. Last pane state:\n${JSON.stringify(lastState, null, 2)}`
+  );
+}
+
 async function waitForScrollbackChange(observer, runtimeId, previous, timeoutMs = 20_000) {
   const startedAt = Date.now();
   let lastScrollback = '';
@@ -716,6 +863,17 @@ async function captureArtifacts(client, runDir, suffix) {
   } catch (error) {
     fs.writeFileSync(
       path.join(runDir, `structured-snapshot-${suffix}.txt`),
+      error instanceof Error ? error.stack || error.message : String(error),
+      'utf8'
+    );
+  }
+
+  try {
+    const renderHealth = await client.request('capture_render_health');
+    saveJson(path.join(runDir, `render-health-${suffix}.json`), renderHealth);
+  } catch (error) {
+    fs.writeFileSync(
+      path.join(runDir, `render-health-${suffix}.txt`),
       error instanceof Error ? error.stack || error.message : String(error),
       'utf8'
     );
@@ -759,6 +917,8 @@ Remote hub options:
   let endpointId = null;
   let removeEndpointOnCleanup = false;
   let remoteSocketPath = null;
+  let remoteUtilityPane = null;
+  let remoteInteraction = null;
   const remoteHome = await getRemoteHome(extraOptions.sshTarget);
   const preparedRepo = extraOptions.remoteDirectory
     ? null
@@ -785,10 +945,36 @@ Remote hub options:
     await removeStaleHarnessEndpoints(observer);
 
     setStep('endpoint-bootstrap');
-    const normalizedTarget = normalizeSshTarget(extraOptions.sshTarget);
-    let endpoint = [...observer.endpointsById.values()].find(
-      (candidate) => normalizeSshTarget(candidate.ssh_target) === normalizedTarget,
-    ) || null;
+    const targetIdentity = await resolveSshTargetIdentity(extraOptions.sshTarget);
+    const endpointCandidates = await Promise.all(
+      [...observer.endpointsById.values()].map(async (candidate) => ({
+        endpoint: candidate,
+        identity: await resolveSshTargetIdentity(candidate.ssh_target),
+      })),
+    );
+    saveJson(path.join(runDir, 'endpoint-candidates.json'), {
+      target: targetIdentity,
+      candidates: endpointCandidates.map(({ endpoint, identity }) => ({
+        id: endpoint.id,
+        name: endpoint.name,
+        sshTarget: endpoint.ssh_target,
+        enabled: endpoint.enabled,
+        status: endpoint.status,
+        identity,
+      })),
+    });
+
+    let endpoint = endpointCandidates
+      .filter(({ identity }) => sshTargetIdentitiesMatch(identity, targetIdentity))
+      .sort((left, right) => {
+        const leftScore = left.endpoint.status === 'connected' ? 0 : left.endpoint.enabled === false ? 2 : 1;
+        const rightScore = right.endpoint.status === 'connected' ? 0 : right.endpoint.enabled === false ? 2 : 1;
+        if (leftScore !== rightScore) {
+          return leftScore - rightScore;
+        }
+        return left.endpoint.name.localeCompare(right.endpoint.name);
+      })
+      .map(({ endpoint: candidate }) => candidate)[0] || null;
     if (endpoint) {
       if (endpoint.enabled === false) {
         observer.updateEndpoint(endpoint.id, { enabled: true });
@@ -1008,45 +1194,97 @@ Remote hub options:
     }
     saveJson(path.join(runDir, 'session-ui-selected.json'), selectedSession);
 
+    const paneDebugConfig = await client.request('set_pane_debug', { enabled: true });
+    const terminalRuntimeTraceConfig = await client.request('set_terminal_runtime_trace', { enabled: true });
+    saveJson(path.join(runDir, 'runtime-debug-config.json'), {
+      paneDebug: paneDebugConfig,
+      terminalRuntimeTrace: terminalRuntimeTraceConfig,
+    });
+
     setStep('remote-pty-interaction');
     const utilityPane = await client.request('split_pane', {
       sessionId: remoteSessionId,
       direction: 'vertical',
     });
-    const remoteUtilityPane = await observer.waitForUtilityPane(remoteSessionId, 30_000);
+    remoteUtilityPane = await observer.waitForUtilityPane(remoteSessionId, 30_000);
     saveJson(path.join(runDir, 'remote-utility-pane.json'), {
       splitResult: utilityPane,
       pane: remoteUtilityPane,
     });
-    await observer.waitForScrollbackReady(remoteUtilityPane.runtime_id, 20_000);
 
+    const focusRequestedAt = Date.now();
     await client.request('focus_pane', {
       sessionId: remoteSessionId,
       paneId: remoteUtilityPane.pane_id,
     });
 
-    const marker = `__ATTN_REMOTE_OK_${Date.now()}__`;
-    const command = `printf '%s\\n' '${marker}'`;
-    await client.request('write_pane', {
+    const readyForInputState = await waitForPaneState(
+      client,
+      remoteSessionId,
+      remoteUtilityPane.pane_id,
+      (state) => Boolean(
+        state?.inputFocused &&
+        state?.activePaneId === remoteUtilityPane.pane_id &&
+        state?.pane?.size?.cols > 0 &&
+        state?.pane?.size?.rows > 0
+      ),
+      `remote utility pane ${remoteUtilityPane.pane_id} to become focused and sized`,
+      20_000,
+    );
+    const readyForInputAt = Date.now();
+    saveJson(path.join(runDir, 'remote-utility-pane-ready.json'), readyForInputState);
+    saveJson(
+      path.join(runDir, 'remote-utility-render-health.json'),
+      await client.request('capture_render_health', { sessionIds: [remoteSessionId] }),
+    );
+
+    const leftOperand = 7000 + Math.floor(Math.random() * 2000);
+    const rightOperand = 300 + Math.floor(Math.random() * 600);
+    const outputToken = String(leftOperand * rightOperand);
+    const commandEchoNeedle = `python3 -c`;
+    const command = `python3 -c "print(${leftOperand}*${rightOperand})"`;
+    const preTypePaneTextState = await client.request('read_pane_text', {
+      sessionId: remoteSessionId,
+      paneId: remoteUtilityPane.pane_id,
+    }, {
+      timeoutMs: 15_000,
+    });
+    const preTypePaneText = typeof preTypePaneTextState?.text === 'string' ? preTypePaneTextState.text : '';
+    const typeStartedAt = Date.now();
+    await client.request('type_pane_via_ui', {
       sessionId: remoteSessionId,
       paneId: remoteUtilityPane.pane_id,
       text: command,
     });
-
-    const utilityScrollback = await observer.waitForScrollbackContains(
-      remoteUtilityPane.runtime_id,
-      marker,
-      20_000
+    const typedEchoState = await waitForPaneTextChange(
+      client,
+      remoteSessionId,
+      remoteUtilityPane.pane_id,
+      preTypePaneText,
+      20_000,
     );
-    saveText(path.join(runDir, 'remote-utility-scrollback.txt'), utilityScrollback);
+    const typedEchoAt = Date.now();
+    if (!typedEchoState?.text?.includes(commandEchoNeedle)) {
+      throw new Error(
+        `Remote utility pane text changed but did not include typed command ${commandEchoNeedle}. State:\n${JSON.stringify(typedEchoState, null, 2)}`
+      );
+    }
+    const submitAt = Date.now();
+    await client.request('write_pane', {
+      sessionId: remoteSessionId,
+      paneId: remoteUtilityPane.pane_id,
+      text: '\r',
+      submit: false,
+    });
 
     const paneTextState = await waitForPaneTextContains(
       client,
       remoteSessionId,
       remoteUtilityPane.pane_id,
-      marker,
+      outputToken,
       20_000,
     );
+    const outputVisibleAt = Date.now();
     saveJson(path.join(runDir, 'remote-pane-text.json'), paneTextState);
 
     const paneSnapshot = await client.request('capture_structured_snapshot', {
@@ -1054,6 +1292,10 @@ Remote hub options:
       sessionIds: [remoteSessionId],
     });
     saveJson(path.join(runDir, 'session-ui-pane-text.json'), paneSnapshot);
+    saveJson(
+      path.join(runDir, 'remote-pane-render-health.json'),
+      await client.request('capture_render_health', { sessionIds: [remoteSessionId] }),
+    );
 
     const utilityBridgeSession = await waitForBridgeSession(
       client,
@@ -1062,13 +1304,39 @@ Remote hub options:
       20_000
     );
     saveJson(path.join(runDir, 'remote-session-interactive.json'), {
-      marker,
+      outputToken,
+      commandEchoNeedle,
       command,
       pane: remoteUtilityPane,
       bridge: utilityBridgeSession,
+      timing: {
+        focusReadyMs: readyForInputAt - focusRequestedAt,
+        typedEchoMs: typedEchoAt - typeStartedAt,
+        outputVisibleMs: outputVisibleAt - submitAt,
+      },
     });
 
-    const preReloadMainScrollback = await observer.waitForScrollbackReady(remoteSessionId, 20_000);
+    remoteInteraction = {
+      outputToken,
+      commandEchoNeedle,
+      command,
+      leftOperand,
+      rightOperand,
+      focusRequestedAt,
+      readyForInputAt,
+      typeStartedAt,
+      typedEchoAt,
+      submitAt,
+      outputVisibleAt,
+    };
+
+    const preReloadMainTextState = await client.request('read_pane_text', {
+      sessionId: remoteSessionId,
+      paneId: 'main',
+    }, {
+      timeoutMs: 15_000,
+    });
+    const preReloadMainText = typeof preReloadMainTextState?.text === 'string' ? preReloadMainTextState.text : '';
 
     setStep('remote-reload');
     await client.request('reload_session', {
@@ -1095,13 +1363,14 @@ Remote hub options:
     );
     saveJson(path.join(runDir, 'session-ui-reloaded.json'), reloadedSessionUi);
 
-    const mainScrollback = await waitForScrollbackChange(
-      observer,
+    const mainTextAfterReload = await waitForPaneTextChange(
+      client,
       remoteSessionId,
-      preReloadMainScrollback,
+      'main',
+      preReloadMainText,
       20_000,
     );
-    saveText(path.join(runDir, 'remote-main-reload-scrollback.txt'), mainScrollback);
+    saveJson(path.join(runDir, 'remote-main-reload-pane-text.json'), mainTextAfterReload);
 
     if (preparedRepo) {
       setStep('remote-review');
@@ -1370,14 +1639,15 @@ printf '%s\\n' ${shellQuote(diffMarker)} >> ${shellQuote(preparedRepo.trackedFil
         pickerWorktreeVisible: remoteWorktreeSessionId ? 'picker-worktree-visible.json' : null,
         paneTextState: 'remote-pane-text.json',
         paneTextSnapshot: 'session-ui-pane-text.json',
-        mainReloadScrollback: 'remote-main-reload-scrollback.txt',
+        mainReloadPaneText: 'remote-main-reload-pane-text.json',
         reviewState: preparedRepo ? 'remote-review-state.json' : null,
         reviewPanelSnapshot: preparedRepo ? 'remote-review-panel.json' : null,
         commentMutations: preparedRepo ? 'remote-comment-mutations.json' : null,
         reviewLoopStop: preparedRepo ? 'remote-review-loop-stop.json' : null,
         reviewLoopAwaitingUser: preparedRepo ? 'remote-review-loop-awaiting-user.json' : null,
         reviewLoopCompleted: preparedRepo ? 'remote-review-loop-completed.json' : null,
-        utilityScrollback: 'remote-utility-scrollback.txt',
+        runtimeDebugConfig: 'runtime-debug-config.json',
+        utilityPaneReady: 'remote-utility-pane-ready.json',
         finalSnapshot: 'structured-snapshot-final.json',
       },
     };
@@ -1405,6 +1675,53 @@ printf '%s\\n' ${shellQuote(diffMarker)} >> ${shellQuote(preparedRepo.trackedFil
       await captureArtifacts(client, runDir, 'failure');
     } catch {
       // Ignore artifact capture failures while recording the primary failure.
+    }
+    try {
+      if (remoteSessionId) {
+        const sessionUi = await client.request('get_session_ui_state', { sessionId: remoteSessionId }, { timeoutMs: 10_000 });
+        saveJson(path.join(runDir, 'session-ui-failure.json'), sessionUi);
+      }
+    } catch {
+      // Ignore failure artifact errors.
+    }
+    try {
+      if (remoteSessionId && remoteUtilityPane?.pane_id) {
+        const paneState = await client.request('get_pane_state', {
+          sessionId: remoteSessionId,
+          paneId: remoteUtilityPane.pane_id,
+        }, { timeoutMs: 10_000 });
+        saveJson(path.join(runDir, 'remote-utility-pane-state-failure.json'), paneState);
+      }
+    } catch {
+      // Ignore failure artifact errors.
+    }
+    try {
+      const paneDebug = await client.request('dump_pane_debug', {}, { timeoutMs: 10_000 });
+      saveJson(path.join(runDir, 'pane-debug-failure.json'), paneDebug);
+    } catch {
+      // Ignore failure artifact errors.
+    }
+    try {
+      const terminalRuntimeTrace = await client.request('dump_terminal_runtime_trace', {}, { timeoutMs: 10_000 });
+      saveJson(path.join(runDir, 'terminal-runtime-trace-failure.json'), terminalRuntimeTrace);
+    } catch {
+      // Ignore failure artifact errors.
+    }
+    try {
+      const perfSnapshot = await client.request('capture_perf_snapshot', {
+        settleFrames: 2,
+        includeMemory: false,
+      }, { timeoutMs: 15_000 });
+      saveJson(path.join(runDir, 'perf-snapshot-failure.json'), perfSnapshot);
+    } catch {
+      // Ignore failure artifact errors.
+    }
+    try {
+      if (remoteInteraction) {
+        saveJson(path.join(runDir, 'remote-interaction-failure.json'), remoteInteraction);
+      }
+    } catch {
+      // Ignore failure artifact errors.
     }
     saveJson(path.join(runDir, 'summary.json'), summary);
     throw error;

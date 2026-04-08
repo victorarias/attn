@@ -13,7 +13,7 @@ Options:
 Examples:
   pnpm exec node scripts/real-app-harness/ui-automation-cli.mjs ping
   pnpm exec node scripts/real-app-harness/ui-automation-cli.mjs --wait-ready get_state
-  pnpm exec node scripts/real-app-harness/ui-automation-cli.mjs --wait-ready capture_screenshot '{\"path\":\"/tmp/attn-shot.png\"}'
+  pnpm exec node scripts/real-app-harness/ui-automation-cli.mjs --wait-ready capture_screenshot_data
 `);
 }
 
