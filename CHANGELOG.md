@@ -21,12 +21,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Range-Based Native Pane Stability Checks**: Add optional before/after tolerance checks for pane paint coverage so split and relaunch scenarios can detect material regressions without requiring exact pixel equality between screenshots.
 - **Remote Relaunch Pane Stability Coverage**: Extend `TR-502` so the restored main pane and original utility pane are checked for both absolute native paint health and acceptable pre/post relaunch drift, not just visibility and typing.
 - **Initial Tiered Scenarios**: Add three first-pass scenario scripts for review: local Claude split-from-main (`TR-101`), local Claude split-from-utility (`TR-102`), and remote relaunch split persistence (`TR-502`).
+- **Pure-Node Native Pane Fixtures**: The native pane screenshot analyzer, fixture tests, and demo generator now use in-repo PNG processing instead of a host-local Pillow dependency, so the packaged-app harness and its pixel assertions run consistently on a clean machine.
 
 ### Fixed
 - **Relaunch Terminal Bootstrap Geometry**: Terminals no longer declare themselves ready from the mount-time font-size effect before the real container measurement arrives, so restored sessions avoid bootstrapping at placeholder geometries like `10x6` that could leave remote panes visually collapsed into tiny wrapped squares after app reopen.
 - **Remote Split Input Delay**: Remote utility panes no longer wait seconds before accepting visible input after the prompt appears. Startup terminal query handling now completes through the real remote worker path, and the packaged-app harness now verifies the exercised local and remote binaries instead of accidentally talking to stale daemons.
 - **Same-Direction Split Width Decay**: Repeated vertical or horizontal splits in one workspace no longer degenerate into `50/25/25` or `25/25/50` pane chains. Stored and newly created chained splits now rebalance to evenly sized siblings, so older sessions like `blubs` recover from the tiny-column layout on the next daemon snapshot.
 - **Truecolor PTY Snapshot Replay**: Attach-time screen snapshots now preserve packed RGB terminal colors when re-emitting visible-frame SGR, so Codex-style truecolor output no longer replays as mostly monochrome after remounts or app relaunches.
+- **`TR-101` Harness Validity**: The local Claude split-from-main packaged-app scenario now runs against the rebuilt automation-enabled app, carries visible-row instrumentation through the live bridge, and treats split-time text reflow as allowed while still failing true paint-collapse regressions.
 
 ## [2026-04-07]
 

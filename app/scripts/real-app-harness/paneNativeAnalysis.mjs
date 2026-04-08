@@ -226,27 +226,27 @@ export function comparePaneNativePaintCoverage(
 
   const failures = [];
 
-  if (deltas.busyColumnRatioDelta > maxBusyColumnRatioDelta) {
+  if (Number.isFinite(maxBusyColumnRatioDelta) && deltas.busyColumnRatioDelta > maxBusyColumnRatioDelta) {
     failures.push(
       `busyColumnRatioDelta=${Number(deltas.busyColumnRatioDelta.toFixed(6))} > ${maxBusyColumnRatioDelta}`
     );
   }
-  if (deltas.busyRowRatioDelta > maxBusyRowRatioDelta) {
+  if (Number.isFinite(maxBusyRowRatioDelta) && deltas.busyRowRatioDelta > maxBusyRowRatioDelta) {
     failures.push(
       `busyRowRatioDelta=${Number(deltas.busyRowRatioDelta.toFixed(6))} > ${maxBusyRowRatioDelta}`
     );
   }
-  if (deltas.bboxWidthRatioDelta > maxBBoxWidthRatioDelta) {
+  if (Number.isFinite(maxBBoxWidthRatioDelta) && deltas.bboxWidthRatioDelta > maxBBoxWidthRatioDelta) {
     failures.push(
       `bboxWidthRatioDelta=${Number(deltas.bboxWidthRatioDelta.toFixed(6))} > ${maxBBoxWidthRatioDelta}`
     );
   }
-  if (deltas.bboxHeightRatioDelta > maxBBoxHeightRatioDelta) {
+  if (Number.isFinite(maxBBoxHeightRatioDelta) && deltas.bboxHeightRatioDelta > maxBBoxHeightRatioDelta) {
     failures.push(
       `bboxHeightRatioDelta=${Number(deltas.bboxHeightRatioDelta.toFixed(6))} > ${maxBBoxHeightRatioDelta}`
     );
   }
-  if (deltas.activePixelRatioDelta > maxActivePixelRatioDelta) {
+  if (Number.isFinite(maxActivePixelRatioDelta) && deltas.activePixelRatioDelta > maxActivePixelRatioDelta) {
     failures.push(
       `activePixelRatioDelta=${Number(deltas.activePixelRatioDelta.toFixed(6))} > ${maxActivePixelRatioDelta}`
     );

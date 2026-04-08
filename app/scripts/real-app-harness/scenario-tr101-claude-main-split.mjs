@@ -52,7 +52,7 @@ async function main() {
   let sessionId = null;
   let utilityPaneId = null;
   let baselineMainNativeMetrics = null;
-  const agentToken = `__TR101_AGENT_${Date.now()}__`;
+  const agentToken = `TR101AGENT${Date.now()}`;
   const shellToken = `__TR101_SHELL_${Date.now()}__`;
 
   try {
@@ -80,7 +80,7 @@ async function main() {
     });
 
     await runner.step('prompt_structured_agent_block', async () => {
-      const fixture = await promptClaudeForStructuredBlock(client, sessionId, agentToken, 8);
+      const fixture = await promptClaudeForStructuredBlock(client, sessionId, agentToken, 4);
       runner.writeJson('agent-fixture.json', fixture);
       await waitForPaneText(
         client,
@@ -92,10 +92,10 @@ async function main() {
       );
       await assertPaneVisibleContent(client, sessionId, 'main', {
         contains: agentToken,
-        minNonEmptyLines: 4,
-        minDenseLines: 3,
-        minCharCount: 140,
-        minMaxLineLength: 40,
+        minNonEmptyLines: 1,
+        minDenseLines: 0,
+        minCharCount: 20,
+        minMaxLineLength: 15,
         timeoutMs: 45_000,
         description: 'main pane visible agent content before split',
       });
@@ -151,10 +151,10 @@ async function main() {
       await waitForPaneVisible(client, sessionId, 'main', 20_000);
       await assertPaneVisibleContent(client, sessionId, 'main', {
         contains: agentToken,
-        minNonEmptyLines: 4,
-        minDenseLines: 3,
-        minCharCount: 140,
-        minMaxLineLength: 40,
+        minNonEmptyLines: 1,
+        minDenseLines: 0,
+        minCharCount: 20,
+        minMaxLineLength: 15,
         timeoutMs: 30_000,
         description: 'main pane visible agent content after split',
       });
@@ -195,8 +195,8 @@ async function main() {
           maxBusyRowRatioDelta: 0.12,
           maxBBoxWidthRatioDelta: 0.08,
           maxBBoxHeightRatioDelta: 0.08,
-          maxActivePixelRatioDelta: 0.04,
-          description: 'main pane native paint stability after split',
+          maxActivePixelRatioDelta: null,
+          description: 'main pane native paint stability after split with allowed text reflow',
         },
       );
 

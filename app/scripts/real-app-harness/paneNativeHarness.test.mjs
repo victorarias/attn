@@ -1,27 +1,22 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   analyzePanePixelCoverage,
   comparePaneNativePaintCoverage,
   evaluatePaneNativePaintCoverage,
-} from '../../scripts/real-app-harness/paneNativeAnalysis.mjs';
-import { analyzePngCropCoverage } from '../../scripts/real-app-harness/paneNativeMetrics.mjs';
+} from './paneNativeAnalysis.mjs';
+import { analyzePngCropCoverage } from './paneNativeMetrics.mjs';
+import { writeFixturePng } from './pngFixtureUtils.mjs';
 
-const createdDirs: string[] = [];
+const createdDirs = [];
 
-function rgba(r: number, g: number, b: number, a = 255): [number, number, number, number] {
+function rgba(r, g, b, a = 255) {
   return [r, g, b, a];
 }
 
-function buildImage(
-  width: number,
-  height: number,
-  background: [number, number, number, number],
-  painter?: (x: number, y: number) => [number, number, number, number],
-) {
+function buildImage(width, height, background, painter) {
   const data = new Uint8Array(width * height * 4);
 
   for (let y = 0; y < height; y += 1) {
@@ -44,34 +39,8 @@ function makeTempDir() {
   return dir;
 }
 
-function writeFixtureImage(filePath: string, fixture: {
-  width: number;
-  height: number;
-  background: [number, number, number, number];
-  rects: Array<{ x: number; y: number; width: number; height: number; fill: [number, number, number, number] }>;
-}) {
-  const script = `
-import json
-import sys
-from PIL import Image, ImageDraw
-
-payload = json.loads(sys.argv[1])
-image = Image.new("RGBA", (payload["width"], payload["height"]), tuple(payload["background"]))
-draw = ImageDraw.Draw(image)
-
-for rect in payload.get("rects", []):
-    draw.rectangle(
-        [rect["x"], rect["y"], rect["x"] + rect["width"] - 1, rect["y"] + rect["height"] - 1],
-        fill=tuple(rect["fill"]),
-    )
-
-image.save(payload["filePath"])
-`;
-
-  execFileSync('python3', ['-c', script, JSON.stringify({
-    ...fixture,
-    filePath,
-  })]);
+function writeFixtureImage(filePath, fixture) {
+  writeFixturePng(filePath, fixture);
 }
 
 afterEach(() => {
@@ -242,7 +211,7 @@ describe('pane native analysis', () => {
     const common = {
       width: 420,
       height: 260,
-      background: [32, 32, 32, 255] as [number, number, number, number],
+      background: [32, 32, 32, 255],
     };
 
     writeFixtureImage(basePath, {
@@ -297,7 +266,7 @@ describe('pane native analysis', () => {
     const common = {
       width: 420,
       height: 260,
-      background: [32, 32, 32, 255] as [number, number, number, number],
+      background: [32, 32, 32, 255],
     };
 
     writeFixtureImage(basePath, {
@@ -339,5 +308,41 @@ describe('pane native analysis', () => {
     });
     expect(comparison.ok).toBe(false);
     expect(comparison.failures.length).toBeGreaterThan(0);
+  });
+
+  it('allows callers to ignore selected delta metrics', () => {
+    const baseline = {
+      busyColumnRatio: 0.9,
+      busyRowRatio: 0.4,
+      bboxWidthRatio: 1,
+      bboxHeightRatio: 1,
+      activePixelRatio: 0.16,
+    };
+    const candidate = {
+      busyColumnRatio: 0.86,
+      busyRowRatio: 0.36,
+      bboxWidthRatio: 0.96,
+      bboxHeightRatio: 0.96,
+      activePixelRatio: 0.07,
+    };
+
+    const strict = comparePaneNativePaintCoverage(baseline, candidate, {
+      maxBusyColumnRatioDelta: 0.08,
+      maxBusyRowRatioDelta: 0.08,
+      maxBBoxWidthRatioDelta: 0.08,
+      maxBBoxHeightRatioDelta: 0.08,
+      maxActivePixelRatioDelta: 0.04,
+    });
+    expect(strict.ok).toBe(false);
+    expect(strict.failures.some((failure) => failure.includes('activePixelRatioDelta'))).toBe(true);
+
+    const reflowAllowed = comparePaneNativePaintCoverage(baseline, candidate, {
+      maxBusyColumnRatioDelta: 0.08,
+      maxBusyRowRatioDelta: 0.08,
+      maxBBoxWidthRatioDelta: 0.08,
+      maxBBoxHeightRatioDelta: 0.08,
+      maxActivePixelRatioDelta: null,
+    });
+    expect(reflowAllowed.ok).toBe(true);
   });
 });

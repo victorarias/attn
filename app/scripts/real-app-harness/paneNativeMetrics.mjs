@@ -1,11 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { PNG } from 'pngjs';
 import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
 import { analyzePanePixelCoverage } from './paneNativeAnalysis.mjs';
-
-const execFileAsync = promisify(execFile);
 
 function clampRect(value, max) {
   if (!Number.isFinite(value)) {
@@ -42,78 +39,51 @@ function resolveTargetMetrics(state, target) {
   };
 }
 
-async function runPythonJson(script, payload) {
-  const { stdout, stderr } = await execFileAsync('python3', ['-c', script, JSON.stringify(payload)], {
-    timeout: 20_000,
-    maxBuffer: 16 * 1024 * 1024,
-  });
-
-  if (stderr?.trim()) {
-    throw new Error(stderr.trim());
-  }
-
-  return JSON.parse(stdout);
-}
-
 async function readImageMetadata(imagePath) {
-  const script = `
-import json
-import sys
-from PIL import Image
-
-payload = json.loads(sys.argv[1])
-image = Image.open(payload["imagePath"]).convert("RGBA")
-image_width, image_height = image.size
-print(json.dumps({
-    "width": image_width,
-    "height": image_height,
-}))
-`;
-
-  return runPythonJson(script, { imagePath });
+  const buffer = fs.readFileSync(imagePath);
+  const image = PNG.sync.read(buffer);
+  return {
+    width: image.width,
+    height: image.height,
+  };
 }
 
 async function extractCropPixels({ imagePath, cropPath, crop }) {
-  const script = `
-import base64
-import json
-import sys
-from PIL import Image
+  const buffer = fs.readFileSync(imagePath);
+  const image = PNG.sync.read(buffer);
+  const x = Math.max(0, Math.min(Math.round(crop.x), image.width));
+  const y = Math.max(0, Math.min(Math.round(crop.y), image.height));
+  const width = Math.max(1, Math.min(Math.round(crop.width), image.width - x));
+  const height = Math.max(1, Math.min(Math.round(crop.height), image.height - y));
+  const cropped = new PNG({ width, height });
 
-payload = json.loads(sys.argv[1])
-image = Image.open(payload["imagePath"]).convert("RGBA")
-image_width, image_height = image.size
-crop = payload["crop"]
-x = max(0, min(int(round(crop["x"])), image_width))
-y = max(0, min(int(round(crop["y"])), image_height))
-width = max(1, min(int(round(crop["width"])), image_width - x))
-height = max(1, min(int(round(crop["height"])), image_height - y))
-cropped = image.crop((x, y, x + width, y + height))
-crop_width, crop_height = cropped.size
-crop_path = payload.get("cropPath")
-if crop_path:
-    cropped.save(crop_path)
+  for (let row = 0; row < height; row += 1) {
+    for (let col = 0; col < width; col += 1) {
+      const srcOffset = ((y + row) * image.width + (x + col)) * 4;
+      const dstOffset = (row * width + col) * 4;
+      cropped.data[dstOffset] = image.data[srcOffset];
+      cropped.data[dstOffset + 1] = image.data[srcOffset + 1];
+      cropped.data[dstOffset + 2] = image.data[srcOffset + 2];
+      cropped.data[dstOffset + 3] = image.data[srcOffset + 3];
+    }
+  }
 
-raw = base64.b64encode(cropped.tobytes()).decode("ascii")
-print(json.dumps({
-    "width": crop_width,
-    "height": crop_height,
-    "pixelsBase64": raw,
-    "crop": {
-        "x": x,
-        "y": y,
-        "width": crop_width,
-        "height": crop_height,
-        "path": crop_path,
+  if (cropPath) {
+    fs.writeFileSync(cropPath, PNG.sync.write(cropped));
+  }
+
+  return {
+    width,
+    height,
+    pixelsBase64: Buffer.from(cropped.data).toString('base64'),
+    crop: {
+      x,
+      y,
+      width,
+      height,
+      path: cropPath,
     },
-}))
-`;
-
-  return runPythonJson(script, {
-    imagePath,
-    cropPath,
-    crop,
-  });
+  };
 }
 
 export async function analyzePngCropCoverage(

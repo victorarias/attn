@@ -81,6 +81,7 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "happy-dom": "^20.0.11",
+    "pngjs": "^7.0.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
     "vitest": "^4.0.15",

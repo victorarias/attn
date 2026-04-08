@@ -3,12 +3,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { analyzePngCropCoverage } from './paneNativeMetrics.mjs';
 import { comparePaneNativePaintCoverage, evaluatePaneNativePaintCoverage } from './paneNativeAnalysis.mjs';
-
-const execFileAsync = promisify(execFile);
+import { writeFixturePng } from './pngFixtureUtils.mjs';
 
 function timestampSlug() {
   return new Date().toISOString().replace(/[:.]/g, '-');
@@ -61,39 +58,7 @@ function buildFixture(name, variant = 'base') {
 }
 
 async function writeFixtureImage(filePath, fixture) {
-  const script = `
-import json
-import sys
-from PIL import Image, ImageDraw
-
-payload = json.loads(sys.argv[1])
-image = Image.new("RGBA", (payload["width"], payload["height"]), tuple(payload["background"]))
-draw = ImageDraw.Draw(image)
-
-for rect in payload.get("rects", []):
-    fill = tuple(rect["fill"])
-    x0 = rect["x"]
-    y0 = rect["y"]
-    x1 = rect["x"] + rect["width"] - 1
-    y1 = rect["y"] + rect["height"] - 1
-    draw.rectangle([x0, y0, x1, y1], fill=fill)
-    if rect.get("outline"):
-        outline_width = int(rect.get("outlineWidth", 1))
-        for offset in range(outline_width):
-            draw.rectangle(
-                [x0 - offset, y0 - offset, x1 + offset, y1 + offset],
-                outline=tuple(rect["outline"]),
-            )
-
-image.save(payload["filePath"])
-`;
-
-  await execFileAsync('python3', ['-c', script, JSON.stringify({
-    ...fixture,
-    filePath,
-  })], {
-    timeout: 20_000,
-  });
+  writeFixturePng(filePath, fixture);
 }
 
 function deltaSummary(left, right) {
