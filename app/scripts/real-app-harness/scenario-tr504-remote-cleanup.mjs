@@ -5,6 +5,7 @@ import { parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
+import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
 import {
   captureSessionArtifacts,
   waitForNewShellPane,
@@ -236,17 +237,7 @@ async function main() {
     process.exitCode = 1;
   } finally {
     if (sessionId) {
-      try {
-        observer.send({ cmd: 'kill_session', id: sessionId });
-        await observer.waitFor(() => {
-          const session = observer.getSession(sessionId);
-          return !session || session.state !== 'working' ? true : null;
-        }, `cleanup kill_session ${sessionId}`, 20_000).catch(() => {});
-        observer.unregisterSession(sessionId);
-        await observer.waitFor(() => !observer.getSession(sessionId), `cleanup unregister ${sessionId}`, 20_000).catch(() => {});
-      } catch {
-        // Best-effort cleanup only.
-      }
+      await cleanupSessionViaAppClose(client, observer, sessionId).catch(() => {});
     }
     if (endpoint?.id) {
       try {

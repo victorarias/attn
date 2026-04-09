@@ -13,10 +13,9 @@ import { registerTerminalPerfGetter } from '../utils/terminalPerf';
 import {
   DEFAULT_FONT_SIZE,
   FONT_FAMILY,
+  getInitialTerminalDimensions,
   getScaledDimensions,
   getTerminalTheme,
-  MAX_CANVAS_WIDTH,
-  measureTerminalFont,
   TERMINAL_SCROLLBACK_LINES,
   type ResolvedTheme,
 } from '../utils/terminalSizing';
@@ -31,6 +30,11 @@ import {
   subscribeTerminalRendererConfig,
   type TerminalRendererMode,
 } from '../utils/terminalRenderer';
+import {
+  planObservedTerminalResize,
+  planVisibilityFlush,
+  X_AXIS_DEBOUNCE_MS,
+} from '../utils/terminalResizeLifecycle';
 import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
 import type { TerminalPerfStartupSnapshot } from '../utils/terminalPerf';
 export type { ResolvedTheme } from '../utils/terminalSizing';
@@ -444,6 +448,32 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
     }, [logTerminal, recordDiags]);
 
+    const applyMeasuredTerminalGeometry = useCallback((
+      term: XTerm,
+      dims: { cols: number; rows: number; diagnostics: ResizeDiagnostics },
+      options: {
+        readySource: 'resize_observer' | 'font_change' | 'fit_fallback';
+        readyReason: string;
+        resizeReason: string;
+        forceRedrawReason?: string;
+      },
+    ) => {
+      if (!readyFiredRef.current) {
+        markTerminalReady(term, dims.cols, dims.rows, dims.diagnostics, options.readySource, options.readyReason);
+        return;
+      }
+
+      const sizeChanged = dims.cols !== term.cols || dims.rows !== term.rows;
+      resizeTerminal(term, dims.cols, dims.rows, options.resizeReason, dims.diagnostics);
+
+      if (!sizeChanged && options.forceRedrawReason) {
+        onResizeRef.current?.(dims.cols, dims.rows, {
+          forceRedraw: true,
+          reason: options.forceRedrawReason,
+        });
+      }
+    }, [markTerminalReady, resizeTerminal]);
+
     useImperativeHandle(ref, () => ({
       get terminal() {
         return xtermRef.current;
@@ -471,18 +501,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             container: getContainerDebugInfo(container),
           });
         }
-        if (!readyFiredRef.current) {
-          markTerminalReady(term, dims.cols, dims.rows, dims.diagnostics, 'fit_fallback', 'ready_fallback');
-          return;
-        }
-        const sizeChanged = dims.cols !== term.cols || dims.rows !== term.rows;
-        resizeTerminal(term, dims.cols, dims.rows, 'fit', dims.diagnostics);
-        if (!sizeChanged) {
-          onResizeRef.current?.(dims.cols, dims.rows, {
-            forceRedraw: true,
-            reason: 'fit_same_size',
-          });
-        }
+        applyMeasuredTerminalGeometry(term, dims, {
+          readySource: 'fit_fallback',
+          readyReason: 'ready_fallback',
+          resizeReason: 'fit',
+          forceRedrawReason: 'fit_same_size',
+        });
       },
       focus: () => {
         return focusTerminal();
@@ -501,7 +525,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           resetTerminalScrollPin(term);
         }
       },
-    }), [focusTerminal, logTerminal, markTerminalReady, resizeTerminal, typeTextViaInput]);
+    }), [applyMeasuredTerminalGeometry, focusTerminal, logTerminal, typeTextViaInput]);
 
     useEffect(() => {
       if (!containerRef.current) return;
@@ -512,26 +536,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const containerWidth = containerRef.current.offsetWidth;
       const containerHeight = containerRef.current.offsetHeight;
       const initialFontSize = fontSizeRef.current;
-      const measured = measureTerminalFont(FONT_FAMILY, initialFontSize);
-      const dpr = window.devicePixelRatio;
-
-      // Calculate initial cols/rows using same logic as getScaledDimensions
-      // but without needing the terminal reference
-      let initialCols = 80; // fallback
-      let initialRows = 24; // fallback
-
-      if (containerWidth > 0 && containerHeight > 0 && measured.charWidth > 0 && measured.charHeight > 0) {
-        const availableWidth = Math.min(containerWidth, MAX_CANVAS_WIDTH) - 14; // scrollbar
-        const availableHeight = containerHeight;
-
-        const scaledWidthAvailable = availableWidth * dpr;
-        const scaledCharWidth = measured.charWidth * dpr;
-        initialCols = Math.max(Math.floor(scaledWidthAvailable / scaledCharWidth), 1);
-
-        const scaledHeightAvailable = availableHeight * dpr;
-        const scaledCharHeight = Math.ceil(measured.charHeight * dpr);
-        initialRows = Math.max(Math.floor(scaledHeightAvailable / scaledCharHeight), 1);
-      }
+      const { cols: initialCols, rows: initialRows } = getInitialTerminalDimensions(
+        containerWidth,
+        containerHeight,
+        initialFontSize,
+      );
 
       // Create terminal with VS Code configuration
       // Source: vscode/src/vs/workbench/contrib/terminal/browser/xterm/xtermTerminal.ts constructor
@@ -856,27 +865,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       let latestDiagnostics: ResizeDiagnostics | null = null;
       let xResizeTimeout: number;
       let isVisible = true;
-      // VS Code constants
-      const START_DEBOUNCING_THRESHOLD = 200; // buffer lines
-      const X_AXIS_DEBOUNCE_MS = 100;
-
-      // Resize both dimensions immediately
-      const resizeBoth = (cols: number, rows: number) => {
+      const resizeBoth = (cols: number, rows: number, diagnostics: ResizeDiagnostics | null) => {
         lastCols = cols;
         lastRows = rows;
-        resizeTerminal(term, cols, rows, 'resize_both', latestDiagnostics);
+        resizeTerminal(term, cols, rows, 'resize_both', diagnostics);
       };
 
-      // Resize X only (debounced)
-      const resizeX = (cols: number) => {
+      const resizeX = (cols: number, diagnostics: ResizeDiagnostics | null) => {
         lastCols = cols;
-        resizeTerminal(term, cols, term.rows, 'resize_x', latestDiagnostics);
+        resizeTerminal(term, cols, term.rows, 'resize_x', diagnostics);
       };
 
-      // Resize Y only (immediate)
-      const resizeY = (rows: number) => {
+      const resizeY = (rows: number, diagnostics: ResizeDiagnostics | null) => {
         lastRows = rows;
-        resizeTerminal(term, term.cols, rows, 'resize_y', latestDiagnostics);
+        resizeTerminal(term, term.cols, rows, 'resize_y', diagnostics);
       };
 
       const handleResize = () => {
@@ -909,38 +911,47 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           });
         }
 
-        const colsChanged = cols !== lastCols;
-        const rowsChanged = rows !== lastRows;
+        const plan = planObservedTerminalResize({
+          next: {
+            cols,
+            rows,
+            diagnostics,
+          },
+          lastCols,
+          lastRows,
+          bufferLength: term.buffer.normal.length,
+          isVisible,
+          hasIdleCallback: 'requestIdleCallback' in window,
+        });
 
-        if (!colsChanged && !rowsChanged) return;
-
-        // VS Code: Immediate resize for small buffers
-        const bufferLength = term.buffer.normal.length;
-        if (bufferLength < START_DEBOUNCING_THRESHOLD) {
-          clearTimeout(xResizeTimeout);
-          resizeBoth(cols, rows);
-          return;
-        }
-
-        // VS Code: If terminal is not visible, defer to idle callback
-        if (!isVisible && 'requestIdleCallback' in window) {
-          (window as any).requestIdleCallback(() => {
-            resizeBoth(latestX, latestY);
-          });
-          return;
-        }
-
-        // VS Code split resize strategy:
-        // Y-axis is immediate (cheap), X-axis is debounced (expensive reflow)
-        if (rowsChanged) {
-          resizeY(rows);
-        }
-
-        if (colsChanged) {
-          clearTimeout(xResizeTimeout);
-          xResizeTimeout = window.setTimeout(() => {
-            resizeX(latestX);
-          }, X_AXIS_DEBOUNCE_MS);
+        switch (plan.type) {
+          case 'none':
+            return;
+          case 'resize_both':
+            clearTimeout(xResizeTimeout);
+            resizeBoth(plan.next.cols, plan.next.rows, plan.next.diagnostics);
+            return;
+          case 'idle_resize_both':
+            (window as any).requestIdleCallback(() => {
+              resizeBoth(latestX, latestY, latestDiagnostics);
+            });
+            return;
+          case 'resize_y':
+            resizeY(plan.rows, plan.diagnostics);
+            return;
+          case 'debounce_x':
+            clearTimeout(xResizeTimeout);
+            xResizeTimeout = window.setTimeout(() => {
+              resizeX(plan.cols, plan.diagnostics);
+            }, X_AXIS_DEBOUNCE_MS);
+            return;
+          case 'resize_y_then_debounce_x':
+            resizeY(plan.rows, plan.diagnostics);
+            clearTimeout(xResizeTimeout);
+            xResizeTimeout = window.setTimeout(() => {
+              resizeX(plan.cols, plan.diagnostics);
+            }, X_AXIS_DEBOUNCE_MS);
+            return;
         }
       };
 
@@ -975,7 +986,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             if (dims && dims.cols > 0 && dims.rows > 0) {
               lastCols = dims.cols;
               lastRows = dims.rows;
-              markTerminalReady(term, dims.cols, dims.rows, dims.diagnostics, 'resize_observer', 'ready');
+              applyMeasuredTerminalGeometry(term, dims, {
+                readySource: 'resize_observer',
+                readyReason: 'ready',
+                resizeReason: 'ready',
+              });
             }
           });
           return;
@@ -1018,20 +1033,35 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           if (wasHidden && readyFiredRef.current) {
             clearTimeout(xResizeTimeout);
             const container = containerRef.current;
-            if (container) {
-              const dims = getScaledDimensions(container, term, fontSizeRef.current);
-              if (dims) {
-                lastCols = dims.cols;
-                lastRows = dims.rows;
-                if (dims.cols === term.cols && dims.rows === term.rows) {
-                  onResizeRef.current?.(dims.cols, dims.rows, {
-                    forceRedraw: true,
-                    reason: 'visibility_flush_same_size',
-                  });
-                } else {
-                  resizeTerminal(term, dims.cols, dims.rows, 'visibility_flush', dims.diagnostics);
-                }
-              }
+            const dims = container ? getScaledDimensions(container, term, fontSizeRef.current) : null;
+            const plan = planVisibilityFlush({
+              wasHidden,
+              ready: readyFiredRef.current,
+              next: dims ? {
+                cols: dims.cols,
+                rows: dims.rows,
+                diagnostics: dims.diagnostics,
+              } : null,
+              currentCols: term.cols,
+              currentRows: term.rows,
+            });
+
+            if (plan.type === 'none') {
+              return;
+            }
+
+            if (dims) {
+              lastCols = dims.cols;
+              lastRows = dims.rows;
+            }
+
+            if (plan.type === 'force_redraw') {
+              onResizeRef.current?.(plan.cols, plan.rows, {
+                forceRedraw: true,
+                reason: 'visibility_flush_same_size',
+              });
+            } else {
+              resizeTerminal(term, plan.next.cols, plan.next.rows, 'visibility_flush', plan.next.diagnostics);
             }
           }
         },
@@ -1115,7 +1145,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         xtermRef.current = null;
         term.dispose();
       };
-    }, [logTerminal, markTerminalReady, resizeTerminal]);
+    }, [applyMeasuredTerminalGeometry, logTerminal, resizeTerminal]);
 
     // Handle fontSize changes after terminal is created
     useEffect(() => {
@@ -1146,15 +1176,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             container: getContainerDebugInfo(container),
           });
         }
-        recordDiags('font-change', dims.cols, dims.rows, term.cols, term.rows, dims.diagnostics);
-        term.resize(dims.cols, dims.rows);
-        onResizeRef.current?.(dims.cols, dims.rows, { reason: 'font-change' });
         if (!readyFiredRef.current) {
           startupSnapshotRef.current.fontEffectAppliedBeforeReady = true;
-          markTerminalReady(term, dims.cols, dims.rows, dims.diagnostics, 'font_change', 'font-change');
         }
+        applyMeasuredTerminalGeometry(term, dims, {
+          readySource: 'font_change',
+          readyReason: 'font-change',
+          resizeReason: 'font-change',
+        });
       }
-    }, [fontSize, markTerminalReady, recordDiags]);
+    }, [applyMeasuredTerminalGeometry, fontSize, logTerminal]);
 
     const handleCopyDebugLog = useCallback(() => {
       const log = formatResizeLog();

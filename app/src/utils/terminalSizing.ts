@@ -6,6 +6,9 @@ export type ResolvedTheme = 'dark' | 'light';
 export const FONT_FAMILY = 'Iosevka, Menlo, Monaco, "Courier New", monospace';
 export const DEFAULT_FONT_SIZE = 14;
 export const TERMINAL_SCROLLBACK_LINES = 50000;
+export const DEFAULT_TERMINAL_COLS = 80;
+export const DEFAULT_TERMINAL_ROWS = 24;
+export const TERMINAL_SCROLLBAR_WIDTH = 14;
 
 // VS Code limits canvas width to prevent performance issues with very wide terminals
 // Source: Constants.MaxCanvasWidth in terminalInstance.ts (line 103)
@@ -48,6 +51,41 @@ export function getTerminalTheme(resolvedTheme: ResolvedTheme) {
   return resolvedTheme === 'light' ? LIGHT_TERMINAL_THEME : DARK_TERMINAL_THEME;
 }
 
+interface GridDimensionInput {
+  availableWidth: number;
+  availableHeight: number;
+  charWidth: number;
+  charHeight: number;
+  dpr: number;
+  letterSpacing?: number;
+  lineHeight?: number;
+}
+
+function computeGridDimensions({
+  availableWidth,
+  availableHeight,
+  charWidth,
+  charHeight,
+  dpr,
+  letterSpacing = 0,
+  lineHeight = 1,
+}: GridDimensionInput): { cols: number; rows: number } | null {
+  if (availableWidth <= 0 || availableHeight <= 0 || charWidth <= 0 || charHeight <= 0) {
+    return null;
+  }
+
+  const scaledWidthAvailable = availableWidth * dpr;
+  const scaledCharWidth = charWidth * dpr + letterSpacing;
+  const cols = Math.max(Math.floor(scaledWidthAvailable / scaledCharWidth), 1);
+
+  const scaledHeightAvailable = availableHeight * dpr;
+  const scaledCharHeight = Math.ceil(charHeight * dpr);
+  const scaledLineHeight = Math.floor(scaledCharHeight * lineHeight);
+  const rows = Math.max(Math.floor(scaledHeightAvailable / scaledLineHeight), 1);
+
+  return { cols, rows };
+}
+
 /**
  * Measure font dimensions using DOM measurement.
  * This is VS Code's fallback when xterm renderer isn't ready.
@@ -75,6 +113,27 @@ export function measureTerminalFont(
   };
 }
 
+export function getInitialTerminalDimensions(
+  containerWidth: number,
+  containerHeight: number,
+  fontSize: number,
+  dpr = window.devicePixelRatio,
+): { cols: number; rows: number } {
+  const measured = measureTerminalFont(FONT_FAMILY, fontSize);
+  const dims = computeGridDimensions({
+    availableWidth: Math.min(containerWidth, MAX_CANVAS_WIDTH) - TERMINAL_SCROLLBAR_WIDTH,
+    availableHeight: containerHeight,
+    charWidth: measured.charWidth,
+    charHeight: measured.charHeight,
+    dpr,
+  });
+
+  return dims ?? {
+    cols: DEFAULT_TERMINAL_COLS,
+    rows: DEFAULT_TERMINAL_ROWS,
+  };
+}
+
 /**
  * Calculate terminal dimensions exactly like VS Code does.
  * Source: vscode/src/vs/workbench/contrib/terminal/browser/terminalInstance.ts
@@ -97,14 +156,13 @@ export function getScaledDimensions(
   }
 
   const xtermElement = term.element;
-  const scrollbarWidth = 14;
 
   if (xtermElement) {
     const xtermStyle = getComputedStyle(xtermElement);
-    width -= parseFloat(xtermStyle.paddingLeft || '0') + parseFloat(xtermStyle.paddingRight || '0') + scrollbarWidth;
+    width -= parseFloat(xtermStyle.paddingLeft || '0') + parseFloat(xtermStyle.paddingRight || '0') + TERMINAL_SCROLLBAR_WIDTH;
     height -= parseFloat(xtermStyle.paddingTop || '0') + parseFloat(xtermStyle.paddingBottom || '0');
   } else {
-    width -= scrollbarWidth;
+    width -= TERMINAL_SCROLLBAR_WIDTH;
   }
 
   if (width <= 0 || height <= 0) {
@@ -134,18 +192,22 @@ export function getScaledDimensions(
     return null;
   }
 
-  const scaledWidthAvailable = width * dpr;
-  const scaledCharWidth = charWidth * dpr + letterSpacing;
-  const cols = Math.max(Math.floor(scaledWidthAvailable / scaledCharWidth), 1);
-
-  const scaledHeightAvailable = height * dpr;
-  const scaledCharHeight = Math.ceil(charHeight * dpr);
-  const scaledLineHeight = Math.floor(scaledCharHeight * lineHeight);
-  const rows = Math.max(Math.floor(scaledHeightAvailable / scaledLineHeight), 1);
+  const gridDimensions = computeGridDimensions({
+    availableWidth: width,
+    availableHeight: height,
+    charWidth,
+    charHeight,
+    dpr,
+    letterSpacing,
+    lineHeight,
+  });
+  if (!gridDimensions) {
+    return null;
+  }
 
   return {
-    cols,
-    rows,
+    cols: gridDimensions.cols,
+    rows: gridDimensions.rows,
     diagnostics: {
       containerWidth,
       containerHeight,

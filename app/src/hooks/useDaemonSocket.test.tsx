@@ -42,18 +42,59 @@ class FakeWebSocket {
   }
 }
 
+async function waitForOpenSocket(): Promise<FakeWebSocket> {
+  await waitFor(() => {
+    expect(FakeWebSocket.instances.length).toBeGreaterThan(0);
+  });
+  const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+  expect(ws).toBeDefined();
+  await waitFor(() => {
+    expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+  });
+  return ws;
+}
+
 describe('useDaemonSocket PTY kill sequencing', () => {
   let originalWebSocket: typeof WebSocket;
+  let originalSetTimeout: typeof globalThis.setTimeout;
+  let originalClearTimeout: typeof globalThis.clearTimeout;
+  let pendingTimeouts: Set<ReturnType<typeof globalThis.setTimeout>>;
 
   beforeEach(() => {
     originalWebSocket = globalThis.WebSocket;
+    originalSetTimeout = globalThis.setTimeout;
+    originalClearTimeout = globalThis.clearTimeout;
+    pendingTimeouts = new Set();
     FakeWebSocket.instances = [];
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: any[]) => {
+      let timeoutId: ReturnType<typeof globalThis.setTimeout>;
+      timeoutId = originalSetTimeout((...callbackArgs: any[]) => {
+        pendingTimeouts.delete(timeoutId);
+        if (typeof handler === 'function') {
+          handler(...callbackArgs);
+        }
+      }, timeout, ...args);
+      pendingTimeouts.add(timeoutId);
+      return timeoutId;
+    }) as typeof globalThis.setTimeout;
+    globalThis.clearTimeout = ((timeoutId?: ReturnType<typeof globalThis.setTimeout>) => {
+      if (timeoutId !== undefined) {
+        pendingTimeouts.delete(timeoutId);
+      }
+      return originalClearTimeout(timeoutId);
+    }) as typeof globalThis.clearTimeout;
     vi.mocked(isTauri).mockReturnValue(true);
     vi.mocked(invoke).mockResolvedValue(true);
   });
 
   afterEach(() => {
+    for (const timeoutId of pendingTimeouts) {
+      originalClearTimeout(timeoutId);
+    }
+    pendingTimeouts.clear();
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
     globalThis.WebSocket = originalWebSocket;
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -112,13 +153,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     const runPromise = result.current.getReviewLoopRun('loop-123');
     await Promise.resolve();
@@ -173,13 +208,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     const answerPromise = result.current.answerReviewLoop('loop-123', 'interaction-1', 'Ship it');
     await Promise.resolve();
@@ -216,13 +245,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
@@ -239,7 +262,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
         expect(vi.mocked(invoke)).toHaveBeenCalledWith('restart_daemon', {
-        expected_protocol: '49',
+        expected_protocol: '50',
         prefer_local: false,
       });
     });
@@ -262,13 +285,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     const first = result.current.sendUpdateEndpoint('ep-1', { enabled: false });
     await expect(result.current.sendUpdateEndpoint('ep-2', { enabled: false })).rejects.toThrow(
@@ -325,18 +342,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '49',
+        protocol_version: '50',
         sessions: [],
         workspaces: [{
           session_id: 'sess-remote',
@@ -369,7 +380,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1' });
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'relaunch_restore' });
     });
 
     const sent = ws.sent.map((entry) => JSON.parse(entry));
@@ -407,18 +418,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '49',
+        protocol_version: '50',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -449,7 +454,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'relaunch_restore' });
     });
 
     act(() => {
@@ -492,18 +497,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '49',
+        protocol_version: '50',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -529,6 +528,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         rows: 46,
         shell: false,
         reason: 'remount_attach',
+        policy: 'same_app_remount',
       },
       forceResizeBeforeAttach: true,
     });
@@ -536,7 +536,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
       expect(sent).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'same_app_remount' });
     });
 
     const sent = ws.sent.map((entry) => JSON.parse(entry));
@@ -580,18 +580,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '49',
+        protocol_version: '50',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -617,6 +611,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         rows: 46,
         shell: false,
         reason: 'remount_attach',
+        policy: 'same_app_remount',
       },
       forceResizeBeforeAttach: true,
     });
@@ -624,7 +619,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
       expect(sent).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'same_app_remount' });
     });
 
     act(() => {
@@ -676,18 +671,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '49',
+        protocol_version: '50',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -713,13 +702,14 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         rows: 46,
         shell: false,
         reason: 'remount_attach',
+        policy: 'same_app_remount',
       },
       forceResizeBeforeAttach: true,
     });
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'same_app_remount' });
     });
 
     act(() => {
@@ -771,18 +761,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '49',
+        protocol_version: '50',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -813,7 +797,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'relaunch_restore' });
     });
 
     act(() => {
@@ -865,18 +849,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '49',
+        protocol_version: '50',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -907,7 +885,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'relaunch_restore' });
     });
 
     act(() => {
@@ -954,18 +932,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '49',
+        protocol_version: '50',
         sessions: [],
         workspaces: [{
           session_id: 'sess-remote',
@@ -998,7 +970,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1' });
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'relaunch_restore' });
     });
 
     act(() => {
@@ -1036,6 +1008,8 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         .map((entry) => JSON.parse(entry))
         .filter((entry) => entry.cmd === 'attach_session' && entry.id === 'runtime-shell-1');
       expect(attachCommands).toHaveLength(2);
+      expect(attachCommands).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'relaunch_restore' });
+      expect(attachCommands).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'fresh_spawn' });
     });
 
     act(() => {
@@ -1067,18 +1041,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '49',
+        protocol_version: '50',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1131,18 +1099,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       }),
     );
 
-    await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
-    });
-    const ws = FakeWebSocket.instances[0];
-    await waitFor(() => {
-      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
-    });
+    const ws = await waitForOpenSocket();
 
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '49',
+        protocol_version: '50',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',
@@ -1205,4 +1167,5 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     unmount();
   });
+
 });

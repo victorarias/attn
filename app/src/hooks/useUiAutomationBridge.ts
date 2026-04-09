@@ -41,7 +41,7 @@ interface UseUiAutomationBridgeArgs {
   getActivePaneIdForSession: (session: Session | undefined | null) => string;
   createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string) => Promise<string>;
   selectSession: (sessionId: string) => void;
-  closeSession: (sessionId: string) => void;
+  closeSession: (sessionId: string) => Promise<void>;
   reloadSession?: (sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
   splitPane: (sessionId: string, targetPaneId: string, direction: TerminalSplitDirection) => Promise<unknown>;
   closePane: (sessionId: string, paneId: string) => Promise<unknown>;
@@ -1179,7 +1179,7 @@ export function useUiAutomationBridge({
         if (!sessionId) {
           throw new Error('close_session requires sessionId');
         }
-        closeSession(sessionId);
+        await closeSession(sessionId);
         await settleUi();
         return { sessionId };
       }

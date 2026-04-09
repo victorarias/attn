@@ -615,11 +615,52 @@ describe('usePaneRuntimeBinder', () => {
         rows: 41,
         shell: false,
         reason: 'ready',
+        policy: 'same_app_remount',
       },
       forceResizeBeforeAttach: true,
     });
     expect(mockPtyResize).not.toHaveBeenCalled();
     expect(mockPtySpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not hydrate when a pane is rewired without first detaching', async () => {
+    vi.useFakeTimers();
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: false,
+        }),
+      },
+    ], 'pane-1', eventRouter));
+
+    const firstXterm = createMockXterm();
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(firstXterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    mockPtyAttach.mockClear();
+    mockPtyResize.mockClear();
+
+    const rewiredXterm = createMockXterm();
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(rewiredXterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    expect(mockPtyAttach).not.toHaveBeenCalled();
+    expect(mockPtyResize).not.toHaveBeenCalled();
   });
 
   it('hydrates a remounted xterm even when terminal ready is missed', async () => {
@@ -685,6 +726,7 @@ describe('usePaneRuntimeBinder', () => {
         rows: 41,
         shell: false,
         reason: 'init_hydrate',
+        policy: 'same_app_remount',
       },
       forceResizeBeforeAttach: true,
     });

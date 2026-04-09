@@ -1575,6 +1575,107 @@ func TestDaemon_HandleAttachSession_PrefersBoundedRawReplayForStoredAgentSession
 	}
 }
 
+func TestDaemon_HandleAttachSession_PrefersFreshScreenSnapshotForStoredClaudeSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+	raw := bytes.Repeat([]byte("claude-replay-chunk-"), 64)
+	backend.SetAttachInfo(ptybackend.AttachInfo{
+		Running:             true,
+		Scrollback:          raw,
+		ScreenSnapshot:      []byte("\x1b[2Jclaude snapshot"),
+		ScreenSnapshotFresh: true,
+		ScreenCols:          58,
+		ScreenRows:          46,
+	})
+	d.ptyBackend = backend
+	d.store.Add(&protocol.Session{
+		ID:             "sess-1",
+		Label:          "attn",
+		Agent:          protocol.SessionAgentClaude,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     time.Now().UTC().Format(time.RFC3339),
+		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		LastSeen:       time.Now().UTC().Format(time.RFC3339),
+	})
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.AttachResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode attach_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
+		}
+		if result.Scrollback != nil {
+			t.Fatal("expected Claude relaunch attach to omit raw replay when a fresh screen snapshot is available")
+		}
+		if protocol.Deref(result.ScreenSnapshot) == "" {
+			t.Fatal("expected Claude relaunch attach to keep the fresh screen snapshot")
+		}
+		if !protocol.Deref(result.ScreenSnapshotFresh) {
+			t.Fatal("expected Claude relaunch attach screen snapshot to be marked fresh")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for attach_result")
+	}
+}
+
+func TestDaemon_HandleAttachSession_SkipsReplayForSameAppRemountPolicy(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+	backend.SetAttachInfo(ptybackend.AttachInfo{
+		Running:             true,
+		Scrollback:          []byte("hello from replay"),
+		ScrollbackTruncated: true,
+		ScreenSnapshot:      []byte("\x1b[2Jsnapshot"),
+		ScreenSnapshotFresh: true,
+		ScreenCols:          58,
+		ScreenRows:          46,
+	})
+	d.ptyBackend = backend
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{
+		ID:           "sess-1",
+		AttachPolicy: protocol.Ptr(protocol.AttachPolicySameAppRemount),
+	})
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.AttachResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode attach_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
+		}
+		if result.Scrollback != nil {
+			t.Fatal("expected same-app remount attach to omit replay scrollback")
+		}
+		if result.ScreenSnapshot != nil {
+			t.Fatal("expected same-app remount attach to omit replay screen snapshot")
+		}
+		if protocol.Deref(result.ScrollbackTruncated) {
+			t.Fatal("expected same-app remount attach to clear replay truncation flag")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for attach_result")
+	}
+}
+
 func TestDaemon_HandleAttachSession_DerivesScreenSnapshotWhenLiveSnapshotMissing(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeAttachBackend{}

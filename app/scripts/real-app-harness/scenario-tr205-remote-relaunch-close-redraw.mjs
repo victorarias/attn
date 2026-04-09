@@ -4,6 +4,7 @@ import { parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
+import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
 import {
   assertPaneCoverage,
   assertPaneNativePaintCoverage,
@@ -85,6 +86,30 @@ function buildTranscriptAnchorPrompt(token, lineCount = 4) {
   return Array.from({ length: lineCount }, (_, index) =>
     `${token} line ${index + 1} width repaint recovery anchor payload ${index + 1} for relaunch close redraw verification`
   ).join('\n');
+}
+
+function recoveredHeaderOptionsForRemoteAgent(agent, description = 'remote main pane header after relaunch close') {
+  if (String(agent || '').toLowerCase() === 'claude') {
+    return {
+      contains: 'Claude Code',
+      minNonEmptyLines: 4,
+      minDenseLines: 1,
+      minCharCount: 120,
+      minMaxLineLength: 18,
+      timeoutMs: 20_000,
+      description,
+    };
+  }
+  return {
+    contains: 'OpenAI Codex',
+    allowWrappedContains: true,
+    minNonEmptyLines: 2,
+    minDenseLines: 0,
+    minCharCount: 20,
+    minMaxLineLength: 12,
+    timeoutMs: 20_000,
+    description,
+  };
 }
 
 async function seedTranscriptAnchor(client, sessionId, anchorPrompt, anchorToken) {
@@ -177,6 +202,8 @@ async function closePaneAndAssertRecovery({
   minAnchorMatches = 2,
   enforceNativeStability = true,
   requiredVisibleText = null,
+  preserveVisibleContent = true,
+  headerRecoveryOptions = null,
 }) {
   await client.request('select_session', { sessionId });
   await waitForPaneVisible(client, sessionId, 'main', 20_000);
@@ -199,19 +226,24 @@ async function closePaneAndAssertRecovery({
     20_000,
   );
   await scrollPaneToTop(client, sessionId, 'main');
-  await assertPaneVisibleContentPreserved(
-    client,
-    sessionId,
-    'main',
-    baselineVisibleContent,
-    {
-      minNonEmptyLineRatio,
-      minCharCountRatio,
-      minAnchorMatches,
-      timeoutMs: 20_000,
-      description: `${label} main content recovery`,
-    },
-  );
+  if (headerRecoveryOptions) {
+    await assertPaneVisibleContent(client, sessionId, 'main', headerRecoveryOptions);
+  }
+  if (preserveVisibleContent) {
+    await assertPaneVisibleContentPreserved(
+      client,
+      sessionId,
+      'main',
+      baselineVisibleContent,
+      {
+        minNonEmptyLineRatio,
+        minCharCountRatio,
+        minAnchorMatches,
+        timeoutMs: 20_000,
+        description: `${label} main content recovery`,
+      },
+    );
+  }
   if (requiredVisibleText) {
     await assertPaneVisibleContent(client, sessionId, 'main', {
       contains: requiredVisibleText,
@@ -578,6 +610,11 @@ async function main() {
         minAnchorMatches: 3,
         enforceNativeStability: true,
         requiredVisibleText: transcriptAnchorToken,
+        preserveVisibleContent: options.remoteAgent !== 'claude',
+        headerRecoveryOptions: recoveredHeaderOptionsForRemoteAgent(
+          options.remoteAgent,
+          '08-after-closing-initial-split main header recovery',
+        ),
       });
       await captureSessionArtifacts(client, runner.runDir, '08-after-closing-initial-split', sessionId);
     });
@@ -633,6 +670,18 @@ async function main() {
     console.error(summary.error);
     process.exitCode = 1;
   } finally {
+    if (sessionId) {
+      await cleanupSessionViaAppClose(client, observer, sessionId).catch(() => {});
+    }
+    if (endpoint?.id) {
+      try {
+        observer.removeEndpoint(endpoint.id);
+        await observer.waitFor(() => !observer.getEndpoint(endpoint.id), `cleanup remove endpoint ${endpoint.id}`, 20_000).catch(() => {});
+      } catch {
+        // Best-effort cleanup only.
+      }
+    }
+    await client.quitApp().catch(() => {});
     await observer.close().catch(() => {});
   }
 }

@@ -29,7 +29,13 @@ export interface PtyAttachArgs {
   rows: number;
   shell?: boolean;
   reason?: string;
+  policy?: PtyAttachPolicy;
 }
+
+export type PtyAttachPolicy =
+  | 'fresh_spawn'
+  | 'relaunch_restore'
+  | 'same_app_remount';
 
 export type PtyEventPayload =
   | { event: 'data'; id: string; data: string; seq?: number }

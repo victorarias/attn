@@ -43,7 +43,16 @@ func shouldPreferAgentRawReplay(session *protocol.Session) bool {
 		return false
 	}
 	agent := strings.TrimSpace(strings.ToLower(string(session.Agent)))
-	return agent != "" && agent != protocol.AgentShellValue
+	return agent == string(protocol.SessionAgentCodex)
+}
+
+func shouldIncludeAttachReplay(policy protocol.AttachPolicy) bool {
+	switch policy {
+	case protocol.AttachPolicySameAppRemount, protocol.AttachPolicyFreshSpawn:
+		return false
+	default:
+		return true
+	}
 }
 
 func limitReplayTail(data []byte, limit int) ([]byte, bool) {
@@ -53,7 +62,7 @@ func limitReplayTail(data []byte, limit int) ([]byte, bool) {
 	return data[len(data)-limit:], true
 }
 
-func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Session) attachReplayPayload {
+func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Session, policy protocol.AttachPolicy) attachReplayPayload {
 	payload := attachReplayPayload{
 		scrollbackTruncated: info.ScrollbackTruncated,
 		screenSnapshot:      info.ScreenSnapshot,
@@ -63,6 +72,18 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 		screenCursorY:       info.ScreenCursorY,
 		screenCursorVisible: info.ScreenCursorVisible,
 		screenSnapshotFresh: info.ScreenSnapshotFresh,
+	}
+
+	if !shouldIncludeAttachReplay(policy) {
+		payload.scrollbackTruncated = false
+		payload.screenSnapshot = nil
+		payload.screenCols = 0
+		payload.screenRows = 0
+		payload.screenCursorX = 0
+		payload.screenCursorY = 0
+		payload.screenCursorVisible = false
+		payload.screenSnapshotFresh = false
+		return payload
 	}
 
 	if shouldPreferAgentRawReplay(session) && len(info.Scrollback) > 0 {
@@ -315,10 +336,11 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		})
 		return
 	}
-	replay := buildAttachReplayPayload(info, d.store.Get(msg.ID))
+	replay := buildAttachReplayPayload(info, d.store.Get(msg.ID), protocol.Deref(msg.AttachPolicy))
 	d.logf(
-		"PTY attach result: id=%s running=%v last_seq=%d scrollback_bytes=%d replay_bytes=%d snapshot_bytes=%d snapshot_fresh=%v derived_snapshot=%v size=%dx%d screen=%dx%d",
+		"PTY attach result: id=%s policy=%s running=%v last_seq=%d scrollback_bytes=%d replay_bytes=%d snapshot_bytes=%d snapshot_fresh=%v derived_snapshot=%v size=%dx%d screen=%dx%d",
 		msg.ID,
+		protocol.Deref(msg.AttachPolicy),
 		info.Running,
 		info.LastSeq,
 		len(info.Scrollback),

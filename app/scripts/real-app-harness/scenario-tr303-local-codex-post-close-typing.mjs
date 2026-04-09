@@ -4,6 +4,7 @@ import { parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
+import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
 import {
   captureSessionArtifacts,
   waitForNewShellPane,
@@ -210,10 +211,13 @@ async function main() {
     process.exitCode = 1;
   } finally {
     try {
-      await withTimeout(observer.disconnect(), 5_000);
+      await withTimeout(cleanupSessionViaAppClose(client, observer, sessionId), 15_000);
     } catch {}
     try {
       await withTimeout(client.quitApp(), 5_000);
+    } catch {}
+    try {
+      await withTimeout(observer.disconnect(), 5_000);
     } catch {}
   }
 }

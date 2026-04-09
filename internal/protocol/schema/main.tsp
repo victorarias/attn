@@ -46,6 +46,12 @@ enum HeatState {
   hot,
 }
 
+enum AttachPolicy {
+  fresh_spawn,
+  relaunch_restore,
+  same_app_remount,
+}
+
 enum ReviewLoopStatus {
   running,
   waiting_for_agent_advance,
@@ -687,6 +693,7 @@ model SpawnSessionMessage {
 model AttachSessionMessage {
   cmd: "attach_session";
   id: string;
+  attach_policy?: AttachPolicy;
 }
 
 model DetachSessionMessage {

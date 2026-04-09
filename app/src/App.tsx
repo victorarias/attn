@@ -1289,7 +1289,7 @@ function AppContent({
   }, []);
 
   const handleCloseSession = useCallback(
-    (id: string) => {
+    async (id: string) => {
       // Check if session is a worktree and last in directory
       const session = enrichedLocalSessions.find(s => s.id === id);
       if (session?.isWorktree && session.cwd) {
@@ -1305,11 +1305,12 @@ function AppContent({
       // Unregister from daemon by matching session ID
       const localDaemonSession = daemonSessions.find(ds => ds.id === session?.id);
       if (localDaemonSession) {
-        sendUnregisterSession(localDaemonSession.id);
+        await sendUnregisterSession(localDaemonSession.id);
+      } else {
+        closeSession(id);
       }
 
       removeWorkspaceRef(id);
-      closeSession(id);
     },
     [alwaysKeepWorktrees, closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession, showError]
   );
@@ -1328,7 +1329,7 @@ function AppContent({
       });
       return;
     }
-    handleCloseSession(id);
+    void handleCloseSession(id);
   }, [handleCloseSession, sessions]);
 
   const handleCancelSessionClose = useCallback(() => {
@@ -1341,7 +1342,7 @@ function AppContent({
     }
     const sessionID = pendingSessionClose.id;
     setPendingSessionClose(null);
-    handleCloseSession(sessionID);
+    void handleCloseSession(sessionID);
   }, [handleCloseSession, pendingSessionClose]);
 
   const handleSelectSession = useCallback(

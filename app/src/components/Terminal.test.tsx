@@ -274,6 +274,7 @@ describe('Terminal', () => {
     });
 
     const term = mockState.terminals[0];
+    (term as any)._core._renderService.dimensions.css.cell = { width: 10, height: 20 };
     const baselineResizeCalls = term.resizeMock.mock.calls.length;
 
     rerender(
@@ -287,9 +288,85 @@ describe('Terminal', () => {
     );
 
     expect(term.resizeMock.mock.calls.length).toBe(baselineResizeCalls + 1);
+    expect(onResize).toHaveBeenLastCalledWith(98, 45, {
+      reason: 'font-change',
+    });
+  });
+
+  it('skips a font-change PTY resize when the computed geometry is unchanged', () => {
+    const handleRef = createRef<TerminalHandle>();
+    const onResize = vi.fn();
+
+    const { rerender } = render(
+      <Terminal
+        ref={handleRef}
+        fontSize={14}
+        resolvedTheme="dark"
+        tuiCursor
+        onResize={onResize}
+      />
+    );
+
+    act(() => {
+      mockState.resizeObservers[0].trigger(1000, 900);
+    });
+
+    const term = mockState.terminals[0];
+    const baselineResizeCalls = term.resizeMock.mock.calls.length;
+    const baselineOnResizeCalls = onResize.mock.calls.length;
+
+    rerender(
+      <Terminal
+        ref={handleRef}
+        fontSize={16}
+        resolvedTheme="dark"
+        tuiCursor
+        onResize={onResize}
+      />
+    );
+
+    expect(term.resizeMock.mock.calls.length).toBe(baselineResizeCalls);
+    expect(onResize.mock.calls.length).toBe(baselineOnResizeCalls);
+  });
+
+  it('does not double-resize when font size changes before readiness', () => {
+    const handleRef = createRef<TerminalHandle>();
+    const onResize = vi.fn();
+
+    const { rerender } = render(
+      <Terminal
+        ref={handleRef}
+        fontSize={14}
+        resolvedTheme="dark"
+        tuiCursor
+        onResize={onResize}
+      />
+    );
+
+    const term = mockState.terminals[0];
+
+    rerender(
+      <Terminal
+        ref={handleRef}
+        fontSize={16}
+        resolvedTheme="dark"
+        tuiCursor
+        onResize={onResize}
+      />
+    );
+
+    expect(term.resizeMock).toHaveBeenCalledTimes(1);
+    expect(onResize).toHaveBeenCalledTimes(1);
     expect(onResize).toHaveBeenLastCalledWith(109, 50, {
       reason: 'font-change',
     });
+
+    act(() => {
+      mockState.resizeObservers[0].trigger(1000, 900);
+    });
+
+    expect(term.resizeMock).toHaveBeenCalledTimes(1);
+    expect(onResize).toHaveBeenCalledTimes(1);
   });
 
   it('uses fit as a readiness fallback when ResizeObserver ready is missed', () => {
@@ -318,6 +395,30 @@ describe('Terminal', () => {
     expect(onResize).toHaveBeenCalledTimes(1);
     expect(onResize).toHaveBeenLastCalledWith(109, 50, {
       reason: 'ready_fallback',
+    });
+  });
+
+  it('forces a redraw when visibility returns without a geometry change', () => {
+    const onResize = vi.fn();
+
+    render(
+      <Terminal
+        fontSize={14}
+        resolvedTheme="dark"
+        tuiCursor
+        onResize={onResize}
+      />
+    );
+
+    act(() => {
+      mockState.resizeObservers[0].trigger(1000, 900);
+      mockState.intersectionObservers[0].trigger(false);
+      mockState.intersectionObservers[0].trigger(true);
+    });
+
+    expect(onResize).toHaveBeenLastCalledWith(109, 50, {
+      forceRedraw: true,
+      reason: 'visibility_flush_same_size',
     });
   });
 

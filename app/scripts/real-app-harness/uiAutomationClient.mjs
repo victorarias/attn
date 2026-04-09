@@ -22,6 +22,19 @@ function defaultManifestPath() {
   );
 }
 
+function isTransientManifestReadError(error) {
+  if (!error) {
+    return false;
+  }
+  if (error instanceof SyntaxError) {
+    return true;
+  }
+  if (typeof error === 'object' && error && 'code' in error) {
+    return error.code === 'ENOENT';
+  }
+  return false;
+}
+
 export class UiAutomationClient {
   constructor({
     appPath = path.join(os.homedir(), 'Applications', 'attn.app'),
@@ -136,15 +149,26 @@ export class UiAutomationClient {
   }
 
   async request(action, payload = {}, options = {}) {
-    const manifest = this.readManifest();
     const requestId = `ui-automation-client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const timeoutMs = options.timeoutMs ?? 35_000;
+    let manifest;
+
+    try {
+      manifest = this.readManifest();
+    } catch (error) {
+      if (!isTransientManifestReadError(error)) {
+        throw error;
+      }
+      await this.waitForManifest(Math.min(5_000, timeoutMs));
+      manifest = this.readManifest();
+    }
+
     const request = {
       id: requestId,
       token: manifest.token,
       action,
       payload,
     };
-    const timeoutMs = options.timeoutMs ?? 35_000;
 
     return new Promise((resolve, reject) => {
       const socket = net.createConnection({
@@ -222,20 +246,23 @@ export class UiAutomationClient {
 
     while (Date.now() - startedAt < timeoutMs) {
       try {
-        const result = await this.request(action, {}, { timeoutMs: Math.min(15_000, timeoutMs) });
+        const requestTimeoutMs = Math.min(15_000, timeoutMs);
+        const state = await this.request('get_state', {}, { timeoutMs: requestTimeoutMs });
         if (
-          action === 'get_state' &&
-          result &&
-          typeof result === 'object' &&
-          'daemonReady' in result &&
-          result.daemonReady === false
+          state &&
+          typeof state === 'object' &&
+          'daemonReady' in state &&
+          state.daemonReady === false
         ) {
-          const detail = typeof result.connectionError === 'string' && result.connectionError
-            ? `: ${result.connectionError}`
+          const detail = typeof state.connectionError === 'string' && state.connectionError
+            ? `: ${state.connectionError}`
             : '';
           throw new Error(`daemon not ready${detail}`);
         }
-        return result;
+        if (action === 'get_state') {
+          return state;
+        }
+        return await this.request(action, {}, { timeoutMs: requestTimeoutMs });
       } catch (error) {
         lastError = error;
       }

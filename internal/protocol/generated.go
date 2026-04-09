@@ -69,6 +69,12 @@ type ApprovePRMessage struct {
 	ID string `json:"id"`
 }
 
+type AttachPolicy string
+
+const AttachPolicyFreshSpawn AttachPolicy = "fresh_spawn"
+const AttachPolicyRelaunchRestore AttachPolicy = "relaunch_restore"
+const AttachPolicySameAppRemount AttachPolicy = "same_app_remount"
+
 type AttachResultMessage struct {
 	// Cols corresponds to the JSON schema field "cols".
 	Cols *int `json:"cols,omitempty"`
@@ -129,6 +135,9 @@ type AttachResultMessage struct {
 }
 
 type AttachSessionMessage struct {
+	// AttachPolicy corresponds to the JSON schema field "attach_policy".
+	AttachPolicy *AttachPolicy `json:"attach_policy,omitempty"`
+
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 

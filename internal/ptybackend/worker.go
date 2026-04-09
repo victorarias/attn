@@ -87,6 +87,7 @@ type workerSession struct {
 	SocketPath   string
 	RegistryPath string
 	ControlToken string
+	WorkerPID    int
 
 	mu              sync.Mutex
 	controlMu       sync.Mutex
@@ -469,6 +470,7 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		return fmt.Errorf("start pty worker: %w", err)
 	}
 	workerProc = cmd.Process
+	session.WorkerPID = workerProc.Pid
 
 	deadline := time.Now().Add(spawnReadyTimeout)
 	var lastErr error
@@ -488,7 +490,7 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		if err == nil {
 			spawnReady = true
 			if workerProc != nil {
-				_ = workerProc.Release()
+				b.reapWorkerProcess(cmd, sessionID)
 				workerProc = nil
 			}
 			b.startPoller(session)
@@ -635,6 +637,7 @@ func (b *WorkerBackend) Remove(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
+	workerPID := b.workerPIDForSession(session)
 	callErr := b.callSimple(ctx, session, ptyworker.MethodRemove, map[string]any{})
 	if callErr != nil {
 		if errors.Is(callErr, pty.ErrSessionNotFound) || errors.Is(callErr, os.ErrNotExist) {
@@ -645,6 +648,7 @@ func (b *WorkerBackend) Remove(ctx context.Context, sessionID string) error {
 			delete(b.sessions, sessionID)
 			b.mu.Unlock()
 			b.pruneRegistryAndSocket(session.RegistryPath, session.SocketPath)
+			b.reapWorkerPID(workerPID, sessionID)
 		}
 		return callErr
 	}
@@ -654,6 +658,7 @@ func (b *WorkerBackend) Remove(ctx context.Context, sessionID string) error {
 	b.mu.Lock()
 	delete(b.sessions, sessionID)
 	b.mu.Unlock()
+	b.reapWorkerPID(workerPID, sessionID)
 	return nil
 }
 
@@ -751,6 +756,7 @@ func (b *WorkerBackend) Recover(ctx context.Context) (RecoveryReport, error) {
 			SocketPath:   expectedSocketPath,
 			RegistryPath: path,
 			ControlToken: entry.ControlToken,
+			WorkerPID:    entry.WorkerPID,
 		}
 		if err := b.probeRecoveryInfo(ctx, session); err != nil {
 			if errors.Is(err, pty.ErrSessionNotFound) || errors.Is(err, os.ErrNotExist) {
@@ -994,6 +1000,7 @@ func (b *WorkerBackend) getSession(sessionID string) (*workerSession, error) {
 		SocketPath:   socketPath,
 		RegistryPath: registryPath,
 		ControlToken: entry.ControlToken,
+		WorkerPID:    entry.WorkerPID,
 	}
 	probeCtx, cancel := context.WithTimeout(context.Background(), livenessRPCTimeout)
 	probeErr := b.probeRecoveryInfo(probeCtx, session)
@@ -1517,6 +1524,54 @@ func (b *WorkerBackend) stopSpawnedWorkerProcess(proc *os.Process, sessionID str
 	b.cfg.Logf("worker backend spawn cleanup: terminated unready worker: session=%s pid=%d", sessionID, proc.Pid)
 }
 
+func (b *WorkerBackend) reapWorkerProcess(cmd *exec.Cmd, sessionID string) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	b.reapWorkerPID(cmd.Process.Pid, sessionID)
+}
+
+func (b *WorkerBackend) workerPIDForSession(session *workerSession) int {
+	if session == nil {
+		return 0
+	}
+	if session.WorkerPID > 0 {
+		return session.WorkerPID
+	}
+	if strings.TrimSpace(session.RegistryPath) == "" {
+		return 0
+	}
+	entry, err := ptyworker.ReadRegistry(session.RegistryPath)
+	if err != nil || entry.WorkerPID <= 0 {
+		return 0
+	}
+	session.WorkerPID = entry.WorkerPID
+	return entry.WorkerPID
+}
+
+func (b *WorkerBackend) reapWorkerPID(pid int, sessionID string) {
+	if pid <= 0 {
+		return
+	}
+	go func() {
+		for {
+			var status syscall.WaitStatus
+			_, waitErr := syscall.Wait4(pid, &status, 0, nil)
+			if waitErr == nil {
+				return
+			}
+			if errors.Is(waitErr, syscall.EINTR) {
+				continue
+			}
+			if errors.Is(waitErr, syscall.ECHILD) {
+				return
+			}
+			b.cfg.Logf("worker backend worker reap failed: session=%s pid=%d status=%d err=%v", sessionID, pid, status, waitErr)
+			return
+		}
+	}()
+}
+
 func (b *WorkerBackend) workerProcessAlive(session *workerSession) bool {
 	alive, err := b.SessionLikelyAlive(context.Background(), session.SessionID)
 	if err != nil {
@@ -1533,6 +1588,7 @@ func (b *WorkerBackend) pruneRegistryAndSocket(registryPath, socketPath string) 
 }
 
 func (b *WorkerBackend) forceSessionEviction(session *workerSession) {
+	workerPID := b.workerPIDForSession(session)
 	b.stopMonitor(session)
 	b.stopPoller(session)
 	b.closePersistentControlConn(session, "force_evict")
@@ -1540,6 +1596,7 @@ func (b *WorkerBackend) forceSessionEviction(session *workerSession) {
 	delete(b.sessions, session.SessionID)
 	b.mu.Unlock()
 	b.pruneRegistryAndSocket(session.RegistryPath, session.SocketPath)
+	b.reapWorkerPID(workerPID, session.SessionID)
 }
 
 func (b *WorkerBackend) removeOwnedSocket(socketPath string) {
