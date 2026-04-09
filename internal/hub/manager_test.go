@@ -124,6 +124,13 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 
 	manager := NewManager(endpointStore, nil, nil, nil, nil)
 
+	if changed, count := manager.upsertRemoteSession(first.ID, protocol.Session{ID: "sess-a", Directory: "/srv/repo"}); !changed || count != 1 {
+		t.Fatalf("upsertRemoteSession(first) = (%v, %d), want (true, 1)", changed, count)
+	}
+	if changed, count := manager.upsertRemoteSession(second.ID, protocol.Session{ID: "sess-b", Directory: "/srv/repo"}); !changed || count != 1 {
+		t.Fatalf("upsertRemoteSession(second) = (%v, %d), want (true, 1)", changed, count)
+	}
+
 	if changed := manager.replaceRemoteWorkspaces(first.ID, []protocol.WorkspaceSnapshot{{
 		SessionID:    "sess-a",
 		ActivePaneID: "main",
@@ -180,6 +187,81 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 	got = manager.RemoteWorkspaces()
 	if len(got) != 1 || got[0].SessionID != "sess-b" {
 		t.Fatalf("RemoteWorkspaces() after clear = %+v, want only sess-b", got)
+	}
+}
+
+func TestManagerIgnoresWorkspaceUpdatesForRemovedRemoteSessions(t *testing.T) {
+	endpointStore := store.New()
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	if err != nil {
+		t.Fatalf("AddEndpoint() error = %v", err)
+	}
+
+	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	if changed, count := manager.upsertRemoteSession(record.ID, protocol.Session{ID: "sess-1", Directory: "/srv/repo"}); !changed || count != 1 {
+		t.Fatalf("upsertRemoteSession() = (%v, %d), want (true, 1)", changed, count)
+	}
+	if changed := manager.upsertRemoteWorkspace(record.ID, protocol.WorkspaceSnapshot{
+		SessionID:    "sess-1",
+		ActivePaneID: "main",
+		LayoutJson:   `{"type":"pane","paneId":"main"}`,
+	}); !changed {
+		t.Fatal("upsertRemoteWorkspace() reported no change")
+	}
+
+	if changed, count := manager.removeRemoteSession(record.ID, "sess-1"); !changed || count != 0 {
+		t.Fatalf("removeRemoteSession() = (%v, %d), want (true, 0)", changed, count)
+	}
+	if changed := manager.removeRemoteWorkspace(record.ID, "sess-1"); !changed {
+		t.Fatal("removeRemoteWorkspace() reported no change")
+	}
+	if changed := manager.upsertRemoteWorkspace(record.ID, protocol.WorkspaceSnapshot{
+		SessionID:    "sess-1",
+		ActivePaneID: "main",
+		LayoutJson:   `{"type":"pane","paneId":"main"}`,
+	}); changed {
+		t.Fatal("upsertRemoteWorkspace() should ignore workspace for removed session")
+	}
+	if got := manager.RemoteWorkspaces(); len(got) != 0 {
+		t.Fatalf("RemoteWorkspaces() = %+v, want empty after stale workspace update", got)
+	}
+}
+
+func TestManagerForgetSessionRemovesRemoteSessionAndWorkspace(t *testing.T) {
+	endpointStore := store.New()
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	if err != nil {
+		t.Fatalf("AddEndpoint() error = %v", err)
+	}
+
+	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	if changed, count := manager.upsertRemoteSession(record.ID, protocol.Session{ID: "sess-1", Directory: "/srv/repo"}); !changed || count != 1 {
+		t.Fatalf("upsertRemoteSession() = (%v, %d), want (true, 1)", changed, count)
+	}
+	if changed := manager.upsertRemoteWorkspace(record.ID, protocol.WorkspaceSnapshot{
+		SessionID:    "sess-1",
+		ActivePaneID: "main",
+		LayoutJson:   `{"type":"pane","paneId":"main"}`,
+	}); !changed {
+		t.Fatal("upsertRemoteWorkspace() reported no change")
+	}
+
+	session := manager.RemoteSession("sess-1")
+	if session == nil || session.ID != "sess-1" {
+		t.Fatalf("RemoteSession(sess-1) = %+v, want session", session)
+	}
+
+	if changed := manager.ForgetSession("sess-1"); !changed {
+		t.Fatal("ForgetSession() reported no change")
+	}
+	if got := manager.RemoteSession("sess-1"); got != nil {
+		t.Fatalf("RemoteSession(sess-1) after forget = %+v, want nil", got)
+	}
+	if got := manager.RemoteWorkspaces(); len(got) != 0 {
+		t.Fatalf("RemoteWorkspaces() after forget = %+v, want empty", got)
+	}
+	if endpointID, ok := manager.EndpointIDForSession("sess-1"); ok || endpointID != "" {
+		t.Fatalf("EndpointIDForSession(sess-1) after forget = (%q, %v), want ('', false)", endpointID, ok)
 	}
 }
 

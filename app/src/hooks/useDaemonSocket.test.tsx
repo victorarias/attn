@@ -1047,4 +1047,68 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     await expect(spawnPromise).resolves.toBeUndefined();
     unmount();
   });
+
+  it('prunes stale workspaces when sessions_updated removes a session', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '49',
+        sessions: [{
+          id: 'sess-stale',
+          label: 'stale',
+          directory: '/tmp/repo',
+          state: 'working',
+          last_seen: '2026-04-09T00:00:00Z',
+        }],
+        workspaces: [{
+          session_id: 'sess-stale',
+          active_pane_id: 'main',
+          layout_json: '',
+          panes: [{
+            pane_id: 'main',
+            kind: 'main',
+            title: 'Session',
+          }],
+        }],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'sessions_updated',
+        sessions: [],
+      });
+    });
+
+    await waitFor(() => {
+      expect(onWorkspacesUpdate).toHaveBeenLastCalledWith([]);
+    });
+
+    unmount();
+  });
 });

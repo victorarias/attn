@@ -476,6 +476,17 @@ function workspaceRuntimeIDs(workspaces: DaemonWorkspace[]): Set<string> {
   return ids;
 }
 
+function pruneWorkspacesBySessions(
+  sessions: DaemonSession[],
+  workspaces: DaemonWorkspace[],
+): DaemonWorkspace[] {
+  if (workspaces.length === 0) {
+    return workspaces;
+  }
+  const sessionIDs = new Set(sessions.map((session) => session.id));
+  return workspaces.filter((workspace) => sessionIDs.has(workspace.session_id));
+}
+
 function workspacesIncludeRuntimeID(workspaces: DaemonWorkspace[], runtimeID: string): boolean {
   for (const workspace of workspaces) {
     for (const pane of workspace.panes || []) {
@@ -1350,6 +1361,14 @@ export function useDaemonSocket({
                 (s) => s.id !== data.session!.id
               );
               onSessionsUpdate(sessionsRef.current);
+              const nextWorkspaces = pruneWorkspacesBySessions(
+                sessionsRef.current,
+                workspacesRef.current,
+              );
+              if (nextWorkspaces !== workspacesRef.current) {
+                workspacesRef.current = nextWorkspaces;
+                onWorkspacesUpdate(nextWorkspaces);
+              }
               pruneAttachedPtySessions(sessionsRef.current, workspacesRef.current);
             }
             break;
@@ -1367,6 +1386,14 @@ export function useDaemonSocket({
               const dedupedSessions = dedupeSessionsByID(data.sessions || []);
               sessionsRef.current = dedupedSessions;
               onSessionsUpdate(dedupedSessions);
+              const nextWorkspaces = pruneWorkspacesBySessions(
+                dedupedSessions,
+                workspacesRef.current,
+              );
+              if (nextWorkspaces !== workspacesRef.current) {
+                workspacesRef.current = nextWorkspaces;
+                onWorkspacesUpdate(nextWorkspaces);
+              }
               pruneAttachedPtySessions(dedupedSessions, workspacesRef.current);
             }
             break;

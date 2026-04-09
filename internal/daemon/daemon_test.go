@@ -28,6 +28,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/workspace"
 	"nhooyr.io/websocket"
 )
 
@@ -1717,6 +1718,55 @@ func TestDaemon_BroadcastRawWSMessage_RemoteSessionExitedClearsRemoteAttachState
 	}
 	d.broadcastRawWSMessage(outputPayload)
 	assertNoOutboundEvent(t, client)
+}
+
+func TestDaemon_HandleUnregisterWS_RemovesWorkspaceAndBroadcastsSessionUnregistered(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	session := &protocol.Session{
+		ID:             "sess-1",
+		Label:          "test",
+		Directory:      t.TempDir(),
+		State:          protocol.StateWorking,
+		StateSince:     time.Now().UTC().Format(time.RFC3339),
+		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		LastSeen:       time.Now().UTC().Format(time.RFC3339),
+	}
+	d.store.Add(session)
+	if err := d.store.SaveWorkspace(workspace.Snapshot{
+		SessionID:    session.ID,
+		ActivePaneID: workspace.MainPaneID,
+		Layout:       workspace.DefaultLayout(),
+		Panes: []workspace.Pane{
+			{PaneID: workspace.MainPaneID, RuntimeID: session.ID, Kind: workspace.PaneKindMain, Title: workspace.DefaultPaneTitle},
+			{PaneID: "pane-shell-1", RuntimeID: "runtime-shell-1", Kind: workspace.PaneKindShell, Title: "Shell 1"},
+		},
+	}); err != nil {
+		t.Fatalf("SaveWorkspace() error = %v", err)
+	}
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 4),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	d.wsHub.clients[client] = true
+	go d.wsHub.run()
+
+	d.handleUnregisterWS(client, &protocol.UnregisterMessage{ID: session.ID})
+
+	if got := d.store.Get(session.ID); got != nil {
+		t.Fatalf("store.Get(%q) = %+v, want nil", session.ID, got)
+	}
+	if got := d.store.GetWorkspace(session.ID); got != nil {
+		t.Fatalf("store.GetWorkspace(%q) = %+v, want nil", session.ID, got)
+	}
+
+	event := readOutboundEvent(t, client)
+	if asString(event["event"]) != protocol.EventSessionUnregistered {
+		t.Fatalf("unexpected event after unregister: %+v", event)
+	}
+	if asString(event["session"].(map[string]interface{})["id"]) != session.ID {
+		t.Fatalf("session_unregistered id = %v, want %s", event["session"], session.ID)
+	}
 }
 
 func TestDaemon_NewAddsWarningWhenPersistenceFallsBackToMemory(t *testing.T) {

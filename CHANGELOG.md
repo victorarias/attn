@@ -16,6 +16,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Replay Boundary Simplification**: Remove the frontend's local visible-frame remount restore path for agent panes and restore daemon replay only for true daemon-known session reattach, so same-app remounts no longer trust lossy painted-frame state while relaunch recovery still has a provisional screen bridge.
+- **Remote Session Close Cleanup**: Closing a remote session now tears down the worker-side process tree and prunes stale workspace ghosts from both the daemon and app state, so cleanup canaries no longer pass only after manual VM cleanup or leave dead sessions visually stuck in the UI.
 
 ## [2026-04-08]
 

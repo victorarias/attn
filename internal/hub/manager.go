@@ -631,6 +631,56 @@ func (m *Manager) EndpointIDForSession(sessionID string) (string, bool) {
 	return "", false
 }
 
+func (m *Manager) RemoteSession(sessionID string) *protocol.Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, runtime := range m.runtimes {
+		if session, ok := runtime.sessions[sessionID]; ok {
+			copy := session
+			if len(session.Todos) > 0 {
+				copy.Todos = append([]string(nil), session.Todos...)
+			}
+			return &copy
+		}
+	}
+	return nil
+}
+
+func (m *Manager) ForgetSession(sessionID string) bool {
+	if strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	changed := false
+	delete(m.pending, sessionID)
+	for _, runtime := range m.runtimes {
+		runtimeChanged := false
+		if runtime.sessions != nil {
+			if _, ok := runtime.sessions[sessionID]; ok {
+				delete(runtime.sessions, sessionID)
+				runtimeChanged = true
+				changed = true
+			}
+		}
+		if runtime.workspaces != nil {
+			if _, ok := runtime.workspaces[sessionID]; ok {
+				delete(runtime.workspaces, sessionID)
+				runtimeChanged = true
+				changed = true
+			}
+		}
+		if runtimeChanged {
+			count := len(runtime.sessions)
+			runtime.info.SessionCount = protocol.Ptr(count)
+		}
+	}
+
+	return changed
+}
+
 func (m *Manager) EndpointIDForPTYTarget(targetID string) (string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -960,6 +1010,11 @@ func (m *Manager) replaceRemoteWorkspaces(id string, workspaces []protocol.Works
 	}
 	next := make(map[string]protocol.WorkspaceSnapshot, len(workspaces))
 	for _, workspace := range workspaces {
+		if runtime.sessions != nil {
+			if _, ok := runtime.sessions[workspace.SessionID]; !ok {
+				continue
+			}
+		}
 		next[workspace.SessionID] = workspace
 	}
 	if workspacesEqual(runtime.workspaces, next) {
@@ -975,6 +1030,11 @@ func (m *Manager) upsertRemoteWorkspace(id string, workspace protocol.WorkspaceS
 	runtime, ok := m.runtimes[id]
 	if !ok {
 		return false
+	}
+	if runtime.sessions != nil {
+		if _, ok := runtime.sessions[workspace.SessionID]; !ok {
+			return false
+		}
 	}
 	if runtime.workspaces == nil {
 		runtime.workspaces = make(map[string]protocol.WorkspaceSnapshot)

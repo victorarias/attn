@@ -181,6 +181,12 @@ func TestRemoteCommandSessionID_IncludesReviewLoopCommands(t *testing.T) {
 		want string
 	}{
 		{
+			name: "unregister handled locally",
+			cmd:  protocol.CmdUnregister,
+			msg:  &protocol.UnregisterMessage{ID: "sess-unregister"},
+			want: "",
+		},
+		{
 			name: "session_visualized",
 			cmd:  protocol.CmdSessionVisualized,
 			msg:  &protocol.SessionVisualizedMessage{ID: "sess-visualized"},
