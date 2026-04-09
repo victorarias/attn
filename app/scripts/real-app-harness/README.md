@@ -49,6 +49,12 @@ Requirements:
 - `/Applications/attn.app` installed and launchable
 - daemon websocket reachable at `ws://127.0.0.1:9849/ws`
 
+Execution discipline:
+
+- Packaged-app harness scenarios should run serially, not in parallel.
+- They share one live app automation surface and can cross-talk through the same daemon/app state if launched together.
+- A failed parallel run should be treated as harness misuse first, not as product evidence.
+
 For the dev-only UI automation bridge, build the app with:
 
 ```bash

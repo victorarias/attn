@@ -20,6 +20,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Remote Session Close Cleanup**: Closing a remote session now tears down the worker-side process tree and prunes stale workspace ghosts from both the daemon and app state, so cleanup canaries no longer pass only after manual VM cleanup or leave dead sessions visually stuck in the UI.
 - **Codex Split-Close Typing Jump**: Stop treating replay-restored runtimes as permanently eligible for forced redraw bounces after later resizes, so typing after closing a split no longer duplicates the prompt or makes the viewport jump in local and remote Codex sessions.
 - **Local Codex Close-Redraw Canary**: Calibrate the local Codex `TR-402` baseline paint thresholds to accept healthy sparse Codex panes, and make split-open main-pane content loss a hard failure instead of a logged observation.
+- **Remote Claude Relaunch Coverage**: `TR-205` now uses the same trust-prompt and prompt-readiness helpers as the local Claude canaries, so remote Claude split/relaunch/close recovery is exercised as a real scenario instead of failing at harness bootstrap.
+- **Packaged-App Harness Discipline**: Document that packaged-app scenarios must run serially because parallel runs can race through the shared app automation surface and produce invalid failures.
 
 ## [2026-04-08]
 

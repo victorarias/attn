@@ -111,8 +111,7 @@ export async function promptClaudeForStructuredBlock(client, sessionId, token, l
 
   await client.request('click_pane', { sessionId, paneId: 'main' });
   await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
-  await client.request('type_pane_via_ui', { sessionId, paneId: 'main', text: prompt });
-  await client.request('write_pane', { sessionId, paneId: 'main', text: '\r', submit: false });
+  await client.request('write_pane', { sessionId, paneId: 'main', text: `${prompt}\r`, submit: false });
 
   return { prompt, expectedLines: lines };
 }

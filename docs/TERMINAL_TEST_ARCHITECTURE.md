@@ -101,6 +101,12 @@ Responsibilities:
 - `scenarioRemote.mjs`
   Isolated remote daemon bootstrap helpers for SSH-backed scenarios.
 
+## Harness Invariants
+
+- Packaged-app real-agent scenarios must run serially.
+- Parallel packaged-app runs are not valid evidence because they can contend for the same app automation surface, daemon state, and selected session.
+- A failing packaged-app scenario that ran concurrently with another packaged-app scenario should be rerun in isolation before drawing product conclusions.
+
 ## Visible-Content Proof
 
 The current bridge foundation now exposes pane-level visible viewport content:
