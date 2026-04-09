@@ -48,6 +48,7 @@ interface UseUiAutomationBridgeArgs {
   focusPane: (sessionId: string, paneId: string) => void;
   typeInSessionPaneViaUI: (sessionId: string, paneId: string, text: string) => boolean;
   isSessionPaneInputFocused: (sessionId: string, paneId: string) => boolean;
+  scrollSessionPaneToTop: (sessionId: string, paneId: string) => boolean;
   getPaneText: (sessionId: string, paneId: string) => string;
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null;
   getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot;
@@ -1099,6 +1100,7 @@ export function useUiAutomationBridge({
   focusPane,
   typeInSessionPaneViaUI,
   isSessionPaneInputFocused,
+  scrollSessionPaneToTop,
   getPaneText,
   getPaneSize,
   getPaneVisibleContent,
@@ -1409,6 +1411,22 @@ export function useUiAutomationBridge({
         await settleUi(1);
         clickPaneElement(sessionId, paneId);
         await settleUi(2);
+        return { sessionId, paneId };
+      }
+      case 'scroll_pane_to_top': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        selectSession(sessionId);
+        await settleUi(1);
+        const success = scrollSessionPaneToTop(sessionId, paneId);
+        if (!success) {
+          throw new Error(`Failed to scroll pane ${paneId} to top`);
+        }
+        await settleUi(1);
         return { sessionId, paneId };
       }
       case 'dispatch_shortcut': {

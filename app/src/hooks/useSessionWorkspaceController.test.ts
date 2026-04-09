@@ -65,6 +65,7 @@ describe('useSessionWorkspaceController', () => {
         focusActivePane: vi.fn(),
         typePaneTextViaUI: vi.fn(() => true),
         isPaneInputFocused: vi.fn(() => true),
+        scrollPaneToTop: vi.fn(() => true),
         getPaneText,
         getPaneSize,
         getPaneVisibleContent,
@@ -96,6 +97,7 @@ describe('useSessionWorkspaceController', () => {
         focusActivePane: vi.fn(),
         typePaneTextViaUI: vi.fn(() => true),
         isPaneInputFocused: vi.fn(() => true),
+        scrollPaneToTop: vi.fn(() => true),
         getPaneText: vi.fn(() => 'text'),
         getPaneSize: vi.fn(() => ({ cols: 80, rows: 24 })),
         getPaneVisibleContent: vi.fn(() => ({

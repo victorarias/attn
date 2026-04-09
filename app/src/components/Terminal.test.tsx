@@ -8,9 +8,16 @@ const mockState = vi.hoisted(() => ({
     cols: number;
     rows: number;
     resizeMock: ReturnType<typeof vi.fn>;
+    scrollToTopMock: ReturnType<typeof vi.fn>;
+    buffer: {
+      active: { length: number; baseY: number; viewportY: number };
+      normal: { length: number };
+    };
   }>,
   resizeObservers: [] as Array<{ trigger: (width: number, height: number) => void }>,
   intersectionObservers: [] as Array<{ trigger: (isIntersecting: boolean) => void }>,
+  containerWidth: 1000,
+  containerHeight: 900,
 }));
 
 vi.mock('@xterm/xterm', () => {
@@ -37,8 +44,15 @@ vi.mock('@xterm/xterm', () => {
     };
     write = vi.fn();
     resizeMock = vi.fn((cols: number, rows: number) => {
+      const shrinkingCols = cols < this.cols;
       this.cols = cols;
       this.rows = rows;
+      if (shrinkingCols) {
+        this.buffer.active.viewportY = 8;
+      }
+    });
+    scrollToTopMock = vi.fn(() => {
+      this.buffer.active.viewportY = 0;
     });
 
     constructor(options: { cols: number; rows: number }) {
@@ -56,6 +70,9 @@ vi.mock('@xterm/xterm', () => {
     loadAddon() {}
     resize(cols: number, rows: number) {
       this.resizeMock(cols, rows);
+    }
+    scrollToTop() {
+      this.scrollToTopMock();
     }
     focus() {}
     blur() {}
@@ -97,6 +114,8 @@ describe('Terminal', () => {
     mockState.terminals.length = 0;
     mockState.resizeObservers.length = 0;
     mockState.intersectionObservers.length = 0;
+    mockState.containerWidth = 1000;
+    mockState.containerHeight = 900;
 
     vi.useFakeTimers();
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb: FrameRequestCallback) => {
@@ -110,8 +129,8 @@ describe('Terminal', () => {
       if ((element as HTMLElement).classList?.contains('terminal-container')) {
         return {
           ...style,
-          width: '1000px',
-          height: '900px',
+          width: `${mockState.containerWidth}px`,
+          height: `${mockState.containerHeight}px`,
           paddingLeft: '0px',
           paddingRight: '0px',
           paddingTop: '0px',
@@ -139,6 +158,8 @@ describe('Terminal', () => {
         this.callback = callback;
         mockState.resizeObservers.push({
           trigger: (width: number, height: number) => {
+            mockState.containerWidth = width;
+            mockState.containerHeight = height;
             this.callback([
               {
                 contentRect: {

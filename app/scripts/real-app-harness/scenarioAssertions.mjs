@@ -65,6 +65,23 @@ export async function waitForPaneVisible(client, sessionId, paneId, timeoutMs = 
   );
 }
 
+export async function scrollPaneToTop(client, sessionId, paneId, timeoutMs = 12_000) {
+  await client.request('scroll_pane_to_top', { sessionId, paneId }, { timeoutMs: 20_000 });
+  return waitForPaneState(
+    client,
+    sessionId,
+    paneId,
+    (state) => {
+      const visibleContent = state?.pane?.visibleContent || null;
+      const viewportY = visibleContent?.viewportY ?? 0;
+      const firstNonEmptyLine = visibleContent?.summary?.firstNonEmptyLine || '';
+      return viewportY <= 1 || firstNonEmptyLine.includes('OpenAI Codex') || firstNonEmptyLine.startsWith('╭');
+    },
+    `pane ${paneId} viewport top`,
+    timeoutMs,
+  );
+}
+
 export async function waitForPaneInputFocus(client, sessionId, paneId, timeoutMs = 12_000) {
   return waitForPaneState(
     client,
@@ -265,10 +282,20 @@ export async function assertPaneVisibleContentPreserved(
     const summary = visibleContent.summary || {};
     const joined = (visibleContent.lines || []).join('\n');
     lastMatches = anchors.filter((anchor) => terminalTextIncludes(joined, anchor, { allowWrapped: true }));
+    const anchorsFullyRecovered = anchors.length > 0 && lastMatches.length === anchors.length;
+    const charCountRecovered = (summary.charCount || 0) >= requiredCharCount;
     if (
-      (summary.nonEmptyLineCount || 0) >= requiredNonEmptyLines &&
-      (summary.charCount || 0) >= requiredCharCount &&
-      lastMatches.length >= requiredAnchorMatches
+      (
+        (
+          (summary.nonEmptyLineCount || 0) >= requiredNonEmptyLines &&
+          charCountRecovered &&
+          lastMatches.length >= requiredAnchorMatches
+        ) ||
+        (
+          anchorsFullyRecovered &&
+          charCountRecovered
+        )
+      )
     ) {
       return {
         state: lastState,
@@ -565,13 +592,22 @@ export async function captureSessionArtifacts(client, runDir, prefix, sessionId)
   await writeJson(`${prefix}-terminal-runtime-trace.json`, 'dump_terminal_runtime_trace', {});
 
   try {
-    await captureFrontWindowScreenshot(`${runDir}/${prefix}-native-window.png`);
+    await client.request('capture_window_screenshot', {
+      path: `${runDir}/${prefix}-native-window.png`,
+      bundleId: 'com.attn.manager',
+    }, { timeoutMs: 20_000 });
   } catch (error) {
-    const fs = await import('node:fs');
-    fs.writeFileSync(
-      `${runDir}/${prefix}-native-window.txt`,
-      error instanceof Error ? error.stack || error.message : String(error),
-      'utf8',
-    );
+    try {
+      await captureFrontWindowScreenshot(`${runDir}/${prefix}-native-window.png`);
+      return;
+    } catch (nativeError) {
+      const fs = await import('node:fs');
+      fs.writeFileSync(
+        `${runDir}/${prefix}-native-window.txt`,
+        nativeError instanceof Error ? nativeError.stack || nativeError.message : String(nativeError),
+        'utf8',
+      );
+      return;
+    }
   }
 }

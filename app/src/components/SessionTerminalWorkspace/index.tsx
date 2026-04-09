@@ -65,6 +65,7 @@ export interface SessionTerminalWorkspaceHandle {
   focusActivePane: (retries?: number) => void;
   typePaneTextViaUI: (paneId: string, text: string) => boolean;
   isPaneInputFocused: (paneId: string) => boolean;
+  scrollPaneToTop: (paneId: string) => boolean;
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => { cols: number; rows: number } | null;
   getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
@@ -245,6 +246,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       focusActivePane: binder.focusPaneWithRetry.bind(null, activePaneId),
       typePaneTextViaUI: binder.typeTextViaPaneInput,
       isPaneInputFocused: binder.isPaneInputFocused,
+      scrollPaneToTop: binder.scrollPaneToTop,
       getPaneText: binder.getPaneText,
       getPaneSize: binder.getPaneSize,
       getPaneVisibleContent: binder.getPaneVisibleContent,

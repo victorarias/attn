@@ -185,22 +185,25 @@ export async function capturePaneNativeMetrics(
 
 async function captureWindowScreenshot(client, screenshotPath, { bundleId }) {
   try {
-    return await captureFrontWindowScreenshot(screenshotPath, { bundleId });
+    const result = await client.request('capture_window_screenshot', {
+      path: screenshotPath,
+      bundleId,
+    }, { timeoutMs: 20_000 });
+    if (result?.path && result?.bounds) {
+      return {
+        source: 'ui_automation_window',
+        bundleId,
+        bounds: result.bounds,
+        path: result.path,
+      };
+    }
   } catch {
-    // Fall through to the app-side capture path.
+    // Fall through to the native front-window path.
   }
 
-  const result = await client.request('capture_window_screenshot', {
-    path: screenshotPath,
-    bundleId,
-  }, { timeoutMs: 20_000 });
-  if (result?.path && result?.bounds) {
-    return {
-      source: 'ui_automation_window',
-      bundleId,
-      bounds: result.bounds,
-      path: result.path,
-    };
+  try {
+    return await captureFrontWindowScreenshot(screenshotPath, { bundleId });
+  } catch (error) {
+    throw new Error(`capture_window_screenshot returned no image for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  throw new Error(`capture_window_screenshot returned no image for ${bundleId}`);
 }

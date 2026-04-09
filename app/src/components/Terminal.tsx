@@ -843,7 +843,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           writeQueueBytesRef.current = bytes;
         },
       });
-
       // Resize strategy from VS Code's TerminalResizeDebouncer:
       // - Y-axis (rows): immediate (cheap operation)
       // - X-axis (cols): 100ms debounce (expensive text reflow)
