@@ -11,6 +11,7 @@ import {
   assertPaneVisibleContent,
   assertPaneVisibleContentPreserved,
   captureSessionArtifacts,
+  scrollPaneToTop,
   shellPanes,
   waitForNewShellPane,
   waitForPaneState,
@@ -265,6 +266,7 @@ async function main() {
       );
       const thresholds = recoveryThresholdsForAgent(options.agent);
       try {
+        await scrollPaneToTop(client, sessionId, 'main');
         await assertPaneVisibleContentPreserved(
           client,
           sessionId,

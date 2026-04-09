@@ -108,6 +108,85 @@ Implication:
 - a bounded raw-byte restore path may be operationally realistic
 - we do not yet know the right general budget, but the prototype suggests we should measure real session distributions before assuming raw replay is too heavy
 
+### 7. Raw replay is not enough to blame by itself
+
+We added a second prototype case:
+
+- restore a fresh xterm from raw Codex history that already represents the current wide state
+- then run another narrow-to-wide resize cycle with the same captured resize bytes
+
+What happened:
+
+- the header still recovered
+- the replay-restored xterm stayed healthy through the later resize cycle
+
+Implication:
+
+- the remaining relaunch bug in the app is less likely to be explained by "raw replay is inherently insufficient"
+- more likely causes are:
+  - the exact replay payload the app is applying differs from the prototype-quality history
+  - or the app's attach/reconcile sequence after replay is damaging otherwise healthy restored state
+
+### 8. xterm resize can keep the header in scrollback while jumping the viewport downward
+
+The `TR-205` first-split prototype exposed a cleaner failure mode than "header bytes were lost":
+
+- a healthy wide Codex buffer resized narrow with plain `xterm.resize()`
+- the visible viewport jumped down into the tip/transcript area
+- the header was still present in scrollback above the viewport
+- `scrollToTop()` immediately made the header visible again
+
+Implication:
+
+- some "header disappeared" regressions are actually viewport-position regressions
+- we should distinguish:
+  - content missing from the buffer
+  - content still present but hidden because the viewport drifted
+- for agent panes near the top of the transcript, repinning the viewport after resize is a valid mitigation
+
+### 9. Local first-split Codex header loss can be a pure viewport shift with no redraw bounce
+
+We later reproduced the first-launch local Codex split-open case directly in the packaged app and checked the runtime trace at the same time.
+
+What happened:
+
+- before split, the main pane had the normal Codex header in view
+- after split, `viewportY` increased further
+- full pane text still contained the full Codex header
+- the visible rows started in the middle of the header/tip/prompt region instead
+- the trace showed only normal live PTY output and geometry scheduling
+- there was no `terminal.mounted`, no `pty.attach.*`, and no `pty.redraw.requested`
+
+Implication:
+
+- not every split-open Codex regression is a remount or redraw bug
+- some of them are viewport-drift bugs even when the buffer contents are intact
+- the presence or absence of redraw events is a useful discriminator when deciding whether the app changed behavior or xterm/Codex simply moved the viewport
+
+### 10. Typing after split-close did not trigger remounts or redraws in the live app
+
+We added a direct packaged-app runtime-trace canary for:
+
+- local Codex
+- split main
+- close split
+- type into the surviving main pane
+
+What happened:
+
+- typing produced only live `pty.output.live` events
+- it did not produce:
+  - `terminal.mounted`
+  - `pty.attach.*`
+  - `pty.geometry.*`
+  - `pty.redraw.requested`
+
+Implication:
+
+- if typing looks jumpy after split-close, typing itself is probably not the mechanism
+- the more likely cause is bad terminal state left behind by the earlier resize/close path
+- runtime-trace canaries are useful for proving whether a user-visible issue is caused by keypress side effects or by the prior layout transition
+
 ## What We Confirmed Was Harness Noise
 
 ### 1. Exact shell token matching produced false negatives
@@ -149,6 +228,22 @@ Implication:
   - pane existence
   - terminal readiness
   - initial geometry
+
+### 4. The wrong screenshot source can completely invalidate native paint checks
+
+We hit a case where the native paint harness captured the wrong app window entirely.
+
+What happened:
+
+- pane state and visible content said Codex was healthy
+- the native screenshot crop showed an unrelated window instead
+- the resulting paint failure looked severe but had nothing to do with the terminal under test
+
+Implication:
+
+- whole-pane native paint failures are only trustworthy if window selection is trustworthy
+- prefer the app-owned screenshot path over a loose "frontmost window" capture
+- when screenshot content and pane state disagree, treat the run as harness-invalid until proven otherwise
 
 ## Mistakes We Made
 
@@ -221,6 +316,32 @@ No single layer is enough.
 ### 3. Healthy baseline gating matters
 
 A scenario should not assert preservation against a bad baseline.
+
+### 4. Viewport normalization belongs in the harness when the viewport quirk is accepted
+
+For Codex, some split-open cases currently leave the viewport a few rows lower even though the header is still present in the buffer.
+
+If we decide that this viewport drift is acceptable for now, then the test should normalize the viewport before diffing semantic content.
+
+Implication:
+
+- the harness may `scrollToTop()` before a preservation comparison when the goal is "did the content survive?"
+- that normalization should not automatically become product behavior
+- otherwise we risk "fixing" the app to satisfy a test when the actual decision was only about what the test should consider acceptable
+
+### 5. Native paint thresholds must be agent- and phase-aware
+
+Codex first-launch panes can be visibly healthy while using only a relatively small vertical portion of the pane:
+
+- compact header box
+- one or two tip/status lines
+- prompt area near the bottom
+
+Implication:
+
+- baseline native paint thresholds that work for denser panes can be too strict for healthy Codex startup
+- recovery comparisons should not fail just because a wider healthy pane redistributes painted pixels differently
+- absolute coverage and semantic-content assertions are usually the stronger signal for these cases
 
 Examples of bad baselines:
 
