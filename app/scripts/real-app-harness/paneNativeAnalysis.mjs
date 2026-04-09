@@ -258,3 +258,57 @@ export function comparePaneNativePaintCoverage(
     failures,
   };
 }
+
+export function comparePaneNativePaintRegression(
+  baseline,
+  candidate,
+  {
+    maxBusyColumnRatioRegression = 0.08,
+    maxBusyRowRatioRegression = 0.08,
+    maxBBoxWidthRatioRegression = 0.08,
+    maxBBoxHeightRatioRegression = 0.08,
+    maxActivePixelRatioRegression = 0.03,
+  } = {},
+) {
+  const regressions = {
+    busyColumnRatioRegression: Math.max(0, (baseline?.busyColumnRatio || 0) - (candidate?.busyColumnRatio || 0)),
+    busyRowRatioRegression: Math.max(0, (baseline?.busyRowRatio || 0) - (candidate?.busyRowRatio || 0)),
+    bboxWidthRatioRegression: Math.max(0, (baseline?.bboxWidthRatio || 0) - (candidate?.bboxWidthRatio || 0)),
+    bboxHeightRatioRegression: Math.max(0, (baseline?.bboxHeightRatio || 0) - (candidate?.bboxHeightRatio || 0)),
+    activePixelRatioRegression: Math.max(0, (baseline?.activePixelRatio || 0) - (candidate?.activePixelRatio || 0)),
+  };
+
+  const failures = [];
+
+  if (Number.isFinite(maxBusyColumnRatioRegression) && regressions.busyColumnRatioRegression > maxBusyColumnRatioRegression) {
+    failures.push(
+      `busyColumnRatioRegression=${Number(regressions.busyColumnRatioRegression.toFixed(6))} > ${maxBusyColumnRatioRegression}`
+    );
+  }
+  if (Number.isFinite(maxBusyRowRatioRegression) && regressions.busyRowRatioRegression > maxBusyRowRatioRegression) {
+    failures.push(
+      `busyRowRatioRegression=${Number(regressions.busyRowRatioRegression.toFixed(6))} > ${maxBusyRowRatioRegression}`
+    );
+  }
+  if (Number.isFinite(maxBBoxWidthRatioRegression) && regressions.bboxWidthRatioRegression > maxBBoxWidthRatioRegression) {
+    failures.push(
+      `bboxWidthRatioRegression=${Number(regressions.bboxWidthRatioRegression.toFixed(6))} > ${maxBBoxWidthRatioRegression}`
+    );
+  }
+  if (Number.isFinite(maxBBoxHeightRatioRegression) && regressions.bboxHeightRatioRegression > maxBBoxHeightRatioRegression) {
+    failures.push(
+      `bboxHeightRatioRegression=${Number(regressions.bboxHeightRatioRegression.toFixed(6))} > ${maxBBoxHeightRatioRegression}`
+    );
+  }
+  if (Number.isFinite(maxActivePixelRatioRegression) && regressions.activePixelRatioRegression > maxActivePixelRatioRegression) {
+    failures.push(
+      `activePixelRatioRegression=${Number(regressions.activePixelRatioRegression.toFixed(6))} > ${maxActivePixelRatioRegression}`
+    );
+  }
+
+  return {
+    ok: failures.length === 0,
+    regressions,
+    failures,
+  };
+}

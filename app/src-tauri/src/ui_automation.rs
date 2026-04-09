@@ -678,6 +678,19 @@ fn window_bounds<R: Runtime>(app: &AppHandle<R>) -> Result<Value, String> {
     }))
 }
 
+fn focus_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    let _ = window.show();
+    let _ = window.unminimize();
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus main window: {error}"))?;
+    thread::sleep(Duration::from_millis(150));
+    Ok(())
+}
+
 fn default_screenshot_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let base = app
         .path()
@@ -706,6 +719,7 @@ fn capture_screenshot<R: Runtime>(
 
     #[cfg(target_os = "macos")]
     {
+        focus_main_window(app)?;
         let bounds = window_bounds(app)?;
         let x = bounds
             .get("x")

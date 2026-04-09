@@ -5,6 +5,10 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function runAppleScript(script) {
   const { stdout } = await execFileAsync('osascript', ['-e', script], {
     timeout: 10_000,
@@ -12,42 +16,63 @@ async function runAppleScript(script) {
   return stdout.trim();
 }
 
-async function resolveProcessName(bundleId) {
+async function activateBundle(bundleId) {
   try {
-    const name = await runAppleScript(`tell application id "${bundleId}" to get name`);
-    if (name) {
-      return name;
-    }
+    await runAppleScript(`tell application id "${bundleId}" to activate`);
   } catch {
-    // Fall back to the default Tauri binary name below.
+    // Best effort only.
   }
-  return 'app';
 }
 
-export async function getFrontWindowBounds(bundleId = 'com.attn.manager') {
-  const processName = await resolveProcessName(bundleId);
+async function readFrontWindowBoundsForBundle(bundleId) {
   const output = await runAppleScript(`
 tell application "System Events"
-  tell application process "${processName}"
-    if (count of windows) is 0 then
-      error "No windows found for ${processName}"
-    end if
-    set p to position of front window
-    set s to size of front window
-    return (item 1 of p as text) & "," & (item 2 of p as text) & "," & (item 1 of s as text) & "," & (item 2 of s as text)
-  end tell
+  set targetProcess to first application process whose bundle identifier is "${bundleId}"
+  if (count of windows of targetProcess) is 0 then
+    error "No windows found for ${bundleId}"
+  end if
+  set p to position of front window of targetProcess
+  set s to size of front window of targetProcess
+  return (item 1 of p as text) & "," & (item 2 of p as text) & "," & (item 1 of s as text) & "," & (item 2 of s as text) & "," & (name of targetProcess as text)
 end tell
 `);
 
-  const [x, y, width, height] = output
+  const [x, y, width, height, processName] = output
     .split(',')
-    .map((value) => Number.parseInt(value.trim(), 10));
+    .map((value) => value.trim());
 
-  if (![x, y, width, height].every((value) => Number.isFinite(value))) {
-    throw new Error(`Failed to parse window bounds for ${bundleId}: ${output}`);
+  const numericBounds = [x, y, width, height].map((value) => Number.parseInt(value, 10));
+
+  if (!numericBounds.every((value) => Number.isFinite(value))) {
+    throw new Error(`Failed to parse window bounds for bundle ${bundleId}: ${output}`);
   }
 
-  return { x, y, width, height, processName };
+  return {
+    x: numericBounds[0],
+    y: numericBounds[1],
+    width: numericBounds[2],
+    height: numericBounds[3],
+    processName: processName || null,
+  };
+}
+
+export async function getFrontWindowBounds(bundleId = 'com.attn.manager') {
+  let lastError = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (attempt > 0) {
+      await activateBundle(bundleId);
+      await delay(250);
+    }
+    try {
+      return await readFrontWindowBoundsForBundle(bundleId);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Failed to resolve front window bounds for ${bundleId}`);
 }
 
 export async function captureFrontWindowScreenshot(outputPath, options = {}) {

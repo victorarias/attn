@@ -6,6 +6,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-09]
+
+### Added
+- **Split-Close Redraw Harness**: Add `real-app:scenario-tr402`, a remote Codex packaged-app scenario that opens a split, closes it again, and fails if the surviving main pane regains width without repainting its visible content back into the reclaimed space.
+- **Replay Fidelity Characterization**: Add a frontend xterm regression test that replays a real standalone Codex first-launch resize capture through `attn`'s visible-frame snapshot path and proves that frame replay is not state-equivalent to a live xterm buffer during later resize recovery.
+
+### Fixed
+- **Replay Boundary Simplification**: Remove the frontend's local visible-frame remount restore path for agent panes and restore daemon replay only for true daemon-known session reattach, so same-app remounts no longer trust lossy painted-frame state while relaunch recovery still has a provisional screen bridge.
+
 ## [2026-04-08]
 
 ### Added

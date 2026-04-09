@@ -21,6 +21,7 @@ Every scenario should validate some combination of these invariants:
 - resize/redraw activity stays targeted to the pane that changed
 - render health shows no severe underfill or projected-layout mismatch
 - rendered content uses the full visible pane area rather than collapsing into a small subset
+- closing a session or app tears down the remote PTY/worker side instead of leaking runtimes that poison later runs
 
 ## Cross-Cutting Rules
 
@@ -99,6 +100,11 @@ Every scenario should validate some combination of these invariants:
   Assertions: replayed pane keeps color/styling, not just plain text.
   Automation: planned
 
+- `TR-205 Close Splits After Relaunch Reuses Reclaimed Space`
+  Start a session, create an initial split, relaunch the app, add more splits, then close the utility panes one by one.
+  Assertions: after each close, the surviving main pane regains width and repaints meaningful visible content into the reclaimed space instead of keeping a stale narrow header/body layout.
+  Automation: initial remote real-agent automation implemented via `real-app:scenario-tr205`
+
 ### Focus And Session Switching
 
 - `TR-301 Utility Focus Survives Session Switch`
@@ -120,8 +126,8 @@ Every scenario should validate some combination of these invariants:
 
 - `TR-402 Split Open Or Close Triggers Targeted Redraw`
   Open or close a split and verify only panes whose container geometry changed bounce/redraw.
-  Assertions: targeted PTY resize/redraw activity, unrelated panes do not reset.
-  Automation: planned
+  Assertions: targeted PTY resize/redraw activity, unrelated panes do not reset, and when a split closes the surviving pane re-expands and repaints meaningful visible content instead of keeping a stale narrow header/body layout.
+  Automation: initial remote real-agent close-path automation implemented via `real-app:scenario-tr402`
 
 ### Remote-Specific
 
@@ -138,6 +144,11 @@ Every scenario should validate some combination of these invariants:
 - `TR-503 Remote Agent Pane Remains Visible After Split`
   Split a remote agent session and verify the agent pane still shows meaningful visible content rather than collapsing to an effectively empty bottom strip.
   Assertions: main pane visible content remains meaningful after split, not just status/prompt residue, and the content occupies the visible pane area rather than a small subset.
+  Automation: planned
+
+- `TR-504 Remote Session Cleanup Does Not Leak Workers`
+  Create remote sessions and utility splits, then close the session or quit the app and verify the remote PTY/worker side is actually torn down.
+  Assertions: closing the session or app does not leave orphaned remote shells, Codex/Claude workers, or stale PTY runtimes behind; repeated scenario runs do not degrade into `resource temporarily unavailable`, startup panics, or spawn failures caused by leaked processes from earlier runs.
   Automation: planned
 
 ### Render Efficiency
@@ -159,7 +170,7 @@ The next scenarios to automate after `TR-502` should be:
 1. `TR-101 Split From Main Preserves Main Pane`
 2. `TR-201 Relaunch Preserves Existing Split Session`
 3. `TR-503 Remote Agent Pane Remains Visible After Split`
-4. `TR-402 Split Open Or Close Triggers Targeted Redraw`
+4. `TR-504 Remote Session Cleanup Does Not Leak Workers`
 5. `TR-204 Relaunch Restore Keeps Formatting`
 
 ## Review Rule

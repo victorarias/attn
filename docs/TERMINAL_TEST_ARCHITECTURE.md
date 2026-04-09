@@ -60,6 +60,7 @@ Current initial scenarios:
 Purpose:
 - verify the same behaviors through the full remote daemon / worker / websocket path
 - verify relaunch, restore, and split persistence where regressions have been worst
+- verify session teardown and app quit do not leak remote PTYs or agent workers across runs
 
 Current initial scenario:
 - `TR-502` via `scenario-tr502-remote-relaunch-splits.mjs`

@@ -137,7 +137,7 @@ export async function capturePaneNativeMetrics(
   const cropPath = path.join(runDir, `${prefix}-${paneId}-${target}-crop.png`);
   const summaryPath = path.join(runDir, `${prefix}-${paneId}-${target}-analysis.json`);
 
-  const nativeScreenshot = await captureFrontWindowScreenshot(screenshotPath, { bundleId });
+  const nativeScreenshot = await captureWindowScreenshot(client, screenshotPath, { bundleId });
   const nativeWidth = nativeScreenshot?.bounds?.width || 0;
   const nativeHeight = nativeScreenshot?.bounds?.height || 0;
   const imageMetadata = await readImageMetadata(screenshotPath);
@@ -181,4 +181,26 @@ export async function capturePaneNativeMetrics(
 
   fs.writeFileSync(summaryPath, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
   return result;
+}
+
+async function captureWindowScreenshot(client, screenshotPath, { bundleId }) {
+  try {
+    return await captureFrontWindowScreenshot(screenshotPath, { bundleId });
+  } catch {
+    // Fall through to the app-side capture path.
+  }
+
+  const result = await client.request('capture_window_screenshot', {
+    path: screenshotPath,
+    bundleId,
+  }, { timeoutMs: 20_000 });
+  if (result?.path && result?.bounds) {
+    return {
+      source: 'ui_automation_window',
+      bundleId,
+      bounds: result.bounds,
+      path: result.path,
+    };
+  }
+  throw new Error(`capture_window_screenshot returned no image for ${bundleId}`);
 }

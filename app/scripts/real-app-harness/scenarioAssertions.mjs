@@ -1,5 +1,9 @@
 import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
-import { comparePaneNativePaintCoverage, evaluatePaneNativePaintCoverage } from './paneNativeAnalysis.mjs';
+import {
+  comparePaneNativePaintCoverage,
+  comparePaneNativePaintRegression,
+  evaluatePaneNativePaintCoverage,
+} from './paneNativeAnalysis.mjs';
 import { capturePaneNativeMetrics } from './paneNativeMetrics.mjs';
 
 export function sleep(ms) {
@@ -79,6 +83,31 @@ export async function waitForPaneText(client, sessionId, paneId, predicate, desc
   while (Date.now() - startedAt < timeoutMs) {
     lastPayload = await client.request('read_pane_text', { sessionId, paneId }, { timeoutMs: 20_000 });
     if (predicate(lastPayload?.text || '')) {
+      return lastPayload;
+    }
+    await sleep(200);
+  }
+
+  throw new Error(
+    `Timed out waiting for ${description}. Last pane text tail:\n${(lastPayload?.text || '').slice(-800)}`
+  );
+}
+
+export async function waitForPaneTextChange(
+  client,
+  sessionId,
+  paneId,
+  previousText,
+  description = `pane ${paneId} text change`,
+  timeoutMs = 15_000,
+) {
+  const startedAt = Date.now();
+  let lastPayload = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastPayload = await client.request('read_pane_text', { sessionId, paneId }, { timeoutMs: 20_000 });
+    const nextText = typeof lastPayload?.text === 'string' ? lastPayload.text : '';
+    if (nextText !== previousText) {
       return lastPayload;
     }
     await sleep(200);
@@ -175,6 +204,90 @@ export async function assertPaneVisibleContent(
     },
     description,
     timeoutMs,
+  );
+}
+
+function visibleContentAnchorLines(
+  visibleContent,
+  {
+    maxAnchors = 6,
+    minLineLength = 6,
+  } = {},
+) {
+  return (visibleContent?.lines || [])
+    .map((line) => String(line || '').trim())
+    .filter((line) => line.length >= minLineLength)
+    .slice(0, maxAnchors);
+}
+
+export async function assertPaneVisibleContentPreserved(
+  client,
+  sessionId,
+  paneId,
+  baselineVisibleContent,
+  {
+    minNonEmptyLineRatio = 0.5,
+    minCharCountRatio = 0.4,
+    maxAnchors = 6,
+    minAnchorMatches = 3,
+    minLineLength = 6,
+    timeoutMs = 20_000,
+    description = `pane ${paneId} visible content preserved`,
+  } = {},
+) {
+  if (!baselineVisibleContent) {
+    throw new Error(`${description} requires baseline visible content`);
+  }
+
+  const baselineSummary = baselineVisibleContent.summary || {};
+  const anchors = visibleContentAnchorLines(baselineVisibleContent, { maxAnchors, minLineLength });
+  const requiredAnchorMatches = Math.min(Math.max(1, minAnchorMatches), Math.max(1, anchors.length));
+  const requiredNonEmptyLines = Math.max(
+    2,
+    Math.floor((baselineSummary.nonEmptyLineCount || anchors.length || 2) * minNonEmptyLineRatio),
+  );
+  const requiredCharCount = Math.max(
+    20,
+    Math.floor((baselineSummary.charCount || 20) * minCharCountRatio),
+  );
+
+  const startedAt = Date.now();
+  let lastState = null;
+  let lastMatches = [];
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastState = await client.request('get_pane_state', { sessionId, paneId }, { timeoutMs: 20_000 });
+    const visibleContent = lastState?.pane?.visibleContent || null;
+    if (!visibleContent) {
+      await sleep(200);
+      continue;
+    }
+    const summary = visibleContent.summary || {};
+    const joined = (visibleContent.lines || []).join('\n');
+    lastMatches = anchors.filter((anchor) => terminalTextIncludes(joined, anchor, { allowWrapped: true }));
+    if (
+      (summary.nonEmptyLineCount || 0) >= requiredNonEmptyLines &&
+      (summary.charCount || 0) >= requiredCharCount &&
+      lastMatches.length >= requiredAnchorMatches
+    ) {
+      return {
+        state: lastState,
+        anchors,
+        matches: lastMatches,
+      };
+    }
+    await sleep(200);
+  }
+
+  throw new Error(
+    [
+      `Timed out waiting for ${description}.`,
+      `Required anchors (${requiredAnchorMatches}/${anchors.length}): ${JSON.stringify(anchors)}`,
+      `Matched anchors (${lastMatches.length}): ${JSON.stringify(lastMatches)}`,
+      `Baseline summary: ${JSON.stringify(baselineSummary)}`,
+      `Last summary: ${JSON.stringify(lastState?.pane?.visibleContent?.summary || null)}`,
+      `Last visible lines: ${JSON.stringify((lastState?.pane?.visibleContent?.lines || []).slice(0, 18), null, 2)}`,
+    ].join('\n')
   );
 }
 
@@ -343,6 +456,74 @@ export async function assertPaneNativePaintStable(
   );
 
   const comparison = assertPaneNativePaintDelta(baselineMetrics, candidateMetrics, options);
+  return {
+    baselineMetrics,
+    candidateMetrics,
+    comparison,
+  };
+}
+
+export function assertPaneNativePaintNotWorse(
+  baselineMetrics,
+  candidateMetrics,
+  {
+    maxBusyColumnRatioRegression = 0.08,
+    maxBusyRowRatioRegression = 0.08,
+    maxBBoxWidthRatioRegression = 0.08,
+    maxBBoxHeightRatioRegression = 0.08,
+    maxActivePixelRatioRegression = 0.03,
+    description = 'pane native paint regression',
+  } = {},
+) {
+  const evaluation = comparePaneNativePaintRegression(
+    baselineMetrics?.analysis || null,
+    candidateMetrics?.analysis || null,
+    {
+      maxBusyColumnRatioRegression,
+      maxBusyRowRatioRegression,
+      maxBBoxWidthRatioRegression,
+      maxBBoxHeightRatioRegression,
+      maxActivePixelRatioRegression,
+    },
+  );
+
+  if (!evaluation.ok) {
+    throw new Error(
+      `${description} failed: ${evaluation.failures.join(', ')}.\n${JSON.stringify({
+        baseline: baselineMetrics,
+        candidate: candidateMetrics,
+        comparison: evaluation,
+      }, null, 2)}`
+    );
+  }
+
+  return evaluation;
+}
+
+export async function assertPaneNativePaintRecovered(
+  client,
+  runDir,
+  prefix,
+  sessionId,
+  paneId,
+  baselineMetrics,
+  options = {},
+) {
+  const candidateMetrics = await capturePaneNativeMetrics(
+    client,
+    runDir,
+    prefix,
+    sessionId,
+    paneId,
+    {
+      target: options.target || 'paneBody',
+      activityThreshold: options.activityThreshold ?? 18,
+      insetPx: options.insetPx ?? 2,
+      bundleId: options.bundleId || 'com.attn.manager',
+    },
+  );
+
+  const comparison = assertPaneNativePaintNotWorse(baselineMetrics, candidateMetrics, options);
   return {
     baselineMetrics,
     candidateMetrics,

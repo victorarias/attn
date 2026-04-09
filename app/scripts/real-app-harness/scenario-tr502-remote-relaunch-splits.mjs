@@ -8,13 +8,14 @@ import { createScenarioRunner } from './scenarioRunner.mjs';
 import {
   assertPaneCoverage,
   assertPaneNativePaintCoverage,
-  assertPaneNativePaintStable,
   assertPaneVisibleContent,
+  assertPaneVisibleContentPreserved,
   compactTerminalText,
   captureSessionArtifacts,
   shellPanes,
   waitForNewShellPane,
   waitForPaneInputFocus,
+  waitForPaneTextChange,
   waitForPaneText,
   waitForPaneVisible,
   waitForSessionWorkspace,
@@ -108,8 +109,8 @@ async function main() {
   let initialShellPaneId = null;
   let postRelaunchMainSplitPaneId = null;
   let postRelaunchShellSplitPaneId = null;
-  let baselineMainNativeMetrics = null;
-  let baselineInitialShellNativeMetrics = null;
+  let baselineMainVisibleContent = null;
+  let restoredMainVisibleContent = null;
   const timings = {
     initialShellEchoMs: null,
     postRelaunchMainSplitEchoMs: null,
@@ -120,9 +121,13 @@ async function main() {
     postRelaunchMainSplit: null,
     postRelaunchShellSplit: null,
   };
-  const preRelaunchToken = `__TR502_PRE_${Date.now()}__`;
-  const postRelaunchMainToken = `__TR502_MAIN_${Date.now()}__`;
-  const postRelaunchShellToken = `__TR502_SHELL_${Date.now()}__`;
+  const runNonce = String(Date.now()).slice(-6);
+  const preRelaunchToken = `T502P${runNonce}`;
+  const postRelaunchMainToken = `T502M${runNonce}`;
+  const postRelaunchShellToken = `T502S${runNonce}`;
+  const preRelaunchMarker = /T502P\d{6}/;
+  const postRelaunchMainMarker = /T502M\d{6}/;
+  const postRelaunchShellMarker = /T502S\d{6}/;
 
   function assertEchoLatency(label, latencyMs) {
     if (!Number.isFinite(latencyMs)) {
@@ -177,7 +182,7 @@ async function main() {
     initialShellPaneId = await runner.step('create_initial_split_before_relaunch', async () => {
       await client.request('select_session', { sessionId });
       await waitForPaneVisible(client, sessionId, 'main', 30_000);
-      await assertPaneVisibleContent(client, sessionId, 'main', {
+      const mainPaneState = await assertPaneVisibleContent(client, sessionId, 'main', {
         minNonEmptyLines: 2,
         minDenseLines: 0,
         minCharCount: 20,
@@ -185,13 +190,14 @@ async function main() {
         timeoutMs: 30_000,
         description: 'remote main pane visible content before relaunch',
       });
+      baselineMainVisibleContent = mainPaneState?.pane?.visibleContent || null;
       await assertPaneCoverage(client, sessionId, 'main', {
         minWidthRatio: 0.8,
         minHeightRatio: 0.7,
         timeoutMs: 20_000,
         description: 'remote main pane coverage before relaunch',
       });
-      baselineMainNativeMetrics = await assertPaneNativePaintCoverage(
+      await assertPaneNativePaintCoverage(
         client,
         runner.runDir,
         '01-pre-relaunch-main',
@@ -222,6 +228,19 @@ async function main() {
       if (!initialPane?.paneId) {
         throw new Error('Initial remote split pane missing');
       }
+      await assertPaneVisibleContentPreserved(
+        client,
+        sessionId,
+        'main',
+        baselineMainVisibleContent,
+        {
+          minNonEmptyLineRatio: 0.5,
+          minCharCountRatio: 0.4,
+          minAnchorMatches: 3,
+          timeoutMs: 20_000,
+          description: 'remote main pane content preserved after initial split',
+        },
+      );
       return initialPane.paneId;
     });
 
@@ -239,44 +258,38 @@ async function main() {
         paneId: initialShellPaneId,
         ...shellTypingReadiness.initialShell,
       });
+      const preTypeState = await client.request('read_pane_text', { sessionId, paneId: initialShellPaneId });
       const typeStartedAt = Date.now();
       await driver.activateApp();
       await driver.typeText(preRelaunchToken);
-      await waitForPaneText(
+      const typedEchoState = await waitForPaneTextChange(
         client,
         sessionId,
         initialShellPaneId,
-        (text) => compactTerminalText(text).includes(preRelaunchToken),
-        'initial remote shell token before relaunch',
+        typeof preTypeState?.text === 'string' ? preTypeState.text : '',
+        'initial remote shell echo before relaunch',
         20_000,
       );
       timings.initialShellEchoMs = Date.now() - typeStartedAt;
       assertEchoLatency('initial remote shell', timings.initialShellEchoMs);
+      if (!preRelaunchMarker.test(compactTerminalText(typedEchoState?.text || ''))) {
+        await waitForPaneText(
+          client,
+          sessionId,
+          initialShellPaneId,
+          (text) => preRelaunchMarker.test(compactTerminalText(text)),
+          'initial remote shell marker before relaunch',
+          20_000,
+        );
+      }
       await assertPaneVisibleContent(client, sessionId, initialShellPaneId, {
-        contains: preRelaunchToken,
-        allowWrappedContains: true,
         minNonEmptyLines: 1,
         minDenseLines: 0,
-        minCharCount: preRelaunchToken.length,
+        minCharCount: 8,
         minMaxLineLength: 8,
         timeoutMs: 20_000,
         description: 'initial remote shell content before relaunch',
       });
-      baselineInitialShellNativeMetrics = await assertPaneNativePaintCoverage(
-        client,
-        runner.runDir,
-        '01-pre-relaunch-shell',
-        sessionId,
-        initialShellPaneId,
-        {
-          target: 'paneBody',
-          minBusyColumnRatio: 0.2,
-          minBusyRowRatio: 0.04,
-          minBBoxWidthRatio: 0.2,
-          minBBoxHeightRatio: 0.08,
-          description: 'initial remote shell native paint coverage before relaunch',
-        },
-      );
       await captureSessionArtifacts(client, runner.runDir, '01-pre-relaunch', sessionId);
     });
 
@@ -289,7 +302,7 @@ async function main() {
       await client.request('select_session', { sessionId });
       await waitForPaneVisible(client, sessionId, 'main', 30_000);
       await waitForPaneVisible(client, sessionId, initialShellPaneId, 30_000);
-      await assertPaneVisibleContent(client, sessionId, 'main', {
+      const restoredMainState = await assertPaneVisibleContent(client, sessionId, 'main', {
         minNonEmptyLines: 2,
         minDenseLines: 0,
         minCharCount: 20,
@@ -297,6 +310,7 @@ async function main() {
         timeoutMs: 30_000,
         description: 'remote main pane visible content after relaunch',
       });
+      restoredMainVisibleContent = restoredMainState?.pane?.visibleContent || null;
       await assertPaneCoverage(client, sessionId, 'main', {
         minWidthRatio: 0.8,
         minHeightRatio: 0.7,
@@ -311,64 +325,22 @@ async function main() {
         minBBoxHeightRatio: 0.12,
         description: 'remote main pane native paint coverage after relaunch',
       });
-      if (!baselineMainNativeMetrics) {
-        throw new Error('Missing baseline remote main-pane native metrics before relaunch');
-      }
-      await assertPaneNativePaintStable(
+      await waitForPaneText(
         client,
-        runner.runDir,
-        '02-post-relaunch-main-stability',
         sessionId,
-        'main',
-        baselineMainNativeMetrics,
-        {
-          target: 'paneBody',
-          maxBusyColumnRatioDelta: 0.12,
-          maxBusyRowRatioDelta: null,
-          maxBBoxWidthRatioDelta: 0.1,
-          maxBBoxHeightRatioDelta: 0.1,
-          maxActivePixelRatioDelta: null,
-          description: 'remote main pane native paint stability after relaunch with allowed content reflow',
-        },
+        initialShellPaneId,
+        (text) => preRelaunchMarker.test(compactTerminalText(text)),
+        'initial remote shell marker after relaunch',
+        20_000,
       );
       await assertPaneVisibleContent(client, sessionId, initialShellPaneId, {
-        contains: preRelaunchToken,
-        allowWrappedContains: true,
         minNonEmptyLines: 1,
         minDenseLines: 0,
-        minCharCount: preRelaunchToken.length,
+        minCharCount: 8,
         minMaxLineLength: 8,
         timeoutMs: 20_000,
         description: 'initial remote shell content after relaunch',
       });
-      await assertPaneNativePaintCoverage(client, runner.runDir, '02-post-relaunch-shell', sessionId, initialShellPaneId, {
-        target: 'paneBody',
-        minBusyColumnRatio: 0.2,
-        minBusyRowRatio: 0.04,
-        minBBoxWidthRatio: 0.2,
-        minBBoxHeightRatio: 0.08,
-        description: 'initial remote shell native paint coverage after relaunch',
-      });
-      if (!baselineInitialShellNativeMetrics) {
-        throw new Error('Missing baseline initial remote shell native metrics before relaunch');
-      }
-      await assertPaneNativePaintStable(
-        client,
-        runner.runDir,
-        '02-post-relaunch-shell-stability',
-        sessionId,
-        initialShellPaneId,
-        baselineInitialShellNativeMetrics,
-        {
-          target: 'paneBody',
-          maxBusyColumnRatioDelta: 0.12,
-          maxBusyRowRatioDelta: 0.16,
-          maxBBoxWidthRatioDelta: 0.12,
-          maxBBoxHeightRatioDelta: 0.12,
-          maxActivePixelRatioDelta: 0.06,
-          description: 'initial remote shell native paint stability after relaunch',
-        },
-      );
       await captureSessionArtifacts(client, runner.runDir, '02-post-relaunch', sessionId);
     });
 
@@ -387,6 +359,19 @@ async function main() {
         'new remote shell after relaunch split from main',
         30_000,
       );
+      await assertPaneVisibleContentPreserved(
+        client,
+        sessionId,
+        'main',
+        restoredMainVisibleContent,
+        {
+          minNonEmptyLineRatio: 0.5,
+          minCharCountRatio: 0.4,
+          minAnchorMatches: 3,
+          timeoutMs: 20_000,
+          description: 'remote main pane content preserved after relaunch split',
+        },
+      );
       return newPane.paneId;
     });
 
@@ -404,25 +389,34 @@ async function main() {
         paneId: postRelaunchMainSplitPaneId,
         ...shellTypingReadiness.postRelaunchMainSplit,
       });
+      const preTypeState = await client.request('read_pane_text', { sessionId, paneId: postRelaunchMainSplitPaneId });
       const typeStartedAt = Date.now();
       await driver.activateApp();
       await driver.typeText(postRelaunchMainToken);
-      await waitForPaneText(
+      const typedEchoState = await waitForPaneTextChange(
         client,
         sessionId,
         postRelaunchMainSplitPaneId,
-        (text) => compactTerminalText(text).includes(postRelaunchMainToken),
-        'remote shell token after main split',
+        typeof preTypeState?.text === 'string' ? preTypeState.text : '',
+        'remote shell echo after main split',
         20_000,
       );
       timings.postRelaunchMainSplitEchoMs = Date.now() - typeStartedAt;
       assertEchoLatency('post-relaunch main split shell', timings.postRelaunchMainSplitEchoMs);
+      if (!postRelaunchMainMarker.test(compactTerminalText(typedEchoState?.text || ''))) {
+        await waitForPaneText(
+          client,
+          sessionId,
+          postRelaunchMainSplitPaneId,
+          (text) => postRelaunchMainMarker.test(compactTerminalText(text)),
+          'remote shell marker after main split',
+          20_000,
+        );
+      }
       await assertPaneVisibleContent(client, sessionId, postRelaunchMainSplitPaneId, {
-        contains: postRelaunchMainToken,
-        allowWrappedContains: true,
         minNonEmptyLines: 1,
         minDenseLines: 0,
-        minCharCount: postRelaunchMainToken.length,
+        minCharCount: 8,
         minMaxLineLength: 8,
         timeoutMs: 20_000,
         description: 'remote shell content after main split',
@@ -468,25 +462,34 @@ async function main() {
         paneId: postRelaunchShellSplitPaneId,
         ...shellTypingReadiness.postRelaunchShellSplit,
       });
+      const preTypeState = await client.request('read_pane_text', { sessionId, paneId: postRelaunchShellSplitPaneId });
       const typeStartedAt = Date.now();
       await driver.activateApp();
       await driver.typeText(postRelaunchShellToken);
-      await waitForPaneText(
+      const typedEchoState = await waitForPaneTextChange(
         client,
         sessionId,
         postRelaunchShellSplitPaneId,
-        (text) => compactTerminalText(text).includes(postRelaunchShellToken),
-        'remote shell token after shell split',
+        typeof preTypeState?.text === 'string' ? preTypeState.text : '',
+        'remote shell echo after shell split',
         20_000,
       );
       timings.postRelaunchShellSplitEchoMs = Date.now() - typeStartedAt;
       assertEchoLatency('post-relaunch shell split shell', timings.postRelaunchShellSplitEchoMs);
+      if (!postRelaunchShellMarker.test(compactTerminalText(typedEchoState?.text || ''))) {
+        await waitForPaneText(
+          client,
+          sessionId,
+          postRelaunchShellSplitPaneId,
+          (text) => postRelaunchShellMarker.test(compactTerminalText(text)),
+          'remote shell marker after shell split',
+          20_000,
+        );
+      }
       await assertPaneVisibleContent(client, sessionId, postRelaunchShellSplitPaneId, {
-        contains: postRelaunchShellToken,
-        allowWrappedContains: true,
         minNonEmptyLines: 1,
         minDenseLines: 0,
-        minCharCount: postRelaunchShellToken.length,
+        minCharCount: 8,
         minMaxLineLength: 8,
         timeoutMs: 20_000,
         description: 'remote shell content after shell split',

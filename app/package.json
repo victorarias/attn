@@ -28,6 +28,8 @@
     "real-app:bridge-cli": "node scripts/real-app-harness/ui-automation-cli.mjs",
     "real-app:scenario-tr101": "node scripts/real-app-harness/scenario-tr101-claude-main-split.mjs",
     "real-app:scenario-tr102": "node scripts/real-app-harness/scenario-tr102-claude-utility-split.mjs",
+    "real-app:scenario-tr205": "node scripts/real-app-harness/scenario-tr205-remote-relaunch-close-redraw.mjs",
+    "real-app:scenario-tr402": "node scripts/real-app-harness/scenario-tr402-remote-close-redraw.mjs",
     "real-app:scenario-tr502": "node scripts/real-app-harness/scenario-tr502-remote-relaunch-splits.mjs",
     "e2e": "playwright test",
     "e2e:headed": "playwright test --headed"

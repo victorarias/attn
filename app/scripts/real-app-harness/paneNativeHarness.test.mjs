@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   analyzePanePixelCoverage,
   comparePaneNativePaintCoverage,
+  comparePaneNativePaintRegression,
   evaluatePaneNativePaintCoverage,
 } from './paneNativeAnalysis.mjs';
 import { analyzePngCropCoverage } from './paneNativeMetrics.mjs';
@@ -344,5 +345,56 @@ describe('pane native analysis', () => {
       maxActivePixelRatioDelta: null,
     });
     expect(reflowAllowed.ok).toBe(true);
+  });
+
+  it('allows paint growth while still rejecting native paint regression', () => {
+    const baseline = {
+      busyColumnRatio: 0.86,
+      busyRowRatio: 0.26,
+      bboxWidthRatio: 0.96,
+      bboxHeightRatio: 0.49,
+      activePixelRatio: 0.06,
+    };
+    const expanded = {
+      busyColumnRatio: 0.97,
+      busyRowRatio: 0.56,
+      bboxWidthRatio: 0.97,
+      bboxHeightRatio: 0.71,
+      activePixelRatio: 0.39,
+    };
+    const collapsed = {
+      busyColumnRatio: 0.62,
+      busyRowRatio: 0.11,
+      bboxWidthRatio: 0.58,
+      bboxHeightRatio: 0.14,
+      activePixelRatio: 0.03,
+    };
+
+    const expandedComparison = comparePaneNativePaintRegression(baseline, expanded, {
+      maxBusyColumnRatioRegression: 0.1,
+      maxBusyRowRatioRegression: 0.1,
+      maxBBoxWidthRatioRegression: 0.1,
+      maxBBoxHeightRatioRegression: 0.1,
+      maxActivePixelRatioRegression: null,
+    });
+    expect(expandedComparison.ok).toBe(true);
+    expect(expandedComparison.regressions).toEqual({
+      busyColumnRatioRegression: 0,
+      busyRowRatioRegression: 0,
+      bboxWidthRatioRegression: 0,
+      bboxHeightRatioRegression: 0,
+      activePixelRatioRegression: 0,
+    });
+
+    const collapsedComparison = comparePaneNativePaintRegression(baseline, collapsed, {
+      maxBusyColumnRatioRegression: 0.1,
+      maxBusyRowRatioRegression: 0.1,
+      maxBBoxWidthRatioRegression: 0.1,
+      maxBBoxHeightRatioRegression: 0.1,
+      maxActivePixelRatioRegression: null,
+    });
+    expect(collapsedComparison.ok).toBe(false);
+    expect(collapsedComparison.failures.some((failure) => failure.includes('busyRowRatioRegression'))).toBe(true);
+    expect(collapsedComparison.failures.some((failure) => failure.includes('bboxHeightRatioRegression'))).toBe(true);
   });
 });

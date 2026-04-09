@@ -13,7 +13,9 @@ export async function runSSH(target, command, timeoutMs = 30_000) {
   const { stdout } = await execFileAsync(
     'ssh',
     [
+      '-S', 'none',
       '-o', 'BatchMode=yes',
+      '-o', 'ControlMaster=no',
       '-o', 'StrictHostKeyChecking=accept-new',
       '-o', 'ConnectTimeout=10',
       target,
@@ -74,6 +76,44 @@ export async function removeStaleHarnessEndpoints(observer, timeoutMs = 20_000) 
     }
     await sleep(250);
   }
+}
+
+export async function removeStaleHarnessScenarioSessions(observer, timeoutMs = 60_000) {
+  const staleSessions = [...observer.sessionsById.values()].filter((session) =>
+    typeof session?.label === 'string' && /^tr\d{3}-scenario-/.test(session.label)
+  );
+  if (staleSessions.length === 0) {
+    return {
+      sessions: [],
+      lingeringWorkspaceSessionIds: [],
+    };
+  }
+
+  const targetIds = new Set(staleSessions.map((session) => session.id));
+  for (const session of staleSessions) {
+    observer.send({ cmd: 'kill_session', id: session.id });
+  }
+
+  await observer.waitFor(() => {
+    const remainingWorking = [...observer.sessionsById.values()].filter((session) =>
+      targetIds.has(session.id) && session.state === 'working'
+    );
+    return remainingWorking.length === 0 ? true : null;
+  }, `harness scenario session kill (${[...targetIds].join(', ')})`, Math.min(timeoutMs, 20_000));
+
+  for (const sessionId of targetIds) {
+    observer.unregisterSession(sessionId);
+  }
+
+  await observer.waitFor(() => {
+    const remainingSessions = [...observer.sessionsById.values()].filter((session) => targetIds.has(session.id));
+    return remainingSessions.length === 0 ? true : null;
+  }, `harness scenario session unregister (${[...targetIds].join(', ')})`, timeoutMs);
+
+  return {
+    sessions: staleSessions,
+    lingeringWorkspaceSessionIds: [...observer.workspacesBySessionId.keys()].filter((sessionId) => targetIds.has(sessionId)),
+  };
 }
 
 export function buildRemoteHarnessPaths(remoteHome, runId) {
