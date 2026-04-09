@@ -26,6 +26,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Local Codex Close-Redraw Canary**: Calibrate the local Codex `TR-402` baseline paint thresholds to accept healthy sparse Codex panes, and make split-open main-pane content loss a hard failure instead of a logged observation.
 - **Remote Claude Relaunch Coverage**: `TR-205` now uses the same trust-prompt and prompt-readiness helpers as the local Claude canaries, so remote Claude split/relaunch/close recovery is exercised as a real scenario instead of failing at harness bootstrap.
 - **Packaged-App Harness Discipline**: Document that packaged-app scenarios must run serially because parallel runs can race through the shared app automation surface and produce invalid failures.
+- **Packaged-App Native Window Capture**: Native screenshot assertions now ask the packaged app for its own window bounds before falling back to macOS `System Events`, so `TR-402` no longer flakes just because AppleScript temporarily loses the app window while the UI itself is still healthy.
 
 ### Changed
 - **Explicit Attach Policies**: Name websocket attach flows as `fresh_spawn`, `relaunch_restore`, and `same_app_remount`, and thread that policy through `attach_session`, so remount hydration, relaunch restore, and brand-new spawns stop sharing one anonymous replay path. Same-app remounts now subscribe without asking the daemon to build replay payloads at all, while relaunch restore remains the only replay-aware attach path.
@@ -43,6 +44,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Acknowledged Session Close**: App-side session close now waits for daemon `session_unregistered` before treating the close as complete, instead of racing daemon unregister with an immediate local PTY kill and UI removal.
 - **Worker Reaping On Session Close**: Removing a PTY worker session now reaps the worker PID directly, so packaged-app session close no longer leaves defunct `attn` worker children attached to the long-lived daemon after the UI and registry cleanup finish.
 - **Shared Terminal Resize Lifecycle**: Initial terminal geometry, observed resize planning, and hidden-to-visible redraw-or-resize decisions now run through dedicated terminal sizing and resize helpers instead of being duplicated inline inside `Terminal.tsx`, with tests preserving the same-size visibility flush redraw behavior.
+- **Shared Terminal Renderer Lifecycle**: WebGL attach/detach, renderer-config subscription, and context-loss fallback now run through a dedicated terminal renderer helper instead of being embedded inside the `Terminal.tsx` mount effect, with focused tests preserving DOM fallback and context-loss refresh behavior.
 
 ## [2026-04-08]
 

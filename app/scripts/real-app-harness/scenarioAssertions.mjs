@@ -598,7 +598,7 @@ export async function captureSessionArtifacts(client, runDir, prefix, sessionId)
     }, { timeoutMs: 20_000 });
   } catch (error) {
     try {
-      await captureFrontWindowScreenshot(`${runDir}/${prefix}-native-window.png`);
+      await captureFrontWindowScreenshot(`${runDir}/${prefix}-native-window.png`, { client, bundleId: 'com.attn.manager' });
       return;
     } catch (nativeError) {
       const fs = await import('node:fs');

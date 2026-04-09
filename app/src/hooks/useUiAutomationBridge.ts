@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { emit, listen } from '@tauri-apps/api/event';
 import { isTauri } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Session } from '../store/sessions';
 import { MAIN_TERMINAL_PANE_ID } from '../store/sessions';
 import type { SessionAgent } from '../types/sessionAgent';
@@ -1137,6 +1138,30 @@ export function useUiAutomationBridge({
         };
       case 'capture_screenshot_data':
         return captureDomScreenshotData();
+      case 'get_window_bounds': {
+        if (!isTauri()) {
+          return null;
+        }
+        const appWindow = getCurrentWindow();
+        const [scaleFactor, outerPosition, outerSize, minimized] = await Promise.all([
+          appWindow.scaleFactor(),
+          appWindow.outerPosition(),
+          appWindow.outerSize(),
+          appWindow.isMinimized(),
+        ]);
+        const logicalPosition = outerPosition.toLogical(scaleFactor);
+        const logicalSize = outerSize.toLogical(scaleFactor);
+        return {
+          scaleFactor,
+          minimized,
+          logicalBounds: {
+            x: logicalPosition.x,
+            y: logicalPosition.y,
+            width: logicalSize.width,
+            height: logicalSize.height,
+          },
+        };
+      }
       case 'list_sessions':
         return {
           activeSessionId,

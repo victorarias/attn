@@ -1,7 +1,6 @@
 import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { WebglAddon } from '@xterm/addon-webgl';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
@@ -30,6 +29,7 @@ import {
   subscribeTerminalRendererConfig,
   type TerminalRendererMode,
 } from '../utils/terminalRenderer';
+import { installTerminalRendererLifecycle } from '../utils/terminalRendererLifecycle';
 import {
   planObservedTerminalResize,
   planVisibilityFlush,
@@ -123,7 +123,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
   function Terminal({ fontSize = DEFAULT_FONT_SIZE, resolvedTheme = 'dark', debugName, runtimeLogMeta, tuiCursor, onInit, onReady, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
-    const webglAddonRef = useRef<WebglAddon | null>(null);
     const debugNameRef = useRef(debugName || 'unknown');
     const visibleRef = useRef(true);
     const rendererModeRef = useRef<'webgl' | 'dom'>('dom');
@@ -602,49 +601,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // VS Code: open() FIRST, then load WebGL
       // Source: xtermTerminal.ts attachToElement() - WebGL is loaded AFTER raw.open()
       term.open(containerRef.current);
-
-      const detachWebglRenderer = () => {
-        webglAddonRef.current?.dispose();
-        webglAddonRef.current = null;
-        rendererModeRef.current = 'dom';
-        setRendererDisplayMode('dom');
-      };
-
-      const attachWebglRenderer = () => {
-          if (webglAddonRef.current) {
+      const rendererLifecycle = installTerminalRendererLifecycle({
+        term,
+        rendererModeRef,
+        setRendererDisplayMode,
+        onContextLoss: () => {
+          const container = containerRef.current;
+          if (!container) {
             return;
           }
-        try {
-          const nextWebglAddon = new WebglAddon();
-          nextWebglAddon.onContextLoss(() => {
-            console.info('[Terminal] WebGL context lost, disposing and falling back to DOM');
-              detachWebglRenderer();
-            // VS Code: trigger dimension refresh since DOM renderer has different cell dimensions
-            const container = containerRef.current;
-            if (container && term) {
-              requestAnimationFrame(() => {
-                const dims = getScaledDimensions(container, term, fontSizeRef.current);
-                if (dims) {
-                  resizeTerminal(term, dims.cols, dims.rows, 'webgl_context_loss');
-                }
-              });
+          requestAnimationFrame(() => {
+            const dims = getScaledDimensions(container, term, fontSizeRef.current);
+            if (dims) {
+              resizeTerminal(term, dims.cols, dims.rows, 'webgl_context_loss');
             }
           });
-          term.loadAddon(nextWebglAddon);
-          webglAddonRef.current = nextWebglAddon;
-          rendererModeRef.current = 'webgl';
-            setRendererDisplayMode('webgl');
-        } catch (e) {
-          console.warn('[Terminal] WebGL addon failed:', e);
-            detachWebglRenderer();
-        }
-      };
-
-        if (getTerminalRendererConfig().mode === 'webgl') {
-          attachWebglRenderer();
-        } else {
-          detachWebglRenderer();
-        }
+        },
+      });
 
       // Copy-on-select: copy selected text to clipboard automatically.
       // Markdown copy (Cmd+Shift+C) suppresses plain copy briefly to prevent races.
@@ -1089,15 +1062,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const dprMediaQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
       dprMediaQuery.addEventListener('change', handleDprChange);
 
-        const unsubscribeRendererConfig = subscribeTerminalRendererConfig(() => {
-          const nextMode = getTerminalRendererConfig().mode;
-          if (nextMode === 'webgl') {
-            attachWebglRenderer();
-            return;
-          }
-          detachWebglRenderer();
-        });
-
       // Cleanup
       return () => {
           const meta = runtimeLogMetaRef.current;
@@ -1127,7 +1091,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           renderDisposable.dispose();
           writeParsedDisposable.dispose();
           window.clearInterval(heartbeatInterval);
-          unsubscribeRendererConfig();
           resizeObserver.disconnect();
           visibilityObserver.disconnect();
           clearTimeout(xResizeTimeout);
@@ -1135,7 +1098,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         window.removeEventListener('keydown', handleMdCopy, true);
         cleanupTerminalScrollPin(term);
         unregisterTerminalPerf();
-          detachWebglRenderer();
+          rendererLifecycle.dispose();
         readyFiredRef.current = false;
         lastResizeSnapshotRef.current = null;
         writeQueueChunksRef.current = 0;

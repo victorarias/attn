@@ -24,6 +24,41 @@ async function activateBundle(bundleId) {
   }
 }
 
+function normalizeLogicalBounds(bounds) {
+  if (!bounds) {
+    return null;
+  }
+  const x = Number(bounds.x);
+  const y = Number(bounds.y);
+  const width = Number(bounds.width);
+  const height = Number(bounds.height);
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(width),
+    height: Math.round(height),
+    processName: 'attn-app-window',
+  };
+}
+
+async function readUiAutomationWindowBounds(client) {
+  if (!client || typeof client.request !== 'function') {
+    return null;
+  }
+  try {
+    const result = await client.request('get_window_bounds', {}, { timeoutMs: 5_000 });
+    if (result?.minimized === true) {
+      return null;
+    }
+    return normalizeLogicalBounds(result?.logicalBounds);
+  } catch {
+    return null;
+  }
+}
+
 async function readFrontWindowBoundsForBundle(bundleId) {
   const output = await runAppleScript(`
 tell application "System Events"
@@ -56,7 +91,12 @@ end tell
   };
 }
 
-export async function getFrontWindowBounds(bundleId = 'com.attn.manager') {
+export async function getFrontWindowBounds(bundleId = 'com.attn.manager', options = {}) {
+  const automationBounds = await readUiAutomationWindowBounds(options.client);
+  if (automationBounds) {
+    return automationBounds;
+  }
+
   let lastError = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     if (attempt > 0) {
@@ -77,7 +117,7 @@ export async function getFrontWindowBounds(bundleId = 'com.attn.manager') {
 
 export async function captureFrontWindowScreenshot(outputPath, options = {}) {
   const bundleId = options.bundleId || 'com.attn.manager';
-  const bounds = await getFrontWindowBounds(bundleId);
+  const bounds = await getFrontWindowBounds(bundleId, options);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   await execFileAsync('/usr/sbin/screencapture', [
     '-x',

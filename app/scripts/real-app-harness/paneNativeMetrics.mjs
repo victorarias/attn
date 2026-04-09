@@ -202,7 +202,7 @@ async function captureWindowScreenshot(client, screenshotPath, { bundleId }) {
   }
 
   try {
-    return await captureFrontWindowScreenshot(screenshotPath, { bundleId });
+    return await captureFrontWindowScreenshot(screenshotPath, { bundleId, client });
   } catch (error) {
     throw new Error(`capture_window_screenshot returned no image for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
   }
