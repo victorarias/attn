@@ -33,6 +33,71 @@ export async function getRemoteHome(target) {
   return (await runSSH(target, 'printf %s "$HOME"')).trim();
 }
 
+export async function listRemoteProcessesByCwd(target, cwd, timeoutMs = 30_000) {
+  const output = await runSSH(
+    target,
+    `python3 - ${shellQuote(cwd)} <<'PY'
+import json
+import os
+import sys
+
+target = os.path.realpath(sys.argv[1])
+processes = []
+for entry in os.listdir('/proc'):
+    if not entry.isdigit():
+        continue
+    pid = int(entry)
+    try:
+        proc_cwd = os.readlink(f'/proc/{pid}/cwd')
+    except OSError:
+        continue
+    if os.path.realpath(proc_cwd) != target:
+        continue
+    try:
+        with open(f'/proc/{pid}/cmdline', 'rb') as handle:
+            cmdline = handle.read().replace(b'\\0', b' ').decode('utf-8', 'replace').strip()
+    except OSError:
+        cmdline = ''
+    try:
+        with open(f'/proc/{pid}/status', 'r', encoding='utf-8', errors='replace') as handle:
+            ppid = None
+            for line in handle:
+                if line.startswith('PPid:'):
+                    ppid = int(line.split(':', 1)[1].strip())
+                    break
+    except OSError:
+        ppid = None
+    processes.append({
+        'pid': pid,
+        'ppid': ppid,
+        'cwd': proc_cwd,
+        'cmdline': cmdline,
+    })
+
+processes.sort(key=lambda entry: entry['pid'])
+print(json.dumps(processes))
+PY`,
+    timeoutMs,
+  );
+  return JSON.parse(String(output || '[]').trim() || '[]');
+}
+
+export async function waitForRemoteProcessesByCwd(target, cwd, predicate, description, timeoutMs = 60_000) {
+  const startedAt = Date.now();
+  let lastSnapshot = [];
+  while (Date.now() - startedAt < timeoutMs) {
+    lastSnapshot = await listRemoteProcessesByCwd(target, cwd, Math.min(30_000, timeoutMs));
+    const value = predicate(lastSnapshot);
+    if (value) {
+      return value;
+    }
+    await sleep(500);
+  }
+  throw new Error(
+    `Timed out waiting for ${description}. Last remote process snapshot for ${cwd}:\n${JSON.stringify(lastSnapshot, null, 2)}`
+  );
+}
+
 export function chooseRemoteWSPort() {
   return 19000 + Math.floor(Math.random() * 2000);
 }
@@ -80,7 +145,7 @@ export async function removeStaleHarnessEndpoints(observer, timeoutMs = 20_000) 
 
 export async function removeStaleHarnessScenarioSessions(observer, timeoutMs = 60_000) {
   const staleSessions = [...observer.sessionsById.values()].filter((session) =>
-    typeof session?.label === 'string' && /^tr\d{3}-scenario-/.test(session.label)
+    typeof session?.label === 'string' && /^tr\d{3}(?:-|$)/.test(session.label)
   );
   if (staleSessions.length === 0) {
     return {

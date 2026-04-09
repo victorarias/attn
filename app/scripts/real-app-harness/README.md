@@ -23,6 +23,9 @@ pnpm run real-app:scenario-tr101
 pnpm run real-app:scenario-tr102
 pnpm run real-app:scenario-tr205
 pnpm run real-app:scenario-tr402
+pnpm run real-app:scenario-tr402-local-codex
+pnpm run real-app:scenario-tr402-local-claude
+pnpm run real-app:scenario-tr504
 pnpm run real-app:scenario-tr502
 ```
 
@@ -160,6 +163,12 @@ The first scenario scripts using that foundation are:
   Remote real-agent session on `ai-sandbox`. Creates one split, relaunches the packaged app, adds two more splits, then closes utility panes one by one and checks that the surviving main Codex pane regains width and repaints into the reclaimed space after each close.
 - `real-app:scenario-tr402`
   Remote real-agent session on `ai-sandbox`. Splits the main Codex pane, closes the new utility pane, and checks that the surviving main pane regains width, keeps meaningful visible content, and repaints enough of its pane body to match the pre-split baseline instead of staying visually narrow.
+- `real-app:scenario-tr402-local-codex`
+  Local first-launch Codex canary for the same close/redraw path. It splits the main pane, closes the split, and fails if the recovered main pane regains width without recovering visible content and pane-body paint.
+- `real-app:scenario-tr402-local-claude`
+  Local first-launch Claude canary for the same close/redraw path. It seeds structured Claude output, splits the main pane, closes the split, and checks that the recovered pane still shows the seeded content with healthy pane-body paint.
+- `real-app:scenario-tr504`
+  Remote cleanup canary on `ai-sandbox`. It creates a remote session plus split in a unique harness workdir, closes the session from the app, and fails if remote processes with that workdir remain alive afterward.
 - `real-app:scenario-tr502`
   Remote real-agent session on `ai-sandbox`. Creates a split session, relaunches the packaged app, then splits again from both the main pane and an existing utility pane. The restored main and original shell panes are checked for absolute native paint health and acceptable pre/post relaunch drift.
 
@@ -181,6 +190,12 @@ Current scenarios:
   Creates one remote Codex-style session on `ai-sandbox`, splits the main pane twice, and fails if rendered pane widths drift too far from the workspace model. The artifacts include render health, structured DOM/model snapshots, and per-runtime PTY resize bursts so split-layout regressions can be separated from PTY redraw issues.
 - `real-app:bridge-remote-relaunch-splits`
   Creates one remote split session on `ai-sandbox`, relaunches the packaged app, returns to the same session, then splits again from both the main pane and the original utility pane. The run fails if pre-existing panes do not restore visibly or if post-relaunch splits do not appear and accept typing.
+- `real-app:scenario-tr402-local-codex`
+  Tier-2 local Codex close/redraw canary for the same split-close path covered remotely by `TR-402`.
+- `real-app:scenario-tr402-local-claude`
+  Tier-2 local Claude close/redraw canary for the same split-close path covered remotely by `TR-402`.
+- `real-app:scenario-tr504`
+  Tier-3 remote cleanup canary for `TR-504`. It closes the session from the app and then verifies, over SSH, that no processes remain alive in the scenario’s unique remote workdir.
 - `real-app:scenario-tr502`
   The tiered remote relaunch scenario for `TR-502`. It uses real macOS typing into post-split shell panes, fails if typed echo exceeds the configured threshold (`ATTN_REMOTE_RELAUNCH_SPLITS_ECHO_THRESHOLD_MS`, default `2500`), and artifacts pane-debug plus terminal-runtime traces so input lag can be attributed to focus, attach/replay, or PTY delivery.
 - `real-app:bridge-perf`

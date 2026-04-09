@@ -10,6 +10,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Split-Close Redraw Harness**: Add `real-app:scenario-tr402`, a remote Codex packaged-app scenario that opens a split, closes it again, and fails if the surviving main pane regains width without repainting its visible content back into the reclaimed space.
+- **Local Close-Redraw Canaries**: Add first-launch packaged-app `TR-402` canaries for both local Codex and local Claude so split-close repaint regressions can be compared against remote relaunch behavior.
+- **Remote Cleanup Canary**: Add `real-app:scenario-tr504`, which creates a remote session in a unique harness workdir and fails if closing the session leaves remote processes behind.
 - **Replay Fidelity Characterization**: Add a frontend xterm regression test that replays a real standalone Codex first-launch resize capture through `attn`'s visible-frame snapshot path and proves that frame replay is not state-equivalent to a live xterm buffer during later resize recovery.
 
 ### Fixed

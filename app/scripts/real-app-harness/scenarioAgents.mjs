@@ -5,7 +5,12 @@ function compact(text) {
 }
 
 function hasTrustPrompt(text) {
-  return text.includes('Do you trust this folder?') || text.includes('Security guide');
+  return (
+    text.includes('Do you trust this folder?')
+    || text.includes('Do you trust the contents of this directory?')
+    || text.includes('Working with untrusted contents')
+    || text.includes('Security guide')
+  );
 }
 
 function hasClaudePrompt(text) {
@@ -13,6 +18,17 @@ function hasClaudePrompt(text) {
     return false;
   }
   return /(^|\n)\s*❯(?:\s|$)/u.test(text);
+}
+
+function hasCodexPrompt(text) {
+  if (hasTrustPrompt(text)) {
+    return false;
+  }
+  return (
+    text.includes('OpenAI Codex')
+    || text.includes('/model to change')
+    || text.includes('100% left')
+  );
 }
 
 function delay(ms) {
@@ -47,6 +63,38 @@ export async function ensureClaudeMainPromptReady(client, sessionId, timeoutMs =
   }
 
   throw new Error(`Timed out waiting for Claude prompt readiness in session ${sessionId}`);
+}
+
+export async function ensureCodexMainPromptReady(client, sessionId, timeoutMs = 40_000) {
+  const startedAt = Date.now();
+  let trustHandled = false;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    await client.request('select_session', { sessionId });
+    await waitForPaneVisible(client, sessionId, 'main', 20_000);
+    const pane = await client.request('read_pane_text', { sessionId, paneId: 'main' }, { timeoutMs: 20_000 });
+    const text = pane?.text || '';
+
+    if (hasTrustPrompt(text)) {
+      await client.request('click_pane', { sessionId, paneId: 'main' });
+      await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
+      await client.request('type_pane_via_ui', { sessionId, paneId: 'main', text: '1' });
+      await client.request('write_pane', { sessionId, paneId: 'main', text: '\r', submit: false });
+      trustHandled = true;
+      await delay(500);
+      continue;
+    }
+
+    if (hasCodexPrompt(text)) {
+      await client.request('click_pane', { sessionId, paneId: 'main' });
+      await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
+      return { trustHandled, text };
+    }
+
+    await delay(300);
+  }
+
+  throw new Error(`Timed out waiting for Codex prompt readiness in session ${sessionId}`);
 }
 
 export async function promptClaudeForStructuredBlock(client, sessionId, token, lineCount = 8) {

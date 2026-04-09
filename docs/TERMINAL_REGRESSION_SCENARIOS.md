@@ -127,7 +127,7 @@ Every scenario should validate some combination of these invariants:
 - `TR-402 Split Open Or Close Triggers Targeted Redraw`
   Open or close a split and verify only panes whose container geometry changed bounce/redraw.
   Assertions: targeted PTY resize/redraw activity, unrelated panes do not reset, and when a split closes the surviving pane re-expands and repaints meaningful visible content instead of keeping a stale narrow header/body layout.
-  Automation: initial remote real-agent close-path automation implemented via `real-app:scenario-tr402`
+  Automation: remote real-agent close-path automation implemented via `real-app:scenario-tr402`; first-launch local Codex and Claude canaries implemented via `real-app:scenario-tr402-local-codex` and `real-app:scenario-tr402-local-claude`
 
 ### Remote-Specific
 
@@ -149,7 +149,7 @@ Every scenario should validate some combination of these invariants:
 - `TR-504 Remote Session Cleanup Does Not Leak Workers`
   Create remote sessions and utility splits, then close the session or quit the app and verify the remote PTY/worker side is actually torn down.
   Assertions: closing the session or app does not leave orphaned remote shells, Codex/Claude workers, or stale PTY runtimes behind; repeated scenario runs do not degrade into `resource temporarily unavailable`, startup panics, or spawn failures caused by leaked processes from earlier runs.
-  Automation: planned
+  Automation: initial remote real-agent cleanup automation implemented via `real-app:scenario-tr504`
 
 ### Render Efficiency
 
