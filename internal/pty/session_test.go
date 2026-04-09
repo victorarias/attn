@@ -1,6 +1,8 @@
 package pty
 
 import (
+	"io"
+	"os"
 	"testing"
 	"time"
 )
@@ -183,5 +185,116 @@ func TestWithinStartupQueryWindow(t *testing.T) {
 	expired := &Session{startedAt: now.Add(-startupQueryFallbackWindow - time.Millisecond)}
 	if expired.withinStartupQueryWindow(now) {
 		t.Fatal("withinStartupQueryWindow() = true, want false after startup window")
+	}
+}
+
+func TestTerminalQueryFallbackMode(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	tests := []struct {
+		name              string
+		agent             string
+		startedAt         time.Time
+		noInteractiveSubs bool
+		wantEnabled       bool
+		wantAllowResend   bool
+		wantSource        string
+	}{
+		{
+			name:              "shell interactive during startup",
+			agent:             "shell",
+			startedAt:         now.Add(-startupQueryFallbackWindow / 2),
+			noInteractiveSubs: false,
+			wantEnabled:       true,
+			wantAllowResend:   true,
+			wantSource:        "read_loop_startup_interactive",
+		},
+		{
+			name:              "shell unattached during startup",
+			agent:             "shell",
+			startedAt:         now.Add(-startupQueryFallbackWindow / 2),
+			noInteractiveSubs: true,
+			wantEnabled:       true,
+			wantAllowResend:   true,
+			wantSource:        "read_loop_startup_unattached",
+		},
+		{
+			name:              "non shell unattached",
+			agent:             "codex",
+			startedAt:         now.Add(-startupQueryFallbackWindow / 2),
+			noInteractiveSubs: true,
+			wantEnabled:       true,
+			wantAllowResend:   false,
+			wantSource:        "read_loop_unattached",
+		},
+		{
+			name:              "shell interactive after startup window",
+			agent:             "shell",
+			startedAt:         now.Add(-startupQueryFallbackWindow - time.Millisecond),
+			noInteractiveSubs: false,
+			wantEnabled:       false,
+			wantAllowResend:   false,
+			wantSource:        "",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			session := &Session{
+				agent:     tc.agent,
+				startedAt: tc.startedAt,
+			}
+			gotEnabled, gotAllowResend, gotSource := session.terminalQueryFallbackMode(now, tc.noInteractiveSubs)
+			if gotEnabled != tc.wantEnabled || gotAllowResend != tc.wantAllowResend || gotSource != tc.wantSource {
+				t.Fatalf(
+					"terminalQueryFallbackMode() = (%v, %v, %q), want (%v, %v, %q)",
+					gotEnabled,
+					gotAllowResend,
+					gotSource,
+					tc.wantEnabled,
+					tc.wantAllowResend,
+					tc.wantSource,
+				)
+			}
+		})
+	}
+}
+
+func TestWriteTerminalQueryResponsesAllowResend(t *testing.T) {
+	t.Parallel()
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() failed: %v", err)
+	}
+	defer reader.Close()
+
+	session := &Session{
+		ptmx: writer,
+	}
+
+	queries := terminalQueries{
+		da1: true,
+		cpr: true,
+	}
+	session.writeTerminalQueryResponses(queries, "startup", true, nil)
+	session.writeTerminalQueryResponses(queries, "startup", true, nil)
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close() failed: %v", err)
+	}
+
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("io.ReadAll() failed: %v", err)
+	}
+
+	wantOnce := "\x1b[?1;2c\x1b[1;1R"
+	want := wantOnce + wantOnce
+	if string(got) != want {
+		t.Fatalf("writeTerminalQueryResponses() wrote %q, want %q", string(got), want)
 	}
 }

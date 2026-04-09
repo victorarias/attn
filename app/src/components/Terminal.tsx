@@ -280,6 +280,68 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
     }, []);
 
+    const markTerminalReady = useCallback((
+      term: XTerm,
+      cols: number,
+      rows: number,
+      diagnostics: ResizeDiagnostics,
+      source: 'resize_observer' | 'font_change' | 'fit_fallback',
+      reason: string,
+    ) => {
+      if (readyFiredRef.current) {
+        return;
+      }
+      readyFiredRef.current = true;
+      startupSnapshotRef.current.firstReadySource = startupSnapshotRef.current.firstReadySource || source;
+      startupSnapshotRef.current.firstReadyAt = startupSnapshotRef.current.firstReadyAt || Date.now();
+      startupSnapshotRef.current.firstReadyCols = startupSnapshotRef.current.firstReadyCols ?? cols;
+      startupSnapshotRef.current.firstReadyRows = startupSnapshotRef.current.firstReadyRows ?? rows;
+
+      if (isSuspiciousTerminalSize(cols, rows)) {
+        const container = containerRef.current;
+        logTerminal('warn', 'ready path produced suspicious dimensions', {
+          source,
+          cols,
+          rows,
+          isVisible: visibleRef.current,
+          container: container ? getContainerDebugInfo(container) : null,
+        });
+      } else {
+        logTerminal('log', 'terminal ready', {
+          source,
+          cols,
+          rows,
+          isVisible: visibleRef.current,
+        });
+      }
+
+      recordDiags(reason, cols, rows, term.cols, term.rows, diagnostics);
+      term.resize(cols, rows);
+      onResizeRef.current?.(cols, rows, { reason });
+
+      const meta = runtimeLogMetaRef.current;
+      if (meta) {
+        recordTerminalRuntimeLog({
+          category: 'terminal',
+          event: 'terminal.ready',
+          sessionId: meta.sessionId,
+          paneId: meta.paneId,
+          runtimeId: meta.runtimeId,
+          debugName: debugNameRef.current,
+          message: 'terminal ready',
+          details: {
+            paneKind: meta.paneKind,
+            cols,
+            rows,
+            renderer: rendererModeRef.current,
+            source,
+          },
+        });
+      }
+
+      onReadyRef.current?.(term);
+    }, [logTerminal, recordDiags]);
+
     useEffect(() => {
       return subscribeTerminalRendererConfig(() => {
         setRendererConfigState(getTerminalRendererConfig());
@@ -409,6 +471,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             container: getContainerDebugInfo(container),
           });
         }
+        if (!readyFiredRef.current) {
+          markTerminalReady(term, dims.cols, dims.rows, dims.diagnostics, 'fit_fallback', 'ready_fallback');
+          return;
+        }
         const sizeChanged = dims.cols !== term.cols || dims.rows !== term.rows;
         resizeTerminal(term, dims.cols, dims.rows, 'fit', dims.diagnostics);
         if (!sizeChanged) {
@@ -435,7 +501,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           resetTerminalScrollPin(term);
         }
       },
-    }), [focusTerminal, logTerminal, resizeTerminal, typeTextViaInput]);
+    }), [focusTerminal, logTerminal, markTerminalReady, resizeTerminal, typeTextViaInput]);
 
     useEffect(() => {
       if (!containerRef.current) return;
@@ -908,61 +974,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           requestAnimationFrame(() => {
             const dims = getScaledDimensions(containerRef.current!, term, fontSizeRef.current);
             if (dims && dims.cols > 0 && dims.rows > 0) {
-              readyFiredRef.current = true;
               lastCols = dims.cols;
               lastRows = dims.rows;
-              startupSnapshotRef.current.firstReadySource = startupSnapshotRef.current.firstReadySource || 'resize_observer';
-              startupSnapshotRef.current.firstReadyAt = startupSnapshotRef.current.firstReadyAt || Date.now();
-              startupSnapshotRef.current.firstReadyCols = startupSnapshotRef.current.firstReadyCols ?? dims.cols;
-              startupSnapshotRef.current.firstReadyRows = startupSnapshotRef.current.firstReadyRows ?? dims.rows;
-
-              if (isSuspiciousTerminalSize(dims.cols, dims.rows)) {
-                logTerminal('warn', 'ready resize produced suspicious dimensions', {
-                  cols: dims.cols,
-                  rows: dims.rows,
-                  isVisible: visibleRef.current,
-                  container: containerRef.current ? getContainerDebugInfo(containerRef.current) : null,
-                });
-              } else {
-                logTerminal('log', 'terminal ready', {
-                  cols: dims.cols,
-                  rows: dims.rows,
-                  isVisible: visibleRef.current,
-                });
-              }
-
-              // Record to ring buffer
-              recordDiags('ready', dims.cols, dims.rows, term.cols, term.rows, dims.diagnostics);
-
-              // Resize to calculated dimensions
-              term.resize(dims.cols, dims.rows);
-
-              if (onResizeRef.current) {
-                onResizeRef.current(dims.cols, dims.rows, { reason: 'ready' });
-              }
-
-              const meta = runtimeLogMetaRef.current;
-              if (meta) {
-                recordTerminalRuntimeLog({
-                  category: 'terminal',
-                  event: 'terminal.ready',
-                  sessionId: meta.sessionId,
-                  paneId: meta.paneId,
-                  runtimeId: meta.runtimeId,
-                  debugName: debugNameRef.current,
-                  message: 'terminal ready',
-                  details: {
-                    paneKind: meta.paneKind,
-                    cols: dims.cols,
-                    rows: dims.rows,
-                    renderer: rendererModeRef.current,
-                  },
-                });
-              }
-
-              if (onReadyRef.current) {
-                onReadyRef.current(term);
-              }
+              markTerminalReady(term, dims.cols, dims.rows, dims.diagnostics, 'resize_observer', 'ready');
             }
           });
           return;
@@ -1102,7 +1116,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         xtermRef.current = null;
         term.dispose();
       };
-    }, [logTerminal, resizeTerminal]);
+    }, [logTerminal, markTerminalReady, resizeTerminal]);
 
     // Handle fontSize changes after terminal is created
     useEffect(() => {
@@ -1138,34 +1152,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         onResizeRef.current?.(dims.cols, dims.rows, { reason: 'font-change' });
         if (!readyFiredRef.current) {
           startupSnapshotRef.current.fontEffectAppliedBeforeReady = true;
-          startupSnapshotRef.current.firstReadySource = startupSnapshotRef.current.firstReadySource || 'font_change';
-          startupSnapshotRef.current.firstReadyAt = startupSnapshotRef.current.firstReadyAt || Date.now();
-          startupSnapshotRef.current.firstReadyCols = startupSnapshotRef.current.firstReadyCols ?? dims.cols;
-          startupSnapshotRef.current.firstReadyRows = startupSnapshotRef.current.firstReadyRows ?? dims.rows;
-          readyFiredRef.current = true;
-          const meta = runtimeLogMetaRef.current;
-          if (meta) {
-            recordTerminalRuntimeLog({
-              category: 'terminal',
-              event: 'terminal.ready',
-              sessionId: meta.sessionId,
-              paneId: meta.paneId,
-              runtimeId: meta.runtimeId,
-              debugName: debugNameRef.current,
-              message: 'terminal ready',
-              details: {
-                paneKind: meta.paneKind,
-                cols: dims.cols,
-                rows: dims.rows,
-                renderer: rendererModeRef.current,
-                source: 'font-change-fallback',
-              },
-            });
-          }
-          onReadyRef.current?.(term);
+          markTerminalReady(term, dims.cols, dims.rows, dims.diagnostics, 'font_change', 'font-change');
         }
       }
-    }, [fontSize, recordDiags]);
+    }, [fontSize, markTerminalReady, recordDiags]);
 
     const handleCopyDebugLog = useCallback(() => {
       const log = formatResizeLog();

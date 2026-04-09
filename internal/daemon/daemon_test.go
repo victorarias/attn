@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -1502,6 +1503,71 @@ func TestDaemon_HandleAttachSession_OmitsScrollbackWhenFreshSnapshotIsAvailable(
 		}
 		if !protocol.Deref(result.ScreenSnapshotFresh) {
 			t.Fatal("expected screen snapshot to be marked fresh")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for attach_result")
+	}
+}
+
+func TestDaemon_HandleAttachSession_PrefersBoundedRawReplayForStoredAgentSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+	raw := bytes.Repeat([]byte("codex-replay-chunk-"), (maxAgentRawReplayBytes/18)+32)
+	backend.SetAttachInfo(ptybackend.AttachInfo{
+		Running:             true,
+		Scrollback:          raw,
+		ScreenSnapshot:      []byte("\x1b[2Jsnapshot"),
+		ScreenSnapshotFresh: true,
+		ScreenCols:          58,
+		ScreenRows:          46,
+	})
+	d.ptyBackend = backend
+	d.store.Add(&protocol.Session{
+		ID:             "sess-1",
+		Label:          "attn",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     time.Now().UTC().Format(time.RFC3339),
+		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		LastSeen:       time.Now().UTC().Format(time.RFC3339),
+	})
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.AttachResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode attach_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
+		}
+		if result.ScreenSnapshot != nil {
+			t.Fatal("expected screen snapshot to be omitted for stored agent session replay")
+		}
+		if protocol.Deref(result.Scrollback) == "" {
+			t.Fatal("expected bounded raw replay to be present")
+		}
+		if !protocol.Deref(result.ScrollbackTruncated) {
+			t.Fatal("expected bounded raw replay to be marked truncated")
+		}
+		decoded, err := base64.StdEncoding.DecodeString(protocol.Deref(result.Scrollback))
+		if err != nil {
+			t.Fatalf("decode scrollback replay: %v", err)
+		}
+		if len(decoded) != maxAgentRawReplayBytes {
+			t.Fatalf("decoded raw replay bytes = %d, want %d", len(decoded), maxAgentRawReplayBytes)
+		}
+		expectedTail := raw[len(raw)-maxAgentRawReplayBytes:]
+		if !bytes.Equal(decoded, expectedTail) {
+			t.Fatal("expected raw replay to contain the bounded tail of PTY history")
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for attach_result")

@@ -20,7 +20,7 @@ import type {
   PRRole,
   HeatState,
 } from '../types/generated';
-import { emitPtyEvent, setPtyBackend, type PtySpawnArgs } from '../pty/bridge';
+import { emitPtyEvent, setPtyBackend, type PtyAttachArgs, type PtySpawnArgs } from '../pty/bridge';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
 import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
 import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
@@ -265,6 +265,13 @@ interface AttachResult {
   running?: boolean;
 }
 
+interface AttachRequestContext {
+  requestedCols: number;
+  requestedRows: number;
+  skipReplay?: boolean;
+  skipReplayOnGeometryMismatch?: boolean;
+}
+
 interface RepoInfo {
   repo: string;
   current_branch: string;
@@ -368,6 +375,52 @@ export interface BranchDiffFilesResult {
   base_ref: string;
   files: BranchDiffFile[];
   error?: string;
+}
+
+function classifyAttachReplay(
+  data: Pick<AttachResult, 'scrollback' | 'screen_snapshot' | 'screen_snapshot_fresh' | 'screen_cols' | 'screen_rows' | 'cols' | 'rows'>,
+  context?: AttachRequestContext,
+) {
+  const hasScreenSnapshot = Boolean(data.screen_snapshot && data.screen_snapshot_fresh !== false);
+  const hasReplayPayload = Boolean((hasScreenSnapshot && data.screen_snapshot) || data.scrollback);
+  const replayKind = hasScreenSnapshot
+    ? 'screen_snapshot'
+    : data.scrollback
+      ? 'scrollback'
+      : 'none';
+  const attachedCols = typeof data.cols === 'number' ? data.cols : null;
+  const attachedRows = typeof data.rows === 'number' ? data.rows : null;
+  const replayCols = typeof data.screen_cols === 'number' ? data.screen_cols : attachedCols;
+  const replayRows = typeof data.screen_rows === 'number' ? data.screen_rows : attachedRows;
+  const requestedCols = context?.requestedCols ?? null;
+  const requestedRows = context?.requestedRows ?? null;
+  const attachedGeometryMismatch = requestedCols !== null && requestedRows !== null && (
+    attachedCols !== requestedCols || attachedRows !== requestedRows
+  );
+  const replayGeometryMismatch = requestedCols !== null && requestedRows !== null && hasReplayPayload && (
+    replayCols !== requestedCols || replayRows !== requestedRows
+  );
+  const skipReplay = Boolean(
+    context?.skipReplay
+    || (context?.skipReplayOnGeometryMismatch &&
+      hasReplayPayload &&
+      (attachedGeometryMismatch || replayGeometryMismatch))
+  );
+
+  return {
+    hasScreenSnapshot,
+    hasReplayPayload,
+    replayKind,
+    attachedCols,
+    attachedRows,
+    replayCols,
+    replayRows,
+    requestedCols,
+    requestedRows,
+    attachedGeometryMismatch,
+    replayGeometryMismatch,
+    skipReplay,
+  };
 }
 
 interface UseDaemonSocketOptions {
@@ -601,6 +654,7 @@ export function useDaemonSocket({
   const attachedPtySessionsRef = useRef<Set<string>>(new Set());
   const ptySeqRef = useRef<Map<string, number>>(new Map());
   const pendingAttachOutputsRef = useRef<Map<string, Array<{ data: string; seq?: number }>>>(new Map());
+  const pendingAttachContextsRef = useRef<Map<string, AttachRequestContext>>(new Map());
   const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
   const daemonInstanceIDRef = useRef<string>('');
   const hasReceivedInitialStateRef = useRef(false);
@@ -1066,22 +1120,22 @@ export function useDaemonSocket({
 
           case 'attach_result': {
             if (data.id) {
-              const replayKind = data.screen_snapshot && data.screen_snapshot_fresh !== false
-                ? 'screen_snapshot'
-                : data.scrollback
-                  ? 'scrollback'
-                  : 'none';
+              const attachContext = pendingAttachContextsRef.current.get(data.id);
+              const replayPlan = classifyAttachReplay(data, attachContext);
               recordRuntimeTransportLog(
                 data.id,
                 'pty.attach.result',
                 data.success ? 'attach session result' : 'attach session failed',
                 {
                   success: data.success,
-                  replayKind,
+                  replayKind: replayPlan.replayKind,
                   lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
                   cols: typeof data.cols === 'number' ? data.cols : null,
                   rows: typeof data.rows === 'number' ? data.rows : null,
                   running: data.running ?? null,
+                  replaySkipped: replayPlan.skipReplay,
+                  requestedCols: replayPlan.requestedCols,
+                  requestedRows: replayPlan.requestedRows,
                 },
               );
               const key = `pty_attach_${data.id}`;
@@ -1117,18 +1171,18 @@ export function useDaemonSocket({
                 attachedPtySessionsRef.current.delete(data.id);
                 ptySeqRef.current.delete(data.id);
                 pendingAttachOutputsRef.current.delete(data.id);
+                pendingAttachContextsRef.current.delete(data.id);
               }
 
               if (data.success) {
-                const hasScreenSnapshot = Boolean(
-                  data.screen_snapshot && data.screen_snapshot_fresh !== false
+                const shouldReset = !replayPlan.skipReplay && (
+                  replayPlan.hasReplayPayload || ptySeqRef.current.has(data.id)
                 );
-                const shouldReset = hasScreenSnapshot || ptySeqRef.current.has(data.id);
                 if (shouldReset) {
                   emitPtyEvent({
                     event: 'reset',
                     id: data.id,
-                    reason: hasScreenSnapshot ? 'snapshot_restore' : 'reattach',
+                    reason: replayPlan.hasScreenSnapshot && !replayPlan.skipReplay ? 'snapshot_restore' : 'reattach',
                   });
                 }
                 if (typeof data.last_seq === 'number') {
@@ -1136,7 +1190,17 @@ export function useDaemonSocket({
                 } else {
                   ptySeqRef.current.set(data.id, 0);
                 }
-                if (hasScreenSnapshot && data.screen_snapshot) {
+                if (replayPlan.skipReplay) {
+                  recordRuntimeTransportLog(data.id, 'pty.attach.replay_skipped', 'attach replay skipped due to incompatible geometry', {
+                    replayKind: replayPlan.replayKind,
+                    attachedCols: replayPlan.attachedCols,
+                    attachedRows: replayPlan.attachedRows,
+                    replayCols: replayPlan.replayCols,
+                    replayRows: replayPlan.replayRows,
+                    requestedCols: replayPlan.requestedCols,
+                    requestedRows: replayPlan.requestedRows,
+                  });
+                } else if (replayPlan.hasScreenSnapshot && data.screen_snapshot) {
                   recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
                     replayKind: 'screen_snapshot',
                     bytes: data.screen_snapshot.length,
@@ -1167,7 +1231,7 @@ export function useDaemonSocket({
                     emitPtyEvent({ event: 'data', id: data.id, data: chunk.data, seq: chunk.seq });
                   }
                 }
-                if (!hasScreenSnapshot && data.scrollback_truncated) {
+                if (!replayPlan.hasScreenSnapshot && data.scrollback_truncated) {
                   const session = sessionsRef.current.find((entry) => entry.id === data.id);
                   if (session?.agent === 'codex') {
                     emitPtyEvent({
@@ -1177,6 +1241,7 @@ export function useDaemonSocket({
                     });
                   }
                 }
+                pendingAttachContextsRef.current.delete(data.id);
               }
             }
             break;
@@ -1981,7 +2046,7 @@ export function useDaemonSocket({
     });
   }, []);
 
-  const sendAttachSession = useCallback((id: string): Promise<AttachResult> => {
+  const sendAttachSession = useCallback((id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1990,6 +2055,11 @@ export function useDaemonSocket({
       }
 
       const key = `pty_attach_${id}`;
+      if (context) {
+        pendingAttachContextsRef.current.set(id, context);
+      } else {
+        pendingAttachContextsRef.current.delete(id);
+      }
       pendingActionsRef.current.set(key, { resolve, reject });
       recordRuntimeTransportLog(id, 'pty.attach.requested', 'attach session requested');
       recordPtyCommand('attach_session', id);
@@ -1999,15 +2069,16 @@ export function useDaemonSocket({
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
           pendingAttachOutputsRef.current.delete(id);
+          pendingAttachContextsRef.current.delete(id);
           reject(new Error('Attach session timed out'));
         }
       }, 15000);
     });
   }, [recordRuntimeTransportLog]);
 
-  const sendAttachSessionWithRetry = useCallback(async (id: string): Promise<AttachResult> => {
+  const sendAttachSessionWithRetry = useCallback(async (id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return retryTransientAttachRequest(
-      () => sendAttachSession(id),
+      () => sendAttachSession(id, context),
       {
         onRetry: (attempt, error, elapsedMs) => {
         console.warn('[DaemonSocket] Retrying transient attach failure', {
@@ -2027,6 +2098,7 @@ export function useDaemonSocket({
     attachedPtySessionsRef.current.delete(id);
     ptySeqRef.current.delete(id);
     pendingAttachOutputsRef.current.delete(id);
+    pendingAttachContextsRef.current.delete(id);
     recordPtyCommand('detach_session', id);
     ws.send(JSON.stringify({ cmd: 'detach_session', id }));
   }, []);
@@ -2098,9 +2170,9 @@ export function useDaemonSocket({
   }, [recordRuntimeTransportLog, sendPtyResize]);
 
   const reconcileAttachedRuntimeGeometry = useCallback((
-    args: PtySpawnArgs,
+    args: Pick<PtySpawnArgs, 'id' | 'cols' | 'rows' | 'shell'>,
     attachResult: AttachResult,
-    options?: { forceShellRedraw?: boolean },
+    options?: { forceShellRedraw?: boolean; forceAuthoritativeRedraw?: boolean },
   ) => {
     const requestedCols = args.cols;
     const requestedRows = args.rows;
@@ -2111,6 +2183,11 @@ export function useDaemonSocket({
     const hasReplayPayload = Boolean(attachResult.screen_snapshot || attachResult.scrollback);
     const ptyGeometryMatches = attachedCols === requestedCols && attachedRows === requestedRows;
     const replayGeometryMatches = replayCols === requestedCols && replayRows === requestedRows;
+    const shouldRequestAuthoritativeRedraw = Boolean(
+      options?.forceAuthoritativeRedraw ||
+      options?.forceShellRedraw ||
+      (!args.shell && hasReplayPayload && (!ptyGeometryMatches || !replayGeometryMatches))
+    );
 
     if (!ptyGeometryMatches) {
       recordRuntimeTransportLog(args.id, 'pty.attach.geometry_reconcile', 'reconcile attached PTY geometry', {
@@ -2123,10 +2200,13 @@ export function useDaemonSocket({
         strategy: 'resize',
       });
       sendPtyResize(args.id, requestedCols, requestedRows, 'daemon_known_attach');
+      if (shouldRequestAuthoritativeRedraw) {
+        sendPtyRedraw(args.id, requestedCols, requestedRows, 'daemon_known_attach');
+      }
       return;
     }
 
-    if ((hasReplayPayload && !replayGeometryMatches) || options?.forceShellRedraw) {
+    if (shouldRequestAuthoritativeRedraw) {
       recordRuntimeTransportLog(args.id, 'pty.attach.geometry_reconcile', 'reconcile attached PTY replay geometry', {
         requestedCols,
         requestedRows,
@@ -2279,8 +2359,13 @@ export function useDaemonSocket({
         // re-spawning them locally would hang until the frontend times out.
         if (!forceRespawn && runtimeKnownToDaemon) {
           try {
-            const attachResult = await sendAttachSessionWithRetry(args.id);
+            const attachResult = await sendAttachSessionWithRetry(args.id, {
+              requestedCols: args.cols,
+              requestedRows: args.rows,
+              skipReplayOnGeometryMismatch: true,
+            });
             reconcileAttachedRuntimeGeometry(args, attachResult, {
+              forceAuthoritativeRedraw: !args.shell,
               forceShellRedraw: Boolean(args.shell && !alreadyAttached && !existingSession),
             });
             return;
@@ -2312,8 +2397,14 @@ export function useDaemonSocket({
                   );
                 }
               }
-              const attachResult = await sendAttachSessionWithRetry(args.id);
-              reconcileAttachedRuntimeGeometry(args, attachResult);
+              const attachResult = await sendAttachSessionWithRetry(args.id, {
+                requestedCols: args.cols,
+                requestedRows: args.rows,
+                skipReplayOnGeometryMismatch: true,
+              });
+              reconcileAttachedRuntimeGeometry(args, attachResult, {
+                forceAuthoritativeRedraw: !args.shell,
+              });
               return;
             }
             if (!existingSession) {
@@ -2340,10 +2431,29 @@ export function useDaemonSocket({
             throw err;
           }
         }
-        await sendAttachSessionWithRetry(args.id);
+        await sendAttachSessionWithRetry(args.id, {
+          requestedCols: args.cols,
+          requestedRows: args.rows,
+          skipReplay: !args.shell,
+          skipReplayOnGeometryMismatch: true,
+        });
         if (args.shell && !runtimeKnownToDaemon) {
           sendPtyRedraw(args.id, args.cols, args.rows, 'fresh_shell_attach');
         }
+      },
+      attach: async (args: PtyAttachArgs, options?: { forceResizeBeforeAttach?: boolean }) => {
+        if (options?.forceResizeBeforeAttach) {
+          sendPtyResize(args.id, args.cols, args.rows, args.reason || 'remount_hydrate');
+        }
+        const attachResult = await sendAttachSessionWithRetry(args.id, {
+          requestedCols: args.cols,
+          requestedRows: args.rows,
+          skipReplay: !args.shell,
+          skipReplayOnGeometryMismatch: true,
+        });
+        reconcileAttachedRuntimeGeometry(args, attachResult, {
+          forceAuthoritativeRedraw: !args.shell,
+        });
       },
       write: async (id: string, data: string, source?: string) => {
         sendPtyInput(id, data, source);

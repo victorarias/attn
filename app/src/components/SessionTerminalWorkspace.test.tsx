@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { forwardRef, useImperativeHandle } from 'react';
+import { forwardRef, useEffect, useImperativeHandle } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionTerminalWorkspace } from './SessionTerminalWorkspace';
 import type { PaneRuntimeEventRouter } from './SessionTerminalWorkspace/paneRuntimeEventRouter';
@@ -38,13 +38,34 @@ const { renderedTerminalProps } = vi.hoisted(() => ({
   renderedTerminalProps: new Map<string, any>(),
 }));
 
+const { terminalLifecycleCounts } = vi.hoisted(() => ({
+  terminalLifecycleCounts: new Map<string, { mounts: number; unmounts: number }>(),
+}));
+
 vi.mock('./Terminal', () => ({
   Terminal: forwardRef((props: any, ref) => {
     renderedTerminalProps.set(props.debugName, props);
+    useEffect(() => {
+      const current = terminalLifecycleCounts.get(props.debugName) || { mounts: 0, unmounts: 0 };
+      terminalLifecycleCounts.set(props.debugName, {
+        mounts: current.mounts + 1,
+        unmounts: current.unmounts,
+      });
+      return () => {
+        const latest = terminalLifecycleCounts.get(props.debugName) || { mounts: 0, unmounts: 0 };
+        terminalLifecycleCounts.set(props.debugName, {
+          mounts: latest.mounts,
+          unmounts: latest.unmounts + 1,
+        });
+      };
+    }, [props.debugName]);
     useImperativeHandle(ref, () => ({
       terminal: {} as any,
       fit: mockTerminalFit,
       focus: mockTerminalFocus,
+      typeTextViaInput: vi.fn(() => true),
+      isInputFocused: vi.fn(() => false),
+      resetScrollPin: vi.fn(),
     }));
     const label = typeof props.debugName === 'string' && props.debugName.startsWith('utility:')
       ? props.debugName.split(':')[2]
@@ -92,6 +113,7 @@ describe('SessionTerminalWorkspace', () => {
   afterEach(() => {
     registeredShortcuts.clear();
     renderedTerminalProps.clear();
+    terminalLifecycleCounts.clear();
     vi.mocked(mockEventRouter.registerBinding).mockClear();
     mockTerminalFit.mockReset();
     mockPtyResize.mockReset();
@@ -356,6 +378,121 @@ describe('SessionTerminalWorkspace', () => {
     expect(secondChild).toHaveAttribute('data-split-child-path', 'root/1');
     expect(mainPane).toHaveAttribute('data-pane-path', 'root/0');
     expect(shellPane).toHaveAttribute('data-pane-path', 'root/1');
+  });
+
+  it('keeps the main terminal mounted when the split topology changes around it', () => {
+    const { rerender } = render(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="codex"
+        cwd="/tmp/repo"
+        workspace={{
+          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+              { type: 'pane', paneId: 'pane-shell-1' },
+            ],
+          },
+        }}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    rerender(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="codex"
+        cwd="/tmp/repo"
+        workspace={{
+          terminals: [
+            { id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' },
+            { id: 'pane-shell-2', ptyId: 'runtime-shell-2', title: 'Shell 2' },
+          ],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root',
+            direction: 'vertical',
+            ratio: 0.7,
+            children: [
+              {
+                type: 'split',
+                splitId: 'main-branch',
+                direction: 'vertical',
+                ratio: 0.5,
+                children: [
+                  { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+                  { type: 'pane', paneId: 'pane-shell-2' },
+                ],
+              },
+              { type: 'pane', paneId: 'pane-shell-1' },
+            ],
+          },
+        }}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    rerender(
+      <SessionTerminalWorkspace
+        sessionId="session-1"
+        sessionLabel="Session 1"
+        sessionAgent="codex"
+        cwd="/tmp/repo"
+        workspace={{
+          terminals: [{ id: 'pane-shell-1', ptyId: 'runtime-shell-1', title: 'Shell 1' }],
+          layoutTree: {
+            type: 'split',
+            splitId: 'root',
+            direction: 'vertical',
+            ratio: 0.5,
+            children: [
+              { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+              { type: 'pane', paneId: 'pane-shell-1' },
+            ],
+          },
+        }}
+        activePaneId={MAIN_TERMINAL_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        getMainPaneSpawnArgs={vi.fn(() => null)}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    expect(terminalLifecycleCounts.get('main:Session 1:codex:session-1')).toEqual({
+      mounts: 1,
+      unmounts: 0,
+    });
   });
 
   it('lets zoom arm before splitting and applies once a split exists', () => {

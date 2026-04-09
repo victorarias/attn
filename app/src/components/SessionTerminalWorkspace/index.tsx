@@ -4,10 +4,12 @@ import { Terminal, type ResolvedTheme, type TerminalHandle } from '../Terminal';
 import { useShortcut } from '../../shortcuts';
 import {
   MAIN_TERMINAL_PANE_ID,
+  getNormalizedPaneBounds,
   hasPane,
   findPaneInDirection,
   type TerminalNavigationDirection,
   type TerminalLayoutNode,
+  type NormalizedPaneBounds,
   type TerminalSplitDirection,
   type TerminalWorkspaceState,
 } from '../../types/workspace';
@@ -206,9 +208,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         walk(node.children[0], path + '/0');
         walk(node.children[1], path + '/1');
       };
-      walk(renderedLayoutTree, '');
+      walk(renderedLayoutTree, 'root');
       return paths;
     }, [renderedLayoutTree]);
+    const renderedPaneBounds = useMemo(() => getNormalizedPaneBounds(renderedLayoutTree), [renderedLayoutTree]);
     const renderedPaneIds = useMemo(() => Array.from(panePaths.keys()), [panePaths]);
     const renderedPaneIdsKey = renderedPaneIds.join('|');
     const prevPanePathsRef = useRef(panePaths);
@@ -497,7 +500,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     useShortcut('terminal.focusUp', () => handleMovePane('up'), sessionVisible);
     useShortcut('terminal.focusDown', () => handleMovePane('down'), sessionVisible);
 
-    const renderPane = useCallback((node: TerminalLayoutNode, path = 'root'): React.ReactNode => {
+    const renderLayoutMetadata = useCallback((node: TerminalLayoutNode, path = 'root'): React.ReactNode => {
       if (node.type === 'split') {
         const firstRatio = clampSplitRatio(node.ratio);
         const secondRatio = clampSplitRatio(1 - firstRatio);
@@ -521,35 +524,55 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               data-split-child-index="0"
               data-split-child-path={firstPath}
             >
-              {renderPane(node.children[0], firstPath)}
+              {renderLayoutMetadata(node.children[0], firstPath)}
             </div>
             <div
               className="workspace-split-child"
               data-split-child-index="1"
               data-split-child-path={secondPath}
             >
-              {renderPane(node.children[1], secondPath)}
+              {renderLayoutMetadata(node.children[1], secondPath)}
             </div>
           </div>
         );
       }
 
-      if (node.paneId === MAIN_TERMINAL_PANE_ID) {
+      return null;
+    }, []);
+
+    const paneFrameStyle = useCallback((bounds: NormalizedPaneBounds) => ({
+      left: `${bounds.left * 100}%`,
+      top: `${bounds.top * 100}%`,
+      width: `${bounds.width * 100}%`,
+      height: `${bounds.height * 100}%`,
+    }), []);
+
+    const renderPaneSurface = useCallback((paneId: string): React.ReactNode => {
+      const path = panePaths.get(paneId) || 'root';
+      const bounds = renderedPaneBounds.get(paneId);
+      if (!bounds) {
+        return null;
+      }
+      const frameStyle = paneFrameStyle(bounds);
+
+      if (paneId === MAIN_TERMINAL_PANE_ID) {
         return (
           <div
-            key={node.paneId}
+            key={MAIN_TERMINAL_PANE_ID}
             className={`workspace-pane main-pane ${activePaneId === MAIN_TERMINAL_PANE_ID ? 'active' : ''}`}
             onMouseDown={handleMainPaneMouseDown}
             data-pane-session-id={sessionId}
             data-pane-id={MAIN_TERMINAL_PANE_ID}
             data-pane-kind="main"
             data-pane-path={path}
+            style={frameStyle}
           >
-            {showMainHeader && (
-              <div className="workspace-pane-header">
-                <span className="workspace-pane-title">Session</span>
-              </div>
-            )}
+            <div
+              className={`workspace-pane-header ${showMainHeader ? '' : 'workspace-pane-header-hidden'}`.trim()}
+              aria-hidden={showMainHeader ? undefined : true}
+            >
+              {showMainHeader ? <span className="workspace-pane-title">Session</span> : null}
+            </div>
             <div className="workspace-pane-body">
               <Terminal
                 ref={getTerminalHandleRef(MAIN_TERMINAL_PANE_ID)}
@@ -574,7 +597,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         );
       }
 
-      const terminal = workspace.terminals.find((entry) => entry.id === node.paneId);
+      const terminal = workspace.terminals.find((entry) => entry.id === paneId);
       if (!terminal) {
         return null;
       }
@@ -587,6 +610,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           data-pane-id={terminal.id}
           data-pane-kind="shell"
           data-pane-path={path}
+          style={frameStyle}
         >
           <div className="workspace-pane-header">
             <span className="workspace-pane-title">{terminal.title}</span>
@@ -633,6 +657,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       handleTerminalInit,
       handleTerminalReady,
       handleUtilityPaneMouseDown,
+      paneFrameStyle,
+      panePaths,
+      renderedPaneBounds,
       workspace.terminals,
       resolvedTheme,
       sessionAgent,
@@ -677,7 +704,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           </div>
         )}
         <div className="session-terminal-panes">
-          {renderPane(renderedLayoutTree)}
+          <div className="workspace-layout-metadata" aria-hidden="true">
+            {renderLayoutMetadata(renderedLayoutTree)}
+          </div>
+          {renderedPaneIds.map((paneId) => renderPaneSurface(paneId))}
         </div>
       </div>
     );

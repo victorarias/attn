@@ -10,7 +10,7 @@ export interface TerminalPerfStartupSnapshot {
   initialCols: number | null;
   initialRows: number | null;
   firstObservedContainer: TerminalPerfElementMetrics | null;
-  firstReadySource: 'resize_observer' | 'font_change' | null;
+  firstReadySource: 'resize_observer' | 'font_change' | 'fit_fallback' | null;
   firstReadyAt: number | null;
   firstReadyCols: number | null;
   firstReadyRows: number | null;

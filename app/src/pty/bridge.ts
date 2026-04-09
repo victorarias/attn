@@ -23,6 +23,14 @@ export interface PtySpawnArgs {
   pi_executable?: string;
 }
 
+export interface PtyAttachArgs {
+  id: string;
+  cols: number;
+  rows: number;
+  shell?: boolean;
+  reason?: string;
+}
+
 export type PtyEventPayload =
   | { event: 'data'; id: string; data: string; seq?: number }
   | { event: 'exit'; id: string; code: number; signal?: string }
@@ -34,6 +42,10 @@ type PtyEventHandler = (event: { payload: PtyEventPayload }) => void;
 
 export interface PtyBackend {
   spawn: (args: PtySpawnArgs) => Promise<void>;
+  attach: (
+    args: PtyAttachArgs,
+    options?: { forceResizeBeforeAttach?: boolean }
+  ) => Promise<void>;
   write: (id: string, data: string, source?: string) => Promise<void>;
   resize: (id: string, cols: number, rows: number, reason?: string) => Promise<void>;
   kill: (id: string) => Promise<void>;
@@ -128,6 +140,24 @@ export async function ptyWrite(request: { id: string; data: string; source?: str
     throw new Error('PTY backend is not configured');
   }
   await backend.write(request.id, request.data, request.source);
+}
+
+export async function ptyAttach(request: {
+  args: PtyAttachArgs;
+  forceResizeBeforeAttach?: boolean;
+}) {
+  if (mockEnabled()) {
+    if (!mockSessions.has(request.args.id)) {
+      return;
+    }
+    return;
+  }
+  if (!backend) {
+    throw new Error('PTY backend is not configured');
+  }
+  await backend.attach(request.args, {
+    forceResizeBeforeAttach: request.forceResizeBeforeAttach,
+  });
 }
 
 export async function ptyResize(request: { id: string; cols: number; rows: number; reason?: string }) {

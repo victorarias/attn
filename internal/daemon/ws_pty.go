@@ -36,7 +36,24 @@ type attachReplayPayload struct {
 	derivedSnapshot     bool
 }
 
-func buildAttachReplayPayload(info ptybackend.AttachInfo) attachReplayPayload {
+const maxAgentRawReplayBytes = 256 * 1024
+
+func shouldPreferAgentRawReplay(session *protocol.Session) bool {
+	if session == nil {
+		return false
+	}
+	agent := strings.TrimSpace(strings.ToLower(string(session.Agent)))
+	return agent != "" && agent != protocol.AgentShellValue
+}
+
+func limitReplayTail(data []byte, limit int) ([]byte, bool) {
+	if len(data) == 0 || limit <= 0 || len(data) <= limit {
+		return data, false
+	}
+	return data[len(data)-limit:], true
+}
+
+func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Session) attachReplayPayload {
 	payload := attachReplayPayload{
 		scrollbackTruncated: info.ScrollbackTruncated,
 		screenSnapshot:      info.ScreenSnapshot,
@@ -46,6 +63,20 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo) attachReplayPayload {
 		screenCursorY:       info.ScreenCursorY,
 		screenCursorVisible: info.ScreenCursorVisible,
 		screenSnapshotFresh: info.ScreenSnapshotFresh,
+	}
+
+	if shouldPreferAgentRawReplay(session) && len(info.Scrollback) > 0 {
+		tail, clipped := limitReplayTail(info.Scrollback, maxAgentRawReplayBytes)
+		payload.scrollback = tail
+		payload.scrollbackTruncated = info.ScrollbackTruncated || clipped
+		payload.screenSnapshot = nil
+		payload.screenCols = 0
+		payload.screenRows = 0
+		payload.screenCursorX = 0
+		payload.screenCursorY = 0
+		payload.screenCursorVisible = false
+		payload.screenSnapshotFresh = false
+		return payload
 	}
 
 	// When no live screen model is available, derive the visible frame from the
@@ -284,7 +315,7 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		})
 		return
 	}
-	replay := buildAttachReplayPayload(info)
+	replay := buildAttachReplayPayload(info, d.store.Get(msg.ID))
 	d.logf(
 		"PTY attach result: id=%s running=%v last_seq=%d scrollback_bytes=%d replay_bytes=%d snapshot_bytes=%d snapshot_fresh=%v derived_snapshot=%v size=%dx%d screen=%dx%d",
 		msg.ID,

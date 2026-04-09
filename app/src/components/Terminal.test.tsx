@@ -271,4 +271,33 @@ describe('Terminal', () => {
     });
   });
 
+  it('uses fit as a readiness fallback when ResizeObserver ready is missed', () => {
+    const handleRef = createRef<TerminalHandle>();
+    const onResize = vi.fn();
+
+    render(
+      <Terminal
+        ref={handleRef}
+        fontSize={14}
+        resolvedTheme="dark"
+        tuiCursor
+        onResize={onResize}
+      />
+    );
+
+    expect(mockState.terminals).toHaveLength(1);
+    expect(onResize).not.toHaveBeenCalled();
+
+    act(() => {
+      handleRef.current?.fit();
+    });
+
+    const term = mockState.terminals[0];
+    expect(term.resizeMock).toHaveBeenCalledWith(109, 50);
+    expect(onResize).toHaveBeenCalledTimes(1);
+    expect(onResize).toHaveBeenLastCalledWith(109, 50, {
+      reason: 'ready_fallback',
+    });
+  });
+
 });

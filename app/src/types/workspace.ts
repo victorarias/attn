@@ -45,6 +45,11 @@ interface PaneBounds {
   centerY: number;
 }
 
+export interface NormalizedPaneBounds extends PaneBounds {
+  width: number;
+  height: number;
+}
+
 export function createDefaultWorkspaceState(): TerminalWorkspaceState {
   return {
     terminals: [],
@@ -75,6 +80,14 @@ function paneBounds(
   };
 }
 
+function withDimensions(bounds: PaneBounds): NormalizedPaneBounds {
+  return {
+    ...bounds,
+    width: bounds.right - bounds.left,
+    height: bounds.bottom - bounds.top,
+  };
+}
+
 function collectPaneBounds(
   node: TerminalLayoutNode,
   bounds: PaneBounds,
@@ -96,6 +109,14 @@ function collectPaneBounds(
   const splitY = bounds.top + (bounds.bottom - bounds.top) * ratio;
   collectPaneBounds(node.children[0], paneBounds(bounds.left, bounds.top, bounds.right, splitY), result);
   collectPaneBounds(node.children[1], paneBounds(bounds.left, splitY, bounds.right, bounds.bottom), result);
+}
+
+export function getNormalizedPaneBounds(node: TerminalLayoutNode): Map<string, NormalizedPaneBounds> {
+  const rects = new Map<string, PaneBounds>();
+  collectPaneBounds(node, paneBounds(0, 0, 1, 1), rects);
+  return new Map(
+    Array.from(rects.entries()).map(([paneId, bounds]) => [paneId, withDimensions(bounds)]),
+  );
 }
 
 function overlapSize(aStart: number, aEnd: number, bStart: number, bEnd: number): number {

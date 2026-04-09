@@ -23,7 +23,7 @@ const debugCaptureSubscriberID = "__attn_debug_capture__"
 const (
 	fallbackOSC10Response      = "\x1b]10;rgb:d4d4/d4d4/d4d4\x1b\\"
 	fallbackOSC11Response      = "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\"
-	startupQueryFallbackWindow = 3 * time.Second
+	startupQueryFallbackWindow = 5 * time.Second
 )
 
 type sessionSubscriber struct {
@@ -180,15 +180,17 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				// PTYs before the interactive xterm is ready, while non-interactive
 				// worker subscribers like debug capture are already attached.
 				// Fish waits about 2 s for these terminal queries before the prompt
-				// becomes truly interactive.
+				// becomes truly interactive. Shell prompts can also re-issue the
+				// same queries shortly after the first attach/resize, so allow
+				// resends during the startup window for shell sessions.
 				noInteractiveSubs := false
 				if queries.any() {
 					s.subMu.RLock()
 					noInteractiveSubs = !hasInteractiveSubscribers(s.subscribers)
 					s.subMu.RUnlock()
 				}
-				if noInteractiveSubs {
-					s.writeTerminalQueryResponses(queries, "read_loop_unattached", false, logf)
+				if enabled, allowResend, source := s.terminalQueryFallbackMode(time.Now(), noInteractiveSubs); enabled {
+					s.writeTerminalQueryResponses(queries, source, allowResend, logf)
 				}
 
 				seq := s.seqCounter.Add(1)
@@ -463,6 +465,24 @@ func (s *Session) withinStartupQueryWindow(now time.Time) bool {
 		return false
 	}
 	return now.Sub(s.startedAt) <= startupQueryFallbackWindow
+}
+
+func (s *Session) startupQueryFallbackAllowed(now time.Time) bool {
+	return s.agent == "shell" && s.withinStartupQueryWindow(now)
+}
+
+func (s *Session) terminalQueryFallbackMode(now time.Time, noInteractiveSubs bool) (enabled bool, allowResend bool, source string) {
+	startupFallback := s.startupQueryFallbackAllowed(now)
+	switch {
+	case noInteractiveSubs && startupFallback:
+		return true, true, "read_loop_startup_unattached"
+	case noInteractiveSubs:
+		return true, false, "read_loop_unattached"
+	case startupFallback:
+		return true, true, "read_loop_startup_interactive"
+	default:
+		return false, false, ""
+	}
 }
 
 func (s *Session) claimFirstAttach() bool {

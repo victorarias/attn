@@ -4,9 +4,10 @@ import { createElement, useLayoutEffect } from 'react';
 import { installTerminalKeyHandler, usePaneRuntimeBinder } from './usePaneRuntimeBinder';
 import type { PaneRuntimeEventBinding, PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 
-const { mockTriggerShortcut, mockIsMacLikePlatform, mockPtySpawn, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
+const { mockTriggerShortcut, mockIsMacLikePlatform, mockPtyAttach, mockPtySpawn, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
   mockTriggerShortcut: vi.fn(() => false),
   mockIsMacLikePlatform: vi.fn(() => true),
+  mockPtyAttach: vi.fn(() => Promise.resolve()),
   mockPtySpawn: vi.fn(() => Promise.resolve()),
   mockPtyResize: vi.fn(() => Promise.resolve()),
   mockPtyWrite: vi.fn(() => Promise.resolve()),
@@ -21,6 +22,7 @@ vi.mock('../../shortcuts/platform', () => ({
 }));
 
 vi.mock('../../pty/bridge', () => ({
+  ptyAttach: mockPtyAttach,
   ptySpawn: mockPtySpawn,
   ptyResize: mockPtyResize,
   ptyWrite: mockPtyWrite,
@@ -37,9 +39,37 @@ function createMockEventRouter(bindings: Map<string, PaneRuntimeEventBinding>): 
   };
 }
 
-function createMockXterm(options?: { manualWriteCallbacks?: boolean }) {
+function createMockCell(chars = ' ') {
+  return {
+    getChars: () => chars,
+    getWidth: () => 1,
+    isBold: () => 0,
+    isItalic: () => 0,
+    isUnderline: () => 0,
+    isBlink: () => 0,
+    isInverse: () => 0,
+    getFgColor: () => 0,
+    getBgColor: () => 0,
+    isFgRGB: () => false,
+    isFgPalette: () => false,
+    isBgRGB: () => false,
+    isBgPalette: () => false,
+  };
+}
+
+function createMockLine(text: string, cols: number) {
+  return {
+    translateToString: () => text.padEnd(cols, ' '),
+    getCell: (index: number) => createMockCell(index < text.length ? text[index] : (index < cols ? ' ' : '')),
+  };
+}
+
+function createMockXterm(options?: { manualWriteCallbacks?: boolean; visibleText?: string; cols?: number; rows?: number }) {
   const writeParsedHandlers = new Set<() => void>();
   const pendingWriteCallbacks: Array<() => void> = [];
+  const cols = options?.cols ?? 80;
+  const rows = options?.rows ?? 24;
+  const visibleText = options?.visibleText;
   const completeWrite = (callback?: () => void) => {
     callback?.();
     for (const handler of Array.from(writeParsedHandlers)) {
@@ -47,8 +77,8 @@ function createMockXterm(options?: { manualWriteCallbacks?: boolean }) {
     }
   };
   return {
-    cols: 80,
-    rows: 24,
+    cols,
+    rows,
     write: vi.fn((_data: string | Uint8Array, callback?: () => void) => {
       if (!callback) {
         return;
@@ -73,8 +103,10 @@ function createMockXterm(options?: { manualWriteCallbacks?: boolean }) {
     attachCustomKeyEventHandler: vi.fn(),
     buffer: {
       active: {
-        length: 0,
-        getLine: vi.fn(() => null),
+        length: visibleText ? 1 : 0,
+        viewportY: 0,
+        getNullCell: vi.fn(() => createMockCell(' ')),
+        getLine: vi.fn((index: number) => (visibleText && index === 0 ? createMockLine(visibleText, cols) : null)),
       },
     },
     __fireWriteParsed: () => {
@@ -94,6 +126,7 @@ describe('installTerminalKeyHandler', () => {
   beforeEach(() => {
     mockTriggerShortcut.mockReset().mockReturnValue(false);
     mockIsMacLikePlatform.mockReset().mockReturnValue(true);
+    mockPtyAttach.mockReset().mockResolvedValue(undefined);
     mockPtySpawn.mockReset().mockResolvedValue(undefined);
     mockPtyResize.mockReset().mockResolvedValue(undefined);
     mockPtyWrite.mockReset().mockResolvedValue(undefined);
@@ -133,7 +166,10 @@ describe('installTerminalKeyHandler', () => {
 
 describe('usePaneRuntimeBinder', () => {
   beforeEach(() => {
+    mockPtyAttach.mockReset().mockResolvedValue(undefined);
     mockPtySpawn.mockReset().mockResolvedValue(undefined);
+    mockPtyResize.mockReset().mockResolvedValue(undefined);
+    mockPtyWrite.mockReset().mockResolvedValue(undefined);
   });
 
   it('replays queued PTY output after a pane remounts', async () => {
@@ -421,5 +457,237 @@ describe('usePaneRuntimeBinder', () => {
       rows: 43,
       reason: 'resize_both',
     });
+  });
+
+  it('requests a column redraw bounce after widening an already-running main runtime', async () => {
+    vi.useFakeTimers();
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: false,
+        }),
+      },
+    ], 'pane-1', eventRouter));
+
+    const xterm = createMockXterm();
+
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(xterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    mockPtyResize.mockClear();
+
+    await act(async () => {
+      result.current.handleTerminalResize('pane-1')(140, 43, { reason: 'fit' });
+      await vi.advanceTimersByTimeAsync(240);
+      await Promise.resolve();
+    });
+
+    expect(mockPtyResize).toHaveBeenCalledTimes(3);
+    expect(mockPtyResize).toHaveBeenNthCalledWith(1, {
+      id: 'runtime-1',
+      cols: 140,
+      rows: 43,
+      reason: 'fit',
+    });
+    expect(mockPtyResize).toHaveBeenNthCalledWith(2, {
+      id: 'runtime-1',
+      cols: 139,
+      rows: 43,
+      reason: 'fit:resize_redraw:bounce',
+    });
+    expect(mockPtyResize).toHaveBeenNthCalledWith(3, {
+      id: 'runtime-1',
+      cols: 140,
+      rows: 43,
+      reason: 'fit:resize_redraw:restore',
+    });
+  });
+
+  it('skips the authoritative redraw when the runtime emits fresh output after resize', async () => {
+    vi.useFakeTimers();
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: false,
+        }),
+      },
+    ], 'pane-1', eventRouter));
+
+    const xterm = createMockXterm();
+
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(xterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    mockPtyResize.mockClear();
+
+    await act(async () => {
+      result.current.handleTerminalResize('pane-1')(140, 43, { reason: 'fit' });
+      await vi.advanceTimersByTimeAsync(100);
+      bindings.get('runtime-1')?.onEvent({ event: 'data', id: 'runtime-1', data: btoa('repaint') });
+      await result.current.drainPaneTerminal('pane-1');
+      await vi.advanceTimersByTimeAsync(160);
+      await Promise.resolve();
+    });
+
+    expect(mockPtyResize).toHaveBeenCalledTimes(1);
+    expect(mockPtyResize).toHaveBeenCalledWith({
+      id: 'runtime-1',
+      cols: 140,
+      rows: 43,
+      reason: 'fit',
+    });
+  });
+
+  it('hydrates a remounted xterm for an already-running runtime', async () => {
+    vi.useFakeTimers();
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: false,
+        }),
+      },
+    ], 'pane-1', eventRouter));
+
+    const firstXterm = createMockXterm();
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(firstXterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    expect(mockPtySpawn).toHaveBeenCalledTimes(1);
+    mockPtyAttach.mockClear();
+    mockPtyResize.mockClear();
+
+    await act(async () => {
+      result.current.setTerminalHandle('pane-1', null);
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    const remountedXterm = createMockXterm();
+    remountedXterm.cols = 132;
+    remountedXterm.rows = 41;
+
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(remountedXterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    expect(mockPtyAttach).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-1',
+        cols: 132,
+        rows: 41,
+        shell: false,
+        reason: 'ready',
+      },
+      forceResizeBeforeAttach: true,
+    });
+    expect(mockPtyResize).not.toHaveBeenCalled();
+    expect(mockPtySpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('hydrates a remounted xterm even when terminal ready is missed', async () => {
+    vi.useFakeTimers();
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: false,
+        }),
+      },
+    ], 'pane-1', eventRouter));
+
+    const firstXterm = createMockXterm();
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(firstXterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    mockPtyAttach.mockClear();
+    mockPtyResize.mockClear();
+
+    await act(async () => {
+      result.current.setTerminalHandle('pane-1', null);
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    const fitHandle = {
+      fit: vi.fn(),
+      focus: vi.fn(() => true),
+      terminal: null,
+    };
+    act(() => {
+      result.current.setTerminalHandle('pane-1', fitHandle as any);
+    });
+
+    const remountedXterm = createMockXterm();
+    remountedXterm.cols = 132;
+    remountedXterm.rows = 41;
+
+    await act(async () => {
+      result.current.handleTerminalInit('pane-1')(remountedXterm as any);
+      await vi.advanceTimersByTimeAsync(16);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    expect(fitHandle.fit).toHaveBeenCalledTimes(1);
+    expect(mockPtyAttach).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-1',
+        cols: 132,
+        rows: 41,
+        shell: false,
+        reason: 'init_hydrate',
+      },
+      forceResizeBeforeAttach: true,
+    });
+    expect(mockPtyResize).not.toHaveBeenCalled();
   });
 });

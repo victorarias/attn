@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { ptyKill, ptySpawn } from '../pty/bridge';
+import { ptyAttach, ptyKill, ptySpawn } from '../pty/bridge';
 import { retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 
 class FakeWebSocket {
@@ -55,6 +55,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
   afterEach(() => {
     globalThis.WebSocket = originalWebSocket;
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -470,6 +471,463 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
       expect(sent).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
     });
+
+    unmount();
+  });
+
+  it('hydrates a remounted runtime by resizing before re-attaching', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '49',
+        sessions: [{
+          id: 'sess-existing',
+          label: 'attn',
+          agent: 'codex',
+          directory: '/tmp/repo',
+          state: 'idle',
+          state_since: '2026-04-08T00:00:00Z',
+          state_updated_at: '2026-04-08T00:00:00Z',
+          last_seen: '2026-04-08T00:00:00Z',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const attachPromise = ptyAttach({
+      args: {
+        id: 'sess-existing',
+        cols: 58,
+        rows: 46,
+        shell: false,
+        reason: 'remount_attach',
+      },
+      forceResizeBeforeAttach: true,
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+    });
+
+    const sent = ws.sent.map((entry) => JSON.parse(entry));
+    const resizeIndex = sent.findIndex((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
+    const attachIndex = sent.findIndex((entry) => entry.cmd === 'attach_session' && entry.id === 'sess-existing');
+    expect(resizeIndex).toBeGreaterThanOrEqual(0);
+    expect(attachIndex).toBeGreaterThan(resizeIndex);
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-existing',
+        success: true,
+        cols: 58,
+        rows: 46,
+        screen_cols: 58,
+        screen_rows: 46,
+        running: true,
+      });
+    });
+
+    await expect(attachPromise).resolves.toBeUndefined();
+    unmount();
+  });
+
+  it('skips stale replay and requests redraw when remounted attach geometry mismatches', async () => {
+    (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS = [];
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '49',
+        sessions: [{
+          id: 'sess-existing',
+          label: 'attn',
+          agent: 'codex',
+          directory: '/tmp/repo',
+          state: 'idle',
+          state_since: '2026-04-08T00:00:00Z',
+          state_updated_at: '2026-04-08T00:00:00Z',
+          last_seen: '2026-04-08T00:00:00Z',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const attachPromise = ptyAttach({
+      args: {
+        id: 'sess-existing',
+        cols: 58,
+        rows: 46,
+        shell: false,
+        reason: 'remount_attach',
+      },
+      forceResizeBeforeAttach: true,
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-existing',
+        success: true,
+        cols: 37,
+        rows: 46,
+        screen_cols: 37,
+        screen_rows: 46,
+        screen_snapshot: 'c3RhbGU=',
+        running: true,
+      });
+    });
+
+    await expect(attachPromise).resolves.toBeUndefined();
+
+    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS || [];
+    expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'sess-existing' && event.data === 'c3RhbGU=')).toBe(false);
+    expect(ptyEvents.some((event) => event.event === 'reset' && event.id === 'sess-existing')).toBe(false);
+
+    await waitFor(() => {
+      const resizes = ws.sent
+        .map((entry) => JSON.parse(entry))
+        .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
+      expect(resizes.filter((entry) => entry.cols === 58 && entry.rows === 46).length).toBeGreaterThanOrEqual(2);
+      expect(resizes).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 45 });
+    });
+
+    unmount();
+  });
+
+  it('skips matching replay and requests redraw when remounted non-shell attach geometry already matches', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS = [];
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '49',
+        sessions: [{
+          id: 'sess-existing',
+          label: 'attn',
+          agent: 'codex',
+          directory: '/tmp/repo',
+          state: 'idle',
+          state_since: '2026-04-08T00:00:00Z',
+          state_updated_at: '2026-04-08T00:00:00Z',
+          last_seen: '2026-04-08T00:00:00Z',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const attachPromise = ptyAttach({
+      args: {
+        id: 'sess-existing',
+        cols: 58,
+        rows: 46,
+        shell: false,
+        reason: 'remount_attach',
+      },
+      forceResizeBeforeAttach: true,
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-existing',
+        success: true,
+        cols: 58,
+        rows: 46,
+        screen_cols: 58,
+        screen_rows: 46,
+        screen_snapshot: 'bWF0Y2g=',
+        running: true,
+      });
+    });
+
+    await expect(attachPromise).resolves.toBeUndefined();
+
+    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS || [];
+    expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'sess-existing' && event.data === 'bWF0Y2g=')).toBe(false);
+    expect(ptyEvents.some((event) => event.event === 'reset' && event.id === 'sess-existing')).toBe(false);
+
+    await waitFor(() => {
+      const resizes = ws.sent
+        .map((entry) => JSON.parse(entry))
+        .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
+      expect(resizes.filter((entry) => entry.cols === 58 && entry.rows === 46).length).toBeGreaterThanOrEqual(2);
+      expect(resizes).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 45 });
+    });
+
+    unmount();
+  });
+
+  it('applies matching replay and requests redraw when spawning a daemon-known non-shell session', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS = [];
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '49',
+        sessions: [{
+          id: 'sess-existing',
+          label: 'attn',
+          agent: 'codex',
+          directory: '/tmp/repo',
+          state: 'idle',
+          state_since: '2026-04-08T00:00:00Z',
+          state_updated_at: '2026-04-08T00:00:00Z',
+          last_seen: '2026-04-08T00:00:00Z',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const spawnPromise = ptySpawn({
+      args: {
+        id: 'sess-existing',
+        cwd: '/tmp/repo',
+        agent: 'codex',
+        cols: 58,
+        rows: 46,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-existing',
+        success: true,
+        cols: 58,
+        rows: 46,
+        screen_cols: 58,
+        screen_rows: 46,
+        screen_snapshot: 'bWF0Y2g=',
+        running: true,
+      });
+    });
+
+    await expect(spawnPromise).resolves.toBeUndefined();
+
+    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS || [];
+    expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'snapshot_restore' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'bWF0Y2g=' });
+
+    await waitFor(() => {
+      const resizes = ws.sent
+        .map((entry) => JSON.parse(entry))
+        .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
+      expect(resizes).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 45 });
+      expect(resizes.filter((entry) => entry.cols === 58 && entry.rows === 46).length).toBeGreaterThanOrEqual(1);
+    });
+
+    unmount();
+  });
+
+  it('applies raw scrollback replay when attaching a daemon-known non-shell session', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS = [];
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '49',
+        sessions: [{
+          id: 'sess-existing',
+          label: 'attn',
+          agent: 'codex',
+          directory: '/tmp/repo',
+          state: 'idle',
+          state_since: '2026-04-08T00:00:00Z',
+          state_updated_at: '2026-04-08T00:00:00Z',
+          last_seen: '2026-04-08T00:00:00Z',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const spawnPromise = ptySpawn({
+      args: {
+        id: 'sess-existing',
+        cwd: '/tmp/repo',
+        agent: 'codex',
+        cols: 58,
+        rows: 46,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing' });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-existing',
+        success: true,
+        cols: 58,
+        rows: 46,
+        scrollback: 'cmF3LXJlcGxheQ==',
+        scrollback_truncated: true,
+        running: true,
+      });
+    });
+
+    await expect(spawnPromise).resolves.toBeUndefined();
+
+    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS || [];
+    expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'cmF3LXJlcGxheQ==' });
 
     unmount();
   });
