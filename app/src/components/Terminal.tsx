@@ -30,11 +30,7 @@ import {
   type TerminalRendererMode,
 } from '../utils/terminalRenderer';
 import { installTerminalRendererLifecycle } from '../utils/terminalRendererLifecycle';
-import {
-  planObservedTerminalResize,
-  planVisibilityFlush,
-  X_AXIS_DEBOUNCE_MS,
-} from '../utils/terminalResizeLifecycle';
+import { installTerminalViewportLifecycle } from '../utils/terminalViewportLifecycle';
 import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
 import type { TerminalPerfStartupSnapshot } from '../utils/terminalPerf';
 export type { ResolvedTheme } from '../utils/terminalSizing';
@@ -147,7 +143,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const onInitRef = useRef(onInit);
     const onResizeRef = useRef(onResize);
     const fontSizeRef = useRef(fontSize);
-    const resolvedThemeRef = useRef(resolvedTheme);
     const tuiCursorRef = useRef(tuiCursor);
     const runtimeLogMetaRef = useRef(runtimeLogMeta);
 
@@ -156,7 +151,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       onInitRef.current = onInit;
       onResizeRef.current = onResize;
       fontSizeRef.current = fontSize;
-      resolvedThemeRef.current = resolvedTheme;
       debugNameRef.current = debugName || 'unknown';
       tuiCursorRef.current = tuiCursor;
       runtimeLogMetaRef.current = runtimeLogMeta;
@@ -825,164 +819,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           writeQueueBytesRef.current = bytes;
         },
       });
-      // Resize strategy from VS Code's TerminalResizeDebouncer:
-      // - Y-axis (rows): immediate (cheap operation)
-      // - X-axis (cols): 100ms debounce (expensive text reflow)
-      // - Small buffers (<200 lines): immediate for both
-      // - Hidden terminals: use requestIdleCallback
-      let lastCols = term.cols;
-      let lastRows = term.rows;
-      // Store latest requested values (VS Code pattern)
-      let latestX = term.cols;
-      let latestY = term.rows;
-      let latestDiagnostics: ResizeDiagnostics | null = null;
-      let xResizeTimeout: number;
-      let isVisible = true;
-      const resizeBoth = (cols: number, rows: number, diagnostics: ResizeDiagnostics | null) => {
-        lastCols = cols;
-        lastRows = rows;
-        resizeTerminal(term, cols, rows, 'resize_both', diagnostics);
-      };
-
-      const resizeX = (cols: number, diagnostics: ResizeDiagnostics | null) => {
-        lastCols = cols;
-        resizeTerminal(term, cols, term.rows, 'resize_x', diagnostics);
-      };
-
-      const resizeY = (rows: number, diagnostics: ResizeDiagnostics | null) => {
-        lastRows = rows;
-        resizeTerminal(term, term.cols, rows, 'resize_y', diagnostics);
-      };
-
-      const handleResize = () => {
-        const container = containerRef.current;
-        if (!container) return;
-
-        const dims = getScaledDimensions(container, term, fontSizeRef.current);
-        if (!dims) {
-          logTerminal('log', 'handleResize: no dimensions', {
-            isVisible: visibleRef.current,
-            container: getContainerDebugInfo(container),
-          });
-          return;
-        }
-
-        const { cols, rows, diagnostics } = dims;
-        latestX = cols;
-        latestY = rows;
-        latestDiagnostics = diagnostics;
-
-        if (isSuspiciousTerminalSize(cols, rows)) {
-          logTerminal('warn', 'handleResize: suspicious dimensions detected', {
-            cols,
-            rows,
-            lastCols,
-            lastRows,
-            bufferLength: term.buffer.normal.length,
-            isVisible: visibleRef.current,
-            container: getContainerDebugInfo(container),
-          });
-        }
-
-        const plan = planObservedTerminalResize({
-          next: {
-            cols,
-            rows,
-            diagnostics,
-          },
-          lastCols,
-          lastRows,
-          bufferLength: term.buffer.normal.length,
-          isVisible,
-          hasIdleCallback: 'requestIdleCallback' in window,
-        });
-
-        switch (plan.type) {
-          case 'none':
-            return;
-          case 'resize_both':
-            clearTimeout(xResizeTimeout);
-            resizeBoth(plan.next.cols, plan.next.rows, plan.next.diagnostics);
-            return;
-          case 'idle_resize_both':
-            (window as any).requestIdleCallback(() => {
-              resizeBoth(latestX, latestY, latestDiagnostics);
-            });
-            return;
-          case 'resize_y':
-            resizeY(plan.rows, plan.diagnostics);
-            return;
-          case 'debounce_x':
-            clearTimeout(xResizeTimeout);
-            xResizeTimeout = window.setTimeout(() => {
-              resizeX(plan.cols, plan.diagnostics);
-            }, X_AXIS_DEBOUNCE_MS);
-            return;
-          case 'resize_y_then_debounce_x':
-            resizeY(plan.rows, plan.diagnostics);
-            clearTimeout(xResizeTimeout);
-            xResizeTimeout = window.setTimeout(() => {
-              resizeX(plan.cols, plan.diagnostics);
-            }, X_AXIS_DEBOUNCE_MS);
-            return;
-        }
-      };
-
-      // CRITICAL FIX: Use ResizeObserver on container for ALL resize detection
-      // This catches: window resize, sidebar collapse, display changes, parent layout changes
-      // VS Code uses a top-down layout system; we use ResizeObserver as the equivalent
-      const resizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[0];
-        if (!entry || entry.contentRect.width <= 0 || entry.contentRect.height <= 0) {
-          if (entry && isTerminalDebugEnabled()) {
-            logTerminal('log', 'ResizeObserver ignored non-positive size', {
-              contentRectWidth: entry.contentRect.width,
-              contentRectHeight: entry.contentRect.height,
-              isVisible: visibleRef.current,
-            });
-          }
-          return;
-        }
-
-        if (!startupSnapshotRef.current.firstObservedContainer) {
-          startupSnapshotRef.current.firstObservedContainer = {
-            width: Math.round(entry.contentRect.width),
-            height: Math.round(entry.contentRect.height),
-          };
-        }
-
-        // First time we get valid dimensions: fire onReady
-        if (!readyFiredRef.current) {
-          // Wait one frame for renderer to initialize cell dimensions
-          requestAnimationFrame(() => {
-            const dims = getScaledDimensions(containerRef.current!, term, fontSizeRef.current);
-            if (dims && dims.cols > 0 && dims.rows > 0) {
-              lastCols = dims.cols;
-              lastRows = dims.rows;
-              applyMeasuredTerminalGeometry(term, dims, {
-                readySource: 'resize_observer',
-                readyReason: 'ready',
-                resizeReason: 'ready',
-              });
-            }
-          });
-          return;
-        }
-
-        // After ready: handle resize with VS Code debouncing strategy
-        handleResize();
-      });
-      resizeObserver.observe(containerRef.current);
-
-      // VS Code: Track visibility to defer resizes when hidden
-      // Source: terminalInstance.ts setVisible() - flushes pending resizes when becoming visible
-      const visibilityObserver = new IntersectionObserver(
-        (entries) => {
-          const nowVisible = entries[0]?.isIntersecting ?? true;
-          const wasHidden = !isVisible && nowVisible;
-          isVisible = nowVisible;
-          visibleRef.current = nowVisible;
-          logTerminal('log', 'Visibility changed', { nowVisible, wasHidden, readyFired: readyFiredRef.current });
+      const viewportLifecycle = installTerminalViewportLifecycle({
+        term,
+        container: containerRef.current,
+        fontSizeRef,
+        visibleRef,
+        readyFiredRef,
+        startupSnapshotRef,
+        logTerminal,
+        getContainerDebugInfo,
+        applyMeasuredTerminalGeometry,
+        resizeTerminal,
+        onVisibilityChanged: (nowVisible, wasHidden) => {
           const meta = runtimeLogMetaRef.current;
           if (meta && meta.isActiveSession && meta.isActivePane) {
             recordTerminalRuntimeLog({
@@ -1001,66 +849,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
               },
             });
           }
-
-          // VS Code pattern: flush pending resizes when becoming visible
-          if (wasHidden && readyFiredRef.current) {
-            clearTimeout(xResizeTimeout);
-            const container = containerRef.current;
-            const dims = container ? getScaledDimensions(container, term, fontSizeRef.current) : null;
-            const plan = planVisibilityFlush({
-              wasHidden,
-              ready: readyFiredRef.current,
-              next: dims ? {
-                cols: dims.cols,
-                rows: dims.rows,
-                diagnostics: dims.diagnostics,
-              } : null,
-              currentCols: term.cols,
-              currentRows: term.rows,
-            });
-
-            if (plan.type === 'none') {
-              return;
-            }
-
-            if (dims) {
-              lastCols = dims.cols;
-              lastRows = dims.rows;
-            }
-
-            if (plan.type === 'force_redraw') {
-              onResizeRef.current?.(plan.cols, plan.rows, {
-                forceRedraw: true,
-                reason: 'visibility_flush_same_size',
-              });
-            } else {
-              resizeTerminal(term, plan.next.cols, plan.next.rows, 'visibility_flush', plan.next.diagnostics);
-            }
-          }
         },
-        { threshold: 0 }
-      );
-      visibilityObserver.observe(containerRef.current);
-
-      // VS Code: Listen for DPI changes (when window moves between displays)
-      // Source: terminalInstance.ts - uses matchMedia for resolution changes
-      let currentDpr = window.devicePixelRatio;
-      const handleDprChange = () => {
-        const newDpr = window.devicePixelRatio;
-        if (newDpr !== currentDpr) {
-          currentDpr = newDpr;
-          const container = containerRef.current;
-          if (container) {
-            const dims = getScaledDimensions(container, term, fontSizeRef.current);
-            if (dims) {
-              resizeTerminal(term, dims.cols, dims.rows, 'dpr_change');
-            }
-          }
-        }
-      };
-      // matchMedia with resolution query triggers on DPI change
-      const dprMediaQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
-      dprMediaQuery.addEventListener('change', handleDprChange);
+        onForceRedraw: (cols, rows, reason) => {
+          onResizeRef.current?.(cols, rows, {
+            forceRedraw: true,
+            reason,
+          });
+        },
+      });
 
       // Cleanup
       return () => {
@@ -1091,10 +887,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           renderDisposable.dispose();
           writeParsedDisposable.dispose();
           window.clearInterval(heartbeatInterval);
-          resizeObserver.disconnect();
-          visibilityObserver.disconnect();
-          clearTimeout(xResizeTimeout);
-          dprMediaQuery.removeEventListener('change', handleDprChange);
+          viewportLifecycle.dispose();
         window.removeEventListener('keydown', handleMdCopy, true);
         cleanupTerminalScrollPin(term);
         unregisterTerminalPerf();

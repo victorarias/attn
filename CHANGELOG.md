@@ -45,6 +45,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Worker Reaping On Session Close**: Removing a PTY worker session now reaps the worker PID directly, so packaged-app session close no longer leaves defunct `attn` worker children attached to the long-lived daemon after the UI and registry cleanup finish.
 - **Shared Terminal Resize Lifecycle**: Initial terminal geometry, observed resize planning, and hidden-to-visible redraw-or-resize decisions now run through dedicated terminal sizing and resize helpers instead of being duplicated inline inside `Terminal.tsx`, with tests preserving the same-size visibility flush redraw behavior.
 - **Shared Terminal Renderer Lifecycle**: WebGL attach/detach, renderer-config subscription, and context-loss fallback now run through a dedicated terminal renderer helper instead of being embedded inside the `Terminal.tsx` mount effect, with focused tests preserving DOM fallback and context-loss refresh behavior.
+- **Shared Terminal Viewport Lifecycle**: ResizeObserver readiness, post-ready resize orchestration, visibility flushes, and DPI-change handling now run through a dedicated viewport lifecycle helper instead of living inline inside `Terminal.tsx`, shrinking the remaining terminal rendering effect while preserving packaged-app split, relaunch, and redraw behavior.
 
 ## [2026-04-08]
 
