@@ -65,11 +65,8 @@ export interface PaneRuntimeBinder {
   drainPaneTerminal: (paneId: string) => Promise<boolean>;
 }
 
-interface PaneTerminalWriteState {
+interface PaneWriteState {
   writeChain: Promise<void>;
-}
-
-interface PaneWriteLogState {
   lastLoggedAt: number;
   writeCount: number;
   bytes: number;
@@ -190,8 +187,7 @@ export function usePaneRuntimeBinder(
   const cachedSpawnArgsRef = useRef<Map<string, PtySpawnArgs | null>>(new Map());
   const pendingUnmountCleanupRef = useRef<Map<string, number>>(new Map());
   const runtimeBindingDisposersRef = useRef<Map<string, { paneId: string; testSessionId?: string; dispose: () => void }>>(new Map());
-  const paneWriteStatesRef = useRef<Map<string, PaneTerminalWriteState>>(new Map());
-  const paneWriteLogStatesRef = useRef<Map<string, PaneWriteLogState>>(new Map());
+  const paneWriteStatesRef = useRef<Map<string, PaneWriteState>>(new Map());
   const pendingGeometrySyncRef = useRef<Map<string, PendingGeometrySync<XTerm>>>(new Map());
   const pendingGeometryTimersRef = useRef<Map<string, number>>(new Map());
   const lastCommittedGeometryRef = useRef<Map<string, PaneRuntimeSize>>(new Map());
@@ -211,11 +207,17 @@ export function usePaneRuntimeBinder(
     pendingTerminalEventsRef.current.set(paneId, events);
   }, []);
 
-  const getPaneWriteState = useCallback((paneId: string): PaneTerminalWriteState => {
+  const getPaneWriteState = useCallback((paneId: string): PaneWriteState => {
     let state = paneWriteStatesRef.current.get(paneId);
     if (!state) {
+      const now = performance.now();
       state = {
         writeChain: Promise.resolve(),
+        lastLoggedAt: now,
+        writeCount: 0,
+        bytes: 0,
+        totalWriteCount: 0,
+        lastWriteAt: 0,
       };
       paneWriteStatesRef.current.set(paneId, state);
     }
@@ -267,17 +269,7 @@ export function usePaneRuntimeBinder(
       return;
     }
     const now = performance.now();
-    let state = paneWriteLogStatesRef.current.get(paneId);
-    if (!state) {
-      state = {
-        lastLoggedAt: now,
-        writeCount: 0,
-        bytes: 0,
-        totalWriteCount: 0,
-        lastWriteAt: 0,
-      };
-      paneWriteLogStatesRef.current.set(paneId, state);
-    }
+    const state = getPaneWriteState(paneId);
     state.writeCount += 1;
     state.bytes += bytes;
     state.totalWriteCount += 1;
@@ -546,7 +538,6 @@ export function usePaneRuntimeBinder(
       xtermsRef.current.clear();
       ensuredRuntimeIdsRef.current.clear();
       paneWriteStatesRef.current.clear();
-      paneWriteLogStatesRef.current.clear();
     };
   }, []);
 
@@ -597,7 +588,6 @@ export function usePaneRuntimeBinder(
         xtermsRef.current.delete(paneId);
         inputSubscriptionsRef.current.get(paneId)?.dispose();
         inputSubscriptionsRef.current.delete(paneId);
-        paneWriteLogStatesRef.current.delete(paneId);
       }, 0);
       pendingUnmountCleanupRef.current.set(paneId, timeoutId);
       return;
@@ -1038,7 +1028,7 @@ export function usePaneRuntimeBinder(
       lastCommittedGeometryRef.current.set(paneId, flushPlan.nextCommitted);
       if (flushPlan.redrawAfterSettle) {
         const redrawAfterSettle = flushPlan.redrawAfterSettle;
-        const redrawWriteBaseline = paneWriteLogStatesRef.current.get(paneId)?.totalWriteCount ?? 0;
+        const redrawWriteBaseline = paneWriteStatesRef.current.get(paneId)?.totalWriteCount ?? 0;
         const redrawTimeoutId = window.setTimeout(() => {
           pendingGeometryTimersRef.current.delete(paneId);
           const livePane = getCurrentPane(paneId);
@@ -1046,7 +1036,7 @@ export function usePaneRuntimeBinder(
           if (!livePane || livePane.runtimeId !== pane.runtimeId || currentXterm !== pending.xterm) {
             return;
           }
-          const writeState = paneWriteLogStatesRef.current.get(paneId);
+          const writeState = paneWriteStatesRef.current.get(paneId);
           const redrawPlan = planDeferredGeometryRedraw({
             baselineWriteCount: redrawWriteBaseline,
             currentWriteCount: writeState?.totalWriteCount ?? 0,
@@ -1144,18 +1134,23 @@ export function usePaneRuntimeBinder(
     pendingGeometryTimersRef.current.set(paneId, timeoutId);
   }, [flushPendingGeometrySync, getCurrentPane, primeSpawnArgsForSize]);
 
-  const handleTerminalInit = useCallback((paneId: string) => (xterm: XTerm) => {
+  const bindTerminalLifecycle = useCallback((
+    paneId: string,
+    xterm: XTerm,
+    phase: 'init' | 'ready',
+  ) => {
     const pane = getCurrentPane(paneId);
     recordPaneRuntimeDebugEvent({
       scope: 'binder',
       sessionId: pane?.testSessionId,
       paneId,
       runtimeId: pane?.runtimeId,
-      message: 'terminal init',
+      message: phase === 'init' ? 'terminal init' : 'terminal ready',
       details: { cols: xterm.cols, rows: xterm.rows },
     });
     wireTerminal(paneId, xterm);
-    if (pendingRuntimeHydrationRef.current.get(paneId)?.xterm === xterm) {
+    const hydratingRemount = pendingRuntimeHydrationRef.current.get(paneId)?.xterm === xterm;
+    if (phase === 'init' && hydratingRemount) {
       window.requestAnimationFrame(() => {
         const liveXterm = xtermsRef.current.get(paneId);
         if (liveXterm !== xterm) {
@@ -1163,23 +1158,37 @@ export function usePaneRuntimeBinder(
         }
         terminalHandlesRef.current.get(paneId)?.fit();
       });
-      scheduleGeometrySync(paneId, xterm, xterm.cols, xterm.rows, 'ready', { reason: 'init_hydrate' });
+      scheduleGeometrySync(paneId, xterm, xterm.cols, xterm.rows, 'ready', {
+        reason: 'init_hydrate',
+      });
+      return;
+    }
+    if (phase === 'ready') {
+      scheduleGeometrySync(paneId, xterm, xterm.cols, xterm.rows, 'ready', { reason: 'ready' });
     }
   }, [getCurrentPane, scheduleGeometrySync, wireTerminal]);
 
+  const handleTerminalInit = useCallback((paneId: string) => (xterm: XTerm) => {
+    bindTerminalLifecycle(paneId, xterm, 'init');
+  }, [bindTerminalLifecycle]);
+
   const handleTerminalReady = useCallback((paneId: string) => (xterm: XTerm) => {
-    const pane = getCurrentPane(paneId);
-    recordPaneRuntimeDebugEvent({
-      scope: 'binder',
-      sessionId: pane?.testSessionId,
-      paneId,
-      runtimeId: pane?.runtimeId,
-      message: 'terminal ready',
-      details: { cols: xterm.cols, rows: xterm.rows },
-    });
-    wireTerminal(paneId, xterm);
-    scheduleGeometrySync(paneId, xterm, xterm.cols, xterm.rows, 'ready', { reason: 'ready' });
-  }, [getCurrentPane, scheduleGeometrySync, wireTerminal]);
+    bindTerminalLifecycle(paneId, xterm, 'ready');
+  }, [bindTerminalLifecycle]);
+
+  const injectPanePayload = useCallback(async (
+    paneId: string,
+    payload: Uint8Array | string,
+    encoding: 'bytes' | 'base64',
+  ) => {
+    const xterm = xtermsRef.current.get(paneId);
+    if (!xterm) {
+      return false;
+    }
+    const bytes = encoding === 'base64' ? decodePtyBytes(payload as string) : payload as Uint8Array;
+    enqueuePaneBytes(paneId, xterm, bytes);
+    return true;
+  }, [enqueuePaneBytes]);
 
   const handleTerminalResize = useCallback((paneId: string) => (
     cols: number,
@@ -1319,23 +1328,12 @@ export function usePaneRuntimeBinder(
   }, []);
 
   const injectPaneBytes = useCallback(async (paneId: string, bytes: Uint8Array) => {
-    const xterm = xtermsRef.current.get(paneId);
-    if (!xterm) {
-      return false;
-    }
-    enqueuePaneBytes(paneId, xterm, bytes);
-    return true;
-  }, [enqueuePaneBytes]);
+    return injectPanePayload(paneId, bytes, 'bytes');
+  }, [injectPanePayload]);
 
   const injectPaneBase64 = useCallback(async (paneId: string, payload: string) => {
-    const xterm = xtermsRef.current.get(paneId);
-    if (!xterm) {
-      return false;
-    }
-    const bytes = decodePtyBytes(payload);
-    enqueuePaneBytes(paneId, xterm, bytes);
-    return true;
-  }, [enqueuePaneBytes]);
+    return injectPanePayload(paneId, payload, 'base64');
+  }, [injectPanePayload]);
 
   const drainPaneTerminal = useCallback(async (paneId: string) => {
     const xterm = xtermsRef.current.get(paneId);

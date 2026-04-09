@@ -414,6 +414,38 @@ describe('usePaneRuntimeBinder', () => {
     expect(mockPtySpawn).toHaveBeenCalledTimes(1);
   });
 
+  it('does not schedule runtime ensure from init unless a remount hydrate is pending', async () => {
+    vi.useFakeTimers();
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: true,
+        }),
+      },
+    ], 'pane-1', eventRouter));
+
+    const xterm = createMockXterm();
+
+    await act(async () => {
+      result.current.handleTerminalInit('pane-1')(xterm as any);
+      await vi.advanceTimersByTimeAsync(200);
+      await Promise.resolve();
+    });
+
+    expect(mockPtySpawn).not.toHaveBeenCalled();
+    expect(mockPtyAttach).not.toHaveBeenCalled();
+    expect(mockPtyResize).not.toHaveBeenCalled();
+  });
+
   it('coalesces rapid runtime resizes after ensure and sends only the settled size', async () => {
     vi.useFakeTimers();
     const bindings = new Map<string, PaneRuntimeEventBinding>();
