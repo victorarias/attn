@@ -117,6 +117,23 @@ function recoveryThresholdsForAgent(agent) {
   };
 }
 
+function nativeCoverageThresholdsForAgent(agent) {
+  if (agent === 'claude') {
+    return {
+      minBusyColumnRatio: 0.35,
+      minBusyRowRatio: 0.12,
+      minBBoxWidthRatio: 0.35,
+      minBBoxHeightRatio: 0.12,
+    };
+  }
+  return {
+    minBusyColumnRatio: 0.35,
+    minBusyRowRatio: 0.08,
+    minBBoxWidthRatio: 0.35,
+    minBBoxHeightRatio: 0.12,
+  };
+}
+
 async function prepareAgentBaseline(client, runner, sessionId, agent, token) {
   if (agent === 'claude') {
     await ensureClaudeMainPromptReady(client, sessionId, 45_000);
@@ -158,6 +175,7 @@ async function main() {
   let splitMainState = null;
   let recoveredMainState = null;
   let splitOpenContentPreservation = null;
+  const nativeCoverageThresholds = nativeCoverageThresholdsForAgent(options.agent);
 
   try {
     await runner.step('launch_app', async () => {
@@ -208,10 +226,10 @@ async function main() {
         'main',
         {
           target: 'paneBody',
-          minBusyColumnRatio: 0.35,
-          minBusyRowRatio: 0.12,
-          minBBoxWidthRatio: 0.35,
-          minBBoxHeightRatio: 0.12,
+          minBusyColumnRatio: nativeCoverageThresholds.minBusyColumnRatio,
+          minBusyRowRatio: nativeCoverageThresholds.minBusyRowRatio,
+          minBBoxWidthRatio: nativeCoverageThresholds.minBBoxWidthRatio,
+          minBBoxHeightRatio: nativeCoverageThresholds.minBBoxHeightRatio,
           description: `${options.agent} main pane native paint coverage before split close scenario`,
         },
       );
@@ -245,8 +263,8 @@ async function main() {
         `${options.agent} main pane width to shrink after split`,
         20_000,
       );
+      const thresholds = recoveryThresholdsForAgent(options.agent);
       try {
-        const thresholds = recoveryThresholdsForAgent(options.agent);
         await assertPaneVisibleContentPreserved(
           client,
           sessionId,
@@ -266,6 +284,9 @@ async function main() {
           ok: false,
           error: error instanceof Error ? error.stack || error.message : String(error),
         };
+        if (options.agent === 'codex') {
+          throw error;
+        }
         runner.log('observation:split_open_content_degraded', splitOpenContentPreservation);
       }
       await captureSessionArtifacts(client, runner.runDir, '02-after-split', sessionId);
@@ -316,10 +337,10 @@ async function main() {
       });
       await assertPaneNativePaintCoverage(client, runner.runDir, '03-after-close-main', sessionId, 'main', {
         target: 'paneBody',
-        minBusyColumnRatio: 0.35,
-        minBusyRowRatio: 0.12,
-        minBBoxWidthRatio: 0.35,
-        minBBoxHeightRatio: 0.12,
+        minBusyColumnRatio: nativeCoverageThresholds.minBusyColumnRatio,
+        minBusyRowRatio: nativeCoverageThresholds.minBusyRowRatio,
+        minBBoxWidthRatio: nativeCoverageThresholds.minBBoxWidthRatio,
+        minBBoxHeightRatio: nativeCoverageThresholds.minBBoxHeightRatio,
         description: `${options.agent} main pane native paint coverage after closing split`,
       });
       if (baselineMainNativeMetrics) {

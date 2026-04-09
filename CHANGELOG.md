@@ -17,6 +17,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Replay Boundary Simplification**: Remove the frontend's local visible-frame remount restore path for agent panes and restore daemon replay only for true daemon-known session reattach, so same-app remounts no longer trust lossy painted-frame state while relaunch recovery still has a provisional screen bridge.
 - **Remote Session Close Cleanup**: Closing a remote session now tears down the worker-side process tree and prunes stale workspace ghosts from both the daemon and app state, so cleanup canaries no longer pass only after manual VM cleanup or leave dead sessions visually stuck in the UI.
+- **Codex Split-Close Typing Jump**: Stop treating replay-restored runtimes as permanently eligible for forced redraw bounces after later resizes, so typing after closing a split no longer duplicates the prompt or makes the viewport jump in local and remote Codex sessions.
+- **Local Codex Close-Redraw Canary**: Calibrate the local Codex `TR-402` baseline paint thresholds to accept healthy sparse Codex panes, and make split-open main-pane content loss a hard failure instead of a logged observation.
 
 ## [2026-04-08]
 

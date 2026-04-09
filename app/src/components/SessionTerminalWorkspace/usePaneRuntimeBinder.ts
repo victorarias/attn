@@ -43,6 +43,7 @@ export interface PaneRuntimeBinder {
   fitActivePane: () => void;
   typeTextViaPaneInput: (paneId: string, text: string) => boolean;
   isPaneInputFocused: (paneId: string) => boolean;
+  scrollPaneToTop: (paneId: string) => boolean;
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => PaneRuntimeSize | null;
   getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
@@ -1252,6 +1253,16 @@ export function usePaneRuntimeBinder(
     return handle?.isInputFocused() || false;
   }, []);
 
+  const scrollPaneToTop = useCallback((paneId: string) => {
+    const xterm = xtermsRef.current.get(paneId);
+    if (!xterm) {
+      return false;
+    }
+    xterm.scrollToTop();
+    resetTerminalScrollPin(xterm);
+    return true;
+  }, []);
+
   const getPaneText = useCallback((paneId: string) => {
     return snapshotTerminalText(xtermsRef.current.get(paneId) || null);
   }, []);
@@ -1317,6 +1328,7 @@ export function usePaneRuntimeBinder(
     fitActivePane,
     typeTextViaPaneInput,
     isPaneInputFocused,
+    scrollPaneToTop,
     getPaneText,
     getPaneSize,
     getPaneVisibleContent,
