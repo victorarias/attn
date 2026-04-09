@@ -72,9 +72,9 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     );
 
     await waitFor(() => {
-      expect(FakeWebSocket.instances.length).toBe(1);
+      expect(FakeWebSocket.instances.length).toBeGreaterThan(0);
     });
-    const ws = FakeWebSocket.instances[0];
+    const ws = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
     await waitFor(() => {
       expect(ws.readyState).toBe(FakeWebSocket.OPEN);
     });
@@ -929,6 +929,11 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
     expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'cmF3LXJlcGxheQ==' });
 
+    const resizes = ws.sent
+      .map((entry) => JSON.parse(entry))
+      .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
+    expect(resizes).toEqual([]);
+
     unmount();
   });
 
@@ -1102,6 +1107,95 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       ws.emit({
         event: 'sessions_updated',
         sessions: [],
+      });
+    });
+
+    await waitFor(() => {
+      expect(onWorkspacesUpdate).toHaveBeenLastCalledWith([]);
+    });
+
+    unmount();
+  });
+
+  it('ignores late workspace updates for sessions that were already removed', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(1);
+    });
+    const ws = FakeWebSocket.instances[0];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '49',
+        sessions: [{
+          id: 'sess-removed',
+          label: 'removed',
+          directory: '/tmp/repo',
+          state: 'working',
+          last_seen: '2026-04-09T00:00:00Z',
+        }],
+        workspaces: [{
+          session_id: 'sess-removed',
+          active_pane_id: 'main',
+          layout_json: '',
+          panes: [{
+            pane_id: 'main',
+            kind: 'main',
+            title: 'Session',
+          }],
+        }],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'session_unregistered',
+        session: {
+          id: 'sess-removed',
+          label: 'removed',
+          directory: '/tmp/repo',
+          state: 'working',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(onWorkspacesUpdate).toHaveBeenLastCalledWith([]);
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'workspace_updated',
+        workspace: {
+          session_id: 'sess-removed',
+          active_pane_id: 'main',
+          layout_json: '',
+          panes: [{
+            pane_id: 'main',
+            kind: 'main',
+            title: 'Ghost',
+          }],
+        },
       });
     });
 

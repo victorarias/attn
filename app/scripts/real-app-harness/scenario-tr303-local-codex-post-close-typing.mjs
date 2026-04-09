@@ -63,6 +63,15 @@ function interestingPostTypingEvents(events) {
   });
 }
 
+function withTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+    }),
+  ]);
+}
+
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
@@ -201,12 +210,19 @@ async function main() {
     process.exitCode = 1;
   } finally {
     try {
-      await observer.disconnect();
+      await withTimeout(observer.disconnect(), 5_000);
     } catch {}
     try {
-      await client.quitApp();
+      await withTimeout(client.quitApp(), 5_000);
     } catch {}
   }
 }
 
-main();
+main()
+  .then(() => {
+    process.exit(process.exitCode ?? 0);
+  })
+  .catch((error) => {
+    console.error(error instanceof Error ? error.stack || error.message : String(error));
+    process.exit(1);
+  });

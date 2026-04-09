@@ -562,8 +562,14 @@ async function main() {
         runner,
         sessionId,
         paneId: initialShellPaneId,
-        baselineVisibleContent: secondRecovered?.state?.pane?.visibleContent || baselineMainState?.state?.pane?.visibleContent || null,
-        baselineNativeMetrics: secondRecovered?.nativeMetrics || baselineMainState?.nativeMetrics || null,
+        baselineVisibleContent:
+          options.remoteAgent === 'claude'
+            ? (baselineMainState?.state?.pane?.visibleContent || null)
+            : (secondRecovered?.state?.pane?.visibleContent || baselineMainState?.state?.pane?.visibleContent || null),
+        baselineNativeMetrics:
+          options.remoteAgent === 'claude'
+            ? (baselineMainState?.nativeMetrics || null)
+            : (secondRecovered?.nativeMetrics || baselineMainState?.nativeMetrics || null),
         previousMainWidth,
         minPaneCountAfterClose: 1,
         label: '08-after-closing-initial-split',

@@ -124,6 +124,7 @@ export interface RateLimitState {
 // Increment when making breaking changes to the protocol
 const PROTOCOL_VERSION = '49';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
+const INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD = import.meta.env.VITE_UI_AUTOMATION === '1';
 
 interface PRActionResult {
   success: boolean;
@@ -1032,10 +1033,14 @@ export function useDaemonSocket({
                   paneIds: (data.workspace.panes || []).map((pane) => pane.pane_id),
                 },
               });
-              const nextWorkspaces = [
-                ...workspacesRef.current.filter((entry) => entry.session_id !== data.workspace!.session_id),
-                data.workspace,
-              ];
+              const workspaceSessionID = data.workspace.session_id;
+              const sessionExists = sessionsRef.current.some((session) => session.id === workspaceSessionID);
+              const nextWorkspaces = sessionExists
+                ? [
+                    ...workspacesRef.current.filter((entry) => entry.session_id !== workspaceSessionID),
+                    data.workspace,
+                  ]
+                : workspacesRef.current.filter((entry) => entry.session_id !== workspaceSessionID);
               workspacesRef.current = nextWorkspaces;
               onWorkspacesUpdate(nextWorkspaces);
               pruneAttachedPtySessions(sessionsRef.current, nextWorkspaces);
@@ -1216,6 +1221,7 @@ export function useDaemonSocket({
                     replayKind: 'screen_snapshot',
                     bytes: data.screen_snapshot.length,
                     lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
+                    replayPayloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.screen_snapshot : undefined,
                   });
                   emitPtyEvent({ event: 'data', id: data.id, data: data.screen_snapshot });
                 } else if (data.scrollback) {
@@ -1223,6 +1229,7 @@ export function useDaemonSocket({
                     replayKind: 'scrollback',
                     bytes: data.scrollback.length,
                     lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
+                    replayPayloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.scrollback : undefined,
                   });
                   emitPtyEvent({ event: 'data', id: data.id, data: data.scrollback });
                 }
@@ -1268,6 +1275,7 @@ export function useDaemonSocket({
                   seq: data.seq,
                   bytes: data.data.length,
                   preview: previewBase64Payload(data.data),
+                  payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
                 },
               });
               const attachKey = `pty_attach_${data.id}`;
@@ -1286,7 +1294,11 @@ export function useDaemonSocket({
                   scope: 'daemon',
                   runtimeId: data.id,
                   message: 'queue pty_output during pending attach',
-                  details: { seq: data.seq, queued: queued.length },
+                  details: {
+                    seq: data.seq,
+                    queued: queued.length,
+                    payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
+                  },
                 });
                 break;
               }
@@ -1306,12 +1318,16 @@ export function useDaemonSocket({
               recordRuntimeTransportLog(data.id, 'pty.output.live', 'live pty output', {
                 seq: typeof data.seq === 'number' ? data.seq : null,
                 bytes: data.data.length,
+                payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
               });
               recordPaneRuntimeDebugEvent({
                 scope: 'daemon',
                 runtimeId: data.id,
                 message: 'emit pty_output to bridge',
-                details: { seq: data.seq },
+                details: {
+                  seq: data.seq,
+                  payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
+                },
               });
               emitPtyEvent({ event: 'data', id: data.id, data: data.data, seq: data.seq });
             }
@@ -2205,15 +2221,20 @@ export function useDaemonSocket({
     const requestedRows = args.rows;
     const attachedCols = typeof attachResult.cols === 'number' ? attachResult.cols : null;
     const attachedRows = typeof attachResult.rows === 'number' ? attachResult.rows : null;
+    const hasScreenSnapshotReplay = Boolean(attachResult.screen_snapshot);
+    const hasRawScrollbackReplay = Boolean(attachResult.scrollback) && !hasScreenSnapshotReplay;
     const replayCols = typeof attachResult.screen_cols === 'number' ? attachResult.screen_cols : null;
     const replayRows = typeof attachResult.screen_rows === 'number' ? attachResult.screen_rows : null;
-    const hasReplayPayload = Boolean(attachResult.screen_snapshot || attachResult.scrollback);
     const ptyGeometryMatches = attachedCols === requestedCols && attachedRows === requestedRows;
-    const replayGeometryMatches = replayCols === requestedCols && replayRows === requestedRows;
+    const replayGeometryMatches = hasScreenSnapshotReplay
+      ? replayCols === requestedCols && replayRows === requestedRows
+      : hasRawScrollbackReplay
+        ? ptyGeometryMatches
+        : false;
     const shouldRequestAuthoritativeRedraw = Boolean(
       options?.forceAuthoritativeRedraw ||
       options?.forceShellRedraw ||
-      (!args.shell && hasReplayPayload && (!ptyGeometryMatches || !replayGeometryMatches))
+      (!args.shell && hasScreenSnapshotReplay && (!ptyGeometryMatches || !replayGeometryMatches))
     );
 
     if (!ptyGeometryMatches) {
@@ -2392,7 +2413,7 @@ export function useDaemonSocket({
               skipReplayOnGeometryMismatch: true,
             });
             reconcileAttachedRuntimeGeometry(args, attachResult, {
-              forceAuthoritativeRedraw: !args.shell,
+              forceAuthoritativeRedraw: Boolean(!args.shell && attachResult.screen_snapshot),
               forceShellRedraw: Boolean(args.shell && !alreadyAttached && !existingSession),
             });
             return;

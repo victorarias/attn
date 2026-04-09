@@ -391,7 +391,11 @@ export class DaemonObserver {
       case 'workspace_snapshot':
       case 'workspace_updated':
         if (data.workspace?.session_id) {
-          this.workspacesBySessionId.set(data.workspace.session_id, data.workspace);
+          if (this.sessionsById.has(data.workspace.session_id)) {
+            this.workspacesBySessionId.set(data.workspace.session_id, data.workspace);
+          } else {
+            this.workspacesBySessionId.delete(data.workspace.session_id);
+          }
         }
         break;
       default:

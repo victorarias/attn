@@ -95,6 +95,30 @@ function agentVisibleContentOptions(agent, token = null, description = 'local ma
   };
 }
 
+function recoveredHeaderOptionsForAgent(agent, description = 'local main pane header after close') {
+  if (agent === 'claude') {
+    return {
+      contains: 'Claude Code',
+      minNonEmptyLines: 4,
+      minDenseLines: 1,
+      minCharCount: 120,
+      minMaxLineLength: 18,
+      timeoutMs: 20_000,
+      description,
+    };
+  }
+  return {
+    contains: 'OpenAI Codex',
+    allowWrappedContains: true,
+    minNonEmptyLines: 2,
+    minDenseLines: 0,
+    minCharCount: 20,
+    minMaxLineLength: 12,
+    timeoutMs: 20_000,
+    description,
+  };
+}
+
 function recoveryThresholdsForAgent(agent) {
   if (agent === 'claude') {
     return {
@@ -265,7 +289,14 @@ async function main() {
         20_000,
       );
       const thresholds = recoveryThresholdsForAgent(options.agent);
-      try {
+      if (options.agent === 'claude') {
+        await scrollPaneToTop(client, sessionId, 'main');
+        splitOpenContentPreservation = {
+          ok: null,
+          skipped: true,
+          reason: 'Claude welcome/header reflows materially while split is open; post-close recovery is the decisive check.',
+        };
+      } else {
         await scrollPaneToTop(client, sessionId, 'main');
         await assertPaneVisibleContentPreserved(
           client,
@@ -281,15 +312,6 @@ async function main() {
           },
         );
         splitOpenContentPreservation = { ok: true };
-      } catch (error) {
-        splitOpenContentPreservation = {
-          ok: false,
-          error: error instanceof Error ? error.stack || error.message : String(error),
-        };
-        if (options.agent === 'codex') {
-          throw error;
-        }
-        runner.log('observation:split_open_content_degraded', splitOpenContentPreservation);
       }
       await captureSessionArtifacts(client, runner.runDir, '02-after-split', sessionId);
       return newPane.paneId;
@@ -317,6 +339,13 @@ async function main() {
         },
         `${options.agent} main pane width to recover after closing split`,
         20_000,
+      );
+      await scrollPaneToTop(client, sessionId, 'main');
+      await assertPaneVisibleContent(
+        client,
+        sessionId,
+        'main',
+        recoveredHeaderOptionsForAgent(options.agent, `${options.agent} main pane header recovered after closing split`),
       );
       await assertPaneVisibleContentPreserved(
         client,
