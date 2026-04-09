@@ -117,6 +117,11 @@ Every scenario should validate some combination of these invariants:
   Assertions: the intended active pane keeps focus ownership, helper textarea is not stolen by another pane.
   Automation: planned
 
+- `TR-303 Typing After Split Close Does Not Trigger Remount Or Redraw`
+  Split the main Codex pane, close the split, then type into the surviving main pane.
+  Assertions: typing produces live PTY output, but does not trigger terminal remount, attach replay, geometry churn, or redraw-bounce events as a side effect.
+  Automation: local Codex packaged-app runtime-trace canary implemented via `real-app:scenario-tr303-local-codex`
+
 ### Resize And Redraw
 
 - `TR-401 Window Resize Preserves Render Health`

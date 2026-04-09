@@ -110,10 +110,10 @@ function recoveryThresholdsForAgent(agent) {
     minNonEmptyLineRatio: 0.7,
     minCharCountRatio: 0.55,
     minAnchorMatches: 2,
-    maxBusyColumnRatioRegression: 0.1,
-    maxBusyRowRatioRegression: 0.08,
-    maxBBoxWidthRatioRegression: 0.1,
-    maxBBoxHeightRatioRegression: 0.08,
+    maxBusyColumnRatioRegression: null,
+    maxBusyRowRatioRegression: null,
+    maxBBoxWidthRatioRegression: null,
+    maxBBoxHeightRatioRegression: null,
   };
 }
 

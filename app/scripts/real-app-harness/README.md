@@ -165,6 +165,8 @@ The first scenario scripts using that foundation are:
   Remote real-agent session on `ai-sandbox`. Splits the main Codex pane, closes the new utility pane, and checks that the surviving main pane regains width, keeps meaningful visible content, and repaints enough of its pane body to match the pre-split baseline instead of staying visually narrow.
 - `real-app:scenario-tr402-local-codex`
   Local first-launch Codex canary for the same close/redraw path. It splits the main pane, closes the split, and fails if the recovered main pane regains width without recovering visible content and pane-body paint.
+- `real-app:scenario-tr303-local-codex`
+  Local Codex runtime-trace canary for the post-close typing path. It splits the main pane, closes the split, types into the surviving main pane, and fails if that typing triggers remount, attach, geometry, or redraw events instead of only live PTY output.
 - `real-app:scenario-tr402-local-claude`
   Local first-launch Claude canary for the same close/redraw path. It seeds structured Claude output, splits the main pane, closes the split, and checks that the recovered pane still shows the seeded content with healthy pane-body paint.
 - `real-app:scenario-tr504`
@@ -192,6 +194,8 @@ Current scenarios:
   Creates one remote split session on `ai-sandbox`, relaunches the packaged app, returns to the same session, then splits again from both the main pane and the original utility pane. The run fails if pre-existing panes do not restore visibly or if post-relaunch splits do not appear and accept typing.
 - `real-app:scenario-tr402-local-codex`
   Tier-2 local Codex close/redraw canary for the same split-close path covered remotely by `TR-402`.
+- `real-app:scenario-tr303-local-codex`
+  Tier-2 local Codex runtime-trace canary for `TR-303`. It proves that typing after split-close produces live PTY output without causing remount, attach, geometry, or redraw side effects.
 - `real-app:scenario-tr402-local-claude`
   Tier-2 local Claude close/redraw canary for the same split-close path covered remotely by `TR-402`.
 - `real-app:scenario-tr504`
