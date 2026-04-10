@@ -2136,6 +2136,46 @@ func TestDaemon_BroadcastRawWSMessage_RoutesRemotePTYTrafficToInterestedClients(
 	assertNoOutboundEvent(t, clientOther)
 }
 
+func TestDaemon_BroadcastRawWSMessage_RoutesPendingRemotePTYOutputBeforeAttachResult(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	clientPending := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+		attachedRemote:  make(map[string]struct{}),
+		pendingRemote:   make(map[string]struct{}),
+	}
+	clientOther := &wsClient{
+		send:            make(chan outboundMessage, 8),
+		attachedStreams: make(map[string]ptybackend.Stream),
+		attachedRemote:  make(map[string]struct{}),
+		pendingRemote:   make(map[string]struct{}),
+	}
+	d.wsHub.clients[clientPending] = true
+	d.wsHub.clients[clientOther] = true
+
+	clientPending.notePendingRemoteAttach("remote-runtime-1")
+
+	outputPayload, err := json.Marshal(protocol.WebSocketEvent{
+		Event: protocol.EventPtyOutput,
+		ID:    protocol.Ptr("remote-runtime-1"),
+		Data:  protocol.Ptr(base64.StdEncoding.EncodeToString([]byte("hello"))),
+		Seq:   protocol.Ptr(7),
+	})
+	if err != nil {
+		t.Fatalf("marshal pty_output: %v", err)
+	}
+	d.broadcastRawWSMessage(outputPayload)
+
+	outputEvent := readOutboundEvent(t, clientPending)
+	if asString(outputEvent["event"]) != protocol.EventPtyOutput || asString(outputEvent["id"]) != "remote-runtime-1" {
+		t.Fatalf("unexpected pending-attach pty_output event: %+v", outputEvent)
+	}
+	assertNoOutboundEvent(t, clientOther)
+	if clientPending.hasRemoteAttach("remote-runtime-1") {
+		t.Fatal("pending attach should not mark remote runtime attached before attach_result")
+	}
+}
+
 func TestDaemon_BroadcastRawWSMessage_RemoteSessionExitedClearsRemoteAttachState(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := &wsClient{

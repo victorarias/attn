@@ -170,6 +170,25 @@ func (c *wsClient) hasRemoteAttach(sessionID string) bool {
 	return ok
 }
 
+func (c *wsClient) wantsRemoteAttachTraffic(sessionID string) bool {
+	if c == nil || strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+	c.attachMu.Lock()
+	defer c.attachMu.Unlock()
+	if c.pendingRemote != nil {
+		if _, ok := c.pendingRemote[sessionID]; ok {
+			return true
+		}
+	}
+	if c.attachedRemote != nil {
+		if _, ok := c.attachedRemote[sessionID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *wsClient) clearRemoteAttach(sessionID string) {
 	if c == nil || strings.TrimSpace(sessionID) == "" {
 		return
@@ -1154,7 +1173,7 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 			return
 		}
 		d.wsHub.SendRawTextToMatchingClients(payload, func(client *wsClient) bool {
-			return client.hasRemoteAttach(envelope.ID)
+			return client.wantsRemoteAttachTraffic(envelope.ID)
 		})
 		return
 	case protocol.EventSessionExited:
