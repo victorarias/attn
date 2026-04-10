@@ -63,6 +63,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Pane Runtime Binder Cleanup**: The session workspace binder now shares one pane-terminal lifecycle path for init vs ready, shares one pane-write state record instead of split queue/log maps, and routes terminal byte injection through one helper, reducing app-side terminal runtime duplication without changing remount hydration or deferred redraw behavior.
 
 ### Fixed
+- **Same-Size PTY Geometry Skip**: Stop scheduling settled PTY geometry work when a live pane is already committed at the requested size, so ordinary same-size `ready` / `fit` / visibility churn no longer carries a no-op PTY geometry timer through the binder path.
 - **Relaunch Replay Query Suppression**: Attach replay now marks restore-only PTY payloads and suppresses terminal-generated reply traffic while those historical bytes are being written into xterm, so relaunch restore stops feeding duplicate CPR/DA/OSC responses back into live Codex sessions during header recovery.
 
 ### Removed

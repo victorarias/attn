@@ -81,7 +81,7 @@ Completed validation/hardening that matters to rendering cleanup:
 - packaged-app matrix can run green end-to-end after cold-daemon reruns
 - fresh-install packaged-app matrix passed end-to-end on 2026-04-09 after `make install-all`, confirming the current cleanup state is green when build provenance is correct
 - fresh-install packaged-app matrix stayed green on 2026-04-09 after removing the same-app non-shell deferred redraw bounce, including `TR-402` and `TR-303`
-- fresh-install packaged-app matrix passed end-to-end again on 2026-04-10 after removing the remaining same-size `forceRedraw` / `fit_same_size` / `visibility_flush_same_size` path
+- focused frontend coverage and targeted packaged-app reruns stayed green on 2026-04-10 after removing the remaining binder-side same-size PTY geometry scheduling path; a single `TR-205` Codex matrix failure from the same build is treated as known scenario flake rather than a causal signal because isolated rerun passed
 - native window capture now prefers app-reported window bounds before falling back to `System Events`
 
 Current code-size tracking metric for this cleanup stream:
@@ -564,7 +564,7 @@ Files:
 
 Why this is a good candidate:
 
-- this is the remaining `forceRedraw` / `fit_same_size` / `visibility_flush_same_size` path
+- this is the remaining no-op same-size redraw / PTY-geometry path
 - the larger same-app redraw bounce was already removed and the packaged-app matrix stayed green
 - that makes this same-size redraw path look like likely leftover repair logic rather than a proven requirement
 
@@ -584,25 +584,24 @@ Minimum verification:
 Status:
 
 - executed on 2026-04-10
-- removed from production code in `Terminal.tsx`, `terminalViewportLifecycle.ts`, `terminalResizeLifecycle.ts`, and `geometryLifecycle.ts`
+- removed from production code in [usePaneRuntimeBinder.ts](/Users/victor.arias/projects/victor/attn/app/src/components/SessionTerminalWorkspace/usePaneRuntimeBinder.ts) by skipping settled PTY geometry work when the runtime is already live, not hydrating a same-app remount, and the requested cols/rows already match committed geometry
 - focused frontend tests passed:
-  - `Terminal.test.tsx`
-  - `terminalViewportLifecycle.test.ts`
-  - `terminalResizeLifecycle.test.ts`
-  - `geometryLifecycle.test.ts`
   - `usePaneRuntimeBinder.test.ts`
-- packaged-app canaries after fresh `make install-all`:
+  - `geometryLifecycle.test.ts`
+  - `terminalResizeLifecycle.test.ts`
+  - `attachPlanning.test.ts`
+  - `useDaemonSocket.test.tsx`
+- packaged-app verification after fresh `make install-all`:
+  - `TR-205 remote codex`: passed on isolated rerun
+  - `TR-205 remote claude`: passed
+  - `TR-504`: passed
   - `TR-402 local codex`: passed
-  - `TR-402 local claude`: passed in the later full-matrix rerun
+  - `TR-402 local claude`: passed
   - `TR-303 local codex`: passed
-- full fresh-install packaged-app serial matrix passed on 2026-04-10:
-  - `TR-205 remote codex`
-  - `TR-205 remote claude`
-  - `TR-504`
-  - `TR-402 local codex`
-  - `TR-402 local claude`
-  - `TR-303 local codex`
-- current read: this experiment is now matrix-backed and should be treated as the current baseline rather than a tentative branch
+- note on signal quality:
+  - the same build produced one `TR-205 remote codex` failure inside the full serial matrix
+  - per project guidance, that result is treated as known `TR-205` flake rather than causal evidence against this deletion experiment
+  - the isolated `TR-205 remote codex` rerun passed, so this slice remains the current working baseline unless a stable failure pattern appears
 
 ### 2. Remove Attach-Time Redraw Bounce And Shell-Specific Redraw Knobs
 

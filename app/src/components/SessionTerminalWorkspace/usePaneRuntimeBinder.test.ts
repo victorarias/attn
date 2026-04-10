@@ -825,6 +825,66 @@ describe('usePaneRuntimeBinder', () => {
     expect(mockPtyResize).not.toHaveBeenCalled();
   });
 
+  it('skips same-size PTY geometry work once runtime geometry is already committed', async () => {
+    vi.useFakeTimers();
+    window.localStorage.setItem('attn:terminal-runtime-trace', '1');
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: false,
+        }),
+      },
+    ], 'pane-1', eventRouter));
+
+    const xterm = createMockXterm();
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(xterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    mockPtySpawn.mockClear();
+    mockPtyAttach.mockClear();
+    mockPtyResize.mockClear();
+    (window as Window & { __ATTN_TERMINAL_RUNTIME_EVENTS?: unknown[] }).__ATTN_TERMINAL_RUNTIME_EVENTS = [];
+
+    act(() => {
+      result.current.handleTerminalResize('pane-1')(80, 24, { reason: 'fit' });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    expect(mockPtySpawn).not.toHaveBeenCalled();
+    expect(mockPtyAttach).not.toHaveBeenCalled();
+    expect(mockPtyResize).not.toHaveBeenCalled();
+
+    const runtimeEvents = (window as Window & {
+      __ATTN_TERMINAL_RUNTIME_EVENTS?: Array<{ event?: string; runtimeId?: string; details?: Record<string, unknown> }>;
+    }).__ATTN_TERMINAL_RUNTIME_EVENTS || [];
+    expect(runtimeEvents).toContainEqual(expect.objectContaining({
+      event: 'pty.geometry.skipped_same_size',
+      runtimeId: 'runtime-1',
+      details: expect.objectContaining({
+        source: 'resize',
+        reason: 'fit',
+        cols: 80,
+        rows: 24,
+      }),
+    }));
+  });
+
   it('hydrates a remounted xterm even when terminal ready is missed', async () => {
     vi.useFakeTimers();
     const bindings = new Map<string, PaneRuntimeEventBinding>();

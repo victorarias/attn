@@ -830,7 +830,35 @@ export function usePaneRuntimeBinder(
     }
 
     primeSpawnArgsForSize(paneId, cols, rows);
-    const previous = paneRuntimeLifecycle.get(paneId)?.pendingGeometrySync;
+    const lifecycleState = paneRuntimeLifecycle.ensure(paneId);
+    const previous = lifecycleState.pendingGeometrySync;
+    const sameAppRemountState = lifecycleState.sameAppRemount;
+    const hydratingRemount = sameAppRemountState?.stage === 'hydrating' && sameAppRemountState.xterm === xterm;
+    const runtimeReady = ensuredRuntimeIdsRef.current.has(pane.runtimeId);
+    const sameGeometryAsCommitted = !isCommittedGeometryChanged(lifecycleState.lastCommittedGeometry, { cols, rows });
+
+    if (runtimeReady && !hydratingRemount && sameGeometryAsCommitted) {
+      paneRuntimeLifecycle.clearGeometryTimer(paneId);
+      delete lifecycleState.pendingGeometrySync;
+      recordTerminalRuntimeLog({
+        category: 'geometry',
+        event: 'pty.geometry.skipped_same_size',
+        sessionId: pane.sessionId ?? pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: 'skip settled PTY geometry for unchanged size',
+        details: {
+          source,
+          reason: options?.reason ?? null,
+          cols,
+          rows,
+          lastCommittedCols: lifecycleState.lastCommittedGeometry?.cols ?? null,
+          lastCommittedRows: lifecycleState.lastCommittedGeometry?.rows ?? null,
+        },
+      });
+      return;
+    }
+
     const { pending, delayMs } = planPendingGeometrySync(previous, {
       cols,
       rows,
@@ -841,7 +869,6 @@ export function usePaneRuntimeBinder(
       resizeDelayMs: PTY_GEOMETRY_SETTLE_MS,
     });
 
-    const lifecycleState = paneRuntimeLifecycle.ensure(paneId);
     lifecycleState.pendingGeometrySync = pending;
     paneRuntimeLifecycle.clearGeometryTimer(paneId);
 
