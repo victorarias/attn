@@ -27,6 +27,12 @@ declare global {
 }
 
 let fileWriteChain: Promise<void> = Promise.resolve();
+type TerminalRuntimeLogEventDetails =
+  | Record<string, unknown>
+  | (() => Record<string, unknown> | undefined);
+type TerminalRuntimeLogEventInput =
+  Omit<TerminalRuntimeLogEvent, 'at' | 'details'>
+  & { details?: TerminalRuntimeLogEventDetails };
 
 export function isTerminalRuntimeTraceEnabled(): boolean {
   if (typeof window === 'undefined') {
@@ -121,7 +127,7 @@ function ensureGlobals() {
   }
 }
 
-export function recordTerminalRuntimeLog(event: Omit<TerminalRuntimeLogEvent, 'at'>) {
+export function recordTerminalRuntimeLog(event: TerminalRuntimeLogEventInput) {
   if (typeof window === 'undefined') {
     return;
   }
@@ -129,9 +135,11 @@ export function recordTerminalRuntimeLog(event: Omit<TerminalRuntimeLogEvent, 'a
     return;
   }
   ensureGlobals();
+  const details = resolveTerminalRuntimeLogDetails(event.details);
   const entry: TerminalRuntimeLogEvent = {
     at: new Date().toISOString(),
     ...event,
+    details,
   };
   const events = window.__ATTN_TERMINAL_RUNTIME_EVENTS || [];
   events.push(entry);
@@ -140,6 +148,13 @@ export function recordTerminalRuntimeLog(event: Omit<TerminalRuntimeLogEvent, 'a
   }
   window.__ATTN_TERMINAL_RUNTIME_EVENTS = events;
   enqueueRuntimeLogFileWrite(entry);
+}
+
+function resolveTerminalRuntimeLogDetails(details: TerminalRuntimeLogEventDetails | undefined) {
+  if (typeof details === 'function') {
+    return details();
+  }
+  return details;
 }
 
 ensureGlobals();

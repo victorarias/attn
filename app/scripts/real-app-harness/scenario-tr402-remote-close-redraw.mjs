@@ -87,6 +87,9 @@ async function main() {
     scenarioId: 'TR-402',
     tier: 'tier3-remote-real-agent',
     prefix: 'scenario-tr402-remote-close-redraw',
+    preflightLaunchEnv: {
+      ATTN_PREFER_LOCAL_DAEMON: '1',
+    },
     metadata: {
       sshTarget: options.sshTarget,
       agent: options.remoteAgent,

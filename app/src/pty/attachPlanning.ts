@@ -15,6 +15,11 @@ export interface AttachRequestContext {
 
 export interface AttachReplayData {
   scrollback?: string;
+  replay_segments?: Array<{
+    cols: number;
+    rows: number;
+    data: string;
+  }>;
   screen_snapshot?: string;
   screen_snapshot_fresh?: boolean;
   screen_cols?: number;
@@ -26,6 +31,11 @@ export interface AttachReplayData {
 export interface AttachGeometryData {
   cols?: number;
   rows?: number;
+  replay_segments?: Array<{
+    cols: number;
+    rows: number;
+    data: string;
+  }>;
   screen_snapshot?: string;
   screen_snapshot_fresh?: boolean;
   scrollback?: string;
@@ -93,16 +103,20 @@ export function classifyAttachReplay(
   context?: AttachRequestContext,
 ) {
   const availableScreenSnapshot = Boolean(data.screen_snapshot && data.screen_snapshot_fresh !== false);
-  const availableRawScrollback = Boolean(data.scrollback);
+  const availableRawScrollback = Boolean(data.scrollback || (data.replay_segments && data.replay_segments.length > 0));
   const replayPreference = context?.replayPreference ?? 'default';
   const prefersRawScrollback = replayPreference === 'prefer_raw_scrollback'
     && context?.policy === 'relaunch_restore';
   const screenSnapshotSuppressed = availableScreenSnapshot && availableRawScrollback && prefersRawScrollback;
   const hasScreenSnapshot = availableScreenSnapshot && !screenSnapshotSuppressed;
-  const hasReplayPayload = Boolean((hasScreenSnapshot && data.screen_snapshot) || data.scrollback);
+  const hasReplayPayload = Boolean(
+    (hasScreenSnapshot && data.screen_snapshot)
+    || data.scrollback
+    || (data.replay_segments && data.replay_segments.length > 0),
+  );
   const replayKind = hasScreenSnapshot
     ? 'screen_snapshot'
-    : data.scrollback
+    : (data.scrollback || (data.replay_segments && data.replay_segments.length > 0))
       ? 'scrollback'
       : 'none';
   const attachedCols = typeof data.cols === 'number' ? data.cols : null;
@@ -214,6 +228,11 @@ export function planAttachResultEffects({
     last_seq?: number;
     screen_snapshot?: string;
     scrollback?: string;
+    replay_segments?: Array<{
+      cols: number;
+      rows: number;
+      data: string;
+    }>;
     scrollback_truncated?: boolean;
   };
   replayPlan: ReturnType<typeof classifyAttachReplay>;
@@ -238,6 +257,12 @@ export function planAttachResultEffects({
           replayKind: 'screen_snapshot' as const,
           data: attachResult.screen_snapshot,
         }
+      : replayPlan.replayApplied && attachResult.replay_segments && attachResult.replay_segments.length > 0
+        ? {
+            kind: 'scrollback_segments' as const,
+            replayKind: 'scrollback' as const,
+            segments: attachResult.replay_segments,
+          }
       : replayPlan.replayApplied && attachResult.scrollback
         ? {
             kind: 'scrollback' as const,

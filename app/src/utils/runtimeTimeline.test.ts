@@ -285,4 +285,42 @@ describe('runtimeTimeline', () => {
       reasons: ['visibility_flush'],
     });
   });
+
+  it('sorts filtered runtime events only when the input order is stale', () => {
+    const events: TerminalRuntimeLogEvent[] = [
+      {
+        at: '2026-04-08T07:00:00.100Z',
+        category: 'transport',
+        event: 'pty.output.live',
+        sessionId: 'session-1',
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        message: 'live pty output',
+        details: { seq: 6 },
+      },
+      {
+        at: '2026-04-08T07:00:00.000Z',
+        category: 'transport',
+        event: 'pty.attach.requested',
+        sessionId: 'session-1',
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        message: 'attach session requested',
+      },
+    ];
+
+    const snapshot = buildRuntimeTimelineSnapshot({
+      events,
+      terminals: [makeTerminalSnapshot()],
+      pty: makePtySnapshot(),
+      runtimeIds: new Set(['runtime-1']),
+    });
+
+    expect(snapshot.recentEvents.map((event) => event.event)).toEqual([
+      'pty.attach.requested',
+      'pty.output.live',
+    ]);
+    expect(snapshot.runtimes[0]?.milestones.attachRequestedAt).toBe('2026-04-08T07:00:00.000Z');
+    expect(snapshot.runtimes[0]?.milestones.firstLiveOutputAt).toBe('2026-04-08T07:00:00.100Z');
+  });
 });

@@ -104,13 +104,15 @@ type InfoResult struct {
 }
 
 type AttachResult struct {
-	Scrollback          []byte `json:"scrollback,omitempty"`
-	ScrollbackTruncated bool   `json:"scrollback_truncated"`
-	LastSeq             uint32 `json:"last_seq"`
-	Cols                uint16 `json:"cols"`
-	Rows                uint16 `json:"rows"`
-	PID                 int    `json:"pid"`
-	Running             bool   `json:"running"`
+	Scrollback          []byte          `json:"scrollback,omitempty"`
+	ScrollbackTruncated bool            `json:"scrollback_truncated"`
+	ReplaySegments      []ReplaySegment `json:"replay_segments,omitempty"`
+	ReplayTruncated     bool            `json:"replay_truncated,omitempty"`
+	LastSeq             uint32          `json:"last_seq"`
+	Cols                uint16          `json:"cols"`
+	Rows                uint16          `json:"rows"`
+	PID                 int             `json:"pid"`
+	Running             bool            `json:"running"`
 
 	ExitCode   *int    `json:"exit_code,omitempty"`
 	ExitSignal *string `json:"exit_signal,omitempty"`
@@ -122,6 +124,12 @@ type AttachResult struct {
 	ScreenCursorY       uint16 `json:"screen_cursor_y,omitempty"`
 	ScreenCursorVisible bool   `json:"screen_cursor_visible,omitempty"`
 	ScreenSnapshotFresh bool   `json:"screen_snapshot_fresh,omitempty"`
+}
+
+type ReplaySegment struct {
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+	Data []byte `json:"data"`
 }
 
 type AttachParams struct {

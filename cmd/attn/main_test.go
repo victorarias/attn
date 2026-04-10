@@ -274,22 +274,55 @@ func TestIsProtocolVersionCommand(t *testing.T) {
 	}
 }
 
+func TestIsBuildInfoJSONCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "no args", args: []string{"attn"}, want: false},
+		{name: "build info flag", args: []string{"attn", "--build-info-json"}, want: true},
+		{name: "protocol flag", args: []string{"attn", "--protocol-version"}, want: false},
+		{name: "version flag", args: []string{"attn", "--version"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isBuildInfoJSONCommand(tt.args); got != tt.want {
+				t.Fatalf("isBuildInfoJSONCommand(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestApplyLegacyBuildInfoOverrides_UsesLegacyMainInjectionWhenNeeded(t *testing.T) {
 	previousBuildinfoVersion := buildinfo.Version
 	previousBuildinfoBuildTime := buildinfo.BuildTime
+	previousBuildinfoSourceFingerprint := buildinfo.SourceFingerprint
+	previousBuildinfoGitCommit := buildinfo.GitCommit
 	previousVersion := version
 	previousBuildTime := buildTime
+	previousSourceFingerprint := sourceFingerprint
+	previousGitCommit := gitCommit
 	t.Cleanup(func() {
 		buildinfo.Version = previousBuildinfoVersion
 		buildinfo.BuildTime = previousBuildinfoBuildTime
+		buildinfo.SourceFingerprint = previousBuildinfoSourceFingerprint
+		buildinfo.GitCommit = previousBuildinfoGitCommit
 		version = previousVersion
 		buildTime = previousBuildTime
+		sourceFingerprint = previousSourceFingerprint
+		gitCommit = previousGitCommit
 	})
 
 	buildinfo.Version = "dev"
 	buildinfo.BuildTime = "unknown"
+	buildinfo.SourceFingerprint = "unknown"
+	buildinfo.GitCommit = "unknown"
 	version = "1.2.3"
 	buildTime = "2026-04-06T00:00:00Z"
+	sourceFingerprint = "tree:abc123"
+	gitCommit = "1234567890abcdef"
 
 	applyLegacyBuildInfoOverrides()
 
@@ -299,24 +332,42 @@ func TestApplyLegacyBuildInfoOverrides_UsesLegacyMainInjectionWhenNeeded(t *test
 	if buildinfo.BuildTime != "2026-04-06T00:00:00Z" {
 		t.Fatalf("buildinfo.BuildTime = %q, want legacy main.buildTime value", buildinfo.BuildTime)
 	}
+	if buildinfo.SourceFingerprint != "tree:abc123" {
+		t.Fatalf("buildinfo.SourceFingerprint = %q, want legacy main.sourceFingerprint value", buildinfo.SourceFingerprint)
+	}
+	if buildinfo.GitCommit != "1234567890abcdef" {
+		t.Fatalf("buildinfo.GitCommit = %q, want legacy main.gitCommit value", buildinfo.GitCommit)
+	}
 }
 
 func TestApplyLegacyBuildInfoOverrides_PreservesInjectedBuildinfo(t *testing.T) {
 	previousBuildinfoVersion := buildinfo.Version
 	previousBuildinfoBuildTime := buildinfo.BuildTime
+	previousBuildinfoSourceFingerprint := buildinfo.SourceFingerprint
+	previousBuildinfoGitCommit := buildinfo.GitCommit
 	previousVersion := version
 	previousBuildTime := buildTime
+	previousSourceFingerprint := sourceFingerprint
+	previousGitCommit := gitCommit
 	t.Cleanup(func() {
 		buildinfo.Version = previousBuildinfoVersion
 		buildinfo.BuildTime = previousBuildinfoBuildTime
+		buildinfo.SourceFingerprint = previousBuildinfoSourceFingerprint
+		buildinfo.GitCommit = previousBuildinfoGitCommit
 		version = previousVersion
 		buildTime = previousBuildTime
+		sourceFingerprint = previousSourceFingerprint
+		gitCommit = previousGitCommit
 	})
 
 	buildinfo.Version = "9.9.9"
 	buildinfo.BuildTime = "2026-04-06T12:34:56Z"
+	buildinfo.SourceFingerprint = "git:new"
+	buildinfo.GitCommit = "fedcba0987654321"
 	version = "1.2.3"
 	buildTime = "2001-01-01T00:00:00Z"
+	sourceFingerprint = "tree:old"
+	gitCommit = "0123456789abcdef"
 
 	applyLegacyBuildInfoOverrides()
 
@@ -325,5 +376,11 @@ func TestApplyLegacyBuildInfoOverrides_PreservesInjectedBuildinfo(t *testing.T) 
 	}
 	if buildinfo.BuildTime != "2026-04-06T12:34:56Z" {
 		t.Fatalf("buildinfo.BuildTime = %q, want primary buildinfo injection to win", buildinfo.BuildTime)
+	}
+	if buildinfo.SourceFingerprint != "git:new" {
+		t.Fatalf("buildinfo.SourceFingerprint = %q, want primary buildinfo injection to win", buildinfo.SourceFingerprint)
+	}
+	if buildinfo.GitCommit != "fedcba0987654321" {
+		t.Fatalf("buildinfo.GitCommit = %q, want primary buildinfo injection to win", buildinfo.GitCommit)
 	}
 }

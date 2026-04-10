@@ -54,6 +54,17 @@ function topSnapshot(term, rows = 12) {
   };
 }
 
+function bufferContains(term, token) {
+  const buffer = term.buffer.active;
+  for (let i = 0; i < buffer.length; i += 1) {
+    const line = buffer.getLine(i);
+    if (line?.translateToString(true).includes(token)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 describe('snapshotVisibleTerminalFrame', () => {
   it('reproduces the TR-205 first-split header loss from the exact app PTY sequence', async () => {
     const fixture = loadSplitFixture();
@@ -117,6 +128,41 @@ describe('snapshotVisibleTerminalFrame', () => {
     expect(afterResize.viewportY).toBeGreaterThan(baselineWide.viewportY);
     expect(afterResize.lines.some((line) => line.includes('OpenAI Codex'))).toBe(false);
     expect(afterRepin.lines.some((line) => line.includes('OpenAI Codex'))).toBe(true);
+  });
+
+  it('shows the TR-205 split bytes preserve the header in buffer only when the wide-to-narrow transition is replayed', async () => {
+    const fixture = loadSplitFixture();
+    const wideReplay = Buffer.concat(fixture.baselineChunks.map((chunk) => decodeBase64(chunk)));
+    const narrowReplay = Buffer.concat(fixture.splitChunks.map((chunk) => decodeBase64(chunk)));
+
+    const segmented = new Terminal({
+      cols: fixture.wideSize[0],
+      rows: fixture.wideSize[1],
+      allowProposedApi: true,
+      scrollback: 5000,
+    });
+
+    await writeAsync(segmented, wideReplay);
+    segmented.resize(fixture.splitSize[0], fixture.splitSize[1]);
+    await writeAsync(segmented, narrowReplay);
+
+    const flattened = new Terminal({
+      cols: fixture.splitSize[0],
+      rows: fixture.splitSize[1],
+      allowProposedApi: true,
+      scrollback: 5000,
+    });
+
+    await writeAsync(flattened, Buffer.concat([wideReplay, narrowReplay]));
+
+    expect(bufferContains(segmented, 'OpenAI Codex')).toBe(true);
+    expect(bufferContains(segmented, 'TR205ANCHOR')).toBe(true);
+    expect(bufferContains(flattened, 'OpenAI Codex')).toBe(false);
+    expect(bufferContains(flattened, 'TR205ANCHOR')).toBe(true);
+
+    segmented.scrollToTop();
+    const segmentedTop = topSnapshot(segmented);
+    expect(segmentedTop.lines.some((line) => line.includes('OpenAI Codex'))).toBe(true);
   });
 
   it('does not recover the Codex header on a fresh xterm without replayed history', async () => {

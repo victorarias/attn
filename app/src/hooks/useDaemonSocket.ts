@@ -89,6 +89,7 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   seq?: number;
   scrollback?: string;
   scrollback_truncated?: boolean;
+  replay_segments?: Array<{ cols: number; rows: number; data: string }>;
   screen_snapshot?: string;
   screen_rows?: number;
   screen_cols?: number;
@@ -142,7 +143,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '50';
+const PROTOCOL_VERSION = '51';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 const INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD = import.meta.env.VITE_UI_AUTOMATION === '1';
 
@@ -167,6 +168,38 @@ function previewBase64Payload(encoded: string): string {
   } catch {
     return '';
   }
+}
+
+function summarizeReplaySegments(
+  segments: Array<{ cols: number; rows: number; data: string }>,
+) {
+  const geometryRuns: Array<{ cols: number; rows: number; segments: number; encodedBytes: number }> = [];
+  for (const segment of segments) {
+    const last = geometryRuns[geometryRuns.length - 1];
+    if (last && last.cols === segment.cols && last.rows === segment.rows) {
+      last.segments += 1;
+      last.encodedBytes += segment.data.length;
+      continue;
+    }
+    geometryRuns.push({
+      cols: segment.cols,
+      rows: segment.rows,
+      segments: 1,
+      encodedBytes: segment.data.length,
+    });
+  }
+
+  return {
+    geometryRunCount: geometryRuns.length,
+    resizeCount: Math.max(geometryRuns.length - 1, 0),
+    firstGeometry: geometryRuns.length > 0
+      ? { cols: geometryRuns[0].cols, rows: geometryRuns[0].rows }
+      : null,
+    lastGeometry: geometryRuns.length > 0
+      ? { cols: geometryRuns[geometryRuns.length - 1].cols, rows: geometryRuns[geometryRuns.length - 1].rows }
+      : null,
+    geometryRuns,
+  };
 }
 
 interface WorktreeActionResult {
@@ -272,6 +305,7 @@ interface AttachResult {
   error?: string;
   scrollback?: string;
   scrollback_truncated?: boolean;
+  replay_segments?: Array<{ cols: number; rows: number; data: string }>;
   screen_snapshot?: string;
   screen_rows?: number;
   screen_cols?: number;
@@ -1128,6 +1162,7 @@ export function useDaemonSocket({
                     success: true,
                     scrollback: data.scrollback,
                     scrollback_truncated: data.scrollback_truncated,
+                    replay_segments: data.replay_segments,
                     screen_snapshot: data.screen_snapshot,
                     screen_rows: data.screen_rows,
                     screen_cols: data.screen_cols,
@@ -1233,6 +1268,47 @@ export function useDaemonSocket({
                     data: attachEffects.replayAction.data,
                     source: 'attach_replay',
                   });
+                } else if (attachEffects.replayAction.kind === 'scrollback_segments') {
+                  const bytes = attachEffects.replayAction.segments.reduce(
+                    (sum, segment) => sum + segment.data.length,
+                    0,
+                  );
+                  const segmentSummary = summarizeReplaySegments(attachEffects.replayAction.segments);
+                  recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
+                    attachPolicy: attachContext?.policy ?? null,
+                    attachAgent: attachContext?.agent ?? null,
+                    replayPreference: replayPlan.replayPreference,
+                    replayKind: 'scrollback_segments',
+                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                    availableRawScrollback: replayPlan.availableRawScrollback,
+                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
+                    bytes,
+                    segmentCount: attachEffects.replayAction.segments.length,
+                    ...segmentSummary,
+                    lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
+                    replaySegmentsBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD
+                      ? attachEffects.replayAction.segments.map((segment) => ({
+                          cols: segment.cols,
+                          rows: segment.rows,
+                          data: segment.data,
+                        }))
+                      : undefined,
+                  });
+                  for (const segment of attachEffects.replayAction.segments) {
+                    emitPtyEvent({
+                      event: 'local_resize',
+                      id: data.id,
+                      cols: segment.cols,
+                      rows: segment.rows,
+                      source: 'attach_replay',
+                    });
+                    emitPtyEvent({
+                      event: 'data',
+                      id: data.id,
+                      data: segment.data,
+                      source: 'attach_replay',
+                    });
+                  }
                 }
                 if (attachEffects.queuedOutputsToEmit.length > 0) {
                   ptyTransportRef.current.clearQueuedAttachOutputs(data.id);

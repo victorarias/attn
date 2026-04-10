@@ -26,6 +26,7 @@ func wsSubscriberID(client *wsClient, sessionID string) string {
 
 type attachReplayPayload struct {
 	scrollback          []byte
+	replaySegments      []ptybackend.ReplaySegment
 	scrollbackTruncated bool
 	screenSnapshot      []byte
 	screenCols          uint16
@@ -65,6 +66,41 @@ func limitReplayTail(data []byte, limit int) ([]byte, bool) {
 	return data[len(data)-limit:], true
 }
 
+func replaySegmentsToPTY(segments []ptybackend.ReplaySegment) []pty.ReplaySegment {
+	if len(segments) == 0 {
+		return nil
+	}
+	out := make([]pty.ReplaySegment, 0, len(segments))
+	for _, segment := range segments {
+		out = append(out, pty.ReplaySegment{
+			Cols: segment.Cols,
+			Rows: segment.Rows,
+			Data: append([]byte(nil), segment.Data...),
+		})
+	}
+	return out
+}
+
+func rawReplaySegmentsMatchFreshSnapshot(segments []ptybackend.ReplaySegment, info ptybackend.AttachInfo) (bool, string) {
+	if len(segments) == 0 {
+		return false, "empty_raw_segments"
+	}
+	if !info.ScreenSnapshotFresh || len(info.ScreenSnapshot) == 0 {
+		return false, "fresh_snapshot_unavailable"
+	}
+	derived, ok := pty.ScreenSnapshotFromReplaySegments(replaySegmentsToPTY(segments))
+	if !ok {
+		return false, "derived_snapshot_unavailable"
+	}
+	if derived.Cols != info.ScreenCols || derived.Rows != info.ScreenRows {
+		return false, "snapshot_geometry_mismatch"
+	}
+	if !bytes.Equal(derived.Payload, info.ScreenSnapshot) {
+		return false, "snapshot_payload_mismatch"
+	}
+	return true, ""
+}
+
 func rawReplayMatchesFreshSnapshot(rawTail []byte, info ptybackend.AttachInfo) (bool, string) {
 	if len(rawTail) == 0 {
 		return false, "empty_raw_tail"
@@ -86,6 +122,19 @@ func rawReplayMatchesFreshSnapshot(rawTail []byte, info ptybackend.AttachInfo) (
 		return false, "snapshot_payload_mismatch"
 	}
 	return true, ""
+}
+
+func applyScreenSnapshot(payload *attachReplayPayload, snapshot pty.ReplayScreenSnapshot, decision, reason string) {
+	payload.screenSnapshot = snapshot.Payload
+	payload.screenCols = snapshot.Cols
+	payload.screenRows = snapshot.Rows
+	payload.screenCursorX = snapshot.CursorX
+	payload.screenCursorY = snapshot.CursorY
+	payload.screenCursorVisible = snapshot.CursorVisible
+	payload.screenSnapshotFresh = true
+	payload.derivedSnapshot = true
+	payload.rawReplayDecision = decision
+	payload.rawReplayReason = reason
 }
 
 func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Session, policy protocol.AttachPolicy) attachReplayPayload {
@@ -114,63 +163,81 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 		return payload
 	}
 
-	if shouldPreferAgentRawReplay(session) && len(info.Scrollback) > 0 {
-		tail, clipped := limitReplayTail(info.Scrollback, maxAgentRawReplayBytes)
-		if matches, reason := rawReplayMatchesFreshSnapshot(tail, info); matches {
-			payload.scrollback = tail
-			payload.scrollbackTruncated = info.ScrollbackTruncated || clipped
-			payload.screenSnapshot = nil
-			payload.screenCols = 0
-			payload.screenRows = 0
-			payload.screenCursorX = 0
-			payload.screenCursorY = 0
-			payload.screenCursorVisible = false
-			payload.screenSnapshotFresh = false
-			payload.rawReplayDecision = "use_raw_replay"
-			if clipped {
-				payload.rawReplayReason = "bounded_tail_matches_fresh_snapshot"
-			} else {
-				payload.rawReplayReason = "full_raw_replay_matches_fresh_snapshot"
+	if shouldPreferAgentRawReplay(session) && (len(info.Scrollback) > 0 || len(info.ReplaySegments) > 0) {
+		if len(info.ReplaySegments) > 0 {
+			segments, clipped := pty.LimitReplaySegmentsTail(replaySegmentsToPTY(info.ReplaySegments), maxAgentRawReplayBytes)
+			backendSegments := make([]ptybackend.ReplaySegment, 0, len(segments))
+			for _, segment := range segments {
+				backendSegments = append(backendSegments, ptybackend.ReplaySegment{
+					Cols: segment.Cols,
+					Rows: segment.Rows,
+					Data: append([]byte(nil), segment.Data...),
+				})
 			}
-			return payload
-		} else if reason == "fresh_snapshot_unavailable" {
-			payload.scrollback = tail
-			payload.scrollbackTruncated = info.ScrollbackTruncated || clipped
-			payload.screenSnapshot = nil
-			payload.screenCols = 0
-			payload.screenRows = 0
-			payload.screenCursorX = 0
-			payload.screenCursorY = 0
-			payload.screenCursorVisible = false
-			payload.screenSnapshotFresh = false
-			payload.rawReplayDecision = "use_raw_replay"
-			if clipped {
-				payload.rawReplayReason = "bounded_tail_without_fresh_snapshot"
+			if !clipped {
+				if matches, reason := rawReplaySegmentsMatchFreshSnapshot(backendSegments, info); matches {
+					payload.replaySegments = backendSegments
+					payload.scrollbackTruncated = info.ReplayTruncated
+					payload.screenSnapshot = nil
+					payload.screenCols = 0
+					payload.screenRows = 0
+					payload.screenCursorX = 0
+					payload.screenCursorY = 0
+					payload.screenCursorVisible = false
+					payload.screenSnapshotFresh = false
+					payload.rawReplayDecision = "use_segmented_raw_replay"
+					payload.rawReplayReason = "full_segmented_raw_replay_matches_fresh_snapshot"
+					return payload
+				} else {
+					payload.rawReplayDecision = "use_fresh_snapshot"
+					payload.rawReplayReason = reason
+				}
 			} else {
-				payload.rawReplayReason = "full_raw_replay_without_fresh_snapshot"
+				payload.rawReplayDecision = "use_fresh_snapshot"
+				payload.rawReplayReason = "segmented_raw_replay_exceeds_budget"
 			}
-			return payload
 		} else {
-			payload.rawReplayDecision = "use_fresh_snapshot"
-			payload.rawReplayReason = reason
+			tail, clipped := limitReplayTail(info.Scrollback, maxAgentRawReplayBytes)
+			if !clipped {
+				if matches, reason := rawReplayMatchesFreshSnapshot(tail, info); matches {
+					payload.scrollback = tail
+					payload.scrollbackTruncated = info.ScrollbackTruncated
+					payload.screenSnapshot = nil
+					payload.screenCols = 0
+					payload.screenRows = 0
+					payload.screenCursorX = 0
+					payload.screenCursorY = 0
+					payload.screenCursorVisible = false
+					payload.screenSnapshotFresh = false
+					payload.rawReplayDecision = "use_raw_replay"
+					payload.rawReplayReason = "full_raw_replay_matches_fresh_snapshot"
+					return payload
+				} else {
+					payload.rawReplayDecision = "use_fresh_snapshot"
+					payload.rawReplayReason = reason
+				}
+			} else {
+				payload.rawReplayDecision = "use_fresh_snapshot"
+				payload.rawReplayReason = "raw_replay_exceeds_budget"
+			}
 		}
 	}
 
 	// When no live screen model is available, derive the visible frame from the
 	// buffered PTY output so attaches can restore the current screen without
-	// shipping the entire scrollback blob to the client.
+	// trusting an unverified raw replay. Prefer geometry-aware replay segments
+	// over flattened scrollback when both are available.
+	if len(payload.screenSnapshot) == 0 && len(info.ReplaySegments) > 0 {
+		if snap, ok := pty.ScreenSnapshotFromReplaySegments(replaySegmentsToPTY(info.ReplaySegments)); ok {
+			applyScreenSnapshot(&payload, snap, "use_derived_segmented_snapshot", "fresh_snapshot_missing")
+		}
+	}
+
+	// Fall back to flat replay derivation only when geometry-aware replay
+	// segments are unavailable.
 	if len(payload.screenSnapshot) == 0 && len(info.Scrollback) > 0 {
 		if snap, ok := pty.ScreenSnapshotFromReplay(info.Scrollback, info.Cols, info.Rows); ok {
-			payload.screenSnapshot = snap.Payload
-			payload.screenCols = snap.Cols
-			payload.screenRows = snap.Rows
-			payload.screenCursorX = snap.CursorX
-			payload.screenCursorY = snap.CursorY
-			payload.screenCursorVisible = snap.CursorVisible
-			payload.screenSnapshotFresh = true
-			payload.derivedSnapshot = true
-			payload.rawReplayDecision = "use_derived_snapshot"
-			payload.rawReplayReason = "fresh_snapshot_missing"
+			applyScreenSnapshot(&payload, snap, "use_derived_snapshot", "fresh_snapshot_missing")
 		}
 	}
 
@@ -398,6 +465,10 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		return
 	}
 	replay := buildAttachReplayPayload(info, d.store.Get(msg.ID), protocol.Deref(msg.AttachPolicy))
+	replayBytes := len(replay.scrollback)
+	for _, segment := range replay.replaySegments {
+		replayBytes += len(segment.Data)
+	}
 	d.logf(
 		"PTY attach result: id=%s policy=%s running=%v last_seq=%d scrollback_bytes=%d replay_bytes=%d snapshot_bytes=%d snapshot_fresh=%v derived_snapshot=%v replay_decision=%s replay_reason=%s size=%dx%d screen=%dx%d",
 		msg.ID,
@@ -405,7 +476,7 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		info.Running,
 		info.LastSeq,
 		len(info.Scrollback),
-		len(replay.scrollback),
+		replayBytes,
 		len(replay.screenSnapshot),
 		replay.screenSnapshotFresh,
 		replay.derivedSnapshot,
@@ -440,6 +511,16 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 	if len(replay.scrollback) > 0 {
 		encoded := base64.StdEncoding.EncodeToString(replay.scrollback)
 		result.Scrollback = protocol.Ptr(encoded)
+	}
+	if len(replay.replaySegments) > 0 {
+		result.ReplaySegments = make([]protocol.ReplaySegment, 0, len(replay.replaySegments))
+		for _, segment := range replay.replaySegments {
+			result.ReplaySegments = append(result.ReplaySegments, protocol.ReplaySegment{
+				Cols: int(segment.Cols),
+				Rows: int(segment.Rows),
+				Data: base64.StdEncoding.EncodeToString(segment.Data),
+			})
+		}
 	}
 	if len(replay.screenSnapshot) > 0 {
 		encoded := base64.StdEncoding.EncodeToString(replay.screenSnapshot)

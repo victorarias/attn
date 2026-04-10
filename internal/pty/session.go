@@ -60,6 +60,7 @@ type Session struct {
 	cmd  *exec.Cmd
 
 	scrollback *RingBuffer
+	replayLog  *ReplayLog
 	screen     *virtualScreen
 	seqCounter atomic.Uint32
 
@@ -194,7 +195,14 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				}
 
 				seq := s.seqCounter.Add(1)
+				s.metaMu.RLock()
+				cols := s.cols
+				rows := s.rows
+				s.metaMu.RUnlock()
 				s.scrollback.Write(data)
+				if s.replayLog != nil {
+					s.replayLog.Write(data, cols, rows)
+				}
 				if s.screen != nil {
 					s.screen.Observe(data)
 				}
@@ -219,7 +227,14 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 	if len(carryover) > 0 {
 		seq := s.seqCounter.Add(1)
+		s.metaMu.RLock()
+		cols := s.cols
+		rows := s.rows
+		s.metaMu.RUnlock()
 		s.scrollback.Write(carryover)
+		if s.replayLog != nil {
+			s.replayLog.Write(carryover, cols, rows)
+		}
 		if s.screen != nil {
 			s.screen.Observe(carryover)
 		}
@@ -297,6 +312,11 @@ func (s *Session) info() AttachInfo {
 	}
 
 	scrollback, truncated := s.scrollback.Snapshot()
+	var replaySegments []ReplaySegment
+	replayTruncated := false
+	if s.replayLog != nil {
+		replaySegments, replayTruncated = s.replayLog.Snapshot()
+	}
 	var (
 		screenSnapshot      []byte
 		screenCols          uint16
@@ -321,6 +341,8 @@ func (s *Session) info() AttachInfo {
 	return AttachInfo{
 		Scrollback:          scrollback,
 		ScrollbackTruncated: truncated,
+		ReplaySegments:      replaySegments,
+		ReplayTruncated:     replayTruncated,
 		LastSeq:             s.seqCounter.Load(),
 		Cols:                cols,
 		Rows:                rows,

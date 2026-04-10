@@ -61,6 +61,8 @@ type SpawnOptions struct {
 type AttachInfo struct {
 	Scrollback          []byte
 	ScrollbackTruncated bool
+	ReplaySegments      []ReplaySegment
+	ReplayTruncated     bool
 	LastSeq             uint32
 	Cols                uint16
 	Rows                uint16
@@ -205,6 +207,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		ptmx:        ptmx,
 		cmd:         cmd,
 		scrollback:  NewRingBuffer(m.scrollbackSize),
+		replayLog:   NewReplayLog(m.scrollbackSize),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),

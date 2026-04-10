@@ -428,6 +428,12 @@ Implementation checklist:
 
 6. Audit the daemon contract, but do not broaden it prematurely.
    - verify whether any relaunch attach path still sends `screen_snapshot` for the targeted agent class despite the existing daemon preference
+
+Result on 2026-04-10:
+
+- Codex-first frontend suppression of `screen_snapshot` when raw scrollback was unavailable was tested and rejected.
+- After rebuilding the packaged app with that client-side kill switch, live `TR-205 remote codex` failed in `relaunch_and_restore_session` with a blank restored main pane: the relaunch viewport came back at the expected `58x46`, but visible content was empty and no attach replay bytes were written.
+- Keep the current fallback behavior for now: Codex may still suppress a fresh snapshot in favor of raw scrollback when raw exists, but must continue to use the fresh snapshot when raw is unavailable.
    - only change [internal/daemon/ws_pty.go](/Users/victor.arias/projects/victor/attn/internal/daemon/ws_pty.go) if the baseline shows the app cannot exercise the experiment cleanly from current payloads
    - if daemon behavior changes, update the corresponding attach replay tests in [internal/daemon/daemon_test.go](/Users/victor.arias/projects/victor/attn/internal/daemon/daemon_test.go) in the same slice
 
@@ -677,6 +683,19 @@ Minimum verification:
 - manual split-open/close spam
 - real window resize drag
 
+Status:
+
+- executed in the current cleanup stream
+- current app-side shape collapses resize handling behind one shared `TerminalViewportResizePlan`, so the viewport lifecycle no longer switches across separate `resize_both`, `resize_y`, `debounce_x`, `resize_y_then_debounce_x`, and `idle_resize_both` action variants
+- targeted frontend verification passed on 2026-04-10:
+  - `terminalResizeLifecycle.test.ts`
+  - `terminalViewportLifecycle.test.ts`
+- packaged-app verification passed on 2026-04-10 after fresh `make install-all-ui-automation`:
+  - `TR-402 local codex`: passed
+- manual verification passed on 2026-04-10:
+  - split-open/close spam: no issue observed
+  - real window resize drag: no issue observed
+
 ### 4. Remove Zero-Delay Detach Cleanup
 
 Files:
@@ -699,6 +718,23 @@ Minimum verification:
 - `TR-402`
 - `TR-303`
 
+Status:
+
+- executed on 2026-04-10
+- removed the zero-delay detach cleanup timer from [usePaneRuntimeBinder.ts](/Users/victor.arias/projects/victor/attn/app/src/components/SessionTerminalWorkspace/usePaneRuntimeBinder.ts), so pane detach now clears the stale `xterm` reference and input subscription immediately instead of deferring cleanup through `setTimeout(..., 0)`
+- removed the matching `pendingUnmountCleanupId` bookkeeping from [paneRuntimeLifecycleState.ts](/Users/victor.arias/projects/victor/attn/app/src/components/SessionTerminalWorkspace/paneRuntimeLifecycleState.ts), which makes the lifecycle registry purely about live geometry, replay, and input state rather than one extra detach-only timer
+- added focused binder coverage proving immediate detach still preserves same-app remount hydration and disposes the stale terminal input subscription before detached `xterm` instances can emit more input
+- targeted frontend verification passed on 2026-04-10:
+  - `src/components/SessionTerminalWorkspace/usePaneRuntimeBinder.test.ts`
+  - `src/components/SessionTerminalWorkspace/paneRuntimeLifecycleState.test.ts`
+  - `src/pty/geometryLifecycle.test.ts`
+  - `src/pty/attachPlanning.test.ts`
+  - `pnpm --dir app exec tsc --noEmit`
+- packaged-app verification passed on 2026-04-10 after fresh `make install-all`:
+  - `TR-205` remote Codex relaunch/split/close
+  - `TR-402` local Codex split-close recovery
+  - `TR-303` local Codex post-close typing
+
 ### 5. Gate Or Trim Hot-Path Diagnostics
 
 Files:
@@ -720,6 +756,22 @@ Minimum verification:
 - UI automation debug dump flows
 - scenarios that explicitly inspect pane/runtime traces
 
+Status:
+
+- executed on 2026-04-10
+- [paneRuntimeDebug.ts](/Users/victor.arias/projects/victor/attn/app/src/utils/paneRuntimeDebug.ts) now stays dormant unless pane debug is explicitly enabled, so ordinary session focus/input/render churn no longer allocates pane debug entries or queues debug-file writes by default
+- [terminalRuntimeLog.ts](/Users/victor.arias/projects/victor/attn/app/src/utils/terminalRuntimeLog.ts) now resolves `details` lazily, so disabled runtime tracing no longer pays for expensive payload construction just because a callsite emits a trace-capable event
+- high-frequency active-element and terminal-heartbeat callsites now pass lazy detail factories instead of eagerly walking DOM state on every focus or renderer heartbeat when tracing is off
+- [runtimeTimeline.ts](/Users/victor.arias/projects/victor/attn/app/src/utils/runtimeTimeline.ts) now filters in one pass and only sorts trace events when they actually arrive out of order, which trims repeated UI-automation snapshot work without changing timeline semantics
+- targeted frontend verification passed on 2026-04-10:
+  - `src/utils/paneRuntimeDebug.test.ts`
+  - `src/utils/terminalRuntimeLog.test.ts`
+  - `src/utils/runtimeTimeline.test.ts`
+  - `src/components/SessionTerminalWorkspace/usePaneRuntimeBinder.test.ts`
+  - `pnpm --dir app exec tsc --noEmit`
+- packaged-app verification passed on 2026-04-10 after fresh `make install-all`:
+  - `TR-205` remote Codex relaunch/split/close, which explicitly enables and uses pane debug plus terminal runtime trace through the UI automation bridge
+
 ## Additional Scenario Gaps Worth Covering After Cleanup Starts
 
 Do not block the initial simplification on all of these, but add them when the cleanup touches the behavior.
@@ -734,11 +786,19 @@ We still need stronger direct formatting/color coverage instead of inferring tha
 
 ### 3. `TR-301 Utility Focus Survives Session Switch`
 
-The focus/utility path is still important and can regress independently of rendering cleanup.
+Status:
+
+- executed on 2026-04-10
+- local packaged-app focus coverage now exists via `real-app:scenario-tr301`
+- the scenario creates a utility pane, switches to another session and back, and fails if active-pane restoration or utility input focus requires an extra click before typing resumes
 
 ### 4. `TR-401 Window Resize Preserves Render Health`
 
-Split churn is covered better than raw app window resize right now.
+Status:
+
+- executed on 2026-04-10
+- local packaged-app resize coverage now exists via `real-app:scenario-tr401`
+- the scenario seeds structured Claude output plus wide utility-shell output, shrinks and restores the app window, and fails if either split pane keeps stale narrow paint or loses meaningful visible content / fill after the resize settles
 
 ## Things To Avoid
 

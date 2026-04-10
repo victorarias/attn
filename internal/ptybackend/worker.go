@@ -565,6 +565,8 @@ func (b *WorkerBackend) Attach(ctx context.Context, sessionID, subscriberID stri
 			return AttachInfo{
 				Scrollback:          attachResult.Scrollback,
 				ScrollbackTruncated: attachResult.ScrollbackTruncated,
+				ReplaySegments:      replaySegmentsFromWorker(attachResult.ReplaySegments),
+				ReplayTruncated:     attachResult.ReplayTruncated,
 				LastSeq:             attachResult.LastSeq,
 				Cols:                attachResult.Cols,
 				Rows:                attachResult.Rows,
@@ -594,6 +596,21 @@ func appendCappedPreEvent(events []OutputEvent, evt OutputEvent, capLimit int) [
 	copy(events, events[1:])
 	events[len(events)-1] = evt
 	return events
+}
+
+func replaySegmentsFromWorker(segments []ptyworker.ReplaySegment) []ReplaySegment {
+	if len(segments) == 0 {
+		return nil
+	}
+	out := make([]ReplaySegment, 0, len(segments))
+	for _, segment := range segments {
+		out = append(out, ReplaySegment{
+			Cols: segment.Cols,
+			Rows: segment.Rows,
+			Data: append([]byte(nil), segment.Data...),
+		})
+	}
+	return out
 }
 
 func (b *WorkerBackend) Input(ctx context.Context, sessionID string, data []byte) error {

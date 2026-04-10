@@ -110,7 +110,7 @@ Every scenario should validate some combination of these invariants:
 - `TR-301 Utility Focus Survives Session Switch`
   With a utility pane active, switch to another session and back.
   Assertions: focus returns to the utility pane, typing lands in the utility runtime without extra click.
-  Automation: planned
+  Automation: local Claude packaged-app focus scenario implemented via `real-app:scenario-tr301`
 
 - `TR-302 Focus Survives Split Churn`
   Create and close splits while actively typing.
@@ -127,7 +127,7 @@ Every scenario should validate some combination of these invariants:
 - `TR-401 Window Resize Preserves Render Health`
   Resize the app window while a split session is visible.
   Assertions: affected panes redraw to meaningful geometry, content still uses the full visible area, no severe underfill, and no stale replay box.
-  Automation: planned
+  Automation: local Claude packaged-app resize scenario implemented via `real-app:scenario-tr401`
 
 - `TR-402 Split Open Or Close Triggers Targeted Redraw`
   Open or close a split and verify only panes whose container geometry changed bounce/redraw.

@@ -13,6 +13,29 @@ vi.mock('./terminalSizing', () => ({
   getScaledDimensions: () => mockState.dimsQueue.shift() ?? null,
 }));
 
+function createStartupSnapshot() {
+  return {
+    initialContainer: null,
+    initialCols: null,
+    initialRows: null,
+    firstObservedContainer: null,
+    firstReadySource: null,
+    firstReadyAt: null,
+    firstReadyCols: null,
+    firstReadyRows: null,
+    fontEffectAppliedBeforeReady: false,
+    skippedInitialFontEffect: false,
+  };
+}
+
+function createTerm(cols: number, rows: number, bufferLength = 0) {
+  return {
+    cols,
+    rows,
+    buffer: { normal: { length: bufferLength } },
+  } as any;
+}
+
 describe('installTerminalViewportLifecycle', () => {
   beforeEach(() => {
     mockState.resizeObservers.length = 0;
@@ -115,23 +138,12 @@ describe('installTerminalViewportLifecycle', () => {
     });
 
     installTerminalViewportLifecycle({
-      term: { cols: 80, rows: 24, buffer: { normal: { length: 0 } } } as any,
+      term: createTerm(80, 24),
       container,
       fontSizeRef: { current: 14 },
       visibleRef: { current: true },
       readyFiredRef: { current: false },
-      startupSnapshotRef: { current: {
-        initialContainer: null,
-        initialCols: null,
-        initialRows: null,
-        firstObservedContainer: null,
-        firstReadySource: null,
-        firstReadyAt: null,
-        firstReadyCols: null,
-        firstReadyRows: null,
-        fontEffectAppliedBeforeReady: false,
-        skippedInitialFontEffect: false,
-      } },
+      startupSnapshotRef: { current: createStartupSnapshot() },
       logTerminal: vi.fn(),
       getContainerDebugInfo: vi.fn(() => ({})),
       applyMeasuredTerminalGeometry,
@@ -163,23 +175,12 @@ describe('installTerminalViewportLifecycle', () => {
     });
 
     installTerminalViewportLifecycle({
-      term: { cols: 118, rows: 48, buffer: { normal: { length: 0 } } } as any,
+      term: createTerm(118, 48),
       container: document.createElement('div'),
       fontSizeRef: { current: 14 },
       visibleRef: { current: true },
       readyFiredRef: { current: true },
-      startupSnapshotRef: { current: {
-        initialContainer: null,
-        initialCols: null,
-        initialRows: null,
-        firstObservedContainer: null,
-        firstReadySource: null,
-        firstReadyAt: null,
-        firstReadyCols: null,
-        firstReadyRows: null,
-        fontEffectAppliedBeforeReady: false,
-        skippedInitialFontEffect: false,
-      } },
+      startupSnapshotRef: { current: createStartupSnapshot() },
       logTerminal: vi.fn(),
       getContainerDebugInfo: vi.fn(() => ({})),
       applyMeasuredTerminalGeometry: vi.fn(),
@@ -193,6 +194,89 @@ describe('installTerminalViewportLifecycle', () => {
     expect(resizeTerminal).not.toHaveBeenCalled();
   });
 
+  it('applies row work immediately and defers x work for visible large buffers', () => {
+    const term = createTerm(100, 40, 500);
+    const resizeTerminal = vi.fn((termRef: any, cols: number, rows: number) => {
+      termRef.cols = cols;
+      termRef.rows = rows;
+    });
+
+    mockState.dimsQueue.push({
+      cols: 120,
+      rows: 42,
+      diagnostics: { containerWidth: 960, containerHeight: 772 },
+    });
+
+    installTerminalViewportLifecycle({
+      term,
+      container: document.createElement('div'),
+      fontSizeRef: { current: 14 },
+      visibleRef: { current: true },
+      readyFiredRef: { current: true },
+      startupSnapshotRef: { current: createStartupSnapshot() },
+      logTerminal: vi.fn(),
+      getContainerDebugInfo: vi.fn(() => ({})),
+      applyMeasuredTerminalGeometry: vi.fn(),
+      resizeTerminal,
+      onVisibilityChanged: vi.fn(),
+    });
+
+    mockState.resizeObservers[0].trigger(960, 772);
+
+    expect(resizeTerminal).toHaveBeenCalledTimes(1);
+    expect(resizeTerminal).toHaveBeenNthCalledWith(1, term, 100, 42, 'resize_y', {
+      containerWidth: 960,
+      containerHeight: 772,
+    });
+
+    vi.advanceTimersByTime(99);
+    expect(resizeTerminal).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(1);
+    expect(resizeTerminal).toHaveBeenCalledTimes(2);
+    expect(resizeTerminal).toHaveBeenNthCalledWith(2, term, 120, 42, 'resize_x', {
+      containerWidth: 960,
+      containerHeight: 772,
+    });
+  });
+
+  it('flushes visibility-return geometry through the shared resize executor', () => {
+    const term = createTerm(118, 48);
+    const resizeTerminal = vi.fn((termRef: any, cols: number, rows: number) => {
+      termRef.cols = cols;
+      termRef.rows = rows;
+    });
+
+    mockState.dimsQueue.push({
+      cols: 120,
+      rows: 50,
+      diagnostics: { containerWidth: 960, containerHeight: 772 },
+    });
+
+    installTerminalViewportLifecycle({
+      term,
+      container: document.createElement('div'),
+      fontSizeRef: { current: 14 },
+      visibleRef: { current: true },
+      readyFiredRef: { current: true },
+      startupSnapshotRef: { current: createStartupSnapshot() },
+      logTerminal: vi.fn(),
+      getContainerDebugInfo: vi.fn(() => ({})),
+      applyMeasuredTerminalGeometry: vi.fn(),
+      resizeTerminal,
+      onVisibilityChanged: vi.fn(),
+    });
+
+    mockState.intersectionObservers[0].trigger(false);
+    mockState.intersectionObservers[0].trigger(true);
+
+    expect(resizeTerminal).toHaveBeenCalledTimes(1);
+    expect(resizeTerminal).toHaveBeenCalledWith(term, 120, 50, 'visibility_flush', {
+      containerWidth: 960,
+      containerHeight: 772,
+    });
+  });
+
   it('resizes on dpr changes using current measured dimensions', () => {
     const resizeTerminal = vi.fn();
 
@@ -203,23 +287,12 @@ describe('installTerminalViewportLifecycle', () => {
     });
 
     installTerminalViewportLifecycle({
-      term: { cols: 118, rows: 48, buffer: { normal: { length: 0 } } } as any,
+      term: createTerm(118, 48),
       container: document.createElement('div'),
       fontSizeRef: { current: 14 },
       visibleRef: { current: true },
       readyFiredRef: { current: true },
-      startupSnapshotRef: { current: {
-        initialContainer: null,
-        initialCols: null,
-        initialRows: null,
-        firstObservedContainer: null,
-        firstReadySource: null,
-        firstReadyAt: null,
-        firstReadyCols: null,
-        firstReadyRows: null,
-        fontEffectAppliedBeforeReady: false,
-        skippedInitialFontEffect: false,
-      } },
+      startupSnapshotRef: { current: createStartupSnapshot() },
       logTerminal: vi.fn(),
       getContainerDebugInfo: vi.fn(() => ({})),
       applyMeasuredTerminalGeometry: vi.fn(),

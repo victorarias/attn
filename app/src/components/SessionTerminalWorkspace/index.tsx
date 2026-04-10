@@ -318,13 +318,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         sessionId,
         paneId: activePaneId,
         message: 'focus active pane effect',
-        details: {
+        details: () => ({
           enabled,
           isActiveSession,
           isSessionViewVisible,
           focusRequestToken,
           ...activeElementSummary(),
-        },
+        }),
       });
       focusActivePane();
     }, [activePaneId, focusActivePane, focusRequestToken, isActiveSession, isSessionViewVisible, sessionId, sessionVisible]);
@@ -448,7 +448,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         sessionId,
         paneId: MAIN_TERMINAL_PANE_ID,
         message: 'main pane mouse down',
-        details: activeElementSummary(),
+        details: activeElementSummary,
       });
       onFocusPane(MAIN_TERMINAL_PANE_ID);
       binder.focusPaneWithRetry(MAIN_TERMINAL_PANE_ID);
@@ -460,7 +460,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         sessionId,
         paneId,
         message: 'utility pane mouse down',
-        details: activeElementSummary(),
+        details: activeElementSummary,
       });
       onFocusPane(paneId);
       binder.focusPaneWithRetry(paneId);
@@ -475,7 +475,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         sessionId,
         paneId,
         message: `focus pane from terminal ${phase}`,
-        details: activeElementSummary(),
+        details: activeElementSummary,
       });
       binder.focusPaneWithRetry(paneId);
     }, [binder, sessionId]);

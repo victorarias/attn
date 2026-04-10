@@ -249,6 +249,16 @@ export function usePaneRuntimeBinder(
           suppressInput: event.source === 'attach_replay',
         });
         break;
+      case 'local_resize':
+        void queuePaneWriteTask(paneId, async () => {
+          const liveXterm = xtermsRef.current.get(paneId);
+          if (!liveXterm || liveXterm !== xterm) {
+            appendPendingTerminalEvent(paneId, event);
+            return;
+          }
+          liveXterm.resize(event.cols, event.rows);
+        });
+        break;
       case 'reset':
         void queuePaneWriteTask(paneId, async () => {
           const liveXterm = xtermsRef.current.get(paneId);
@@ -377,8 +387,6 @@ export function usePaneRuntimeBinder(
   }, [paneRuntimeLifecycle]);
 
   const setTerminalHandle = useCallback((paneId: string, handle: TerminalHandle | null) => {
-    paneRuntimeLifecycle.clearPendingUnmountCleanup(paneId);
-
     if (!handle) {
       const pane = getCurrentPane(paneId);
       const currentXterm = xtermsRef.current.get(paneId);
@@ -411,20 +419,13 @@ export function usePaneRuntimeBinder(
         });
       }
       terminalHandlesRef.current.delete(paneId);
-      const timeoutId = window.setTimeout(() => {
-        recordPaneRuntimeDebugEvent({
-          scope: 'binder',
-          paneId,
-          message: 'terminal cleanup executed',
-        });
-        const state = paneRuntimeLifecycle.get(paneId);
-        if (state) {
-          delete state.pendingUnmountCleanupId;
-        }
-        xtermsRef.current.delete(paneId);
-        paneRuntimeLifecycle.clearInputSubscription(paneId);
-      }, 0);
-      paneRuntimeLifecycle.ensure(paneId).pendingUnmountCleanupId = timeoutId;
+      recordPaneRuntimeDebugEvent({
+        scope: 'binder',
+        paneId,
+        message: 'terminal cleanup executed',
+      });
+      xtermsRef.current.delete(paneId);
+      paneRuntimeLifecycle.clearInputSubscription(paneId);
       return;
     }
     recordPaneRuntimeDebugEvent({
@@ -656,11 +657,11 @@ export function usePaneRuntimeBinder(
         paneId,
         runtimeId: currentPane.runtimeId,
         message: 'send input to pty',
-        details: {
+        details: () => ({
           dataPreview: data.slice(0, 20),
           dataLength: data.length,
           ...activeElementSummary(),
-        },
+        }),
       });
       ptyWrite({ id: currentPane.runtimeId, data, source: 'user' }).catch(console.error);
     };

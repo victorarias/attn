@@ -107,6 +107,7 @@ function createMockXterm(options?: {
       }
       queueMicrotask(finishWrite);
     }),
+    resize: vi.fn(),
     reset: vi.fn(),
     focus: vi.fn(),
     onData: vi.fn((handler: (data: string) => void) => {
@@ -514,6 +515,58 @@ describe('usePaneRuntimeBinder', () => {
     await expect(drainPromise).resolves.toBe(true);
   });
 
+  it('applies local replay resize events without forwarding them to the PTY backend', async () => {
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: () => null,
+      },
+    ], 'pane-1', eventRouter));
+
+    const xterm = createMockXterm();
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(xterm as any);
+      await Promise.resolve();
+    });
+
+    act(() => {
+      bindings.get('runtime-1')?.onEvent({
+        event: 'local_resize',
+        id: 'runtime-1',
+        cols: 118,
+        rows: 48,
+        source: 'attach_replay',
+      });
+      bindings.get('runtime-1')?.onEvent({
+        event: 'data',
+        id: 'runtime-1',
+        data: btoa('wide replay'),
+        source: 'attach_replay',
+      });
+      bindings.get('runtime-1')?.onEvent({
+        event: 'local_resize',
+        id: 'runtime-1',
+        cols: 58,
+        rows: 46,
+        source: 'attach_replay',
+      });
+    });
+
+    await act(async () => {
+      await result.current.drainPaneTerminal('pane-1');
+      await Promise.resolve();
+    });
+
+    expect((xterm as any).resize).toHaveBeenNthCalledWith(1, 118, 48);
+    expect((xterm as any).write).toHaveBeenCalledWith(new TextEncoder().encode('wide replay'), expect.any(Function));
+    expect((xterm as any).resize).toHaveBeenNthCalledWith(2, 58, 46);
+    expect(mockPtyWrite).not.toHaveBeenCalled();
+  });
+
   it('ensures the runtime from the settled resize when terminal ready is missed', async () => {
     vi.useFakeTimers();
     const bindings = new Map<string, PaneRuntimeEventBinding>();
@@ -756,7 +809,6 @@ describe('usePaneRuntimeBinder', () => {
 
     await act(async () => {
       result.current.setTerminalHandle('pane-1', null);
-      await vi.advanceTimersByTimeAsync(0);
       await Promise.resolve();
     });
 
@@ -916,7 +968,6 @@ describe('usePaneRuntimeBinder', () => {
 
     await act(async () => {
       result.current.setTerminalHandle('pane-1', null);
-      await vi.advanceTimersByTimeAsync(0);
       await Promise.resolve();
     });
 
@@ -953,5 +1004,41 @@ describe('usePaneRuntimeBinder', () => {
       forceResizeBeforeAttach: true,
     });
     expect(mockPtyResize).not.toHaveBeenCalled();
+  });
+
+  it('disposes the previous terminal input subscription immediately on detach', async () => {
+    vi.useFakeTimers();
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: false,
+        }),
+      },
+    ], 'pane-1', eventRouter));
+
+    const xterm = createMockXterm();
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(xterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    mockPtyWrite.mockClear();
+
+    act(() => {
+      result.current.setTerminalHandle('pane-1', null);
+    });
+
+    xterm.__emitData('stale-input');
+    expect(mockPtyWrite).not.toHaveBeenCalled();
   });
 });

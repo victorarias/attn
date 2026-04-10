@@ -262,7 +262,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
         expect(vi.mocked(invoke)).toHaveBeenCalledWith('restart_daemon', {
-        expected_protocol: '50',
+        expected_protocol: '51',
         prefer_local: false,
       });
     });
@@ -347,7 +347,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [],
         workspaces: [{
           session_id: 'sess-remote',
@@ -423,7 +423,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -502,7 +502,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -585,7 +585,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -676,7 +676,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -767,7 +767,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -855,7 +855,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -914,6 +914,113 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('replays geometry-aware segmented raw history for relaunching a daemon-known Codex session', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    (window as Window & {
+      __TEST_PTY_EVENTS?: Array<{
+        event: string;
+        id: string;
+        data?: string;
+        cols?: number;
+        rows?: number;
+        source?: string;
+        reason?: string;
+      }>;
+    }).__TEST_PTY_EVENTS = [];
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '51',
+        sessions: [{
+          id: 'sess-existing',
+          label: 'attn',
+          agent: 'codex',
+          directory: '/tmp/repo',
+          state: 'idle',
+          state_since: '2026-04-08T00:00:00Z',
+          state_updated_at: '2026-04-08T00:00:00Z',
+          last_seen: '2026-04-08T00:00:00Z',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const spawnPromise = ptySpawn({
+      args: {
+        id: 'sess-existing',
+        cwd: '/tmp/repo',
+        agent: 'codex',
+        cols: 58,
+        rows: 46,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'relaunch_restore' });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-existing',
+        success: true,
+        cols: 58,
+        rows: 46,
+        replay_segments: [
+          { cols: 118, rows: 48, data: 'd2lkZS1oaXN0b3J5' },
+          { cols: 58, rows: 46, data: 'bmFycm93LXRhaWw=' },
+        ],
+        screen_cols: 58,
+        screen_rows: 46,
+        running: true,
+      });
+    });
+
+    await expect(spawnPromise).resolves.toBeUndefined();
+
+    const ptyEvents = (window as Window & {
+      __TEST_PTY_EVENTS?: Array<{
+        event: string;
+        id: string;
+        data?: string;
+        cols?: number;
+        rows?: number;
+        source?: string;
+        reason?: string;
+      }>;
+    }).__TEST_PTY_EVENTS || [];
+    expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
+    expect(ptyEvents).toContainEqual({ event: 'local_resize', id: 'sess-existing', cols: 118, rows: 48, source: 'attach_replay' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'd2lkZS1oaXN0b3J5', source: 'attach_replay' });
+    expect(ptyEvents).toContainEqual({ event: 'local_resize', id: 'sess-existing', cols: 58, rows: 46, source: 'attach_replay' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'bmFycm93LXRhaWw=', source: 'attach_replay' });
+    expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'sess-existing' && event.data === 'c25hcHNob3Qtd2lucw==')).toBe(false);
+
+    unmount();
+  });
+
   it('keeps screen snapshot replay when relaunching a daemon-known Claude session', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
@@ -937,7 +1044,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1025,7 +1132,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [],
         workspaces: [{
           session_id: 'sess-remote',
@@ -1115,7 +1222,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -1198,7 +1305,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [],
         workspaces: [{
           session_id: 'sess-remote',
@@ -1307,7 +1414,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -1365,7 +1472,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '50',
+        protocol_version: '51',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',

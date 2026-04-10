@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
 import { createRunContext } from './common.mjs';
 
 function writeJson(filePath, value) {
@@ -13,13 +15,149 @@ function normalizeError(error) {
   return String(error);
 }
 
+function processExists(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function packagedAppScenarioLockPath() {
+  return process.env.ATTN_REAL_APP_SCENARIO_LOCK_PATH || path.join(os.tmpdir(), 'attn-real-app-harness-scenario.lock');
+}
+
+function readLockOwner(lockDir) {
+  const ownerPath = path.join(lockDir, 'owner.json');
+  return JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+}
+
+function removeDirIfPresent(dirPath) {
+  try {
+    fs.rmSync(dirPath, { recursive: true, force: true });
+  } catch {}
+}
+
+function acquireScenarioLock({ scenarioId, tier, runId, runDir, appPath }) {
+  const lockDir = packagedAppScenarioLockPath();
+  const ownerPath = path.join(lockDir, 'owner.json');
+  const owner = {
+    pid: process.pid,
+    scenarioId,
+    tier,
+    runId,
+    runDir,
+    appPath: appPath || null,
+    startedAt: new Date().toISOString(),
+    command: process.argv.join(' '),
+  };
+
+  while (true) {
+    try {
+      fs.mkdirSync(lockDir);
+      writeJson(ownerPath, owner);
+      break;
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') {
+        throw error;
+      }
+
+      let existingOwner = null;
+      try {
+        existingOwner = readLockOwner(lockDir);
+      } catch {
+        removeDirIfPresent(lockDir);
+        continue;
+      }
+
+      if (!processExists(existingOwner?.pid)) {
+        removeDirIfPresent(lockDir);
+        continue;
+      }
+
+      const activeScenario = existingOwner.scenarioId || 'unknown';
+      const activePid = Number.isInteger(existingOwner.pid) ? existingOwner.pid : 'unknown';
+      const activeRunId = existingOwner.runId || 'unknown';
+      const activeStartedAt = existingOwner.startedAt || 'unknown';
+      throw new Error(
+        `invalid run: packaged-app scenarios are single-tenant; ${activeScenario} is already active ` +
+        `(pid ${activePid}, run ${activeRunId}, started ${activeStartedAt})`
+      );
+    }
+  }
+
+  let released = false;
+  const release = () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    try {
+      const existingOwner = readLockOwner(lockDir);
+      if (existingOwner?.pid === process.pid && existingOwner?.runId === runId) {
+        removeDirIfPresent(lockDir);
+      }
+    } catch {
+      removeDirIfPresent(lockDir);
+    }
+  };
+
+  const signalHandlers = new Map();
+  const exitHandler = () => {
+    release();
+  };
+  process.once('exit', exitHandler);
+
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    const handler = () => {
+      release();
+      process.removeListener(signal, handler);
+      process.kill(process.pid, signal);
+    };
+    signalHandlers.set(signal, handler);
+    process.once(signal, handler);
+  }
+
+  return () => {
+    release();
+    process.removeListener('exit', exitHandler);
+    for (const [signal, handler] of signalHandlers.entries()) {
+      process.removeListener(signal, handler);
+    }
+  };
+}
+
 export function createScenarioRunner(options, {
   scenarioId,
   tier,
   prefix,
   metadata = {},
+  preflightLaunchEnv = null,
 } = {}) {
+  assertPackagedAppBuildMatchesCurrentSource({
+    appPath: options?.appPath,
+    launchEnv: preflightLaunchEnv,
+  });
   const { runId, runDir, sessionDir } = createRunContext(options, prefix || scenarioId.toLowerCase());
+  let releaseScenarioLock = null;
+  try {
+    releaseScenarioLock = acquireScenarioLock({
+      scenarioId,
+      tier,
+      runId,
+      runDir,
+      appPath: options?.appPath,
+    });
+  } catch (error) {
+    removeDirIfPresent(runDir);
+    removeDirIfPresent(sessionDir);
+    throw error;
+  }
   const tracePath = path.join(runDir, 'trace.log');
   const steps = [];
   const assertions = [];
@@ -114,6 +252,7 @@ export function createScenarioRunner(options, {
         ...summary,
       };
       writeJson(path.join(runDir, 'summary.json'), finalSummary);
+      releaseScenarioLock?.();
       return finalSummary;
     },
     finishFailure(error, summary = {}) {
@@ -131,7 +270,11 @@ export function createScenarioRunner(options, {
         ...summary,
       };
       writeJson(path.join(runDir, 'failure.json'), finalSummary);
+      releaseScenarioLock?.();
       return finalSummary;
+    },
+    close() {
+      releaseScenarioLock?.();
     },
   };
 

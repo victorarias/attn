@@ -21,6 +21,8 @@ pnpm run real-app:bridge-pty-bench
 pnpm run real-app:bridge-cli -- --wait-ready get_state
 pnpm run real-app:scenario-tr101
 pnpm run real-app:scenario-tr102
+pnpm run real-app:scenario-tr301
+pnpm run real-app:scenario-tr401
 pnpm run real-app:scenario-tr205
 pnpm run real-app:scenario-tr402
 pnpm run real-app:scenario-tr402-local-codex
@@ -165,6 +167,10 @@ The first scenario scripts using that foundation are:
   Local Claude session. Prompts the main agent pane for structured output, splits from `main`, and checks that both the source pane and the new utility pane retain meaningful visible content. The main pane is also validated with a pane-cropped native screenshot so the scenario can fail if content collapses into a narrow strip or footer band.
 - `real-app:scenario-tr102`
   Local Claude session. Creates a utility pane, splits from that utility pane, and checks that both the original and the new utility pane remain visible and writable with preserved content.
+- `real-app:scenario-tr301`
+  Local Claude sessions. Creates a utility pane in one session, switches to another session and back, and fails if focus does not return to the utility pane or typing requires an extra click.
+- `real-app:scenario-tr401`
+  Local Claude session. Seeds structured main-pane output plus wide utility-shell output, shrinks and restores the packaged-app window, and fails if either split pane loses meaningful visible content, underfills its pane, or keeps stale narrow native paint after the resize settles.
 - `real-app:scenario-tr205`
   Remote real-agent session on `ai-sandbox`. Creates one split, relaunches the packaged app, adds two more splits, then closes utility panes one by one and checks that the surviving main Codex pane regains width and repaints into the reclaimed space after each close.
 - `real-app:scenario-tr402`

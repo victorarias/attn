@@ -8,6 +8,7 @@ import { getScaledDimensions } from './terminalSizing';
 import {
   planObservedTerminalResize,
   planVisibilityFlush,
+  type TerminalViewportResizePlan,
   X_AXIS_DEBOUNCE_MS,
 } from './terminalResizeLifecycle';
 
@@ -77,20 +78,46 @@ export function installTerminalViewportLifecycle({
     }
   };
 
-  const resizeBoth = (cols: number, rows: number, diagnostics: ResizeDiagnostics | null) => {
-    lastCols = cols;
-    lastRows = rows;
-    resizeTerminal(term, cols, rows, 'resize_both', diagnostics);
+  const applyImmediateResize = (resize: NonNullable<TerminalViewportResizePlan['immediate']>) => {
+    if (resize.axis === 'both') {
+      lastCols = resize.next.cols;
+      lastRows = resize.next.rows;
+      resizeTerminal(term, resize.next.cols, resize.next.rows, resize.reason, resize.next.diagnostics);
+      return;
+    }
+
+    lastRows = resize.next.rows;
+    resizeTerminal(term, term.cols, resize.next.rows, resize.reason, resize.next.diagnostics);
   };
 
-  const resizeX = (cols: number, diagnostics: ResizeDiagnostics | null) => {
-    lastCols = cols;
-    resizeTerminal(term, cols, term.rows, 'resize_x', diagnostics);
+  const scheduleDebouncedXResize = (resize: NonNullable<TerminalViewportResizePlan['debouncedX']>) => {
+    xResizeTimeout = window.setTimeout(() => {
+      lastCols = resize.cols;
+      resizeTerminal(term, resize.cols, term.rows, 'resize_x', resize.diagnostics);
+    }, X_AXIS_DEBOUNCE_MS);
   };
 
-  const resizeY = (rows: number, diagnostics: ResizeDiagnostics | null) => {
-    lastRows = rows;
-    resizeTerminal(term, term.cols, rows, 'resize_y', diagnostics);
+  const scheduleIdleResize = (resize: NonNullable<TerminalViewportResizePlan['idle']>) => {
+    (window as Window & { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback?.(() => {
+      lastCols = latestX;
+      lastRows = latestY;
+      resizeTerminal(term, latestX, latestY, resize.reason, latestDiagnostics);
+    });
+  };
+
+  const executeResizePlan = (plan: TerminalViewportResizePlan) => {
+    if (plan.cancelPendingX) {
+      clearXResizeTimeout();
+    }
+    if (plan.immediate) {
+      applyImmediateResize(plan.immediate);
+    }
+    if (plan.debouncedX) {
+      scheduleDebouncedXResize(plan.debouncedX);
+    }
+    if (plan.idle) {
+      scheduleIdleResize(plan.idle);
+    }
   };
 
   const handleResize = () => {
@@ -132,36 +159,7 @@ export function installTerminalViewportLifecycle({
       isVisible,
       hasIdleCallback: 'requestIdleCallback' in window,
     });
-
-    switch (plan.type) {
-      case 'none':
-        return;
-      case 'resize_both':
-        clearXResizeTimeout();
-        resizeBoth(plan.next.cols, plan.next.rows, plan.next.diagnostics);
-        return;
-      case 'idle_resize_both':
-        (window as Window & { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback?.(() => {
-          resizeBoth(latestX, latestY, latestDiagnostics);
-        });
-        return;
-      case 'resize_y':
-        resizeY(plan.rows, plan.diagnostics);
-        return;
-      case 'debounce_x':
-        clearXResizeTimeout();
-        xResizeTimeout = window.setTimeout(() => {
-          resizeX(plan.cols, plan.diagnostics);
-        }, X_AXIS_DEBOUNCE_MS);
-        return;
-      case 'resize_y_then_debounce_x':
-        resizeY(plan.rows, plan.diagnostics);
-        clearXResizeTimeout();
-        xResizeTimeout = window.setTimeout(() => {
-          resizeX(plan.cols, plan.diagnostics);
-        }, X_AXIS_DEBOUNCE_MS);
-        return;
-    }
+    executeResizePlan(plan);
   };
 
   const resizeObserver = new ResizeObserver((entries) => {
@@ -217,8 +215,12 @@ export function installTerminalViewportLifecycle({
       onVisibilityChanged(nowVisible, wasHidden);
 
       if (wasHidden && readyFiredRef.current) {
-        clearXResizeTimeout();
         const dims = getScaledDimensions(container, term, fontSizeRef.current);
+        if (dims) {
+          latestX = dims.cols;
+          latestY = dims.rows;
+          latestDiagnostics = dims.diagnostics;
+        }
         const plan = planVisibilityFlush({
           wasHidden,
           ready: readyFiredRef.current,
@@ -230,19 +232,7 @@ export function installTerminalViewportLifecycle({
           currentCols: term.cols,
           currentRows: term.rows,
         });
-
-        if (plan.type === 'none') {
-          return;
-        }
-
-        if (dims) {
-          lastCols = dims.cols;
-          lastRows = dims.rows;
-        }
-
-        if (plan.type === 'resize') {
-          resizeTerminal(term, plan.next.cols, plan.next.rows, 'visibility_flush', plan.next.diagnostics);
-        }
+        executeResizePlan(plan);
       }
     },
     { threshold: 0 },

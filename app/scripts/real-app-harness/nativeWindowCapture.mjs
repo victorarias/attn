@@ -24,6 +24,25 @@ async function activateBundle(bundleId) {
   }
 }
 
+function parseWindowBoundsOutput(output, bundleId) {
+  const [x, y, width, height, processName] = String(output || '')
+    .split(',')
+    .map((value) => value.trim());
+
+  const numericBounds = [x, y, width, height].map((value) => Number.parseInt(value, 10));
+  if (!numericBounds.every((value) => Number.isFinite(value))) {
+    throw new Error(`Failed to parse window bounds for bundle ${bundleId}: ${output}`);
+  }
+
+  return {
+    x: numericBounds[0],
+    y: numericBounds[1],
+    width: numericBounds[2],
+    height: numericBounds[3],
+    processName: processName || null,
+  };
+}
+
 function normalizeLogicalBounds(bounds) {
   if (!bounds) {
     return null;
@@ -71,24 +90,7 @@ tell application "System Events"
   return (item 1 of p as text) & "," & (item 2 of p as text) & "," & (item 1 of s as text) & "," & (item 2 of s as text) & "," & (name of targetProcess as text)
 end tell
 `);
-
-  const [x, y, width, height, processName] = output
-    .split(',')
-    .map((value) => value.trim());
-
-  const numericBounds = [x, y, width, height].map((value) => Number.parseInt(value, 10));
-
-  if (!numericBounds.every((value) => Number.isFinite(value))) {
-    throw new Error(`Failed to parse window bounds for bundle ${bundleId}: ${output}`);
-  }
-
-  return {
-    x: numericBounds[0],
-    y: numericBounds[1],
-    width: numericBounds[2],
-    height: numericBounds[3],
-    processName: processName || null,
-  };
+  return parseWindowBoundsOutput(output, bundleId);
 }
 
 export async function getFrontWindowBounds(bundleId = 'com.attn.manager', options = {}) {
@@ -113,6 +115,83 @@ export async function getFrontWindowBounds(bundleId = 'com.attn.manager', option
   throw lastError instanceof Error
     ? lastError
     : new Error(`Failed to resolve front window bounds for ${bundleId}`);
+}
+
+function boundsWithinTolerance(actual, target, tolerancePx = 6) {
+  if (!actual || !target) {
+    return false;
+  }
+  return (
+    Math.abs(actual.x - target.x) <= tolerancePx &&
+    Math.abs(actual.y - target.y) <= tolerancePx &&
+    Math.abs(actual.width - target.width) <= tolerancePx &&
+    Math.abs(actual.height - target.height) <= tolerancePx
+  );
+}
+
+async function setFrontWindowBoundsForBundle(bundleId, bounds) {
+  const output = await runAppleScript(`
+tell application "System Events"
+  set targetProcess to first application process whose bundle identifier is "${bundleId}"
+  if (count of windows of targetProcess) is 0 then
+    error "No windows found for ${bundleId}"
+  end if
+  set position of front window of targetProcess to {${bounds.x}, ${bounds.y}}
+  set size of front window of targetProcess to {${bounds.width}, ${bounds.height}}
+  set p to position of front window of targetProcess
+  set s to size of front window of targetProcess
+  return (item 1 of p as text) & "," & (item 2 of p as text) & "," & (item 1 of s as text) & "," & (item 2 of s as text) & "," & (name of targetProcess as text)
+end tell
+`);
+  return parseWindowBoundsOutput(output, bundleId);
+}
+
+export async function setFrontWindowBounds(targetBounds, options = {}) {
+  const bundleId = options.bundleId || 'com.attn.manager';
+  const normalizedTarget = normalizeLogicalBounds(targetBounds);
+  if (!normalizedTarget) {
+    throw new Error(`Invalid target window bounds: ${JSON.stringify(targetBounds)}`);
+  }
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) {
+      await delay(250);
+    }
+    await activateBundle(bundleId);
+    try {
+      const result = await setFrontWindowBoundsForBundle(bundleId, normalizedTarget);
+      if (boundsWithinTolerance(result, normalizedTarget, options.settleTolerancePx ?? 8)) {
+        return result;
+      }
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  const settleTimeoutMs = options.settleTimeoutMs ?? 6_000;
+  const retryIntervalMs = options.retryIntervalMs ?? 150;
+  const settleTolerancePx = options.settleTolerancePx ?? 8;
+  const startedAt = Date.now();
+  let lastBounds = null;
+
+  while (Date.now() - startedAt < settleTimeoutMs) {
+    lastBounds = await getFrontWindowBounds(bundleId, options);
+    if (boundsWithinTolerance(lastBounds, normalizedTarget, settleTolerancePx)) {
+      return lastBounds;
+    }
+    await delay(retryIntervalMs);
+  }
+
+  throw new Error(
+    `Timed out waiting for ${bundleId} window bounds to settle at ${JSON.stringify(normalizedTarget)}. ` +
+    `Last bounds: ${JSON.stringify(lastBounds)}`
+  );
 }
 
 export async function captureFrontWindowScreenshot(outputPath, options = {}) {

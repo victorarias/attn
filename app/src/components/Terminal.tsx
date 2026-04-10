@@ -734,7 +734,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           runtimeId: meta.runtimeId,
           debugName: debugNameRef.current,
           message: 'xterm renderer heartbeat',
-          details: {
+          details: () => ({
             paneKind: meta.paneKind,
             renderer: rendererModeRef.current,
             visible: visibleRef.current,
@@ -751,7 +751,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             writeQueueChunks: writeQueueChunksRef.current,
             writeQueueBytes: writeQueueBytesRef.current,
             ...activeElementSummary(),
-          },
+          }),
         });
         activity.loggedRenderCount = activity.renderCount;
         activity.loggedWriteParsedCount = activity.writeParsedCount;

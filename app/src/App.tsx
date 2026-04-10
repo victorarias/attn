@@ -759,6 +759,8 @@ function AppContent({
     eventRouter: paneRuntimeEventRouter,
     getActivePaneIdForSession,
     setActivePane,
+    prepareClosePaneFocus,
+    clearPreparedClosePaneFocus,
     setWorkspaceRef,
     removeWorkspaceRef,
     focusSessionPane,
@@ -1353,6 +1355,14 @@ function AppContent({
     [setActiveSession]
   );
 
+  const handleClosePane = useCallback((sessionId: string, paneId: string) => {
+    prepareClosePaneFocus(sessionId, paneId);
+    return sendWorkspaceClosePane(sessionId, paneId).catch((error) => {
+      clearPreparedClosePaneFocus(sessionId);
+      throw error;
+    });
+  }, [clearPreparedClosePaneFocus, prepareClosePaneFocus, sendWorkspaceClosePane]);
+
   useUiAutomationBridge({
     sessions,
     activeSessionId,
@@ -1364,7 +1374,7 @@ function AppContent({
     closeSession: handleCloseSession,
     reloadSession,
     splitPane: sendWorkspaceSplitPane,
-    closePane: sendWorkspaceClosePane,
+    closePane: handleClosePane,
     focusPane: (sessionId: string, paneId: string) => {
       setActiveSession(sessionId);
       setUtilityFocusRequestToken((token) => token + 1);
@@ -1561,7 +1571,7 @@ function AppContent({
     if (activeSession.workspace.terminals.length > 0) {
       const activePaneId = getActivePaneIdForSession(activeSession);
       if (activePaneId !== MAIN_TERMINAL_PANE_ID) {
-        void sendWorkspaceClosePane(activeSessionId, activePaneId).catch((error) => {
+        void handleClosePane(activeSessionId, activePaneId).catch((error) => {
           showError(error instanceof Error ? error.message : 'Failed to close split pane');
         });
         return;
@@ -1569,7 +1579,7 @@ function AppContent({
     }
 
     handleRequestCloseSession(activeSessionId);
-  }, [activeSessionId, getActivePaneIdForSession, handleRequestCloseSession, sendWorkspaceClosePane, sessions, showError]);
+  }, [activeSessionId, getActivePaneIdForSession, handleClosePane, handleRequestCloseSession, sessions, showError]);
 
   const handleReloadSession = useCallback((id: string) => {
     const size = getPaneSize(id, MAIN_TERMINAL_PANE_ID) || undefined;
@@ -1994,7 +2004,7 @@ function AppContent({
                     void sendWorkspaceSplitPane(session.id, targetPaneId, direction).catch(console.error);
                   }}
                   onClosePane={(paneId) => {
-                    void sendWorkspaceClosePane(session.id, paneId).catch(console.error);
+                    void handleClosePane(session.id, paneId).catch(console.error);
                   }}
                   onFocusPane={(paneId) => {
                     setActivePane(session.id, paneId);

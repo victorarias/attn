@@ -94,6 +94,9 @@ type AttachResultMessage struct {
 	// Pid corresponds to the JSON schema field "pid".
 	Pid *int `json:"pid,omitempty"`
 
+	// ReplaySegments corresponds to the JSON schema field "replay_segments".
+	ReplaySegments []ReplaySegment `json:"replay_segments,omitempty"`
+
 	// Rows corresponds to the JSON schema field "rows".
 	Rows *int `json:"rows,omitempty"`
 
@@ -1489,6 +1492,17 @@ type RemoveEndpointMessage struct {
 
 	// EndpointID corresponds to the JSON schema field "endpoint_id".
 	EndpointID string `json:"endpoint_id"`
+}
+
+type ReplaySegment struct {
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// Data corresponds to the JSON schema field "data".
+	Data string `json:"data"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
 }
 
 type RepoInfo struct {

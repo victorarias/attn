@@ -24,7 +24,6 @@ export interface PaneRuntimeLifecycleState<TXterm = unknown> {
   spawnArgs?: PtySpawnArgs | null;
   pendingGeometrySync?: PendingGeometrySync<TXterm>;
   pendingGeometryTimerId?: number;
-  pendingUnmountCleanupId?: number;
   pendingTerminalEvents?: PtyEventPayload[];
   lastCommittedGeometry?: PaneRuntimeSize;
   sameAppRemount?: SameAppRemountState<TXterm>;
@@ -42,7 +41,6 @@ export interface PaneRuntimeLifecycleRegistry<TXterm = unknown> {
   takePendingTerminalEvents: (paneId: string) => PtyEventPayload[];
   clearPendingTerminalEvents: (paneId: string) => void;
   clearGeometryTimer: (paneId: string) => void;
-  clearPendingUnmountCleanup: (paneId: string) => void;
   replaceInputSubscription: (paneId: string, subscription: { dispose: () => void }) => void;
   clearInputSubscription: (paneId: string) => void;
   isInputSuppressed: (paneId: string) => boolean;
@@ -70,14 +68,6 @@ export function createPaneRuntimeLifecycleRegistry<TXterm>(): PaneRuntimeLifecyc
     if (state?.pendingGeometryTimerId !== undefined) {
       window.clearTimeout(state.pendingGeometryTimerId);
       delete state.pendingGeometryTimerId;
-    }
-  };
-
-  const clearPendingUnmountCleanup = (paneId: string) => {
-    const state = states.get(paneId);
-    if (state?.pendingUnmountCleanupId !== undefined) {
-      window.clearTimeout(state.pendingUnmountCleanupId);
-      delete state.pendingUnmountCleanupId;
     }
   };
 
@@ -132,7 +122,6 @@ export function createPaneRuntimeLifecycleRegistry<TXterm>(): PaneRuntimeLifecyc
       }
     },
     clearGeometryTimer,
-    clearPendingUnmountCleanup,
     replaceInputSubscription: (paneId: string, subscription: { dispose: () => void }) => {
       const state = ensure(paneId);
       state.inputSubscription?.dispose();
@@ -158,14 +147,12 @@ export function createPaneRuntimeLifecycleRegistry<TXterm>(): PaneRuntimeLifecyc
     },
     dispose: (paneId: string) => {
       clearGeometryTimer(paneId);
-      clearPendingUnmountCleanup(paneId);
       clearInputSubscription(paneId);
       states.delete(paneId);
     },
     disposeAll: () => {
       for (const paneId of Array.from(states.keys())) {
         clearGeometryTimer(paneId);
-        clearPendingUnmountCleanup(paneId);
         clearInputSubscription(paneId);
       }
       states.clear();

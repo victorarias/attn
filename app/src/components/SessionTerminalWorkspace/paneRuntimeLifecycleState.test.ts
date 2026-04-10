@@ -71,13 +71,11 @@ describe('paneRuntimeLifecycleState', () => {
     const subscription = { dispose: vi.fn() };
     const state = registry.ensure('pane-1');
     state.pendingGeometryTimerId = 11;
-    state.pendingUnmountCleanupId = 12;
     state.inputSubscription = subscription;
 
     registry.dispose('pane-1');
 
     expect(clearTimeoutSpy).toHaveBeenCalledWith(11);
-    expect(clearTimeoutSpy).toHaveBeenCalledWith(12);
     expect(subscription.dispose).toHaveBeenCalledTimes(1);
     expect(registry.get('pane-1')).toBeUndefined();
   });

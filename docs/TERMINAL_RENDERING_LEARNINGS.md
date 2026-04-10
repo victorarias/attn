@@ -229,6 +229,44 @@ Implication:
 - duplicate query responses are a credible mechanism for why the next Codex shrink redraw becomes malformed after relaunch
 - the right deterministic test level is the replay/query-response/xterm layer, not only the packaged-app relaunch canary
 
+### 13. The destructive relaunch tail can be the exact earlier split bytes, not new relaunch-only output
+
+For the `2026-04-10` `TR-205` remote relaunch-close-redraw failure, we compared:
+
+- the relaunch main-pane `pty.attach.replay_applied` payload tail from `03-post-relaunch-terminal-runtime-trace.json`
+- the earlier live main-pane `pty.output.live` bytes `seq 94-97` from `02-after-initial-split-terminal-runtime-trace.json`
+
+What that showed:
+
+- the replay tail was byte-for-byte the earlier live split redraw tail, with only a leading `ESC[?2026l` disable sequence prepended
+- replaying the prefix alone left `OpenAI Codex` present with xterm cursor state at row `15`, col `3`
+- replaying the embedded `CSI 6 n` emitted a fresh CPR reply of `ESC[15;3R`
+- replaying the rest of that same historical tail then moved xterm to `1;1`, issued `CSI J`, and cleared the header before repainting only the anchor block/status line
+
+Implication:
+
+- this failure is not explained by "relaunch produced brand-new bad bytes"
+- it is also not explained by pure viewport drift
+- the relaunch restore path is re-executing a historical split redraw/query cycle in a fresh xterm state where that cycle becomes destructive
+- the promising fix surface is replay selection/sanitization, not viewport forcing
+
+### 14. Geometry-aware replay selection is the fix surface, but clipped raw tails are not state-safe
+
+We then exercised the replay-selection fix directly on real packaged-app relaunches and on isolated xterm replays.
+
+What that showed:
+
+- `TR-205` and `TR-502` both restored the Codex main pane through `scrollback_segments`, not `screen_snapshot`
+- the successful relaunch traces carried two geometry runs, one resize, and preserved both `OpenAI Codex` and the transcript anchor after replay
+- the same bytes still lose the header if they are flattened into one final-geometry replay instead of being replayed across their original wide-to-narrow transition
+- a transport-bounded segmented tail can still reconstruct the current visible frame while omitting older geometry context, so "matches the live screen snapshot" is not enough to call that clipped tail state-equivalent
+
+Implication:
+
+- full geometry-segmented replay is the right restore primitive for Codex relaunches when the daemon can verify it against the live screen model
+- transport-clipped raw replay should not be treated as safe just because it paints the same current screen
+- when a fresh live snapshot is missing, the least-wrong fallback is a geometry-aware derived snapshot from replay segments, not blind trust in raw replay bytes
+
 ## What We Confirmed Was Harness Noise
 
 ### 1. Exact shell token matching produced false negatives

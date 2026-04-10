@@ -219,6 +219,12 @@ model WorkspaceSnapshot {
   updated_at?: string;
 }
 
+model ReplaySegment {
+  cols: int32;
+  rows: int32;
+  data: string; // base64 bytes
+}
+
 model EndpointCapabilities {
   protocol_version: string;
   agents_available: string[];
@@ -1279,6 +1285,7 @@ model AttachResultMessage {
   success: boolean;
   scrollback?: string;           // base64 bytes
   scrollback_truncated?: boolean;
+  replay_segments?: ReplaySegment[];
   screen_snapshot?: string;      // base64 ANSI replay of visible frame
   screen_rows?: int32;
   screen_cols?: int32;

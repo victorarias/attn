@@ -86,6 +86,49 @@ func ScreenSnapshotFromReplay(data []byte, cols, rows uint16) (ReplayScreenSnaps
 	}, true
 }
 
+func ScreenSnapshotFromReplaySegments(segments []ReplaySegment) (ReplayScreenSnapshot, bool) {
+	if len(segments) == 0 {
+		return ReplayScreenSnapshot{}, false
+	}
+
+	first := segments[0]
+	if first.Cols == 0 || first.Rows == 0 {
+		return ReplayScreenSnapshot{}, false
+	}
+
+	screen := newVirtualScreen(first.Cols, first.Rows)
+	currentCols := first.Cols
+	currentRows := first.Rows
+	for _, segment := range segments {
+		if len(segment.Data) == 0 {
+			continue
+		}
+		if segment.Cols == 0 || segment.Rows == 0 {
+			return ReplayScreenSnapshot{}, false
+		}
+		if segment.Cols != currentCols || segment.Rows != currentRows {
+			screen.Resize(segment.Cols, segment.Rows)
+			currentCols = segment.Cols
+			currentRows = segment.Rows
+		}
+		screen.Observe(segment.Data)
+	}
+
+	snap, ok := screen.Snapshot()
+	if !ok {
+		return ReplayScreenSnapshot{}, false
+	}
+
+	return ReplayScreenSnapshot{
+		Payload:       snap.payload,
+		Cols:          snap.cols,
+		Rows:          snap.rows,
+		CursorX:       snap.cursorX,
+		CursorY:       snap.cursorY,
+		CursorVisible: snap.cursorVisible,
+	}, true
+}
+
 func (v *virtualScreen) Observe(data []byte) {
 	if v == nil || len(data) == 0 {
 		return

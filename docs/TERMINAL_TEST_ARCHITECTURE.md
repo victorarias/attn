@@ -54,6 +54,8 @@ Purpose:
 Current initial scenarios:
 - `TR-101` via `scenario-tr101-claude-main-split.mjs`
 - `TR-102` via `scenario-tr102-claude-utility-split.mjs`
+- `TR-301` local Claude via `scenario-tr301-local-utility-session-switch.mjs`
+- `TR-401` local Claude via `scenario-tr401-local-window-resize.mjs`
 - `TR-402` local Codex via `scenario-tr402-local-close-redraw.mjs --agent codex`
 - `TR-402` local Claude via `scenario-tr402-local-close-redraw.mjs --agent claude`
 

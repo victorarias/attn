@@ -23,8 +23,14 @@ describe('terminalResizeLifecycle', () => {
       isVisible: true,
       hasIdleCallback: true,
     })).toEqual({
-      type: 'resize_both',
-      next: snapshot(120, 42),
+      cancelPendingX: true,
+      immediate: {
+        axis: 'both',
+        next: snapshot(120, 42),
+        reason: 'resize_both',
+      },
+      debouncedX: null,
+      idle: null,
     });
   });
 
@@ -37,10 +43,17 @@ describe('terminalResizeLifecycle', () => {
       isVisible: true,
       hasIdleCallback: true,
     })).toEqual({
-      type: 'resize_y_then_debounce_x',
-      rows: 42,
-      cols: 120,
-      diagnostics: null,
+      cancelPendingX: true,
+      immediate: {
+        axis: 'y',
+        next: snapshot(120, 42),
+        reason: 'resize_y',
+      },
+      debouncedX: {
+        cols: 120,
+        diagnostics: null,
+      },
+      idle: null,
     });
   });
 
@@ -53,8 +66,12 @@ describe('terminalResizeLifecycle', () => {
       isVisible: false,
       hasIdleCallback: true,
     })).toEqual({
-      type: 'idle_resize_both',
-      next: snapshot(120, 42),
+      cancelPendingX: false,
+      immediate: null,
+      debouncedX: null,
+      idle: {
+        reason: 'resize_both',
+      },
     });
   });
 
@@ -66,7 +83,10 @@ describe('terminalResizeLifecycle', () => {
       currentCols: 109,
       currentRows: 50,
     })).toEqual({
-      type: 'none',
+      cancelPendingX: false,
+      immediate: null,
+      debouncedX: null,
+      idle: null,
     });
   });
 
@@ -78,8 +98,34 @@ describe('terminalResizeLifecycle', () => {
       currentCols: 109,
       currentRows: 50,
     })).toEqual({
-      type: 'resize',
-      next: snapshot(120, 52),
+      cancelPendingX: true,
+      immediate: {
+        axis: 'both',
+        next: snapshot(120, 52),
+        reason: 'visibility_flush',
+      },
+      debouncedX: null,
+      idle: null,
+    });
+  });
+
+  it('preserves pending x work for row-only large-buffer changes', () => {
+    expect(planObservedTerminalResize({
+      next: snapshot(100, 42),
+      lastCols: 100,
+      lastRows: 40,
+      bufferLength: 500,
+      isVisible: true,
+      hasIdleCallback: true,
+    })).toEqual({
+      cancelPendingX: false,
+      immediate: {
+        axis: 'y',
+        next: snapshot(100, 42),
+        reason: 'resize_y',
+      },
+      debouncedX: null,
+      idle: null,
     });
   });
 });

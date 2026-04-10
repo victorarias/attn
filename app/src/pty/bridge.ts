@@ -41,8 +41,15 @@ export type PtyAttachPolicy =
 export type PtyDataEventSource =
   | 'attach_replay';
 
+export interface PtyReplaySegment {
+  cols: number;
+  rows: number;
+  data: string;
+}
+
 export type PtyEventPayload =
   | { event: 'data'; id: string; data: string; seq?: number; source?: PtyDataEventSource }
+  | { event: 'local_resize'; id: string; cols: number; rows: number; source?: PtyDataEventSource }
   | { event: 'exit'; id: string; code: number; signal?: string }
   | { event: 'error'; id: string; error: string }
   | { event: 'transcript'; id: string; matched: boolean }

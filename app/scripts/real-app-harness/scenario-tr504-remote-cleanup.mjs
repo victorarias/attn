@@ -82,6 +82,9 @@ async function main() {
     scenarioId: 'TR-504',
     tier: 'tier3-remote-real-agent',
     prefix: 'scenario-tr504-remote-cleanup',
+    preflightLaunchEnv: {
+      ATTN_PREFER_LOCAL_DAEMON: '1',
+    },
     metadata: {
       sshTarget: options.sshTarget,
       agent: options.remoteAgent,

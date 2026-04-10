@@ -1,27 +1,42 @@
 #!/usr/bin/env node
 
+import os from 'node:os';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
 
 const scenarioCatalog = [
   {
     id: 'tr205-codex',
     label: 'TR-205 remote codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],
+    preflightLaunchEnv: {
+      ATTN_PREFER_LOCAL_DAEMON: '1',
+    },
   },
   {
     id: 'tr205-claude',
     label: 'TR-205 remote claude',
     command: ['pnpm', 'run', 'real-app:scenario-tr205', '--', '--remote-agent', 'claude'],
+    preflightLaunchEnv: {
+      ATTN_PREFER_LOCAL_DAEMON: '1',
+    },
   },
   {
     id: 'tr502',
     label: 'TR-502 remote relaunch splits',
     command: ['pnpm', 'run', 'real-app:scenario-tr502'],
+    preflightLaunchEnv: {
+      ATTN_PREFER_LOCAL_DAEMON: '1',
+    },
   },
   {
     id: 'tr504',
     label: 'TR-504 remote cleanup',
     command: ['pnpm', 'run', 'real-app:scenario-tr504'],
+    preflightLaunchEnv: {
+      ATTN_PREFER_LOCAL_DAEMON: '1',
+    },
   },
   {
     id: 'tr402-local-codex',
@@ -34,6 +49,16 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-tr402-local-claude'],
   },
   {
+    id: 'tr301-local-claude',
+    label: 'TR-301 local claude utility focus',
+    command: ['pnpm', 'run', 'real-app:scenario-tr301'],
+  },
+  {
+    id: 'tr401-local-claude',
+    label: 'TR-401 local claude resize',
+    command: ['pnpm', 'run', 'real-app:scenario-tr401'],
+  },
+  {
     id: 'tr303-local-codex',
     label: 'TR-303 local codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr303-local-codex'],
@@ -42,6 +67,9 @@ const scenarioCatalog = [
 
 function parseArgs(argv) {
   const args = [...argv];
+  if (args[0] === '--') {
+    args.shift();
+  }
   const selected = [];
   let failFast = false;
   let timeoutMs = 120_000;
@@ -130,6 +158,20 @@ async function main() {
   }
 
   const scenarios = resolveScenarios(selected);
+  const appPath = process.env.ATTN_REAL_APP_PATH || path.join(os.homedir(), 'Applications', 'attn.app');
+  const preflightKeys = new Set();
+  for (const scenario of scenarios) {
+    const preflightLaunchEnv = scenario.preflightLaunchEnv || null;
+    const preflightKey = JSON.stringify(preflightLaunchEnv || {});
+    if (preflightKeys.has(preflightKey)) {
+      continue;
+    }
+    preflightKeys.add(preflightKey);
+    assertPackagedAppBuildMatchesCurrentSource({
+      appPath,
+      launchEnv: preflightLaunchEnv,
+    });
+  }
   const results = [];
 
   for (const scenario of scenarios) {

@@ -7,6 +7,7 @@ import { MAIN_TERMINAL_PANE_ID } from '../store/sessions';
 import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId } from '../shortcuts';
+import { APP_BUILD_IDENTITY } from '../buildIdentity';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
 import { getAllResizeEvents } from '../utils/terminalDebug';
@@ -1134,6 +1135,7 @@ export function useUiAutomationBridge({
           activeSessionId,
           daemonReady,
           connectionError,
+          appBuild: APP_BUILD_IDENTITY,
           sessions: sessions.map((session) => serializeSession(session, getActivePaneIdForSession)),
         };
       case 'capture_screenshot_data':

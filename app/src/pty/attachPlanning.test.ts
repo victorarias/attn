@@ -62,6 +62,26 @@ describe('attachPlanning', () => {
     expect(plan.replayPreference).toBe('prefer_raw_scrollback');
   });
 
+  it('treats segmented raw replay as available raw replay for Codex relaunch restores', () => {
+    const plan = classifyAttachReplay({
+      cols: 58,
+      rows: 46,
+      replay_segments: [
+        { cols: 118, rows: 48, data: 'wide' },
+        { cols: 58, rows: 46, data: 'narrow' },
+      ],
+      screen_cols: 58,
+      screen_rows: 46,
+      screen_snapshot: 'snapshot',
+      screen_snapshot_fresh: true,
+    }, createAttachRequestContext({ cols: 58, rows: 46, agent: 'codex' }, 'relaunch_restore'));
+
+    expect(plan.replayKind).toBe('scrollback');
+    expect(plan.replayApplied).toBe(true);
+    expect(plan.availableRawScrollback).toBe(true);
+    expect(plan.screenSnapshotSuppressed).toBe(true);
+  });
+
   it('keeps screen snapshot replay for Claude relaunch restores', () => {
     const plan = classifyAttachReplay({
       cols: 58,
@@ -276,6 +296,38 @@ describe('attachPlanning', () => {
       { data: 'noseq' },
     ]);
     expect(effects.nextSeq).toBe(11);
+  });
+
+  it('plans segmented raw replay when replay segments are present', () => {
+    const replayPlan = classifyAttachReplay({
+      cols: 58,
+      rows: 46,
+      replay_segments: [
+        { cols: 118, rows: 48, data: 'wide' },
+        { cols: 58, rows: 46, data: 'narrow' },
+      ],
+    }, createAttachRequestContext({ cols: 58, rows: 46, agent: 'codex' }, 'relaunch_restore'));
+
+    const effects = planAttachResultEffects({
+      attachResult: {
+        last_seq: 97,
+        replay_segments: [
+          { cols: 118, rows: 48, data: 'wide' },
+          { cols: 58, rows: 46, data: 'narrow' },
+        ],
+      },
+      replayPlan,
+      previousSeq: 96,
+    });
+
+    expect(effects.replayAction).toEqual({
+      kind: 'scrollback_segments',
+      replayKind: 'scrollback',
+      segments: [
+        { cols: 118, rows: 48, data: 'wide' },
+        { cols: 58, rows: 46, data: 'narrow' },
+      ],
+    });
   });
 
   it('warns on truncated raw Codex restore without a screen snapshot', () => {

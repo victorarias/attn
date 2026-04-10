@@ -118,6 +118,34 @@ const PTY_RESIZE_BURST_GAP_MS = 180;
 const MAX_RECENT_PTY_RESIZES = 12;
 const MAX_PTY_RESIZE_BURSTS = 4;
 
+function filterRuntimeTimelineEvents(
+  events: TerminalRuntimeLogEvent[],
+  runtimeIds: Set<string> | null,
+) {
+  const filtered: TerminalRuntimeLogEvent[] = [];
+  let previousAt = '';
+  let outOfOrder = false;
+
+  for (const event of events) {
+    if (runtimeIds && runtimeIds.size > 0) {
+      if (typeof event.runtimeId !== 'string' || !runtimeIds.has(event.runtimeId)) {
+        continue;
+      }
+    }
+    filtered.push(event);
+    if (previousAt && event.at.localeCompare(previousAt) < 0) {
+      outOfOrder = true;
+    }
+    previousAt = event.at;
+  }
+
+  if (outOfOrder) {
+    filtered.sort((left, right) => left.at.localeCompare(right.at));
+  }
+
+  return filtered;
+}
+
 function asMs(earlier: string | null, later: string | null): number | null {
   if (!earlier || !later) {
     return null;
@@ -227,14 +255,7 @@ export function buildRuntimeTimelineSnapshot({
   pty,
   runtimeIds = null,
 }: RuntimeTimelineBuilderInput): RuntimeTimelineSnapshot {
-  const filteredEvents = events
-    .filter((event) => {
-      if (!runtimeIds || runtimeIds.size === 0) {
-        return true;
-      }
-      return typeof event.runtimeId === 'string' && runtimeIds.has(event.runtimeId);
-    })
-    .sort((left, right) => left.at.localeCompare(right.at));
+  const filteredEvents = filterRuntimeTimelineEvents(events, runtimeIds);
 
   const summaries = new Map<string, MutableRuntimeTimelineSummary>();
 

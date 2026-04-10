@@ -80,6 +80,9 @@ async function main() {
     scenarioId: 'TR-502',
     tier: 'tier3-remote-real-agent',
     prefix: 'scenario-tr502-remote-relaunch-splits',
+    preflightLaunchEnv: {
+      ATTN_PREFER_LOCAL_DAEMON: '1',
+    },
     metadata: {
       sshTarget: options.sshTarget,
       agent: options.remoteAgent,
@@ -185,6 +188,13 @@ async function main() {
         result.sessionId,
         (workspace) => (workspace.panes || []).length >= 1,
         `initial workspace for ${result.sessionId}`,
+        30_000,
+      );
+      await waitForSessionWorkspace(
+        client,
+        result.sessionId,
+        (workspace) => (workspace.panes || []).length >= 1,
+        `frontend workspace for ${result.sessionId}`,
         30_000,
       );
       return result.sessionId;
@@ -305,6 +315,16 @@ async function main() {
       await client.waitForManifest(20_000);
       await client.waitForReady(20_000);
       await client.waitForFrontendResponsive(20_000);
+      await waitForSessionWorkspace(
+        client,
+        sessionId,
+        (workspace) => {
+          const paneIds = new Set((workspace.panes || []).map((pane) => pane.paneId));
+          return paneIds.has('main') && paneIds.has(initialShellPaneId);
+        },
+        `frontend workspace after relaunch for ${sessionId}`,
+        45_000,
+      );
       await client.request('select_session', { sessionId });
       await waitForPaneVisible(client, sessionId, 'main', 30_000);
       await waitForPaneVisible(client, sessionId, initialShellPaneId, 30_000);

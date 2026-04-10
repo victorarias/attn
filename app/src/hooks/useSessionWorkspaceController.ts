@@ -10,6 +10,8 @@ interface SessionWorkspaceController {
   eventRouter: ReturnType<typeof usePaneRuntimeEventRouter>;
   getActivePaneIdForSession: (session: Session | undefined | null) => string;
   setActivePane: (sessionId: string, paneId: string) => void;
+  prepareClosePaneFocus: (sessionId: string, paneId: string) => string;
+  clearPreparedClosePaneFocus: (sessionId: string) => void;
   setWorkspaceRef: (sessionId: string) => (ref: SessionTerminalWorkspaceHandle | null) => void;
   removeWorkspaceRef: (sessionId: string) => void;
   focusSessionPane: (sessionId: string, paneId: string, retries?: number) => void;
@@ -32,7 +34,12 @@ export function useSessionWorkspaceController(
 ): SessionWorkspaceController {
   const workspaceRefs = useRef<Map<string, SessionTerminalWorkspaceHandle>>(new Map());
   const eventRouter = usePaneRuntimeEventRouter();
-  const { getActivePaneIdForSession, setActivePane } = useSessionWorkspaceViewState(sessions);
+  const {
+    getActivePaneIdForSession,
+    setActivePane,
+    prepareClosePaneFocus: prepareClosePaneFocusForSession,
+    clearPreparedClosePaneFocus,
+  } = useSessionWorkspaceViewState(sessions);
 
   useWorkspaceDebugHarness({
     sessions,
@@ -55,6 +62,11 @@ export function useSessionWorkspaceController(
   const removeWorkspaceRef = useCallback((sessionId: string) => {
     workspaceRefs.current.delete(sessionId);
   }, []);
+
+  const prepareClosePaneFocus = useCallback((sessionId: string, paneId: string) => {
+    const session = sessions.find((entry) => entry.id === sessionId);
+    return prepareClosePaneFocusForSession(session, paneId);
+  }, [prepareClosePaneFocusForSession, sessions]);
 
   const focusSessionPane = useCallback((sessionId: string, paneId: string, retries = 20) => {
     workspaceRefs.current.get(sessionId)?.focusPane(paneId, retries);
@@ -128,6 +140,8 @@ export function useSessionWorkspaceController(
     eventRouter,
     getActivePaneIdForSession,
     setActivePane,
+    prepareClosePaneFocus,
+    clearPreparedClosePaneFocus,
     setWorkspaceRef,
     removeWorkspaceRef,
     focusSessionPane,

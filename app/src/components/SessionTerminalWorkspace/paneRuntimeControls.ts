@@ -51,7 +51,7 @@ export function createPaneRuntimeControls({
           paneId,
           runtimeId: pane?.runtimeId,
           message: 'focus via terminal handle succeeded',
-          details: activeElementSummary(),
+          details: activeElementSummary,
         });
         recordTerminalRuntimeLog({
           category: 'focus',
@@ -60,7 +60,7 @@ export function createPaneRuntimeControls({
           paneId,
           runtimeId: pane?.runtimeId,
           message: 'focus acquired via terminal handle',
-          details: activeElementSummary(),
+          details: activeElementSummary,
         });
         return;
       }
@@ -71,7 +71,7 @@ export function createPaneRuntimeControls({
           paneId,
           runtimeId: pane?.runtimeId,
           message: 'focus via xterm fallback',
-          details: activeElementSummary(),
+          details: activeElementSummary,
         });
         recordTerminalRuntimeLog({
           category: 'focus',
@@ -80,7 +80,7 @@ export function createPaneRuntimeControls({
           paneId,
           runtimeId: pane?.runtimeId,
           message: 'focus acquired via xterm fallback',
-          details: activeElementSummary(),
+          details: activeElementSummary,
         });
         return;
       }
@@ -91,7 +91,7 @@ export function createPaneRuntimeControls({
           paneId,
           runtimeId: pane?.runtimeId,
           message: 'focus retries exhausted',
-          details: activeElementSummary(),
+          details: activeElementSummary,
         });
         return;
       }

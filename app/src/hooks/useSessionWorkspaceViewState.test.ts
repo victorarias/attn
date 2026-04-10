@@ -99,4 +99,107 @@ describe('useSessionWorkspaceViewState', () => {
 
     expect(result.current.getActivePaneIdForSession(updated)).toBe('pane-b');
   });
+
+  it('restores focus to the previously active pane after closing the current pane', () => {
+    const initial = buildSession({
+      workspace: {
+        terminals: [
+          { id: 'pane-a', ptyId: 'runtime-a', title: 'Shell 1' },
+          { id: 'pane-b', ptyId: 'runtime-b', title: 'Shell 2' },
+        ],
+        layoutTree: {
+          type: 'split',
+          splitId: 'root',
+          direction: 'vertical',
+          ratio: 2 / 3,
+          children: [
+            {
+              type: 'split',
+              splitId: 'left',
+              direction: 'vertical',
+              ratio: 0.5,
+              children: [
+                { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+                { type: 'pane', paneId: 'pane-a' },
+              ],
+            },
+            { type: 'pane', paneId: 'pane-b' },
+          ],
+        },
+      },
+      daemonActivePaneId: 'pane-b',
+    });
+
+    const { result, rerender } = renderHook(({ sessions }) => useSessionWorkspaceViewState(sessions), {
+      initialProps: { sessions: [initial] },
+    });
+
+    act(() => {
+      result.current.setActivePane(initial.id, 'pane-a');
+      result.current.setActivePane(initial.id, 'pane-b');
+      result.current.prepareClosePaneFocus(initial, 'pane-b');
+    });
+
+    const updated = buildSession({
+      id: initial.id,
+      workspace: {
+        terminals: [{ id: 'pane-a', ptyId: 'runtime-a', title: 'Shell 1' }],
+        layoutTree: {
+          type: 'split',
+          splitId: 'root',
+          direction: 'vertical',
+          ratio: 0.5,
+          children: [
+            { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+            { type: 'pane', paneId: 'pane-a' },
+          ],
+        },
+      },
+      daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+    });
+
+    rerender({ sessions: [updated] });
+
+    expect(result.current.getActivePaneIdForSession(updated)).toBe('pane-a');
+  });
+
+  it('falls back to the left pane when closing the current pane without prior pane history', () => {
+    const initial = buildSession({
+      workspace: {
+        terminals: [{ id: 'pane-b', ptyId: 'runtime-b', title: 'Shell 2' }],
+        layoutTree: {
+          type: 'split',
+          splitId: 'root',
+          direction: 'vertical',
+          ratio: 0.5,
+          children: [
+            { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+            { type: 'pane', paneId: 'pane-b' },
+          ],
+        },
+      },
+      daemonActivePaneId: 'pane-b',
+    });
+
+    const { result, rerender } = renderHook(({ sessions }) => useSessionWorkspaceViewState(sessions), {
+      initialProps: { sessions: [initial] },
+    });
+
+    act(() => {
+      result.current.prepareClosePaneFocus(initial, 'pane-b');
+    });
+
+    const updated = buildSession({
+      id: initial.id,
+      workspace: {
+        terminals: [],
+        layoutTree: { type: 'pane', paneId: MAIN_TERMINAL_PANE_ID },
+      },
+      daemonActivePaneId: MAIN_TERMINAL_PANE_ID,
+    });
+
+    rerender({ sessions: [updated] });
+
+    expect(result.current.getActivePaneIdForSession(updated)).toBe(MAIN_TERMINAL_PANE_ID);
+  });
 });
