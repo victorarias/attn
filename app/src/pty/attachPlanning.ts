@@ -97,7 +97,7 @@ export function classifyAttachReplay(
   const replayPreference = context?.replayPreference ?? 'default';
   const prefersRawScrollback = replayPreference === 'prefer_raw_scrollback'
     && context?.policy === 'relaunch_restore';
-  const screenSnapshotSuppressed = availableScreenSnapshot && prefersRawScrollback;
+  const screenSnapshotSuppressed = availableScreenSnapshot && availableRawScrollback && prefersRawScrollback;
   const hasScreenSnapshot = availableScreenSnapshot && !screenSnapshotSuppressed;
   const hasReplayPayload = Boolean((hasScreenSnapshot && data.screen_snapshot) || data.scrollback);
   const replayKind = hasScreenSnapshot
@@ -159,7 +159,6 @@ export function planAttachedRuntimeGeometry(
   attachResult: AttachGeometryData,
   options: {
     attachPolicy: PtyAttachPolicy;
-    forceShellRedraw?: boolean;
     attachContext?: AttachRequestContext;
   },
 ) {
@@ -178,14 +177,6 @@ export function planAttachedRuntimeGeometry(
     : hasRawScrollbackReplay
       ? ptyGeometryMatches
       : false;
-  const shouldRedrawNonShellAttach = !args.shell && (
-    options.attachPolicy === 'same_app_remount'
-    || (options.attachPolicy === 'relaunch_restore' && hasScreenSnapshotReplay)
-  );
-  const redrawRequired = Boolean(
-    options.forceShellRedraw ||
-    shouldRedrawNonShellAttach
-  );
   const resizeRequired = !ptyGeometryMatches;
 
   return {
@@ -207,10 +198,8 @@ export function planAttachedRuntimeGeometry(
     replayPreference: replayPlan.replayPreference,
     agent: replayPlan.agent,
     resizeRequired,
-    redrawRequired,
-    strategy: resizeRequired ? 'resize' : redrawRequired ? 'redraw' : 'none',
+    strategy: resizeRequired ? 'resize' : 'none',
     attachPolicy: options.attachPolicy,
-    forceShellRedraw: options.forceShellRedraw ?? false,
   };
 }
 

@@ -26,6 +26,7 @@ import (
 	"github.com/victorarias/attn/internal/github/mockserver"
 	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/workspace"
@@ -1513,14 +1514,23 @@ func TestDaemon_HandleAttachSession_OmitsScrollbackWhenFreshSnapshotIsAvailable(
 func TestDaemon_HandleAttachSession_PrefersBoundedRawReplayForStoredAgentSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeAttachBackend{}
-	raw := bytes.Repeat([]byte("codex-replay-chunk-"), (maxAgentRawReplayBytes/18)+32)
+	raw := []byte("\x1b[H\x1b[2JOpenAI Codex\r\n\r\nRun /review on my current changes\r\n\r\n  gpt-5.4 high · 100% left · ~")
+	snapshot, ok := pty.ScreenSnapshotFromReplay(raw, 58, 46)
+	if !ok {
+		t.Fatal("expected raw replay to derive a snapshot")
+	}
 	backend.SetAttachInfo(ptybackend.AttachInfo{
 		Running:             true,
 		Scrollback:          raw,
-		ScreenSnapshot:      []byte("\x1b[2Jsnapshot"),
+		Cols:                58,
+		Rows:                46,
+		ScreenSnapshot:      snapshot.Payload,
 		ScreenSnapshotFresh: true,
-		ScreenCols:          58,
-		ScreenRows:          46,
+		ScreenCols:          snapshot.Cols,
+		ScreenRows:          snapshot.Rows,
+		ScreenCursorX:       snapshot.CursorX,
+		ScreenCursorY:       snapshot.CursorY,
+		ScreenCursorVisible: snapshot.CursorVisible,
 	})
 	d.ptyBackend = backend
 	d.store.Add(&protocol.Session{
@@ -1554,21 +1564,102 @@ func TestDaemon_HandleAttachSession_PrefersBoundedRawReplayForStoredAgentSession
 			t.Fatal("expected screen snapshot to be omitted for stored agent session replay")
 		}
 		if protocol.Deref(result.Scrollback) == "" {
-			t.Fatal("expected bounded raw replay to be present")
+			t.Fatal("expected raw replay to be present")
 		}
-		if !protocol.Deref(result.ScrollbackTruncated) {
-			t.Fatal("expected bounded raw replay to be marked truncated")
+		if protocol.Deref(result.ScrollbackTruncated) {
+			t.Fatal("expected self-contained raw replay to remain untruncated")
 		}
 		decoded, err := base64.StdEncoding.DecodeString(protocol.Deref(result.Scrollback))
 		if err != nil {
 			t.Fatalf("decode scrollback replay: %v", err)
 		}
-		if len(decoded) != maxAgentRawReplayBytes {
-			t.Fatalf("decoded raw replay bytes = %d, want %d", len(decoded), maxAgentRawReplayBytes)
+		if !bytes.Equal(decoded, raw) {
+			t.Fatal("expected raw replay to preserve the self-contained PTY history")
 		}
-		expectedTail := raw[len(raw)-maxAgentRawReplayBytes:]
-		if !bytes.Equal(decoded, expectedTail) {
-			t.Fatal("expected raw replay to contain the bounded tail of PTY history")
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for attach_result")
+	}
+}
+
+func TestDaemon_HandleAttachSession_FallsBackToFreshSnapshotWhenStoredCodexRawReplayDiverges(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+
+	liveFrame := []byte("\x1b[H\x1b[2JOpenAI Codex\r\n\r\nTip: stable header\r\n\r\n› Run /review on my current changes\r\n\r\n  gpt-5.4 high · 100% left · ~")
+	liveSnapshot, ok := pty.ScreenSnapshotFromReplay(liveFrame, 58, 46)
+	if !ok {
+		t.Fatal("expected live frame to derive a snapshot")
+	}
+
+	raw := append(
+		bytes.Repeat([]byte("codex-replay-chunk-"), (maxAgentRawReplayBytes/18)+32),
+		append(
+			liveFrame,
+			[]byte("\x1b[1;1H\x1b[J \r\n› Run /review on my current changes\r\n \r\n  gpt-5.4 high · 100% left · ~")...,
+		)...,
+	)
+	boundedTail, _ := limitReplayTail(raw, maxAgentRawReplayBytes)
+	derivedFromRaw, ok := pty.ScreenSnapshotFromReplay(boundedTail, 58, 46)
+	if !ok {
+		t.Fatal("expected divergent bounded raw replay tail to derive a snapshot")
+	}
+	if bytes.Equal(derivedFromRaw.Payload, liveSnapshot.Payload) {
+		t.Fatal("expected bounded raw replay tail to diverge from the fresh live snapshot")
+	}
+
+	backend.SetAttachInfo(ptybackend.AttachInfo{
+		Running:             true,
+		Scrollback:          raw,
+		Cols:                58,
+		Rows:                46,
+		ScreenSnapshot:      liveSnapshot.Payload,
+		ScreenSnapshotFresh: true,
+		ScreenCols:          liveSnapshot.Cols,
+		ScreenRows:          liveSnapshot.Rows,
+		ScreenCursorX:       liveSnapshot.CursorX,
+		ScreenCursorY:       liveSnapshot.CursorY,
+		ScreenCursorVisible: liveSnapshot.CursorVisible,
+	})
+	d.ptyBackend = backend
+	d.store.Add(&protocol.Session{
+		ID:             "sess-1",
+		Label:          "attn",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     time.Now().UTC().Format(time.RFC3339),
+		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		LastSeen:       time.Now().UTC().Format(time.RFC3339),
+	})
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.AttachResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode attach_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
+		}
+		if result.Scrollback != nil {
+			t.Fatal("expected divergent Codex raw replay to be omitted")
+		}
+		if protocol.Deref(result.ScreenSnapshot) == "" {
+			t.Fatal("expected fresh screen snapshot to be present when raw replay diverges")
+		}
+		decoded, err := base64.StdEncoding.DecodeString(protocol.Deref(result.ScreenSnapshot))
+		if err != nil {
+			t.Fatalf("decode screen snapshot: %v", err)
+		}
+		if !bytes.Equal(decoded, liveSnapshot.Payload) {
+			t.Fatal("expected attach_result to keep the fresh live snapshot")
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for attach_result")

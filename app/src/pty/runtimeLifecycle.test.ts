@@ -22,7 +22,6 @@ function createOperations(): SpawnPtyRuntimeOperations & {
   attachFreshRuntime: ReturnType<typeof vi.fn<SpawnPtyRuntimeOperations['attachFreshRuntime']>>;
   spawnRuntime: ReturnType<typeof vi.fn<SpawnPtyRuntimeOperations['spawnRuntime']>>;
   resizeRuntime: ReturnType<typeof vi.fn<SpawnPtyRuntimeOperations['resizeRuntime']>>;
-  redrawRuntime: ReturnType<typeof vi.fn<SpawnPtyRuntimeOperations['redrawRuntime']>>;
   logClaudeResumeRecovery: ReturnType<typeof vi.fn<NonNullable<SpawnPtyRuntimeOperations['logClaudeResumeRecovery']>>>;
   logKnownWorkspaceRespawn: ReturnType<typeof vi.fn<NonNullable<SpawnPtyRuntimeOperations['logKnownWorkspaceRespawn']>>>;
 } {
@@ -31,7 +30,6 @@ function createOperations(): SpawnPtyRuntimeOperations & {
     attachFreshRuntime: vi.fn<SpawnPtyRuntimeOperations['attachFreshRuntime']>(),
     spawnRuntime: vi.fn<SpawnPtyRuntimeOperations['spawnRuntime']>(),
     resizeRuntime: vi.fn<SpawnPtyRuntimeOperations['resizeRuntime']>(),
-    redrawRuntime: vi.fn<SpawnPtyRuntimeOperations['redrawRuntime']>(),
     logClaudeResumeRecovery: vi.fn<NonNullable<SpawnPtyRuntimeOperations['logClaudeResumeRecovery']>>(),
     logKnownWorkspaceRespawn: vi.fn<NonNullable<SpawnPtyRuntimeOperations['logKnownWorkspaceRespawn']>>(),
   };
@@ -83,7 +81,7 @@ describe('runtimeLifecycle', () => {
 
     expect(operations.attachExistingRuntime).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'runtime-1', shell: true }),
-      { policy: 'relaunch_restore', forceShellRedraw: true },
+      { policy: 'relaunch_restore' },
     );
     expect(operations.spawnRuntime).not.toHaveBeenCalled();
     expect(operations.attachFreshRuntime).not.toHaveBeenCalled();
@@ -174,7 +172,7 @@ describe('runtimeLifecycle', () => {
     expect(operations.attachFreshRuntime).not.toHaveBeenCalled();
   });
 
-  it('bootstraps fresh shell spawns, tolerates already-exists races, and redraws after attach', async () => {
+  it('bootstraps fresh shell spawns and tolerates already-exists races without an attach redraw', async () => {
     const operations = createOperations();
     operations.spawnRuntime.mockRejectedValueOnce(new Error('session already exists'));
 
@@ -192,6 +190,5 @@ describe('runtimeLifecycle', () => {
     expect(operations.attachFreshRuntime).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'runtime-1', shell: true }),
     );
-    expect(operations.redrawRuntime).toHaveBeenCalledWith('runtime-1', 80, 24, 'fresh_shell_attach');
   });
 });

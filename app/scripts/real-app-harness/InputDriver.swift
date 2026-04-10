@@ -318,10 +318,35 @@ func keystroke(for character: Character) throws -> (CGKeyCode, [String]) {
 }
 
 func postText(_ text: String) throws {
-    for character in text {
-        let (keyCode, modifiers) = try keystroke(for: character)
-        try postKeyCode(keyCode, modifiers: modifiers)
-        Thread.sleep(forTimeInterval: 0.01)
+    let pasteboard = NSPasteboard.general
+    let previousString = pasteboard.string(forType: .string)
+    let pasteRestoreDelay: TimeInterval = 0.3
+
+    pasteboard.clearContents()
+    guard pasteboard.setString(text, forType: .string) else {
+        throw DriverError.eventCreationFailed("Failed to stage text on the system pasteboard.")
+    }
+
+    do {
+        try postKeyCode(try virtualKeyCode(for: "v"), modifiers: ["command"])
+        // AppKit paste dispatch is asynchronous; keep the staged contents alive
+        // long enough for the target terminal to consume the paste payload.
+        Thread.sleep(forTimeInterval: pasteRestoreDelay)
+    } catch {
+        if let previousString {
+            pasteboard.clearContents()
+            _ = pasteboard.setString(previousString, forType: .string)
+        } else {
+            pasteboard.clearContents()
+        }
+        throw error
+    }
+
+    if let previousString {
+        pasteboard.clearContents()
+        _ = pasteboard.setString(previousString, forType: .string)
+    } else {
+        pasteboard.clearContents()
     }
 }
 

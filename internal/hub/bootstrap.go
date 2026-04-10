@@ -19,6 +19,7 @@ import (
 const githubRepo = "victorarias/attn"
 
 const remoteDaemonReadyTimeout = 35 * time.Second
+const remoteHarnessRootMarker = "/.attn/harness/"
 
 type RemotePlatform struct {
 	GOOS         string
@@ -452,6 +453,20 @@ pid_path="$(dirname "$socket_path")/attn.pid"
 `
 }
 
+func isRemoteHarnessOverridePath(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	return strings.Contains(trimmed, remoteHarnessRootMarker) || strings.Contains(trimmed, "~"+remoteHarnessRootMarker)
+}
+
+func remoteHarnessCleanupEnabled() bool {
+	return isRemoteHarnessOverridePath(os.Getenv("ATTN_REMOTE_SOCKET_PATH")) ||
+		isRemoteHarnessOverridePath(os.Getenv("ATTN_REMOTE_DB_PATH")) ||
+		isRemoteHarnessOverridePath(os.Getenv("ATTN_REMOTE_ATTN_BIN"))
+}
+
 type remoteDaemonState struct {
 	Running  bool
 	Starting bool
@@ -568,6 +583,36 @@ nohup setsid "$ATTN_BIN" daemon </dev/null >>~/.attn/daemon.log 2>&1 &
 		sshTarget,
 		launchScript,
 	)
+	return err
+}
+
+func (b *Bootstrapper) StopRemoteDaemon(ctx context.Context, sshTarget string) error {
+	if !remoteHarnessCleanupEnabled() {
+		return nil
+	}
+	stopScript := remoteSocketConfigScript() + `
+listener_pid="$(ss -H -ltnp "( sport = :${ATTN_WS_PORT:-9849} )" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
+pid_file_pid=""
+if [ -f "$pid_path" ]; then
+  pid_file_pid="$(cat "$pid_path" 2>/dev/null || true)"
+fi
+seen_pids=""
+for pid in "$listener_pid" "$pid_file_pid"; do
+  [ -n "$pid" ] || continue
+  case " $seen_pids " in
+    *" $pid "*) continue ;;
+  esac
+  seen_pids="$seen_pids $pid"
+  kill "$pid" 2>/dev/null || true
+done
+sleep 0.5
+for pid in $seen_pids; do
+  kill -0 "$pid" 2>/dev/null || continue
+  kill -9 "$pid" 2>/dev/null || true
+done
+rm -f "$socket_path" "$pid_path"
+`
+	_, err := runSSH(ctx, sshTarget, stopScript)
 	return err
 }
 

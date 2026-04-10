@@ -32,12 +32,28 @@ export function shellPanes(workspace) {
   return (workspace?.panes || []).filter((pane) => pane.kind === 'shell');
 }
 
+function isRetryableAutomationAbsence(error) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return message.includes('Session not found') || message.includes('Pane not found');
+}
+
 export async function waitForPaneState(client, sessionId, paneId, predicate, description, timeoutMs = 20_000) {
   const startedAt = Date.now();
   let lastState = null;
+  let lastError = null;
 
   while (Date.now() - startedAt < timeoutMs) {
-    lastState = await client.request('get_pane_state', { sessionId, paneId }, { timeoutMs: 20_000 });
+    try {
+      lastState = await client.request('get_pane_state', { sessionId, paneId }, { timeoutMs: 20_000 });
+      lastError = null;
+    } catch (error) {
+      if (!isRetryableAutomationAbsence(error)) {
+        throw error;
+      }
+      lastError = error;
+      await sleep(200);
+      continue;
+    }
     if (predicate(lastState)) {
       return lastState;
     }
@@ -45,7 +61,7 @@ export async function waitForPaneState(client, sessionId, paneId, predicate, des
   }
 
   throw new Error(
-    `Timed out waiting for ${description}. Last pane state:\n${JSON.stringify(lastState, null, 2)}`
+    `Timed out waiting for ${description}. Last request error: ${lastError instanceof Error ? lastError.message : 'none'}\nLast pane state:\n${JSON.stringify(lastState, null, 2)}`
   );
 }
 
@@ -82,8 +98,14 @@ export async function scrollPaneToTop(client, sessionId, paneId, timeoutMs = 12_
   );
 }
 
-export async function waitForPaneInputFocus(client, sessionId, paneId, timeoutMs = 12_000) {
-  return waitForPaneState(
+export async function waitForPaneInputFocus(
+  client,
+  sessionId,
+  paneId,
+  timeoutMs = 12_000,
+  { stableMs = 0 } = {},
+) {
+  const focusedState = await waitForPaneState(
     client,
     sessionId,
     paneId,
@@ -91,14 +113,39 @@ export async function waitForPaneInputFocus(client, sessionId, paneId, timeoutMs
     `pane ${paneId} input focus`,
     timeoutMs,
   );
+
+  if (stableMs <= 0) {
+    return focusedState;
+  }
+
+  await sleep(stableMs);
+  return waitForPaneState(
+    client,
+    sessionId,
+    paneId,
+    (state) => Boolean(state?.inputFocused),
+    `pane ${paneId} stable input focus`,
+    Math.max(1_000, timeoutMs),
+  );
 }
 
 export async function waitForPaneText(client, sessionId, paneId, predicate, description, timeoutMs = 15_000) {
   const startedAt = Date.now();
   let lastPayload = null;
+  let lastError = null;
 
   while (Date.now() - startedAt < timeoutMs) {
-    lastPayload = await client.request('read_pane_text', { sessionId, paneId }, { timeoutMs: 20_000 });
+    try {
+      lastPayload = await client.request('read_pane_text', { sessionId, paneId }, { timeoutMs: 20_000 });
+      lastError = null;
+    } catch (error) {
+      if (!isRetryableAutomationAbsence(error)) {
+        throw error;
+      }
+      lastError = error;
+      await sleep(200);
+      continue;
+    }
     if (predicate(lastPayload?.text || '')) {
       return lastPayload;
     }
@@ -106,7 +153,7 @@ export async function waitForPaneText(client, sessionId, paneId, predicate, desc
   }
 
   throw new Error(
-    `Timed out waiting for ${description}. Last pane text tail:\n${(lastPayload?.text || '').slice(-800)}`
+    `Timed out waiting for ${description}. Last request error: ${lastError instanceof Error ? lastError.message : 'none'}\nLast pane text tail:\n${(lastPayload?.text || '').slice(-800)}`
   );
 }
 
@@ -120,9 +167,20 @@ export async function waitForPaneTextChange(
 ) {
   const startedAt = Date.now();
   let lastPayload = null;
+  let lastError = null;
 
   while (Date.now() - startedAt < timeoutMs) {
-    lastPayload = await client.request('read_pane_text', { sessionId, paneId }, { timeoutMs: 20_000 });
+    try {
+      lastPayload = await client.request('read_pane_text', { sessionId, paneId }, { timeoutMs: 20_000 });
+      lastError = null;
+    } catch (error) {
+      if (!isRetryableAutomationAbsence(error)) {
+        throw error;
+      }
+      lastError = error;
+      await sleep(200);
+      continue;
+    }
     const nextText = typeof lastPayload?.text === 'string' ? lastPayload.text : '';
     if (nextText !== previousText) {
       return lastPayload;
@@ -131,16 +189,27 @@ export async function waitForPaneTextChange(
   }
 
   throw new Error(
-    `Timed out waiting for ${description}. Last pane text tail:\n${(lastPayload?.text || '').slice(-800)}`
+    `Timed out waiting for ${description}. Last request error: ${lastError instanceof Error ? lastError.message : 'none'}\nLast pane text tail:\n${(lastPayload?.text || '').slice(-800)}`
   );
 }
 
 export async function waitForSessionWorkspace(client, sessionId, predicate, description, timeoutMs = 20_000) {
   const startedAt = Date.now();
   let lastWorkspace = null;
+  let lastError = null;
 
   while (Date.now() - startedAt < timeoutMs) {
-    lastWorkspace = await client.request('get_workspace', { sessionId }, { timeoutMs: 20_000 });
+    try {
+      lastWorkspace = await client.request('get_workspace', { sessionId }, { timeoutMs: 20_000 });
+      lastError = null;
+    } catch (error) {
+      if (!isRetryableAutomationAbsence(error)) {
+        throw error;
+      }
+      lastError = error;
+      await sleep(200);
+      continue;
+    }
     if (predicate(lastWorkspace)) {
       return lastWorkspace;
     }
@@ -148,7 +217,7 @@ export async function waitForSessionWorkspace(client, sessionId, predicate, desc
   }
 
   throw new Error(
-    `Timed out waiting for ${description}. Last workspace:\n${JSON.stringify(lastWorkspace, null, 2)}`
+    `Timed out waiting for ${description}. Last request error: ${lastError instanceof Error ? lastError.message : 'none'}\nLast workspace:\n${JSON.stringify(lastWorkspace, null, 2)}`
   );
 }
 
@@ -229,11 +298,13 @@ function visibleContentAnchorLines(
   {
     maxAnchors = 6,
     minLineLength = 6,
+    ignoreAnchorPatterns = [],
   } = {},
 ) {
   return (visibleContent?.lines || [])
     .map((line) => String(line || '').trim())
     .filter((line) => line.length >= minLineLength)
+    .filter((line) => ignoreAnchorPatterns.every((pattern) => !pattern.test(line)))
     .slice(0, maxAnchors);
 }
 
@@ -248,6 +319,7 @@ export async function assertPaneVisibleContentPreserved(
     maxAnchors = 6,
     minAnchorMatches = 3,
     minLineLength = 6,
+    ignoreAnchorPatterns = [],
     timeoutMs = 20_000,
     description = `pane ${paneId} visible content preserved`,
   } = {},
@@ -257,7 +329,11 @@ export async function assertPaneVisibleContentPreserved(
   }
 
   const baselineSummary = baselineVisibleContent.summary || {};
-  const anchors = visibleContentAnchorLines(baselineVisibleContent, { maxAnchors, minLineLength });
+  const anchors = visibleContentAnchorLines(baselineVisibleContent, {
+    maxAnchors,
+    minLineLength,
+    ignoreAnchorPatterns,
+  });
   const requiredAnchorMatches = Math.min(Math.max(1, minAnchorMatches), Math.max(1, anchors.length));
   const requiredNonEmptyLines = Math.max(
     2,
@@ -271,9 +347,20 @@ export async function assertPaneVisibleContentPreserved(
   const startedAt = Date.now();
   let lastState = null;
   let lastMatches = [];
+  let lastError = null;
 
   while (Date.now() - startedAt < timeoutMs) {
-    lastState = await client.request('get_pane_state', { sessionId, paneId }, { timeoutMs: 20_000 });
+    try {
+      lastState = await client.request('get_pane_state', { sessionId, paneId }, { timeoutMs: 20_000 });
+      lastError = null;
+    } catch (error) {
+      if (!isRetryableAutomationAbsence(error)) {
+        throw error;
+      }
+      lastError = error;
+      await sleep(200);
+      continue;
+    }
     const visibleContent = lastState?.pane?.visibleContent || null;
     if (!visibleContent) {
       await sleep(200);
@@ -311,6 +398,7 @@ export async function assertPaneVisibleContentPreserved(
       `Timed out waiting for ${description}.`,
       `Required anchors (${requiredAnchorMatches}/${anchors.length}): ${JSON.stringify(anchors)}`,
       `Matched anchors (${lastMatches.length}): ${JSON.stringify(lastMatches)}`,
+      `Last request error: ${lastError instanceof Error ? lastError.message : 'none'}`,
       `Baseline summary: ${JSON.stringify(baselineSummary)}`,
       `Last summary: ${JSON.stringify(lastState?.pane?.visibleContent?.summary || null)}`,
       `Last visible lines: ${JSON.stringify((lastState?.pane?.visibleContent?.lines || []).slice(0, 18), null, 2)}`,
@@ -389,37 +477,49 @@ export async function assertPaneNativePaintCoverage(
     minBBoxHeightRatio = 0.18,
     activityThreshold = 18,
     insetPx = 2,
+    timeoutMs = 4_000,
+    retryIntervalMs = 250,
     description = `pane ${paneId} native paint coverage`,
   } = {},
 ) {
-  const metrics = await capturePaneNativeMetrics(
-    client,
-    runDir,
-    prefix,
-    sessionId,
-    paneId,
-    {
-      target,
-      activityThreshold,
-      insetPx,
-    },
-  );
+  const startedAt = Date.now();
+  let lastMetrics = null;
+  let lastEvaluation = null;
 
-  const analysis = metrics.analysis || {};
-  const evaluation = evaluatePaneNativePaintCoverage(analysis, {
-    minBusyColumnRatio,
-    minBusyRowRatio,
-    minBBoxWidthRatio,
-    minBBoxHeightRatio,
-  });
-
-  if (!evaluation.ok) {
-    throw new Error(
-      `${description} failed: ${evaluation.failures.join(', ')}.\n${JSON.stringify(metrics, null, 2)}`
+  while (Date.now() - startedAt < timeoutMs) {
+    const metrics = await capturePaneNativeMetrics(
+      client,
+      runDir,
+      prefix,
+      sessionId,
+      paneId,
+      {
+        target,
+        activityThreshold,
+        insetPx,
+      },
     );
+
+    const analysis = metrics.analysis || {};
+    const evaluation = evaluatePaneNativePaintCoverage(analysis, {
+      minBusyColumnRatio,
+      minBusyRowRatio,
+      minBBoxWidthRatio,
+      minBBoxHeightRatio,
+    });
+
+    if (evaluation.ok) {
+      return metrics;
+    }
+
+    lastMetrics = metrics;
+    lastEvaluation = evaluation;
+    await sleep(retryIntervalMs);
   }
 
-  return metrics;
+  throw new Error(
+    `${description} failed: ${(lastEvaluation?.failures || []).join(', ')}.\n${JSON.stringify(lastMetrics, null, 2)}`
+  );
 }
 
 export function assertPaneNativePaintDelta(

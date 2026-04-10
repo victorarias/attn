@@ -562,7 +562,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('skips stale replay and requests redraw when remounted attach geometry mismatches', async () => {
+  it('skips stale replay and only requests authoritative geometry when remounted attach geometry mismatches', async () => {
     (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS = [];
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
@@ -647,13 +647,13 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         .map((entry) => JSON.parse(entry))
         .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
       expect(resizes.filter((entry) => entry.cols === 58 && entry.rows === 46).length).toBeGreaterThanOrEqual(2);
-      expect(resizes).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 45 });
+      expect(resizes).not.toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 45 });
     });
 
     unmount();
   });
 
-  it('skips matching replay and requests redraw when remounted non-shell attach geometry already matches', async () => {
+  it('skips matching replay and does not request extra PTY work when remounted geometry already matches', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
     const onPRsUpdate = vi.fn();
@@ -736,8 +736,9 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       const resizes = ws.sent
         .map((entry) => JSON.parse(entry))
         .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
-      expect(resizes.filter((entry) => entry.cols === 58 && entry.rows === 46).length).toBeGreaterThanOrEqual(2);
-      expect(resizes).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 45 });
+      expect(resizes).toEqual([
+        { cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 },
+      ]);
     });
 
     unmount();
@@ -831,6 +832,88 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('replays the fresh screen snapshot when relaunching a daemon-known Codex session without raw scrollback', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string; source?: string; reason?: string }> }).__TEST_PTY_EVENTS = [];
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '50',
+        sessions: [{
+          id: 'sess-existing',
+          label: 'attn',
+          agent: 'codex',
+          directory: '/tmp/repo',
+          state: 'idle',
+          state_since: '2026-04-08T00:00:00Z',
+          state_updated_at: '2026-04-08T00:00:00Z',
+          last_seen: '2026-04-08T00:00:00Z',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const spawnPromise = ptySpawn({
+      args: {
+        id: 'sess-existing',
+        cwd: '/tmp/repo',
+        agent: 'codex',
+        cols: 58,
+        rows: 46,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'relaunch_restore' });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-existing',
+        success: true,
+        cols: 58,
+        rows: 46,
+        screen_cols: 58,
+        screen_rows: 46,
+        screen_snapshot: 'c25hcHNob3Qtd2lucw==',
+        screen_snapshot_fresh: true,
+        running: true,
+      });
+    });
+
+    await expect(spawnPromise).resolves.toBeUndefined();
+
+    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string; source?: string; reason?: string }> }).__TEST_PTY_EVENTS || [];
+    expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'snapshot_restore' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'c25hcHNob3Qtd2lucw==', source: 'attach_replay' });
+    expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'sess-existing' && event.data === 'cmF3LXdpbnM=')).toBe(false);
+
+    unmount();
+  });
+
   it('keeps screen snapshot replay when relaunching a daemon-known Claude session', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
@@ -911,13 +994,10 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'Y2xhdWRlLXNuYXBzaG90', source: 'attach_replay' });
     expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'sess-existing' && event.data === 'Y2xhdWRlLXJhdy1mYWxsYmFjaw==')).toBe(false);
 
-    await waitFor(() => {
-      const resizes = ws.sent
-        .map((entry) => JSON.parse(entry))
-        .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
-      expect(resizes).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 45 });
-      expect(resizes.filter((entry) => entry.cols === 58 && entry.rows === 46).length).toBeGreaterThanOrEqual(1);
-    });
+    const resizes = ws.sent
+      .map((entry) => JSON.parse(entry))
+      .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
+    expect(resizes).toEqual([]);
 
     unmount();
   });
@@ -1004,13 +1084,10 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     expect(ptyEvents).toContainEqual({ event: 'data', id: 'runtime-shell-1', data: 'c2hlbGwtc25hcHNob3Q=', source: 'attach_replay' });
     expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'runtime-shell-1' && event.data === 'c2hlbGwtcmF3LWZhbGxiYWNr')).toBe(false);
 
-    await waitFor(() => {
-      const resizes = ws.sent
-        .map((entry) => JSON.parse(entry))
-        .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'runtime-shell-1');
-      expect(resizes).toContainEqual({ cmd: 'pty_resize', id: 'runtime-shell-1', cols: 80, rows: 23 });
-      expect(resizes.filter((entry) => entry.cols === 80 && entry.rows === 24).length).toBeGreaterThanOrEqual(1);
-    });
+    const resizes = ws.sent
+      .map((entry) => JSON.parse(entry))
+      .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'runtime-shell-1');
+    expect(resizes).toEqual([]);
 
     unmount();
   });

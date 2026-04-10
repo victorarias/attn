@@ -2187,36 +2187,11 @@ export function useDaemonSocket({
     );
   }, [recordRuntimeTransportLog, sendOrQueueCommand]);
 
-  const sendPtyRedraw = useCallback((id: string, cols: number, rows: number, reason: string) => {
-    let bounceCols = cols;
-    let bounceRows = rows;
-    if (rows > 1) {
-      bounceRows = rows - 1;
-    } else if (cols > 1) {
-      bounceCols = cols - 1;
-    } else {
-      return;
-    }
-
-    recordRuntimeTransportLog(id, 'pty.redraw.requested', 'request PTY redraw bounce', {
-      cols,
-      rows,
-      bounceCols,
-      bounceRows,
-      reason,
-    });
-    sendPtyResize(id, bounceCols, bounceRows, `${reason}:bounce`);
-    window.setTimeout(() => {
-      sendPtyResize(id, cols, rows, `${reason}:restore`);
-    }, 16);
-  }, [recordRuntimeTransportLog, sendPtyResize]);
-
   const reconcileAttachedRuntimeGeometry = useCallback((
     args: Pick<PtySpawnArgs, 'id' | 'cols' | 'rows' | 'shell'>,
     attachResult: AttachResult,
     options: {
       attachPolicy: PtyAttachPolicy;
-      forceShellRedraw?: boolean;
       attachContext?: AttachRequestContext;
     },
   ) => {
@@ -2227,26 +2202,14 @@ export function useDaemonSocket({
         ...plan,
       });
       sendPtyResize(args.id, plan.requestedCols, plan.requestedRows, 'daemon_known_attach');
-      if (plan.redrawRequired) {
-        sendPtyRedraw(args.id, plan.requestedCols, plan.requestedRows, 'daemon_known_attach');
-      }
-      return;
     }
-
-    if (plan.redrawRequired) {
-      recordRuntimeTransportLog(args.id, 'pty.attach.geometry_reconcile', 'reconcile attached PTY replay geometry', {
-        ...plan,
-      });
-      sendPtyRedraw(args.id, plan.requestedCols, plan.requestedRows, 'daemon_known_attach');
-    }
-  }, [recordRuntimeTransportLog, sendPtyRedraw, sendPtyResize]);
+  }, [recordRuntimeTransportLog, sendPtyResize]);
 
   const attachExistingRuntime = useCallback(async (
     args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell' | 'agent' | 'reason'>,
     options: {
       policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount'>;
       forceResizeBeforeAttach?: boolean;
-      forceShellRedraw?: boolean;
     },
   ): Promise<void> => {
     const sessionAgent = args.agent
@@ -2266,7 +2229,6 @@ export function useDaemonSocket({
     reconcileAttachedRuntimeGeometry(args, attachResult, {
       attachPolicy: options.policy,
       attachContext,
-      forceShellRedraw: options.forceShellRedraw,
     });
   }, [reconcileAttachedRuntimeGeometry, sendAttachSessionWithRetry, sendPtyResize]);
 
@@ -2402,7 +2364,6 @@ export function useDaemonSocket({
             },
             spawnRuntime: sendSpawnSession,
             resizeRuntime: sendPtyResize,
-            redrawRuntime: sendPtyRedraw,
             logClaudeResumeRecovery: ({ id, recoverable }) => {
               console.log(
                 '[DaemonSocket] Recovering session %s via resume (recoverable=%s)',
@@ -2443,7 +2404,7 @@ export function useDaemonSocket({
     return () => {
       setPtyBackend(null);
     };
-  }, [attachExistingRuntime, sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyRedraw, sendPtyResize, sendSpawnSession]);
+  }, [attachExistingRuntime, sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendSpawnSession]);
 
   const sendPRAction = useCallback((
     action: 'approve' | 'merge',

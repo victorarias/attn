@@ -44,6 +44,24 @@ describe('attachPlanning', () => {
     expect(plan.replayPreference).toBe('prefer_raw_scrollback');
   });
 
+  it('keeps screen snapshot replay for Codex relaunch restores when raw scrollback is unavailable', () => {
+    const plan = classifyAttachReplay({
+      cols: 58,
+      rows: 46,
+      screen_cols: 58,
+      screen_rows: 46,
+      screen_snapshot: 'snapshot',
+      screen_snapshot_fresh: true,
+    }, createAttachRequestContext({ cols: 58, rows: 46, agent: 'codex' }, 'relaunch_restore'));
+
+    expect(plan.replayKind).toBe('screen_snapshot');
+    expect(plan.replayApplied).toBe(true);
+    expect(plan.availableScreenSnapshot).toBe(true);
+    expect(plan.availableRawScrollback).toBe(false);
+    expect(plan.screenSnapshotSuppressed).toBe(false);
+    expect(plan.replayPreference).toBe('prefer_raw_scrollback');
+  });
+
   it('keeps screen snapshot replay for Claude relaunch restores', () => {
     const plan = classifyAttachReplay({
       cols: 58,
@@ -79,7 +97,7 @@ describe('attachPlanning', () => {
     expect(plan.replayAllowedByPolicy).toBe(false);
   });
 
-  it('requests redraw for same-app remount non-shell attaches at matching geometry', () => {
+  it('does not request PTY reconcile work for same-app remount attaches at matching geometry', () => {
     const plan = planAttachedRuntimeGeometry({
       cols: 58,
       rows: 46,
@@ -95,8 +113,7 @@ describe('attachPlanning', () => {
     });
 
     expect(plan.resizeRequired).toBe(false);
-    expect(plan.redrawRequired).toBe(true);
-    expect(plan.strategy).toBe('redraw');
+    expect(plan.strategy).toBe('none');
   });
 
   it('requests resize without treating skipped stale snapshot replay as an active redraw source', () => {
@@ -121,13 +138,12 @@ describe('attachPlanning', () => {
     });
 
     expect(plan.resizeRequired).toBe(true);
-    expect(plan.redrawRequired).toBe(false);
     expect(plan.strategy).toBe('resize');
     expect(plan.ptyGeometryMatches).toBe(false);
     expect(plan.replayGeometryMatches).toBe(false);
   });
 
-  it('does not request redraw for raw scrollback relaunches that already match geometry', () => {
+  it('does not request PTY reconcile work for raw scrollback relaunches that already match geometry', () => {
     const plan = planAttachedRuntimeGeometry({
       cols: 58,
       rows: 46,
@@ -141,7 +157,34 @@ describe('attachPlanning', () => {
     });
 
     expect(plan.resizeRequired).toBe(false);
-    expect(plan.redrawRequired).toBe(false);
+    expect(plan.strategy).toBe('none');
+  });
+
+  it('does not request PTY reconcile work for screen-snapshot relaunches that already match geometry', () => {
+    const attachContext = createAttachRequestContext({
+      cols: 58,
+      rows: 46,
+      agent: 'claude',
+    }, 'relaunch_restore');
+    const plan = planAttachedRuntimeGeometry({
+      cols: 58,
+      rows: 46,
+      shell: false,
+      agent: 'claude',
+    }, {
+      cols: 58,
+      rows: 46,
+      screen_cols: 58,
+      screen_rows: 46,
+      screen_snapshot: 'snapshot',
+      screen_snapshot_fresh: true,
+    }, {
+      attachPolicy: 'relaunch_restore',
+      attachContext,
+    });
+
+    expect(plan.hasScreenSnapshotReplay).toBe(true);
+    expect(plan.resizeRequired).toBe(false);
     expect(plan.strategy).toBe('none');
   });
 
@@ -173,7 +216,6 @@ describe('attachPlanning', () => {
     expect(plan.hasRawScrollbackReplay).toBe(true);
     expect(plan.screenSnapshotSuppressed).toBe(true);
     expect(plan.resizeRequired).toBe(false);
-    expect(plan.redrawRequired).toBe(false);
     expect(plan.strategy).toBe('none');
   });
 

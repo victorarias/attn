@@ -27,6 +27,7 @@ import {
 } from './scenarioAgents.mjs';
 import {
   buildRemoteHarnessPaths,
+  cleanupRemoteHarnessProcesses,
   chooseRemoteWSPort,
   getRemoteHome,
   removeStaleHarnessEndpoints,
@@ -330,6 +331,7 @@ async function main() {
   });
 
   const remoteHome = await getRemoteHome(options.sshTarget);
+  const remoteHarnessBase = `${remoteHome}/.attn/harness`;
   const remoteDirectory = options.remoteDirectory || remoteHome;
   const remotePaths = buildRemoteHarnessPaths(remoteHome, runner.runId);
   const remoteHarnessWSPort = String(chooseRemoteWSPort());
@@ -358,6 +360,15 @@ async function main() {
   const transcriptAnchorPrompt = buildTranscriptAnchorPrompt(transcriptAnchorToken, 4);
 
   try {
+    await runner.step('cleanup_stale_remote_harness_state', async () => {
+      const cleanupResult = await cleanupRemoteHarnessProcesses(options.sshTarget, remoteHarnessBase, 60_000);
+      runner.writeJson('00-remote-harness-preflight-cleanup.json', cleanupResult);
+      runner.assert((cleanupResult.leftover || []).length === 0, 'remote harness preflight cleanup leaves no stale harness-root processes', {
+        remoteHarnessBase,
+        cleanupResult,
+      });
+    });
+
     await runner.step('launch_app_and_connect_daemon', async () => {
       await client.launchFreshApp();
       await client.waitForManifest(20_000);
@@ -681,6 +692,14 @@ async function main() {
         // Best-effort cleanup only.
       }
     }
+    const finalRemoteCleanup = await cleanupRemoteHarnessProcesses(
+      options.sshTarget,
+      remotePaths.remoteHarnessRoot,
+      30_000,
+    ).catch((error) => ({
+      error: error instanceof Error ? error.stack || error.message : String(error),
+    }));
+    runner.writeJson('99-final-remote-harness-cleanup.json', finalRemoteCleanup);
     await client.quitApp().catch(() => {});
     await observer.close().catch(() => {});
   }

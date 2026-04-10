@@ -8,7 +8,6 @@ export interface RuntimeLifecycleSessionSnapshot {
 export interface ExistingRuntimeAttachOptions {
   policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount'>;
   forceResizeBeforeAttach?: boolean;
-  forceShellRedraw?: boolean;
 }
 
 export interface SpawnPtyRuntimeContext {
@@ -25,7 +24,6 @@ export interface SpawnPtyRuntimeOperations {
   attachFreshRuntime(args: PtySpawnArgs): Promise<unknown>;
   spawnRuntime(args: PtySpawnArgs): Promise<unknown>;
   resizeRuntime(id: string, cols: number, rows: number, reason: string): void;
-  redrawRuntime(id: string, cols: number, rows: number, reason: string): void;
   logClaudeResumeRecovery?(details: { id: string; recoverable: boolean }): void;
   logKnownWorkspaceRespawn?(details: { id: string; endpointId?: string; error: unknown }): void;
 }
@@ -63,7 +61,6 @@ export async function spawnPtyRuntime(
     try {
       await operations.attachExistingRuntime(args, {
         policy: 'relaunch_restore',
-        forceShellRedraw: Boolean(args.shell && !context.alreadyAttached && !context.existingSession),
       });
       return;
     } catch (attachError) {
@@ -114,8 +111,4 @@ export async function spawnPtyRuntime(
   }
 
   await operations.attachFreshRuntime(args);
-
-  if (args.shell && !context.runtimeKnownToDaemon) {
-    operations.redrawRuntime(args.id, args.cols, args.rows, 'fresh_shell_attach');
-  }
 }

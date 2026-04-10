@@ -627,6 +627,34 @@ Minimum verification:
 - `TR-205`
 - `TR-502`
 
+Status:
+
+- executed on 2026-04-10
+- removed from production code by deleting `sendPtyRedraw`, `redrawRequired`, and `forceShellRedraw`, so attach-time geometry reconciliation now only claims authoritative PTY size when daemon-reported cols/rows differ from the requested size
+- focused frontend tests passed after updating attach-path expectations:
+  - `attachPlanning.test.ts`
+  - `runtimeLifecycle.test.ts`
+  - `geometryLifecycle.test.ts`
+  - `useDaemonSocket.test.tsx`
+- packaged-app verification after fresh `make install-all`:
+  - `TR-205 remote codex`: passed
+  - `TR-502 remote codex`: first run failed during relaunch restore; immediate rerun passed
+- note on signal quality:
+  - the first valid `TR-502` run after rebuild failed at `relaunch_and_restore_session` with low native paint coverage in the remote main pane while the DOM-visible rows showed only the stripped prompt block and not the boxed `OpenAI Codex` header
+  - decoding the saved main-pane replay payload shows that the boxed Codex header was present earlier in the relaunch replay stream before later replay content cleared the screen back to the stripped prompt state
+  - the failing replay tail contains a full-screen erase from row 1 (`CSI 1;1H` + `CSI J`) before redrawing only the prompt block, while the passing replay tail only erases from lower rows and leaves the header intact
+  - this does not currently implicate the redraw-cleanup slice by itself: the daemon already suppresses fresh `screen_snapshot` payloads for stored Codex relaunch attaches when raw scrollback exists in [internal/daemon/ws_pty.go](/Users/victor.arias/projects/victor/attn/internal/daemon/ws_pty.go#L65), and the frontend attach planner already prefers that raw replay for Codex relaunch restore in [app/src/pty/attachPlanning.ts](/Users/victor.arias/projects/victor/attn/app/src/pty/attachPlanning.ts#L91)
+  - root cause was confirmed in two layers:
+    - the daemon's Codex relaunch raw-replay preference was too eager; bounded raw replay could diverge from the daemon's fresh live `screen_snapshot`, so relaunch first paint sometimes restored a different final screen than the live session actually had
+    - when the daemon was changed to fall back to snapshot-only for that divergence case, the frontend still suppressed the snapshot for Codex even when no raw scrollback was present, producing `replayKind: none` and a blank restored pane
+  - fix shipped:
+    - [internal/daemon/ws_pty.go](/Users/victor.arias/projects/victor/attn/internal/daemon/ws_pty.go) now only prefers Codex raw replay when the bounded raw tail derives the same visible frame as the fresh live snapshot; otherwise it keeps the fresh snapshot
+    - [app/src/pty/attachPlanning.ts](/Users/victor.arias/projects/victor/attn/app/src/pty/attachPlanning.ts) now suppresses a Codex snapshot only when raw scrollback is actually present to replace it
+  - verification after the fix:
+    - focused daemon and frontend attach-path tests passed
+    - `TR-205 remote codex` passed after fresh `make install-all`
+    - `TR-502` remained noisy in unrelated pre-relaunch harness steps during this investigation (`seed_initial_shell_before_relaunch` marker timeout and `create_initial_split_before_relaunch` anchor drift), so full packaged-app relaunch validation for this exact fix is still partially blocked by separate scenario instability
+
 ### 3. Collapse Viewport Resize Scheduling Branches
 
 Files:

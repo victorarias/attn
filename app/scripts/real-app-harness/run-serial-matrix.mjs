@@ -14,6 +14,11 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-tr205', '--', '--remote-agent', 'claude'],
   },
   {
+    id: 'tr502',
+    label: 'TR-502 remote relaunch splits',
+    command: ['pnpm', 'run', 'real-app:scenario-tr502'],
+  },
+  {
     id: 'tr504',
     label: 'TR-504 remote cleanup',
     command: ['pnpm', 'run', 'real-app:scenario-tr504'],

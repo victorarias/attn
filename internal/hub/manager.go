@@ -137,16 +137,25 @@ func (m *Manager) Start(parent context.Context) {
 
 func (m *Manager) Stop() {
 	changed := false
+	shutdownTargets := make([]string, 0)
+	seenTargets := make(map[string]struct{})
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.cancel != nil {
 		m.cancel()
 	}
 	for _, runtime := range m.runtimes {
 		changed = changed || len(runtime.sessions) > 0
+		if target := isolatedRemoteShutdownTarget(runtime.record); target != "" {
+			if _, exists := seenTargets[target]; !exists {
+				seenTargets[target] = struct{}{}
+				shutdownTargets = append(shutdownTargets, target)
+			}
+		}
 		m.stopRuntimeLocked(runtime)
 	}
 	m.started = false
+	m.mu.Unlock()
+	m.stopIsolatedRemoteDaemons(shutdownTargets)
 	if changed {
 		go m.publishSessionsChanged()
 	}
@@ -250,17 +259,56 @@ func (m *Manager) UpdateEndpoint(id string, update store.EndpointUpdate) (*store
 
 func (m *Manager) RemoveEndpoint(id string) error {
 	changed := false
+	shutdownTarget := ""
 	m.mu.Lock()
 	if runtime, ok := m.runtimes[id]; ok {
 		changed = len(runtime.sessions) > 0
+		shutdownTarget = isolatedRemoteShutdownTarget(runtime.record)
 		m.stopRuntimeLocked(runtime)
 		delete(m.runtimes, id)
 	}
 	m.mu.Unlock()
+	m.stopIsolatedRemoteDaemons(nonEmptyStrings(shutdownTarget))
 	if changed {
 		m.publishSessionsChanged()
 	}
 	return m.store.RemoveEndpoint(id)
+}
+
+func isolatedRemoteShutdownTarget(record store.EndpointRecord) string {
+	if !remoteHarnessCleanupEnabled() {
+		return ""
+	}
+	target := strings.TrimSpace(record.SSHTarget)
+	if target == "" {
+		return ""
+	}
+	return target
+}
+
+func nonEmptyStrings(values ...string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
+}
+
+func (m *Manager) stopIsolatedRemoteDaemons(targets []string) {
+	if m == nil || m.bootstrapper == nil || len(targets) == 0 || !remoteHarnessCleanupEnabled() {
+		return
+	}
+	for _, target := range targets {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := m.bootstrapper.StopRemoteDaemon(ctx, target)
+		cancel()
+		if err != nil {
+			m.logf("remote harness daemon cleanup failed for %s: %v", target, err)
+		}
+	}
 }
 
 func (m *Manager) startRuntimeLocked(id string) {

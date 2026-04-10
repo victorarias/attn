@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -34,6 +35,8 @@ type attachReplayPayload struct {
 	screenCursorVisible bool
 	screenSnapshotFresh bool
 	derivedSnapshot     bool
+	rawReplayDecision   string
+	rawReplayReason     string
 }
 
 const maxAgentRawReplayBytes = 256 * 1024
@@ -62,6 +65,29 @@ func limitReplayTail(data []byte, limit int) ([]byte, bool) {
 	return data[len(data)-limit:], true
 }
 
+func rawReplayMatchesFreshSnapshot(rawTail []byte, info ptybackend.AttachInfo) (bool, string) {
+	if len(rawTail) == 0 {
+		return false, "empty_raw_tail"
+	}
+	if !info.ScreenSnapshotFresh || len(info.ScreenSnapshot) == 0 {
+		return false, "fresh_snapshot_unavailable"
+	}
+	if info.Cols == 0 || info.Rows == 0 {
+		return false, "pty_geometry_unavailable"
+	}
+	derived, ok := pty.ScreenSnapshotFromReplay(rawTail, info.Cols, info.Rows)
+	if !ok {
+		return false, "derived_snapshot_unavailable"
+	}
+	if derived.Cols != info.ScreenCols || derived.Rows != info.ScreenRows {
+		return false, "snapshot_geometry_mismatch"
+	}
+	if !bytes.Equal(derived.Payload, info.ScreenSnapshot) {
+		return false, "snapshot_payload_mismatch"
+	}
+	return true, ""
+}
+
 func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Session, policy protocol.AttachPolicy) attachReplayPayload {
 	payload := attachReplayPayload{
 		scrollbackTruncated: info.ScrollbackTruncated,
@@ -72,6 +98,7 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 		screenCursorY:       info.ScreenCursorY,
 		screenCursorVisible: info.ScreenCursorVisible,
 		screenSnapshotFresh: info.ScreenSnapshotFresh,
+		rawReplayDecision:   "default",
 	}
 
 	if !shouldIncludeAttachReplay(policy) {
@@ -83,21 +110,50 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 		payload.screenCursorY = 0
 		payload.screenCursorVisible = false
 		payload.screenSnapshotFresh = false
+		payload.rawReplayDecision = "omit_replay_for_policy"
 		return payload
 	}
 
 	if shouldPreferAgentRawReplay(session) && len(info.Scrollback) > 0 {
 		tail, clipped := limitReplayTail(info.Scrollback, maxAgentRawReplayBytes)
-		payload.scrollback = tail
-		payload.scrollbackTruncated = info.ScrollbackTruncated || clipped
-		payload.screenSnapshot = nil
-		payload.screenCols = 0
-		payload.screenRows = 0
-		payload.screenCursorX = 0
-		payload.screenCursorY = 0
-		payload.screenCursorVisible = false
-		payload.screenSnapshotFresh = false
-		return payload
+		if matches, reason := rawReplayMatchesFreshSnapshot(tail, info); matches {
+			payload.scrollback = tail
+			payload.scrollbackTruncated = info.ScrollbackTruncated || clipped
+			payload.screenSnapshot = nil
+			payload.screenCols = 0
+			payload.screenRows = 0
+			payload.screenCursorX = 0
+			payload.screenCursorY = 0
+			payload.screenCursorVisible = false
+			payload.screenSnapshotFresh = false
+			payload.rawReplayDecision = "use_raw_replay"
+			if clipped {
+				payload.rawReplayReason = "bounded_tail_matches_fresh_snapshot"
+			} else {
+				payload.rawReplayReason = "full_raw_replay_matches_fresh_snapshot"
+			}
+			return payload
+		} else if reason == "fresh_snapshot_unavailable" {
+			payload.scrollback = tail
+			payload.scrollbackTruncated = info.ScrollbackTruncated || clipped
+			payload.screenSnapshot = nil
+			payload.screenCols = 0
+			payload.screenRows = 0
+			payload.screenCursorX = 0
+			payload.screenCursorY = 0
+			payload.screenCursorVisible = false
+			payload.screenSnapshotFresh = false
+			payload.rawReplayDecision = "use_raw_replay"
+			if clipped {
+				payload.rawReplayReason = "bounded_tail_without_fresh_snapshot"
+			} else {
+				payload.rawReplayReason = "full_raw_replay_without_fresh_snapshot"
+			}
+			return payload
+		} else {
+			payload.rawReplayDecision = "use_fresh_snapshot"
+			payload.rawReplayReason = reason
+		}
 	}
 
 	// When no live screen model is available, derive the visible frame from the
@@ -113,6 +169,8 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 			payload.screenCursorVisible = snap.CursorVisible
 			payload.screenSnapshotFresh = true
 			payload.derivedSnapshot = true
+			payload.rawReplayDecision = "use_derived_snapshot"
+			payload.rawReplayReason = "fresh_snapshot_missing"
 		}
 	}
 
@@ -122,6 +180,9 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 	// JSON payloads with no UI benefit.
 	if len(info.Scrollback) > 0 && !(len(payload.screenSnapshot) > 0 && payload.screenSnapshotFresh) {
 		payload.scrollback = info.Scrollback
+		if payload.rawReplayDecision == "default" {
+			payload.rawReplayDecision = "use_scrollback"
+		}
 	}
 
 	return payload
@@ -338,7 +399,7 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 	}
 	replay := buildAttachReplayPayload(info, d.store.Get(msg.ID), protocol.Deref(msg.AttachPolicy))
 	d.logf(
-		"PTY attach result: id=%s policy=%s running=%v last_seq=%d scrollback_bytes=%d replay_bytes=%d snapshot_bytes=%d snapshot_fresh=%v derived_snapshot=%v size=%dx%d screen=%dx%d",
+		"PTY attach result: id=%s policy=%s running=%v last_seq=%d scrollback_bytes=%d replay_bytes=%d snapshot_bytes=%d snapshot_fresh=%v derived_snapshot=%v replay_decision=%s replay_reason=%s size=%dx%d screen=%dx%d",
 		msg.ID,
 		protocol.Deref(msg.AttachPolicy),
 		info.Running,
@@ -348,6 +409,8 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		len(replay.screenSnapshot),
 		replay.screenSnapshotFresh,
 		replay.derivedSnapshot,
+		replay.rawReplayDecision,
+		replay.rawReplayReason,
 		info.Cols,
 		info.Rows,
 		replay.screenCols,
