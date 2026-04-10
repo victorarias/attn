@@ -405,6 +405,16 @@ describe('worktree cleanup prompt', () => {
       syncFromDaemonSessions: vi.fn(),
       syncFromDaemonWorkspaces: vi.fn(),
     });
+    mockUseDaemonStore.mockReturnValue({
+      daemonSessions: [],
+      setDaemonSessions: vi.fn(),
+      prs: [],
+      setPRs: vi.fn(),
+      repoStates: [],
+      setRepoStates: vi.fn(),
+      authorStates: [],
+      setAuthorStates: vi.fn(),
+    });
 
     render(<App />);
 
@@ -422,7 +432,9 @@ describe('worktree cleanup prompt', () => {
 
     fireEvent.keyDown(dialog, { key: 'y' });
 
-    expect(mockCloseSession).toHaveBeenCalledWith('s1');
+    await waitFor(() => {
+      expect(mockCloseSession).toHaveBeenCalledWith('s1');
+    });
     expect(mockSendWorkspaceClosePane).not.toHaveBeenCalled();
   });
 

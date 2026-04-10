@@ -26,5 +26,5 @@ jobs:
           api-key: ${{ secrets.OPEN_ROUTER_API_KEY }}
           model: minimax/minimax-m2.7
           reasoning: xhigh
-          max-files: 100
+          max-files: 200
           debug: "true"
