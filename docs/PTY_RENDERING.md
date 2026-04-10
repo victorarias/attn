@@ -32,6 +32,7 @@ This note records the rules we want to preserve so we do not relearn them throug
 3. Do not treat a locally resized terminal as authoritative until the PTY has been resized and the process has had a chance to rerender.
 4. Do not assume replayed scrollback or a replayed screen snapshot is valid at the client's current geometry.
 5. Do not assume desktop mobile emulation proves real-phone keyboard and viewport behavior.
+6. Do not let replayed historical terminal queries generate new live PTY input.
 
 ## Why Replay Is Dangerous
 
@@ -45,6 +46,7 @@ Consequences:
 - Replaying scrollback produced during a narrow or transient geometry will reproduce that narrow wrapping later.
 - Replaying a visible-frame snapshot captured before the final viewport settles can omit the bottom rows for the eventual client size.
 - Reattaching during keyboard animation or viewport churn can replay unstable content and make the terminal look squeezed, truncated, or stale.
+- Replayed history can include terminal queries such as CPR, DA1, or OSC color probes; if a fresh terminal answers them again, replay stops being a passive restore and starts perturbing the running process.
 
 ## Preferred Lifecycle
 
@@ -154,6 +156,7 @@ Do not do these:
 - Reuse `attach_session` as a post-resize repaint primitive.
 - Replay scrollback generated under a different resize epoch and expect it not to look compressed.
 - Let an attach snapshot captured at one geometry stand in for a stable render at another geometry.
+- Feed historical terminal query bytes through a live `onData` path and assume the duplicate responses are harmless.
 - Accept a narrow automated test that proves "something became visible" as proof that the full mobile lifecycle is correct.
 
 ## Verification Expectations

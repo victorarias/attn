@@ -58,7 +58,7 @@ describe('terminalResizeLifecycle', () => {
     });
   });
 
-  it('requests a redraw when visibility returns at the same size', () => {
+  it('noops when visibility returns at the same size', () => {
     expect(planVisibilityFlush({
       wasHidden: true,
       ready: true,
@@ -66,9 +66,7 @@ describe('terminalResizeLifecycle', () => {
       currentCols: 109,
       currentRows: 50,
     })).toEqual({
-      type: 'force_redraw',
-      cols: 109,
-      rows: 50,
+      type: 'none',
     });
   });
 

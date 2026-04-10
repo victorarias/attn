@@ -29,6 +29,7 @@
     "real-app:scenario-tr101": "node scripts/real-app-harness/scenario-tr101-claude-main-split.mjs",
     "real-app:scenario-tr102": "node scripts/real-app-harness/scenario-tr102-claude-utility-split.mjs",
     "real-app:scenario-tr303-local-codex": "node scripts/real-app-harness/scenario-tr303-local-codex-post-close-typing.mjs",
+    "real-app:scenario-tr206-local-codex": "node scripts/real-app-harness/scenario-tr206-local-relaunch-header-loss.mjs",
     "real-app:scenario-tr205": "node scripts/real-app-harness/scenario-tr205-remote-relaunch-close-redraw.mjs",
     "real-app:scenario-tr402": "node scripts/real-app-harness/scenario-tr402-remote-close-redraw.mjs",
     "real-app:scenario-tr402-local-codex": "node scripts/real-app-harness/scenario-tr402-local-close-redraw.mjs --agent codex",

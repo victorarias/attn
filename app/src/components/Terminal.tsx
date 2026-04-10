@@ -112,7 +112,7 @@ interface TerminalProps {
   tuiCursor?: boolean;
   onInit?: (terminal: XTerm) => void;
   onReady?: (terminal: XTerm) => void;
-  onResize?: (cols: number, rows: number, options?: { forceRedraw?: boolean; reason?: string }) => void;
+  onResize?: (cols: number, rows: number, options?: { reason?: string }) => void;
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
@@ -448,7 +448,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         readySource: 'resize_observer' | 'font_change' | 'fit_fallback';
         readyReason: string;
         resizeReason: string;
-        forceRedrawReason?: string;
       },
     ) => {
       if (!readyFiredRef.current) {
@@ -456,15 +455,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         return;
       }
 
-      const sizeChanged = dims.cols !== term.cols || dims.rows !== term.rows;
       resizeTerminal(term, dims.cols, dims.rows, options.resizeReason, dims.diagnostics);
-
-      if (!sizeChanged && options.forceRedrawReason) {
-        onResizeRef.current?.(dims.cols, dims.rows, {
-          forceRedraw: true,
-          reason: options.forceRedrawReason,
-        });
-      }
     }, [markTerminalReady, resizeTerminal]);
 
     useImperativeHandle(ref, () => ({
@@ -498,7 +489,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           readySource: 'fit_fallback',
           readyReason: 'ready_fallback',
           resizeReason: 'fit',
-          forceRedrawReason: 'fit_same_size',
         });
       },
       focus: () => {
@@ -849,12 +839,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
               },
             });
           }
-        },
-        onForceRedraw: (cols, rows, reason) => {
-          onResizeRef.current?.(cols, rows, {
-            forceRedraw: true,
-            reason,
-          });
         },
       });
 

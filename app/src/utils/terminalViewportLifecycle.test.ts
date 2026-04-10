@@ -137,7 +137,6 @@ describe('installTerminalViewportLifecycle', () => {
       applyMeasuredTerminalGeometry,
       resizeTerminal: vi.fn(),
       onVisibilityChanged: vi.fn(),
-      onForceRedraw: vi.fn(),
     });
 
     mockState.resizeObservers[0].trigger(960, 772);
@@ -154,8 +153,8 @@ describe('installTerminalViewportLifecycle', () => {
     container.remove();
   });
 
-  it('forces redraw when visibility returns without a geometry change', () => {
-    const onForceRedraw = vi.fn();
+  it('does nothing when visibility returns without a geometry change', () => {
+    const resizeTerminal = vi.fn();
 
     mockState.dimsQueue.push({
       cols: 118,
@@ -184,15 +183,14 @@ describe('installTerminalViewportLifecycle', () => {
       logTerminal: vi.fn(),
       getContainerDebugInfo: vi.fn(() => ({})),
       applyMeasuredTerminalGeometry: vi.fn(),
-      resizeTerminal: vi.fn(),
+      resizeTerminal,
       onVisibilityChanged: vi.fn(),
-      onForceRedraw,
     });
 
     mockState.intersectionObservers[0].trigger(false);
     mockState.intersectionObservers[0].trigger(true);
 
-    expect(onForceRedraw).toHaveBeenCalledWith(118, 48, 'visibility_flush_same_size');
+    expect(resizeTerminal).not.toHaveBeenCalled();
   });
 
   it('resizes on dpr changes using current measured dimensions', () => {
@@ -227,7 +225,6 @@ describe('installTerminalViewportLifecycle', () => {
       applyMeasuredTerminalGeometry: vi.fn(),
       resizeTerminal,
       onVisibilityChanged: vi.fn(),
-      onForceRedraw: vi.fn(),
     });
 
     mockState.devicePixelRatio = 1;

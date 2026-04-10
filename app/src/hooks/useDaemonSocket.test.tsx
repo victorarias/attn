@@ -816,9 +816,9 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await expect(spawnPromise).resolves.toBeUndefined();
 
-    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS || [];
+    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string; source?: string }> }).__TEST_PTY_EVENTS || [];
     expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'snapshot_restore' });
-    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'bWF0Y2g=' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'bWF0Y2g=', source: 'attach_replay' });
 
     await waitFor(() => {
       const resizes = ws.sent
@@ -903,9 +903,9 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await expect(spawnPromise).resolves.toBeUndefined();
 
-    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS || [];
+    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string; source?: string }> }).__TEST_PTY_EVENTS || [];
     expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
-    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'cmF3LXJlcGxheQ==' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'cmF3LXJlcGxheQ==', source: 'attach_replay' });
 
     const resizes = ws.sent
       .map((entry) => JSON.parse(entry))

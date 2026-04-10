@@ -105,6 +105,11 @@ Every scenario should validate some combination of these invariants:
   Assertions: after each close, the surviving main pane regains width and repaints meaningful visible content into the reclaimed space instead of keeping a stale narrow header/body layout.
   Automation: initial remote real-agent automation implemented via `real-app:scenario-tr205`
 
+- `TR-206 Local Relaunch Close-Resplit Preserves Codex Header`
+  Create a local Codex session, split it, relaunch the app, close the restored split, split again from `main`, then type into the surviving main pane.
+  Assertions: the main Codex header survives relaunch restore, survives the restored split close, remains present before typing after the second split, and still remains recoverable after typing. The scenario should fail both when the header only drifts out of view and when it is actually missing from the buffer after `scrollToTop()`.
+  Automation: local packaged-app Codex relaunch canary implemented via `real-app:scenario-tr206-local-codex`
+
 ### Focus And Session Switching
 
 - `TR-301 Utility Focus Survives Session Switch`

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   isCommittedGeometryChanged,
-  planDeferredGeometryRedraw,
   planGeometryFlush,
   planPendingGeometrySync,
 } from './geometryLifecycle';
@@ -12,7 +11,6 @@ describe('geometryLifecycle', () => {
       {
         cols: 80,
         rows: 24,
-        forceRedraw: true,
         reason: 'previous',
         xterm: 'old',
       },
@@ -31,7 +29,6 @@ describe('geometryLifecycle', () => {
       cols: 120,
       rows: 40,
       xterm: 'new',
-      forceRedraw: true,
       reason: 'previous',
     });
   });
@@ -47,8 +44,7 @@ describe('geometryLifecycle', () => {
       runtimeReady: false,
       ensureInFlight: true,
       hydratePending: false,
-      pending: { cols: 80, rows: 24, forceRedraw: false, reason: 'ready' },
-      spawnIsShell: true,
+      pending: { cols: 80, rows: 24, reason: 'ready' },
       source: 'ready',
     })).toEqual({
       kind: 'retry_after_pending_ensure',
@@ -61,9 +57,8 @@ describe('geometryLifecycle', () => {
       runtimeReady: true,
       ensureInFlight: false,
       hydratePending: true,
-      pending: { cols: 132, rows: 41, forceRedraw: false, reason: 'init_hydrate' },
+      pending: { cols: 132, rows: 41, reason: 'init_hydrate' },
       lastCommitted: { cols: 80, rows: 24 },
-      spawnIsShell: false,
       source: 'ready',
     })).toEqual({
       kind: 'hydrate_runtime',
@@ -78,36 +73,13 @@ describe('geometryLifecycle', () => {
     });
   });
 
-  it('requests authoritative redraw after non-shell resize changes', () => {
+  it('resizes an already-running non-shell runtime without adding a deferred redraw bounce', () => {
     expect(planGeometryFlush({
       runtimeReady: true,
       ensureInFlight: false,
       hydratePending: false,
-      pending: { cols: 140, rows: 43, forceRedraw: false, reason: 'fit' },
+      pending: { cols: 140, rows: 43, reason: 'fit' },
       lastCommitted: { cols: 80, rows: 43 },
-      spawnIsShell: false,
-      source: 'resize',
-    })).toEqual({
-      kind: 'resize_runtime',
-      geometryChanged: true,
-      resize: {
-        cols: 140,
-        rows: 43,
-        reason: 'fit',
-      },
-      nextCommitted: { cols: 140, rows: 43 },
-      redrawAfterSettle: { axis: 'cols' },
-    });
-  });
-
-  it('skips authoritative redraw for shell resize changes', () => {
-    expect(planGeometryFlush({
-      runtimeReady: true,
-      ensureInFlight: false,
-      hydratePending: false,
-      pending: { cols: 140, rows: 43, forceRedraw: false, reason: 'fit' },
-      lastCommitted: { cols: 80, rows: 43 },
-      spawnIsShell: true,
       source: 'resize',
     })).toEqual({
       kind: 'resize_runtime',
@@ -121,38 +93,17 @@ describe('geometryLifecycle', () => {
     });
   });
 
-  it('requests redraw-only flush when geometry is unchanged but redraw is forced', () => {
+  it('noops when geometry is unchanged', () => {
     expect(planGeometryFlush({
       runtimeReady: true,
       ensureInFlight: false,
       hydratePending: false,
-      pending: { cols: 80, rows: 24, forceRedraw: true, reason: 'visibility_flush_same_size' },
+      pending: { cols: 80, rows: 24, reason: 'visibility_flush_same_size' },
       lastCommitted: { cols: 80, rows: 24 },
-      spawnIsShell: false,
       source: 'resize',
     })).toEqual({
-      kind: 'redraw_only',
+      kind: 'noop',
       geometryChanged: false,
-      redraw: {
-        cols: 80,
-        rows: 24,
-        reason: 'visibility_flush_same_size',
-      },
-    });
-  });
-
-  it('skips deferred redraw when fresh output already arrived', () => {
-    expect(planDeferredGeometryRedraw({
-      baselineWriteCount: 3,
-      currentWriteCount: 4,
-      reason: 'fit:resize_redraw',
-      axis: 'cols',
-    })).toEqual({
-      kind: 'skip',
-      baselineWriteCount: 3,
-      currentWriteCount: 4,
-      reason: 'fit:resize_redraw',
-      axis: 'cols',
     });
   });
 });

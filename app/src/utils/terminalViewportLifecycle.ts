@@ -33,7 +33,6 @@ interface TerminalViewportLifecycleOptions {
       readySource: 'resize_observer' | 'font_change' | 'fit_fallback';
       readyReason: string;
       resizeReason: string;
-      forceRedrawReason?: string;
     },
   ) => void;
   resizeTerminal: (
@@ -44,7 +43,6 @@ interface TerminalViewportLifecycleOptions {
     diagnostics?: ResizeDiagnostics | null,
   ) => void;
   onVisibilityChanged: (nowVisible: boolean, wasHidden: boolean) => void;
-  onForceRedraw: (cols: number, rows: number, reason: string) => void;
 }
 
 export interface TerminalViewportLifecycle {
@@ -63,7 +61,6 @@ export function installTerminalViewportLifecycle({
   applyMeasuredTerminalGeometry,
   resizeTerminal,
   onVisibilityChanged,
-  onForceRedraw,
 }: TerminalViewportLifecycleOptions): TerminalViewportLifecycle {
   let lastCols = term.cols;
   let lastRows = term.rows;
@@ -243,9 +240,7 @@ export function installTerminalViewportLifecycle({
           lastRows = dims.rows;
         }
 
-        if (plan.type === 'force_redraw') {
-          onForceRedraw(plan.cols, plan.rows, 'visibility_flush_same_size');
-        } else {
+        if (plan.type === 'resize') {
           resizeTerminal(term, plan.next.cols, plan.next.rows, 'visibility_flush', plan.next.diagnostics);
         }
       }

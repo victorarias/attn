@@ -245,13 +245,8 @@ describe('Terminal', () => {
     });
 
     expect(term.resizeMock.mock.calls.length).toBe(baselineResizeCalls);
-    expect(onResize).toHaveBeenLastCalledWith(109, 50, {
-      forceRedraw: true,
-      reason: 'fit_same_size',
-    });
     expect(onResize.mock.calls).toEqual([
       [109, 50, { reason: 'ready' }],
-      [109, 50, { forceRedraw: true, reason: 'fit_same_size' }],
     ]);
   });
 
@@ -398,7 +393,7 @@ describe('Terminal', () => {
     });
   });
 
-  it('forces a redraw when visibility returns without a geometry change', () => {
+  it('does not emit PTY resize work when visibility returns without a geometry change', () => {
     const onResize = vi.fn();
 
     render(
@@ -416,10 +411,9 @@ describe('Terminal', () => {
       mockState.intersectionObservers[0].trigger(true);
     });
 
-    expect(onResize).toHaveBeenLastCalledWith(109, 50, {
-      forceRedraw: true,
-      reason: 'visibility_flush_same_size',
-    });
+    expect(onResize.mock.calls).toEqual([
+      [109, 50, { reason: 'ready' }],
+    ]);
   });
 
 });

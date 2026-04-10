@@ -16,6 +16,11 @@ function loadSplitFixture() {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
+function loadRelaunchReplayFixture() {
+  const path = resolve(process.cwd(), 'src/test/fixtures/tr206-relaunch-replay-bad.json');
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
+
 function decodeBase64(base64) {
   return Uint8Array.from(Buffer.from(base64, 'base64'));
 }
@@ -205,5 +210,45 @@ describe('snapshotVisibleTerminalFrame', () => {
     expect(replayLarge.lines.some((line) => line.includes('OpenAI Codex'))).toBe(false);
     expect(replayLarge.lines).toEqual(replaySmall.lines);
     expect(liveLarge.viewportY).not.toBe(replayLarge.viewportY);
+  });
+
+  it('replays the TR-206 bad relaunch payload into a fresh xterm with the header body missing at the top', async () => {
+    const fixture = loadRelaunchReplayFixture();
+    const raw = Buffer.from(fixture.scrollbackBase64, 'base64').toString('utf8');
+    const term = new Terminal({
+      cols: fixture.cols,
+      rows: fixture.rows,
+      allowProposedApi: true,
+      scrollback: 2000,
+    });
+
+    await feedStage(term, [fixture.scrollbackBase64]);
+    term.scrollToTop();
+    const replayedTop = topSnapshot(term, 8);
+    const topText = replayedTop.lines.join('\n');
+
+    expect(fixture.source).toContain('TR-206');
+    expect(raw.includes('OpenAI Codex')).toBe(true);
+    expect(topText.includes('OpenAI Codex')).toBe(false);
+    expect(replayedTop.lines.some((line) => line.includes('╭'))).toBe(true);
+    expect(replayedTop.lines.some((line) => line.includes(fixture.token))).toBe(true);
+  });
+
+  it('shows the TR-206 bad relaunch replay still emits terminal query responses while historical bytes are being restored', async () => {
+    const fixture = loadRelaunchReplayFixture();
+    const term = new Terminal({
+      cols: fixture.cols,
+      rows: fixture.rows,
+      allowProposedApi: true,
+      scrollback: 2000,
+    });
+    const replies = [];
+
+    term.onData((data) => replies.push(data));
+    await feedStage(term, [fixture.scrollbackBase64]);
+
+    expect(replies.length).toBeGreaterThan(0);
+    expect(replies).toContain('\u001b[?1;2c');
+    expect(replies.some((data) => /^\u001b\[\d+;\d+R$/.test(data))).toBe(true);
   });
 });

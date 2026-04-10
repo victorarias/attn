@@ -37,8 +37,11 @@ export type PtyAttachPolicy =
   | 'relaunch_restore'
   | 'same_app_remount';
 
+export type PtyDataEventSource =
+  | 'attach_replay';
+
 export type PtyEventPayload =
-  | { event: 'data'; id: string; data: string; seq?: number }
+  | { event: 'data'; id: string; data: string; seq?: number; source?: PtyDataEventSource }
   | { event: 'exit'; id: string; code: number; signal?: string }
   | { event: 'error'; id: string; error: string }
   | { event: 'transcript'; id: string; matched: boolean }

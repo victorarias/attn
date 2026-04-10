@@ -1183,7 +1183,12 @@ export function useDaemonSocket({
                     lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
                     replayPayloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? attachEffects.replayAction.data : undefined,
                   });
-                  emitPtyEvent({ event: 'data', id: data.id, data: attachEffects.replayAction.data });
+                  emitPtyEvent({
+                    event: 'data',
+                    id: data.id,
+                    data: attachEffects.replayAction.data,
+                    source: 'attach_replay',
+                  });
                 } else if (attachEffects.replayAction.kind === 'scrollback') {
                   recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
                     attachPolicy: attachContext?.policy ?? null,
@@ -1192,7 +1197,12 @@ export function useDaemonSocket({
                     lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
                     replayPayloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? attachEffects.replayAction.data : undefined,
                   });
-                  emitPtyEvent({ event: 'data', id: data.id, data: attachEffects.replayAction.data });
+                  emitPtyEvent({
+                    event: 'data',
+                    id: data.id,
+                    data: attachEffects.replayAction.data,
+                    source: 'attach_replay',
+                  });
                 }
                 if (attachEffects.queuedOutputsToEmit.length > 0) {
                   ptyTransportRef.current.clearQueuedAttachOutputs(data.id);

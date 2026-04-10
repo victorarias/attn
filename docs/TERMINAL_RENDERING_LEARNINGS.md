@@ -187,6 +187,48 @@ Implication:
 - the more likely cause is bad terminal state left behind by the earlier resize/close path
 - runtime-trace canaries are useful for proving whether a user-visible issue is caused by keypress side effects or by the prior layout transition
 
+### 11. Local relaunch close-resplit can erase the Codex header from the buffer entirely
+
+We later exercised the local Codex path that is closer to the user report:
+
+- create a local Codex session
+- split
+- quit and reopen the packaged app
+- close the restored split
+- split again from `main`
+- type into `main`
+
+What happened in the nonrecovering variant:
+
+- before typing, the visible main pane already no longer showed the Codex header
+- full pane text no longer contained `OpenAI Codex`
+- `scrollToTop()` restored the viewport to the top border, but the header text was still missing
+- native window screenshots matched the missing-header state before typing, after typing, and after scroll
+
+Implication:
+
+- not every relaunch close-resplit Codex bug is a viewport-only quirk
+- there is also a real buffer-loss failure class where the restored header bytes are gone
+- local relaunch header regressions need their own dedicated scenario instead of being inferred from `TR-205` or first-launch split canaries
+
+### 12. Replayed Codex history can answer old terminal queries again
+
+We then froze the nonrecovering relaunch payload itself and replayed it into a plain xterm outside the app.
+
+What that showed:
+
+- the bad replay payload still contained `OpenAI Codex`
+- the daemon-side raw scrollback for that session still contained the header bytes too
+- but replaying those bytes into a fresh xterm at `58x46` still produced a top-of-buffer view with the border and prompt but no header line
+- while those historical bytes were being restored, xterm emitted live `onData` responses such as DA1 and CPR replies
+
+Implication:
+
+- the worker did not simply "forget" the header bytes
+- relaunch replay is not passive for this payload; it can make a fresh terminal answer old queries from history
+- duplicate query responses are a credible mechanism for why the next Codex shrink redraw becomes malformed after relaunch
+- the right deterministic test level is the replay/query-response/xterm layer, not only the packaged-app relaunch canary
+
 ## What We Confirmed Was Harness Noise
 
 ### 1. Exact shell token matching produced false negatives

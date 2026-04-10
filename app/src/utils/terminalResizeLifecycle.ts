@@ -68,7 +68,6 @@ export function planObservedTerminalResize(input: {
 
 export type VisibilityFlushPlan =
   | { type: 'none' }
-  | { type: 'force_redraw'; cols: number; rows: number }
   | { type: 'resize'; next: TerminalResizeSnapshot };
 
 export function planVisibilityFlush(input: {
@@ -85,11 +84,7 @@ export function planVisibilityFlush(input: {
   }
 
   if (next.cols === currentCols && next.rows === currentRows) {
-    return {
-      type: 'force_redraw',
-      cols: next.cols,
-      rows: next.rows,
-    };
+    return { type: 'none' };
   }
 
   return {
