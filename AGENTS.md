@@ -33,6 +33,13 @@ go test ./internal/store -run TestList  # Run single test
 - Do not add tests that only re-check compile-time guarantees (types, lint-only checks, build-only coverage).
 - Do not copy production code into tests; tests should exercise behavior, not mirror implementation.
 
+## Packaged-App Harness Discipline
+
+- Real packaged-app harness scenarios are single-tenant. Never run them in parallel.
+- Treat any failure from a parallel packaged-app run as invalid harness usage, not product evidence.
+- Prefer `pnpm --dir app run real-app:serial-matrix` when you want multiple packaged-app scenarios.
+- If you need one scenario, run exactly one packaged-app scenario at a time and wait for it to finish before starting another.
+
 ## CLI Usage
 
 ```bash
