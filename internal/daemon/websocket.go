@@ -21,12 +21,14 @@ import (
 
 // wsClient represents a connected WebSocket client
 type wsClient struct {
-	conn       *websocket.Conn
-	send       chan outboundMessage
-	recv       chan []byte // incoming messages for ordered processing
-	slowCount  int         // tracks consecutive failed sends
-	sendMu     sync.RWMutex
-	sendClosed bool
+	conn        *websocket.Conn
+	send        chan outboundMessage
+	recv        chan []byte // incoming messages for ordered processing
+	slowCount   int         // tracks consecutive failed sends
+	sendMu      sync.RWMutex
+	sendClosed  bool
+	closeCode   websocket.StatusCode
+	closeReason string
 
 	// PTY subscriptions keyed by session ID
 	attachedStreams map[string]ptybackend.Stream // session -> stream
@@ -44,13 +46,30 @@ type wsClient struct {
 }
 
 func (c *wsClient) closeSendChannel() {
+	c.closeSendChannelWithStatus(websocket.StatusNormalClosure, "")
+}
+
+func (c *wsClient) closeSendChannelWithStatus(code websocket.StatusCode, reason string) {
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
+	if c.closeCode == 0 {
+		c.closeCode = code
+		c.closeReason = reason
+	}
 	if c.sendClosed {
 		return
 	}
 	c.sendClosed = true
 	close(c.send)
+}
+
+func (c *wsClient) closeStatus() (websocket.StatusCode, string) {
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+	if c.closeCode == 0 {
+		return websocket.StatusNormalClosure, ""
+	}
+	return c.closeCode, c.closeReason
 }
 
 func (c *wsClient) trySend(message outboundMessage) bool {
@@ -297,7 +316,7 @@ func (h *wsHub) run() {
 			// Remove slow clients outside the iteration
 			for _, client := range toRemove {
 				delete(h.clients, client)
-				client.closeSendChannel()
+				client.closeSendChannelWithStatus(websocket.StatusPolicyViolation, "client too slow")
 			}
 			h.mu.Unlock()
 		}
@@ -349,7 +368,7 @@ func (h *wsHub) SendRawTextToMatchingClients(payload []byte, match func(*wsClien
 	}
 	for _, client := range toRemove {
 		delete(h.clients, client)
-		client.closeSendChannel()
+		client.closeSendChannelWithStatus(websocket.StatusPolicyViolation, "client too slow")
 	}
 	h.mu.Unlock()
 }
@@ -531,7 +550,8 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 
 func (d *Daemon) wsWritePump(client *wsClient) {
 	defer func() {
-		client.conn.Close(websocket.StatusNormalClosure, "")
+		code, reason := client.closeStatus()
+		client.conn.Close(code, reason)
 	}()
 
 	for message := range client.send {
