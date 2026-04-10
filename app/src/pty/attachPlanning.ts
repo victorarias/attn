@@ -1,9 +1,16 @@
 import type { PtyAttachPolicy } from './bridge';
 
+export type AttachReplayPreference =
+  | 'default'
+  | 'prefer_raw_scrollback';
+
 export interface AttachRequestContext {
   requestedCols: number;
   requestedRows: number;
   policy: PtyAttachPolicy;
+  shell: boolean;
+  agent: string | null;
+  replayPreference: AttachReplayPreference;
 }
 
 export interface AttachReplayData {
@@ -20,6 +27,7 @@ export interface AttachGeometryData {
   cols?: number;
   rows?: number;
   screen_snapshot?: string;
+  screen_snapshot_fresh?: boolean;
   scrollback?: string;
   screen_cols?: number;
   screen_rows?: number;
@@ -29,6 +37,7 @@ export interface AttachRuntimeRequest {
   cols: number;
   rows: number;
   shell?: boolean;
+  agent?: string | null;
 }
 
 export interface PendingAttachOutputChunk {
@@ -50,21 +59,46 @@ export function enqueuePendingAttachOutput(
 }
 
 export function createAttachRequestContext(
-  args: Pick<AttachRuntimeRequest, 'cols' | 'rows'>,
+  args: Pick<AttachRuntimeRequest, 'cols' | 'rows' | 'shell' | 'agent'>,
   policy: PtyAttachPolicy,
 ): AttachRequestContext {
+  const normalizedAgent = normalizeAttachAgent(args.agent, args.shell);
   return {
     requestedCols: args.cols,
     requestedRows: args.rows,
     policy,
+    shell: normalizedAgent === 'shell',
+    agent: normalizedAgent,
+    replayPreference: deriveAttachReplayPreference(normalizedAgent),
   };
+}
+
+function normalizeAttachAgent(agent?: string | null, shell?: boolean): string | null {
+  if (shell) {
+    return 'shell';
+  }
+  if (typeof agent !== 'string') {
+    return null;
+  }
+  const normalized = agent.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function deriveAttachReplayPreference(agent: string | null): AttachReplayPreference {
+  return agent === 'codex' ? 'prefer_raw_scrollback' : 'default';
 }
 
 export function classifyAttachReplay(
   data: AttachReplayData,
   context?: AttachRequestContext,
 ) {
-  const hasScreenSnapshot = Boolean(data.screen_snapshot && data.screen_snapshot_fresh !== false);
+  const availableScreenSnapshot = Boolean(data.screen_snapshot && data.screen_snapshot_fresh !== false);
+  const availableRawScrollback = Boolean(data.scrollback);
+  const replayPreference = context?.replayPreference ?? 'default';
+  const prefersRawScrollback = replayPreference === 'prefer_raw_scrollback'
+    && context?.policy === 'relaunch_restore';
+  const screenSnapshotSuppressed = availableScreenSnapshot && prefersRawScrollback;
+  const hasScreenSnapshot = availableScreenSnapshot && !screenSnapshotSuppressed;
   const hasReplayPayload = Boolean((hasScreenSnapshot && data.screen_snapshot) || data.scrollback);
   const replayKind = hasScreenSnapshot
     ? 'screen_snapshot'
@@ -73,8 +107,12 @@ export function classifyAttachReplay(
       : 'none';
   const attachedCols = typeof data.cols === 'number' ? data.cols : null;
   const attachedRows = typeof data.rows === 'number' ? data.rows : null;
-  const replayCols = typeof data.screen_cols === 'number' ? data.screen_cols : attachedCols;
-  const replayRows = typeof data.screen_rows === 'number' ? data.screen_rows : attachedRows;
+  const replayCols = hasScreenSnapshot
+    ? (typeof data.screen_cols === 'number' ? data.screen_cols : attachedCols)
+    : attachedCols;
+  const replayRows = hasScreenSnapshot
+    ? (typeof data.screen_rows === 'number' ? data.screen_rows : attachedRows)
+    : attachedRows;
   const requestedCols = context?.requestedCols ?? null;
   const requestedRows = context?.requestedRows ?? null;
   const attachedGeometryMismatch = requestedCols !== null && requestedRows !== null && (
@@ -92,6 +130,13 @@ export function classifyAttachReplay(
   const replayApplied = hasReplayPayload && !replaySkipped;
 
   return {
+    shell: context?.shell ?? false,
+    agent: context?.agent ?? null,
+    replayPreference,
+    prefersRawScrollback,
+    availableScreenSnapshot,
+    availableRawScrollback,
+    screenSnapshotSuppressed,
     hasScreenSnapshot,
     hasReplayPayload,
     replayKind,
@@ -112,16 +157,21 @@ export function classifyAttachReplay(
 export function planAttachedRuntimeGeometry(
   args: AttachRuntimeRequest,
   attachResult: AttachGeometryData,
-  options: { attachPolicy: PtyAttachPolicy; forceShellRedraw?: boolean },
+  options: {
+    attachPolicy: PtyAttachPolicy;
+    forceShellRedraw?: boolean;
+    attachContext?: AttachRequestContext;
+  },
 ) {
+  const replayPlan = classifyAttachReplay(attachResult, options.attachContext);
   const requestedCols = args.cols;
   const requestedRows = args.rows;
   const attachedCols = typeof attachResult.cols === 'number' ? attachResult.cols : null;
   const attachedRows = typeof attachResult.rows === 'number' ? attachResult.rows : null;
-  const hasScreenSnapshotReplay = Boolean(attachResult.screen_snapshot);
-  const hasRawScrollbackReplay = Boolean(attachResult.scrollback) && !hasScreenSnapshotReplay;
-  const replayCols = typeof attachResult.screen_cols === 'number' ? attachResult.screen_cols : null;
-  const replayRows = typeof attachResult.screen_rows === 'number' ? attachResult.screen_rows : null;
+  const hasScreenSnapshotReplay = replayPlan.replayApplied && replayPlan.hasScreenSnapshot;
+  const hasRawScrollbackReplay = replayPlan.replayApplied && replayPlan.replayKind === 'scrollback';
+  const replayCols = replayPlan.replayCols;
+  const replayRows = replayPlan.replayRows;
   const ptyGeometryMatches = attachedCols === requestedCols && attachedRows === requestedRows;
   const replayGeometryMatches = hasScreenSnapshotReplay
     ? replayCols === requestedCols && replayRows === requestedRows
@@ -149,6 +199,13 @@ export function planAttachedRuntimeGeometry(
     replayGeometryMatches,
     hasScreenSnapshotReplay,
     hasRawScrollbackReplay,
+    replayKind: replayPlan.replayKind,
+    replayApplied: replayPlan.replayApplied,
+    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+    availableRawScrollback: replayPlan.availableRawScrollback,
+    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
+    replayPreference: replayPlan.replayPreference,
+    agent: replayPlan.agent,
     resizeRequired,
     redrawRequired,
     strategy: resizeRequired ? 'resize' : redrawRequired ? 'redraw' : 'none',

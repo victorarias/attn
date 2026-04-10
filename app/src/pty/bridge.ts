@@ -28,6 +28,7 @@ export interface PtyAttachArgs {
   cols: number;
   rows: number;
   shell?: boolean;
+  agent?: string;
   reason?: string;
   policy?: PtyAttachPolicy;
 }

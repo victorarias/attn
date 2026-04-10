@@ -743,7 +743,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('applies matching replay and requests redraw when spawning a daemon-known non-shell session', async () => {
+  it('prefers raw scrollback over screen snapshot when relaunching a daemon-known Codex session', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
     const onPRsUpdate = vi.fn();
@@ -807,9 +807,99 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         success: true,
         cols: 58,
         rows: 46,
+        scrollback: 'cmF3LXdpbnM=',
         screen_cols: 58,
         screen_rows: 46,
         screen_snapshot: 'bWF0Y2g=',
+        screen_snapshot_fresh: true,
+        running: true,
+      });
+    });
+
+    await expect(spawnPromise).resolves.toBeUndefined();
+
+    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string; source?: string }> }).__TEST_PTY_EVENTS || [];
+    expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'cmF3LXdpbnM=', source: 'attach_replay' });
+    expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'sess-existing' && event.data === 'bWF0Y2g=')).toBe(false);
+
+    const resizes = ws.sent
+      .map((entry) => JSON.parse(entry))
+      .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
+    expect(resizes).toEqual([]);
+
+    unmount();
+  });
+
+  it('keeps screen snapshot replay when relaunching a daemon-known Claude session', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS = [];
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '50',
+        sessions: [{
+          id: 'sess-existing',
+          label: 'attn',
+          agent: 'claude',
+          directory: '/tmp/repo',
+          state: 'idle',
+          state_since: '2026-04-08T00:00:00Z',
+          state_updated_at: '2026-04-08T00:00:00Z',
+          last_seen: '2026-04-08T00:00:00Z',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const spawnPromise = ptySpawn({
+      args: {
+        id: 'sess-existing',
+        cwd: '/tmp/repo',
+        agent: 'claude',
+        cols: 58,
+        rows: 46,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'relaunch_restore' });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-existing',
+        success: true,
+        cols: 58,
+        rows: 46,
+        scrollback: 'Y2xhdWRlLXJhdy1mYWxsYmFjaw==',
+        screen_cols: 58,
+        screen_rows: 46,
+        screen_snapshot: 'Y2xhdWRlLXNuYXBzaG90',
+        screen_snapshot_fresh: true,
         running: true,
       });
     });
@@ -818,7 +908,8 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string; source?: string }> }).__TEST_PTY_EVENTS || [];
     expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'snapshot_restore' });
-    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'bWF0Y2g=', source: 'attach_replay' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'Y2xhdWRlLXNuYXBzaG90', source: 'attach_replay' });
+    expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'sess-existing' && event.data === 'Y2xhdWRlLXJhdy1mYWxsYmFjaw==')).toBe(false);
 
     await waitFor(() => {
       const resizes = ws.sent
@@ -826,6 +917,99 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
       expect(resizes).toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 45 });
       expect(resizes.filter((entry) => entry.cols === 58 && entry.rows === 46).length).toBeGreaterThanOrEqual(1);
+    });
+
+    unmount();
+  });
+
+  it('keeps screen snapshot replay for daemon-known shell relaunches', async () => {
+    const onSessionsUpdate = vi.fn();
+    const onWorkspacesUpdate = vi.fn();
+    const onPRsUpdate = vi.fn();
+    const onReposUpdate = vi.fn();
+    const onAuthorsUpdate = vi.fn();
+    (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS = [];
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate,
+        onWorkspacesUpdate,
+        onPRsUpdate,
+        onReposUpdate,
+        onAuthorsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: '50',
+        sessions: [],
+        workspaces: [{
+          session_id: 'sess-remote',
+          active_pane_id: 'main',
+          layout_json: '',
+          panes: [{
+            pane_id: 'pane-shell-1',
+            kind: 'shell',
+            runtime_id: 'runtime-shell-1',
+            title: 'Shell 1',
+          }],
+        }],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const spawnPromise = ptySpawn({
+      args: {
+        id: 'runtime-shell-1',
+        cwd: '/tmp/repo',
+        endpoint_id: 'ep-remote',
+        cols: 80,
+        rows: 24,
+        shell: true,
+      },
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'relaunch_restore' });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'runtime-shell-1',
+        success: true,
+        cols: 80,
+        rows: 24,
+        scrollback: 'c2hlbGwtcmF3LWZhbGxiYWNr',
+        screen_cols: 80,
+        screen_rows: 24,
+        screen_snapshot: 'c2hlbGwtc25hcHNob3Q=',
+        screen_snapshot_fresh: true,
+        running: true,
+      });
+    });
+
+    await expect(spawnPromise).resolves.toBeUndefined();
+
+    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string; source?: string; reason?: string }> }).__TEST_PTY_EVENTS || [];
+    expect(ptyEvents).toContainEqual({ event: 'reset', id: 'runtime-shell-1', reason: 'snapshot_restore' });
+    expect(ptyEvents).toContainEqual({ event: 'data', id: 'runtime-shell-1', data: 'c2hlbGwtc25hcHNob3Q=', source: 'attach_replay' });
+    expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'runtime-shell-1' && event.data === 'c2hlbGwtcmF3LWZhbGxiYWNr')).toBe(false);
+
+    await waitFor(() => {
+      const resizes = ws.sent
+        .map((entry) => JSON.parse(entry))
+        .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'runtime-shell-1');
+      expect(resizes).toContainEqual({ cmd: 'pty_resize', id: 'runtime-shell-1', cols: 80, rows: 23 });
+      expect(resizes.filter((entry) => entry.cols === 80 && entry.rows === 24).length).toBeGreaterThanOrEqual(1);
     });
 
     unmount();

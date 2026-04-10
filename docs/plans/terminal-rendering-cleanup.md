@@ -362,6 +362,179 @@ Status:
 - blocked more by scenario stability than by lack of code structure
 - `TR-205` is still the main place where product behavior and harness/bootstrap flakiness are hardest to disentangle
 
+### Next Phase 3 Experiments
+
+These are the next relaunch-focused experiments to run before inventing more replay repair logic.
+
+#### 1. Agent `screen_snapshot` Kill Switch
+
+Hypothesis:
+
+- agent-pane relaunch restore may not need `screen_snapshot` at all if bounded raw replay is already available
+- if true, we can simplify the attach path and reduce one source of stale geometry replay
+
+Experiment:
+
+- disable `screen_snapshot` restore for agent panes only
+- keep existing raw scrollback replay behavior
+- compare relaunch first-paint and later resize recovery against the current baseline
+
+Why this is first:
+
+- it directly answers Phase 3 task `2`
+- it is the cleanest way to test whether snapshot-specific relaunch logic is still agent-critical
+
+Primary verification:
+
+- `useDaemonSocket.test.tsx`
+- `TR-205`
+- `TR-204`
+- `TR-502`
+
+Success signal:
+
+- relaunch restore keeps acceptable first paint and later resize recovery without relying on visible-frame snapshot semantics
+
+Main regression risk:
+
+- relaunch first paint may look blank or stale for longer while waiting for live output or raw replay
+
+Implementation checklist:
+
+1. Capture a baseline before changing behavior.
+   - record current `pty.attach.result`, `pty.attach.replay_applied`, and `pty.attach.replay_skipped` traces for `TR-205`, `TR-204`, and `TR-502`
+   - confirm which relaunch cases still reach the client with `replayKind: screen_snapshot`
+   - do not assume every agent pane still depends on snapshot replay just because the client path exists
+
+2. Lock down the intended scope before editing code.
+   - current daemon behavior already prefers bounded raw replay for stored Codex sessions in [internal/daemon/ws_pty.go](/Users/victor.arias/projects/victor/attn/internal/daemon/ws_pty.go)
+   - current daemon tests still explicitly prefer fresh `screen_snapshot` replay for stored Claude sessions in [internal/daemon/daemon_test.go](/Users/victor.arias/projects/victor/attn/internal/daemon/daemon_test.go)
+   - treat the first pass as `Codex-first unless evidence says Claude should join the same experiment immediately`
+
+3. Thread pane-kind intent into the attach replay planner.
+   - extend the attach replay context in [app/src/pty/attachPlanning.ts](/Users/victor.arias/projects/victor/attn/app/src/pty/attachPlanning.ts) so replay classification can distinguish shell vs agent and Codex vs Claude where needed
+   - prefer passing explicit session-agent or replay-preference intent instead of inferring from unrelated geometry fields later in the flow
+   - keep same-app remount behavior unchanged; this experiment is relaunch-only
+
+4. Add an app-side kill switch that suppresses agent snapshot restore.
+   - in [app/src/pty/attachPlanning.ts](/Users/victor.arias/projects/victor/attn/app/src/pty/attachPlanning.ts), change `classifyAttachReplay()` so eligible agent relaunch attaches ignore `screen_snapshot` and fall back to raw `scrollback` when present
+   - if only `screen_snapshot` is present, log that explicitly and decide whether the experiment should skip replay entirely or temporarily allow the old path
+   - make the decision visible in transport logs so artifacts can prove when snapshot replay was intentionally bypassed
+
+5. Keep replay effects semantically correct after the switch.
+   - in [app/src/pty/attachPlanning.ts](/Users/victor.arias/projects/victor/attn/app/src/pty/attachPlanning.ts), ensure the reset reason changes from `snapshot_restore` to `reattach` when raw replay is selected instead
+   - keep Codex truncated-raw warnings intact
+   - do not accidentally re-enable redraw-only repair logic while removing snapshot restore
+
+6. Audit the daemon contract, but do not broaden it prematurely.
+   - verify whether any relaunch attach path still sends `screen_snapshot` for the targeted agent class despite the existing daemon preference
+   - only change [internal/daemon/ws_pty.go](/Users/victor.arias/projects/victor/attn/internal/daemon/ws_pty.go) if the baseline shows the app cannot exercise the experiment cleanly from current payloads
+   - if daemon behavior changes, update the corresponding attach replay tests in [internal/daemon/daemon_test.go](/Users/victor.arias/projects/victor/attn/internal/daemon/daemon_test.go) in the same slice
+
+7. Add focused unit coverage before running packaged-app scenarios.
+   - in [app/src/pty/attachPlanning.test.ts](/Users/victor.arias/projects/victor/attn/app/src/pty/attachPlanning.test.ts):
+     add a case where a Codex relaunch attach contains both `screen_snapshot` and `scrollback` and confirm raw replay wins
+   - in [app/src/hooks/useDaemonSocket.test.tsx](/Users/victor.arias/projects/victor/attn/app/src/hooks/useDaemonSocket.test.tsx):
+     add a relaunch attach case proving the emitted replay data comes from `scrollback`, not `screen_snapshot`
+   - keep a shell control case that still uses snapshot replay
+   - if Claude remains out of scope for this experiment, keep an explicit Claude control case so the contract stays intentional rather than accidental
+
+8. Run the minimum packaged-app matrix for acceptance.
+   - `TR-205` remote Codex
+   - `TR-204`
+   - `TR-502`
+   - rerun the matching shell path if shell replay policy was touched indirectly
+
+9. Decide based on trace evidence, not only visual feel.
+   - success means accepted relaunch traces for the targeted agent class no longer show `replayKind: screen_snapshot`
+   - first paint can be slightly less immediate, but later resize recovery must stay healthy
+   - if the experiment only helps Codex while Claude regresses or clearly still benefits from snapshots, keep the policies split and document that explicitly
+
+Status:
+
+- executed on 2026-04-10 for the current app-side relaunch path
+- attach replay context now carries explicit agent-aware replay preference in the frontend planner, so relaunch classification no longer treats all non-shell attaches as one replay class
+- Codex relaunch attaches now suppress fresh `screen_snapshot` replay in favor of raw `scrollback` when both payloads are present
+- Claude and shell relaunch attaches intentionally keep the snapshot replay path for now
+- geometry reconcile now keys redraw behavior off the replay source that was actually applied rather than only the raw `attach_result` payload shape
+- the daemon contract did not need to change for this slice because it already preferred bounded raw replay for stored Codex sessions and fresh snapshots for stored Claude sessions
+- focused frontend verification passed:
+  - `src/pty/attachPlanning.test.ts`
+  - `src/hooks/useDaemonSocket.test.tsx`
+  - `src/pty/runtimeLifecycle.test.ts`
+  - `src/pty/transportState.test.ts`
+- packaged-app serial matrix passed on 2026-04-10 after fresh `make install-all`:
+  - `TR-205` remote Codex
+  - `TR-205` remote Claude
+  - `TR-504`
+  - `TR-402` local Codex
+  - `TR-402` local Claude
+  - `TR-303` local Codex
+- current read: the Codex-first app-side kill switch is validated as the new baseline, while Claude remains an explicit snapshot-preserving control policy rather than an unexamined default
+
+#### 2. Replay Query Quarantine
+
+Hypothesis:
+
+- some relaunch corruption may be caused by replayed historical terminal queries provoking fresh terminal responses during restore
+
+Experiment:
+
+- instrument replay restore so DA1, CPR, OSC color probes, and similar query-response traffic are visible in traces
+- prototype a restore window where query replies from replay restoration are suppressed, ignored, or deferred until replay completes
+- compare the result to the current relaunch path on the same payloads
+
+Why this matters:
+
+- recent prototype work suggests relaunch replay is not fully passive for bad Codex payloads
+- if duplicate query responses are the real damage source, more redraw or reattach logic will be the wrong fix
+
+Primary verification:
+
+- deterministic replay/query-response characterization tests
+- `TR-205`
+- local relaunch Codex repro artifacts when available
+
+Success signal:
+
+- malformed post-relaunch shrink/widen behavior becomes reproducible or disappears based on query-reply handling rather than on redraw timing
+
+Main regression risk:
+
+- over-quarantining replies could hide terminal capability negotiation that a fresh xterm actually needs
+
+#### 3. Geometry-Epoch Shadow Mode
+
+Hypothesis:
+
+- the remaining relaunch ambiguity is partly observational: we still cannot always tell whether replay matched the geometry epoch the client actually wanted
+
+Experiment:
+
+- add shadow-only logging for requested attach geometry, attached PTY geometry, replay payload geometry, and a replay/resize epoch identifier where practical
+- do not change replay policy yet
+- use the resulting traces to classify replay as matching, provisional, or incompatible
+
+Why this is third:
+
+- it de-risks future protocol changes without forcing a behavior shift before the evidence is stronger
+- it should make `TR-205` failures easier to separate into product bugs vs harness/bootstrap timing noise
+
+Primary verification:
+
+- `useDaemonSocket.test.tsx`
+- protocol/logging assertions where the new metadata is surfaced
+- `TR-205`
+- `TR-502`
+
+Success signal:
+
+- each relaunch trace can explain not only what geometry the client asked for, but what geometry or epoch produced the replay payload that was actually applied
+
+Main regression risk:
+
+- mostly instrumentation churn and trace noise rather than user-facing behavior regressions
+
 ## Ranked Deletion Experiments
 
 These are intentionally framed as removal experiments, not preservation work. The working assumption is that some terminal-rendering code was added defensively during regressions and may no longer be required.

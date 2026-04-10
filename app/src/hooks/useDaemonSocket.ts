@@ -1103,8 +1103,13 @@ export function useDaemonSocket({
                 data.success ? 'attach session result' : 'attach session failed',
                 {
                   attachPolicy: attachContext?.policy ?? null,
+                  attachAgent: attachContext?.agent ?? null,
+                  replayPreference: replayPlan.replayPreference,
                   success: data.success,
                   replayKind: replayPlan.replayKind,
+                  availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                  availableRawScrollback: replayPlan.availableRawScrollback,
+                  screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
                   lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
                   cols: typeof data.cols === 'number' ? data.cols : null,
                   rows: typeof data.rows === 'number' ? data.rows : null,
@@ -1164,10 +1169,25 @@ export function useDaemonSocket({
                   });
                 }
                 ptyTransportRef.current.setLastSeq(data.id, attachEffects.nextSeq);
+                if (replayPlan.screenSnapshotSuppressed) {
+                  recordRuntimeTransportLog(data.id, 'pty.attach.snapshot_suppressed', 'attach screen snapshot suppressed by replay preference', {
+                    attachPolicy: attachContext?.policy ?? null,
+                    attachAgent: attachContext?.agent ?? null,
+                    replayPreference: replayPlan.replayPreference,
+                    replayKind: replayPlan.replayKind,
+                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                    availableRawScrollback: replayPlan.availableRawScrollback,
+                  });
+                }
                 if (attachEffects.replayAction.kind === 'skipped') {
                   recordRuntimeTransportLog(data.id, 'pty.attach.replay_skipped', 'attach replay skipped due to attach policy or geometry mismatch', {
                     attachPolicy: attachContext?.policy ?? null,
+                    attachAgent: attachContext?.agent ?? null,
+                    replayPreference: replayPlan.replayPreference,
                     replayKind: replayPlan.replayKind,
+                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                    availableRawScrollback: replayPlan.availableRawScrollback,
+                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
                     attachedCols: replayPlan.attachedCols,
                     attachedRows: replayPlan.attachedRows,
                     replayCols: replayPlan.replayCols,
@@ -1178,7 +1198,12 @@ export function useDaemonSocket({
                 } else if (attachEffects.replayAction.kind === 'screen_snapshot') {
                   recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
                     attachPolicy: attachContext?.policy ?? null,
+                    attachAgent: attachContext?.agent ?? null,
+                    replayPreference: replayPlan.replayPreference,
                     replayKind: 'screen_snapshot',
+                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                    availableRawScrollback: replayPlan.availableRawScrollback,
+                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
                     bytes: attachEffects.replayAction.data.length,
                     lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
                     replayPayloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? attachEffects.replayAction.data : undefined,
@@ -1192,7 +1217,12 @@ export function useDaemonSocket({
                 } else if (attachEffects.replayAction.kind === 'scrollback') {
                   recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
                     attachPolicy: attachContext?.policy ?? null,
+                    attachAgent: attachContext?.agent ?? null,
+                    replayPreference: replayPlan.replayPreference,
                     replayKind: 'scrollback',
+                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                    availableRawScrollback: replayPlan.availableRawScrollback,
+                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
                     bytes: attachEffects.replayAction.data.length,
                     lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
                     replayPayloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? attachEffects.replayAction.data : undefined,
@@ -2070,6 +2100,8 @@ export function useDaemonSocket({
       pendingActionsRef.current.set(key, { resolve, reject });
       recordRuntimeTransportLog(id, 'pty.attach.requested', 'attach session requested', {
         attachPolicy: context?.policy ?? null,
+        attachAgent: context?.agent ?? null,
+        replayPreference: context?.replayPreference ?? null,
       });
       recordPtyCommand('attach_session', id);
       ws.send(JSON.stringify({
@@ -2182,7 +2214,11 @@ export function useDaemonSocket({
   const reconcileAttachedRuntimeGeometry = useCallback((
     args: Pick<PtySpawnArgs, 'id' | 'cols' | 'rows' | 'shell'>,
     attachResult: AttachResult,
-    options: { attachPolicy: PtyAttachPolicy; forceShellRedraw?: boolean },
+    options: {
+      attachPolicy: PtyAttachPolicy;
+      forceShellRedraw?: boolean;
+      attachContext?: AttachRequestContext;
+    },
   ) => {
     const plan = planAttachedRuntimeGeometry(args, attachResult, options);
 
@@ -2206,22 +2242,30 @@ export function useDaemonSocket({
   }, [recordRuntimeTransportLog, sendPtyRedraw, sendPtyResize]);
 
   const attachExistingRuntime = useCallback(async (
-    args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell' | 'reason'>,
+    args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell' | 'agent' | 'reason'>,
     options: {
       policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount'>;
       forceResizeBeforeAttach?: boolean;
       forceShellRedraw?: boolean;
     },
   ): Promise<void> => {
+    const sessionAgent = args.agent
+      ?? sessionsRef.current.find((entry) => entry.id === args.id)?.agent
+      ?? null;
+    const attachContext = createAttachRequestContext({
+      ...args,
+      agent: sessionAgent,
+    }, options.policy);
     if (options?.forceResizeBeforeAttach) {
       sendPtyResize(args.id, args.cols, args.rows, args.reason || 'remount_hydrate');
     }
     const attachResult = await sendAttachSessionWithRetry(
       args.id,
-      createAttachRequestContext(args, options.policy),
+      attachContext,
     );
     reconcileAttachedRuntimeGeometry(args, attachResult, {
       attachPolicy: options.policy,
+      attachContext,
       forceShellRedraw: options.forceShellRedraw,
     });
   }, [reconcileAttachedRuntimeGeometry, sendAttachSessionWithRetry, sendPtyResize]);

@@ -19,7 +19,7 @@ export interface SpawnPtyRuntimeContext {
 
 export interface SpawnPtyRuntimeOperations {
   attachExistingRuntime(
-    args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell' | 'reason'>,
+    args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell' | 'agent' | 'reason'>,
     options: ExistingRuntimeAttachOptions,
   ): Promise<unknown>;
   attachFreshRuntime(args: PtySpawnArgs): Promise<unknown>;

@@ -47,9 +47,9 @@ describe('paneRuntimeLifecycleState', () => {
 
   it('suppresses pane input only while the wrapped task is running', async () => {
     const registry = createPaneRuntimeLifecycleRegistry();
-    let resolveTask: (() => void) | null = null;
+    const resolveTaskRef: { current: (() => void) | null } = { current: null };
     const task = new Promise<void>((resolve) => {
-      resolveTask = resolve;
+      resolveTaskRef.current = resolve;
     });
 
     const wrapped = registry.runWithInputSuppressed('pane-1', async () => {
@@ -59,7 +59,7 @@ describe('paneRuntimeLifecycleState', () => {
 
     expect(registry.isInputSuppressed('pane-1')).toBe(true);
 
-    resolveTask?.();
+    resolveTaskRef.current?.();
     await wrapped;
 
     expect(registry.isInputSuppressed('pane-1')).toBe(false);

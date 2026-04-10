@@ -25,6 +25,44 @@ describe('attachPlanning', () => {
     expect(plan.replayAllowedByPolicy).toBe(true);
   });
 
+  it('prefers raw scrollback over screen snapshot for Codex relaunch restores', () => {
+    const plan = classifyAttachReplay({
+      cols: 58,
+      rows: 46,
+      screen_cols: 58,
+      screen_rows: 46,
+      screen_snapshot: 'snapshot',
+      screen_snapshot_fresh: true,
+      scrollback: 'raw',
+    }, createAttachRequestContext({ cols: 58, rows: 46, agent: 'codex' }, 'relaunch_restore'));
+
+    expect(plan.replayKind).toBe('scrollback');
+    expect(plan.replayApplied).toBe(true);
+    expect(plan.availableScreenSnapshot).toBe(true);
+    expect(plan.availableRawScrollback).toBe(true);
+    expect(plan.screenSnapshotSuppressed).toBe(true);
+    expect(plan.replayPreference).toBe('prefer_raw_scrollback');
+  });
+
+  it('keeps screen snapshot replay for Claude relaunch restores', () => {
+    const plan = classifyAttachReplay({
+      cols: 58,
+      rows: 46,
+      screen_cols: 58,
+      screen_rows: 46,
+      screen_snapshot: 'snapshot',
+      screen_snapshot_fresh: true,
+      scrollback: 'raw',
+    }, createAttachRequestContext({ cols: 58, rows: 46, agent: 'claude' }, 'relaunch_restore'));
+
+    expect(plan.replayKind).toBe('screen_snapshot');
+    expect(plan.replayApplied).toBe(true);
+    expect(plan.availableScreenSnapshot).toBe(true);
+    expect(plan.availableRawScrollback).toBe(true);
+    expect(plan.screenSnapshotSuppressed).toBe(false);
+    expect(plan.replayPreference).toBe('default');
+  });
+
   it('skips replay for same-app remount even when payload geometry matches', () => {
     const plan = classifyAttachReplay({
       cols: 58,
@@ -61,7 +99,12 @@ describe('attachPlanning', () => {
     expect(plan.strategy).toBe('redraw');
   });
 
-  it('requests resize and redraw when attached geometry is stale', () => {
+  it('requests resize without treating skipped stale snapshot replay as an active redraw source', () => {
+    const attachContext = createAttachRequestContext({
+      cols: 58,
+      rows: 46,
+      agent: 'claude',
+    }, 'relaunch_restore');
     const plan = planAttachedRuntimeGeometry({
       cols: 58,
       rows: 46,
@@ -74,10 +117,11 @@ describe('attachPlanning', () => {
       screen_snapshot: 'stale',
     }, {
       attachPolicy: 'relaunch_restore',
+      attachContext,
     });
 
     expect(plan.resizeRequired).toBe(true);
-    expect(plan.redrawRequired).toBe(true);
+    expect(plan.redrawRequired).toBe(false);
     expect(plan.strategy).toBe('resize');
     expect(plan.ptyGeometryMatches).toBe(false);
     expect(plan.replayGeometryMatches).toBe(false);
@@ -96,6 +140,38 @@ describe('attachPlanning', () => {
       attachPolicy: 'relaunch_restore',
     });
 
+    expect(plan.resizeRequired).toBe(false);
+    expect(plan.redrawRequired).toBe(false);
+    expect(plan.strategy).toBe('none');
+  });
+
+  it('does not request redraw when Codex relaunch replay suppresses a matching snapshot in favor of raw scrollback', () => {
+    const attachContext = createAttachRequestContext({
+      cols: 58,
+      rows: 46,
+      agent: 'codex',
+    }, 'relaunch_restore');
+    const plan = planAttachedRuntimeGeometry({
+      cols: 58,
+      rows: 46,
+      shell: false,
+      agent: 'codex',
+    }, {
+      cols: 58,
+      rows: 46,
+      screen_cols: 58,
+      screen_rows: 46,
+      screen_snapshot: 'snapshot',
+      screen_snapshot_fresh: true,
+      scrollback: 'raw',
+    }, {
+      attachPolicy: 'relaunch_restore',
+      attachContext,
+    });
+
+    expect(plan.hasScreenSnapshotReplay).toBe(false);
+    expect(plan.hasRawScrollbackReplay).toBe(true);
+    expect(plan.screenSnapshotSuppressed).toBe(true);
     expect(plan.resizeRequired).toBe(false);
     expect(plan.redrawRequired).toBe(false);
     expect(plan.strategy).toBe('none');
