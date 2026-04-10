@@ -332,6 +332,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       focusActivePane();
     }, [activePaneId, focusActivePane, focusRequestToken, isActiveSession, isSessionViewVisible, sessionId, sessionVisible]);
 
+    // After relaunch, first-show, or split topology changes, xterm can briefly keep
+    // stale narrow geometry from the previous layout. Re-fitting immediately and then
+    // once more after layout settles preserves restored headers/content width.
     const refitPanesNowAndIfStillTiny = useCallback((targetPaneIds: string[]) => {
       const paneIdsToFit = Array.from(new Set(targetPaneIds));
       if (paneIdsToFit.length === 0) {

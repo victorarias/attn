@@ -6,68 +6,23 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
-## [2026-04-09]
-
-### Added
-- **Packaged-App Terminal Regression Matrix**: Add split-close repaint, post-close typing, and remote cleanup canaries so packaged-app regressions in redraw, input, and teardown can be exercised serially against both local and remote sessions.
-- **Replay Characterization Coverage**: Add deterministic replay-level coverage that proves visible-frame restore is not equivalent to a live xterm buffer during later resize recovery.
-
-### Fixed
-- **Split/Close Render Cleanup**: Remove same-size redraw work, same-app non-shell redraw bounces, and remount-time visible-frame restore from ordinary split churn, so close/open recovery now relies on settled PTY resize and authoritative reattach behavior instead of stacked repair heuristics.
-- **Relaunch Restore Stability**: Clarify replay boundaries between Codex and Claude relaunches, harden same-app remount arming, and tune `TR-205` expectations so relaunch canaries catch real width and paint regressions without overfitting benign welcome-screen reflow.
-- **Harness Validity And Cleanup**: Make packaged-app runs fail fast on protocol mismatch, use better native window bounds, enforce serial-harness discipline, and ensure remote session close tears down worker-side processes and stale workspace state.
-- **Post-Close Codex Stability**: Remove replay-triggered redraw jumps after split close and tighten local Codex paint checks so typing and repaint stay stable after the workspace collapses.
-
 ## [2026-04-10]
 
 ### Added
-- **Local Restore And Focus Canaries**: Add packaged-app scenarios for existing-split relaunch, relaunch formatting preservation, utility-focus restoration across session switching, and split-window resize recovery.
-- **Replay Characterization Fixture**: Add deterministic replay-level coverage for the bad local relaunch payload to separate replay bugs from harness noise.
+- **Packaged-App Terminal Validation**: Added a serial packaged-app regression matrix plus relaunch, resize, focus, redraw, and remote cleanup scenarios, along with deterministic replay fixtures and richer visible-content and native-render diagnostics for validating real terminal behavior instead of relying on screenshots or full-buffer text alone.
 
 ### Changed
-- **Terminal Runtime Cleanup**: Refactor PTY attach planning, attach-result handling, transport state, runtime lifecycle, geometry lifecycle, and pane-runtime bookkeeping into explicit helpers so the frontend terminal path is smaller, more policy-driven, and less reliant on parallel local maps and ad hoc replay flags.
-- **Explicit Attach Semantics**: Distinguish `fresh_spawn`, `relaunch_restore`, and `same_app_remount`, keep relaunch restore as the only replay-aware attach path, and carry agent-aware replay preference through attach planning.
-- **Terminal Lifecycle Extraction**: Split terminal sizing, renderer management, viewport readiness, pane controls, and binder write paths into dedicated helpers while preserving existing split, relaunch, and redraw behavior.
-- **Session Close Fidelity**: Make the app and harness wait for daemon-backed close completion and reap worker processes directly, so packaged-app close paths exercise the same semantics users hit.
+- **Terminal Runtime And Harness Discipline**: Reorganized PTY attach, replay, geometry, and pane lifecycle handling into clearer frontend runtime helpers, and tightened packaged-app preflight, build fingerprint checks, scenario locking, and remote isolation so the app and harness consistently exercise the intended binaries and session state.
 
 ### Fixed
-- **Codex Relaunch Replay Correctness**: Suppress replay-time terminal replies, reject raw replay that does not reconstruct the live screen safely, and preserve snapshot fallback when raw replay diverges, so Codex relaunches keep their header and restore without feeding duplicate control-query traffic back into the live session.
-- **Split-Close Focus And Detach Cleanup**: Closing a split now restores focus to the most recently active surviving pane, falling back leftward when needed, and pane detach clears stale xterm/input wiring immediately.
-- **Idle Hot-Path Cost**: Leave pane debug dormant unless enabled, resolve trace details lazily, and skip no-op same-size geometry work so ordinary focus and render churn pays less debug and timer overhead.
-- **Harness Stability**: Ignore `app/scripts/real-app-harness` in source fingerprinting, tolerate transient relaunch-time missing sessions, keep paste-driver warmup stable, and fully tear down isolated remote harness state between runs.
+- **Split, Relaunch, And Replay Stability**: Improved split-close recovery, focus handoff, relaunch restore behavior, Codex header preservation, same-direction split sizing, hidden-session geometry handoff, remote split readiness, and worker cleanup so terminals keep the right content, width, and responsiveness across close, remount, resize, and app-reopen paths.
 
 ### Removed
-- **Local Relaunch Header Canary**: Drop the packaged-app `TR-206` relaunch fuzz canary from the standing scenario matrix after using it to isolate deterministic replay-level coverage for the Codex header-loss bug.
-
-## [2026-04-08]
-
-### Added
-- **Isolated Remote PTY Harness**: The packaged-app remote split latency harness now launches a fresh app against a hermetic remote daemon on the SSH host, with dedicated binary, socket, database, websocket port, and artifacted binary provenance so terminal regressions can be verified without piggybacking on ambient remote state.
-- **Workspace Split Span Diagnostics**: The packaged-app session diagnostics now record how many visual slots each split child spans within a same-direction chain, and nested split DOM snapshots now report direct child widths instead of whichever descendant matched first.
-- **Native Window Harness Capture**: Packaged-app diagnosis bundles now include a native macOS window screenshot so WebGL terminal regressions can be verified from real pixels instead of relying only on DOM-rendered screenshots.
-- **Terminal Startup Render Trace**: Packaged-app session diagnostics now record each terminal's initial container size, first observed layout size, and which path declared the terminal ready, with a no-select relaunch capture mode for bugs that self-heal when the harness focuses the session.
-- **Terminal Regression Scenario Matrix**: Add a packaged-app PTY/UI scenario matrix to track the cases we need to keep stable and tie harness scripts back to explicit scenario IDs.
-- **Terminal Scenario Runner Foundation**: Add shared packaged-app scenario runner, assertion, agent, and remote-helper modules plus a short harness architecture note.
-- **Visible Viewport Content Instrumentation**: Expose each pane's currently visible terminal rows and summary metrics through the UI automation bridge so split and relaunch scenarios can assert rendered content instead of only pane geometry and full-buffer text.
-- **Pane-Cropped Native Pixel Assertions**: Add a pane-level native screenshot analyzer that crops the real macOS window to one pane body and measures painted row/column spread, so scenarios can prove on-screen content occupies the pane instead of collapsing into a narrow strip or footer band.
-- **Range-Based Native Pane Stability Checks**: Add optional before/after tolerance checks for pane paint coverage so split and relaunch scenarios can detect material regressions without requiring exact pixel equality between screenshots.
-- **Remote Relaunch Pane Stability Coverage**: Extend `TR-502` so the restored main pane and original utility pane are checked for both absolute native paint health and acceptable pre/post relaunch drift, not just visibility and typing.
-- **Initial Tiered Scenarios**: Add the first packaged-app scenario scripts for review, including remote relaunch split persistence (`TR-502`).
-- **Pure-Node Native Pane Fixtures**: The native pane screenshot analyzer, fixture tests, and demo generator now use in-repo PNG processing instead of a host-local Pillow dependency, so the packaged-app harness and its pixel assertions run consistently on a clean machine.
-- **Remote Split Echo Thresholds**: `TR-502` now measures typed-shell echo latency with a configurable threshold (`2500ms` by default), records whether the shell terminal was ready when typing began, and saves pane-debug plus terminal-runtime traces so slow split input can be localized instead of waved through as eventual success.
-
-### Fixed
-- **Relaunch Terminal Bootstrap Geometry**: Terminals no longer declare themselves ready from the mount-time font-size effect before the real container measurement arrives, so restored sessions avoid bootstrapping at placeholder geometries like `10x6` that could leave remote panes visually collapsed into tiny wrapped squares after app reopen.
-- **Remote Split Input Delay**: Remote utility panes no longer wait seconds before accepting visible input after the prompt appears. Startup terminal query handling now completes through the real remote worker path, and the packaged-app harness now verifies the exercised local and remote binaries instead of accidentally talking to stale daemons.
-- **Same-Direction Split Width Decay**: Repeated vertical or horizontal splits in one workspace no longer degenerate into `50/25/25` or `25/25/50` pane chains. Stored and newly created chained splits now rebalance to evenly sized siblings, so older sessions like `blubs` recover from the tiny-column layout on the next daemon snapshot.
-- **Truecolor PTY Snapshot Replay**: Attach-time screen snapshots now preserve packed RGB terminal colors when re-emitting visible-frame SGR, so Codex-style truecolor output no longer replays as mostly monochrome after remounts or app relaunches.
-- **`TR-502` Readiness Gate**: The remote relaunch split scenario now waits for visible remote main-pane content before native paint assertions and accepts wrapped shell tokens in narrow panes, avoiding false failures that were actually timing or wrapping artifacts rather than rendering regressions.
+- **Temporary Relaunch Fuzz Canary**: Removed the packaged-app `TR-206` relaunch fuzz scenario after replacing it with more deterministic replay-level coverage.
 
 ## [2026-04-07]
 
 ### Fixed
-- **Terminal Remount Stability**: Session workspaces now keep stable terminal refs across ordinary rerenders, reducing false pane remount churn that could disturb terminal state and formatting.
-- **Session Switch Geometry Handoff**: Hidden terminals now avoid tiny startup measurements and selected sessions fit on animation frames instead of a coarse timeout, so switching sessions does not flash a skinny provisional terminal before the real geometry arrives.
 - **Codex Idle Classification On Remote Daemons**: Stop-time Codex classification now runs from the session repository directory instead of the daemon's ambient working directory, so remote Codex sessions no longer fall back to `unknown` just because the classifier subprocess hit the CLI trust check.
 - **Remote Split Freeze On Codex Sessions**: WebSocket attach replay now drops redundant full scrollback when a fresh screen snapshot is available, so opening a split on a remote Codex session no longer has to push multi-megabyte replay payloads through the UI just to redraw the current screen.
 - **Remote Split Shell Reattach Routing**: Split-pane utility runtimes now inherit their parent session's endpoint and are treated as daemon-known PTYs, so reopening or remounting a remote split attaches to the existing remote shell before falling back to respawn instead of hanging on a misrouted local `spawn_session`.
@@ -126,9 +81,6 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Cross-Compile Path**: Use `zig cc` for macOS-to-Linux cgo builds with fingerprint-based dev caching, so remote-daemon iteration produces SQLite-capable Linux binaries without a Linux box.
 
 ### Fixed
-- **Packaged-App Preflight Stop**: Real-app scenarios and the serial matrix now preflight packaged-app and resolved-daemon fingerprints before launching scenario work, so stale installs stop the run immediately instead of failing later during scenario bootstrap.
-- **Single-Tenant Real-App Scenarios**: Tiered packaged-app scenarios now take a shared lock before touching the live app, so accidental parallel runs fail fast as invalid harness usage instead of producing misleading terminal-regression evidence.
-- **Packaged-App Source Guard**: Real-app harness startup now refuses to run when the installed `attn.app` or its resolved daemon binary were built from a different source fingerprint than the current checkout, so stale installs fail fast instead of masquerading as flaky scenario regressions.
 - **Terminal Scroll & Cursor**: Fix viewport scroll jump during fast TUI output, ghost cursor reappearing after resize, and scroll pin not resetting on session respawn.
 - **Remote Daemon Robustness**: Wider startup readiness windows for SSH-bootstrapped daemons and packaged-app cold boot, cgo-less in-memory fallback that actually retains state, correct `~` expansion on the remote host, and Linux PTY spawn no longer fails with EPERM.
 
