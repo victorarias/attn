@@ -778,11 +778,19 @@ Do not block the initial simplification on all of these, but add them when the c
 
 ### 1. `TR-201 Relaunch Preserves Existing Split Session`
 
-We cover aggressive relaunch split churn through `TR-205`, but a more direct “reopen existing split session and simply inspect it before new actions” scenario would sharpen restore regressions.
+Status:
+
+- executed on 2026-04-10
+- local packaged-app relaunch coverage now exists via `real-app:scenario-tr201`
+- the scenario creates a split Claude session, relaunches the packaged app, revisits the same session, and fails if the existing main and utility panes do not both restore visibly with preserved content and sane coverage before any new post-relaunch split churn
 
 ### 2. `TR-204 Relaunch Restore Keeps Formatting`
 
-We still need stronger direct formatting/color coverage instead of inferring that from generic healthy content.
+Status:
+
+- executed on 2026-04-10
+- local packaged-app formatting coverage now exists via `real-app:scenario-tr204`
+- the scenario creates a utility pane, writes explicit ANSI bold/underline/inverse/palette/truecolor shell output, relaunches the app, and fails if the restored pane keeps the text but loses the non-default xterm cell styles captured from the live buffer
 
 ### 3. `TR-301 Utility Focus Survives Session Switch`
 

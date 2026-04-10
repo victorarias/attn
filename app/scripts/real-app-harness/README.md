@@ -21,6 +21,8 @@ pnpm run real-app:bridge-pty-bench
 pnpm run real-app:bridge-cli -- --wait-ready get_state
 pnpm run real-app:scenario-tr101
 pnpm run real-app:scenario-tr102
+pnpm run real-app:scenario-tr201
+pnpm run real-app:scenario-tr204
 pnpm run real-app:scenario-tr301
 pnpm run real-app:scenario-tr401
 pnpm run real-app:scenario-tr205
@@ -80,6 +82,7 @@ Useful bridge actions:
 - `focus_pane`
 - `write_pane`
 - `read_pane_text`
+- `read_pane_style`
 - `set_pane_debug`
 - `dump_pane_debug`
 - `capture_structured_snapshot`
@@ -167,6 +170,10 @@ The first scenario scripts using that foundation are:
   Local Claude session. Prompts the main agent pane for structured output, splits from `main`, and checks that both the source pane and the new utility pane retain meaningful visible content. The main pane is also validated with a pane-cropped native screenshot so the scenario can fail if content collapses into a narrow strip or footer band.
 - `real-app:scenario-tr102`
   Local Claude session. Creates a utility pane, splits from that utility pane, and checks that both the original and the new utility pane remain visible and writable with preserved content.
+- `real-app:scenario-tr201`
+  Local Claude session. Creates a split session, relaunches the packaged app, revisits the same session, and fails if the existing main and utility panes do not both restore visibly with sane coverage and preserved content.
+- `real-app:scenario-tr204`
+  Local Claude session. Creates a utility pane, writes explicit ANSI bold/underline/inverse/palette/truecolor shell output, relaunches the packaged app, and fails if the restored pane keeps the text but loses the non-default xterm cell styles.
 - `real-app:scenario-tr301`
   Local Claude sessions. Creates a utility pane in one session, switches to another session and back, and fails if focus does not return to the utility pane or typing requires an extra click.
 - `real-app:scenario-tr401`
@@ -204,6 +211,10 @@ Current scenarios:
   Creates one remote Codex-style session on `ai-sandbox`, splits the main pane twice, and fails if rendered pane widths drift too far from the workspace model. The artifacts include render health, structured DOM/model snapshots, and per-runtime PTY resize bursts so split-layout regressions can be separated from PTY redraw issues.
 - `real-app:bridge-remote-relaunch-splits`
   Creates one remote split session on `ai-sandbox`, relaunches the packaged app, returns to the same session, then splits again from both the main pane and the original utility pane. The run fails if pre-existing panes do not restore visibly or if post-relaunch splits do not appear and accept typing.
+- `real-app:scenario-tr201`
+  Tier-2 local Claude relaunch-restore canary for `TR-201`. It proves that an already-split session reopens with both original panes still visible, populated, and sanely sized before any new post-relaunch actions occur.
+- `real-app:scenario-tr204`
+  Tier-2 local Claude relaunch-formatting canary for `TR-204`. It proves that daemon replay preserves non-default xterm cell styles in a restored utility pane instead of flattening the replay to plain monochrome text.
 - `real-app:scenario-tr402-local-codex`
   Tier-2 local Codex close/redraw canary for the same split-close path covered remotely by `TR-402`.
 - `real-app:scenario-tr303-local-codex`

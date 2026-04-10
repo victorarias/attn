@@ -34,6 +34,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **TR-206 Replay Characterization**: Add a deterministic xterm replay fixture for the bad local relaunch payload, proving that the payload still contains `OpenAI Codex`, can still lose the header at the top of a fresh xterm, and can emit duplicate terminal-query responses during restore.
+- **Existing-Split Relaunch Canary**: Add `real-app:scenario-tr201`, a local Claude packaged-app scenario that relaunches an already-split session and fails if the original main and utility panes do not both restore visibly with sane coverage before any new split churn.
+- **Relaunch Formatting Canary**: Add `real-app:scenario-tr204`, a local Claude packaged-app scenario that seeds explicit ANSI bold/underline/inverse/palette/truecolor shell output, relaunches the app, and fails if replay restores the text but flattens the visible xterm styles.
 - **Utility Session-Switch Focus Canary**: Add `real-app:scenario-tr301`, a local Claude packaged-app scenario that switches away from and back to a session with an active utility pane, failing if utility focus is lost or typing needs an extra click.
 - **Window Resize Render-Health Canary**: Add `real-app:scenario-tr401`, a local Claude packaged-app scenario that resizes a split session window smaller and then back to baseline, failing if either pane keeps stale narrow paint or loses meaningful visible content, fill, or width usage during the resize path.
 
@@ -65,6 +67,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Pane Runtime Binder Cleanup**: The session workspace binder now shares one pane-terminal lifecycle path for init vs ready, shares one pane-write state record instead of split queue/log maps, and routes terminal byte injection through one helper, reducing app-side terminal runtime duplication without changing remount hydration or deferred redraw behavior.
 
 ### Fixed
+- **Harness-Only Fingerprint Noise**: Source fingerprinting now ignores `app/scripts/real-app-harness`, so packaged-app build identity and real-app preflight stop forcing reinstall churn for harness-script-only edits.
 - **Split-Close Focus Recovery**: Closing a split pane now restores focus to the most recently active surviving pane for that session, with left-pane fallback when there is no surviving focus history, instead of blindly dropping focus back to the main pane.
 - **Terminal Diagnostics Idle Cost**: Pane debug now stays fully off until explicitly enabled, runtime trace details are resolved lazily, and runtime timeline snapshots only sort stale event streams, so ordinary terminal focus/render churn stops paying for debug-only DOM and trace work while the packaged-app trace canaries still pass.
 - **Immediate Pane Detach Cleanup**: Split-pane terminal detach now clears the stale xterm/input wiring immediately instead of waiting for a zero-delay timer, so fast remounts keep one hydrate path and detached terminals stop leaking late input into live sessions.

@@ -22,6 +22,7 @@ import { recordTerminalRuntimeLog } from '../../utils/terminalRuntimeLog';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
 import './SessionTerminalWorkspace.css';
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
+import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 
 const ZOOM_PATH_RATIO = 0.76;
 
@@ -69,6 +70,7 @@ export interface SessionTerminalWorkspaceHandle {
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => { cols: number; rows: number } | null;
   getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
+  getPaneVisibleStyleSummary: (paneId: string) => TerminalVisibleStyleSnapshot;
   resetPaneTerminal: (paneId: string) => boolean;
   injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectPaneBase64: (paneId: string, payload: string) => Promise<boolean>;
@@ -250,6 +252,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       getPaneText: binder.getPaneText,
       getPaneSize: binder.getPaneSize,
       getPaneVisibleContent: binder.getPaneVisibleContent,
+      getPaneVisibleStyleSummary: binder.getPaneVisibleStyleSummary,
       resetPaneTerminal: binder.resetPaneTerminal,
       injectPaneBytes: binder.injectPaneBytes,
       injectPaneBase64: binder.injectPaneBase64,

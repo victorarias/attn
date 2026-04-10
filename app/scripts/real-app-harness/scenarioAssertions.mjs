@@ -157,6 +157,34 @@ export async function waitForPaneText(client, sessionId, paneId, predicate, desc
   );
 }
 
+export async function waitForPaneStyle(client, sessionId, paneId, predicate, description, timeoutMs = 15_000) {
+  const startedAt = Date.now();
+  let lastPayload = null;
+  let lastError = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      lastPayload = await client.request('read_pane_style', { sessionId, paneId }, { timeoutMs: 20_000 });
+      lastError = null;
+    } catch (error) {
+      if (!isRetryableAutomationAbsence(error)) {
+        throw error;
+      }
+      lastError = error;
+      await sleep(200);
+      continue;
+    }
+    if (predicate(lastPayload?.style || null, lastPayload)) {
+      return lastPayload;
+    }
+    await sleep(200);
+  }
+
+  throw new Error(
+    `Timed out waiting for ${description}. Last request error: ${lastError instanceof Error ? lastError.message : 'none'}\nLast pane style:\n${JSON.stringify(lastPayload, null, 2)}`
+  );
+}
+
 export async function waitForPaneTextChange(
   client,
   sessionId,
@@ -403,6 +431,58 @@ export async function assertPaneVisibleContentPreserved(
       `Last summary: ${JSON.stringify(lastState?.pane?.visibleContent?.summary || null)}`,
       `Last visible lines: ${JSON.stringify((lastState?.pane?.visibleContent?.lines || []).slice(0, 18), null, 2)}`,
     ].join('\n')
+  );
+}
+
+export async function assertPaneStyleSummaryPreserved(
+  client,
+  sessionId,
+  paneId,
+  baselineStyle,
+  {
+    minStyledCellRatio = 0.6,
+    minStyledLineRatio = 0.6,
+    minBoldCellRatio = 0.5,
+    minUnderlineCellRatio = 0.5,
+    minInverseCellRatio = 0.5,
+    minFgPaletteCellRatio = 0.5,
+    minFgRgbCellRatio = 0.5,
+    minBgPaletteCellRatio = 0.5,
+    minBgRgbCellRatio = 0.5,
+    minUniqueStyleRatio = 0.5,
+    timeoutMs = 20_000,
+    description = `pane ${paneId} style preservation`,
+  } = {},
+) {
+  const baselineSummary = baselineStyle?.summary || {};
+  const minimumCount = (value, ratio) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      return 0;
+    }
+    return Math.max(1, Math.floor(value * ratio));
+  };
+
+  return waitForPaneStyle(
+    client,
+    sessionId,
+    paneId,
+    (style) => {
+      const summary = style?.summary || {};
+      return (
+        (summary.styledCellCount || 0) >= minimumCount(baselineSummary.styledCellCount || 0, minStyledCellRatio) &&
+        (summary.styledLineCount || 0) >= minimumCount(baselineSummary.styledLineCount || 0, minStyledLineRatio) &&
+        (summary.boldCellCount || 0) >= minimumCount(baselineSummary.boldCellCount || 0, minBoldCellRatio) &&
+        (summary.underlineCellCount || 0) >= minimumCount(baselineSummary.underlineCellCount || 0, minUnderlineCellRatio) &&
+        (summary.inverseCellCount || 0) >= minimumCount(baselineSummary.inverseCellCount || 0, minInverseCellRatio) &&
+        (summary.fgPaletteCellCount || 0) >= minimumCount(baselineSummary.fgPaletteCellCount || 0, minFgPaletteCellRatio) &&
+        (summary.fgRgbCellCount || 0) >= minimumCount(baselineSummary.fgRgbCellCount || 0, minFgRgbCellRatio) &&
+        (summary.bgPaletteCellCount || 0) >= minimumCount(baselineSummary.bgPaletteCellCount || 0, minBgPaletteCellRatio) &&
+        (summary.bgRgbCellCount || 0) >= minimumCount(baselineSummary.bgRgbCellCount || 0, minBgRgbCellRatio) &&
+        (summary.uniqueStyleCount || 0) >= minimumCount(baselineSummary.uniqueStyleCount || 0, minUniqueStyleRatio)
+      );
+    },
+    description,
+    timeoutMs,
   );
 }
 

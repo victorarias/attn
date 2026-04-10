@@ -9,6 +9,7 @@ import {
 } from '../../utils/terminalViewportActions';
 import { resetTerminalScrollPin } from '../../utils/terminalScrollPin';
 import { snapshotVisibleTerminalContent, type TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
+import { snapshotVisibleTerminalStyleSummary, type TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 import { snapshotTerminalText } from './paneRuntimeTerminalUtils';
 import type { PaneRuntimeSize } from './paneRuntimeLifecycleState';
 
@@ -136,6 +137,10 @@ export function createPaneRuntimeControls({
     return snapshotVisibleTerminalContent(getXterm(paneId) || null);
   };
 
+  const getPaneVisibleStyleSummary = (paneId: string): TerminalVisibleStyleSnapshot => {
+    return snapshotVisibleTerminalStyleSummary(getXterm(paneId) || null);
+  };
+
   const resetPaneTerminal = (paneId: string) => {
     const xterm = getXterm(paneId);
     if (!resetTerminalViewport(xterm, resetTerminalScrollPin)) {
@@ -171,6 +176,7 @@ export function createPaneRuntimeControls({
     getPaneText,
     getPaneSize,
     getPaneVisibleContent,
+    getPaneVisibleStyleSummary,
     resetPaneTerminal,
     injectPaneBytes,
     injectPaneBase64,

@@ -60,6 +60,16 @@ hash_file() {
   exit 1
 }
 
+should_exclude_path() {
+  local relative_path="$1"
+  case "${relative_path}" in
+    app/scripts/real-app-harness/*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 emit_result() {
   local fingerprint="$1"
   local commit="$2"
@@ -121,6 +131,9 @@ cleanup() {
 trap cleanup EXIT
 
 while IFS= read -r -d '' relative_path; do
+  if should_exclude_path "${relative_path}"; then
+    continue
+  fi
   absolute_path="${ROOT_DIR}/${relative_path}"
   printf '%s\0' "${relative_path}" >>"${tmp_payload}"
   if [[ -L "${absolute_path}" ]]; then

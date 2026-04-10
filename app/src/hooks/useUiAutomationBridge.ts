@@ -17,6 +17,7 @@ import { buildRuntimeTimelineSnapshot } from '../utils/runtimeTimeline';
 import { collectWorkspaceLayoutDiagnostics, projectWorkspaceBounds } from '../utils/workspaceDiagnostics';
 import { clearTerminalRuntimeLog, setTerminalRuntimeTraceEnabled } from '../utils/terminalRuntimeLog';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
+import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary';
 
 const UI_AUTOMATION_REQUEST_EVENT = 'attn://ui-automation/request';
 const UI_AUTOMATION_RESPONSE_EVENT = 'attn://ui-automation/response';
@@ -54,6 +55,7 @@ interface UseUiAutomationBridgeArgs {
   getPaneText: (sessionId: string, paneId: string) => string;
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null;
   getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot;
+  getPaneVisibleStyleSummary: (sessionId: string, paneId: string) => TerminalVisibleStyleSnapshot;
   fitSessionActivePane: (sessionId: string) => void;
   sendRuntimeInput: (runtimeId: string, data: string, source?: string) => void;
   getReviewState?: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: unknown; error?: string }>;
@@ -1106,6 +1108,7 @@ export function useUiAutomationBridge({
   getPaneText,
   getPaneSize,
   getPaneVisibleContent,
+  getPaneVisibleStyleSummary,
   fitSessionActivePane,
   sendRuntimeInput,
   getReviewState,
@@ -1513,6 +1516,20 @@ export function useUiAutomationBridge({
           paneId,
           text: getPaneText(sessionId, paneId),
           size: getPaneSize(sessionId, paneId),
+        };
+      }
+      case 'read_pane_style': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        return {
+          sessionId,
+          paneId,
+          size: getPaneSize(sessionId, paneId),
+          style: getPaneVisibleStyleSummary(sessionId, paneId),
         };
       }
       case 'get_pane_state': {

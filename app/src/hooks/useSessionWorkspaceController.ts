@@ -5,6 +5,7 @@ import { usePaneRuntimeEventRouter } from '../components/SessionTerminalWorkspac
 import { useSessionWorkspaceViewState } from './useSessionWorkspaceViewState';
 import { useWorkspaceDebugHarness } from './useWorkspaceDebugHarness';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
+import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary';
 
 interface SessionWorkspaceController {
   eventRouter: ReturnType<typeof usePaneRuntimeEventRouter>;
@@ -22,6 +23,7 @@ interface SessionWorkspaceController {
   getPaneText: (sessionId: string, paneId: string) => string;
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null;
   getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot;
+  getPaneVisibleStyleSummary: (sessionId: string, paneId: string) => TerminalVisibleStyleSnapshot;
   resetSessionPaneTerminal: (sessionId: string, paneId: string) => boolean;
   injectSessionPaneBytes: (sessionId: string, paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectSessionPaneBase64: (sessionId: string, paneId: string, payload: string) => Promise<boolean>;
@@ -120,6 +122,29 @@ export function useSessionWorkspaceController(
     };
   }, []);
 
+  const getPaneVisibleStyleSummary = useCallback((sessionId: string, paneId: string) => {
+    return workspaceRefs.current.get(sessionId)?.getPaneVisibleStyleSummary(paneId) || {
+      cols: null,
+      rows: null,
+      viewportY: null,
+      lineCount: 0,
+      lines: [],
+      summary: {
+        styledCellCount: 0,
+        styledLineCount: 0,
+        boldCellCount: 0,
+        italicCellCount: 0,
+        underlineCellCount: 0,
+        inverseCellCount: 0,
+        fgPaletteCellCount: 0,
+        fgRgbCellCount: 0,
+        bgPaletteCellCount: 0,
+        bgRgbCellCount: 0,
+        uniqueStyleCount: 0,
+      },
+    };
+  }, []);
+
   const resetSessionPaneTerminal = useCallback((sessionId: string, paneId: string) => {
     return workspaceRefs.current.get(sessionId)?.resetPaneTerminal(paneId) || false;
   }, []);
@@ -152,6 +177,7 @@ export function useSessionWorkspaceController(
     getPaneText,
     getPaneSize,
     getPaneVisibleContent,
+    getPaneVisibleStyleSummary,
     resetSessionPaneTerminal,
     injectSessionPaneBytes,
     injectSessionPaneBase64,

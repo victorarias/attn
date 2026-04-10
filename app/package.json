@@ -28,6 +28,8 @@
     "real-app:bridge-cli": "node scripts/real-app-harness/ui-automation-cli.mjs",
     "real-app:scenario-tr101": "node scripts/real-app-harness/scenario-tr101-claude-main-split.mjs",
     "real-app:scenario-tr102": "node scripts/real-app-harness/scenario-tr102-claude-utility-split.mjs",
+    "real-app:scenario-tr201": "node scripts/real-app-harness/scenario-tr201-local-relaunch-existing-split.mjs",
+    "real-app:scenario-tr204": "node scripts/real-app-harness/scenario-tr204-local-relaunch-formatting.mjs",
     "real-app:scenario-tr301": "node scripts/real-app-harness/scenario-tr301-local-utility-session-switch.mjs",
     "real-app:scenario-tr303-local-codex": "node scripts/real-app-harness/scenario-tr303-local-codex-post-close-typing.mjs",
     "real-app:scenario-tr401": "node scripts/real-app-harness/scenario-tr401-local-window-resize.mjs",

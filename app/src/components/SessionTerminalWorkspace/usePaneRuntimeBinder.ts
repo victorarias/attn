@@ -31,6 +31,7 @@ import {
 import { resetTerminalScrollPin } from '../../utils/terminalScrollPin';
 import { recordTerminalRuntimeLog } from '../../utils/terminalRuntimeLog';
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
+import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 
 const MAX_PENDING_TERMINAL_EVENTS = 256;
 const RUNTIME_ENSURE_TIMEOUT_MS = 20_000;
@@ -98,6 +99,7 @@ export interface PaneRuntimeBinder {
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => PaneRuntimeSize | null;
   getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
+  getPaneVisibleStyleSummary: (paneId: string) => TerminalVisibleStyleSnapshot;
   resetPaneTerminal: (paneId: string) => boolean;
   injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectPaneBase64: (paneId: string, payload: string) => Promise<boolean>;

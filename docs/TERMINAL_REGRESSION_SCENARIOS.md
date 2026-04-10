@@ -83,7 +83,7 @@ Every scenario should validate some combination of these invariants:
 - `TR-201 Relaunch Preserves Existing Split Session`
   Close and reopen the app while a session already has split panes, then revisit that session.
   Assertions: pre-existing panes remain visible, retain meaningful visible content, no pane restores into a tiny square, and render health stays sane after relaunch.
-  Automation: planned
+  Automation: local Claude packaged-app relaunch scenario implemented via `real-app:scenario-tr201`
 
 - `TR-202 Split From Main After Relaunch`
   Relaunch the app, return to an already-split session, then split from the main pane.
@@ -98,7 +98,7 @@ Every scenario should validate some combination of these invariants:
 - `TR-204 Relaunch Restore Keeps Formatting`
   Relaunch the app and verify formatted output restores through daemon replay without flattening ANSI state into monochrome text.
   Assertions: replayed pane keeps color/styling, not just plain text.
-  Automation: planned
+  Automation: local Claude packaged-app formatting scenario implemented via `real-app:scenario-tr204`
 
 - `TR-205 Close Splits After Relaunch Reuses Reclaimed Space`
   Start a session, create an initial split, relaunch the app, add more splits, then close the utility panes one by one.
