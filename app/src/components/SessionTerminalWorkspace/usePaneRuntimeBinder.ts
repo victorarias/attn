@@ -41,6 +41,41 @@ const PTY_REDRAW_BOUNCE_DELAY_MS = 16;
 const terminalTextEncoder = new TextEncoder();
 export { installTerminalKeyHandler };
 
+interface TerminalReplyDetails {
+  containsEscape: boolean;
+  recognizedTerminalReply: boolean;
+  replyKinds: Array<'da1' | 'cpr' | 'osc10' | 'osc11'>;
+  cprResponses: Array<{ row: number; col: number }>;
+}
+
+function classifyTerminalReply(data: string): TerminalReplyDetails {
+  const replyKinds = new Set<'da1' | 'cpr' | 'osc10' | 'osc11'>();
+  const cprResponses: Array<{ row: number; col: number }> = [];
+
+  if (/\x1b\[\?[0-9;]*c/.test(data)) {
+    replyKinds.add('da1');
+  }
+
+  for (const match of data.matchAll(/\x1b\[(\d+);(\d+)R/g)) {
+    replyKinds.add('cpr');
+    cprResponses.push({
+      row: Number(match[1]),
+      col: Number(match[2]),
+    });
+  }
+
+  for (const match of data.matchAll(/\x1b\](10|11);[\s\S]*?(?:\x07|\x1b\\)/g)) {
+    replyKinds.add(match[1] === '10' ? 'osc10' : 'osc11');
+  }
+
+  return {
+    containsEscape: data.includes('\x1b'),
+    recognizedTerminalReply: replyKinds.size > 0,
+    replyKinds: Array.from(replyKinds),
+    cprResponses,
+  };
+}
+
 export interface PaneRuntimeSpec {
   paneId: string;
   runtimeId: string;
@@ -570,6 +605,11 @@ export function usePaneRuntimeBinder(
       if (!currentPane) {
         return;
       }
+      const replyDetails = {
+        dataPreview: data.slice(0, 20),
+        dataLength: data.length,
+        ...classifyTerminalReply(data),
+      };
       if (paneRuntimeLifecycle.isInputSuppressed(paneId)) {
         recordPaneRuntimeDebugEvent({
           scope: 'input',
@@ -577,12 +617,31 @@ export function usePaneRuntimeBinder(
           paneId,
           runtimeId: currentPane.runtimeId,
           message: 'drop terminal-generated input during replay restore',
-          details: {
-            dataPreview: data.slice(0, 20),
-            dataLength: data.length,
-          },
+          details: replyDetails,
         });
+        if (replyDetails.containsEscape) {
+          recordTerminalRuntimeLog({
+            category: 'input',
+            event: 'terminal.reply.suppressed',
+            sessionId: currentPane.sessionId ?? currentPane.testSessionId,
+            paneId,
+            runtimeId: currentPane.runtimeId,
+            message: 'suppress terminal-generated reply during replay restore',
+            details: replyDetails,
+          });
+        }
         return;
+      }
+      if (replyDetails.recognizedTerminalReply) {
+        recordTerminalRuntimeLog({
+          category: 'input',
+          event: 'terminal.reply.forwarded',
+          sessionId: currentPane.sessionId ?? currentPane.testSessionId,
+          paneId,
+          runtimeId: currentPane.runtimeId,
+          message: 'forward terminal-generated reply to pty',
+          details: replyDetails,
+        });
       }
       if (import.meta.env.DEV && currentPane.testSessionId) {
         const testWindow = window as Window & {

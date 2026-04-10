@@ -503,6 +503,20 @@ Main regression risk:
 
 - over-quarantining replies could hide terminal capability negotiation that a fresh xterm actually needs
 
+Status:
+
+- app-side replay quarantine is now in place for attach payloads explicitly marked as `attach_replay`
+- the binder now keeps only coarse reply classification in the restore path: `DA1`, `CPR`, and `OSC 10/11` are visible in traces as `terminal.reply.suppressed` or `terminal.reply.forwarded`
+- this experiment intentionally did not add a reusable parsing subsystem; the current read is that evidence should stay local to the binder unless it directly unlocks more code deletion
+- focused frontend coverage passed:
+  - `usePaneRuntimeBinder.test.ts`
+  - `attachPlanning.test.ts`
+  - `useDaemonSocket.test.tsx`
+- packaged-app relaunch controls also passed on `2026-04-10` after rebuilding with `make install-all`:
+  - `TR-205` remote Codex
+  - `TR-205` remote Claude
+- current read: replay-time terminal replies are real enough to quarantine, but the evidence so far supports a narrow restore-window suppression rule rather than a broader replay pipeline redesign
+
 #### 3. Geometry-Epoch Shadow Mode
 
 Hypothesis:
