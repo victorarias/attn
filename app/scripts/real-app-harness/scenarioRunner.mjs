@@ -107,29 +107,7 @@ function acquireScenarioLock({ scenarioId, tier, runId, runDir, appPath }) {
     }
   };
 
-  const signalHandlers = new Map();
-  const exitHandler = () => {
-    release();
-  };
-  process.once('exit', exitHandler);
-
-  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-    const handler = () => {
-      release();
-      process.removeListener(signal, handler);
-      process.kill(process.pid, signal);
-    };
-    signalHandlers.set(signal, handler);
-    process.once(signal, handler);
-  }
-
-  return () => {
-    release();
-    process.removeListener('exit', exitHandler);
-    for (const [signal, handler] of signalHandlers.entries()) {
-      process.removeListener(signal, handler);
-    }
-  };
+  return release;
 }
 
 export function createScenarioRunner(options, {
@@ -161,11 +139,82 @@ export function createScenarioRunner(options, {
   const tracePath = path.join(runDir, 'trace.log');
   const steps = [];
   const assertions = [];
+  const cleanupHandlers = [];
+  let cleanupPromise = null;
+  let finalized = false;
 
   const appendTrace = (message, details) => {
     const line = `[${new Date().toISOString()}] ${message}${details ? ` ${JSON.stringify(details)}` : ''}\n`;
     fs.appendFileSync(tracePath, line, 'utf8');
     process.stdout.write(line);
+  };
+
+  const runRegisteredCleanup = async (reason) => {
+    if (cleanupPromise) {
+      return cleanupPromise;
+    }
+    cleanupPromise = (async () => {
+      if (cleanupHandlers.length === 0) {
+        return;
+      }
+      appendTrace('cleanup:start', { reason, count: cleanupHandlers.length });
+      for (const cleanup of [...cleanupHandlers].reverse()) {
+        try {
+          appendTrace('cleanup:run', { reason, name: cleanup.name });
+          await cleanup.fn();
+          appendTrace('cleanup:ok', { reason, name: cleanup.name });
+        } catch (error) {
+          appendTrace('cleanup:error', {
+            reason,
+            name: cleanup.name,
+            error: normalizeError(error),
+          });
+        }
+      }
+      appendTrace('cleanup:done', { reason });
+    })();
+    return cleanupPromise;
+  };
+
+  const finalizeRunner = () => {
+    if (finalized) {
+      return;
+    }
+    finalized = true;
+    releaseScenarioLock?.();
+    process.removeListener('exit', exitHandler);
+    for (const [signal, handler] of signalHandlers.entries()) {
+      process.removeListener(signal, handler);
+    }
+  };
+
+  const signalExitCode = {
+    SIGINT: 130,
+    SIGTERM: 143,
+    SIGHUP: 129,
+  };
+  let handlingSignal = false;
+  const signalHandlers = new Map();
+  const exitHandler = () => {
+    releaseScenarioLock?.();
+  };
+  process.once('exit', exitHandler);
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    const handler = async () => {
+      if (handlingSignal) {
+        return;
+      }
+      handlingSignal = true;
+      appendTrace('signal', { signal });
+      try {
+        await runRegisteredCleanup(`signal:${signal}`);
+      } finally {
+        finalizeRunner();
+        process.exit(signalExitCode[signal] || 1);
+      }
+    };
+    signalHandlers.set(signal, handler);
+    process.once(signal, handler);
   };
 
   const runner = {
@@ -186,6 +235,19 @@ export function createScenarioRunner(options, {
     },
     writeText(name, value) {
       fs.writeFileSync(path.join(runDir, name), value, 'utf8');
+    },
+    registerCleanup(name, fn) {
+      if (typeof fn !== 'function') {
+        throw new Error(`Cleanup handler ${name} is missing a function`);
+      }
+      const record = { name, fn };
+      cleanupHandlers.push(record);
+      return () => {
+        const index = cleanupHandlers.indexOf(record);
+        if (index >= 0) {
+          cleanupHandlers.splice(index, 1);
+        }
+      };
     },
     async step(name, details, fn) {
       const actualDetails = typeof details === 'function' ? null : (details || null);
@@ -252,7 +314,7 @@ export function createScenarioRunner(options, {
         ...summary,
       };
       writeJson(path.join(runDir, 'summary.json'), finalSummary);
-      releaseScenarioLock?.();
+      finalizeRunner();
       return finalSummary;
     },
     finishFailure(error, summary = {}) {
@@ -270,11 +332,11 @@ export function createScenarioRunner(options, {
         ...summary,
       };
       writeJson(path.join(runDir, 'failure.json'), finalSummary);
-      releaseScenarioLock?.();
+      finalizeRunner();
       return finalSummary;
     },
     close() {
-      releaseScenarioLock?.();
+      finalizeRunner();
     },
   };
 

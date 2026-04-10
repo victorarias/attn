@@ -132,6 +132,43 @@ function resolveScenarios(selected) {
   });
 }
 
+const signalExitCode = {
+  SIGINT: 130,
+  SIGTERM: 143,
+  SIGHUP: 129,
+};
+let activeChild = null;
+let interruptHandled = false;
+
+function terminateActiveChild(signal) {
+  if (!activeChild || activeChild.killed) {
+    return;
+  }
+  activeChild.kill(signal);
+  setTimeout(() => {
+    if (activeChild && !activeChild.killed) {
+      activeChild.kill('SIGKILL');
+    }
+  }, 5_000).unref();
+}
+
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.once(signal, () => {
+    if (interruptHandled) {
+      return;
+    }
+    interruptHandled = true;
+    terminateActiveChild(signal);
+    if (!activeChild) {
+      process.exit(signalExitCode[signal] || 1);
+      return;
+    }
+    activeChild.once('exit', () => {
+      process.exit(signalExitCode[signal] || 1);
+    });
+  });
+}
+
 function runScenario(scenario, timeoutMs) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
@@ -140,6 +177,7 @@ function runScenario(scenario, timeoutMs) {
       stdio: 'inherit',
       env: process.env,
     });
+    activeChild = child;
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -148,6 +186,9 @@ function runScenario(scenario, timeoutMs) {
     }, timeoutMs);
     child.on('exit', (code, signal) => {
       clearTimeout(timer);
+      if (activeChild === child) {
+        activeChild = null;
+      }
       resolve({
         id: scenario.id,
         label: scenario.label,

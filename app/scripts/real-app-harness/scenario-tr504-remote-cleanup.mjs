@@ -122,6 +122,35 @@ async function main() {
   let cleanedProcessSnapshot = [];
   let postEndpointRemovalProcessSnapshot = [];
   let endpointRemoved = false;
+  let cleanupStarted = false;
+
+  const runFinalCleanup = async () => {
+    if (cleanupStarted) {
+      return;
+    }
+    cleanupStarted = true;
+    if (sessionId) {
+      await cleanupSessionViaAppClose(client, observer, sessionId).catch(() => {});
+    }
+    if (endpoint?.id && !endpointRemoved) {
+      try {
+        observer.removeEndpoint(endpoint.id);
+        await observer.waitFor(() => !observer.getEndpoint(endpoint.id), `cleanup remove endpoint ${endpoint.id}`, 20_000).catch(() => {});
+      } catch {
+        // Best-effort cleanup only.
+      }
+    }
+    const finalRemoteCleanup = await cleanupRemoteHarnessProcesses(
+      options.sshTarget,
+      remotePaths.remoteHarnessRoot,
+      30_000,
+    ).catch((error) => ({
+      error: error instanceof Error ? error.stack || error.message : String(error),
+    }));
+    runner.writeJson('99-final-remote-harness-cleanup.json', finalRemoteCleanup);
+    await observer.close().catch(() => {});
+  };
+  runner.registerCleanup('remote cleanup teardown', runFinalCleanup);
 
   try {
     await runner.step('cleanup_stale_remote_harness_state', async () => {
@@ -281,26 +310,7 @@ async function main() {
     console.error(summary.error);
     process.exitCode = 1;
   } finally {
-    if (sessionId) {
-      await cleanupSessionViaAppClose(client, observer, sessionId).catch(() => {});
-    }
-    if (endpoint?.id && !endpointRemoved) {
-      try {
-        observer.removeEndpoint(endpoint.id);
-        await observer.waitFor(() => !observer.getEndpoint(endpoint.id), `cleanup remove endpoint ${endpoint.id}`, 20_000).catch(() => {});
-      } catch {
-        // Best-effort cleanup only.
-      }
-    }
-    const finalRemoteCleanup = await cleanupRemoteHarnessProcesses(
-      options.sshTarget,
-      remotePaths.remoteHarnessRoot,
-      30_000,
-    ).catch((error) => ({
-      error: error instanceof Error ? error.stack || error.message : String(error),
-    }));
-    runner.writeJson('99-final-remote-harness-cleanup.json', finalRemoteCleanup);
-    await observer.close().catch(() => {});
+    await runFinalCleanup();
   }
 }
 
