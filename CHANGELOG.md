@@ -33,11 +33,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-04-10]
 
 ### Added
-- **Local Relaunch Header Canary**: Add `real-app:scenario-tr206-local-codex`, a packaged-app Codex scenario that relaunches an already-split local session, closes the restored split, splits again, and fails if the main Codex header disappears either as viewport drift or as true buffer loss.
 - **TR-206 Replay Characterization**: Add a deterministic xterm replay fixture for the bad local relaunch payload, proving that the payload still contains `OpenAI Codex`, can still lose the header at the top of a fresh xterm, and can emit duplicate terminal-query responses during restore.
-
-### Changed
-- **Terminal Regression Coverage**: Add `TR-206` to the packaged-app harness docs and serial matrix so the local relaunch close-resplit Codex header path is tracked as its own regression scenario instead of being folded into `TR-205` or first-launch split canaries.
 
 ### Changed
 - **Same-App Geometry Policy**: Unify shell and non-shell behavior in the binder's same-app geometry flush path, so ordinary resize/split churn no longer carries a special non-shell redraw heuristic and the remaining binder logic is more clearly about orchestration than repair.
@@ -67,6 +63,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Relaunch Replay Query Suppression**: Attach replay now marks restore-only PTY payloads and suppresses terminal-generated reply traffic while those historical bytes are being written into xterm, so relaunch restore stops feeding duplicate CPR/DA/OSC responses back into live Codex sessions during header recovery.
+
+### Removed
+- **Local Relaunch Header Canary**: Drop the packaged-app `TR-206` relaunch fuzz canary from the standing scenario matrix after using it to isolate deterministic replay-level coverage for the Codex header-loss bug.
 
 ## [2026-04-08]
 

@@ -19,11 +19,6 @@ const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-tr504'],
   },
   {
-    id: 'tr206-local-codex',
-    label: 'TR-206 local codex',
-    command: ['pnpm', 'run', 'real-app:scenario-tr206-local-codex'],
-  },
-  {
     id: 'tr402-local-codex',
     label: 'TR-402 local codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr402-local-codex'],

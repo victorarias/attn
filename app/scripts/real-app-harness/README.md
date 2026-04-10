@@ -21,7 +21,6 @@ pnpm run real-app:bridge-pty-bench
 pnpm run real-app:bridge-cli -- --wait-ready get_state
 pnpm run real-app:scenario-tr101
 pnpm run real-app:scenario-tr102
-pnpm run real-app:scenario-tr206-local-codex
 pnpm run real-app:scenario-tr205
 pnpm run real-app:scenario-tr402
 pnpm run real-app:scenario-tr402-local-codex
@@ -203,8 +202,6 @@ Current scenarios:
   Tier-2 local Codex close/redraw canary for the same split-close path covered remotely by `TR-402`.
 - `real-app:scenario-tr303-local-codex`
   Tier-2 local Codex runtime-trace canary for `TR-303`. It proves that typing after split-close produces live PTY output without causing remount, attach, geometry, or redraw side effects.
-- `real-app:scenario-tr206-local-codex`
-  Tier-2 local Codex relaunch canary for the nonrecovering header-loss path. It creates a split, relaunches the packaged app, closes the restored split, splits again, and fails if the main Codex header disappears either as a viewport-only loss or as a true buffer loss that still does not recover after `scrollToTop()`.
 - `real-app:scenario-tr402-local-claude`
   Tier-2 local Claude close/redraw canary for the same split-close path covered remotely by `TR-402`.
 - `real-app:scenario-tr504`
