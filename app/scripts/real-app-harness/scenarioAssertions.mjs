@@ -14,7 +14,7 @@ export function compactTerminalText(text) {
   return String(text || '').replace(/\s+/g, '');
 }
 
-export function terminalTextIncludes(text, needle, { allowWrapped = false } = {}) {
+function terminalTextIncludes(text, needle, { allowWrapped = false } = {}) {
   if (!needle) {
     return true;
   }
@@ -263,7 +263,7 @@ export async function waitForNewShellPane(client, sessionId, existingPaneIds, de
   });
 }
 
-export async function waitForPaneVisibleContent(
+async function waitForPaneVisibleContent(
   client,
   sessionId,
   paneId,
@@ -602,7 +602,7 @@ export async function assertPaneNativePaintCoverage(
   );
 }
 
-export function assertPaneNativePaintDelta(
+function assertPaneNativePaintDelta(
   baselineMetrics,
   candidateMetrics,
   {
@@ -639,7 +639,7 @@ export function assertPaneNativePaintDelta(
   return evaluation;
 }
 
-export async function assertPaneNativePaintStable(
+async function assertPaneNativePaintStable(
   client,
   runDir,
   prefix,
@@ -670,7 +670,7 @@ export async function assertPaneNativePaintStable(
   };
 }
 
-export function assertPaneNativePaintNotWorse(
+function assertPaneNativePaintNotWorse(
   baselineMetrics,
   candidateMetrics,
   {

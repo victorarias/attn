@@ -39,21 +39,21 @@ function normalizeBuildInfo(raw) {
   };
 }
 
-export function bundledDaemonPathForApp(appPath) {
+function bundledDaemonPathForApp(appPath) {
   if (appPath.endsWith('.app')) {
     return path.join(appPath, 'Contents', 'MacOS', 'attn');
   }
   return path.join(path.dirname(appPath), 'attn');
 }
 
-export function packagedAppBuildIdentityPath(appPath) {
+function packagedAppBuildIdentityPath(appPath) {
   if (appPath.endsWith('.app')) {
     return path.join(appPath, 'Contents', 'Resources', 'build-identity.json');
   }
   return path.join(path.dirname(appPath), 'build-identity.json');
 }
 
-export function getCurrentSourceIdentitySync() {
+function getCurrentSourceIdentitySync() {
   const stdout = execFileSync('bash', [SOURCE_FINGERPRINT_SCRIPT, '--json'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
@@ -61,7 +61,7 @@ export function getCurrentSourceIdentitySync() {
   return JSON.parse(stdout);
 }
 
-export function readPackagedAppBuildInfoSync(appPath) {
+function readPackagedAppBuildInfoSync(appPath) {
   const identityPath = packagedAppBuildIdentityPath(appPath);
   let raw;
   try {
@@ -88,7 +88,7 @@ function resolvePreferLocalDaemon(launchEnv = null) {
   return readTruthyEnv(launchValue) || readTruthyEnv(process.env.ATTN_PREFER_LOCAL_DAEMON);
 }
 
-export function resolveDaemonBinaryPathSync({ appPath, launchEnv = null }) {
+function resolveDaemonBinaryPathSync({ appPath, launchEnv = null }) {
   const localPath = path.join(os.homedir(), '.local', 'bin', 'attn');
   const bundledPath = bundledDaemonPathForApp(appPath);
   const preferLocal = resolvePreferLocalDaemon(launchEnv);
@@ -114,7 +114,7 @@ export function resolveDaemonBinaryPathSync({ appPath, launchEnv = null }) {
   );
 }
 
-export function readBinaryBuildInfoSync(binaryPath) {
+function readBinaryBuildInfoSync(binaryPath) {
   try {
     const stdout = execFileSync(binaryPath, ['--build-info-json'], {
       encoding: 'utf8',

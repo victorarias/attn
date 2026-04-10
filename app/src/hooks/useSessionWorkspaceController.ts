@@ -4,8 +4,14 @@ import type { SessionTerminalWorkspaceHandle } from '../components/SessionTermin
 import { usePaneRuntimeEventRouter } from '../components/SessionTerminalWorkspace/paneRuntimeEventRouter';
 import { useSessionWorkspaceViewState } from './useSessionWorkspaceViewState';
 import { useWorkspaceDebugHarness } from './useWorkspaceDebugHarness';
-import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
-import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary';
+import {
+  snapshotVisibleTerminalContent,
+  type TerminalVisibleContentSnapshot,
+} from '../utils/terminalVisibleContent';
+import {
+  snapshotVisibleTerminalStyleSummary,
+  type TerminalVisibleStyleSnapshot,
+} from '../utils/terminalStyleSummary';
 
 interface SessionWorkspaceController {
   eventRouter: ReturnType<typeof usePaneRuntimeEventRouter>;
@@ -99,50 +105,13 @@ export function useSessionWorkspaceController(
   }, []);
 
   const getPaneVisibleContent = useCallback((sessionId: string, paneId: string) => {
-    return workspaceRefs.current.get(sessionId)?.getPaneVisibleContent(paneId) || {
-      cols: null,
-      viewportY: null,
-      lineCount: 0,
-      lines: [],
-      lineMetrics: [],
-      summary: {
-        nonEmptyLineCount: 0,
-        denseLineCount: 0,
-        charCount: 0,
-        maxLineLength: 0,
-        maxOccupiedColumns: 0,
-        maxOccupiedWidthRatio: 0,
-        medianOccupiedWidthRatio: 0,
-        meanOccupiedWidthRatio: 0,
-        wideLineCount: 0,
-        uniqueTrimmedLineCount: 0,
-        firstNonEmptyLine: null,
-        lastNonEmptyLine: null,
-      },
-    };
+    return workspaceRefs.current.get(sessionId)?.getPaneVisibleContent(paneId)
+      || snapshotVisibleTerminalContent(null);
   }, []);
 
   const getPaneVisibleStyleSummary = useCallback((sessionId: string, paneId: string) => {
-    return workspaceRefs.current.get(sessionId)?.getPaneVisibleStyleSummary(paneId) || {
-      cols: null,
-      rows: null,
-      viewportY: null,
-      lineCount: 0,
-      lines: [],
-      summary: {
-        styledCellCount: 0,
-        styledLineCount: 0,
-        boldCellCount: 0,
-        italicCellCount: 0,
-        underlineCellCount: 0,
-        inverseCellCount: 0,
-        fgPaletteCellCount: 0,
-        fgRgbCellCount: 0,
-        bgPaletteCellCount: 0,
-        bgRgbCellCount: 0,
-        uniqueStyleCount: 0,
-      },
-    };
+    return workspaceRefs.current.get(sessionId)?.getPaneVisibleStyleSummary(paneId)
+      || snapshotVisibleTerminalStyleSummary(null);
   }, []);
 
   const resetSessionPaneTerminal = useCallback((sessionId: string, paneId: string) => {

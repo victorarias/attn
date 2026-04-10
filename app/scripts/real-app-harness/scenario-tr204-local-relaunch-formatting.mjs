@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 
-import { parseCommonArgs, printCommonHelp } from './common.mjs';
+import {
+  createSessionAndWaitForMain,
+  launchFreshAppAndConnect,
+  parseCommonArgs,
+  printCommonHelp,
+  relaunchAppAndConnect,
+} from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
@@ -41,18 +47,6 @@ function formattingFixtureCommand(token) {
   return `python3 -c 'import sys;sys.stdout.buffer.write(bytes.fromhex("${hexPayload}"))'`;
 }
 
-async function createClaudeSession(client, observer, runner) {
-  const result = await client.request('create_session', {
-    cwd: runner.sessionDir,
-    label: `tr204-local-formatting-${runner.runId}`,
-    agent: 'claude',
-  });
-  await observer.waitForSession({ id: result.sessionId, timeoutMs: 30_000 });
-  await ensureClaudeMainPromptReady(client, result.sessionId, 45_000);
-  await waitForPaneVisible(client, result.sessionId, 'main', 20_000);
-  return result.sessionId;
-}
-
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
@@ -81,15 +75,18 @@ async function main() {
 
   try {
     await runner.step('launch_app', async () => {
-      await client.launchFreshApp();
-      await client.waitForManifest(20_000);
-      await client.waitForReady(20_000);
-      await client.waitForFrontendResponsive(20_000);
-      await observer.connect();
+      await launchFreshAppAndConnect(client, observer);
     });
 
     sessionId = await runner.step('create_session', async () => {
-      return createClaudeSession(client, observer, runner);
+      return createSessionAndWaitForMain({
+        client,
+        observer,
+        cwd: runner.sessionDir,
+        label: `tr204-local-formatting-${runner.runId}`,
+        agent: 'claude',
+        promptReadyFn: ensureClaudeMainPromptReady,
+      });
     });
 
     utilityPaneId = await runner.step('seed_formatted_utility_output', async () => {
@@ -161,11 +158,7 @@ async function main() {
     });
 
     await runner.step('relaunch_and_verify_formatting_restore', async () => {
-      await client.quitApp();
-      await client.launchFreshApp();
-      await client.waitForManifest(20_000);
-      await client.waitForReady(20_000);
-      await client.waitForFrontendResponsive(20_000);
+      await relaunchAppAndConnect(client, observer);
       await client.request('select_session', { sessionId });
       await waitForSessionWorkspace(
         client,

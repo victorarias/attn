@@ -34,6 +34,7 @@ import {
   planAttachResultEffects,
   planAttachedRuntimeGeometry,
   planLivePtyOutput,
+  type AttachResultData,
   type AttachRequestContext,
 } from '../pty/attachPlanning';
 import {
@@ -300,25 +301,15 @@ interface SpawnResult {
   error?: string;
 }
 
-interface AttachResult {
+type AttachResult = AttachResultData & {
   success: boolean;
   error?: string;
-  scrollback?: string;
-  scrollback_truncated?: boolean;
-  replay_segments?: Array<{ cols: number; rows: number; data: string }>;
-  screen_snapshot?: string;
-  screen_rows?: number;
-  screen_cols?: number;
   screen_cursor_x?: number;
   screen_cursor_y?: number;
   screen_cursor_visible?: boolean;
-  screen_snapshot_fresh?: boolean;
-  last_seq?: number;
-  cols?: number;
-  rows?: number;
   pid?: number;
   running?: boolean;
-}
+};
 
 interface RepoInfo {
   repo: string;

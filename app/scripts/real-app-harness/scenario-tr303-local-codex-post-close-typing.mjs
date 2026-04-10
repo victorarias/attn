@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
-import { parseCommonArgs, printCommonHelp } from './common.mjs';
+import {
+  createSessionAndWaitForMain,
+  launchFreshAppAndConnect,
+  parseCommonArgs,
+  printCommonHelp,
+} from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
@@ -98,21 +103,18 @@ async function main() {
 
   try {
     await runner.step('launch_app', async () => {
-      await client.launchFreshApp();
-      await client.waitForManifest(20_000);
-      await client.waitForReady(20_000);
-      await client.waitForFrontendResponsive(20_000);
-      await observer.connect();
+      await launchFreshAppAndConnect(client, observer);
     });
 
     sessionId = await runner.step('create_local_session', async () => {
-      const result = await client.request('create_session', {
+      return createSessionAndWaitForMain({
+        client,
+        observer,
         cwd: runner.sessionDir,
         label: `tr303-local-codex-${runner.runId}`,
         agent: 'codex',
+        waitForMainVisible: false,
       });
-      await observer.waitForSession({ id: result.sessionId, timeoutMs: 30_000 });
-      return result.sessionId;
     });
 
     await runner.step('prepare_main_prompt', async () => {

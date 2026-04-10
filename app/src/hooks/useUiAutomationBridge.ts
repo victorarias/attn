@@ -7,7 +7,6 @@ import { MAIN_TERMINAL_PANE_ID } from '../store/sessions';
 import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId } from '../shortcuts';
-import { APP_BUILD_IDENTITY } from '../buildIdentity';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
 import { getAllResizeEvents } from '../utils/terminalDebug';
@@ -22,6 +21,21 @@ import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary
 const UI_AUTOMATION_REQUEST_EVENT = 'attn://ui-automation/request';
 const UI_AUTOMATION_RESPONSE_EVENT = 'attn://ui-automation/response';
 const UI_AUTOMATION_READY_EVENT = 'attn://ui-automation/ready';
+
+function readBuildEnv(value: string | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+const APP_BUILD_IDENTITY = {
+  version: readBuildEnv(import.meta.env.VITE_ATTN_BUILD_VERSION),
+  sourceFingerprint: readBuildEnv(import.meta.env.VITE_ATTN_SOURCE_FINGERPRINT),
+  gitCommit: readBuildEnv(import.meta.env.VITE_ATTN_GIT_COMMIT),
+  buildTime: readBuildEnv(import.meta.env.VITE_ATTN_BUILD_TIME),
+};
 
 interface AutomationRequest {
   request_id: string;

@@ -10,11 +10,7 @@ It exists to prevent a familiar failure mode:
 - change terminal behavior quickly
 - later discover the app was fine and the harness was wrong
 
-Use this alongside:
-
-- [PTY_RENDERING.md](/Users/victor.arias/projects/victor/attn/docs/PTY_RENDERING.md)
-- [TERMINAL_TEST_ARCHITECTURE.md](/Users/victor.arias/projects/victor/attn/docs/TERMINAL_TEST_ARCHITECTURE.md)
-- [TERMINAL_REGRESSION_SCENARIOS.md](/Users/victor.arias/projects/victor/attn/docs/TERMINAL_REGRESSION_SCENARIOS.md)
+Related context now lives in the packaged-app harness scripts and the release notes.
 
 ## What We Confirmed Was Real
 

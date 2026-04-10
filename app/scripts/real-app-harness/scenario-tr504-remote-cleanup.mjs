@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 
 import path from 'node:path';
-import { parseCommonArgs, printCommonHelp } from './common.mjs';
+import {
+  createSessionAndWaitForMain,
+  launchFreshAppAndConnect,
+  parseCommonArgs,
+  printCommonHelp,
+} from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
@@ -129,11 +134,7 @@ async function main() {
     });
 
     await runner.step('launch_app_and_connect_daemon', async () => {
-      await client.launchFreshApp();
-      await client.waitForManifest(20_000);
-      await client.waitForReady(20_000);
-      await client.waitForFrontendResponsive(20_000);
-      await observer.connect();
+      await launchFreshAppAndConnect(client, observer);
       await removeStaleHarnessEndpoints(observer, 20_000);
       await removeStaleHarnessScenarioSessions(observer, 30_000);
     });
@@ -157,20 +158,22 @@ async function main() {
     });
 
     sessionId = await runner.step('create_remote_session', async () => {
-      const result = await client.request('create_session', {
+      const resultSessionId = await createSessionAndWaitForMain({
+        client,
+        observer,
         cwd: remoteDirectory,
         label: `tr504-${runner.runId}`,
         agent: options.remoteAgent,
-        endpoint_id: endpoint.id,
+        endpointId: endpoint.id,
+        waitForMainVisible: false,
       });
-      await observer.waitForSession({ id: result.sessionId, timeoutMs: 30_000 });
       await observer.waitForWorkspace(
-        result.sessionId,
+        resultSessionId,
         (workspace) => (workspace.panes || []).length >= 1,
-        `initial workspace for ${result.sessionId}`,
+        `initial workspace for ${resultSessionId}`,
         30_000,
       );
-      return result.sessionId;
+      return resultSessionId;
     });
 
     splitPaneId = await runner.step('create_remote_split', async () => {

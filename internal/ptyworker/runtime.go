@@ -35,16 +35,22 @@ func previewWorkerBytesForLog(data []byte) string {
 }
 
 func replaySegmentsFromPTYAttachInfo(segments []pty.ReplaySegment) []ReplaySegment {
-	if len(segments) == 0 {
-		return nil
-	}
-	out := make([]ReplaySegment, 0, len(segments))
-	for _, segment := range segments {
-		out = append(out, ReplaySegment{
+	return cloneReplaySegments(segments, func(segment pty.ReplaySegment) ReplaySegment {
+		return ReplaySegment{
 			Cols: segment.Cols,
 			Rows: segment.Rows,
 			Data: append([]byte(nil), segment.Data...),
-		})
+		}
+	})
+}
+
+func cloneReplaySegments[From any, To any](segments []From, convert func(From) To) []To {
+	if len(segments) == 0 {
+		return nil
+	}
+	out := make([]To, 0, len(segments))
+	for _, segment := range segments {
+		out = append(out, convert(segment))
 	}
 	return out
 }

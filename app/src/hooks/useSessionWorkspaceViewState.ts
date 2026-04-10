@@ -5,8 +5,6 @@ import { findPaneInDirection, hasPane } from '../types/workspace';
 
 interface SessionWorkspaceViewStateController {
   getActivePaneIdForSession: (session: Session | undefined | null) => string;
-  getDaemonPreferredPaneId: (session: Session | undefined | null) => string;
-  getWorkspaceTopologySignature: (session: Session | undefined | null) => string;
   setActivePane: (sessionId: string, paneId: string) => void;
   prepareClosePaneFocus: (session: Session | undefined | null, paneId: string) => string;
   clearPreparedClosePaneFocus: (sessionId: string) => void;
@@ -160,8 +158,6 @@ export function useSessionWorkspaceViewState(
 
   return {
     getActivePaneIdForSession,
-    getDaemonPreferredPaneId,
-    getWorkspaceTopologySignature,
     setActivePane,
     prepareClosePaneFocus,
     clearPreparedClosePaneFocus,

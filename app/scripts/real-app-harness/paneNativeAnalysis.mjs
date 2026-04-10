@@ -34,7 +34,7 @@ function readPixel(data, width, x, y) {
   };
 }
 
-export function estimatePaneBackgroundColor(
+function estimatePaneBackgroundColor(
   {
     width,
     height,

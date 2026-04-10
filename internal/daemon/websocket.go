@@ -184,16 +184,6 @@ func (c *wsClient) clearRemoteAttach(sessionID string) {
 	}
 }
 
-func (c *wsClient) clearAllRemoteAttaches() {
-	if c == nil {
-		return
-	}
-	c.attachMu.Lock()
-	defer c.attachMu.Unlock()
-	c.pendingRemote = make(map[string]struct{})
-	c.attachedRemote = make(map[string]struct{})
-}
-
 // BroadcastListener is called for each broadcast event (for testing)
 type BroadcastListener func(event *protocol.WebSocketEvent)
 

@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
-import { parseCommonArgs, printCommonHelp } from './common.mjs';
+import {
+  createSessionAndWaitForMain,
+  launchFreshAppAndConnect,
+  parseCommonArgs,
+  printCommonHelp,
+} from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
@@ -26,18 +31,6 @@ function parseArgs(argv) {
     options,
     help: args.includes('--help') || args.includes('-h'),
   };
-}
-
-async function createClaudeSession(client, observer, runner, labelSuffix) {
-  const result = await client.request('create_session', {
-    cwd: runner.sessionDir,
-    label: `${labelSuffix}-${runner.runId}`,
-    agent: 'claude',
-  });
-  await observer.waitForSession({ id: result.sessionId, timeoutMs: 30_000 });
-  await ensureClaudeMainPromptReady(client, result.sessionId, 45_000);
-  await waitForPaneVisible(client, result.sessionId, 'main', 20_000);
-  return result.sessionId;
 }
 
 async function main() {
@@ -67,15 +60,18 @@ async function main() {
 
   try {
     await runner.step('launch_app', async () => {
-      await client.launchFreshApp();
-      await client.waitForManifest(20_000);
-      await client.waitForReady(20_000);
-      await client.waitForFrontendResponsive(20_000);
-      await observer.connect();
+      await launchFreshAppAndConnect(client, observer);
     });
 
     primarySessionId = await runner.step('create_primary_session', async () => {
-      return createClaudeSession(client, observer, runner, 'tr301-primary');
+      return createSessionAndWaitForMain({
+        client,
+        observer,
+        cwd: runner.sessionDir,
+        label: `tr301-primary-${runner.runId}`,
+        agent: 'claude',
+        promptReadyFn: ensureClaudeMainPromptReady,
+      });
     });
 
     utilityPaneId = await runner.step('create_primary_utility', async () => {
@@ -100,7 +96,14 @@ async function main() {
     });
 
     secondarySessionId = await runner.step('create_secondary_session', async () => {
-      return createClaudeSession(client, observer, runner, 'tr301-secondary');
+      return createSessionAndWaitForMain({
+        client,
+        observer,
+        cwd: runner.sessionDir,
+        label: `tr301-secondary-${runner.runId}`,
+        agent: 'claude',
+        promptReadyFn: ensureClaudeMainPromptReady,
+      });
     });
 
     await runner.step('switch_back_and_assert_utility_focus', async () => {

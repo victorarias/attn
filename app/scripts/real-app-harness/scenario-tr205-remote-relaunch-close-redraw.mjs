@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 
-import { parseCommonArgs, printCommonHelp } from './common.mjs';
+import {
+  createSessionAndWaitForMain,
+  launchFreshAppAndConnect,
+  parseCommonArgs,
+  printCommonHelp,
+  relaunchAppAndConnect,
+} from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
@@ -373,17 +379,13 @@ async function main() {
     });
 
     await runner.step('launch_app_and_connect_daemon', async () => {
-      await client.launchFreshApp();
-      await client.waitForManifest(20_000);
-      await client.waitForReady(20_000);
-      await client.waitForFrontendResponsive(20_000);
+      await launchFreshAppAndConnect(client, observer);
       const paneDebugConfig = await client.request('set_pane_debug', { enabled: true });
       const terminalRuntimeTraceConfig = await client.request('set_terminal_runtime_trace', { enabled: true });
       runner.writeJson('ui-debug-config.json', {
         paneDebugConfig,
         terminalRuntimeTraceConfig,
       });
-      await observer.connect();
       await removeStaleHarnessEndpoints(observer, 20_000);
       const cleanupResult = await removeStaleHarnessScenarioSessions(observer, 60_000);
       if (cleanupResult.sessions.length > 0 || cleanupResult.lingeringWorkspaceSessionIds.length > 0) {
@@ -400,20 +402,22 @@ async function main() {
     });
 
     sessionId = await runner.step('create_remote_session', async () => {
-      const result = await client.request('create_session', {
+      const resultSessionId = await createSessionAndWaitForMain({
+        client,
+        observer,
         cwd: remoteDirectory,
         label: `tr205-${runner.runId}`,
         agent: options.remoteAgent,
-        endpoint_id: endpoint.id,
+        endpointId: endpoint.id,
+        waitForMainVisible: false,
       });
-      await observer.waitForSession({ id: result.sessionId, timeoutMs: 30_000 });
       await observer.waitForWorkspace(
-        result.sessionId,
+        resultSessionId,
         (workspace) => (workspace.panes || []).length >= 1,
-        `initial workspace for ${result.sessionId}`,
+        `initial workspace for ${resultSessionId}`,
         30_000,
       );
-      return result.sessionId;
+      return resultSessionId;
     });
 
     await runner.step('capture_baseline_main', async () => {
@@ -477,11 +481,7 @@ async function main() {
     });
 
     await runner.step('relaunch_and_restore_session', async () => {
-      await client.quitApp();
-      await client.launchApp();
-      await client.waitForManifest(20_000);
-      await client.waitForReady(20_000);
-      await client.waitForFrontendResponsive(20_000);
+      await relaunchAppAndConnect(client, observer);
       await client.request('select_session', { sessionId });
       await waitForPaneVisible(client, sessionId, 'main', 30_000);
       await waitForPaneVisible(client, sessionId, initialShellPaneId, 30_000);

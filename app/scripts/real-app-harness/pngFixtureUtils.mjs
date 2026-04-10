@@ -45,7 +45,7 @@ function drawOutline(data, width, height, rect, color, outlineWidth = 1) {
   }
 }
 
-export function createFixturePngBuffer(fixture) {
+function createFixturePngBuffer(fixture) {
   const width = Math.max(1, Math.round(fixture.width));
   const height = Math.max(1, Math.round(fixture.height));
   const png = new PNG({ width, height });

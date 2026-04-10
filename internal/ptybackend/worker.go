@@ -598,19 +598,25 @@ func appendCappedPreEvent(events []OutputEvent, evt OutputEvent, capLimit int) [
 	return events
 }
 
-func replaySegmentsFromWorker(segments []ptyworker.ReplaySegment) []ReplaySegment {
+func cloneReplaySegments[From any, To any](segments []From, convert func(From) To) []To {
 	if len(segments) == 0 {
 		return nil
 	}
-	out := make([]ReplaySegment, 0, len(segments))
+	out := make([]To, 0, len(segments))
 	for _, segment := range segments {
-		out = append(out, ReplaySegment{
+		out = append(out, convert(segment))
+	}
+	return out
+}
+
+func replaySegmentsFromWorker(segments []ptyworker.ReplaySegment) []ReplaySegment {
+	return cloneReplaySegments(segments, func(segment ptyworker.ReplaySegment) ReplaySegment {
+		return ReplaySegment{
 			Cols: segment.Cols,
 			Rows: segment.Rows,
 			Data: append([]byte(nil), segment.Data...),
-		})
-	}
-	return out
+		}
+	})
 }
 
 func (b *WorkerBackend) Input(ctx context.Context, sessionID string, data []byte) error {

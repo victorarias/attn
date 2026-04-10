@@ -4,6 +4,12 @@ export type AttachReplayPreference =
   | 'default'
   | 'prefer_raw_scrollback';
 
+export interface AttachReplaySegment {
+  cols: number;
+  rows: number;
+  data: string;
+}
+
 export interface AttachRequestContext {
   requestedCols: number;
   requestedRows: number;
@@ -15,11 +21,7 @@ export interface AttachRequestContext {
 
 export interface AttachReplayData {
   scrollback?: string;
-  replay_segments?: Array<{
-    cols: number;
-    rows: number;
-    data: string;
-  }>;
+  replay_segments?: AttachReplaySegment[];
   screen_snapshot?: string;
   screen_snapshot_fresh?: boolean;
   screen_cols?: number;
@@ -28,20 +30,10 @@ export interface AttachReplayData {
   rows?: number;
 }
 
-export interface AttachGeometryData {
-  cols?: number;
-  rows?: number;
-  replay_segments?: Array<{
-    cols: number;
-    rows: number;
-    data: string;
-  }>;
-  screen_snapshot?: string;
-  screen_snapshot_fresh?: boolean;
-  scrollback?: string;
-  screen_cols?: number;
-  screen_rows?: number;
-}
+export type AttachResultData = AttachReplayData & {
+  last_seq?: number;
+  scrollback_truncated?: boolean;
+};
 
 export interface AttachRuntimeRequest {
   cols: number;
@@ -170,7 +162,7 @@ export function classifyAttachReplay(
 
 export function planAttachedRuntimeGeometry(
   args: AttachRuntimeRequest,
-  attachResult: AttachGeometryData,
+  attachResult: AttachReplayData,
   options: {
     attachPolicy: PtyAttachPolicy;
     attachContext?: AttachRequestContext;
@@ -224,17 +216,7 @@ export function planAttachResultEffects({
   queuedOutputs,
   sessionAgent,
 }: {
-  attachResult: {
-    last_seq?: number;
-    screen_snapshot?: string;
-    scrollback?: string;
-    replay_segments?: Array<{
-      cols: number;
-      rows: number;
-      data: string;
-    }>;
-    scrollback_truncated?: boolean;
-  };
+  attachResult: AttachResultData;
   replayPlan: ReturnType<typeof classifyAttachReplay>;
   previousSeq?: number;
   queuedOutputs?: PendingAttachOutputChunk[];

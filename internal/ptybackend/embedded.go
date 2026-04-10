@@ -103,18 +103,13 @@ func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID stri
 }
 
 func replaySegmentsFromPTY(segments []pty.ReplaySegment) []ReplaySegment {
-	if len(segments) == 0 {
-		return nil
-	}
-	out := make([]ReplaySegment, 0, len(segments))
-	for _, segment := range segments {
-		out = append(out, ReplaySegment{
+	return cloneReplaySegments(segments, func(segment pty.ReplaySegment) ReplaySegment {
+		return ReplaySegment{
 			Cols: segment.Cols,
 			Rows: segment.Rows,
 			Data: append([]byte(nil), segment.Data...),
-		})
-	}
-	return out
+		}
+	})
 }
 
 func (b *EmbeddedBackend) Input(_ context.Context, sessionID string, data []byte) error {
