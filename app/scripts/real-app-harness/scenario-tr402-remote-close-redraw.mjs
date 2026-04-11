@@ -87,9 +87,6 @@ async function main() {
     scenarioId: 'TR-402',
     tier: 'tier3-remote-real-agent',
     prefix: 'scenario-tr402-remote-close-redraw',
-    preflightLaunchEnv: {
-      ATTN_PREFER_LOCAL_DAEMON: '1',
-    },
     metadata: {
       sshTarget: options.sshTarget,
       agent: options.remoteAgent,
@@ -104,7 +101,6 @@ async function main() {
   const client = new UiAutomationClient({
     appPath: options.appPath,
     launchEnv: {
-      ATTN_PREFER_LOCAL_DAEMON: '1',
       ATTN_REMOTE_ATTN_BIN: remotePaths.remoteHarnessBinary,
       ATTN_REMOTE_SOCKET_PATH: remotePaths.remoteHarnessSocket,
       ATTN_REMOTE_DB_PATH: remotePaths.remoteHarnessDB,

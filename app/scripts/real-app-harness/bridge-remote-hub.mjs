@@ -675,7 +675,7 @@ async function resetRemoteTarget(target) {
     target,
     `
 pkill -x attn >/dev/null 2>&1 || true
-rm -f "$HOME/.attn/attn.sock" "$HOME/.attn/attn.pid" "$HOME/.attn/daemon.log" "$HOME/.local/bin/attn" "$HOME/.local/bin/attn.tmp"
+rm -f "$HOME/.attn/attn.sock" "$HOME/.attn/attn.pid" "$HOME/.attn/daemon.log"
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   if ! ss -H -ltn "( sport = :9849 )" 2>/dev/null | grep -q .; then
     break

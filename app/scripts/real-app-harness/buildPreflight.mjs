@@ -81,36 +81,28 @@ function readPackagedAppBuildInfoSync(appPath) {
   return buildInfo;
 }
 
-function resolvePreferLocalDaemon(launchEnv = null) {
-  const launchValue = launchEnv && typeof launchEnv === 'object'
-    ? launchEnv.ATTN_PREFER_LOCAL_DAEMON
-    : undefined;
-  return readTruthyEnv(launchValue) || readTruthyEnv(process.env.ATTN_PREFER_LOCAL_DAEMON);
-}
-
 function resolveDaemonBinaryPathSync({ appPath, launchEnv = null }) {
-  const localPath = path.join(os.homedir(), '.local', 'bin', 'attn');
+  const overridePath = launchEnv && typeof launchEnv === 'object'
+    ? launchEnv.ATTN_DAEMON_BINARY
+    : undefined;
   const bundledPath = bundledDaemonPathForApp(appPath);
-  const preferLocal = resolvePreferLocalDaemon(launchEnv);
+  const explicitPath = typeof overridePath === 'string' && overridePath.trim() !== ''
+    ? overridePath.trim()
+    : (typeof process.env.ATTN_DAEMON_BINARY === 'string' && process.env.ATTN_DAEMON_BINARY.trim() !== ''
+      ? process.env.ATTN_DAEMON_BINARY.trim()
+      : '');
 
-  if (preferLocal) {
-    if (fs.existsSync(localPath)) {
-      return localPath;
+  if (explicitPath) {
+    if (fs.existsSync(explicitPath)) {
+      return explicitPath;
     }
-    if (fs.existsSync(bundledPath)) {
-      return bundledPath;
-    }
-  } else {
-    if (fs.existsSync(bundledPath)) {
-      return bundledPath;
-    }
-    if (fs.existsSync(localPath)) {
-      return localPath;
-    }
+    throw new Error(`Explicit daemon binary override not found: ${explicitPath}`);
   }
-
+  if (fs.existsSync(bundledPath)) {
+    return bundledPath;
+  }
   throw new Error(
-    `No daemon binary found for packaged app checks (looked for ${bundledPath} and ${localPath})`
+    `No bundled daemon binary found for packaged app checks (looked for ${bundledPath})`
   );
 }
 

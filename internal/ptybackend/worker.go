@@ -258,9 +258,8 @@ func (b *WorkerBackend) resolveBinaryPath() string {
 	if home != "" {
 		candidates = append(candidates, filepath.Join(home, ".local", "bin", "attn"))
 	}
-	if runtime.GOOS == "darwin" && home != "" {
-		// Bundled binary inside the macOS app bundle.
-		candidates = append(candidates, filepath.Join(home, "Applications", "attn.app", "Contents", "MacOS", "attn"))
+	if runtime.GOOS == "darwin" {
+		candidates = append(candidates, darwinBundledAttnCandidates(home)...)
 	}
 	if path, err := exec.LookPath("attn"); err == nil && path != "" {
 		candidates = append(candidates, path)
@@ -277,6 +276,15 @@ func (b *WorkerBackend) resolveBinaryPath() string {
 	}
 	b.cfg.Logf("worker binary re-resolve failed, using original %s; candidates=%v", binaryPath, candidates)
 	return binaryPath
+}
+
+func darwinBundledAttnCandidates(home string) []string {
+	candidates := make([]string, 0, 2)
+	if strings.TrimSpace(home) != "" {
+		candidates = append(candidates, filepath.Join(home, "Applications", "attn.app", "Contents", "MacOS", "attn"))
+	}
+	candidates = append(candidates, filepath.Join(string(filepath.Separator), "Applications", "attn.app", "Contents", "MacOS", "attn"))
+	return candidates
 }
 
 func isExecutableFile(path string) bool {

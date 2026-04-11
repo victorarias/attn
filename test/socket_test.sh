@@ -3,7 +3,7 @@
 # Tests daemon socket communication directly without Go test overhead
 set -e
 
-SOCKET=~/.attn.sock
+SOCKET=~/.attn/attn.sock
 SESSION_ID="socket-test-$(date +%s)"
 
 # Colors for output

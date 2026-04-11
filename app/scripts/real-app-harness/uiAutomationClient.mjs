@@ -344,36 +344,25 @@ export class UiAutomationClient {
     return this.currentSourceIdentityPromise;
   }
 
-  resolvePreferLocalDaemon() {
-    const launchValue = this.launchEnv && typeof this.launchEnv === 'object'
-      ? this.launchEnv.ATTN_PREFER_LOCAL_DAEMON
-      : undefined;
-    return readTruthyEnv(launchValue) || readTruthyEnv(process.env.ATTN_PREFER_LOCAL_DAEMON);
-  }
-
   resolveDaemonBinaryPath() {
-    const localPath = path.join(os.homedir(), '.local', 'bin', 'attn');
     const bundledPath = bundledDaemonPathForApp(this.appPath);
-    const preferLocal = this.resolvePreferLocalDaemon();
+    const explicitPath = this.launchEnv && typeof this.launchEnv === 'object' && typeof this.launchEnv.ATTN_DAEMON_BINARY === 'string'
+      ? this.launchEnv.ATTN_DAEMON_BINARY.trim()
+      : (typeof process.env.ATTN_DAEMON_BINARY === 'string' ? process.env.ATTN_DAEMON_BINARY.trim() : '');
 
-    if (preferLocal) {
-      if (fs.existsSync(localPath)) {
-        return localPath;
+    if (explicitPath) {
+      if (fs.existsSync(explicitPath)) {
+        return explicitPath;
       }
-      if (fs.existsSync(bundledPath)) {
-        return bundledPath;
-      }
-    } else {
-      if (fs.existsSync(bundledPath)) {
-        return bundledPath;
-      }
-      if (fs.existsSync(localPath)) {
-        return localPath;
-      }
+      throw new Error(`Explicit daemon binary override not found: ${explicitPath}`);
+    }
+
+    if (fs.existsSync(bundledPath)) {
+      return bundledPath;
     }
 
     throw new Error(
-      `No daemon binary found for packaged app checks (looked for ${bundledPath} and ${localPath})`
+      `No bundled daemon binary found for packaged app checks (looked for ${bundledPath})`
     );
   }
 

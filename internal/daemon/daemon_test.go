@@ -147,6 +147,13 @@ func TestDaemon_RegisterAndQuery(t *testing.T) {
 	defer d.Stop()
 
 	waitForSocket(t, sockPath, 5*time.Second)
+	deadline := time.Now().Add(2 * time.Second)
+	for d.isRecovering() {
+		if time.Now().After(deadline) {
+			t.Fatal("daemon recovery did not finish before test setup")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	c := client.New(sockPath)
 
@@ -180,6 +187,13 @@ func TestDaemon_StateUpdate(t *testing.T) {
 	defer d.Stop()
 
 	waitForSocket(t, sockPath, 5*time.Second)
+	deadline := time.Now().Add(2 * time.Second)
+	for d.isRecovering() {
+		if time.Now().After(deadline) {
+			t.Fatal("daemon recovery did not finish before test setup")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	c := client.New(sockPath)
 
@@ -236,27 +250,49 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 	defer d.Stop()
 
 	waitForSocket(t, sockPath, 5*time.Second)
+	deadline := time.Now().Add(2 * time.Second)
+	for d.isRecovering() {
+		if time.Now().After(deadline) {
+			t.Fatal("daemon recovery did not finish before test setup")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	c := client.New(sockPath)
 
 	// Register multiple sessions (all start as launching)
-	c.Register("1", "one", "/tmp/1")
-	c.Register("2", "two", "/tmp/2")
-	c.Register("3", "three", "/tmp/3")
-
-	// Update one to working
-	c.UpdateState("2", protocol.StateWorking)
-
-	// Query launching (sessions 1 and 3)
-	launching, _ := c.Query(protocol.StateLaunching)
-	if len(launching) != 2 {
-		t.Errorf("got %d launching, want 2", len(launching))
+	if err := c.Register("1", "one", "/tmp/1"); err != nil {
+		t.Fatalf("Register(1) error: %v", err)
+	}
+	if err := c.Register("2", "two", "/tmp/2"); err != nil {
+		t.Fatalf("Register(2) error: %v", err)
+	}
+	if err := c.Register("3", "three", "/tmp/3"); err != nil {
+		t.Fatalf("Register(3) error: %v", err)
 	}
 
-	// Query working (session 2)
-	working, _ := c.Query(protocol.StateWorking)
-	if len(working) != 1 {
-		t.Errorf("got %d working, want 1", len(working))
+	// Update one to working
+	if err := c.UpdateState("2", protocol.StateWorking); err != nil {
+		t.Fatalf("UpdateState(2, working) error: %v", err)
+	}
+
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		launching, err := c.Query(protocol.StateLaunching)
+		if err != nil {
+			t.Fatalf("Query(launching) error: %v", err)
+		}
+		working, err := c.Query(protocol.StateWorking)
+		if err != nil {
+			t.Fatalf("Query(working) error: %v", err)
+		}
+		if len(launching) == 2 && len(working) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("got %d launching and %d working, want 2 launching and 1 working", len(launching), len(working))
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
@@ -2623,6 +2659,12 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 	}
 	if health["build_time"] != buildinfo.BuildTime {
 		t.Errorf("build_time = %v, want %s", health["build_time"], buildinfo.BuildTime)
+	}
+	if health["source_fingerprint"] != buildinfo.SourceFingerprint {
+		t.Errorf("source_fingerprint = %v, want %s", health["source_fingerprint"], buildinfo.SourceFingerprint)
+	}
+	if health["git_commit"] != buildinfo.GitCommit {
+		t.Errorf("git_commit = %v, want %s", health["git_commit"], buildinfo.GitCommit)
 	}
 	if daemonID, ok := health["daemon_instance_id"].(string); !ok || daemonID == "" {
 		t.Errorf("daemon_instance_id = %v, want non-empty string", health["daemon_instance_id"])

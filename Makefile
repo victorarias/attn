@@ -1,7 +1,8 @@
-.PHONY: build build-linux-amd64 build-linux-arm64 install test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-ui-automation install-app install-app-ui-automation install-all install-all-ui-automation app-screenshot dist release release-skip-tests
+.PHONY: build build-linux-amd64 build-linux-arm64 install install-daemon test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-ui-automation app-screenshot dist release release-skip-tests
 
 BINARY_NAME=attn
-INSTALL_DIR=$(HOME)/.local/bin
+APP_BUNDLE=$(HOME)/Applications/attn.app
+APP_BINARY=$(APP_BUNDLE)/Contents/MacOS/attn
 BUILD_DIR=./cmd/attn
 VERSION ?= $(shell bash ./scripts/version.sh)
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -61,26 +62,25 @@ test-all: test test-frontend
 
 UNAME_S := $(shell uname -s)
 
-install: build
-	@mkdir -p $(INSTALL_DIR)
-	cp $(OUTPUT) $(INSTALL_DIR)/$(BINARY_NAME)
-	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(INSTALL_DIR)/$(BINARY_NAME); fi
-	@# Kill running daemon and restart with new local code.
-	-pkill -f "$(BINARY_NAME) daemon" 2>/dev/null || true
-	@sleep 0.2
-	@nohup $(INSTALL_DIR)/$(BINARY_NAME) daemon >/dev/null 2>&1 &
-	@sleep 0.2
-	@pid=$$(pgrep -f -x "$(INSTALL_DIR)/$(BINARY_NAME) daemon" | head -n 1); \
-	if [ -n "$$pid" ]; then \
-		echo "Installed $(BINARY_NAME) to $(INSTALL_DIR) (daemon restarted: $$pid)"; \
-	else \
-		echo "Installed $(BINARY_NAME) to $(INSTALL_DIR) (daemon restart failed)"; \
+install: build-app-ui-automation
+	@mkdir -p ~/Applications
+	@rm -rf ~/Applications/attn.app
+	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
+	@$(APP_BINARY) daemon ensure >/dev/null
+	@echo "Installed attn.app to ~/Applications"
+
+install-daemon: build
+	@if [ ! -d "$(APP_BUNDLE)" ]; then \
+		echo "No installed attn.app found in ~/Applications; run make install first"; \
 		exit 1; \
 	fi
+	cp $(OUTPUT) $(APP_BINARY)
+	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(APP_BINARY); fi
+	@$(APP_BINARY) daemon ensure >/dev/null
+	@echo "Updated bundled daemon at $(APP_BINARY)"
 
 clean:
 	rm -f $(BINARY_NAME)
-	rm -f $(INSTALL_DIR)/$(BINARY_NAME)
 
 # Type generation pipeline: TypeSpec -> JSON Schema -> go-jsonschema/quicktype
 generate-types:
@@ -117,22 +117,6 @@ build-app: build
 
 build-app-ui-automation: build
 	$(call build_tauri_app,ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)')
-
-# Install Tauri app to ~/Applications with the UI automation bridge enabled.
-install-app: build-app-ui-automation
-	@mkdir -p ~/Applications
-	@rm -rf ~/Applications/attn.app
-	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
-	@echo "Installed attn.app to ~/Applications with UI automation bridge enabled"
-
-install-app-ui-automation: install-app
-
-# Install daemon and app.
-# Install the app bundle first so the final daemon restart wins even if the
-# running GUI app eagerly respawns its bundled daemon during the install.
-install-all: install-app install
-
-install-all-ui-automation: install-all
 
 app-screenshot:
 	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path "$(SCREENSHOT_PATH)",) $(APP_SCREENSHOT_FLAGS)

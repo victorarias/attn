@@ -10,33 +10,21 @@ const scenarioCatalog = [
     id: 'tr205-codex',
     label: 'TR-205 remote codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],
-    preflightLaunchEnv: {
-      ATTN_PREFER_LOCAL_DAEMON: '1',
-    },
   },
   {
     id: 'tr205-claude',
     label: 'TR-205 remote claude',
     command: ['pnpm', 'run', 'real-app:scenario-tr205', '--', '--remote-agent', 'claude'],
-    preflightLaunchEnv: {
-      ATTN_PREFER_LOCAL_DAEMON: '1',
-    },
   },
   {
     id: 'tr502',
     label: 'TR-502 remote relaunch splits',
     command: ['pnpm', 'run', 'real-app:scenario-tr502'],
-    preflightLaunchEnv: {
-      ATTN_PREFER_LOCAL_DAEMON: '1',
-    },
   },
   {
     id: 'tr504',
     label: 'TR-504 remote cleanup',
     command: ['pnpm', 'run', 'real-app:scenario-tr504'],
-    preflightLaunchEnv: {
-      ATTN_PREFER_LOCAL_DAEMON: '1',
-    },
   },
   {
     id: 'tr402-local-codex',

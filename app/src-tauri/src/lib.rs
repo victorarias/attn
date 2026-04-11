@@ -2,11 +2,15 @@ mod thumbs;
 mod ui_automation;
 
 use std::env;
-use std::io::Read;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
+
+static ENSURE_DAEMON_LOCK: Mutex<()> = Mutex::new(());
 
 fn daemon_socket_path() -> Option<PathBuf> {
     if let Ok(path) = env::var("ATTN_SOCKET_PATH") {
@@ -43,45 +47,33 @@ fn daemon_is_running_at(socket_path: &Path) -> bool {
     socket_is_live(socket_path)
 }
 
-fn resolve_prefer_local(prefer_local: Option<bool>) -> bool {
-    let prefer_local_env = matches!(
-        env::var("ATTN_PREFER_LOCAL_DAEMON")
-            .ok()
-            .map(|value| value.trim().to_ascii_lowercase()),
-        Some(value) if value == "1" || value == "true" || value == "yes"
-    );
-    let prefer_local_hint = prefer_local.unwrap_or(false);
-    prefer_local_env || prefer_local_hint
+fn daemon_http_is_live(timeout: Duration) -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], daemon_http_port()));
+    TcpStream::connect_timeout(&addr, timeout).is_ok()
 }
 
-fn resolve_daemon_binary(prefer_local: bool) -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let local_path = home.join(".local/bin/attn");
+#[derive(Debug, serde::Deserialize, Default)]
+struct DaemonHealth {
+    #[serde(default)]
+    status: String,
+}
+
+fn resolve_daemon_binary() -> Result<PathBuf, String> {
+    if let Ok(path) = env::var("ATTN_DAEMON_BINARY") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
     let bundled_path = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("attn")));
-
-    if prefer_local {
-        if local_path.exists() {
-            return Ok(local_path);
-        }
-        if let Some(ref path) = bundled_path {
-            if path.exists() {
-                return Ok(path.clone());
-            }
-        }
-    } else {
-        if let Some(ref path) = bundled_path {
-            if path.exists() {
-                return Ok(path.clone());
-            }
-        }
-        if local_path.exists() {
-            return Ok(local_path);
+    if let Some(ref path) = bundled_path {
+        if path.exists() {
+            return Ok(path.clone());
         }
     }
-
-    Err("No daemon binary found. Run 'make install' or reinstall the app.".into())
+    Err("No bundled daemon binary found. Reinstall attn.app.".into())
 }
 
 fn spawn_daemon(bin_path: &Path) -> Result<(), String> {
@@ -93,30 +85,23 @@ fn spawn_daemon(bin_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn daemon_binary_protocol_version(bin_path: &Path) -> Result<String, String> {
-    let empty_path = env::temp_dir().join("attn-protocol-probe-empty-path");
+fn run_daemon_ensure(bin_path: &Path) -> Result<String, String> {
     let mut child = Command::new(bin_path)
-        .arg("--protocol-version")
-        // Older binaries may not understand this flag and fall back into the
-        // wrapper path. Force the in-app direct-launch branch and strip PATH so
-        // any nested agent exec fails fast instead of opening the app.
-        .env("ATTN_INSIDE_APP", "1")
-        .env("ATTN_DAEMON_MANAGED", "1")
-        .env("ATTN_AGENT", "codex")
-        .env("PATH", &empty_path)
+        .arg("daemon")
+        .arg("ensure")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| {
             format!(
-                "Failed to query protocol version from daemon binary {}: {}",
+                "Failed to run daemon ensure with {}: {}",
                 bin_path.display(),
                 e
             )
         })?;
 
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + DAEMON_ENSURE_TIMEOUT;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -125,20 +110,16 @@ fn daemon_binary_protocol_version(bin_path: &Path) -> Result<String, String> {
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(format!(
-                        "Timed out querying protocol version from daemon binary {}",
-                        bin_path.display()
+                        "Daemon ensure did not finish within {} seconds",
+                        DAEMON_ENSURE_TIMEOUT.as_secs()
                     ));
                 }
-                thread::sleep(Duration::from_millis(25));
+                thread::sleep(Duration::from_millis(50));
             }
             Err(e) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!(
-                    "Failed while querying protocol version from daemon binary {}: {}",
-                    bin_path.display(),
-                    e
-                ));
+                return Err(format!("Failed while waiting for daemon ensure: {}", e));
             }
         }
     };
@@ -153,37 +134,59 @@ fn daemon_binary_protocol_version(bin_path: &Path) -> Result<String, String> {
     }
 
     if !status.success() {
-        let stderr = stderr.trim().to_string();
-        return Err(format!(
-            "Daemon binary {} failed protocol preflight{}",
-            bin_path.display(),
-            if stderr.is_empty() {
-                String::new()
-            } else {
-                format!(": {}", stderr)
-            }
-        ));
+        let stderr = stderr.trim();
+        return Err(if stderr.is_empty() {
+            "daemon ensure failed".to_string()
+        } else {
+            format!("daemon ensure failed: {}", stderr)
+        });
     }
 
-    let reported = stdout.trim().to_string();
-    if reported.is_empty() {
-        return Err(format!(
-            "Daemon binary {} returned an empty protocol version",
-            bin_path.display()
-        ));
-    }
-
-    Ok(reported)
+    Ok(stdout)
 }
 
-fn wait_for_socket_state(socket_path: &Path, want_live: bool, timeout: Duration) -> bool {
+fn daemon_http_port() -> u16 {
+    env::var("ATTN_WS_PORT")
+        .ok()
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .filter(|port| *port > 0)
+        .unwrap_or(9849)
+}
+
+fn fetch_daemon_health(timeout: Duration) -> Result<DaemonHealth, String> {
+    let addr = SocketAddr::from(([127, 0, 0, 1], daemon_http_port()));
+    let mut stream = TcpStream::connect_timeout(&addr, timeout)
+        .map_err(|e| format!("connect /health: {}", e))?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| format!("set /health read timeout: {}", e))?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| format!("set /health write timeout: {}", e))?;
+    stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .map_err(|e| format!("write /health request: {}", e))?;
+    stream
+        .flush()
+        .map_err(|e| format!("flush /health request: {}", e))?;
+
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .map_err(|e| format!("read /health response: {}", e))?;
+
+    let split = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| "invalid /health response".to_string())?;
+    let body = &response[split + 4..];
+    serde_json::from_slice(body).map_err(|e| format!("decode /health response: {}", e))
+}
+
+fn wait_for_daemon_shutdown(socket_path: &Path, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
-        let live = daemon_is_running_at(socket_path);
-        if live == want_live {
-            return true;
-        }
-        if !want_live && !socket_path.exists() {
+        if !daemon_is_running_at(socket_path) && !daemon_http_is_live(Duration::from_millis(250)) {
             return true;
         }
         if Instant::now() >= deadline {
@@ -194,25 +197,191 @@ fn wait_for_socket_state(socket_path: &Path, want_live: bool, timeout: Duration)
 }
 
 const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(10);
+const DAEMON_ENSURE_TIMEOUT: Duration = Duration::from_secs(20);
 
-fn start_daemon_impl(prefer_local: Option<bool>) -> Result<(), String> {
-    let prefer_local = resolve_prefer_local(prefer_local);
-    let bin_path = resolve_daemon_binary(prefer_local)?;
-    let socket_path = daemon_socket_path().ok_or("Cannot resolve daemon socket path")?;
-    if !daemon_is_running_at(&socket_path) {
-        let _ = std::fs::remove_file(&socket_path);
-    } else {
+fn wait_for_daemon_health(socket_path: &Path, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if daemon_is_running_at(socket_path) && daemon_http_is_live(Duration::from_millis(250)) {
+            if let Ok(health) = fetch_daemon_health(Duration::from_millis(500)) {
+                if health.status.trim() == "ok" {
+                    return true;
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn stop_running_daemon(socket_path: &Path) -> Result<(), String> {
+    let pid_path = daemon_pid_path().ok_or("Cannot resolve daemon pid path")?;
+    let pid = read_daemon_pid(&pid_path)?;
+    let self_pid = std::process::id();
+    if pid == self_pid || parent_process_id() == Some(pid) {
+        return Err(format!(
+            "Refusing to stop daemon pid {} because it matches the current app process tree",
+            pid
+        ));
+    }
+
+    terminate_process(pid)?;
+    if !wait_for_daemon_shutdown(socket_path, Duration::from_secs(5)) {
+        return Err("Timed out waiting for daemon to stop".into());
+    }
+    let _ = std::fs::remove_file(&socket_path);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn listening_pids_for_daemon_port() -> Vec<u32> {
+    let port = daemon_http_port();
+    let output = Command::new("lsof")
+        .arg("-ti")
+        .arg(format!("tcp:{port}"))
+        .arg("-sTCP:LISTEN")
+        .output();
+
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() && output.stdout.is_empty() {
+        return Vec::new();
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<u32>().ok())
+        .collect()
+}
+
+#[cfg(not(unix))]
+fn listening_pids_for_daemon_port() -> Vec<u32> {
+    Vec::new()
+}
+
+#[cfg(unix)]
+fn command_for_pid(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .arg("-p")
+        .arg(pid.to_string())
+        .arg("-o")
+        .arg("command=")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let command = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if command.is_empty() {
+        return None;
+    }
+    Some(command)
+}
+
+#[cfg(not(unix))]
+fn command_for_pid(_pid: u32) -> Option<String> {
+    None
+}
+
+fn looks_like_attn_daemon_command(command: &str) -> bool {
+    let mut parts = command.split_whitespace();
+    let Some(program) = parts.next() else {
+        return false;
+    };
+    if !parts.any(|part| part == "daemon") {
+        return false;
+    }
+
+    let program_name = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    program_name.contains("attn")
+}
+
+fn force_stop_running_daemon(socket_path: &Path) -> Result<(), String> {
+    let self_pid = std::process::id();
+    let parent_pid = parent_process_id();
+    let mut pids = listening_pids_for_daemon_port();
+    pids.sort_unstable();
+    pids.dedup();
+    pids.retain(|pid| *pid != 0 && *pid != self_pid && Some(*pid) != parent_pid);
+
+    let mut attn_daemon_pids = Vec::new();
+    let mut other_listeners = Vec::new();
+    for pid in pids {
+        match command_for_pid(pid) {
+            Some(command) if looks_like_attn_daemon_command(&command) => {
+                attn_daemon_pids.push(pid);
+            }
+            Some(command) => other_listeners.push(format!("{pid}:{command}")),
+            None => other_listeners.push(format!("{pid}:<unknown>")),
+        }
+    }
+
+    if attn_daemon_pids.is_empty() {
+        if other_listeners.is_empty() {
+            return Err(format!(
+                "No attn daemon listener found on port {} for temporary fallback recovery",
+                daemon_http_port()
+            ));
+        }
+        return Err(format!(
+            "Refusing temporary fallback recovery because port {} is owned by non-attn listener(s): {}",
+            daemon_http_port(),
+            other_listeners.join(", ")
+        ));
+    }
+
+    for pid in &attn_daemon_pids {
+        let _ = terminate_process(*pid);
+    }
+
+    if wait_for_daemon_shutdown(socket_path, Duration::from_secs(3)) {
         return Ok(());
     }
 
-    spawn_daemon(&bin_path)?;
+    #[cfg(unix)]
+    {
+        for pid in &attn_daemon_pids {
+            let _ = kill_process(*pid, libc::SIGKILL);
+        }
+    }
 
-    if wait_for_socket_state(&socket_path, true, DAEMON_START_TIMEOUT) {
+    if wait_for_daemon_shutdown(socket_path, Duration::from_secs(2)) {
         return Ok(());
     }
 
     Err(format!(
-        "Daemon did not start within {} seconds",
+        "Timed out waiting for daemon listener to stop on port {}",
+        daemon_http_port()
+    ))
+}
+
+fn temporary_force_daemon_recovery(bin_path: &Path) -> Result<(), String> {
+    let socket_path = daemon_socket_path().ok_or("Cannot resolve daemon socket path")?;
+    if daemon_is_running_at(&socket_path) {
+        if stop_running_daemon(&socket_path).is_err() {
+            force_stop_running_daemon(&socket_path)?;
+        }
+    } else if daemon_http_is_live(Duration::from_millis(250)) {
+        force_stop_running_daemon(&socket_path)?;
+    }
+
+    let pid_path = daemon_pid_path().ok_or("Cannot resolve daemon pid path")?;
+    let _ = std::fs::remove_file(&socket_path);
+    let _ = std::fs::remove_file(&pid_path);
+
+    spawn_daemon(bin_path)?;
+    if wait_for_daemon_health(&socket_path, DAEMON_START_TIMEOUT) {
+        return Ok(());
+    }
+    Err(format!(
+        "Daemon did not become healthy within {} seconds",
         DAEMON_START_TIMEOUT.as_secs()
     ))
 }
@@ -240,7 +409,12 @@ fn read_daemon_pid(pid_path: &Path) -> Result<u32, String> {
 
 #[cfg(unix)]
 fn terminate_process(pid: u32) -> Result<(), String> {
-    let rc = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    kill_process(pid, libc::SIGTERM)
+}
+
+#[cfg(unix)]
+fn kill_process(pid: u32, signal: libc::c_int) -> Result<(), String> {
+    let rc = unsafe { libc::kill(pid as i32, signal) };
     if rc == 0 {
         return Ok(());
     }
@@ -250,7 +424,10 @@ fn terminate_process(pid: u32) -> Result<(), String> {
         return Ok(());
     }
 
-    Err(format!("Failed to stop daemon process {}: {}", pid, err))
+    Err(format!(
+        "Failed to send signal {} to daemon process {}: {}",
+        signal, pid, err
+    ))
 }
 
 #[cfg(not(unix))]
@@ -268,85 +445,28 @@ fn parent_process_id() -> Option<u32> {
     None
 }
 
-/// Check if the daemon is running by validating the socket is live.
 #[tauri::command]
-fn is_daemon_running() -> bool {
-    let socket_path = match daemon_socket_path() {
-        Some(path) => path,
-        None => return false,
-    };
-    if daemon_is_running_at(&socket_path) {
-        return true;
-    }
-
-    // Clean up stale socket files so startup can recover.
-    let _ = std::fs::remove_file(&socket_path);
-    false
-}
-
-/// Start the daemon process
-/// Uses bundled app daemon by default, with optional local override for development.
-#[tauri::command]
-fn start_daemon(_app: tauri::AppHandle, prefer_local: Option<bool>) -> Result<(), String> {
-    start_daemon_impl(prefer_local)
-}
-
-#[tauri::command]
-fn restart_daemon(
-    _app: tauri::AppHandle,
-    prefer_local: Option<bool>,
-    expected_protocol: String,
-) -> Result<(), String> {
-    let prefer_local = resolve_prefer_local(prefer_local);
-    let bin_path = resolve_daemon_binary(prefer_local)?;
-    let reported_protocol = daemon_binary_protocol_version(&bin_path)?;
-    if reported_protocol != expected_protocol.trim() {
-        return Err(format!(
-            "Refusing restart: resolved daemon binary {} reports protocol {}, app expects {}",
-            bin_path.display(),
-            reported_protocol,
-            expected_protocol.trim()
-        ));
-    }
-
-    let socket_path = daemon_socket_path().ok_or("Cannot resolve daemon socket path")?;
-    if !daemon_is_running_at(&socket_path) {
-        let _ = std::fs::remove_file(&socket_path);
-        spawn_daemon(&bin_path)?;
-        if wait_for_socket_state(&socket_path, true, DAEMON_START_TIMEOUT) {
-            return Ok(());
+fn ensure_daemon(_app: tauri::AppHandle) -> Result<(), String> {
+    let _guard = ENSURE_DAEMON_LOCK
+        .lock()
+        .map_err(|_| "Failed to acquire daemon ensure lock".to_string())?;
+    let bin_path = resolve_daemon_binary()?;
+    match run_daemon_ensure(&bin_path) {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            // Temporary fallback for older or unaccounted-for local states.
+            eprintln!("[Daemon] daemon ensure failed: {err}; entering temporary fallback recovery");
+            temporary_force_daemon_recovery(&bin_path)
+                .map(|_| {
+                    eprintln!("[Daemon] temporary fallback recovery completed successfully");
+                })
+                .map_err(|fallback_err| {
+                    format!(
+                        "daemon ensure failed ({err}); temporary fallback also failed: {fallback_err}"
+                    )
+                })
         }
-        return Err(format!(
-            "Daemon did not start within {} seconds",
-            DAEMON_START_TIMEOUT.as_secs()
-        ));
     }
-
-    let pid_path = daemon_pid_path().ok_or("Cannot resolve daemon pid path")?;
-    let pid = read_daemon_pid(&pid_path)?;
-    let self_pid = std::process::id();
-    if pid == self_pid || parent_process_id() == Some(pid) {
-        return Err(format!(
-            "Refusing to stop daemon pid {} because it matches the current app process tree",
-            pid
-        ));
-    }
-
-    terminate_process(pid)?;
-    if !wait_for_socket_state(&socket_path, false, Duration::from_secs(5)) {
-        return Err("Timed out waiting for daemon to stop".into());
-    }
-    let _ = std::fs::remove_file(&socket_path);
-
-    spawn_daemon(&bin_path)?;
-    if wait_for_socket_state(&socket_path, true, DAEMON_START_TIMEOUT) {
-        return Ok(());
-    }
-
-    Err(format!(
-        "Daemon did not start within {} seconds",
-        DAEMON_START_TIMEOUT.as_secs()
-    ))
 }
 
 #[tauri::command]
@@ -573,9 +693,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             list_directory,
-            is_daemon_running,
-            start_daemon,
-            restart_daemon,
+            ensure_daemon,
             open_in_editor,
             thumbs::extract_patterns,
             thumbs::reveal_in_finder,

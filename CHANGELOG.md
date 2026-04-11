@@ -6,6 +6,17 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-11]
+
+### Changed
+- **App-Owned Daemon Startup**: Desktop app startup now routes through a bundled-binary `attn daemon ensure` flow so the app asks its own runtime to reconcile, replace, and health-check the local daemon before connecting instead of treating any live socket as good enough.
+- **Source Dev Install Flow**: `make install` now updates the installed app's bundled `attn` sidecar and runs `daemon ensure`, while `make install-all` becomes a deprecated shim to the simpler default source install path.
+- **Install Surface Simplification**: Remove the CLI-only Homebrew formula from the supported install and release surface, update cask/docs accordingly, and stop steering app users toward a standalone `attn` install as part of normal setup or upgrades.
+
+### Fixed
+- **Packaged-App Daemon Upgrade Reconciliation**: App startup now verifies that the live local daemon matches the daemon binary the current install would launch, so Homebrew and packaged-app upgrades replace stale daemons from older install paths instead of silently reusing them until session startup fails.
+- **macOS Worker Binary Fallback**: Worker-side PTY recovery now checks both `~/Applications/attn.app` and `/Applications/attn.app`, so packaged installs can recover the bundled `attn` binary even when Homebrew placed the app in the system Applications folder.
+
 ## [2026-04-10]
 
 ### Added

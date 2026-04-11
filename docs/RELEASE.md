@@ -26,7 +26,6 @@ What it automates:
 3. Runs validation (unless `--skip-tests`).
 4. Creates release commit + annotated tag.
 5. Pushes `main` and tag.
-6. Updates `Formula/attn.rb` SHA/version for the new tag and pushes that commit.
 
 The GitHub release workflow (`.github/workflows/release.yml`) builds and publishes the macOS app artifacts, uploads `attn_aarch64.dmg` for the Homebrew cask, and attaches standalone Linux daemon binaries for `amd64` and `arm64`.
 The cask itself stays `version :latest` and does not need per-release edits.
@@ -84,7 +83,6 @@ Suggested use:
    - `attn-linux-amd64`
    - `attn-linux-arm64`
 3. Verify install/upgrade:
-   - `brew upgrade victorarias/attn/attn`
    - `brew upgrade --cask victorarias/attn/attn`
 
 ## Re-run an Existing Tag

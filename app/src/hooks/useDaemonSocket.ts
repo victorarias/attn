@@ -824,11 +824,7 @@ export function useDaemonSocket({
       return;
     }
     try {
-      const isRunning = await invoke<boolean>('is_daemon_running');
-      if (!isRunning) {
-        console.log('[Daemon] Not running during reconnect, starting daemon...');
-        await invoke('start_daemon', { prefer_local: import.meta.env.VITE_INSTALL_CHANNEL === 'source' });
-      }
+      await invoke('ensure_daemon');
     } catch (err) {
       console.error('[Daemon] Failed to ensure daemon is running:', err);
     }
@@ -935,10 +931,7 @@ export function useDaemonSocket({
                   if (!daemonRestartInProgressRef.current) {
                     daemonRestartInProgressRef.current = true;
                     console.log(`[Daemon] Restarting older daemon ${data.protocol_version} to match app protocol ${PROTOCOL_VERSION}`);
-                    void invoke('restart_daemon', {
-                      expected_protocol: PROTOCOL_VERSION,
-                      prefer_local: import.meta.env.VITE_INSTALL_CHANNEL === 'source',
-                    }).catch((err) => {
+                    void invoke('ensure_daemon').catch((err) => {
                       console.error('[Daemon] Failed to restart daemon after protocol mismatch:', err);
                       daemonRestartInProgressRef.current = false;
                       setConnectionError(

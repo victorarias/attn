@@ -21,6 +21,7 @@ import (
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemon"
+	"github.com/victorarias/attn/internal/daemonctl"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
@@ -101,7 +102,7 @@ func main() {
 
 	switch os.Args[1] {
 	case "daemon":
-		runDaemon()
+		runDaemonCommand()
 	case "ws-relay":
 		runWSRelay()
 	case "pty-worker":
@@ -225,12 +226,34 @@ func runPTYWorker() {
 	}
 }
 
+func runDaemonCommand() {
+	if len(os.Args) >= 3 && os.Args[2] == "ensure" {
+		runDaemonEnsure()
+		return
+	}
+	runDaemon()
+}
+
 func runDaemon() {
 	d := daemon.New(config.SocketPath())
 	if err := d.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "daemon error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runDaemonEnsure() {
+	binaryPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "daemon ensure error: resolve executable: %v\n", err)
+		os.Exit(1)
+	}
+	result, err := daemonctl.Ensure(context.Background(), binaryPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "daemon ensure error: %v\n", err)
+		os.Exit(1)
+	}
+	printJSON(result)
 }
 
 func runWSRelay() {

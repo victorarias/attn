@@ -10,9 +10,4 @@ cask "attn" do
   depends_on arch: :arm64
 
   app "attn.app"
-
-  caveats <<~EOS
-    Optional CLI/daemon wrapper:
-      brew install victorarias/attn/attn
-  EOS
 end
