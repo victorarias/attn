@@ -20,6 +20,7 @@ export function WorktreeCleanupPrompt({
   onDelete,
   onAlwaysKeep,
 }: WorktreeCleanupPromptProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
   const deleteRef = useRef<HTMLButtonElement>(null);
   const alwaysRef = useRef<HTMLButtonElement>(null);
@@ -74,10 +75,16 @@ export function WorktreeCleanupPrompt({
 
   useEffect(() => {
     if (!isVisible) return;
-    const focusKeep = () => keepRef.current?.focus();
-    focusKeep();
-    const raf = requestAnimationFrame(focusKeep);
-    const timeoutId = window.setTimeout(focusKeep, 50);
+    const focusKeepIfNeeded = () => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && dialogRef.current?.contains(active)) {
+        return;
+      }
+      keepRef.current?.focus();
+    };
+    focusKeepIfNeeded();
+    const raf = requestAnimationFrame(focusKeepIfNeeded);
+    const timeoutId = window.setTimeout(focusKeepIfNeeded, 50);
     return () => {
       cancelAnimationFrame(raf);
       window.clearTimeout(timeoutId);
@@ -91,6 +98,7 @@ export function WorktreeCleanupPrompt({
   return (
     <div className="worktree-cleanup-prompt" role="presentation">
       <div
+        ref={dialogRef}
         className="cleanup-content"
         role="dialog"
         aria-modal="true"
