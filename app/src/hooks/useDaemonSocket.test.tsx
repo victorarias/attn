@@ -226,9 +226,9 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('restarts an older daemon automatically on protocol mismatch in Tauri', async () => {
+  it('re-runs daemon ensure automatically on protocol mismatch in Tauri', async () => {
     vi.mocked(invoke).mockImplementation(async (cmd) => {
-      if (cmd === 'restart_daemon') {
+      if (cmd === 'ensure_daemon') {
         return undefined;
       }
       return true;
@@ -261,10 +261,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
 
     await waitFor(() => {
-        expect(vi.mocked(invoke)).toHaveBeenCalledWith('restart_daemon', {
-        expected_protocol: '51',
-        prefer_local: false,
-      });
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith('ensure_daemon');
     });
     expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
     expect(result.current.connectionError === null || result.current.connectionError === 'Restarting daemon...').toBe(true);

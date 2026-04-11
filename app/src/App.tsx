@@ -146,12 +146,8 @@ function App() {
   useEffect(() => {
     async function ensureDaemon() {
       try {
-        const isRunning = await invoke<boolean>('is_daemon_running');
-        if (!isRunning) {
-          console.log('[App] Daemon not running, starting...');
-          await invoke('start_daemon', { prefer_local: installChannel === 'source' });
-          console.log('[App] Daemon started');
-        }
+        await invoke('ensure_daemon');
+        console.log('[App] Daemon ensured');
       } catch (err) {
         console.error('[App] Failed to start daemon:', err);
       }

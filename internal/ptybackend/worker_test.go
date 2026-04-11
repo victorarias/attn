@@ -294,6 +294,22 @@ func TestWorkerBackend_ResolveBinaryPath_ReResolvesImplicitPath(t *testing.T) {
 	}
 }
 
+func TestDarwinBundledAttnCandidates(t *testing.T) {
+	got := darwinBundledAttnCandidates("/Users/tester")
+	want := []string{
+		"/Users/tester/Applications/attn.app/Contents/MacOS/attn",
+		"/Applications/attn.app/Contents/MacOS/attn",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len(darwinBundledAttnCandidates()) = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("darwinBundledAttnCandidates()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestWorkerBackend_CallSimple_ReusesPersistentControlConnection(t *testing.T) {
 	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{

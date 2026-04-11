@@ -5,14 +5,12 @@ Repository guidance for coding agents working in this repo.
 ## Build And Test
 
 ```bash
-# daemon
-make build
+# source/dev install
 make install
+make install-daemon
 
 # app
 make build-app
-make install-app
-make install-all
 
 # tests
 make test
@@ -23,7 +21,7 @@ make test-all
 go test ./internal/store -run TestList
 ```
 
-Use `make install` for daemon-only iteration. Use `make install-app` or `make install-all` when packaged-app behavior matters.
+Use `make install` as the default source/dev install path; it rebuilds and installs the app bundle and ensures the bundled daemon is running. Use `make install-daemon` when only daemon/runtime code changed and you want the faster sidecar-only loop.
 
 Frontend-only shortcuts:
 

@@ -58,7 +58,7 @@ fi
 
 # Layer 4: Socket Integration (requires running daemon)
 section "Layer 4: Socket Integration Tests"
-SOCKET=~/.attn.sock
+SOCKET=~/.attn/attn.sock
 
 if [ -S "$SOCKET" ]; then
     if ./test/socket_test.sh; then
@@ -69,7 +69,7 @@ if [ -S "$SOCKET" ]; then
     fi
 else
     echo -e "${YELLOW}⚠ Daemon not running - skipping socket tests${NC}"
-    echo "  Run 'attn daemon' in another terminal to enable socket tests"
+    echo "  Launch attn.app or run the bundled runtime's 'attn daemon' manually to enable socket tests"
 fi
 
 # Layer 5: E2E Tests (if app is available)

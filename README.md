@@ -49,15 +49,7 @@ brew tap victorarias/attn https://github.com/victorarias/attn
 brew install --cask victorarias/attn/attn
 ```
 
-This installs `attn.app` (with bundled daemon/runtime binary). It does not add `attn` to your shell `PATH`.
-
-### Homebrew formula (CLI + daemon only)
-
-```bash
-brew install victorarias/attn/attn
-```
-
-Install this if you want the `attn` command in terminal.
+This installs `attn.app` with its bundled daemon/runtime binary.
 
 ### Direct DMG
 
@@ -66,10 +58,6 @@ Grab the [latest release](https://github.com/victorarias/attn/releases/latest), 
 ### Updating
 
 ```bash
-# Formula
-brew update && brew upgrade victorarias/attn/attn
-
-# Cask
 brew update && brew upgrade --cask victorarias/attn/attn
 ```
 
@@ -83,7 +71,7 @@ The app nudges you when a new release exists. No auto-install — you pick when.
 
 ## Quick start
 
-1. Launch **attn** from Applications (or just type `attn`).
+1. Launch **attn** from Applications.
 2. **Cmd+N** — pick an agent, pick a directory, go.
 3. Watch the sidebar. Colors tell you who needs you.
 4. Optional: add an SSH endpoint in Settings and run remote or VM sessions from the same picker.
@@ -112,20 +100,9 @@ Long-run review behavior: if a run takes 5+ minutes, attn keeps it yellow when i
 | Cmd+Up / Down | Jump between sessions |
 | Cmd+R | Refresh PRs |
 
-## CLI
-
-```bash
-attn                 # Open app, start session
-attn --version       # Print the compiled CLI/daemon version
-attn -s myproject    # Session with a label
-attn --resume        # Resume via agent's native picker
-attn list            # All sessions as JSON
-attn daemon          # Run daemon in foreground
-```
-
 ## How it works
 
-1. `attn` wraps your agent CLI and installs hooks (Claude) or reads PTY output (Codex, Copilot) to detect state.
+1. The bundled attn runtime wraps your agent CLI and installs hooks (Claude) or reads PTY output (Codex, Copilot) to detect state.
 2. A background daemon tracks sessions via unix socket (`~/.attn/attn.sock`).
 3. The desktop app connects over WebSocket for real-time updates.
 4. Optional SSH-managed remote daemons connect through the local hub, so local and remote sessions share one session list and one control surface.
@@ -146,10 +123,9 @@ git clone https://github.com/victorarias/attn.git && cd attn
 | Command | What it does |
 |---|---|
 | `make build` | Build Go daemon binary |
-| `make install` | Install daemon CLI (~2s iteration) |
+| `make install` | Rebuild and install the app bundle for source development, then ensure the bundled daemon is running |
+| `make install-daemon` | Update only the installed app's bundled daemon/runtime for the fast dev loop |
 | `make build-app` | Build daemon + Tauri app |
-| `make install-app` | Install app to /Applications |
-| `make install-all` | Both, with the source app build’s local automation bridge enabled |
 | `make dist` | Create DMG |
 | `make test` | Go tests |
 | `make test-frontend` | Frontend tests (vitest) |

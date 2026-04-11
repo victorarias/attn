@@ -2624,6 +2624,12 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 	if health["build_time"] != buildinfo.BuildTime {
 		t.Errorf("build_time = %v, want %s", health["build_time"], buildinfo.BuildTime)
 	}
+	if health["source_fingerprint"] != buildinfo.SourceFingerprint {
+		t.Errorf("source_fingerprint = %v, want %s", health["source_fingerprint"], buildinfo.SourceFingerprint)
+	}
+	if health["git_commit"] != buildinfo.GitCommit {
+		t.Errorf("git_commit = %v, want %s", health["git_commit"], buildinfo.GitCommit)
+	}
 	if daemonID, ok := health["daemon_instance_id"].(string); !ok || daemonID == "" {
 		t.Errorf("daemon_instance_id = %v, want non-empty string", health["daemon_instance_id"])
 	}

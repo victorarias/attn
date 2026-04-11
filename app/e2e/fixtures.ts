@@ -110,7 +110,6 @@ function resolveAttnBinaryPath(): string {
   const candidates = [
     process.env.ATTN_E2E_BIN,
     path.resolve(E2E_DIR, '../../attn'),
-    path.join(os.homedir(), '.local', 'bin', 'attn'),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   for (const candidate of candidates) {

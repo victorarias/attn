@@ -69,8 +69,6 @@ jobs:
         run: |
           cd ..
           go build -o /tmp/attn ./cmd/attn
-          mkdir -p ~/.local/bin
-          cp /tmp/attn ~/.local/bin/attn
           target_triple="x86_64-unknown-linux-gnu"
           mkdir -p app/src-tauri/binaries
           cp /tmp/attn "app/src-tauri/binaries/attn-${target_triple}"

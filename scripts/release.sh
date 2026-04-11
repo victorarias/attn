@@ -71,8 +71,6 @@ Dry run for ${VERSION_TAG}
 - Would run validation: $([[ "$SKIP_TESTS" -eq 1 ]] && echo "no (skip-tests)" || echo "yes")
 - Would commit release changes
 - Would create and push tag ${VERSION_TAG}
-- Would update Formula/attn.rb for ${VERSION_TAG}
-- Would commit and push formula update
 EOF
   exit 0
 fi
@@ -101,19 +99,6 @@ echo "Creating and pushing tag ${VERSION_TAG}..."
 git tag -a "${VERSION_TAG}" -m "${VERSION_TAG}"
 git push origin main
 git push origin "${VERSION_TAG}"
-
-echo "Waiting for GitHub source tarball..."
-for _ in {1..30}; do
-  if ./scripts/update-homebrew-formula.sh "${VERSION_TAG}" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 2
-done
-
-./scripts/update-homebrew-formula.sh "${VERSION_TAG}"
-git add Formula/attn.rb
-git commit -m "homebrew: update formula for ${VERSION_TAG}"
-git push origin main
 
 echo "Release automation complete for ${VERSION_TAG}"
 echo "Monitor workflow: .github/workflows/release.yml"

@@ -2903,6 +2903,8 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"version":            buildinfo.Version,
 		"build_time":         buildinfo.BuildTime,
 		"protocol":           protocol.ProtocolVersion,
+		"source_fingerprint": buildinfo.SourceFingerprint,
+		"git_commit":         buildinfo.GitCommit,
 		"daemon_instance_id": d.daemonInstanceID,
 		"sessions":           len(sessions),
 		"prs":                len(prs),
