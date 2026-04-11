@@ -1,4 +1,41 @@
 import { test, expect } from './fixtures';
+import { execSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+// The browser harness provisions only the local daemon flow today. Remote parity
+// for the location picker is therefore covered at component-integration level in
+// LocationPicker tests, while this spec validates the browser-visible behavior on
+// the local harness.
+
+function createLocationPickerRepo(worktreeBranches: string[]) {
+  const parentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-location-picker-repo-'));
+  const repoPath = path.join(parentDir, 'exsin');
+  fs.mkdirSync(repoPath);
+
+  execSync('git init -b main', { cwd: repoPath, stdio: 'pipe' });
+  execSync('git config user.email "test@example.com"', { cwd: repoPath, stdio: 'pipe' });
+  execSync('git config user.name "Test User"', { cwd: repoPath, stdio: 'pipe' });
+  fs.writeFileSync(path.join(repoPath, 'README.md'), '# exsin\n');
+  execSync('git add README.md', { cwd: repoPath, stdio: 'pipe' });
+  execSync('git commit -m "initial"', { cwd: repoPath, stdio: 'pipe' });
+
+  const worktrees = worktreeBranches.map((branch) => {
+    const worktreePath = `${repoPath}--${branch}`;
+    execSync(`git branch ${branch}`, { cwd: repoPath, stdio: 'pipe' });
+    execSync(`git worktree add ${JSON.stringify(worktreePath)} ${branch}`, { cwd: repoPath, stdio: 'pipe' });
+    return { branch, path: worktreePath };
+  });
+
+  return {
+    repoPath,
+    worktrees,
+    cleanup() {
+      fs.rmSync(parentDir, { recursive: true, force: true });
+    },
+  };
+}
 
 test.describe('LocationPicker', () => {
   test.describe('Basic Dialog Operations', () => {
@@ -218,6 +255,152 @@ test.describe('LocationPicker', () => {
       const emptyState = page.locator('.picker-empty');
       await expect(emptyState).toBeVisible({ timeout: 2000 });
       await expect(emptyState).toContainText('No matches');
+    });
+  });
+
+  test.describe('Regression Cases', () => {
+    test('preselects the exact worktree row for typed worktree paths with and without trailing slash', async ({ page, daemon }) => {
+      await daemon.start();
+      const repo = createLocationPickerRepo(['feat-images']);
+
+      try {
+        await page.goto('/');
+        await page.waitForSelector('.dashboard');
+
+        for (const typedPath of [repo.worktrees[0].path, `${repo.worktrees[0].path}/`]) {
+          await page.keyboard.press('Meta+n');
+          await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+
+          const input = page.locator('[data-testid="location-picker-path-input"]');
+          await input.fill(typedPath);
+          await input.press('Enter');
+
+          await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+          await expect(page.locator('[data-testid="repo-option-1"]')).toHaveClass(/selected/);
+
+          await page.keyboard.press('Escape');
+          await expect(page.locator('[data-testid="location-picker-path-input"]')).toBeVisible({ timeout: 2000 });
+          await page.keyboard.press('Escape');
+          await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 2000 });
+        }
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    test('hovering a chooser row does not change the Enter target', async ({ page, daemon }) => {
+      await daemon.start();
+      const repo = createLocationPickerRepo(['feat-images']);
+
+      try {
+        await page.goto('/');
+        await page.waitForSelector('.dashboard');
+        await page.keyboard.press('Meta+n');
+        await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+
+        const input = page.locator('[data-testid="location-picker-path-input"]');
+        await input.fill(repo.repoPath);
+        await input.press('Enter');
+
+        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('[data-testid="repo-option-0"]')).toHaveClass(/selected/);
+
+        await page.locator('[data-testid="repo-option-1"]').hover();
+        await expect(page.locator('[data-testid="repo-option-0"]')).toHaveClass(/selected/);
+
+        await page.keyboard.press('Enter');
+        await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 5000 });
+        await expect(page.locator('.session-name', { hasText: 'exsin' }).first()).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.session-name', { hasText: 'exsin--feat-images' })).toHaveCount(0);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    test('creates a new worktree and opens it immediately', async ({ page, daemon }) => {
+      await daemon.start();
+      const repo = createLocationPickerRepo(['feat-images']);
+
+      try {
+        await page.goto('/');
+        await page.waitForSelector('.dashboard');
+        await page.keyboard.press('Meta+n');
+        await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+
+        const input = page.locator('[data-testid="location-picker-path-input"]');
+        await input.fill(repo.worktrees[0].path);
+        await input.press('Enter');
+
+        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        await page.locator('[data-testid="repo-option-2"]').click();
+        await expect(page.locator('[data-testid="repo-new-worktree-input"]')).toBeVisible({ timeout: 2000 });
+        await expect(page.getByText('Start from feat-images')).toBeVisible();
+
+        await page.locator('[data-testid="repo-new-worktree-input"]').fill('feat-more');
+        await page.keyboard.press('Enter');
+
+        await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.session-name', { hasText: 'exsin--feat-more' }).first()).toBeVisible({ timeout: 10000 });
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    test('keeps adjacent selection after deleting a worktree', async ({ page, daemon }) => {
+      await daemon.start();
+      const repo = createLocationPickerRepo(['feat-a', 'feat-b']);
+
+      try {
+        await page.goto('/');
+        await page.waitForSelector('.dashboard');
+        await page.keyboard.press('Meta+n');
+        await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+
+        const input = page.locator('[data-testid="location-picker-path-input"]');
+        await input.fill(repo.worktrees[1].path);
+        await input.press('Enter');
+
+        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('[data-testid="repo-option-2"]')).toHaveClass(/selected/);
+
+        await page.locator('[data-testid="repo-options"]').press('D');
+        await page.locator('[data-testid="repo-options"]').press('y');
+
+        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('[data-testid="repo-option-1"]')).toHaveClass(/selected/);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    test('does not implicitly open a child directory such as .claude', async ({ page, daemon }) => {
+      await daemon.start();
+      page.on('dialog', async (dialog) => {
+        await dialog.dismiss();
+      });
+
+      const parentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-location-picker-'));
+      const projectDir = path.join(parentDir, 'project-with-hidden-child');
+      fs.mkdirSync(projectDir);
+      fs.mkdirSync(path.join(projectDir, '.claude'));
+
+      try {
+        await page.goto('/');
+        await page.waitForSelector('.dashboard');
+
+        await page.keyboard.press('Meta+n');
+        await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+
+        const input = page.locator('[data-testid="location-picker-path-input"]');
+        await input.fill(`${projectDir}/`);
+        await input.press('Enter');
+
+        await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 5000 });
+        await expect(page.locator('.session-name', { hasText: 'project-with-hidden-child' }).first()).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.session-name', { hasText: '.claude' })).toHaveCount(0);
+      } finally {
+        fs.rmSync(parentDir, { recursive: true, force: true });
+      }
     });
   });
 });

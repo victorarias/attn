@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { BrowseDirectoryResult } from './useDaemonSocket';
+import { toDisplayPath } from '../utils/locationPickerPaths';
 
 interface FilesystemSuggestion {
   name: string;
@@ -11,32 +12,19 @@ interface UseFilesystemSuggestionsResult {
   loading: boolean;
   error: string | null;
   currentDir: string;
-  homePath: string;
-}
-
-function contractPath(path: string, homePath: string): string {
-  if (!path || !homePath) {
-    return path;
-  }
-  if (path === homePath) {
-    return '~';
-  }
-  if (path.startsWith(homePath + '/')) {
-    return '~' + path.slice(homePath.length);
-  }
-  return path;
 }
 
 export function useFilesystemSuggestions(
   inputPath: string,
   endpointId: string | undefined,
   browseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>,
+  homePath?: string,
+  onHomePathChange?: (nextHomePath: string) => void,
 ): UseFilesystemSuggestionsResult {
   const [suggestions, setSuggestions] = useState<FilesystemSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentDir, setCurrentDir] = useState('');
-  const [homePath, setHomePath] = useState('');
   const debounceRef = useRef<number | null>(null);
   const requestIdRef = useRef(0);
   const previousEndpointIdRef = useRef<string | undefined>(endpointId);
@@ -58,14 +46,14 @@ export function useFilesystemSuggestions(
         return;
       }
 
-      const nextHomePath = result.home_path || '';
+      const nextHomePath = result.home_path || homePath || '';
       if (nextHomePath) {
-        setHomePath(nextHomePath);
+        onHomePathChange?.(nextHomePath);
       }
-      setCurrentDir(contractPath(result.directory, nextHomePath));
+      setCurrentDir(toDisplayPath(result.directory, nextHomePath));
       setSuggestions((result.entries || []).map((entry) => ({
         name: entry.name,
-        path: contractPath(entry.path, nextHomePath) + '/',
+        path: toDisplayPath(entry.path, nextHomePath),
       })));
     } catch (e) {
       if (requestIdRef.current !== requestId) {
@@ -80,7 +68,7 @@ export function useFilesystemSuggestions(
         setLoading(false);
       }
     }
-  }, [browseDirectory]);
+  }, [browseDirectory, homePath, onHomePathChange]);
 
   useEffect(() => {
     if (debounceRef.current) {
@@ -111,5 +99,5 @@ export function useFilesystemSuggestions(
     };
   }, [endpointId, fetchSuggestions, inputPath]);
 
-  return { suggestions, loading, error, currentDir, homePath };
+  return { suggestions, loading, error, currentDir };
 }

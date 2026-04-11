@@ -3,110 +3,49 @@
 .repo-options {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   background: var(--color-bg-app);
   color: var(--color-text-primary);
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 
-.repo-options-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--color-border-subtle);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.repo-options-back {
-  background: none;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  color: var(--color-text-tertiary);
-  padding: 6px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.1s;
-}
-
-.repo-options-back:hover {
-  background: var(--color-bg-panel);
-  border-color: var(--color-border-hover);
-  color: var(--color-text-primary);
-}
-
-.repo-options-title {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  color: #ff6b35;
-  text-shadow: 0 0 20px rgba(255, 107, 53, 0.3);
+.repo-options:focus {
+  outline: none;
 }
 
 .repo-options-content {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
   padding: 16px;
-}
-
-.repo-options-toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--color-border-subtle);
-  background: rgba(255, 255, 255, 0.015);
+  flex-direction: column;
+  gap: 16px;
 }
 
-.repo-options-toolbar-label {
-  text-transform: uppercase;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  color: var(--color-text-dimmed);
+.repo-options-destinations {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.repo-options-yolo {
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: var(--color-bg-input);
-  color: var(--color-text-tertiary);
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  font-size: 11px;
-  padding: 6px 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: all 0.12s ease-out;
+.repo-destination-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
-.repo-options-yolo:hover:not(:disabled) {
-  color: var(--color-text-primary);
-}
-
-.repo-options-yolo:focus-visible {
-  outline: 2px solid rgba(255, 107, 53, 0.7);
-  outline-offset: 2px;
-}
-
-.repo-options-yolo:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.repo-options-yolo.active {
-  background: linear-gradient(180deg, #ff6b35 0%, #ff874f 100%);
-  color: var(--color-bg-app);
-  box-shadow: 0 6px 16px rgba(255, 107, 53, 0.25);
+.repo-options-actions {
+  flex: 0 0 auto;
 }
 
 /* Section headers */
 .repo-section-header {
   text-transform: uppercase;
-  font-size: 9px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   letter-spacing: 0.12em;
   color: var(--color-text-dimmed);
@@ -123,7 +62,7 @@
 /* Option items */
 .repo-option-item {
   display: grid;
-  grid-template-columns: 24px 1fr auto auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto auto;
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
@@ -158,7 +97,7 @@
 
 /* Icons */
 .repo-option-icon {
-  font-size: 14px;
+  font-size: var(--font-size);
   text-align: center;
   width: 24px;
   height: 24px;
@@ -182,10 +121,6 @@
   color: #00aaff;
 }
 
-.icon-muted {
-  color: var(--color-text-muted);
-}
-
 .repo-option-item.selected .repo-option-icon {
   background: #ff6b35;
   border-color: #ff6b35;
@@ -204,8 +139,12 @@
 }
 
 .repo-option-detail {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .repo-option-item.selected .repo-option-detail {
@@ -213,7 +152,7 @@
 }
 
 .repo-option-shortcut {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   color: var(--color-text-tertiary);
   background: var(--color-bg-panel);
   border: 1px solid var(--color-border);
@@ -253,7 +192,7 @@
   padding: 8px 10px;
   color: var(--color-text-primary);
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  font-size: 13px;
+  font-size: var(--font-size-md);
   outline: none;
   caret-color: #ff6b35;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -284,7 +223,7 @@
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.1s ease-out;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   color: var(--color-text-tertiary);
 }
 
@@ -306,7 +245,7 @@
 }
 
 .new-worktree-hint {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-dimmed);
   text-align: center;
   padding-top: 10px;
@@ -319,7 +258,7 @@
   border-radius: 3px;
   padding: 2px 5px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   color: var(--color-text-tertiary);
 }
 
@@ -330,7 +269,7 @@
   padding: 10px 16px;
   background: rgba(0, 0, 0, 0.3);
   border-top: 1px solid var(--color-border-subtle);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-dimmed);
 }
 
@@ -347,15 +286,10 @@
   border-radius: 3px;
   padding: 3px 6px;
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   color: var(--color-text-tertiary);
   min-width: 20px;
   text-align: center;
-}
-
-.repo-options-footer .fetch-time {
-  margin-left: auto;
-  color: var(--color-text-dimmed);
 }
 
 /* Refresh button */
@@ -365,7 +299,7 @@
   border-radius: 3px;
   color: var(--color-text-muted);
   padding: 2px 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   cursor: pointer;
   transition: all 0.1s;
 }
@@ -382,19 +316,19 @@
 }
 
 /* Scrollbar styling */
-.repo-options-content::-webkit-scrollbar {
+.repo-destination-list::-webkit-scrollbar {
   width: 8px;
 }
 
-.repo-options-content::-webkit-scrollbar-track {
+.repo-destination-list::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.repo-options-content::-webkit-scrollbar-thumb {
+.repo-destination-list::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: 4px;
 }
 
-.repo-options-content::-webkit-scrollbar-thumb:hover {
+.repo-destination-list::-webkit-scrollbar-thumb:hover {
   background: var(--color-border-hover);
 }

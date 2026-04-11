@@ -6,8 +6,10 @@ interface PathInputProps {
   onChange: (value: string) => void;
   onTabComplete: (value: string) => void;
   onSelect: (path: string) => void;
+  onSubmit: () => void;
   ghostText: string;
-  hasSelectedSinceTab: boolean;
+  completionValue?: string;
+  hasSelectedSinceTab?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
 }
@@ -17,8 +19,10 @@ export function PathInput({
   onChange,
   onTabComplete,
   onSelect,
+  onSubmit,
   ghostText,
-  hasSelectedSinceTab,
+  completionValue,
+  hasSelectedSinceTab = true,
   placeholder = 'Type path (e.g., ~/projects)...',
   autoFocus = true,
 }: PathInputProps) {
@@ -40,10 +44,9 @@ export function PathInput({
   }, [value]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Tab' && ghostText) {
+    if (e.key === 'Tab' && completionValue) {
       e.preventDefault();
-      // Complete to ghost text - use onTabComplete to signal this was Tab (not typing)
-      onTabComplete(ghostText);
+      onTabComplete(completionValue);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       // Decision logic:
@@ -54,9 +57,10 @@ export function PathInput({
         : value;     // User just Tabbed, confirm current path
       if (pathToSelect) {
         onSelect(pathToSelect);
+        onSubmit();
       }
     }
-  }, [ghostText, value, onTabComplete, onSelect, hasSelectedSinceTab]);
+  }, [completionValue, ghostText, hasSelectedSinceTab, onChange, onSelect, onSubmit, onTabComplete, value]);
 
   // Calculate ghost text to show (portion not yet typed)
   const visibleGhost = ghostText.startsWith(value)

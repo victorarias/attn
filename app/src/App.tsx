@@ -7,7 +7,7 @@ import { Sidebar, type SidebarHeaderAction, type FooterShortcut, ReviewLoopIcon,
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
-import { BranchPicker } from './components/BranchPicker';
+
 import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { CloseSessionPrompt } from './components/CloseSessionPrompt';
@@ -248,7 +248,6 @@ function App() {
     sendSetSetting,
     sendCreateWorktree,
     sendDeleteWorktree,
-    sendDeleteBranch,
     sendAddEndpoint,
     sendUpdateEndpoint,
     sendRemoveEndpoint,
@@ -256,18 +255,9 @@ function App() {
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
-    sendListBranches,
-    sendSwitchBranch,
     sendCreateWorktreeFromBranch,
-    sendCheckDirty,
-    sendStash,
-    sendStashPop,
-    sendCheckAttnStash,
-    sendCommitWIP,
-    sendGetDefaultBranch,
     sendFetchRemotes,
     sendFetchPRDetails,
-    sendListRemoteBranches,
     sendEnsureRepo,
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
@@ -360,7 +350,6 @@ function App() {
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
         sendDeleteWorktree={sendDeleteWorktree}
-        sendDeleteBranch={sendDeleteBranch}
         sendAddEndpoint={sendAddEndpoint}
         sendUpdateEndpoint={sendUpdateEndpoint}
         sendRemoveEndpoint={sendRemoveEndpoint}
@@ -368,18 +357,9 @@ function App() {
         sendGetRecentLocations={sendGetRecentLocations}
         sendBrowseDirectory={sendBrowseDirectory}
         sendInspectPath={sendInspectPath}
-        sendListBranches={sendListBranches}
-        sendSwitchBranch={sendSwitchBranch}
         sendCreateWorktreeFromBranch={sendCreateWorktreeFromBranch}
-        sendCheckDirty={sendCheckDirty}
-        sendStash={sendStash}
-        sendStashPop={sendStashPop}
-        sendCheckAttnStash={sendCheckAttnStash}
-        sendCommitWIP={sendCommitWIP}
-        sendGetDefaultBranch={sendGetDefaultBranch}
         sendFetchRemotes={sendFetchRemotes}
         sendFetchPRDetails={sendFetchPRDetails}
-        sendListRemoteBranches={sendListRemoteBranches}
         sendEnsureRepo={sendEnsureRepo}
         sendSubscribeGitStatus={sendSubscribeGitStatus}
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
@@ -441,7 +421,6 @@ interface AppContentProps {
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
   sendDeleteWorktree: ReturnType<typeof useDaemonSocket>['sendDeleteWorktree'];
-  sendDeleteBranch: ReturnType<typeof useDaemonSocket>['sendDeleteBranch'];
   sendAddEndpoint: ReturnType<typeof useDaemonSocket>['sendAddEndpoint'];
   sendUpdateEndpoint: ReturnType<typeof useDaemonSocket>['sendUpdateEndpoint'];
   sendRemoveEndpoint: ReturnType<typeof useDaemonSocket>['sendRemoveEndpoint'];
@@ -449,18 +428,9 @@ interface AppContentProps {
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
   sendInspectPath: ReturnType<typeof useDaemonSocket>['sendInspectPath'];
-  sendListBranches: ReturnType<typeof useDaemonSocket>['sendListBranches'];
-  sendSwitchBranch: ReturnType<typeof useDaemonSocket>['sendSwitchBranch'];
   sendCreateWorktreeFromBranch: ReturnType<typeof useDaemonSocket>['sendCreateWorktreeFromBranch'];
-  sendCheckDirty: ReturnType<typeof useDaemonSocket>['sendCheckDirty'];
-  sendStash: ReturnType<typeof useDaemonSocket>['sendStash'];
-  sendStashPop: ReturnType<typeof useDaemonSocket>['sendStashPop'];
-  sendCheckAttnStash: ReturnType<typeof useDaemonSocket>['sendCheckAttnStash'];
-  sendCommitWIP: ReturnType<typeof useDaemonSocket>['sendCommitWIP'];
-  sendGetDefaultBranch: ReturnType<typeof useDaemonSocket>['sendGetDefaultBranch'];
   sendFetchRemotes: ReturnType<typeof useDaemonSocket>['sendFetchRemotes'];
   sendFetchPRDetails: ReturnType<typeof useDaemonSocket>['sendFetchPRDetails'];
-  sendListRemoteBranches: ReturnType<typeof useDaemonSocket>['sendListRemoteBranches'];
   sendEnsureRepo: ReturnType<typeof useDaemonSocket>['sendEnsureRepo'];
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
@@ -517,26 +487,16 @@ function AppContent({
   sendSetSetting,
   sendCreateWorktree,
   sendDeleteWorktree,
-  sendDeleteBranch,
   sendAddEndpoint,
   sendUpdateEndpoint,
   sendRemoveEndpoint,
   sendSetEndpointRemoteWeb,
   sendGetRecentLocations,
   sendBrowseDirectory,
-  sendInspectPath,
-  sendListBranches,
-  sendSwitchBranch,
-  sendCreateWorktreeFromBranch,
-  sendCheckDirty,
-  sendStash,
-  sendStashPop,
-  sendCheckAttnStash,
-  sendCommitWIP,
-  sendGetDefaultBranch,
-  sendFetchRemotes,
-  sendFetchPRDetails,
-  sendListRemoteBranches,
+sendInspectPath,
+    sendCreateWorktreeFromBranch,
+    sendFetchRemotes,
+sendFetchPRDetails,
   sendEnsureRepo,
   sendSubscribeGitStatus,
   sendUnsubscribeGitStatus,
@@ -1036,8 +996,7 @@ function AppContent({
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
 
-  // Branch picker state management
-  const [branchPickerOpen, setBranchPickerOpen] = useState(false);
+  
 
   // Thumbs (Quick Find) state
   const [thumbsOpen, setThumbsOpen] = useState(false);
@@ -1883,23 +1842,13 @@ function AppContent({
       toggleDockPanel('diffDetail');
     },
     onToggleAttentionPanel: () => toggleDockPanel('attention'),
-    onOpenBranchPicker: () => {
-      // Only open if we have an active session with git
-      const localSession = sessions.find(s => s.id === activeSessionId);
-      if (localSession) {
-        const daemonSession = daemonSessions.find(ds => ds.id === localSession.id);
-        if (daemonSession && (daemonSession.branch || daemonSession.main_repo)) {
-          setBranchPickerOpen(true);
-        }
-      }
-    },
     onQuickFind: view === 'session' ? handleOpenQuickFind : undefined,
     onForkSession: view === 'session' && !activeRemoteSession ? handleOpenForkDialog : undefined,
     onOpenSettings: useCallback(() => setSettingsOpen(prev => !prev), []),
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
-    enabled: !locationPickerOpen && !branchPickerOpen && !thumbsOpen && !forkDialogOpen,
+    enabled: !locationPickerOpen && !thumbsOpen && !forkDialogOpen,
   });
 
   return (
@@ -1993,7 +1942,7 @@ function AppContent({
                   fontSize={terminalFontSize}
                   resolvedTheme={resolvedTheme}
                   focusRequestToken={utilityFocusRequestToken}
-                  enabled={!locationPickerOpen && !branchPickerOpen}
+                  enabled={!locationPickerOpen}
                   isActiveSession={session.id === activeSessionId}
                   isSessionViewVisible={view === 'session'}
                   eventRouter={paneRuntimeEventRouter}
@@ -2124,30 +2073,10 @@ function AppContent({
         onGetRepoInfo={getRepoInfo}
         onCreateWorktree={sendCreateWorktree}
         onDeleteWorktree={sendDeleteWorktree}
-        onDeleteBranch={sendDeleteBranch}
         onError={showError}
         projectsDirectory={settings.projects_directory}
         agentAvailability={agentAvailability}
         endpoints={daemonEndpoints}
-      />
-      <BranchPicker
-        isOpen={branchPickerOpen}
-        onClose={() => setBranchPickerOpen(false)}
-        session={(() => {
-          const localSession = sessions.find(s => s.id === activeSessionId);
-          if (!localSession) return null;
-          return daemonSessions.find(ds => ds.id === localSession.id) || null;
-        })()}
-        onListBranches={sendListBranches}
-        onListRemoteBranches={sendListRemoteBranches}
-        onFetchRemotes={sendFetchRemotes}
-        onSwitchBranch={sendSwitchBranch}
-        onCheckDirty={sendCheckDirty}
-        onStash={sendStash}
-        onCommitWIP={sendCommitWIP}
-        onCheckAttnStash={sendCheckAttnStash}
-        onStashPop={sendStashPop}
-        onGetDefaultBranch={sendGetDefaultBranch}
       />
       <UndoToast />
       <WorktreeCleanupPrompt

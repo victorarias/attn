@@ -38,7 +38,7 @@ func ListWorktrees(repoDir string) ([]WorktreeEntry, error) {
 			if current.Path != "" {
 				worktrees = append(worktrees, current)
 			}
-			current = WorktreeEntry{Path: strings.TrimPrefix(line, "worktree ")}
+			current = WorktreeEntry{Path: CanonicalizePath(strings.TrimPrefix(line, "worktree "))}
 		} else if strings.HasPrefix(line, "branch refs/heads/") {
 			current.Branch = strings.TrimPrefix(line, "branch refs/heads/")
 		}
@@ -53,7 +53,7 @@ func ListWorktrees(repoDir string) ([]WorktreeEntry, error) {
 
 // CreateWorktree creates a new worktree with a new branch
 func CreateWorktree(repoDir, branch, path string) error {
-	cmd := exec.Command("git", "worktree", "add", "-b", branch, path)
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, CanonicalizePath(path))
 	cmd.Dir = repoDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree add failed: %s", out)
@@ -63,7 +63,7 @@ func CreateWorktree(repoDir, branch, path string) error {
 
 // CreateWorktreeFromPoint creates a worktree with a new branch starting from a specific ref.
 func CreateWorktreeFromPoint(repoDir, branch, path, startingFrom string) error {
-	args := []string{"worktree", "add", "-b", branch, path}
+	args := []string{"worktree", "add", "-b", branch, CanonicalizePath(path)}
 	if startingFrom != "" {
 		args = append(args, startingFrom)
 	}
@@ -116,6 +116,7 @@ func CreateWorktreeFromRemoteBranch(repoDir, remoteBranch, path string) (string,
 // If the worktree directory doesn't exist, it prunes stale entries instead
 // Always runs prune after removal to ensure git metadata is fully cleaned
 func DeleteWorktree(repoDir, path string) error {
+	path = CanonicalizePath(path)
 	// Check if directory exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		// Directory doesn't exist - prune stale worktree entries

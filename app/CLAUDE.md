@@ -21,7 +21,6 @@ pnpm run dev    # Starts tauri dev with hot reload
 - **ChangesPanel.tsx**: Git changes display
 - **DiffDetailPanel.tsx**: Review/diff panel orchestration and file selection
 - **UnifiedDiffEditor.tsx**: CodeMirror-based unified diff viewing with inline comments
-- **BranchPicker.tsx**: Branch selection UI
 - **AttentionDrawer.tsx**: Quick view of items needing attention
 
 ### State Management

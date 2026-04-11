@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, CheckAttnStashMessage, CheckAttnStashResultMessage, CheckDirtyMessage, CheckDirtyResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CommitWIPMessage, CommitWIPResultMessage, CreateBranchMessage, CreateBranchResultMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteBranchMessage, DeleteBranchResultMessage, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StashMessage, StashPopMessage, StashPopResultMessage, StashResultMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, SwitchBranchMessage, SwitchBranchResultMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, WorkspaceActionResultMessage, WorkspaceClosePaneMessage, WorkspaceFocusPaneMessage, WorkspaceGetMessage, WorkspacePane, WorkspacePaneKind, WorkspaceRenamePaneMessage, WorkspaceRuntimeExitedMessage, WorkspaceSnapshot, WorkspaceSnapshotMessage, WorkspaceSplitDirection, WorkspaceSplitPaneMessage, WorkspaceUpdatedMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PathInspection, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, WorkspaceActionResultMessage, WorkspaceClosePaneMessage, WorkspaceFocusPaneMessage, WorkspaceGetMessage, WorkspacePane, WorkspacePaneKind, WorkspaceRenamePaneMessage, WorkspaceRuntimeExitedMessage, WorkspaceSnapshot, WorkspaceSnapshotMessage, WorkspaceSplitDirection, WorkspaceSplitPaneMessage, WorkspaceUpdatedMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -19,24 +19,14 @@
 //   const branchesResultMessage = Convert.toBranchesResultMessage(json);
 //   const browseDirectoryMessage = Convert.toBrowseDirectoryMessage(json);
 //   const browseDirectoryResultMessage = Convert.toBrowseDirectoryResultMessage(json);
-//   const checkAttnStashMessage = Convert.toCheckAttnStashMessage(json);
-//   const checkAttnStashResultMessage = Convert.toCheckAttnStashResultMessage(json);
-//   const checkDirtyMessage = Convert.toCheckDirtyMessage(json);
-//   const checkDirtyResultMessage = Convert.toCheckDirtyResultMessage(json);
 //   const clearSessionsMessage = Convert.toClearSessionsMessage(json);
 //   const clearWarningsMessage = Convert.toClearWarningsMessage(json);
 //   const collapseRepoMessage = Convert.toCollapseRepoMessage(json);
 //   const commandErrorMessage = Convert.toCommandErrorMessage(json);
-//   const commitWIPMessage = Convert.toCommitWIPMessage(json);
-//   const commitWIPResultMessage = Convert.toCommitWIPResultMessage(json);
-//   const createBranchMessage = Convert.toCreateBranchMessage(json);
-//   const createBranchResultMessage = Convert.toCreateBranchResultMessage(json);
 //   const createWorktreeFromBranchMessage = Convert.toCreateWorktreeFromBranchMessage(json);
 //   const createWorktreeMessage = Convert.toCreateWorktreeMessage(json);
 //   const createWorktreeResultMessage = Convert.toCreateWorktreeResultMessage(json);
 //   const daemonWarning = Convert.toDaemonWarning(json);
-//   const deleteBranchMessage = Convert.toDeleteBranchMessage(json);
-//   const deleteBranchResultMessage = Convert.toDeleteBranchResultMessage(json);
 //   const deleteCommentMessage = Convert.toDeleteCommentMessage(json);
 //   const deleteCommentResultMessage = Convert.toDeleteCommentResultMessage(json);
 //   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
@@ -91,12 +81,12 @@
 //   const muteMessage = Convert.toMuteMessage(json);
 //   const mutePRMessage = Convert.toMutePRMessage(json);
 //   const muteRepoMessage = Convert.toMuteRepoMessage(json);
+//   const pathInspection = Convert.toPathInspection(json);
 //   const pR = Convert.toPR(json);
 //   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
 //   const pRRole = Convert.toPRRole(json);
-//   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
 //   const pRsUpdatedMessage = Convert.toPRsUpdatedMessage(json);
-//   const pathInspection = Convert.toPathInspection(json);
+//   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
 //   const ptyDesyncMessage = Convert.toPtyDesyncMessage(json);
 //   const ptyInputMessage = Convert.toPtyInputMessage(json);
 //   const ptyOutputMessage = Convert.toPtyOutputMessage(json);
@@ -138,10 +128,10 @@
 //   const sessionRegisteredMessage = Convert.toSessionRegisteredMessage(json);
 //   const sessionState = Convert.toSessionState(json);
 //   const sessionStateChangedMessage = Convert.toSessionStateChangedMessage(json);
+//   const sessionsUpdatedMessage = Convert.toSessionsUpdatedMessage(json);
 //   const sessionTodosUpdatedMessage = Convert.toSessionTodosUpdatedMessage(json);
 //   const sessionUnregisteredMessage = Convert.toSessionUnregisteredMessage(json);
 //   const sessionVisualizedMessage = Convert.toSessionVisualizedMessage(json);
-//   const sessionsUpdatedMessage = Convert.toSessionsUpdatedMessage(json);
 //   const setEndpointRemoteWebMessage = Convert.toSetEndpointRemoteWebMessage(json);
 //   const setReviewLoopIterationLimitMessage = Convert.toSetReviewLoopIterationLimitMessage(json);
 //   const setSessionResumeIDMessage = Convert.toSetSessionResumeIDMessage(json);
@@ -150,16 +140,10 @@
 //   const spawnResultMessage = Convert.toSpawnResultMessage(json);
 //   const spawnSessionMessage = Convert.toSpawnSessionMessage(json);
 //   const startReviewLoopMessage = Convert.toStartReviewLoopMessage(json);
-//   const stashMessage = Convert.toStashMessage(json);
-//   const stashPopMessage = Convert.toStashPopMessage(json);
-//   const stashPopResultMessage = Convert.toStashPopResultMessage(json);
-//   const stashResultMessage = Convert.toStashResultMessage(json);
 //   const stateMessage = Convert.toStateMessage(json);
 //   const stopMessage = Convert.toStopMessage(json);
 //   const stopReviewLoopMessage = Convert.toStopReviewLoopMessage(json);
 //   const subscribeGitStatusMessage = Convert.toSubscribeGitStatusMessage(json);
-//   const switchBranchMessage = Convert.toSwitchBranchMessage(json);
-//   const switchBranchResultMessage = Convert.toSwitchBranchResultMessage(json);
 //   const todosMessage = Convert.toTodosMessage(json);
 //   const unregisterMessage = Convert.toUnregisterMessage(json);
 //   const unsubscribeGitStatusMessage = Convert.toUnsubscribeGitStatusMessage(json);
@@ -483,52 +467,6 @@ export enum BrowseDirectoryResultMessageEvent {
     BrowseDirectoryResult = "browse_directory_result",
 }
 
-export interface CheckAttnStashMessage {
-    branch: string;
-    cmd:    CheckAttnStashMessageCmd;
-    repo:   string;
-    [property: string]: any;
-}
-
-export enum CheckAttnStashMessageCmd {
-    CheckAttnStash = "check_attn_stash",
-}
-
-export interface CheckAttnStashResultMessage {
-    error?:     string;
-    event:      CheckAttnStashResultMessageEvent;
-    found:      boolean;
-    stash_ref?: string;
-    success:    boolean;
-    [property: string]: any;
-}
-
-export enum CheckAttnStashResultMessageEvent {
-    CheckAttnStashResult = "check_attn_stash_result",
-}
-
-export interface CheckDirtyMessage {
-    cmd:  CheckDirtyMessageCmd;
-    repo: string;
-    [property: string]: any;
-}
-
-export enum CheckDirtyMessageCmd {
-    CheckDirty = "check_dirty",
-}
-
-export interface CheckDirtyResultMessage {
-    dirty:   boolean;
-    error?:  string;
-    event:   CheckDirtyResultMessageEvent;
-    success: boolean;
-    [property: string]: any;
-}
-
-export enum CheckDirtyResultMessageEvent {
-    CheckDirtyResult = "check_dirty_result",
-}
-
 export interface ClearSessionsMessage {
     cmd: ClearSessionsMessageCmd;
     [property: string]: any;
@@ -568,50 +506,6 @@ export interface CommandErrorMessage {
 
 export enum CommandErrorMessageEvent {
     CommandError = "command_error",
-}
-
-export interface CommitWIPMessage {
-    cmd:  CommitWIPMessageCmd;
-    repo: string;
-    [property: string]: any;
-}
-
-export enum CommitWIPMessageCmd {
-    CommitWip = "commit_wip",
-}
-
-export interface CommitWIPResultMessage {
-    error?:  string;
-    event:   CommitWIPResultMessageEvent;
-    success: boolean;
-    [property: string]: any;
-}
-
-export enum CommitWIPResultMessageEvent {
-    CommitWipResult = "commit_wip_result",
-}
-
-export interface CreateBranchMessage {
-    branch:    string;
-    cmd:       CreateBranchMessageCmd;
-    main_repo: string;
-    [property: string]: any;
-}
-
-export enum CreateBranchMessageCmd {
-    CreateBranch = "create_branch",
-}
-
-export interface CreateBranchResultMessage {
-    branch:  string;
-    error?:  string;
-    event:   CreateBranchResultMessageEvent;
-    success: boolean;
-    [property: string]: any;
-}
-
-export enum CreateBranchResultMessageEvent {
-    CreateBranchResult = "create_branch_result",
 }
 
 export interface CreateWorktreeFromBranchMessage {
@@ -657,32 +551,6 @@ export interface DaemonWarning {
     code:    string;
     message: string;
     [property: string]: any;
-}
-
-export interface DeleteBranchMessage {
-    branch:       string;
-    cmd:          DeleteBranchMessageCmd;
-    endpoint_id?: string;
-    force:        boolean;
-    main_repo:    string;
-    [property: string]: any;
-}
-
-export enum DeleteBranchMessageCmd {
-    DeleteBranch = "delete_branch",
-}
-
-export interface DeleteBranchResultMessage {
-    branch:       string;
-    endpoint_id?: string;
-    error?:       string;
-    event:        DeleteBranchResultMessageEvent;
-    success:      boolean;
-    [property: string]: any;
-}
-
-export enum DeleteBranchResultMessageEvent {
-    DeleteBranchResult = "delete_branch_result",
 }
 
 export interface DeleteCommentMessage {
@@ -1432,6 +1300,16 @@ export enum MuteRepoMessageCmd {
     MuteRepo = "mute_repo",
 }
 
+export interface PathInspection {
+    exists:        boolean;
+    home_path?:    string;
+    input_path:    string;
+    is_directory:  boolean;
+    repo_root?:    string;
+    resolved_path: string;
+    [property: string]: any;
+}
+
 export interface PR {
     approved_by_me:         boolean;
     author:                 string;
@@ -1475,16 +1353,6 @@ export enum PRActionResultMessageEvent {
     PRActionResult = "pr_action_result",
 }
 
-export interface PRVisitedMessage {
-    cmd: PRVisitedMessageCmd;
-    id:  string;
-    [property: string]: any;
-}
-
-export enum PRVisitedMessageCmd {
-    PRVisited = "pr_visited",
-}
-
 export interface PRsUpdatedMessage {
     event: PRsUpdatedMessageEvent;
     prs?:  PRElement[];
@@ -1495,14 +1363,14 @@ export enum PRsUpdatedMessageEvent {
     PrsUpdated = "prs_updated",
 }
 
-export interface PathInspection {
-    exists:        boolean;
-    home_path?:    string;
-    input_path:    string;
-    is_directory:  boolean;
-    repo_root?:    string;
-    resolved_path: string;
+export interface PRVisitedMessage {
+    cmd: PRVisitedMessageCmd;
+    id:  string;
     [property: string]: any;
+}
+
+export enum PRVisitedMessageCmd {
+    PRVisited = "pr_visited",
 }
 
 export interface PtyDesyncMessage {
@@ -2027,6 +1895,16 @@ export enum SessionStateChangedMessageEvent {
     SessionStateChanged = "session_state_changed",
 }
 
+export interface SessionsUpdatedMessage {
+    event:     SessionsUpdatedMessageEvent;
+    sessions?: SessionElement[];
+    [property: string]: any;
+}
+
+export enum SessionsUpdatedMessageEvent {
+    SessionsUpdated = "sessions_updated",
+}
+
 export interface SessionTodosUpdatedMessage {
     event:   SessionTodosUpdatedMessageEvent;
     session: SessionElement;
@@ -2055,16 +1933,6 @@ export interface SessionVisualizedMessage {
 
 export enum SessionVisualizedMessageCmd {
     SessionVisualized = "session_visualized",
-}
-
-export interface SessionsUpdatedMessage {
-    event:     SessionsUpdatedMessageEvent;
-    sessions?: SessionElement[];
-    [property: string]: any;
-}
-
-export enum SessionsUpdatedMessageEvent {
-    SessionsUpdated = "sessions_updated",
 }
 
 export interface SetEndpointRemoteWebMessage {
@@ -2175,50 +2043,6 @@ export enum StartReviewLoopMessageCmd {
     StartReviewLoop = "start_review_loop",
 }
 
-export interface StashMessage {
-    cmd:     StashMessageCmd;
-    message: string;
-    repo:    string;
-    [property: string]: any;
-}
-
-export enum StashMessageCmd {
-    Stash = "stash",
-}
-
-export interface StashPopMessage {
-    cmd:  StashPopMessageCmd;
-    repo: string;
-    [property: string]: any;
-}
-
-export enum StashPopMessageCmd {
-    StashPop = "stash_pop",
-}
-
-export interface StashPopResultMessage {
-    conflict?: boolean;
-    error?:    string;
-    event:     StashPopResultMessageEvent;
-    success:   boolean;
-    [property: string]: any;
-}
-
-export enum StashPopResultMessageEvent {
-    StashPopResult = "stash_pop_result",
-}
-
-export interface StashResultMessage {
-    error?:  string;
-    event:   StashResultMessageEvent;
-    success: boolean;
-    [property: string]: any;
-}
-
-export enum StashResultMessageEvent {
-    StashResult = "stash_result",
-}
-
 export interface StateMessage {
     cmd:   StateMessageCmd;
     id:    string;
@@ -2259,29 +2083,6 @@ export interface SubscribeGitStatusMessage {
 
 export enum SubscribeGitStatusMessageCmd {
     SubscribeGitStatus = "subscribe_git_status",
-}
-
-export interface SwitchBranchMessage {
-    branch:    string;
-    cmd:       SwitchBranchMessageCmd;
-    main_repo: string;
-    [property: string]: any;
-}
-
-export enum SwitchBranchMessageCmd {
-    SwitchBranch = "switch_branch",
-}
-
-export interface SwitchBranchResultMessage {
-    branch:  string;
-    error?:  string;
-    event:   SwitchBranchResultMessageEvent;
-    success: boolean;
-    [property: string]: any;
-}
-
-export enum SwitchBranchResultMessageEvent {
-    SwitchBranchResult = "switch_branch_result",
 }
 
 export interface TodosMessage {
@@ -2738,38 +2539,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("BrowseDirectoryResultMessage")), null, 2);
     }
 
-    public static toCheckAttnStashMessage(json: string): CheckAttnStashMessage {
-        return cast(JSON.parse(json), r("CheckAttnStashMessage"));
-    }
-
-    public static checkAttnStashMessageToJson(value: CheckAttnStashMessage): string {
-        return JSON.stringify(uncast(value, r("CheckAttnStashMessage")), null, 2);
-    }
-
-    public static toCheckAttnStashResultMessage(json: string): CheckAttnStashResultMessage {
-        return cast(JSON.parse(json), r("CheckAttnStashResultMessage"));
-    }
-
-    public static checkAttnStashResultMessageToJson(value: CheckAttnStashResultMessage): string {
-        return JSON.stringify(uncast(value, r("CheckAttnStashResultMessage")), null, 2);
-    }
-
-    public static toCheckDirtyMessage(json: string): CheckDirtyMessage {
-        return cast(JSON.parse(json), r("CheckDirtyMessage"));
-    }
-
-    public static checkDirtyMessageToJson(value: CheckDirtyMessage): string {
-        return JSON.stringify(uncast(value, r("CheckDirtyMessage")), null, 2);
-    }
-
-    public static toCheckDirtyResultMessage(json: string): CheckDirtyResultMessage {
-        return cast(JSON.parse(json), r("CheckDirtyResultMessage"));
-    }
-
-    public static checkDirtyResultMessageToJson(value: CheckDirtyResultMessage): string {
-        return JSON.stringify(uncast(value, r("CheckDirtyResultMessage")), null, 2);
-    }
-
     public static toClearSessionsMessage(json: string): ClearSessionsMessage {
         return cast(JSON.parse(json), r("ClearSessionsMessage"));
     }
@@ -2802,38 +2571,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("CommandErrorMessage")), null, 2);
     }
 
-    public static toCommitWIPMessage(json: string): CommitWIPMessage {
-        return cast(JSON.parse(json), r("CommitWIPMessage"));
-    }
-
-    public static commitWIPMessageToJson(value: CommitWIPMessage): string {
-        return JSON.stringify(uncast(value, r("CommitWIPMessage")), null, 2);
-    }
-
-    public static toCommitWIPResultMessage(json: string): CommitWIPResultMessage {
-        return cast(JSON.parse(json), r("CommitWIPResultMessage"));
-    }
-
-    public static commitWIPResultMessageToJson(value: CommitWIPResultMessage): string {
-        return JSON.stringify(uncast(value, r("CommitWIPResultMessage")), null, 2);
-    }
-
-    public static toCreateBranchMessage(json: string): CreateBranchMessage {
-        return cast(JSON.parse(json), r("CreateBranchMessage"));
-    }
-
-    public static createBranchMessageToJson(value: CreateBranchMessage): string {
-        return JSON.stringify(uncast(value, r("CreateBranchMessage")), null, 2);
-    }
-
-    public static toCreateBranchResultMessage(json: string): CreateBranchResultMessage {
-        return cast(JSON.parse(json), r("CreateBranchResultMessage"));
-    }
-
-    public static createBranchResultMessageToJson(value: CreateBranchResultMessage): string {
-        return JSON.stringify(uncast(value, r("CreateBranchResultMessage")), null, 2);
-    }
-
     public static toCreateWorktreeFromBranchMessage(json: string): CreateWorktreeFromBranchMessage {
         return cast(JSON.parse(json), r("CreateWorktreeFromBranchMessage"));
     }
@@ -2864,22 +2601,6 @@ export class Convert {
 
     public static daemonWarningToJson(value: DaemonWarning): string {
         return JSON.stringify(uncast(value, r("DaemonWarning")), null, 2);
-    }
-
-    public static toDeleteBranchMessage(json: string): DeleteBranchMessage {
-        return cast(JSON.parse(json), r("DeleteBranchMessage"));
-    }
-
-    public static deleteBranchMessageToJson(value: DeleteBranchMessage): string {
-        return JSON.stringify(uncast(value, r("DeleteBranchMessage")), null, 2);
-    }
-
-    public static toDeleteBranchResultMessage(json: string): DeleteBranchResultMessage {
-        return cast(JSON.parse(json), r("DeleteBranchResultMessage"));
-    }
-
-    public static deleteBranchResultMessageToJson(value: DeleteBranchResultMessage): string {
-        return JSON.stringify(uncast(value, r("DeleteBranchResultMessage")), null, 2);
     }
 
     public static toDeleteCommentMessage(json: string): DeleteCommentMessage {
@@ -3314,6 +3035,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("MuteRepoMessage")), null, 2);
     }
 
+    public static toPathInspection(json: string): PathInspection {
+        return cast(JSON.parse(json), r("PathInspection"));
+    }
+
+    public static pathInspectionToJson(value: PathInspection): string {
+        return JSON.stringify(uncast(value, r("PathInspection")), null, 2);
+    }
+
     public static toPR(json: string): PR {
         return cast(JSON.parse(json), r("PR"));
     }
@@ -3338,14 +3067,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("PRRole")), null, 2);
     }
 
-    public static toPRVisitedMessage(json: string): PRVisitedMessage {
-        return cast(JSON.parse(json), r("PRVisitedMessage"));
-    }
-
-    public static pRVisitedMessageToJson(value: PRVisitedMessage): string {
-        return JSON.stringify(uncast(value, r("PRVisitedMessage")), null, 2);
-    }
-
     public static toPRsUpdatedMessage(json: string): PRsUpdatedMessage {
         return cast(JSON.parse(json), r("PRsUpdatedMessage"));
     }
@@ -3354,12 +3075,12 @@ export class Convert {
         return JSON.stringify(uncast(value, r("PRsUpdatedMessage")), null, 2);
     }
 
-    public static toPathInspection(json: string): PathInspection {
-        return cast(JSON.parse(json), r("PathInspection"));
+    public static toPRVisitedMessage(json: string): PRVisitedMessage {
+        return cast(JSON.parse(json), r("PRVisitedMessage"));
     }
 
-    public static pathInspectionToJson(value: PathInspection): string {
-        return JSON.stringify(uncast(value, r("PathInspection")), null, 2);
+    public static pRVisitedMessageToJson(value: PRVisitedMessage): string {
+        return JSON.stringify(uncast(value, r("PRVisitedMessage")), null, 2);
     }
 
     public static toPtyDesyncMessage(json: string): PtyDesyncMessage {
@@ -3690,6 +3411,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SessionStateChangedMessage")), null, 2);
     }
 
+    public static toSessionsUpdatedMessage(json: string): SessionsUpdatedMessage {
+        return cast(JSON.parse(json), r("SessionsUpdatedMessage"));
+    }
+
+    public static sessionsUpdatedMessageToJson(value: SessionsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("SessionsUpdatedMessage")), null, 2);
+    }
+
     public static toSessionTodosUpdatedMessage(json: string): SessionTodosUpdatedMessage {
         return cast(JSON.parse(json), r("SessionTodosUpdatedMessage"));
     }
@@ -3712,14 +3441,6 @@ export class Convert {
 
     public static sessionVisualizedMessageToJson(value: SessionVisualizedMessage): string {
         return JSON.stringify(uncast(value, r("SessionVisualizedMessage")), null, 2);
-    }
-
-    public static toSessionsUpdatedMessage(json: string): SessionsUpdatedMessage {
-        return cast(JSON.parse(json), r("SessionsUpdatedMessage"));
-    }
-
-    public static sessionsUpdatedMessageToJson(value: SessionsUpdatedMessage): string {
-        return JSON.stringify(uncast(value, r("SessionsUpdatedMessage")), null, 2);
     }
 
     public static toSetEndpointRemoteWebMessage(json: string): SetEndpointRemoteWebMessage {
@@ -3786,38 +3507,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("StartReviewLoopMessage")), null, 2);
     }
 
-    public static toStashMessage(json: string): StashMessage {
-        return cast(JSON.parse(json), r("StashMessage"));
-    }
-
-    public static stashMessageToJson(value: StashMessage): string {
-        return JSON.stringify(uncast(value, r("StashMessage")), null, 2);
-    }
-
-    public static toStashPopMessage(json: string): StashPopMessage {
-        return cast(JSON.parse(json), r("StashPopMessage"));
-    }
-
-    public static stashPopMessageToJson(value: StashPopMessage): string {
-        return JSON.stringify(uncast(value, r("StashPopMessage")), null, 2);
-    }
-
-    public static toStashPopResultMessage(json: string): StashPopResultMessage {
-        return cast(JSON.parse(json), r("StashPopResultMessage"));
-    }
-
-    public static stashPopResultMessageToJson(value: StashPopResultMessage): string {
-        return JSON.stringify(uncast(value, r("StashPopResultMessage")), null, 2);
-    }
-
-    public static toStashResultMessage(json: string): StashResultMessage {
-        return cast(JSON.parse(json), r("StashResultMessage"));
-    }
-
-    public static stashResultMessageToJson(value: StashResultMessage): string {
-        return JSON.stringify(uncast(value, r("StashResultMessage")), null, 2);
-    }
-
     public static toStateMessage(json: string): StateMessage {
         return cast(JSON.parse(json), r("StateMessage"));
     }
@@ -3848,22 +3537,6 @@ export class Convert {
 
     public static subscribeGitStatusMessageToJson(value: SubscribeGitStatusMessage): string {
         return JSON.stringify(uncast(value, r("SubscribeGitStatusMessage")), null, 2);
-    }
-
-    public static toSwitchBranchMessage(json: string): SwitchBranchMessage {
-        return cast(JSON.parse(json), r("SwitchBranchMessage"));
-    }
-
-    public static switchBranchMessageToJson(value: SwitchBranchMessage): string {
-        return JSON.stringify(uncast(value, r("SwitchBranchMessage")), null, 2);
-    }
-
-    public static toSwitchBranchResultMessage(json: string): SwitchBranchResultMessage {
-        return cast(JSON.parse(json), r("SwitchBranchResultMessage"));
-    }
-
-    public static switchBranchResultMessageToJson(value: SwitchBranchResultMessage): string {
-        return JSON.stringify(uncast(value, r("SwitchBranchResultMessage")), null, 2);
     }
 
     public static toTodosMessage(json: string): TodosMessage {
@@ -4401,28 +4074,6 @@ const typeMap: any = {
         { json: "name", js: "name", typ: "" },
         { json: "path", js: "path", typ: "" },
     ], "any"),
-    "CheckAttnStashMessage": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "cmd", js: "cmd", typ: r("CheckAttnStashMessageCmd") },
-        { json: "repo", js: "repo", typ: "" },
-    ], "any"),
-    "CheckAttnStashResultMessage": o([
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("CheckAttnStashResultMessageEvent") },
-        { json: "found", js: "found", typ: true },
-        { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
-    "CheckDirtyMessage": o([
-        { json: "cmd", js: "cmd", typ: r("CheckDirtyMessageCmd") },
-        { json: "repo", js: "repo", typ: "" },
-    ], "any"),
-    "CheckDirtyResultMessage": o([
-        { json: "dirty", js: "dirty", typ: true },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("CheckDirtyResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
     "ClearSessionsMessage": o([
         { json: "cmd", js: "cmd", typ: r("ClearSessionsMessageCmd") },
     ], "any"),
@@ -4438,26 +4089,6 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: u(undefined, "") },
         { json: "error", js: "error", typ: "" },
         { json: "event", js: "event", typ: r("CommandErrorMessageEvent") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
-    "CommitWIPMessage": o([
-        { json: "cmd", js: "cmd", typ: r("CommitWIPMessageCmd") },
-        { json: "repo", js: "repo", typ: "" },
-    ], "any"),
-    "CommitWIPResultMessage": o([
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("CommitWIPResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
-    "CreateBranchMessage": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "cmd", js: "cmd", typ: r("CreateBranchMessageCmd") },
-        { json: "main_repo", js: "main_repo", typ: "" },
-    ], "any"),
-    "CreateBranchResultMessage": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("CreateBranchResultMessageEvent") },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "CreateWorktreeFromBranchMessage": o([
@@ -4484,20 +4115,6 @@ const typeMap: any = {
     "DaemonWarning": o([
         { json: "code", js: "code", typ: "" },
         { json: "message", js: "message", typ: "" },
-    ], "any"),
-    "DeleteBranchMessage": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "cmd", js: "cmd", typ: r("DeleteBranchMessageCmd") },
-        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
-        { json: "force", js: "force", typ: true },
-        { json: "main_repo", js: "main_repo", typ: "" },
-    ], "any"),
-    "DeleteBranchResultMessage": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("DeleteBranchResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
     ], "any"),
     "DeleteCommentMessage": o([
         { json: "cmd", js: "cmd", typ: r("DeleteCommentMessageCmd") },
@@ -4904,6 +4521,14 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("MuteRepoMessageCmd") },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
+    "PathInspection": o([
+        { json: "exists", js: "exists", typ: true },
+        { json: "home_path", js: "home_path", typ: u(undefined, "") },
+        { json: "input_path", js: "input_path", typ: "" },
+        { json: "is_directory", js: "is_directory", typ: true },
+        { json: "repo_root", js: "repo_root", typ: u(undefined, "") },
+        { json: "resolved_path", js: "resolved_path", typ: "" },
+    ], "any"),
     "PR": o([
         { json: "approved_by_me", js: "approved_by_me", typ: true },
         { json: "author", js: "author", typ: "" },
@@ -4939,21 +4564,13 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
-    "PRVisitedMessage": o([
-        { json: "cmd", js: "cmd", typ: r("PRVisitedMessageCmd") },
-        { json: "id", js: "id", typ: "" },
-    ], "any"),
     "PRsUpdatedMessage": o([
         { json: "event", js: "event", typ: r("PRsUpdatedMessageEvent") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
     ], "any"),
-    "PathInspection": o([
-        { json: "exists", js: "exists", typ: true },
-        { json: "home_path", js: "home_path", typ: u(undefined, "") },
-        { json: "input_path", js: "input_path", typ: "" },
-        { json: "is_directory", js: "is_directory", typ: true },
-        { json: "repo_root", js: "repo_root", typ: u(undefined, "") },
-        { json: "resolved_path", js: "resolved_path", typ: "" },
+    "PRVisitedMessage": o([
+        { json: "cmd", js: "cmd", typ: r("PRVisitedMessageCmd") },
+        { json: "id", js: "id", typ: "" },
     ], "any"),
     "PtyDesyncMessage": o([
         { json: "event", js: "event", typ: r("PtyDesyncMessageEvent") },
@@ -5275,6 +4892,10 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("SessionStateChangedMessageEvent") },
         { json: "session", js: "session", typ: r("SessionElement") },
     ], "any"),
+    "SessionsUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("SessionsUpdatedMessageEvent") },
+        { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
+    ], "any"),
     "SessionTodosUpdatedMessage": o([
         { json: "event", js: "event", typ: r("SessionTodosUpdatedMessageEvent") },
         { json: "session", js: "session", typ: r("SessionElement") },
@@ -5286,10 +4907,6 @@ const typeMap: any = {
     "SessionVisualizedMessage": o([
         { json: "cmd", js: "cmd", typ: r("SessionVisualizedMessageCmd") },
         { json: "id", js: "id", typ: "" },
-    ], "any"),
-    "SessionsUpdatedMessage": o([
-        { json: "event", js: "event", typ: r("SessionsUpdatedMessageEvent") },
-        { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
     ], "any"),
     "SetEndpointRemoteWebMessage": o([
         { json: "cmd", js: "cmd", typ: r("SetEndpointRemoteWebMessageCmd") },
@@ -5351,26 +4968,6 @@ const typeMap: any = {
         { json: "prompt", js: "prompt", typ: "" },
         { json: "session_id", js: "session_id", typ: "" },
     ], "any"),
-    "StashMessage": o([
-        { json: "cmd", js: "cmd", typ: r("StashMessageCmd") },
-        { json: "message", js: "message", typ: "" },
-        { json: "repo", js: "repo", typ: "" },
-    ], "any"),
-    "StashPopMessage": o([
-        { json: "cmd", js: "cmd", typ: r("StashPopMessageCmd") },
-        { json: "repo", js: "repo", typ: "" },
-    ], "any"),
-    "StashPopResultMessage": o([
-        { json: "conflict", js: "conflict", typ: u(undefined, true) },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("StashPopResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
-    "StashResultMessage": o([
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("StashResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
     "StateMessage": o([
         { json: "cmd", js: "cmd", typ: r("StateMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -5388,17 +4985,6 @@ const typeMap: any = {
     "SubscribeGitStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("SubscribeGitStatusMessageCmd") },
         { json: "directory", js: "directory", typ: "" },
-    ], "any"),
-    "SwitchBranchMessage": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "cmd", js: "cmd", typ: r("SwitchBranchMessageCmd") },
-        { json: "main_repo", js: "main_repo", typ: "" },
-    ], "any"),
-    "SwitchBranchResultMessage": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("SwitchBranchResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
     ], "any"),
     "TodosMessage": o([
         { json: "cmd", js: "cmd", typ: r("TodosMessageCmd") },
@@ -5640,18 +5226,6 @@ const typeMap: any = {
     "BrowseDirectoryResultMessageEvent": [
         "browse_directory_result",
     ],
-    "CheckAttnStashMessageCmd": [
-        "check_attn_stash",
-    ],
-    "CheckAttnStashResultMessageEvent": [
-        "check_attn_stash_result",
-    ],
-    "CheckDirtyMessageCmd": [
-        "check_dirty",
-    ],
-    "CheckDirtyResultMessageEvent": [
-        "check_dirty_result",
-    ],
     "ClearSessionsMessageCmd": [
         "clear_sessions",
     ],
@@ -5664,18 +5238,6 @@ const typeMap: any = {
     "CommandErrorMessageEvent": [
         "command_error",
     ],
-    "CommitWIPMessageCmd": [
-        "commit_wip",
-    ],
-    "CommitWIPResultMessageEvent": [
-        "commit_wip_result",
-    ],
-    "CreateBranchMessageCmd": [
-        "create_branch",
-    ],
-    "CreateBranchResultMessageEvent": [
-        "create_branch_result",
-    ],
     "CreateWorktreeFromBranchMessageCmd": [
         "create_worktree_from_branch",
     ],
@@ -5684,12 +5246,6 @@ const typeMap: any = {
     ],
     "CreateWorktreeResultMessageEvent": [
         "create_worktree_result",
-    ],
-    "DeleteBranchMessageCmd": [
-        "delete_branch",
-    ],
-    "DeleteBranchResultMessageEvent": [
-        "delete_branch_result",
     ],
     "DeleteCommentMessageCmd": [
         "delete_comment",
@@ -5854,11 +5410,11 @@ const typeMap: any = {
     "PRActionResultMessageEvent": [
         "pr_action_result",
     ],
-    "PRVisitedMessageCmd": [
-        "pr_visited",
-    ],
     "PRsUpdatedMessageEvent": [
         "prs_updated",
+    ],
+    "PRVisitedMessageCmd": [
+        "pr_visited",
     ],
     "PtyDesyncMessageEvent": [
         "pty_desync",
@@ -5959,6 +5515,9 @@ const typeMap: any = {
     "SessionStateChangedMessageEvent": [
         "session_state_changed",
     ],
+    "SessionsUpdatedMessageEvent": [
+        "sessions_updated",
+    ],
     "SessionTodosUpdatedMessageEvent": [
         "session_todos_updated",
     ],
@@ -5967,9 +5526,6 @@ const typeMap: any = {
     ],
     "SessionVisualizedMessageCmd": [
         "session_visualized",
-    ],
-    "SessionsUpdatedMessageEvent": [
-        "sessions_updated",
     ],
     "SetEndpointRemoteWebMessageCmd": [
         "set_endpoint_remote_web",
@@ -5995,18 +5551,6 @@ const typeMap: any = {
     "StartReviewLoopMessageCmd": [
         "start_review_loop",
     ],
-    "StashMessageCmd": [
-        "stash",
-    ],
-    "StashPopMessageCmd": [
-        "stash_pop",
-    ],
-    "StashPopResultMessageEvent": [
-        "stash_pop_result",
-    ],
-    "StashResultMessageEvent": [
-        "stash_result",
-    ],
     "StateMessageCmd": [
         "state",
     ],
@@ -6018,12 +5562,6 @@ const typeMap: any = {
     ],
     "SubscribeGitStatusMessageCmd": [
         "subscribe_git_status",
-    ],
-    "SwitchBranchMessageCmd": [
-        "switch_branch",
-    ],
-    "SwitchBranchResultMessageEvent": [
-        "switch_branch_result",
     ],
     "TodosMessageCmd": [
         "todos",
