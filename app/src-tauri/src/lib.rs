@@ -387,9 +387,7 @@ fn ensure_daemon(_app: tauri::AppHandle) -> Result<(), String> {
         Ok(_) => Ok(()),
         Err(err) => {
             // Temporary fallback for older or unaccounted-for local states.
-            eprintln!(
-                "[Daemon] daemon ensure failed: {err}; entering temporary fallback recovery"
-            );
+            eprintln!("[Daemon] daemon ensure failed: {err}; entering temporary fallback recovery");
             temporary_force_daemon_recovery(&bin_path)
                 .map(|_| {
                     eprintln!("[Daemon] temporary fallback recovery completed successfully");
