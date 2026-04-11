@@ -101,7 +101,7 @@ fn run_daemon_ensure(bin_path: &Path) -> Result<String, String> {
             )
         })?;
 
-    let deadline = Instant::now() + DAEMON_START_TIMEOUT;
+    let deadline = Instant::now() + DAEMON_ENSURE_TIMEOUT;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -111,7 +111,7 @@ fn run_daemon_ensure(bin_path: &Path) -> Result<String, String> {
                     let _ = child.wait();
                     return Err(format!(
                         "Daemon ensure did not finish within {} seconds",
-                        DAEMON_START_TIMEOUT.as_secs()
+                        DAEMON_ENSURE_TIMEOUT.as_secs()
                     ));
                 }
                 thread::sleep(Duration::from_millis(50));
@@ -197,6 +197,7 @@ fn wait_for_daemon_shutdown(socket_path: &Path, timeout: Duration) -> bool {
 }
 
 const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(10);
+const DAEMON_ENSURE_TIMEOUT: Duration = Duration::from_secs(20);
 
 fn wait_for_daemon_health(socket_path: &Path, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
@@ -261,6 +262,47 @@ fn listening_pids_for_daemon_port() -> Vec<u32> {
     Vec::new()
 }
 
+#[cfg(unix)]
+fn command_for_pid(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .arg("-p")
+        .arg(pid.to_string())
+        .arg("-o")
+        .arg("command=")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let command = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if command.is_empty() {
+        return None;
+    }
+    Some(command)
+}
+
+#[cfg(not(unix))]
+fn command_for_pid(_pid: u32) -> Option<String> {
+    None
+}
+
+fn looks_like_attn_daemon_command(command: &str) -> bool {
+    let mut parts = command.split_whitespace();
+    let Some(program) = parts.next() else {
+        return false;
+    };
+    if !parts.any(|part| part == "daemon") {
+        return false;
+    }
+
+    let program_name = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    program_name.contains("attn")
+}
+
 fn force_stop_running_daemon(socket_path: &Path) -> Result<(), String> {
     let self_pid = std::process::id();
     let parent_pid = parent_process_id();
@@ -269,7 +311,33 @@ fn force_stop_running_daemon(socket_path: &Path) -> Result<(), String> {
     pids.dedup();
     pids.retain(|pid| *pid != 0 && *pid != self_pid && Some(*pid) != parent_pid);
 
-    for pid in &pids {
+    let mut attn_daemon_pids = Vec::new();
+    let mut other_listeners = Vec::new();
+    for pid in pids {
+        match command_for_pid(pid) {
+            Some(command) if looks_like_attn_daemon_command(&command) => {
+                attn_daemon_pids.push(pid);
+            }
+            Some(command) => other_listeners.push(format!("{pid}:{command}")),
+            None => other_listeners.push(format!("{pid}:<unknown>")),
+        }
+    }
+
+    if attn_daemon_pids.is_empty() {
+        if other_listeners.is_empty() {
+            return Err(format!(
+                "No attn daemon listener found on port {} for temporary fallback recovery",
+                daemon_http_port()
+            ));
+        }
+        return Err(format!(
+            "Refusing temporary fallback recovery because port {} is owned by non-attn listener(s): {}",
+            daemon_http_port(),
+            other_listeners.join(", ")
+        ));
+    }
+
+    for pid in &attn_daemon_pids {
         let _ = terminate_process(*pid);
     }
 
@@ -279,7 +347,7 @@ fn force_stop_running_daemon(socket_path: &Path) -> Result<(), String> {
 
     #[cfg(unix)]
     {
-        for pid in &pids {
+        for pid in &attn_daemon_pids {
             let _ = kill_process(*pid, libc::SIGKILL);
         }
     }
