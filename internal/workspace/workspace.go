@@ -150,7 +150,31 @@ func NormalizeLayout(node Node, panesByID map[string]Pane) Node {
 	if empty {
 		return DefaultLayout()
 	}
-	return normalized
+	return rebalanceSplitChains(normalized)
+}
+
+func rebalanceSplitChains(node Node) Node {
+	if node.Type != "split" || len(node.Children) < 2 {
+		return node
+	}
+
+	firstChild := rebalanceSplitChains(node.Children[0])
+	secondChild := rebalanceSplitChains(node.Children[1])
+	node.Children = []Node{firstChild, secondChild}
+
+	firstSpan := splitChainSpanCount(firstChild, node.Direction)
+	secondSpan := splitChainSpanCount(secondChild, node.Direction)
+	if totalSpan := firstSpan + secondSpan; totalSpan > 0 {
+		node.Ratio = float64(firstSpan) / float64(totalSpan)
+	}
+	return node
+}
+
+func splitChainSpanCount(node Node, direction Direction) int {
+	if node.Type != "split" || node.Direction != direction || len(node.Children) < 2 {
+		return 1
+	}
+	return splitChainSpanCount(node.Children[0], direction) + splitChainSpanCount(node.Children[1], direction)
 }
 
 func normalizeNode(node Node, panesByID map[string]Pane) (Node, bool) {

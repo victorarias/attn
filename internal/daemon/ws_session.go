@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"syscall"
 
@@ -25,10 +26,24 @@ func (d *Daemon) handleSessionVisualizedWS(msg *protocol.SessionVisualizedMessag
 func (d *Daemon) handleUnregisterWS(client *wsClient, msg *protocol.UnregisterMessage) {
 	d.logf("Unregistering session %s via WebSocket", msg.ID)
 	d.detachSession(client, msg.ID)
-	session := d.store.Get(msg.ID)
-	d.terminateSession(msg.ID, syscall.SIGTERM)
-	d.store.Remove(msg.ID)
-	d.clearLongRunTracking(msg.ID)
+	endpointID := ""
+	if d.hubManager != nil {
+		if resolved, ok := d.hubManager.EndpointIDForSession(msg.ID); ok {
+			endpointID = resolved
+		}
+	}
+	session := d.unregisterSession(msg.ID, syscall.SIGTERM)
+	if endpointID != "" {
+		payload, err := json.Marshal(protocol.UnregisterMessage{
+			Cmd: protocol.CmdUnregister,
+			ID:  msg.ID,
+		})
+		if err != nil {
+			d.logf("marshal remote unregister failed for %s: %v", msg.ID, err)
+		} else if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, payload); err != nil {
+			d.logf("remote unregister forward failed for %s on endpoint %s: %v", msg.ID, endpointID, err)
+		}
+	}
 	if session != nil {
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:   protocol.EventSessionUnregistered,

@@ -159,11 +159,7 @@ git clone https://github.com/victorarias/attn.git && cd attn
 
 | | |
 |---|---|
-| [Usage](docs/USAGE.md) | App and CLI usage |
-| [CLI reference](docs/CLI.md) | Commands and flags |
-| [Configuration](docs/CONFIGURATION.md) | Settings |
-| [Troubleshooting](docs/TROUBLESHOOTING.md) | When things go sideways |
-| [PR review automation](docs/PR_REVIEW.md) | shitty-reviewing-agent workflow and required GitHub secrets |
+| [Terminal rendering learnings](docs/TERMINAL_RENDERING_LEARNINGS.md) | PTY and harness notes from the current cleanup stream |
 | [Release](docs/RELEASE.md) | Maintainer runbook |
 
 ## Status

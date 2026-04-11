@@ -2,9 +2,11 @@ package pty
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -13,10 +15,32 @@ import (
 	creackpty "github.com/creack/pty"
 )
 
+// Worker-side debug capture and info probes attach transient/non-interactive
+// subscribers before the real frontend xterm is ready. They should not suppress
+// terminal-query fallbacks such as DA1.
+const debugCaptureSubscriberID = "__attn_debug_capture__"
+
+const (
+	fallbackOSC10Response      = "\x1b]10;rgb:d4d4/d4d4/d4d4\x1b\\"
+	fallbackOSC11Response      = "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\"
+	startupQueryFallbackWindow = 5 * time.Second
+)
+
 type sessionSubscriber struct {
 	id     string
 	send   func(data []byte, seq uint32) bool
 	onDrop func(reason string)
+}
+
+type terminalQueries struct {
+	da1   bool
+	cpr   bool
+	osc10 bool
+	osc11 bool
+}
+
+func (q terminalQueries) any() bool {
+	return q.da1 || q.cpr || q.osc10 || q.osc11
 }
 
 type stateDetector interface {
@@ -36,6 +60,7 @@ type Session struct {
 	cmd  *exec.Cmd
 
 	scrollback *RingBuffer
+	replayLog  *ReplayLog
 	screen     *virtualScreen
 	seqCounter atomic.Uint32
 
@@ -43,6 +68,11 @@ type Session struct {
 	subscribers map[string]*sessionSubscriber
 
 	writeMu sync.Mutex
+
+	queryMu          sync.Mutex
+	queryResponses   terminalQueries
+	firstAttachMu    sync.Mutex
+	firstAttachClaim bool
 
 	// CLI state detection based on PTY output.
 	detector      stateDetector
@@ -56,6 +86,7 @@ type Session struct {
 	exitSignal *string
 	exited     chan struct{}
 	exitOnce   sync.Once
+	startedAt  time.Time
 }
 
 func (s *Session) addSubscriber(subID string, send func([]byte, uint32) bool, onDrop func(reason string)) {
@@ -72,6 +103,16 @@ func (s *Session) removeSubscriber(subID string) {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
 	delete(s.subscribers, subID)
+}
+
+func hasInteractiveSubscribers(subscribers map[string]*sessionSubscriber) bool {
+	for id := range subscribers {
+		if id == debugCaptureSubscriberID || strings.HasPrefix(id, "info-") {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (s *Session) fanOut(data []byte, seq uint32) {
@@ -116,7 +157,6 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 	buf := make([]byte, 16*1024)
 	carryover := make([]byte, 0, 64)
-	da1Responded := false
 
 	for {
 		n, err := s.ptmx.Read(buf)
@@ -134,27 +174,35 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 			if boundary > 0 {
 				data := chunk[:boundary]
+				queries := detectTerminalQueries(data)
 
 				// Respond to DA1 (Primary Device Attributes) queries when no
-				// frontend subscriber is attached.  The daemon spawns shell
-				// PTYs before the frontend renders the Terminal, so fish's
-				// DA1 query (\x1b[c) may arrive before anyone can relay the
-				// xterm response.  Fish waits 2 s and prints a warning.
-				// Respond once, only when unattached, to avoid duplicates
-				// with the frontend's xterm-based response.
-				if !da1Responded && containsDA1Query(data) {
+				// frontend subscriber is attached. The daemon can spawn shell
+				// PTYs before the interactive xterm is ready, while non-interactive
+				// worker subscribers like debug capture are already attached.
+				// Fish waits about 2 s for these terminal queries before the prompt
+				// becomes truly interactive. Shell prompts can also re-issue the
+				// same queries shortly after the first attach/resize, so allow
+				// resends during the startup window for shell sessions.
+				noInteractiveSubs := false
+				if queries.any() {
 					s.subMu.RLock()
-					noSubs := len(s.subscribers) == 0
+					noInteractiveSubs = !hasInteractiveSubscribers(s.subscribers)
 					s.subMu.RUnlock()
-					if noSubs {
-						da1Responded = true
-						// xterm DA1 response: VT100 with Advanced Video Option
-						_, _ = s.ptmx.Write([]byte("\x1b[?1;2c"))
-					}
+				}
+				if enabled, allowResend, source := s.terminalQueryFallbackMode(time.Now(), noInteractiveSubs); enabled {
+					s.writeTerminalQueryResponses(queries, source, allowResend, logf)
 				}
 
 				seq := s.seqCounter.Add(1)
+				s.metaMu.RLock()
+				cols := s.cols
+				rows := s.rows
+				s.metaMu.RUnlock()
 				s.scrollback.Write(data)
+				if s.replayLog != nil {
+					s.replayLog.Write(data, cols, rows)
+				}
 				if s.screen != nil {
 					s.screen.Observe(data)
 				}
@@ -179,7 +227,14 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 	if len(carryover) > 0 {
 		seq := s.seqCounter.Add(1)
+		s.metaMu.RLock()
+		cols := s.cols
+		rows := s.rows
+		s.metaMu.RUnlock()
 		s.scrollback.Write(carryover)
+		if s.replayLog != nil {
+			s.replayLog.Write(carryover, cols, rows)
+		}
 		if s.screen != nil {
 			s.screen.Observe(carryover)
 		}
@@ -257,6 +312,11 @@ func (s *Session) info() AttachInfo {
 	}
 
 	scrollback, truncated := s.scrollback.Snapshot()
+	var replaySegments []ReplaySegment
+	replayTruncated := false
+	if s.replayLog != nil {
+		replaySegments, replayTruncated = s.replayLog.Snapshot()
+	}
 	var (
 		screenSnapshot      []byte
 		screenCols          uint16
@@ -281,6 +341,8 @@ func (s *Session) info() AttachInfo {
 	return AttachInfo{
 		Scrollback:          scrollback,
 		ScrollbackTruncated: truncated,
+		ReplaySegments:      replaySegments,
+		ReplayTruncated:     replayTruncated,
 		LastSeq:             s.seqCounter.Load(),
 		Cols:                cols,
 		Rows:                rows,
@@ -369,6 +431,152 @@ func (s *Session) closePTY() {
 	_ = s.ptmx.Close()
 }
 
+func detectTerminalQueries(data []byte) terminalQueries {
+	return terminalQueries{
+		da1:   containsDA1Query(data),
+		cpr:   containsCPRQuery(data),
+		osc10: containsOSCColorQuery(data, "10"),
+		osc11: containsOSCColorQuery(data, "11"),
+	}
+}
+
+func (s *Session) claimTerminalQueryResponses(queries terminalQueries) terminalQueries {
+	s.queryMu.Lock()
+	defer s.queryMu.Unlock()
+
+	responses := terminalQueries{}
+	if queries.da1 && !s.queryResponses.da1 {
+		s.queryResponses.da1 = true
+		responses.da1 = true
+	}
+	if queries.cpr && !s.queryResponses.cpr {
+		s.queryResponses.cpr = true
+		responses.cpr = true
+	}
+	if queries.osc10 && !s.queryResponses.osc10 {
+		s.queryResponses.osc10 = true
+		responses.osc10 = true
+	}
+	if queries.osc11 && !s.queryResponses.osc11 {
+		s.queryResponses.osc11 = true
+		responses.osc11 = true
+	}
+	return responses
+}
+
+func (s *Session) markTerminalQueryResponses(queries terminalQueries) {
+	s.queryMu.Lock()
+	defer s.queryMu.Unlock()
+
+	if queries.da1 {
+		s.queryResponses.da1 = true
+	}
+	if queries.cpr {
+		s.queryResponses.cpr = true
+	}
+	if queries.osc10 {
+		s.queryResponses.osc10 = true
+	}
+	if queries.osc11 {
+		s.queryResponses.osc11 = true
+	}
+}
+
+func (s *Session) withinStartupQueryWindow(now time.Time) bool {
+	if s.startedAt.IsZero() {
+		return false
+	}
+	return now.Sub(s.startedAt) <= startupQueryFallbackWindow
+}
+
+func (s *Session) startupQueryFallbackAllowed(now time.Time) bool {
+	return s.agent == "shell" && s.withinStartupQueryWindow(now)
+}
+
+func (s *Session) terminalQueryFallbackMode(now time.Time, noInteractiveSubs bool) (enabled bool, allowResend bool, source string) {
+	startupFallback := s.startupQueryFallbackAllowed(now)
+	switch {
+	case noInteractiveSubs && startupFallback:
+		return true, true, "read_loop_startup_unattached"
+	case noInteractiveSubs:
+		return true, false, "read_loop_unattached"
+	case startupFallback:
+		return true, true, "read_loop_startup_interactive"
+	default:
+		return false, false, ""
+	}
+}
+
+func (s *Session) claimFirstAttach() bool {
+	s.firstAttachMu.Lock()
+	defer s.firstAttachMu.Unlock()
+	if s.firstAttachClaim {
+		return false
+	}
+	s.firstAttachClaim = true
+	return true
+}
+
+func (s *Session) flushStartupQueryResponses(logf func(string, ...interface{})) {
+	if !s.withinStartupQueryWindow(time.Now()) {
+		return
+	}
+	scrollback, _ := s.scrollback.Snapshot()
+	s.writeTerminalQueryResponses(detectTerminalQueries(scrollback), "first_attach_scrollback", true, logf)
+}
+
+func (s *Session) writeTerminalQueryResponses(queries terminalQueries, source string, allowResend bool, logf func(string, ...interface{})) {
+	var responses terminalQueries
+	if allowResend {
+		responses = queries
+		s.markTerminalQueryResponses(queries)
+	} else {
+		responses = s.claimTerminalQueryResponses(queries)
+	}
+	if !responses.any() {
+		return
+	}
+
+	cprRow := 0
+	cprCol := 0
+	if responses.osc10 {
+		_, _ = s.ptmx.Write([]byte(fallbackOSC10Response))
+	}
+	if responses.osc11 {
+		_, _ = s.ptmx.Write([]byte(fallbackOSC11Response))
+	}
+	if responses.da1 {
+		// xterm DA1 response: VT100 with Advanced Video Option
+		_, _ = s.ptmx.Write([]byte("\x1b[?1;2c"))
+	}
+	if responses.cpr {
+		row, col := 1, 1
+		if s.screen != nil {
+			if snapshot, ok := s.screen.Snapshot(); ok {
+				row = int(snapshot.cursorY) + 1
+				col = int(snapshot.cursorX) + 1
+			}
+		}
+		cprRow = row
+		cprCol = col
+		_, _ = s.ptmx.Write([]byte(fmt.Sprintf("\x1b[%d;%dR", row, col)))
+	}
+
+	if logf != nil {
+		logf(
+			"pty terminal-query fallback: session=%s source=%s da1=%v cpr=%v osc10=%v osc11=%v cpr_row=%d cpr_col=%d",
+			s.id,
+			source,
+			responses.da1,
+			responses.cpr,
+			responses.osc10,
+			responses.osc11,
+			cprRow,
+			cprCol,
+		)
+	}
+}
+
 // containsDA1Query scans data for a CSI Primary Device Attributes query
 // (ESC [ c  or  ESC [ 0 c).  It ignores DA2 (ESC [ > c) and other variants.
 func containsDA1Query(data []byte) bool {
@@ -382,6 +590,26 @@ func containsDA1Query(data []byte) bool {
 			j++
 		}
 		if j < len(data) && data[j] == 'c' {
+			return true
+		}
+	}
+	return false
+}
+
+// containsCPRQuery scans data for a DSR 6 / CPR query (ESC [ 6 n).
+func containsCPRQuery(data []byte) bool {
+	for i := 0; i < len(data)-3; i++ {
+		if data[i] == 0x1b && data[i+1] == '[' && data[i+2] == '6' && data[i+3] == 'n' {
+			return true
+		}
+	}
+	return false
+}
+
+func containsOSCColorQuery(data []byte, code string) bool {
+	prefix := []byte("\x1b]" + code + ";?")
+	for i := 0; i+len(prefix) <= len(data); i++ {
+		if string(data[i:i+len(prefix)]) == string(prefix) {
 			return true
 		}
 	}

@@ -20,10 +20,32 @@ import type {
   PRRole,
   HeatState,
 } from '../types/generated';
-import { emitPtyEvent, setPtyBackend, type PtySpawnArgs } from '../pty/bridge';
+import {
+  emitPtyEvent,
+  setPtyBackend,
+  type PtyAttachArgs,
+  type PtyAttachPolicy,
+  type PtySpawnArgs,
+} from '../pty/bridge';
+import {
+  classifyAttachReplay,
+  createAttachRequestContext,
+  enqueuePendingAttachOutput,
+  planAttachResultEffects,
+  planAttachedRuntimeGeometry,
+  planLivePtyOutput,
+  type AttachResultData,
+  type AttachRequestContext,
+} from '../pty/attachPlanning';
+import {
+  normalizeAttachPolicy,
+  spawnPtyRuntime,
+} from '../pty/runtimeLifecycle';
+import { createPtyTransportState } from '../pty/transportState';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled } from '../utils/terminalDebug';
 import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
-import { recordWsJsonParse } from '../utils/ptyPerf';
+import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
+import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 
 // Re-export types from generated for consumers
@@ -68,6 +90,7 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   seq?: number;
   scrollback?: string;
   scrollback_truncated?: boolean;
+  replay_segments?: Array<{ cols: number; rows: number; data: string }>;
   screen_snapshot?: string;
   screen_rows?: number;
   screen_cols?: number;
@@ -121,8 +144,9 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '49';
+const PROTOCOL_VERSION = '51';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
+const INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD = import.meta.env.VITE_UI_AUTOMATION === '1';
 
 interface PRActionResult {
   success: boolean;
@@ -145,6 +169,38 @@ function previewBase64Payload(encoded: string): string {
   } catch {
     return '';
   }
+}
+
+function summarizeReplaySegments(
+  segments: Array<{ cols: number; rows: number; data: string }>,
+) {
+  const geometryRuns: Array<{ cols: number; rows: number; segments: number; encodedBytes: number }> = [];
+  for (const segment of segments) {
+    const last = geometryRuns[geometryRuns.length - 1];
+    if (last && last.cols === segment.cols && last.rows === segment.rows) {
+      last.segments += 1;
+      last.encodedBytes += segment.data.length;
+      continue;
+    }
+    geometryRuns.push({
+      cols: segment.cols,
+      rows: segment.rows,
+      segments: 1,
+      encodedBytes: segment.data.length,
+    });
+  }
+
+  return {
+    geometryRunCount: geometryRuns.length,
+    resizeCount: Math.max(geometryRuns.length - 1, 0),
+    firstGeometry: geometryRuns.length > 0
+      ? { cols: geometryRuns[0].cols, rows: geometryRuns[0].rows }
+      : null,
+    lastGeometry: geometryRuns.length > 0
+      ? { cols: geometryRuns[geometryRuns.length - 1].cols, rows: geometryRuns[geometryRuns.length - 1].rows }
+      : null,
+    geometryRuns,
+  };
 }
 
 interface WorktreeActionResult {
@@ -245,24 +301,15 @@ interface SpawnResult {
   error?: string;
 }
 
-interface AttachResult {
+type AttachResult = AttachResultData & {
   success: boolean;
   error?: string;
-  scrollback?: string;
-  scrollback_truncated?: boolean;
-  screen_snapshot?: string;
-  screen_rows?: number;
-  screen_cols?: number;
   screen_cursor_x?: number;
   screen_cursor_y?: number;
   screen_cursor_visible?: boolean;
-  screen_snapshot_fresh?: boolean;
-  last_seq?: number;
-  cols?: number;
-  rows?: number;
   pid?: number;
   running?: boolean;
-}
+};
 
 interface RepoInfo {
   repo: string;
@@ -422,6 +469,17 @@ function workspaceRuntimeIDs(workspaces: DaemonWorkspace[]): Set<string> {
   return ids;
 }
 
+function pruneWorkspacesBySessions(
+  sessions: DaemonSession[],
+  workspaces: DaemonWorkspace[],
+): DaemonWorkspace[] {
+  if (workspaces.length === 0) {
+    return workspaces;
+  }
+  const sessionIDs = new Set(sessions.map((session) => session.id));
+  return workspaces.filter((workspace) => sessionIDs.has(workspace.session_id));
+}
+
 function workspacesIncludeRuntimeID(workspaces: DaemonWorkspace[], runtimeID: string): boolean {
   for (const workspace of workspaces) {
     for (const pane of workspace.panes || []) {
@@ -431,6 +489,34 @@ function workspacesIncludeRuntimeID(workspaces: DaemonWorkspace[], runtimeID: st
     }
   }
   return false;
+}
+
+function resolveRuntimeLogContext(
+  sessions: DaemonSession[],
+  workspaces: DaemonWorkspace[],
+  runtimeID: string,
+): { sessionId?: string; paneId?: string; paneKind?: 'main' | 'shell' } {
+  const session = sessions.find((entry) => entry.id === runtimeID);
+  if (session) {
+    return {
+      sessionId: session.id,
+      paneId: 'main',
+      paneKind: 'main',
+    };
+  }
+  for (const workspace of workspaces) {
+    for (const pane of workspace.panes || []) {
+      if (pane.runtime_id !== runtimeID) {
+        continue;
+      }
+      return {
+        sessionId: workspace.session_id,
+        paneId: pane.pane_id,
+        paneKind: pane.pane_id === 'main' ? 'main' : 'shell',
+      };
+    }
+  }
+  return {};
 }
 
 function upsertEndpointByID(endpoints: DaemonEndpoint[], endpoint: DaemonEndpoint): DaemonEndpoint[] {
@@ -522,7 +608,7 @@ export async function retryTransientAttachRequest<T>(
 //    - sendPRVisited: Clear notification flag
 //    - sendSetSetting: Update user preference
 //    - sendClearSessions: Dev/admin action
-//    - sendUnregisterSession: Session cleanup
+//    - sendUnregisterSession: Session cleanup acknowledgment
 //    - sendListWorktrees: Query operation
 //    Pattern: Update UI immediately, assume success
 //
@@ -569,9 +655,7 @@ export function useDaemonSocket({
   const recoveryNoticeTimeoutRef = useRef<number | null>(null);
   const gitStatusSubscriptionRef = useRef<string | null>(null);
   const branchDiffInFlightRef = useRef<Map<string, Promise<BranchDiffFilesResult>>>(new Map());
-  const attachedPtySessionsRef = useRef<Set<string>>(new Set());
-  const ptySeqRef = useRef<Map<string, number>>(new Map());
-  const pendingAttachOutputsRef = useRef<Map<string, Array<{ data: string; seq?: number }>>>(new Map());
+  const ptyTransportRef = useRef(createPtyTransportState<AttachRequestContext>());
   const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
   const daemonInstanceIDRef = useRef<string>('');
   const hasReceivedInitialStateRef = useRef(false);
@@ -617,19 +701,40 @@ export function useDaemonSocket({
     }, 2000);
   }, []);
 
+  const recordRuntimeTransportLog = useCallback((
+    runtimeId: string,
+    event: string,
+    message: string,
+    details?: Record<string, unknown>,
+  ) => {
+    if (!runtimeId) {
+      return;
+    }
+    const context = resolveRuntimeLogContext(
+      sessionsRef.current,
+      workspacesRef.current,
+      runtimeId,
+    );
+    recordTerminalRuntimeLog({
+      category: 'transport',
+      event,
+      sessionId: context.sessionId,
+      paneId: context.paneId,
+      runtimeId,
+      message,
+      details: {
+        paneKind: context.paneKind ?? null,
+        ...(details || {}),
+      },
+    });
+  }, []);
+
   const pruneAttachedPtySessions = useCallback((sessions: DaemonSession[], workspaces: DaemonWorkspace[]) => {
     const attachableIDs = new Set<string>(sessions.map((session) => session.id));
     for (const runtimeID of workspaceRuntimeIDs(workspaces)) {
       attachableIDs.add(runtimeID);
     }
-    for (const sessionId of Array.from(attachedPtySessionsRef.current)) {
-      if (attachableIDs.has(sessionId)) {
-        continue;
-      }
-      attachedPtySessionsRef.current.delete(sessionId);
-      ptySeqRef.current.delete(sessionId);
-      pendingAttachOutputsRef.current.delete(sessionId);
-    }
+    ptyTransportRef.current.pruneDetachedRuntimes(attachableIDs);
   }, []);
 
   const rejectPendingByPredicate = useCallback((predicate: (key: string) => boolean, error: Error) => {
@@ -657,6 +762,9 @@ export function useDaemonSocket({
         return;
       case 'kill_session':
         rejectPendingByPredicate((key) => key.startsWith('pty_kill_'), error);
+        return;
+      case 'unregister':
+        rejectPendingByPredicate((key) => key.startsWith('unregister:'), error);
         return;
       case 'workspace_split_pane':
       case 'workspace_close_pane':
@@ -796,6 +904,10 @@ export function useDaemonSocket({
           performance.now() - parseStartedAt,
           data.event,
           data.event === 'pty_output' && typeof data.data === 'string' ? data.data.length : 0,
+          {
+            runtimeId: data.id ?? null,
+            seq: typeof data.seq === 'number' ? data.seq : null,
+          },
         );
 
         switch (data.event) {
@@ -808,8 +920,7 @@ export function useDaemonSocket({
               // Endpoint identity changed (new daemon instance). Keep the
               // attached session set so we can reattach after initial_state,
               // but clear stream caches to force clean replay.
-              ptySeqRef.current.clear();
-              pendingAttachOutputsRef.current.clear();
+              ptyTransportRef.current.clearStreamCaches();
             }
             daemonInstanceIDRef.current = data.daemon_instance_id || '';
             // Check protocol version on initial connection
@@ -888,7 +999,7 @@ export function useDaemonSocket({
             if (ws.readyState === WebSocket.OPEN) {
               // Re-attach PTY streams only after recovery barrier has lifted and
               // initial_state has arrived.
-              for (const sessionId of attachedPtySessionsRef.current) {
+              for (const sessionId of ptyTransportRef.current.listAttachedRuntimeIds()) {
                 ws.send(JSON.stringify({ cmd: 'attach_session', id: sessionId }));
               }
             }
@@ -906,10 +1017,14 @@ export function useDaemonSocket({
                   paneIds: (data.workspace.panes || []).map((pane) => pane.pane_id),
                 },
               });
-              const nextWorkspaces = [
-                ...workspacesRef.current.filter((entry) => entry.session_id !== data.workspace!.session_id),
-                data.workspace,
-              ];
+              const workspaceSessionID = data.workspace.session_id;
+              const sessionExists = sessionsRef.current.some((session) => session.id === workspaceSessionID);
+              const nextWorkspaces = sessionExists
+                ? [
+                    ...workspacesRef.current.filter((entry) => entry.session_id !== workspaceSessionID),
+                    data.workspace,
+                  ]
+                : workspacesRef.current.filter((entry) => entry.session_id !== workspaceSessionID);
               workspacesRef.current = nextWorkspaces;
               onWorkspacesUpdate(nextWorkspaces);
               pruneAttachedPtySessions(sessionsRef.current, nextWorkspaces);
@@ -1005,6 +1120,30 @@ export function useDaemonSocket({
 
           case 'attach_result': {
             if (data.id) {
+              const attachContext = ptyTransportRef.current.getAttachContext(data.id);
+              const replayPlan = classifyAttachReplay(data, attachContext);
+              recordRuntimeTransportLog(
+                data.id,
+                'pty.attach.result',
+                data.success ? 'attach session result' : 'attach session failed',
+                {
+                  attachPolicy: attachContext?.policy ?? null,
+                  attachAgent: attachContext?.agent ?? null,
+                  replayPreference: replayPlan.replayPreference,
+                  success: data.success,
+                  replayKind: replayPlan.replayKind,
+                  availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                  availableRawScrollback: replayPlan.availableRawScrollback,
+                  screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
+                  lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
+                  cols: typeof data.cols === 'number' ? data.cols : null,
+                  rows: typeof data.rows === 'number' ? data.rows : null,
+                  running: data.running ?? null,
+                  replaySkipped: replayPlan.replaySkipped,
+                  requestedCols: replayPlan.requestedCols,
+                  requestedRows: replayPlan.requestedRows,
+                },
+              );
               const key = `pty_attach_${data.id}`;
               const pending = pendingActionsRef.current.get(key);
               if (pending) {
@@ -1014,6 +1153,7 @@ export function useDaemonSocket({
                     success: true,
                     scrollback: data.scrollback,
                     scrollback_truncated: data.scrollback_truncated,
+                    replay_segments: data.replay_segments,
                     screen_snapshot: data.screen_snapshot,
                     screen_rows: data.screen_rows,
                     screen_cols: data.screen_cols,
@@ -1033,61 +1173,148 @@ export function useDaemonSocket({
               }
 
               if (data.success) {
-                attachedPtySessionsRef.current.add(data.id);
+                ptyTransportRef.current.markRuntimeAttached(data.id);
               } else {
-                attachedPtySessionsRef.current.delete(data.id);
-                ptySeqRef.current.delete(data.id);
-                pendingAttachOutputsRef.current.delete(data.id);
+                ptyTransportRef.current.clearRuntime(data.id);
               }
 
               if (data.success) {
-                const hasScreenSnapshot = Boolean(
-                  data.screen_snapshot && data.screen_snapshot_fresh !== false
-                );
-                const shouldReset = hasScreenSnapshot || ptySeqRef.current.has(data.id);
-                if (shouldReset) {
+                const session = sessionsRef.current.find((entry) => entry.id === data.id);
+                const attachEffects = planAttachResultEffects({
+                  attachResult: data,
+                  replayPlan,
+                  previousSeq: ptyTransportRef.current.getLastSeq(data.id),
+                  queuedOutputs: ptyTransportRef.current.getQueuedAttachOutputs(data.id),
+                  sessionAgent: session?.agent,
+                });
+                if (attachEffects.shouldReset && attachEffects.resetReason) {
                   emitPtyEvent({
                     event: 'reset',
                     id: data.id,
-                    reason: hasScreenSnapshot ? 'snapshot_restore' : 'reattach',
+                    reason: attachEffects.resetReason,
                   });
                 }
-                if (typeof data.last_seq === 'number') {
-                  ptySeqRef.current.set(data.id, data.last_seq);
-                } else {
-                  ptySeqRef.current.set(data.id, 0);
+                ptyTransportRef.current.setLastSeq(data.id, attachEffects.nextSeq);
+                if (replayPlan.screenSnapshotSuppressed) {
+                  recordRuntimeTransportLog(data.id, 'pty.attach.snapshot_suppressed', 'attach screen snapshot suppressed by replay preference', {
+                    attachPolicy: attachContext?.policy ?? null,
+                    attachAgent: attachContext?.agent ?? null,
+                    replayPreference: replayPlan.replayPreference,
+                    replayKind: replayPlan.replayKind,
+                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                    availableRawScrollback: replayPlan.availableRawScrollback,
+                  });
                 }
-                if (hasScreenSnapshot && data.screen_snapshot) {
-                  emitPtyEvent({ event: 'data', id: data.id, data: data.screen_snapshot });
-                } else if (data.scrollback) {
-                  emitPtyEvent({ event: 'data', id: data.id, data: data.scrollback });
-                }
-                const queued = pendingAttachOutputsRef.current.get(data.id);
-                if (queued && queued.length > 0) {
-                  pendingAttachOutputsRef.current.delete(data.id);
-                  for (const chunk of queued) {
-                    if (typeof chunk.seq === 'number') {
-                      const lastSeq = ptySeqRef.current.get(data.id);
-                      // Keep seq==lastSeq during attach replay: Session.info().last_seq can race
-                      // ahead of the replay payload, and that first live chunk may be missing otherwise.
-                      if (typeof lastSeq === 'number' && chunk.seq < lastSeq) {
-                        continue;
-                      }
-                      ptySeqRef.current.set(data.id, chunk.seq);
-                    }
-                    emitPtyEvent({ event: 'data', id: data.id, data: chunk.data, seq: chunk.seq });
-                  }
-                }
-                if (!hasScreenSnapshot && data.scrollback_truncated) {
-                  const session = sessionsRef.current.find((entry) => entry.id === data.id);
-                  if (session?.agent === 'codex') {
+                if (attachEffects.replayAction.kind === 'skipped') {
+                  recordRuntimeTransportLog(data.id, 'pty.attach.replay_skipped', 'attach replay skipped due to attach policy or geometry mismatch', {
+                    attachPolicy: attachContext?.policy ?? null,
+                    attachAgent: attachContext?.agent ?? null,
+                    replayPreference: replayPlan.replayPreference,
+                    replayKind: replayPlan.replayKind,
+                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                    availableRawScrollback: replayPlan.availableRawScrollback,
+                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
+                    attachedCols: replayPlan.attachedCols,
+                    attachedRows: replayPlan.attachedRows,
+                    replayCols: replayPlan.replayCols,
+                    replayRows: replayPlan.replayRows,
+                    requestedCols: replayPlan.requestedCols,
+                    requestedRows: replayPlan.requestedRows,
+                  });
+                } else if (attachEffects.replayAction.kind === 'screen_snapshot') {
+                  recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
+                    attachPolicy: attachContext?.policy ?? null,
+                    attachAgent: attachContext?.agent ?? null,
+                    replayPreference: replayPlan.replayPreference,
+                    replayKind: 'screen_snapshot',
+                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                    availableRawScrollback: replayPlan.availableRawScrollback,
+                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
+                    bytes: attachEffects.replayAction.data.length,
+                    lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
+                    replayPayloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? attachEffects.replayAction.data : undefined,
+                  });
+                  emitPtyEvent({
+                    event: 'data',
+                    id: data.id,
+                    data: attachEffects.replayAction.data,
+                    source: 'attach_replay',
+                  });
+                } else if (attachEffects.replayAction.kind === 'scrollback') {
+                  recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
+                    attachPolicy: attachContext?.policy ?? null,
+                    attachAgent: attachContext?.agent ?? null,
+                    replayPreference: replayPlan.replayPreference,
+                    replayKind: 'scrollback',
+                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                    availableRawScrollback: replayPlan.availableRawScrollback,
+                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
+                    bytes: attachEffects.replayAction.data.length,
+                    lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
+                    replayPayloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? attachEffects.replayAction.data : undefined,
+                  });
+                  emitPtyEvent({
+                    event: 'data',
+                    id: data.id,
+                    data: attachEffects.replayAction.data,
+                    source: 'attach_replay',
+                  });
+                } else if (attachEffects.replayAction.kind === 'scrollback_segments') {
+                  const bytes = attachEffects.replayAction.segments.reduce(
+                    (sum, segment) => sum + segment.data.length,
+                    0,
+                  );
+                  const segmentSummary = summarizeReplaySegments(attachEffects.replayAction.segments);
+                  recordRuntimeTransportLog(data.id, 'pty.attach.replay_applied', 'attach replay applied', {
+                    attachPolicy: attachContext?.policy ?? null,
+                    attachAgent: attachContext?.agent ?? null,
+                    replayPreference: replayPlan.replayPreference,
+                    replayKind: 'scrollback_segments',
+                    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
+                    availableRawScrollback: replayPlan.availableRawScrollback,
+                    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
+                    bytes,
+                    segmentCount: attachEffects.replayAction.segments.length,
+                    ...segmentSummary,
+                    lastSeq: typeof data.last_seq === 'number' ? data.last_seq : null,
+                    replaySegmentsBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD
+                      ? attachEffects.replayAction.segments.map((segment) => ({
+                          cols: segment.cols,
+                          rows: segment.rows,
+                          data: segment.data,
+                        }))
+                      : undefined,
+                  });
+                  for (const segment of attachEffects.replayAction.segments) {
                     emitPtyEvent({
-                      event: 'error',
+                      event: 'local_resize',
                       id: data.id,
-                      error: 'Restore scrollback was truncated; Codex full-screen output may be incomplete.',
+                      cols: segment.cols,
+                      rows: segment.rows,
+                      source: 'attach_replay',
+                    });
+                    emitPtyEvent({
+                      event: 'data',
+                      id: data.id,
+                      data: segment.data,
+                      source: 'attach_replay',
                     });
                   }
                 }
+                if (attachEffects.queuedOutputsToEmit.length > 0) {
+                  ptyTransportRef.current.clearQueuedAttachOutputs(data.id);
+                  for (const chunk of attachEffects.queuedOutputsToEmit) {
+                    emitPtyEvent({ event: 'data', id: data.id, data: chunk.data, seq: chunk.seq });
+                  }
+                }
+                if (attachEffects.shouldWarnTruncatedRestore) {
+                  emitPtyEvent({
+                    event: 'error',
+                    id: data.id,
+                    error: 'Restore scrollback was truncated; Codex full-screen output may be incomplete.',
+                  });
+                }
+                ptyTransportRef.current.setAttachContext(data.id);
               }
             }
             break;
@@ -1103,42 +1330,62 @@ export function useDaemonSocket({
                   seq: data.seq,
                   bytes: data.data.length,
                   preview: previewBase64Payload(data.data),
+                  payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
                 },
               });
               const attachKey = `pty_attach_${data.id}`;
               if (pendingActionsRef.current.has(attachKey)) {
-                const queued = pendingAttachOutputsRef.current.get(data.id) || [];
-                if (queued.length >= MAX_PENDING_ATTACH_OUTPUTS) {
-                  queued.shift();
-                }
-                queued.push({ data: data.data, seq: data.seq });
-                pendingAttachOutputsRef.current.set(data.id, queued);
+                recordRuntimeTransportLog(data.id, 'pty.output.queued_during_attach', 'queue pty output while attach pending', {
+                  seq: typeof data.seq === 'number' ? data.seq : null,
+                  bytes: data.data.length,
+                });
+                const queued = enqueuePendingAttachOutput(
+                  ptyTransportRef.current.getQueuedAttachOutputs(data.id) || [],
+                  { data: data.data, seq: data.seq },
+                  MAX_PENDING_ATTACH_OUTPUTS,
+                );
+                ptyTransportRef.current.setQueuedAttachOutputs(data.id, queued);
                 recordPaneRuntimeDebugEvent({
                   scope: 'daemon',
                   runtimeId: data.id,
                   message: 'queue pty_output during pending attach',
-                  details: { seq: data.seq, queued: queued.length },
+                  details: {
+                    seq: data.seq,
+                    queued: queued.length,
+                    payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
+                  },
                 });
                 break;
               }
-              if (typeof data.seq === 'number') {
-                const lastSeq = ptySeqRef.current.get(data.id);
-                if (typeof lastSeq === 'number' && data.seq <= lastSeq) {
-                  recordPaneRuntimeDebugEvent({
-                    scope: 'daemon',
-                    runtimeId: data.id,
-                    message: 'drop stale pty_output event',
-                    details: { seq: data.seq, lastSeq },
-                  });
-                  break;
-                }
-                ptySeqRef.current.set(data.id, data.seq);
+              const outputPlan = planLivePtyOutput({
+                incomingSeq: typeof data.seq === 'number' ? data.seq : undefined,
+                lastSeq: ptyTransportRef.current.getLastSeq(data.id),
+              });
+              if (outputPlan.shouldDropAsStale) {
+                recordPaneRuntimeDebugEvent({
+                  scope: 'daemon',
+                  runtimeId: data.id,
+                  message: 'drop stale pty_output event',
+                  details: { seq: data.seq, lastSeq: ptyTransportRef.current.getLastSeq(data.id) },
+                });
+                break;
               }
+              if (typeof outputPlan.nextSeq === 'number') {
+                ptyTransportRef.current.setLastSeq(data.id, outputPlan.nextSeq);
+              }
+              recordRuntimeTransportLog(data.id, 'pty.output.live', 'live pty output', {
+                seq: typeof data.seq === 'number' ? data.seq : null,
+                bytes: data.data.length,
+                payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
+              });
               recordPaneRuntimeDebugEvent({
                 scope: 'daemon',
                 runtimeId: data.id,
                 message: 'emit pty_output to bridge',
-                details: { seq: data.seq },
+                details: {
+                  seq: data.seq,
+                  payloadBase64: INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD ? data.data : undefined,
+                },
               });
               emitPtyEvent({ event: 'data', id: data.id, data: data.data, seq: data.seq });
             }
@@ -1153,9 +1400,7 @@ export function useDaemonSocket({
                 pendingActionsRef.current.delete(killKey);
                 pendingKill.resolve({ success: true });
               }
-              attachedPtySessionsRef.current.delete(data.id);
-              ptySeqRef.current.delete(data.id);
-              pendingAttachOutputsRef.current.delete(data.id);
+              ptyTransportRef.current.clearRuntime(data.id);
               emitPtyEvent({
                 event: 'exit',
                 id: data.id,
@@ -1168,7 +1413,7 @@ export function useDaemonSocket({
           case 'pty_desync':
             if (data.id) {
               emitPtyEvent({ event: 'reset', id: data.id, reason: data.reason || 'desync' });
-              ptySeqRef.current.delete(data.id);
+              ptyTransportRef.current.clearRuntimeStream(data.id);
               ws.send(JSON.stringify({ cmd: 'attach_session', id: data.id }));
             }
             break;
@@ -1182,12 +1427,25 @@ export function useDaemonSocket({
 
           case 'session_unregistered':
             if (data.session) {
-              attachedPtySessionsRef.current.delete(data.session.id);
-              ptySeqRef.current.delete(data.session.id);
+              const unregisterKey = `unregister:${data.session.id}`;
+              const pendingUnregister = pendingActionsRef.current.get(unregisterKey);
+              if (pendingUnregister) {
+                pendingActionsRef.current.delete(unregisterKey);
+                pendingUnregister.resolve(undefined);
+              }
+              ptyTransportRef.current.clearRuntime(data.session.id);
               sessionsRef.current = sessionsRef.current.filter(
                 (s) => s.id !== data.session!.id
               );
               onSessionsUpdate(sessionsRef.current);
+              const nextWorkspaces = pruneWorkspacesBySessions(
+                sessionsRef.current,
+                workspacesRef.current,
+              );
+              if (nextWorkspaces !== workspacesRef.current) {
+                workspacesRef.current = nextWorkspaces;
+                onWorkspacesUpdate(nextWorkspaces);
+              }
               pruneAttachedPtySessions(sessionsRef.current, workspacesRef.current);
             }
             break;
@@ -1205,6 +1463,14 @@ export function useDaemonSocket({
               const dedupedSessions = dedupeSessionsByID(data.sessions || []);
               sessionsRef.current = dedupedSessions;
               onSessionsUpdate(dedupedSessions);
+              const nextWorkspaces = pruneWorkspacesBySessions(
+                dedupedSessions,
+                workspacesRef.current,
+              );
+              if (nextWorkspaces !== workspacesRef.current) {
+                workspacesRef.current = nextWorkspaces;
+                onWorkspacesUpdate(nextWorkspaces);
+              }
               pruneAttachedPtySessions(dedupedSessions, workspacesRef.current);
             }
             break;
@@ -1884,7 +2150,7 @@ export function useDaemonSocket({
     });
   }, []);
 
-  const sendAttachSession = useCallback((id: string): Promise<AttachResult> => {
+  const sendAttachSession = useCallback((id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1893,22 +2159,38 @@ export function useDaemonSocket({
       }
 
       const key = `pty_attach_${id}`;
+      if (context) {
+        ptyTransportRef.current.setAttachContext(id, context);
+      } else {
+        ptyTransportRef.current.setAttachContext(id);
+      }
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'attach_session', id }));
+      recordRuntimeTransportLog(id, 'pty.attach.requested', 'attach session requested', {
+        attachPolicy: context?.policy ?? null,
+        attachAgent: context?.agent ?? null,
+        replayPreference: context?.replayPreference ?? null,
+      });
+      recordPtyCommand('attach_session', id);
+      ws.send(JSON.stringify({
+        cmd: 'attach_session',
+        id,
+        ...(context?.policy ? { attach_policy: context.policy } : {}),
+      }));
 
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
-          pendingAttachOutputsRef.current.delete(id);
+          ptyTransportRef.current.clearQueuedAttachOutputs(id);
+          ptyTransportRef.current.setAttachContext(id);
           reject(new Error('Attach session timed out'));
         }
       }, 15000);
     });
-  }, []);
+  }, [recordRuntimeTransportLog]);
 
-  const sendAttachSessionWithRetry = useCallback(async (id: string): Promise<AttachResult> => {
+  const sendAttachSessionWithRetry = useCallback(async (id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return retryTransientAttachRequest(
-      () => sendAttachSession(id),
+      () => sendAttachSession(id, context),
       {
         onRetry: (attempt, error, elapsedMs) => {
         console.warn('[DaemonSocket] Retrying transient attach failure', {
@@ -1925,29 +2207,97 @@ export function useDaemonSocket({
   const sendDetachSession = useCallback((id: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    attachedPtySessionsRef.current.delete(id);
-    ptySeqRef.current.delete(id);
-    pendingAttachOutputsRef.current.delete(id);
+    ptyTransportRef.current.clearRuntime(id);
+    recordPtyCommand('detach_session', id);
     ws.send(JSON.stringify({ cmd: 'detach_session', id }));
   }, []);
 
   const sendPtyInput = useCallback((id: string, data: string, source?: string) => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ cmd: 'pty_input', id, data, ...(source ? { source } : {}) }));
-  }, []);
+    const transportReady = Boolean(ws && ws.readyState === WebSocket.OPEN && hasReceivedInitialStateRef.current);
+    if (!transportReady && (source === 'user' || source === 'automation')) {
+      console.warn('[DaemonSocket] Queueing PTY input while transport is not ready', {
+        id,
+        bytes: data.length,
+        source: source || 'unknown',
+        wsState: ws?.readyState ?? null,
+        initialStateReceived: hasReceivedInitialStateRef.current,
+      });
+    }
+    recordRuntimeTransportLog(id, 'pty.input.sent', 'pty input sent', {
+      bytes: data.length,
+      source: source ?? null,
+    });
+    recordPtyCommand('pty_input', id, data.length, source);
+    sendOrQueueCommand(
+      { cmd: 'pty_input', id, data, ...(source ? { source } : {}) },
+      { waitForInitialState: true },
+    );
+  }, [recordRuntimeTransportLog, sendOrQueueCommand]);
 
-  const sendPtyResize = useCallback((id: string, cols: number, rows: number) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const sendPtyResize = useCallback((id: string, cols: number, rows: number, reason?: string) => {
     const suspiciousResize = isSuspiciousTerminalSize(cols, rows);
     if (suspiciousResize) {
-      console.warn('[DaemonSocket] Sending suspicious PTY resize', { id, cols, rows });
+      console.warn('[DaemonSocket] Sending suspicious PTY resize', { id, cols, rows, reason: reason || null });
     } else if (isTerminalDebugEnabled()) {
-      console.log('[DaemonSocket] Sending PTY resize', { id, cols, rows });
+      console.log('[DaemonSocket] Sending PTY resize', { id, cols, rows, reason: reason || null });
     }
-    ws.send(JSON.stringify({ cmd: 'pty_resize', id, cols, rows }));
-  }, []);
+    recordRuntimeTransportLog(id, 'pty.resize.sent', 'pty resize sent', {
+      cols,
+      rows,
+      reason: reason || null,
+    });
+    recordPtyCommand('pty_resize', id, 0, null);
+    sendOrQueueCommand(
+      { cmd: 'pty_resize', id, cols, rows },
+      { waitForInitialState: true },
+    );
+  }, [recordRuntimeTransportLog, sendOrQueueCommand]);
+
+  const reconcileAttachedRuntimeGeometry = useCallback((
+    args: Pick<PtySpawnArgs, 'id' | 'cols' | 'rows' | 'shell'>,
+    attachResult: AttachResult,
+    options: {
+      attachPolicy: PtyAttachPolicy;
+      attachContext?: AttachRequestContext;
+    },
+  ) => {
+    const plan = planAttachedRuntimeGeometry(args, attachResult, options);
+
+    if (plan.resizeRequired) {
+      recordRuntimeTransportLog(args.id, 'pty.attach.geometry_reconcile', 'reconcile attached PTY geometry', {
+        ...plan,
+      });
+      sendPtyResize(args.id, plan.requestedCols, plan.requestedRows, 'daemon_known_attach');
+    }
+  }, [recordRuntimeTransportLog, sendPtyResize]);
+
+  const attachExistingRuntime = useCallback(async (
+    args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell' | 'agent' | 'reason'>,
+    options: {
+      policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount'>;
+      forceResizeBeforeAttach?: boolean;
+    },
+  ): Promise<void> => {
+    const sessionAgent = args.agent
+      ?? sessionsRef.current.find((entry) => entry.id === args.id)?.agent
+      ?? null;
+    const attachContext = createAttachRequestContext({
+      ...args,
+      agent: sessionAgent,
+    }, options.policy);
+    if (options?.forceResizeBeforeAttach) {
+      sendPtyResize(args.id, args.cols, args.rows, args.reason || 'remount_hydrate');
+    }
+    const attachResult = await sendAttachSessionWithRetry(
+      args.id,
+      attachContext,
+    );
+    reconcileAttachedRuntimeGeometry(args, attachResult, {
+      attachPolicy: options.policy,
+      attachContext,
+    });
+  }, [reconcileAttachedRuntimeGeometry, sendAttachSessionWithRetry, sendPtyResize]);
 
   const sendKillSession = useCallback((id: string, signal?: string): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -2064,97 +2414,55 @@ export function useDaemonSocket({
     setPtyBackend({
       spawn: async (args: PtySpawnArgs) => {
         const existingSession = sessionsRef.current.find((session) => session.id === args.id);
-        const runtimeKnownToDaemon = Boolean(existingSession)
-          || workspacesIncludeRuntimeID(workspacesRef.current, args.id);
-        const forceRespawn = args.reload === true;
-        const alreadyAttached = attachedPtySessionsRef.current.has(args.id);
-
-        if (alreadyAttached && !forceRespawn) {
-          sendPtyResize(args.id, args.cols, args.rows);
-          return;
-        }
-
-        // For new spawns, prime PTY size before attach.
-        // For existing daemon sessions, avoid transient bootstrap resizes
-        // (hidden terminals can report placeholder dimensions briefly).
-        if (!runtimeKnownToDaemon) {
-          sendPtyResize(args.id, args.cols, args.rows);
-        }
-
-        // If the daemon already advertises this runtime — either as a top-level
-        // session or as a workspace utility pane — attach before attempting a
-        // spawn. Remote split panes are created on the endpoint first, and
-        // re-spawning them locally would hang until the frontend times out.
-        if (!forceRespawn && runtimeKnownToDaemon) {
-          try {
-            await sendAttachSessionWithRetry(args.id);
-            return;
-          } catch (attachErr) {
-            // If daemon already knows this session but PTY is gone, check if it's recoverable.
-            // Claude sessions are recovered by resuming the existing session ID.
-            // This keeps the first-run contract:
-            //   first run: --session-id <id>
-            //   recover:   --resume <id>
-            if (existingSession?.agent === 'claude') {
-              const resumeArgs: PtySpawnArgs = {
-                ...args,
-                resume_session_id: args.id,
-                resume_picker: null,
-                fork_session: null,
-              };
+        await spawnPtyRuntime(
+          args,
+          {
+            existingSession,
+            runtimeKnownToDaemon: Boolean(existingSession)
+              || workspacesIncludeRuntimeID(workspacesRef.current, args.id),
+            alreadyAttached: ptyTransportRef.current.hasAttachedRuntime(args.id),
+          },
+          {
+            attachExistingRuntime,
+            attachFreshRuntime: async (spawnArgs: PtySpawnArgs) => {
+              await sendAttachSessionWithRetry(spawnArgs.id, {
+                ...createAttachRequestContext(spawnArgs, 'fresh_spawn'),
+              });
+            },
+            spawnRuntime: sendSpawnSession,
+            resizeRuntime: sendPtyResize,
+            logClaudeResumeRecovery: ({ id, recoverable }) => {
               console.log(
                 '[DaemonSocket] Recovering session %s via resume (recoverable=%s)',
-                args.id,
-                String(existingSession.recoverable ?? false),
+                id,
+                String(recoverable),
               );
-              try {
-                await sendSpawnSession(resumeArgs);
-              } catch (spawnErr) {
-                const message = spawnErr instanceof Error ? spawnErr.message.toLowerCase() : String(spawnErr).toLowerCase();
-                if (!message.includes('already exists')) {
-                  throw new Error(
-                    'Failed to recover session. Close it and start a new session.'
-                  );
-                }
-              }
-              await sendAttachSessionWithRetry(args.id);
-              return;
-            }
-            if (!existingSession) {
-              // Workspace utility panes can be recreated in place; fall through to
-              // spawn_session using the pane's runtime ID and endpoint metadata.
+            },
+            logKnownWorkspaceRespawn: ({ id, endpointId, error }) => {
               console.warn('[DaemonSocket] Known workspace runtime attach failed, respawning shell pane', {
-                id: args.id,
-                endpoint_id: args.endpoint_id,
-                error: attachErr instanceof Error ? attachErr.message : String(attachErr),
+                id,
+                endpoint_id: endpointId,
+                error: error instanceof Error ? error.message : String(error),
               });
-            } else {
-              throw new Error(
-                'No live PTY found for this session. It likely ended when the daemon restarted. Close it and start a new session.'
-              );
-            }
-          }
-        }
-
-        try {
-          await sendSpawnSession(args);
-        } catch (err) {
-          const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
-          if (!message.includes('already exists')) {
-            throw err;
-          }
-        }
-        await sendAttachSessionWithRetry(args.id);
+            },
+          },
+        );
+      },
+      attach: async (args: PtyAttachArgs, options?: { forceResizeBeforeAttach?: boolean }) => {
+        await attachExistingRuntime({
+          ...args,
+        }, {
+          policy: normalizeAttachPolicy(args.policy),
+          forceResizeBeforeAttach: options?.forceResizeBeforeAttach,
+        });
       },
       write: async (id: string, data: string, source?: string) => {
         sendPtyInput(id, data, source);
       },
-      resize: async (id: string, cols: number, rows: number) => {
-        sendPtyResize(id, cols, rows);
+      resize: async (id: string, cols: number, rows: number, reason?: string) => {
+        sendPtyResize(id, cols, rows, reason);
       },
       kill: async (id: string) => {
-        attachedPtySessionsRef.current.delete(id);
-        ptySeqRef.current.delete(id);
         sendDetachSession(id);
         await sendKillSession(id);
       },
@@ -2163,7 +2471,7 @@ export function useDaemonSocket({
     return () => {
       setPtyBackend(null);
     };
-  }, [sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendSpawnSession]);
+  }, [attachExistingRuntime, sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendSpawnSession]);
 
   const sendPRAction = useCallback((
     action: 'approve' | 'merge',
@@ -2313,13 +2621,31 @@ export function useDaemonSocket({
   }, []);
 
   // Unregister a single session from daemon
-  const sendUnregisterSession = useCallback((sessionId: string) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const sendUnregisterSession = useCallback((sessionId: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (!sessionId) {
+        resolve();
+        return;
+      }
 
-    attachedPtySessionsRef.current.delete(sessionId);
-    ptySeqRef.current.delete(sessionId);
-    ws.send(JSON.stringify({ cmd: 'unregister', id: sessionId }));
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = `unregister:${sessionId}`;
+      pendingActionsRef.current.set(key, { resolve: () => resolve(), reject });
+      ws.send(JSON.stringify({ cmd: 'unregister', id: sessionId }));
+
+      window.setTimeout(() => {
+        if (!pendingActionsRef.current.has(key)) {
+          return;
+        }
+        pendingActionsRef.current.delete(key);
+        reject(new Error(`Session close timed out for ${sessionId}`));
+      }, 10_000);
+    });
   }, []);
 
   // Mark a PR as visited (clears HasNewChanges flag)

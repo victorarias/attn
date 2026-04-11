@@ -7,11 +7,67 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/victorarias/attn/internal/ptyworker"
 )
+
+func pidExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	return syscall.Kill(pid, 0) == nil
+}
+
+func waitForPIDsGone(timeout time.Duration, pids ...int) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		alive := false
+		for _, pid := range pids {
+			if pidExists(pid) {
+				alive = true
+				break
+			}
+		}
+		if !alive {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
+}
+
+func debugProcessState(t *testing.T, pids ...int) string {
+	t.Helper()
+	args := []string{"-o", "pid=,ppid=,stat=,comm=,command="}
+	for _, pid := range pids {
+		args = append(args, "-p", strconv.Itoa(pid))
+	}
+	cmd := exec.Command("ps", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil && len(output) == 0 {
+		return err.Error()
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func waitForRegistryEntry(path string, timeout time.Duration) (ptyworker.RegistryEntry, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		entry, err := ptyworker.ReadRegistry(path)
+		if err == nil {
+			return entry, nil
+		}
+		lastErr = err
+		time.Sleep(50 * time.Millisecond)
+	}
+	return ptyworker.RegistryEntry{}, lastErr
+}
 
 func TestWorkerBackend_SpawnAttachInputResizeRemove(t *testing.T) {
 	if testing.Short() {
@@ -190,6 +246,65 @@ func TestWorkerBackend_RecoverAfterBackendRestart(t *testing.T) {
 		}
 	}
 	t.Fatalf("timed out waiting for recover output; got=%q", out.String())
+}
+
+func TestWorkerBackend_RemoveReapsExitedWorker(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping worker integration test in short mode")
+	}
+	if os.Getenv("ATTN_RUN_WORKER_INTEGRATION") != "1" {
+		t.Skip("set ATTN_RUN_WORKER_INTEGRATION=1 to run worker integration test")
+	}
+
+	binary := buildAttnBinary(t)
+	root, err := os.MkdirTemp("/tmp", "attn-worker-reap-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error: %v", err)
+	}
+	defer os.RemoveAll(root)
+
+	backend, err := NewWorker(WorkerBackendConfig{
+		DataRoot:         root,
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BinaryPath:       binary,
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+
+	sessionID := "worker-reap-1"
+	if err := backend.Spawn(context.Background(), SpawnOptions{
+		ID:    sessionID,
+		CWD:   t.TempDir(),
+		Agent: "shell",
+		Label: "worker-reap",
+		Cols:  80,
+		Rows:  24,
+	}); err != nil {
+		t.Skipf("worker spawn unavailable in this environment: %v", err)
+	}
+
+	registryPath := filepath.Join(backend.registryDir(), sessionID+".json")
+	entry, err := waitForRegistryEntry(registryPath, 5*time.Second)
+	if err != nil {
+		t.Fatalf("waitForRegistryEntry() error: %v", err)
+	}
+
+	if err := backend.Kill(context.Background(), sessionID, syscall.SIGTERM); err != nil {
+		t.Fatalf("Kill() error: %v", err)
+	}
+	if err := backend.Remove(context.Background(), sessionID); err != nil {
+		t.Fatalf("Remove() error: %v", err)
+	}
+
+	if !waitForPIDsGone(5*time.Second, entry.WorkerPID, entry.ChildPID) {
+		t.Fatalf(
+			"worker or child pid still present after remove: worker=%d child=%d\n%s",
+			entry.WorkerPID,
+			entry.ChildPID,
+			debugProcessState(t, entry.WorkerPID, entry.ChildPID),
+		)
+	}
 }
 
 func buildAttnBinary(t *testing.T) string {

@@ -41,6 +41,8 @@ type SpawnOptions struct {
 type AttachInfo struct {
 	Scrollback          []byte
 	ScrollbackTruncated bool
+	ReplaySegments      []ReplaySegment
+	ReplayTruncated     bool
 	LastSeq             uint32
 	Cols                uint16
 	Rows                uint16
@@ -55,6 +57,12 @@ type AttachInfo struct {
 	ScreenCursorY       uint16
 	ScreenCursorVisible bool
 	ScreenSnapshotFresh bool
+}
+
+type ReplaySegment struct {
+	Cols uint16
+	Rows uint16
+	Data []byte
 }
 
 type OutputEvent struct {

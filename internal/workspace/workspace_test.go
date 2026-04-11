@@ -1,6 +1,9 @@
 package workspace
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestSplitTargetsOnlyRequestedPane(t *testing.T) {
 	root, changed := Split(
@@ -100,5 +103,86 @@ func TestNormalizeSnapshotPrunesMissingPanes(t *testing.T) {
 	}
 	if len(normalized.Panes) != 1 || normalized.Panes[0].PaneID != MainPaneID {
 		t.Fatalf("normalized panes = %+v, want only main", normalized.Panes)
+	}
+}
+
+func TestNormalizeSnapshotRebalancesSameDirectionChains(t *testing.T) {
+	snapshot := Snapshot{
+		SessionID:    "sess-1",
+		ActivePaneID: "pane-b",
+		Layout: Node{
+			Type:      "split",
+			SplitID:   "root",
+			Direction: DirectionVertical,
+			Ratio:     DefaultSplitRatio,
+			Children: []Node{
+				{
+					Type:      "split",
+					SplitID:   "left",
+					Direction: DirectionVertical,
+					Ratio:     DefaultSplitRatio,
+					Children: []Node{
+						{Type: "pane", PaneID: MainPaneID},
+						{Type: "pane", PaneID: "pane-a"},
+					},
+				},
+				{Type: "pane", PaneID: "pane-b"},
+			},
+		},
+		Panes: []Pane{
+			{PaneID: MainPaneID, RuntimeID: "sess-1", Kind: PaneKindMain, Title: DefaultPaneTitle},
+			{PaneID: "pane-a", RuntimeID: "runtime-a", Kind: PaneKindShell, Title: "Shell 1"},
+			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: PaneKindShell, Title: "Shell 2"},
+		},
+	}
+
+	normalized := NormalizeSnapshot(snapshot, "sess-1")
+	if normalized.Layout.Type != "split" {
+		t.Fatalf("normalized layout = %+v, want split root", normalized.Layout)
+	}
+	if math.Abs(normalized.Layout.Ratio-(2.0/3.0)) > 1e-9 {
+		t.Fatalf("root ratio = %v, want %v", normalized.Layout.Ratio, 2.0/3.0)
+	}
+	left := normalized.Layout.Children[0]
+	if left.Type != "split" || math.Abs(left.Ratio-0.5) > 1e-9 {
+		t.Fatalf("left split = %+v, want balanced nested split", left)
+	}
+}
+
+func TestNormalizeSnapshotRebalancesAfterRemovingPaneFromChain(t *testing.T) {
+	snapshot := Snapshot{
+		SessionID:    "sess-1",
+		ActivePaneID: "pane-b",
+		Layout: Node{
+			Type:      "split",
+			SplitID:   "root",
+			Direction: DirectionVertical,
+			Ratio:     2.0 / 3.0,
+			Children: []Node{
+				{
+					Type:      "split",
+					SplitID:   "left",
+					Direction: DirectionVertical,
+					Ratio:     DefaultSplitRatio,
+					Children: []Node{
+						{Type: "pane", PaneID: MainPaneID},
+						{Type: "pane", PaneID: "pane-gone"},
+					},
+				},
+				{Type: "pane", PaneID: "pane-b"},
+			},
+		},
+		Panes: []Pane{
+			{PaneID: MainPaneID, RuntimeID: "sess-1", Kind: PaneKindMain, Title: DefaultPaneTitle},
+			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: PaneKindShell, Title: "Shell 2"},
+		},
+	}
+
+	normalized := NormalizeSnapshot(snapshot, "sess-1")
+	if normalized.Layout.Type != "split" {
+		t.Fatalf("normalized layout = %+v, want split root", normalized.Layout)
+	}
+	if math.Abs(normalized.Layout.Ratio-0.5) > 1e-9 {
+		t.Fatalf("root ratio = %v, want 0.5", normalized.Layout.Ratio)
 	}
 }

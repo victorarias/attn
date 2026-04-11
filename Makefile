@@ -5,8 +5,10 @@ INSTALL_DIR=$(HOME)/.local/bin
 BUILD_DIR=./cmd/attn
 VERSION ?= $(shell bash ./scripts/version.sh)
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+SOURCE_FINGERPRINT ?= $(shell bash ./scripts/source-fingerprint.sh --field fingerprint)
+GIT_COMMIT ?= $(shell bash ./scripts/source-fingerprint.sh --field commit)
 OUTPUT ?= $(BINARY_NAME)
-GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME)
+GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME) -X github.com/victorarias/attn/internal/buildinfo.SourceFingerprint=$(SOURCE_FINGERPRINT) -X github.com/victorarias/attn/internal/buildinfo.GitCommit=$(GIT_COMMIT)
 ZIG ?= zig
 
 build:
@@ -97,41 +99,40 @@ check-types: generate-types
 	git diff --exit-code internal/protocol/generated.go app/src/types/generated.ts
 
 # Build Tauri app with bundled daemon (app bundle only, no DMG dialog)
-build-app: build
+define build_tauri_app
 	@mkdir -p app/src-tauri/binaries
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
-	cd app && VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles app
+	cd app && $(1) pnpm tauri build --bundles app
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		mkdir -p app/src-tauri/target/release/bundle/macos/attn.app/Contents/Resources; \
+		printf '{\n  "version": "%s",\n  "sourceFingerprint": "%s",\n  "gitCommit": "%s",\n  "buildTime": "%s"\n}\n' '$(VERSION)' '$(SOURCE_FINGERPRINT)' '$(GIT_COMMIT)' '$(BUILD_TIME)' > app/src-tauri/target/release/bundle/macos/attn.app/Contents/Resources/build-identity.json; \
+	fi
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
 		codesign -s - -f app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn; \
 	fi
+endef
+
+build-app: build
+	$(call build_tauri_app,VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)')
 
 build-app-ui-automation: build
-	@mkdir -p app/src-tauri/binaries
-	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
-	cd app && ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles app
-	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign -s - -f app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn; \
-	fi
+	$(call build_tauri_app,ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)')
 
-# Install Tauri app to ~/Applications
-install-app: build-app
-	@mkdir -p ~/Applications
-	@rm -rf ~/Applications/attn.app
-	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
-	@echo "Installed attn.app to ~/Applications"
-
-install-app-ui-automation: build-app-ui-automation
+# Install Tauri app to ~/Applications with the UI automation bridge enabled.
+install-app: build-app-ui-automation
 	@mkdir -p ~/Applications
 	@rm -rf ~/Applications/attn.app
 	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
 	@echo "Installed attn.app to ~/Applications with UI automation bridge enabled"
 
+install-app-ui-automation: install-app
+
 # Install daemon and app.
 # Install the app bundle first so the final daemon restart wins even if the
 # running GUI app eagerly respawns its bundled daemon during the install.
-install-all: install-app-ui-automation install
+install-all: install-app install
 
-install-all-ui-automation: install-app-ui-automation install
+install-all-ui-automation: install-all
 
 app-screenshot:
 	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path "$(SCREENSHOT_PATH)",) $(APP_SCREENSHOT_FLAGS)
@@ -148,7 +149,7 @@ sign-app:
 
 # Create distributable DMG
 dist: build-app
-	cd app && VITE_INSTALL_CHANNEL=source pnpm tauri build --bundles dmg
+	cd app && VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)' pnpm tauri build --bundles dmg
 	@echo "DMG created at app/src-tauri/target/release/bundle/dmg/"
 
 release:

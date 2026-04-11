@@ -1,7 +1,6 @@
 import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { WebglAddon } from '@xterm/addon-webgl';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
@@ -13,10 +12,9 @@ import { registerTerminalPerfGetter } from '../utils/terminalPerf';
 import {
   DEFAULT_FONT_SIZE,
   FONT_FAMILY,
+  getInitialTerminalDimensions,
   getScaledDimensions,
   getTerminalTheme,
-  MAX_CANVAS_WIDTH,
-  measureTerminalFont,
   TERMINAL_SCROLLBACK_LINES,
   type ResolvedTheme,
 } from '../utils/terminalSizing';
@@ -31,7 +29,10 @@ import {
   subscribeTerminalRendererConfig,
   type TerminalRendererMode,
 } from '../utils/terminalRenderer';
+import { installTerminalRendererLifecycle } from '../utils/terminalRendererLifecycle';
+import { installTerminalViewportLifecycle } from '../utils/terminalViewportLifecycle';
 import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
+import type { TerminalPerfStartupSnapshot } from '../utils/terminalPerf';
 export type { ResolvedTheme } from '../utils/terminalSizing';
 
 function getContainerDebugInfo(container: HTMLElement) {
@@ -49,6 +50,32 @@ function getContainerDebugInfo(container: HTMLElement) {
     parentDisplay: parentStyle?.display ?? null,
     parentVisibility: parentStyle?.visibility ?? null,
     dpr: window.devicePixelRatio,
+  };
+}
+
+function elementSizeSnapshot(element: Element | null) {
+  if (!(element instanceof HTMLElement)) {
+    return null;
+  }
+  const rect = element.getBoundingClientRect();
+  return {
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  };
+}
+
+function createEmptyStartupSnapshot(): TerminalPerfStartupSnapshot {
+  return {
+    initialContainer: null,
+    initialCols: null,
+    initialRows: null,
+    firstObservedContainer: null,
+    firstReadySource: null,
+    firstReadyAt: null,
+    firstReadyCols: null,
+    firstReadyRows: null,
+    fontEffectAppliedBeforeReady: false,
+    skippedInitialFontEffect: false,
   };
 }
 
@@ -85,27 +112,37 @@ interface TerminalProps {
   tuiCursor?: boolean;
   onInit?: (terminal: XTerm) => void;
   onReady?: (terminal: XTerm) => void;
-  onResize?: (cols: number, rows: number) => void;
+  onResize?: (cols: number, rows: number, options?: { reason?: string }) => void;
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
   function Terminal({ fontSize = DEFAULT_FONT_SIZE, resolvedTheme = 'dark', debugName, runtimeLogMeta, tuiCursor, onInit, onReady, onResize }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
-    const webglAddonRef = useRef<WebglAddon | null>(null);
     const debugNameRef = useRef(debugName || 'unknown');
     const visibleRef = useRef(true);
     const rendererModeRef = useRef<'webgl' | 'dom'>('dom');
     const writeQueueChunksRef = useRef(0);
     const writeQueueBytesRef = useRef(0);
-	    const perfRegistryIdRef = useRef(`terminal-${Math.random().toString(16).slice(2)}`);
+    const perfRegistryIdRef = useRef(`terminal-${Math.random().toString(16).slice(2)}`);
+    const readyFiredRef = useRef(false);
+    const appliedFontSizeRef = useRef<number | null>(null);
+    const startupSnapshotRef = useRef<TerminalPerfStartupSnapshot>(createEmptyStartupSnapshot());
+    const lastResizeSnapshotRef = useRef<{
+      at: number;
+      trigger: string;
+      cols: number;
+      rows: number;
+      prevCols: number;
+      prevRows: number;
+      diagnostics: ResizeDiagnostics;
+    } | null>(null);
 
     // Store callbacks and values in refs to avoid re-running effect when they change
     const onReadyRef = useRef(onReady);
     const onInitRef = useRef(onInit);
     const onResizeRef = useRef(onResize);
     const fontSizeRef = useRef(fontSize);
-    const resolvedThemeRef = useRef(resolvedTheme);
     const tuiCursorRef = useRef(tuiCursor);
     const runtimeLogMetaRef = useRef(runtimeLogMeta);
 
@@ -114,7 +151,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       onInitRef.current = onInit;
       onResizeRef.current = onResize;
       fontSizeRef.current = fontSize;
-      resolvedThemeRef.current = resolvedTheme;
       debugNameRef.current = debugName || 'unknown';
       tuiCursorRef.current = tuiCursor;
       runtimeLogMetaRef.current = runtimeLogMeta;
@@ -126,6 +162,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
       recordTerminalRuntimeLog({
         category: 'terminal',
+        event: 'terminal.activity_target_changed',
         sessionId: runtimeLogMeta.sessionId,
         paneId: runtimeLogMeta.paneId,
         runtimeId: runtimeLogMeta.runtimeId,
@@ -155,7 +192,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     }, [resolvedTheme]);
 
     // Debug overlay state — always record to ring buffer, only render overlay when debug enabled
-	    const [debugDisplay, setDebugDisplay] = useState<{
+    const [debugDisplay, setDebugDisplay] = useState<{
       cols: number;
       rows: number;
       containerWidth: number;
@@ -166,7 +203,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       fontSize: number;
       dpr: number;
       trigger: string;
-	    } | null>(null);
+    } | null>(null);
     const [rendererConfig, setRendererConfigState] = useState(() => getTerminalRendererConfig());
     const [rendererDisplayMode, setRendererDisplayMode] = useState<TerminalRendererMode>('dom');
 
@@ -178,8 +215,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       prevRows: number,
       diagnostics: ResizeDiagnostics,
     ) => {
+      const recordedAt = Date.now();
       recordResizeEvent({
-        timestamp: Date.now(),
+        timestamp: recordedAt,
         terminalName: debugNameRef.current,
         trigger,
         fontSize: fontSizeRef.current,
@@ -190,6 +228,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         isVisible: visibleRef.current,
         diagnostics,
       });
+      lastResizeSnapshotRef.current = {
+        at: recordedAt,
+        trigger,
+        cols,
+        rows,
+        prevCols,
+        prevRows,
+        diagnostics,
+      };
       if (isTerminalDebugEnabled()) {
         setDebugDisplay({
           cols,
@@ -206,7 +253,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
     }, []);
 
-	    const logTerminal = useCallback((
+    const logTerminal = useCallback((
       level: 'log' | 'warn',
       message: string,
       details?: Record<string, unknown>
@@ -228,7 +275,69 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       } else {
         console.log(prefix);
       }
-	    }, []);
+    }, []);
+
+    const markTerminalReady = useCallback((
+      term: XTerm,
+      cols: number,
+      rows: number,
+      diagnostics: ResizeDiagnostics,
+      source: 'resize_observer' | 'font_change' | 'fit_fallback',
+      reason: string,
+    ) => {
+      if (readyFiredRef.current) {
+        return;
+      }
+      readyFiredRef.current = true;
+      startupSnapshotRef.current.firstReadySource = startupSnapshotRef.current.firstReadySource || source;
+      startupSnapshotRef.current.firstReadyAt = startupSnapshotRef.current.firstReadyAt || Date.now();
+      startupSnapshotRef.current.firstReadyCols = startupSnapshotRef.current.firstReadyCols ?? cols;
+      startupSnapshotRef.current.firstReadyRows = startupSnapshotRef.current.firstReadyRows ?? rows;
+
+      if (isSuspiciousTerminalSize(cols, rows)) {
+        const container = containerRef.current;
+        logTerminal('warn', 'ready path produced suspicious dimensions', {
+          source,
+          cols,
+          rows,
+          isVisible: visibleRef.current,
+          container: container ? getContainerDebugInfo(container) : null,
+        });
+      } else {
+        logTerminal('log', 'terminal ready', {
+          source,
+          cols,
+          rows,
+          isVisible: visibleRef.current,
+        });
+      }
+
+      recordDiags(reason, cols, rows, term.cols, term.rows, diagnostics);
+      term.resize(cols, rows);
+      onResizeRef.current?.(cols, rows, { reason });
+
+      const meta = runtimeLogMetaRef.current;
+      if (meta) {
+        recordTerminalRuntimeLog({
+          category: 'terminal',
+          event: 'terminal.ready',
+          sessionId: meta.sessionId,
+          paneId: meta.paneId,
+          runtimeId: meta.runtimeId,
+          debugName: debugNameRef.current,
+          message: 'terminal ready',
+          details: {
+            paneKind: meta.paneKind,
+            cols,
+            rows,
+            renderer: rendererModeRef.current,
+            source,
+          },
+        });
+      }
+
+      onReadyRef.current?.(term);
+    }, [logTerminal, recordDiags]);
 
     useEffect(() => {
       return subscribeTerminalRendererConfig(() => {
@@ -260,7 +369,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
       const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
       const setValue = descriptor?.set;
-
       for (const char of text) {
         if (setValue) {
           setValue.call(textarea, char);
@@ -315,7 +423,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
       if (cols !== term.cols || rows !== term.rows) {
         term.resize(cols, rows);
-        onResizeRef.current?.(cols, rows);
+        onResizeRef.current?.(cols, rows, { reason });
       }
       // Same-size case: no refresh needed. The fit() bounce sends SIGWINCH
       // which triggers the app to redraw. A term.refresh() here would reveal
@@ -333,32 +441,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
     }, [logTerminal, recordDiags]);
 
-    const bounceTerminalResize = useCallback((
+    const applyMeasuredTerminalGeometry = useCallback((
       term: XTerm,
-      cols: number,
-      rows: number,
-      reason: string,
-      diagnostics?: ResizeDiagnostics | null,
+      dims: { cols: number; rows: number; diagnostics: ResizeDiagnostics },
+      options: {
+        readySource: 'resize_observer' | 'font_change' | 'fit_fallback';
+        readyReason: string;
+        resizeReason: string;
+      },
     ) => {
-      let bounceCols = cols;
-      let bounceRows = rows;
-
-      if (rows > 1) {
-        bounceRows = rows - 1;
-      } else if (cols > 1) {
-        bounceCols = cols - 1;
-      } else {
+      if (!readyFiredRef.current) {
+        markTerminalReady(term, dims.cols, dims.rows, dims.diagnostics, options.readySource, options.readyReason);
         return;
       }
 
-      resizeTerminal(term, bounceCols, bounceRows, `${reason}_bounce_out`, diagnostics);
-      window.setTimeout(() => {
-        if (xtermRef.current !== term) {
-          return;
-        }
-        resizeTerminal(term, cols, rows, `${reason}_bounce_back`, diagnostics);
-      }, 0);
-    }, [resizeTerminal]);
+      resizeTerminal(term, dims.cols, dims.rows, options.resizeReason, dims.diagnostics);
+    }, [markTerminalReady, resizeTerminal]);
 
     useImperativeHandle(ref, () => ({
       get terminal() {
@@ -387,14 +485,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             container: getContainerDebugInfo(container),
           });
         }
-        const sizeChanged = dims.cols !== term.cols || dims.rows !== term.rows;
-        resizeTerminal(term, dims.cols, dims.rows, 'fit', dims.diagnostics);
-        if (!sizeChanged) {
-          // Hidden session wrappers can leave xterm painted at an old width even
-          // after the PTY has the correct size again. Force a real xterm size
-          // transition so the renderer subtree is rebuilt, not just the PTY.
-          bounceTerminalResize(term, dims.cols, dims.rows, 'fit_same_size', dims.diagnostics);
-        }
+        applyMeasuredTerminalGeometry(term, dims, {
+          readySource: 'fit_fallback',
+          readyReason: 'ready_fallback',
+          resizeReason: 'fit',
+        });
       },
       focus: () => {
         return focusTerminal();
@@ -413,7 +508,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           resetTerminalScrollPin(term);
         }
       },
-    }), [focusTerminal, logTerminal, resizeTerminal, typeTextViaInput]);
+    }), [applyMeasuredTerminalGeometry, focusTerminal, logTerminal, typeTextViaInput]);
 
     useEffect(() => {
       if (!containerRef.current) return;
@@ -421,30 +516,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // VS Code: Pre-calculate initial dimensions before creating terminal
       // This prevents xterm from initializing with default 80x24 and then resizing
       // Source: xtermTerminal.ts constructor receives cols/rows from options
-      const containerStyle = getComputedStyle(containerRef.current);
-      const containerWidth = parseFloat(containerStyle.width);
-      const containerHeight = parseFloat(containerStyle.height);
+      const containerWidth = containerRef.current.offsetWidth;
+      const containerHeight = containerRef.current.offsetHeight;
       const initialFontSize = fontSizeRef.current;
-      const measured = measureTerminalFont(FONT_FAMILY, initialFontSize);
-      const dpr = window.devicePixelRatio;
-
-      // Calculate initial cols/rows using same logic as getScaledDimensions
-      // but without needing the terminal reference
-      let initialCols = 80; // fallback
-      let initialRows = 24; // fallback
-
-      if (containerWidth > 0 && containerHeight > 0 && measured.charWidth > 0 && measured.charHeight > 0) {
-        const availableWidth = Math.min(containerWidth, MAX_CANVAS_WIDTH) - 14; // scrollbar
-        const availableHeight = containerHeight;
-
-        const scaledWidthAvailable = availableWidth * dpr;
-        const scaledCharWidth = measured.charWidth * dpr;
-        initialCols = Math.max(Math.floor(scaledWidthAvailable / scaledCharWidth), 1);
-
-        const scaledHeightAvailable = availableHeight * dpr;
-        const scaledCharHeight = Math.ceil(measured.charHeight * dpr);
-        initialRows = Math.max(Math.floor(scaledHeightAvailable / scaledCharHeight), 1);
-      }
+      const { cols: initialCols, rows: initialRows } = getInitialTerminalDimensions(
+        containerWidth,
+        containerHeight,
+        initialFontSize,
+      );
 
       // Create terminal with VS Code configuration
       // Source: vscode/src/vs/workbench/contrib/terminal/browser/xterm/xtermTerminal.ts constructor
@@ -475,6 +554,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           },
         },
       });
+      appliedFontSizeRef.current = initialFontSize;
+      startupSnapshotRef.current = {
+        initialContainer: {
+          width: Math.round(containerWidth),
+          height: Math.round(containerHeight),
+        },
+        initialCols,
+        initialRows,
+        firstObservedContainer: null,
+        firstReadySource: null,
+        firstReadyAt: null,
+        firstReadyCols: null,
+        firstReadyRows: null,
+        fontEffectAppliedBeforeReady: false,
+        skippedInitialFontEffect: false,
+      };
 
       // Load WebLinksAddon before open - Cmd/Ctrl+click to open URLs
       term.loadAddon(new WebLinksAddon(async (event, uri) => {
@@ -490,49 +585,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // VS Code: open() FIRST, then load WebGL
       // Source: xtermTerminal.ts attachToElement() - WebGL is loaded AFTER raw.open()
       term.open(containerRef.current);
-
-      const detachWebglRenderer = () => {
-	        webglAddonRef.current?.dispose();
-	        webglAddonRef.current = null;
-	        rendererModeRef.current = 'dom';
-          setRendererDisplayMode('dom');
-	      };
-
-	      const attachWebglRenderer = () => {
-          if (webglAddonRef.current) {
+      const rendererLifecycle = installTerminalRendererLifecycle({
+        term,
+        rendererModeRef,
+        setRendererDisplayMode,
+        onContextLoss: () => {
+          const container = containerRef.current;
+          if (!container) {
             return;
           }
-	        try {
-	          const nextWebglAddon = new WebglAddon();
-	          nextWebglAddon.onContextLoss(() => {
-	            console.info('[Terminal] WebGL context lost, disposing and falling back to DOM');
-              detachWebglRenderer();
-	          // VS Code: trigger dimension refresh since DOM renderer has different cell dimensions
-	          const container = containerRef.current;
-	          if (container && term) {
-	            requestAnimationFrame(() => {
-	              const dims = getScaledDimensions(container, term, fontSizeRef.current);
-	              if (dims) {
-	                resizeTerminal(term, dims.cols, dims.rows, 'webgl_context_loss');
-	              }
-	            });
-	          }
-	          });
-	          term.loadAddon(nextWebglAddon);
-	          webglAddonRef.current = nextWebglAddon;
-	          rendererModeRef.current = 'webgl';
-            setRendererDisplayMode('webgl');
-	        } catch (e) {
-	          console.warn('[Terminal] WebGL addon failed:', e);
-            detachWebglRenderer();
-	        }
-	      };
-
-        if (getTerminalRendererConfig().mode === 'webgl') {
-          attachWebglRenderer();
-        } else {
-          detachWebglRenderer();
-        }
+          requestAnimationFrame(() => {
+            const dims = getScaledDimensions(container, term, fontSizeRef.current);
+            if (dims) {
+              resizeTerminal(term, dims.cols, dims.rows, 'webgl_context_loss');
+            }
+          });
+        },
+      });
 
       // Copy-on-select: copy selected text to clipboard automatically.
       // Markdown copy (Cmd+Shift+C) suppresses plain copy briefly to prevent races.
@@ -567,6 +636,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       if (runtimeMeta) {
         recordTerminalRuntimeLog({
           category: 'terminal',
+          event: 'terminal.mounted',
           sessionId: runtimeMeta.sessionId,
           paneId: runtimeMeta.paneId,
           runtimeId: runtimeMeta.runtimeId,
@@ -588,15 +658,55 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         lastRenderAt: 0,
         lastWriteParsedAt: 0,
         lastRenderRange: null as { start: number; end: number } | null,
+        firstRenderLogged: false,
+        firstWriteParsedLogged: false,
       };
       const renderDisposable = term.onRender((event) => {
         activity.renderCount += 1;
         activity.lastRenderAt = Date.now();
         activity.lastRenderRange = event;
+        if (!activity.firstRenderLogged) {
+          activity.firstRenderLogged = true;
+          const meta = runtimeLogMetaRef.current;
+          if (meta) {
+            recordTerminalRuntimeLog({
+              category: 'terminal',
+              event: 'terminal.first_render',
+              sessionId: meta.sessionId,
+              paneId: meta.paneId,
+              runtimeId: meta.runtimeId,
+              debugName: debugNameRef.current,
+              message: 'xterm rendered first frame',
+              details: {
+                paneKind: meta.paneKind,
+                renderer: rendererModeRef.current,
+              },
+            });
+          }
+        }
       });
       const writeParsedDisposable = term.onWriteParsed(() => {
         activity.writeParsedCount += 1;
         activity.lastWriteParsedAt = Date.now();
+        if (!activity.firstWriteParsedLogged) {
+          activity.firstWriteParsedLogged = true;
+          const meta = runtimeLogMetaRef.current;
+          if (meta) {
+            recordTerminalRuntimeLog({
+              category: 'terminal',
+              event: 'terminal.first_write_parsed',
+              sessionId: meta.sessionId,
+              paneId: meta.paneId,
+              runtimeId: meta.runtimeId,
+              debugName: debugNameRef.current,
+              message: 'xterm parsed first write',
+              details: {
+                paneKind: meta.paneKind,
+                renderer: rendererModeRef.current,
+              },
+            });
+          }
+        }
       });
       const heartbeatInterval = window.setInterval(() => {
         const meta = runtimeLogMetaRef.current;
@@ -624,7 +734,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           runtimeId: meta.runtimeId,
           debugName: debugNameRef.current,
           message: 'xterm renderer heartbeat',
-          details: {
+          details: () => ({
             paneKind: meta.paneKind,
             renderer: rendererModeRef.current,
             visible: visibleRef.current,
@@ -641,7 +751,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             writeQueueChunks: writeQueueChunksRef.current,
             writeQueueBytes: writeQueueBytesRef.current,
             ...activeElementSummary(),
-          },
+          }),
         });
         activity.loggedRenderCount = activity.renderCount;
         activity.loggedWriteParsedCount = activity.writeParsedCount;
@@ -652,8 +762,19 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           return null;
         }
         const buffer = currentTerm.buffer.active;
+        const meta = runtimeLogMetaRef.current;
+        const container = containerRef.current;
+        const xterm = container?.querySelector('.xterm') || null;
+        const xtermScreen = container?.querySelector('.xterm-screen') || null;
+        const canvas = container?.querySelector('.xterm-screen canvas') || null;
         return {
           terminalName: debugNameRef.current,
+          sessionId: meta?.sessionId ?? null,
+          paneId: meta?.paneId ?? null,
+          runtimeId: meta?.runtimeId ?? null,
+          paneKind: meta?.paneKind ?? null,
+          isActivePane: meta?.isActivePane ?? null,
+          isActiveSession: meta?.isActiveSession ?? null,
           cols: currentTerm.cols,
           rows: currentTerm.rows,
           bufferLength: buffer.length,
@@ -664,6 +785,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           visible: visibleRef.current,
           writeQueueChunks: writeQueueChunksRef.current,
           writeQueueBytes: writeQueueBytesRef.current,
+          renderCount: activity.renderCount,
+          writeParsedCount: activity.writeParsedCount,
+          lastRenderAt: activity.lastRenderAt,
+          lastWriteParsedAt: activity.lastWriteParsedAt,
+          lastRenderRange: activity.lastRenderRange,
+          ready: readyFiredRef.current,
+          startup: startupSnapshotRef.current,
+          lastResize: lastResizeSnapshotRef.current,
+          dom: {
+            container: elementSizeSnapshot(container),
+            xterm: elementSizeSnapshot(xterm),
+            xtermScreen: elementSizeSnapshot(xtermScreen),
+            canvas: elementSizeSnapshot(canvas),
+          },
         };
       });
       onInitRef.current?.(term);
@@ -674,187 +809,23 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           writeQueueBytesRef.current = bytes;
         },
       });
-
-      // Resize strategy from VS Code's TerminalResizeDebouncer:
-      // - Y-axis (rows): immediate (cheap operation)
-      // - X-axis (cols): 100ms debounce (expensive text reflow)
-      // - Small buffers (<200 lines): immediate for both
-      // - Hidden terminals: use requestIdleCallback
-      let lastCols = term.cols;
-      let lastRows = term.rows;
-      // Store latest requested values (VS Code pattern)
-      let latestX = term.cols;
-      let latestY = term.rows;
-      let latestDiagnostics: ResizeDiagnostics | null = null;
-      let xResizeTimeout: number;
-      let isVisible = true;
-      let readyFired = false;
-
-      // VS Code constants
-      const START_DEBOUNCING_THRESHOLD = 200; // buffer lines
-      const X_AXIS_DEBOUNCE_MS = 100;
-
-      // Resize both dimensions immediately
-      const resizeBoth = (cols: number, rows: number) => {
-        lastCols = cols;
-        lastRows = rows;
-        resizeTerminal(term, cols, rows, 'resize_both', latestDiagnostics);
-      };
-
-      // Resize X only (debounced)
-      const resizeX = (cols: number) => {
-        lastCols = cols;
-        resizeTerminal(term, cols, term.rows, 'resize_x', latestDiagnostics);
-      };
-
-      // Resize Y only (immediate)
-      const resizeY = (rows: number) => {
-        lastRows = rows;
-        resizeTerminal(term, term.cols, rows, 'resize_y', latestDiagnostics);
-      };
-
-      const handleResize = () => {
-        const container = containerRef.current;
-        if (!container) return;
-
-        const dims = getScaledDimensions(container, term, fontSizeRef.current);
-        if (!dims) {
-          logTerminal('log', 'handleResize: no dimensions', {
-            isVisible: visibleRef.current,
-            container: getContainerDebugInfo(container),
-          });
-          return;
-        }
-
-        const { cols, rows, diagnostics } = dims;
-        latestX = cols;
-        latestY = rows;
-        latestDiagnostics = diagnostics;
-
-        if (isSuspiciousTerminalSize(cols, rows)) {
-          logTerminal('warn', 'handleResize: suspicious dimensions detected', {
-            cols,
-            rows,
-            lastCols,
-            lastRows,
-            bufferLength: term.buffer.normal.length,
-            isVisible: visibleRef.current,
-            container: getContainerDebugInfo(container),
-          });
-        }
-
-        const colsChanged = cols !== lastCols;
-        const rowsChanged = rows !== lastRows;
-
-        if (!colsChanged && !rowsChanged) return;
-
-        // VS Code: Immediate resize for small buffers
-        const bufferLength = term.buffer.normal.length;
-        if (bufferLength < START_DEBOUNCING_THRESHOLD) {
-          clearTimeout(xResizeTimeout);
-          resizeBoth(cols, rows);
-          return;
-        }
-
-        // VS Code: If terminal is not visible, defer to idle callback
-        if (!isVisible && 'requestIdleCallback' in window) {
-          (window as any).requestIdleCallback(() => {
-            resizeBoth(latestX, latestY);
-          });
-          return;
-        }
-
-        // VS Code split resize strategy:
-        // Y-axis is immediate (cheap), X-axis is debounced (expensive reflow)
-        if (rowsChanged) {
-          resizeY(rows);
-        }
-
-        if (colsChanged) {
-          clearTimeout(xResizeTimeout);
-          xResizeTimeout = window.setTimeout(() => {
-            resizeX(latestX);
-          }, X_AXIS_DEBOUNCE_MS);
-        }
-      };
-
-      // CRITICAL FIX: Use ResizeObserver on container for ALL resize detection
-      // This catches: window resize, sidebar collapse, display changes, parent layout changes
-      // VS Code uses a top-down layout system; we use ResizeObserver as the equivalent
-      const resizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[0];
-        if (!entry || entry.contentRect.width <= 0 || entry.contentRect.height <= 0) {
-          if (entry && isTerminalDebugEnabled()) {
-            logTerminal('log', 'ResizeObserver ignored non-positive size', {
-              contentRectWidth: entry.contentRect.width,
-              contentRectHeight: entry.contentRect.height,
-              isVisible: visibleRef.current,
-            });
-          }
-          return;
-        }
-
-        // First time we get valid dimensions: fire onReady
-        if (!readyFired) {
-          // Wait one frame for renderer to initialize cell dimensions
-          requestAnimationFrame(() => {
-            const dims = getScaledDimensions(containerRef.current!, term, fontSizeRef.current);
-            if (dims && dims.cols > 0 && dims.rows > 0) {
-              readyFired = true;
-              lastCols = dims.cols;
-              lastRows = dims.rows;
-
-              if (isSuspiciousTerminalSize(dims.cols, dims.rows)) {
-                logTerminal('warn', 'ready resize produced suspicious dimensions', {
-                  cols: dims.cols,
-                  rows: dims.rows,
-                  isVisible: visibleRef.current,
-                  container: containerRef.current ? getContainerDebugInfo(containerRef.current) : null,
-                });
-              } else {
-                logTerminal('log', 'terminal ready', {
-                  cols: dims.cols,
-                  rows: dims.rows,
-                  isVisible: visibleRef.current,
-                });
-              }
-
-              // Record to ring buffer
-              recordDiags('ready', dims.cols, dims.rows, term.cols, term.rows, dims.diagnostics);
-
-              // Resize to calculated dimensions
-              term.resize(dims.cols, dims.rows);
-
-              if (onResizeRef.current) {
-                onResizeRef.current(dims.cols, dims.rows);
-              }
-
-              if (onReadyRef.current) {
-                onReadyRef.current(term);
-              }
-            }
-          });
-          return;
-        }
-
-        // After ready: handle resize with VS Code debouncing strategy
-        handleResize();
-      });
-      resizeObserver.observe(containerRef.current);
-
-      // VS Code: Track visibility to defer resizes when hidden
-      // Source: terminalInstance.ts setVisible() - flushes pending resizes when becoming visible
-      const visibilityObserver = new IntersectionObserver(
-        (entries) => {
-          const nowVisible = entries[0]?.isIntersecting ?? true;
-          const wasHidden = !isVisible && nowVisible;
-          isVisible = nowVisible;
-          visibleRef.current = nowVisible;
-          logTerminal('log', 'Visibility changed', { nowVisible, wasHidden, readyFired });
+      const viewportLifecycle = installTerminalViewportLifecycle({
+        term,
+        container: containerRef.current,
+        fontSizeRef,
+        visibleRef,
+        readyFiredRef,
+        startupSnapshotRef,
+        logTerminal,
+        getContainerDebugInfo,
+        applyMeasuredTerminalGeometry,
+        resizeTerminal,
+        onVisibilityChanged: (nowVisible, wasHidden) => {
           const meta = runtimeLogMetaRef.current;
           if (meta && meta.isActiveSession && meta.isActivePane) {
             recordTerminalRuntimeLog({
               category: 'terminal',
+              event: 'terminal.visibility_changed',
               sessionId: meta.sessionId,
               paneId: meta.paneId,
               runtimeId: meta.runtimeId,
@@ -864,69 +835,21 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
                 paneKind: meta.paneKind,
                 nowVisible,
                 wasHidden,
-                readyFired,
+                readyFired: readyFiredRef.current,
               },
             });
           }
-
-          // VS Code pattern: flush pending resizes when becoming visible
-          if (wasHidden && readyFired) {
-            clearTimeout(xResizeTimeout);
-            const container = containerRef.current;
-            if (container) {
-              const dims = getScaledDimensions(container, term, fontSizeRef.current);
-              if (dims) {
-                lastCols = dims.cols;
-                lastRows = dims.rows;
-                if (dims.cols === term.cols && dims.rows === term.rows) {
-                  bounceTerminalResize(term, dims.cols, dims.rows, 'visibility_flush', dims.diagnostics);
-                } else {
-                  resizeTerminal(term, dims.cols, dims.rows, 'visibility_flush', dims.diagnostics);
-                }
-              }
-            }
-          }
         },
-        { threshold: 0 }
-      );
-      visibilityObserver.observe(containerRef.current);
+      });
 
-      // VS Code: Listen for DPI changes (when window moves between displays)
-      // Source: terminalInstance.ts - uses matchMedia for resolution changes
-      let currentDpr = window.devicePixelRatio;
-      const handleDprChange = () => {
-        const newDpr = window.devicePixelRatio;
-        if (newDpr !== currentDpr) {
-          currentDpr = newDpr;
-          const container = containerRef.current;
-          if (container) {
-            const dims = getScaledDimensions(container, term, fontSizeRef.current);
-            if (dims) {
-              resizeTerminal(term, dims.cols, dims.rows, 'dpr_change');
-            }
-          }
-        }
-      };
-      // matchMedia with resolution query triggers on DPI change
-      const dprMediaQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
-      dprMediaQuery.addEventListener('change', handleDprChange);
-
-        const unsubscribeRendererConfig = subscribeTerminalRendererConfig(() => {
-          const nextMode = getTerminalRendererConfig().mode;
-          if (nextMode === 'webgl') {
-            attachWebglRenderer();
-            return;
-          }
-          detachWebglRenderer();
-        });
-
-	      // Cleanup
-	      return () => {
+      // Cleanup
+      return () => {
           const meta = runtimeLogMetaRef.current;
           if (meta) {
             const buffer = term.buffer.active;
             recordTerminalRuntimeLog({
               category: 'terminal',
+              event: 'terminal.unmounted',
               sessionId: meta.sessionId,
               paneId: meta.paneId,
               runtimeId: meta.runtimeId,
@@ -948,21 +871,21 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           renderDisposable.dispose();
           writeParsedDisposable.dispose();
           window.clearInterval(heartbeatInterval);
-          unsubscribeRendererConfig();
-	        resizeObserver.disconnect();
-        visibilityObserver.disconnect();
-        clearTimeout(xResizeTimeout);
-        dprMediaQuery.removeEventListener('change', handleDprChange);
+          viewportLifecycle.dispose();
         window.removeEventListener('keydown', handleMdCopy, true);
         cleanupTerminalScrollPin(term);
         unregisterTerminalPerf();
-          detachWebglRenderer();
-	        writeQueueChunksRef.current = 0;
+          rendererLifecycle.dispose();
+        readyFiredRef.current = false;
+        lastResizeSnapshotRef.current = null;
+        writeQueueChunksRef.current = 0;
         writeQueueBytesRef.current = 0;
+        appliedFontSizeRef.current = null;
+        startupSnapshotRef.current = createEmptyStartupSnapshot();
         xtermRef.current = null;
         term.dispose();
       };
-    }, [bounceTerminalResize, logTerminal, resizeTerminal]);
+    }, [applyMeasuredTerminalGeometry, logTerminal, resizeTerminal]);
 
     // Handle fontSize changes after terminal is created
     useEffect(() => {
@@ -970,8 +893,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const container = containerRef.current;
       if (!term || !container) return;
 
+      if (appliedFontSizeRef.current === fontSize) {
+        if (!readyFiredRef.current) {
+          startupSnapshotRef.current.skippedInitialFontEffect = true;
+        }
+        return;
+      }
+
       // Update xterm font size
       term.options.fontSize = fontSize;
+      appliedFontSizeRef.current = fontSize;
 
       // Recalculate dimensions with new font size
       const dims = getScaledDimensions(container, term, fontSize);
@@ -985,47 +916,52 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             container: getContainerDebugInfo(container),
           });
         }
-        recordDiags('font-change', dims.cols, dims.rows, term.cols, term.rows, dims.diagnostics);
-        term.resize(dims.cols, dims.rows);
-        onResizeRef.current?.(dims.cols, dims.rows);
+        if (!readyFiredRef.current) {
+          startupSnapshotRef.current.fontEffectAppliedBeforeReady = true;
+        }
+        applyMeasuredTerminalGeometry(term, dims, {
+          readySource: 'font_change',
+          readyReason: 'font-change',
+          resizeReason: 'font-change',
+        });
       }
-    }, [fontSize, recordDiags]);
+    }, [applyMeasuredTerminalGeometry, fontSize, logTerminal]);
 
-	    const handleCopyDebugLog = useCallback(() => {
+    const handleCopyDebugLog = useCallback(() => {
       const log = formatResizeLog();
       navigator.clipboard.writeText(log).then(
         () => logTerminal('log', 'Terminal debug log copied to clipboard'),
         (err) => logTerminal('warn', 'Failed to copy resize log', { error: String(err) }),
       );
-	    }, [logTerminal]);
+    }, [logTerminal]);
 
     const handleToggleRenderer = useCallback(() => {
       const nextMode = getTerminalRendererConfig().mode === 'webgl' ? 'dom' : 'webgl';
       setTerminalRendererConfig(nextMode);
     }, []);
 
-	    return (
-	      <div ref={containerRef} className="terminal-container">
-	        {debugDisplay && (
-	          <div className="terminal-debug-badge">
+    return (
+      <div ref={containerRef} className="terminal-container">
+        {debugDisplay && (
+          <div className="terminal-debug-badge">
             <span className="terminal-debug-dims">{debugDisplay.cols}×{debugDisplay.rows}</span>
             <span className="terminal-debug-sep">|</span>
             <span>ctr:{Math.round(debugDisplay.containerWidth)}×{Math.round(debugDisplay.containerHeight)}</span>
             <span className="terminal-debug-sep">|</span>
             <span>cell:{debugDisplay.cellWidth.toFixed(1)} ({debugDisplay.cellSource})</span>
             <span className="terminal-debug-sep">|</span>
-	            <span>font:{debugDisplay.fontSize}</span>
-	            <span className="terminal-debug-sep">|</span>
-	            <span>rend:{rendererDisplayMode}</span>
-	            <span className="terminal-debug-sep">|</span>
-	            <span className="terminal-debug-trigger">{debugDisplay.trigger}</span>
-	            <button className="terminal-debug-toggle" onClick={handleToggleRenderer}>
+            <span>font:{debugDisplay.fontSize}</span>
+            <span className="terminal-debug-sep">|</span>
+            <span>rend:{rendererDisplayMode}</span>
+            <span className="terminal-debug-sep">|</span>
+            <span className="terminal-debug-trigger">{debugDisplay.trigger}</span>
+            <button className="terminal-debug-toggle" onClick={handleToggleRenderer}>
                 Renderer {rendererConfig.mode === 'webgl' ? 'WebGL' : 'DOM'}
               </button>
-	            <button className="terminal-debug-copy" onClick={handleCopyDebugLog}>Copy</button>
-	          </div>
-	        )}
-	      </div>
-	    );
+            <button className="terminal-debug-copy" onClick={handleCopyDebugLog}>Copy</button>
+          </div>
+        )}
+      </div>
+    );
   }
 );

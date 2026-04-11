@@ -1,4 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core';
+import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
+import { recordPtyListenerError } from '../utils/ptyPerf';
 
 export interface PtySpawnArgs {
   id: string;
@@ -21,8 +23,33 @@ export interface PtySpawnArgs {
   pi_executable?: string;
 }
 
+export interface PtyAttachArgs {
+  id: string;
+  cols: number;
+  rows: number;
+  shell?: boolean;
+  agent?: string;
+  reason?: string;
+  policy?: PtyAttachPolicy;
+}
+
+export type PtyAttachPolicy =
+  | 'fresh_spawn'
+  | 'relaunch_restore'
+  | 'same_app_remount';
+
+export type PtyDataEventSource =
+  | 'attach_replay';
+
+export interface PtyReplaySegment {
+  cols: number;
+  rows: number;
+  data: string;
+}
+
 export type PtyEventPayload =
-  | { event: 'data'; id: string; data: string; seq?: number }
+  | { event: 'data'; id: string; data: string; seq?: number; source?: PtyDataEventSource }
+  | { event: 'local_resize'; id: string; cols: number; rows: number; source?: PtyDataEventSource }
   | { event: 'exit'; id: string; code: number; signal?: string }
   | { event: 'error'; id: string; error: string }
   | { event: 'transcript'; id: string; matched: boolean }
@@ -32,8 +59,12 @@ type PtyEventHandler = (event: { payload: PtyEventPayload }) => void;
 
 export interface PtyBackend {
   spawn: (args: PtySpawnArgs) => Promise<void>;
+  attach: (
+    args: PtyAttachArgs,
+    options?: { forceResizeBeforeAttach?: boolean }
+  ) => Promise<void>;
   write: (id: string, data: string, source?: string) => Promise<void>;
-  resize: (id: string, cols: number, rows: number) => Promise<void>;
+  resize: (id: string, cols: number, rows: number, reason?: string) => Promise<void>;
   kill: (id: string) => Promise<void>;
 }
 
@@ -63,8 +94,24 @@ export function emitPtyEvent(payload: PtyEventPayload) {
       (window as unknown as { __TEST_PTY_EVENTS?: PtyEventPayload[] }).__TEST_PTY_EVENTS = [payload];
     }
   }
+  let listenerIndex = 0;
   for (const handler of listeners) {
-    handler(event);
+    listenerIndex += 1;
+    try {
+      handler(event);
+    } catch (error) {
+      recordPtyListenerError(payload.event, payload.id, error);
+      recordPaneRuntimeDebugEvent({
+        scope: 'pty-bridge',
+        runtimeId: payload.id,
+        message: 'PTY listener threw while handling event',
+        details: {
+          event: payload.event,
+          listenerIndex,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 }
 
@@ -112,7 +159,25 @@ export async function ptyWrite(request: { id: string; data: string; source?: str
   await backend.write(request.id, request.data, request.source);
 }
 
-export async function ptyResize(request: { id: string; cols: number; rows: number }) {
+export async function ptyAttach(request: {
+  args: PtyAttachArgs;
+  forceResizeBeforeAttach?: boolean;
+}) {
+  if (mockEnabled()) {
+    if (!mockSessions.has(request.args.id)) {
+      return;
+    }
+    return;
+  }
+  if (!backend) {
+    throw new Error('PTY backend is not configured');
+  }
+  await backend.attach(request.args, {
+    forceResizeBeforeAttach: request.forceResizeBeforeAttach,
+  });
+}
+
+export async function ptyResize(request: { id: string; cols: number; rows: number; reason?: string }) {
   if (mockEnabled()) {
     if (!mockSessions.has(request.id)) {
       return;
@@ -122,7 +187,7 @@ export async function ptyResize(request: { id: string; cols: number; rows: numbe
   if (!backend) {
     throw new Error('PTY backend is not configured');
   }
-  await backend.resize(request.id, request.cols, request.rows);
+  await backend.resize(request.id, request.cols, request.rows, request.reason);
 }
 
 export async function ptyKill(request: { id: string }) {

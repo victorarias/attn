@@ -61,6 +61,8 @@ type SpawnOptions struct {
 type AttachInfo struct {
 	Scrollback          []byte
 	ScrollbackTruncated bool
+	ReplaySegments      []ReplaySegment
+	ReplayTruncated     bool
 	LastSeq             uint32
 	Cols                uint16
 	Rows                uint16
@@ -205,13 +207,13 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		ptmx:        ptmx,
 		cmd:         cmd,
 		scrollback:  NewRingBuffer(m.scrollbackSize),
+		replayLog:   NewReplayLog(m.scrollbackSize),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
+		startedAt:   time.Now(),
 	}
-	if agent == "codex" {
-		session.screen = newVirtualScreen(opts.Cols, opts.Rows)
-	}
+	session.screen = newVirtualScreen(opts.Cols, opts.Rows)
 
 	m.mu.Lock()
 	m.sessions[opts.ID] = session
@@ -257,6 +259,9 @@ func (m *Manager) Attach(sessionID, subscriberID string, send func([]byte, uint3
 		return AttachInfo{}, errors.New("subscriber send callback is required")
 	}
 	session.addSubscriber(subscriberID, send, onDrop)
+	if session.claimFirstAttach() {
+		session.flushStartupQueryResponses(m.logf)
+	}
 	return session.info(), nil
 }
 

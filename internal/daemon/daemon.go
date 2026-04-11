@@ -1137,6 +1137,25 @@ func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 	_ = d.ptyBackend.Remove(context.Background(), sessionID)
 }
 
+func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protocol.Session {
+	session := d.store.Get(sessionID)
+	if session == nil && d.hubManager != nil {
+		session = d.hubManager.RemoteSession(sessionID)
+	}
+	d.killWorkspaceRuntimesForSession(sessionID)
+	d.terminateSession(sessionID, sig)
+	d.handleReviewLoopSourceSessionExit(sessionID)
+	d.setPendingInputSource(sessionID, "")
+	d.store.Remove(sessionID)
+	if d.hubManager != nil {
+		d.hubManager.ForgetSession(sessionID)
+	}
+	d.clearLongRunTracking(sessionID)
+	d.clearClassifiedTurn(sessionID)
+	d.clearClassifyingTurn(sessionID)
+	return session
+}
+
 func (d *Daemon) handlePTYState(sessionID, state string) {
 	session := d.store.Get(sessionID)
 	if session == nil {
@@ -1538,24 +1557,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 }
 
 func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage) {
-	// Get session before removing for broadcast
-	sessions := d.store.List("")
-	var session *protocol.Session
-	for _, s := range sessions {
-		if s.ID == msg.ID {
-			session = s
-			break
-		}
-	}
-
-	d.killWorkspaceRuntimesForSession(msg.ID)
-	d.terminateSession(msg.ID, syscall.SIGTERM)
-	d.handleReviewLoopSourceSessionExit(msg.ID)
-	d.setPendingInputSource(msg.ID, "")
-	d.store.Remove(msg.ID)
-	d.clearLongRunTracking(msg.ID)
-	d.clearClassifiedTurn(msg.ID)
-	d.clearClassifyingTurn(msg.ID)
+	session := d.unregisterSession(msg.ID, syscall.SIGTERM)
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients

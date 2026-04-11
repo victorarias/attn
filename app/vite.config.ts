@@ -47,6 +47,12 @@ export default defineConfig(async () => ({
     globals: true,
     environment: "happy-dom",
     setupFiles: ["./src/test/setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}"],
+    include: [
+      "src/**/*.test.{ts,tsx}",
+      "scripts/real-app-harness/**/*.test.{ts,mjs}",
+    ],
+    environmentMatchGlobs: [
+      ["scripts/real-app-harness/**/*.test.{ts,mjs}", "node"],
+    ],
   },
 }));

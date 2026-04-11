@@ -6,6 +6,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-10]
+
+### Added
+- **Packaged-App Terminal Validation**: Added a serial packaged-app regression matrix plus relaunch, resize, focus, redraw, and remote cleanup scenarios, along with deterministic replay fixtures and richer visible-content and native-render diagnostics for validating real terminal behavior instead of relying on screenshots or full-buffer text alone.
+
+### Changed
+- **Terminal Runtime And Harness Discipline**: Reorganized PTY attach, replay, geometry, and pane lifecycle handling into clearer frontend runtime helpers, and tightened packaged-app preflight, build fingerprint checks, scenario locking, and remote isolation so the app and harness consistently exercise the intended binaries and session state.
+
+### Fixed
+- **Split, Relaunch, And Replay Stability**: Improved split-close recovery, focus handoff, relaunch restore behavior, Codex header preservation, same-direction split sizing, hidden-session geometry handoff, remote split readiness, and worker cleanup so terminals keep the right content, width, and responsiveness across close, remount, resize, and app-reopen paths.
+
+### Removed
+- **Temporary Relaunch Fuzz Canary**: Removed the packaged-app `TR-206` relaunch fuzz scenario after replacing it with more deterministic replay-level coverage.
+
 ## [2026-04-07]
 
 ### Fixed

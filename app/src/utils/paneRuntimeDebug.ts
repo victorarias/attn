@@ -26,6 +26,12 @@ declare global {
 }
 
 let fileWriteChain: Promise<void> = Promise.resolve();
+type PaneRuntimeDebugEventDetails =
+  | Record<string, unknown>
+  | (() => Record<string, unknown> | undefined);
+type PaneRuntimeDebugEventInput =
+  Omit<PaneRuntimeDebugEvent, 'at' | 'details'>
+  & { details?: PaneRuntimeDebugEventDetails };
 
 async function appendDebugEventToFile(entry: PaneRuntimeDebugEvent) {
   if (!isTauri() || !isPaneRuntimeDebugEnabled()) {
@@ -120,14 +126,19 @@ export function isPaneRuntimeDebugEnabled(): boolean {
   }
 }
 
-export function recordPaneRuntimeDebugEvent(event: Omit<PaneRuntimeDebugEvent, 'at'>) {
+export function recordPaneRuntimeDebugEvent(event: PaneRuntimeDebugEventInput) {
   if (typeof window === 'undefined') {
     return;
   }
+  if (!isPaneRuntimeDebugEnabled()) {
+    return;
+  }
   ensureGlobals();
+  const details = resolvePaneRuntimeDebugDetails(event.details);
   const entry: PaneRuntimeDebugEvent = {
     at: new Date().toISOString(),
     ...event,
+    details,
   };
   const events = window.__ATTN_PANE_DEBUG_EVENTS || [];
   events.push(entry);
@@ -137,23 +148,28 @@ export function recordPaneRuntimeDebugEvent(event: Omit<PaneRuntimeDebugEvent, '
   window.__ATTN_PANE_DEBUG_EVENTS = events;
   enqueueDebugEventFileWrite(entry);
 
-  if (isPaneRuntimeDebugEnabled()) {
-    const prefix = `[PaneDebug:${event.scope}] ${event.message}`;
-    if (event.details) {
-      console.log(prefix, {
-        sessionId: event.sessionId,
-        paneId: event.paneId,
-        runtimeId: event.runtimeId,
-        ...event.details,
-      });
-    } else {
-      console.log(prefix, {
-        sessionId: event.sessionId,
-        paneId: event.paneId,
-        runtimeId: event.runtimeId,
-      });
-    }
+  const prefix = `[PaneDebug:${event.scope}] ${event.message}`;
+  if (details) {
+    console.log(prefix, {
+      sessionId: event.sessionId,
+      paneId: event.paneId,
+      runtimeId: event.runtimeId,
+      ...details,
+    });
+  } else {
+    console.log(prefix, {
+      sessionId: event.sessionId,
+      paneId: event.paneId,
+      runtimeId: event.runtimeId,
+    });
   }
+}
+
+function resolvePaneRuntimeDebugDetails(details: PaneRuntimeDebugEventDetails | undefined) {
+  if (typeof details === 'function') {
+    return details();
+  }
+  return details;
 }
 
 export function activeElementSummary(): Record<string, unknown> {

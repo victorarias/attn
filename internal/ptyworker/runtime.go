@@ -34,6 +34,27 @@ func previewWorkerBytesForLog(data []byte) string {
 	return preview
 }
 
+func replaySegmentsFromPTYAttachInfo(segments []pty.ReplaySegment) []ReplaySegment {
+	return cloneReplaySegments(segments, func(segment pty.ReplaySegment) ReplaySegment {
+		return ReplaySegment{
+			Cols: segment.Cols,
+			Rows: segment.Rows,
+			Data: append([]byte(nil), segment.Data...),
+		}
+	})
+}
+
+func cloneReplaySegments[From any, To any](segments []From, convert func(From) To) []To {
+	if len(segments) == 0 {
+		return nil
+	}
+	out := make([]To, 0, len(segments))
+	for _, segment := range segments {
+		out = append(out, convert(segment))
+	}
+	return out
+}
+
 var exitedSessionCleanupTTL = 45 * time.Second
 
 const (
@@ -707,6 +728,8 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 		c.sendResult(req.ID, AttachResult{
 			Scrollback:          info.Scrollback,
 			ScrollbackTruncated: info.ScrollbackTruncated,
+			ReplaySegments:      replaySegmentsFromPTYAttachInfo(info.ReplaySegments),
+			ReplayTruncated:     info.ReplayTruncated,
 			LastSeq:             info.LastSeq,
 			Cols:                info.Cols,
 			Rows:                info.Rows,

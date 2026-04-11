@@ -15,6 +15,15 @@ function workspacePaneIds(workspace) {
   return (workspace?.panes || []).map((pane) => pane.pane_id);
 }
 
+function pruneWorkspacesBySessions(sessionsById, workspacesBySessionId) {
+  for (const sessionId of Array.from(workspacesBySessionId.keys())) {
+    if (sessionsById.has(sessionId)) {
+      continue;
+    }
+    workspacesBySessionId.delete(sessionId);
+  }
+}
+
 export class DaemonObserver {
   constructor({
     wsUrl = 'ws://127.0.0.1:9849/ws',
@@ -353,6 +362,7 @@ export class DaemonObserver {
         for (const session of data.sessions || []) {
           this.sessionsById.set(session.id, session);
         }
+        pruneWorkspacesBySessions(this.sessionsById, this.workspacesBySessionId);
         break;
       case 'endpoint_status_changed':
         if (data.endpoint?.id) {
@@ -381,7 +391,11 @@ export class DaemonObserver {
       case 'workspace_snapshot':
       case 'workspace_updated':
         if (data.workspace?.session_id) {
-          this.workspacesBySessionId.set(data.workspace.session_id, data.workspace);
+          if (this.sessionsById.has(data.workspace.session_id)) {
+            this.workspacesBySessionId.set(data.workspace.session_id, data.workspace);
+          } else {
+            this.workspacesBySessionId.delete(data.workspace.session_id);
+          }
         }
         break;
       default:

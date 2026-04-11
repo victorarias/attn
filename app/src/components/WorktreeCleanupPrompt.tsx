@@ -74,8 +74,14 @@ export function WorktreeCleanupPrompt({
 
   useEffect(() => {
     if (!isVisible) return;
-    const raf = requestAnimationFrame(() => keepRef.current?.focus());
-    return () => cancelAnimationFrame(raf);
+    const focusKeep = () => keepRef.current?.focus();
+    focusKeep();
+    const raf = requestAnimationFrame(focusKeep);
+    const timeoutId = window.setTimeout(focusKeep, 50);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timeoutId);
+    };
   }, [isVisible]);
 
   if (!isVisible) return null;
@@ -99,13 +105,18 @@ export function WorktreeCleanupPrompt({
           Keep worktree <span className="cleanup-branch">{displayName}</span> for later?
         </div>
         <div className="cleanup-actions">
-          <button ref={keepRef} className="cleanup-btn keep" onClick={handleKeep}>
+          <button ref={keepRef} type="button" autoFocus className="cleanup-btn keep" onClick={handleKeep}>
             Keep
           </button>
-          <button ref={deleteRef} className="cleanup-btn delete" onClick={handleDelete}>
+          <button ref={deleteRef} type="button" className="cleanup-btn delete" onClick={handleDelete}>
             Delete
           </button>
-          <button ref={alwaysRef} className="cleanup-btn always" onClick={handleAlwaysKeep}>
+          <button
+            ref={alwaysRef}
+            type="button"
+            className="cleanup-btn always"
+            onClick={handleAlwaysKeep}
+          >
             Always keep (this app run)
           </button>
         </div>

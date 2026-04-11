@@ -137,16 +137,25 @@ func (m *Manager) Start(parent context.Context) {
 
 func (m *Manager) Stop() {
 	changed := false
+	shutdownTargets := make([]string, 0)
+	seenTargets := make(map[string]struct{})
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.cancel != nil {
 		m.cancel()
 	}
 	for _, runtime := range m.runtimes {
 		changed = changed || len(runtime.sessions) > 0
+		if target := isolatedRemoteShutdownTarget(runtime.record); target != "" {
+			if _, exists := seenTargets[target]; !exists {
+				seenTargets[target] = struct{}{}
+				shutdownTargets = append(shutdownTargets, target)
+			}
+		}
 		m.stopRuntimeLocked(runtime)
 	}
 	m.started = false
+	m.mu.Unlock()
+	m.stopIsolatedRemoteDaemons(shutdownTargets)
 	if changed {
 		go m.publishSessionsChanged()
 	}
@@ -250,17 +259,56 @@ func (m *Manager) UpdateEndpoint(id string, update store.EndpointUpdate) (*store
 
 func (m *Manager) RemoveEndpoint(id string) error {
 	changed := false
+	shutdownTarget := ""
 	m.mu.Lock()
 	if runtime, ok := m.runtimes[id]; ok {
 		changed = len(runtime.sessions) > 0
+		shutdownTarget = isolatedRemoteShutdownTarget(runtime.record)
 		m.stopRuntimeLocked(runtime)
 		delete(m.runtimes, id)
 	}
 	m.mu.Unlock()
+	m.stopIsolatedRemoteDaemons(nonEmptyStrings(shutdownTarget))
 	if changed {
 		m.publishSessionsChanged()
 	}
 	return m.store.RemoveEndpoint(id)
+}
+
+func isolatedRemoteShutdownTarget(record store.EndpointRecord) string {
+	if !remoteHarnessCleanupEnabled() {
+		return ""
+	}
+	target := strings.TrimSpace(record.SSHTarget)
+	if target == "" {
+		return ""
+	}
+	return target
+}
+
+func nonEmptyStrings(values ...string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
+}
+
+func (m *Manager) stopIsolatedRemoteDaemons(targets []string) {
+	if m == nil || m.bootstrapper == nil || len(targets) == 0 || !remoteHarnessCleanupEnabled() {
+		return
+	}
+	for _, target := range targets {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := m.bootstrapper.StopRemoteDaemon(ctx, target)
+		cancel()
+		if err != nil {
+			m.logf("remote harness daemon cleanup failed for %s: %v", target, err)
+		}
+	}
 }
 
 func (m *Manager) startRuntimeLocked(id string) {
@@ -459,9 +507,59 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 		default:
 			if forwardsRawEvent(peek.Event) {
 				m.observeRemoteEvent(id, peek.Event, data)
+				m.logRemoteRawEvent(id, peek.Event, data)
 				m.publishRawEvent(data)
 			}
 		}
+	}
+}
+
+func (m *Manager) logRemoteRawEvent(endpointID, event string, data []byte) {
+	if m.logf == nil {
+		return
+	}
+
+	switch event {
+	case protocol.EventPtyOutput:
+		var msg struct {
+			ID   *string `json:"id"`
+			Seq  *int    `json:"seq"`
+			Data *string `json:"data"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			m.logf("remote raw event relay: endpoint=%s event=%s decode_err=%v", endpointID, event, err)
+			return
+		}
+		m.logf(
+			"remote pty_output relay: endpoint=%s id=%s seq=%d base64_bytes=%d",
+			endpointID,
+			protocol.Deref(msg.ID),
+			protocol.Deref(msg.Seq),
+			len(protocol.Deref(msg.Data)),
+		)
+	case protocol.EventAttachResult:
+		var msg struct {
+			ID      *string `json:"id"`
+			Success bool    `json:"success"`
+			LastSeq *int    `json:"last_seq"`
+			Cols    *int    `json:"cols"`
+			Rows    *int    `json:"rows"`
+			Error   *string `json:"error"`
+		}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			m.logf("remote raw event relay: endpoint=%s event=%s decode_err=%v", endpointID, event, err)
+			return
+		}
+		m.logf(
+			"remote attach_result relay: endpoint=%s id=%s success=%v last_seq=%d size=%dx%d error=%q",
+			endpointID,
+			protocol.Deref(msg.ID),
+			msg.Success,
+			protocol.Deref(msg.LastSeq),
+			protocol.Deref(msg.Cols),
+			protocol.Deref(msg.Rows),
+			protocol.Deref(msg.Error),
+		)
 	}
 }
 
@@ -579,6 +677,56 @@ func (m *Manager) EndpointIDForSession(sessionID string) (string, bool) {
 		return pending.endpointID, true
 	}
 	return "", false
+}
+
+func (m *Manager) RemoteSession(sessionID string) *protocol.Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, runtime := range m.runtimes {
+		if session, ok := runtime.sessions[sessionID]; ok {
+			copy := session
+			if len(session.Todos) > 0 {
+				copy.Todos = append([]string(nil), session.Todos...)
+			}
+			return &copy
+		}
+	}
+	return nil
+}
+
+func (m *Manager) ForgetSession(sessionID string) bool {
+	if strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	changed := false
+	delete(m.pending, sessionID)
+	for _, runtime := range m.runtimes {
+		runtimeChanged := false
+		if runtime.sessions != nil {
+			if _, ok := runtime.sessions[sessionID]; ok {
+				delete(runtime.sessions, sessionID)
+				runtimeChanged = true
+				changed = true
+			}
+		}
+		if runtime.workspaces != nil {
+			if _, ok := runtime.workspaces[sessionID]; ok {
+				delete(runtime.workspaces, sessionID)
+				runtimeChanged = true
+				changed = true
+			}
+		}
+		if runtimeChanged {
+			count := len(runtime.sessions)
+			runtime.info.SessionCount = protocol.Ptr(count)
+		}
+	}
+
+	return changed
 }
 
 func (m *Manager) EndpointIDForPTYTarget(targetID string) (string, bool) {
@@ -910,6 +1058,11 @@ func (m *Manager) replaceRemoteWorkspaces(id string, workspaces []protocol.Works
 	}
 	next := make(map[string]protocol.WorkspaceSnapshot, len(workspaces))
 	for _, workspace := range workspaces {
+		if runtime.sessions != nil {
+			if _, ok := runtime.sessions[workspace.SessionID]; !ok {
+				continue
+			}
+		}
 		next[workspace.SessionID] = workspace
 	}
 	if workspacesEqual(runtime.workspaces, next) {
@@ -925,6 +1078,11 @@ func (m *Manager) upsertRemoteWorkspace(id string, workspace protocol.WorkspaceS
 	runtime, ok := m.runtimes[id]
 	if !ok {
 		return false
+	}
+	if runtime.sessions != nil {
+		if _, ok := runtime.sessions[workspace.SessionID]; !ok {
+			return false
+		}
 	}
 	if runtime.workspaces == nil {
 		runtime.workspaces = make(map[string]protocol.WorkspaceSnapshot)

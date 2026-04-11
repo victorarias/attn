@@ -83,6 +83,8 @@ func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID stri
 	return AttachInfo{
 		Scrollback:          info.Scrollback,
 		ScrollbackTruncated: info.ScrollbackTruncated,
+		ReplaySegments:      replaySegmentsFromPTY(info.ReplaySegments),
+		ReplayTruncated:     info.ReplayTruncated,
 		LastSeq:             info.LastSeq,
 		Cols:                info.Cols,
 		Rows:                info.Rows,
@@ -98,6 +100,16 @@ func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID stri
 		ScreenCursorVisible: info.ScreenCursorVisible,
 		ScreenSnapshotFresh: info.ScreenSnapshotFresh,
 	}, stream, nil
+}
+
+func replaySegmentsFromPTY(segments []pty.ReplaySegment) []ReplaySegment {
+	return cloneReplaySegments(segments, func(segment pty.ReplaySegment) ReplaySegment {
+		return ReplaySegment{
+			Cols: segment.Cols,
+			Rows: segment.Rows,
+			Data: append([]byte(nil), segment.Data...),
+		}
+	})
 }
 
 func (b *EmbeddedBackend) Input(_ context.Context, sessionID string, data []byte) error {

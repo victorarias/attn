@@ -46,6 +46,12 @@ enum HeatState {
   hot,
 }
 
+enum AttachPolicy {
+  fresh_spawn,
+  relaunch_restore,
+  same_app_remount,
+}
+
 enum ReviewLoopStatus {
   running,
   waiting_for_agent_advance,
@@ -211,6 +217,12 @@ model WorkspaceSnapshot {
   layout_json: string;
   panes: WorkspacePane[];
   updated_at?: string;
+}
+
+model ReplaySegment {
+  cols: int32;
+  rows: int32;
+  data: string; // base64 bytes
 }
 
 model EndpointCapabilities {
@@ -687,6 +699,7 @@ model SpawnSessionMessage {
 model AttachSessionMessage {
   cmd: "attach_session";
   id: string;
+  attach_policy?: AttachPolicy;
 }
 
 model DetachSessionMessage {
@@ -1272,6 +1285,7 @@ model AttachResultMessage {
   success: boolean;
   scrollback?: string;           // base64 bytes
   scrollback_truncated?: boolean;
+  replay_segments?: ReplaySegment[];
   screen_snapshot?: string;      // base64 ANSI replay of visible frame
   screen_rows?: int32;
   screen_cols?: int32;

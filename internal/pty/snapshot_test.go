@@ -86,6 +86,60 @@ func TestVirtualScreenSnapshot_PreservesForegroundColor(t *testing.T) {
 	}
 }
 
+func TestVirtualScreenSnapshot_PreservesTrueColorForeground(t *testing.T) {
+	screen := newVirtualScreen(10, 4)
+	screen.Observe([]byte("\x1b[38;2;17;34;51mT\x1b[0m"))
+
+	snap, ok := screen.Snapshot()
+	if !ok {
+		t.Fatal("expected snapshot to be available")
+	}
+
+	replayed := vt10x.New(vt10x.WithSize(int(snap.cols), int(snap.rows)))
+	if _, err := replayed.Write(snap.payload); err != nil {
+		t.Fatalf("replay write error: %v", err)
+	}
+
+	replayed.Lock()
+	cell := replayed.Cell(0, 0)
+	replayed.Unlock()
+
+	want := vt10x.Color(0x112233)
+	if cell.Char != 'T' {
+		t.Fatalf("cell(0,0).char = %q, want T", cell.Char)
+	}
+	if cell.FG != want {
+		t.Fatalf("cell(0,0).fg = %#x, want %#x", uint32(cell.FG), uint32(want))
+	}
+}
+
+func TestVirtualScreenSnapshot_PreservesTrueColorBackground(t *testing.T) {
+	screen := newVirtualScreen(10, 4)
+	screen.Observe([]byte("\x1b[48;2;68;85;102mB\x1b[0m"))
+
+	snap, ok := screen.Snapshot()
+	if !ok {
+		t.Fatal("expected snapshot to be available")
+	}
+
+	replayed := vt10x.New(vt10x.WithSize(int(snap.cols), int(snap.rows)))
+	if _, err := replayed.Write(snap.payload); err != nil {
+		t.Fatalf("replay write error: %v", err)
+	}
+
+	replayed.Lock()
+	cell := replayed.Cell(0, 0)
+	replayed.Unlock()
+
+	want := vt10x.Color(0x445566)
+	if cell.Char != 'B' {
+		t.Fatalf("cell(0,0).char = %q, want B", cell.Char)
+	}
+	if cell.BG != want {
+		t.Fatalf("cell(0,0).bg = %#x, want %#x", uint32(cell.BG), uint32(want))
+	}
+}
+
 func TestScreenSnapshotFromReplay(t *testing.T) {
 	snap, ok := ScreenSnapshotFromReplay([]byte("hello\r\nworld"), 20, 6)
 	if !ok {
@@ -136,22 +190,24 @@ func TestSessionInfo_IncludesScreenSnapshotWhenAvailable(t *testing.T) {
 	}
 }
 
-func TestSessionInfo_OmitsScreenSnapshotForNonCodexSessions(t *testing.T) {
+func TestSessionInfo_IncludesScreenSnapshotForShellSessions(t *testing.T) {
 	session := &Session{
 		id:         "shell-1",
 		agent:      "shell",
 		cols:       12,
 		rows:       4,
 		scrollback: NewRingBuffer(1024),
+		screen:     newVirtualScreen(12, 4),
 		running:    true,
 	}
+	session.screen.Observe([]byte("prompt"))
 
 	info := session.info()
-	if len(info.ScreenSnapshot) != 0 {
-		t.Fatalf("expected no screen snapshot, got %d bytes", len(info.ScreenSnapshot))
+	if len(info.ScreenSnapshot) == 0 {
+		t.Fatal("expected non-empty screen snapshot for shell session")
 	}
-	if info.ScreenSnapshotFresh {
-		t.Fatal("expected ScreenSnapshotFresh=false for non-codex session")
+	if !info.ScreenSnapshotFresh {
+		t.Fatal("expected ScreenSnapshotFresh=true for shell session")
 	}
 }
 

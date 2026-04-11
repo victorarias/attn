@@ -57,3 +57,35 @@ func TestShouldInstallRemoteBinary(t *testing.T) {
 		})
 	}
 }
+
+func TestIsRemoteHarnessOverridePath(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: false},
+		{value: "/home/victor/.attn/attn.sock", want: false},
+		{value: "/home/victor/.attn/harness/run-123/attn.sock", want: true},
+		{value: "~/.attn/harness/run-123/bin/attn", want: true},
+	}
+
+	for _, tt := range tests {
+		if got := isRemoteHarnessOverridePath(tt.value); got != tt.want {
+			t.Fatalf("isRemoteHarnessOverridePath(%q) = %v, want %v", tt.value, got, tt.want)
+		}
+	}
+}
+
+func TestRemoteHarnessCleanupEnabled(t *testing.T) {
+	t.Setenv("ATTN_REMOTE_SOCKET_PATH", "")
+	t.Setenv("ATTN_REMOTE_DB_PATH", "")
+	t.Setenv("ATTN_REMOTE_ATTN_BIN", "")
+	if remoteHarnessCleanupEnabled() {
+		t.Fatal("remoteHarnessCleanupEnabled() = true, want false without harness overrides")
+	}
+
+	t.Setenv("ATTN_REMOTE_SOCKET_PATH", "/home/victor/.attn/harness/run-456/attn.sock")
+	if !remoteHarnessCleanupEnabled() {
+		t.Fatal("remoteHarnessCleanupEnabled() = false, want true with harness socket override")
+	}
+}

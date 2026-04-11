@@ -301,22 +301,22 @@ test.describe('Keyboard Shortcuts', () => {
 
       await expect(keep).toBeFocused();
 
-      await page.keyboard.press('ArrowRight');
+      await keep.press('ArrowRight');
       await expect(del).toBeFocused();
 
-      await page.keyboard.press('ArrowRight');
+      await del.press('ArrowRight');
       await expect(always).toBeFocused();
 
-      await page.keyboard.press('ArrowLeft');
+      await always.press('ArrowLeft');
       await expect(del).toBeFocused();
 
-      await page.keyboard.press('Tab');
+      await del.press('Tab');
       await expect(always).toBeFocused();
 
-      await page.keyboard.press('Tab');
+      await always.press('Tab');
       await expect(keep).toBeFocused();
 
-      await page.keyboard.press('Shift+Tab');
+      await keep.press('Shift+Tab');
       await expect(always).toBeFocused();
     });
   });

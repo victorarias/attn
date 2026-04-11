@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { waitForPaneVisible } from './scenarioAssertions.mjs';
 
 export function parseCommonArgs(argv) {
   const options = {
@@ -47,6 +48,48 @@ export async function captureScreenshot(driver, outputPath) {
     console.warn(`[RealAppHarness] Screenshot skipped: ${message}`);
     return false;
   }
+}
+
+export async function launchFreshAppAndConnect(client, observer) {
+  await client.launchFreshApp();
+  await client.waitForManifest(20_000);
+  await client.waitForReady(20_000);
+  await client.waitForFrontendResponsive(20_000);
+  await observer.connect();
+}
+
+export async function relaunchAppAndConnect(client, observer) {
+  await client.quitApp();
+  await launchFreshAppAndConnect(client, observer);
+}
+
+export async function createSessionAndWaitForMain({
+  client,
+  observer,
+  cwd,
+  label,
+  agent,
+  endpointId = null,
+  sessionWaitMs = 30_000,
+  promptReadyFn = null,
+  promptReadyTimeoutMs = 45_000,
+  waitForMainVisible = true,
+  mainWaitMs = 20_000,
+}) {
+  const result = await client.request('create_session', {
+    cwd,
+    label,
+    agent,
+    ...(endpointId ? { endpoint_id: endpointId } : {}),
+  });
+  await observer.waitForSession({ id: result.sessionId, timeoutMs: sessionWaitMs });
+  if (typeof promptReadyFn === 'function') {
+    await promptReadyFn(client, result.sessionId, promptReadyTimeoutMs);
+  }
+  if (waitForMainVisible) {
+    await waitForPaneVisible(client, result.sessionId, 'main', mainWaitMs);
+  }
+  return result.sessionId;
 }
 
 export function timestampSlug() {

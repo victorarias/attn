@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
 
 function printHelp() {
   console.log(`Usage: node scripts/real-app-harness/capture-app-screenshot.mjs [options]
 
 Options:
-  --path <file>      Save screenshot to an explicit path
+  --path <file>      Save a native macOS window screenshot to an explicit path
   --launch           Launch ~/Applications/attn.app before capturing
   --fresh-launch     Quit and relaunch ~/Applications/attn.app before capturing
   --help, -h         Show this help
@@ -58,8 +59,8 @@ async function main() {
   await client.waitForReady(20_000);
   await client.waitForFrontendResponsive(20_000);
 
-  const payload = outputPath ? { path: outputPath } : {};
-  const result = await client.request('capture_screenshot', payload, { timeoutMs: 20_000 });
+  const targetPath = outputPath || '/tmp/attn-app-window.png';
+  const result = await captureFrontWindowScreenshot(targetPath);
   console.log(JSON.stringify(result, null, 2));
 }
 

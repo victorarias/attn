@@ -30,8 +30,10 @@ import (
 var (
 	// Backward-compatible ldflags targets for builders that still inject
 	// build metadata into the main package instead of internal/buildinfo.
-	version   = ""
-	buildTime = ""
+	version           = ""
+	buildTime         = ""
+	sourceFingerprint = ""
+	gitCommit         = ""
 )
 
 // hookInput represents the JSON input from Claude Code hooks
@@ -64,11 +66,26 @@ func applyLegacyBuildInfoOverrides() {
 			buildinfo.BuildTime = legacyBuildTime
 		}
 	}
+	if buildinfo.SourceFingerprint == "unknown" {
+		if legacySourceFingerprint := strings.TrimSpace(sourceFingerprint); legacySourceFingerprint != "" {
+			buildinfo.SourceFingerprint = legacySourceFingerprint
+		}
+	}
+	if buildinfo.GitCommit == "unknown" {
+		if legacyGitCommit := strings.TrimSpace(gitCommit); legacyGitCommit != "" {
+			buildinfo.GitCommit = legacyGitCommit
+		}
+	}
 }
 
 func main() {
 	if isProtocolVersionCommand(os.Args) {
 		runProtocolVersion()
+		return
+	}
+
+	if isBuildInfoJSONCommand(os.Args) {
+		runBuildInfoJSON()
 		return
 	}
 
@@ -129,6 +146,13 @@ func isProtocolVersionCommand(args []string) bool {
 	return args[1] == "--protocol-version"
 }
 
+func isBuildInfoJSONCommand(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	return args[1] == "--build-info-json"
+}
+
 func runVersion() {
 	applyLegacyBuildInfoOverrides()
 	fmt.Println(buildinfo.Version)
@@ -136,6 +160,16 @@ func runVersion() {
 
 func runProtocolVersion() {
 	fmt.Println(protocol.ProtocolVersion)
+}
+
+func runBuildInfoJSON() {
+	applyLegacyBuildInfoOverrides()
+	printJSON(map[string]string{
+		"version":           buildinfo.Version,
+		"buildTime":         buildinfo.BuildTime,
+		"sourceFingerprint": buildinfo.SourceFingerprint,
+		"gitCommit":         buildinfo.GitCommit,
+	})
 }
 
 func runPTYWorker() {

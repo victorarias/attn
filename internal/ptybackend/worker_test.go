@@ -294,6 +294,236 @@ func TestWorkerBackend_ResolveBinaryPath_ReResolvesImplicitPath(t *testing.T) {
 	}
 }
 
+func TestWorkerBackend_CallSimple_ReusesPersistentControlConnection(t *testing.T) {
+	root := newWorkerBackendTestRoot(t)
+	backend, err := NewWorker(WorkerBackendConfig{
+		DataRoot:         root,
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BinaryPath:       "/bin/true",
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+
+	sessionID := "sess-persistent-control"
+	socketPath := filepath.Join(root, "persistent.sock")
+	_ = os.Remove(socketPath)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix) error: %v", err)
+	}
+	defer func() {
+		_ = listener.Close()
+		_ = os.Remove(socketPath)
+	}()
+
+	var acceptCount atomic.Int64
+	var inputCalls atomic.Int64
+	var resizeCalls atomic.Int64
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		acceptCount.Add(1)
+		defer conn.Close()
+		enc := json.NewEncoder(conn)
+		dec := json.NewDecoder(conn)
+		for {
+			var req ptyworker.RequestEnvelope
+			if err := dec.Decode(&req); err != nil {
+				return
+			}
+			switch req.Method {
+			case ptyworker.MethodHello:
+				result, _ := json.Marshal(ptyworker.HelloResult{
+					WorkerVersion:    "test-worker",
+					RPCMajor:         ptyworker.RPCMajor,
+					RPCMinor:         ptyworker.RPCMinor,
+					DaemonInstanceID: backend.cfg.DaemonInstanceID,
+					SessionID:        sessionID,
+				})
+				_ = enc.Encode(ptyworker.ResponseEnvelope{Type: "res", ID: req.ID, OK: true, Result: result})
+			case ptyworker.MethodInput:
+				inputCalls.Add(1)
+				result, _ := json.Marshal(map[string]any{"ok": true})
+				_ = enc.Encode(ptyworker.ResponseEnvelope{Type: "res", ID: req.ID, OK: true, Result: result})
+			case ptyworker.MethodResize:
+				resizeCalls.Add(1)
+				result, _ := json.Marshal(map[string]any{"ok": true})
+				_ = enc.Encode(ptyworker.ResponseEnvelope{Type: "res", ID: req.ID, OK: true, Result: result})
+			default:
+				t.Errorf("unexpected method %q", req.Method)
+				return
+			}
+		}
+	}()
+
+	backend.mu.Lock()
+	backend.sessions[sessionID] = &workerSession{
+		SessionID:    sessionID,
+		SocketPath:   socketPath,
+		RegistryPath: filepath.Join(backend.registryDir(), sessionID+".json"),
+		ControlToken: "tok",
+	}
+	backend.mu.Unlock()
+
+	if err := backend.Input(context.Background(), sessionID, []byte("a")); err != nil {
+		t.Fatalf("first Input() error: %v", err)
+	}
+	if err := backend.Input(context.Background(), sessionID, []byte("b")); err != nil {
+		t.Fatalf("second Input() error: %v", err)
+	}
+	if err := backend.Resize(context.Background(), sessionID, 120, 40); err != nil {
+		t.Fatalf("Resize() error: %v", err)
+	}
+
+	backend.mu.RLock()
+	session := backend.sessions[sessionID]
+	backend.mu.RUnlock()
+	if session == nil {
+		t.Fatal("session missing after persistent control calls")
+	}
+	backend.closePersistentControlConn(session, "test_done")
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for persistent control test server to exit")
+	}
+
+	if acceptCount.Load() != 1 {
+		t.Fatalf("acceptCount = %d, want 1 reused connection", acceptCount.Load())
+	}
+	if inputCalls.Load() != 2 {
+		t.Fatalf("inputCalls = %d, want 2", inputCalls.Load())
+	}
+	if resizeCalls.Load() != 1 {
+		t.Fatalf("resizeCalls = %d, want 1", resizeCalls.Load())
+	}
+}
+
+func TestWorkerBackend_CallSimple_RetriesAfterPersistentConnectionDrops(t *testing.T) {
+	root := newWorkerBackendTestRoot(t)
+	backend, err := NewWorker(WorkerBackendConfig{
+		DataRoot:         root,
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BinaryPath:       "/bin/true",
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+
+	sessionID := "sess-control-retry"
+	socketPath := filepath.Join(root, "control-retry.sock")
+	_ = os.Remove(socketPath)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix) error: %v", err)
+	}
+	defer func() {
+		_ = listener.Close()
+		_ = os.Remove(socketPath)
+	}()
+
+	var acceptCount atomic.Int64
+	var helloCount atomic.Int64
+	var inputCalls atomic.Int64
+	var resizeCalls atomic.Int64
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			connIndex := acceptCount.Add(1)
+			go func(c net.Conn, index int64) {
+				defer c.Close()
+				enc := json.NewEncoder(c)
+				dec := json.NewDecoder(c)
+				for {
+					var req ptyworker.RequestEnvelope
+					if err := dec.Decode(&req); err != nil {
+						return
+					}
+					switch req.Method {
+					case ptyworker.MethodHello:
+						helloCount.Add(1)
+						result, _ := json.Marshal(ptyworker.HelloResult{
+							WorkerVersion:    "test-worker",
+							RPCMajor:         ptyworker.RPCMajor,
+							RPCMinor:         ptyworker.RPCMinor,
+							DaemonInstanceID: backend.cfg.DaemonInstanceID,
+							SessionID:        sessionID,
+						})
+						_ = enc.Encode(ptyworker.ResponseEnvelope{Type: "res", ID: req.ID, OK: true, Result: result})
+					case ptyworker.MethodInput:
+						inputCalls.Add(1)
+						result, _ := json.Marshal(map[string]any{"ok": true})
+						_ = enc.Encode(ptyworker.ResponseEnvelope{Type: "res", ID: req.ID, OK: true, Result: result})
+						if index == 1 {
+							return
+						}
+					case ptyworker.MethodResize:
+						resizeCalls.Add(1)
+						result, _ := json.Marshal(map[string]any{"ok": true})
+						_ = enc.Encode(ptyworker.ResponseEnvelope{Type: "res", ID: req.ID, OK: true, Result: result})
+					default:
+						t.Errorf("unexpected method %q", req.Method)
+						return
+					}
+				}
+			}(conn, connIndex)
+		}
+	}()
+
+	backend.mu.Lock()
+	backend.sessions[sessionID] = &workerSession{
+		SessionID:    sessionID,
+		SocketPath:   socketPath,
+		RegistryPath: filepath.Join(backend.registryDir(), sessionID+".json"),
+		ControlToken: "tok",
+	}
+	backend.mu.Unlock()
+
+	if err := backend.Input(context.Background(), sessionID, []byte("x")); err != nil {
+		t.Fatalf("Input() error: %v", err)
+	}
+	if err := backend.Resize(context.Background(), sessionID, 120, 40); err != nil {
+		t.Fatalf("Resize() after dropped control connection error: %v", err)
+	}
+
+	backend.mu.RLock()
+	session := backend.sessions[sessionID]
+	backend.mu.RUnlock()
+	if session == nil {
+		t.Fatal("session missing after retry test")
+	}
+	backend.closePersistentControlConn(session, "test_done")
+	_ = listener.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for retry test server to exit")
+	}
+
+	if acceptCount.Load() != 2 {
+		t.Fatalf("acceptCount = %d, want 2 after reconnect", acceptCount.Load())
+	}
+	if helloCount.Load() != 2 {
+		t.Fatalf("helloCount = %d, want 2", helloCount.Load())
+	}
+	if inputCalls.Load() != 1 {
+		t.Fatalf("inputCalls = %d, want 1", inputCalls.Load())
+	}
+	if resizeCalls.Load() != 1 {
+		t.Fatalf("resizeCalls = %d, want 1", resizeCalls.Load())
+	}
+}
+
 func TestWorkerBackend_Remove_RetainsTrackedSessionOnTransientError(t *testing.T) {
 	root := newWorkerBackendTestRoot(t)
 	backend, err := NewWorker(WorkerBackendConfig{

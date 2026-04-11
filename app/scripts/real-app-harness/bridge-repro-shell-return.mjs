@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, parseCommonArgs, printCommonHelp } from './common.mjs';
+import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 
 function saveJson(filePath, value) {
@@ -81,9 +82,7 @@ async function captureBridgeDebugArtifacts(client, runDir, suffix = 'failure') {
   }
 
   try {
-    const screenshot = await client.request('capture_screenshot', {
-      path: path.join(runDir, `ui-${suffix}.png`),
-    });
+    const screenshot = await captureFrontWindowScreenshot(path.join(runDir, `ui-${suffix}.png`));
     saveJson(path.join(runDir, `screenshot-${suffix}.json`), screenshot);
   } catch (error) {
     fs.writeFileSync(
@@ -96,9 +95,7 @@ async function captureBridgeDebugArtifacts(client, runDir, suffix = 'failure') {
 
 async function tryCaptureScreenshot(client, runDir, filename) {
   try {
-    await client.request('capture_screenshot', {
-      path: path.join(runDir, filename),
-    });
+    await captureFrontWindowScreenshot(path.join(runDir, filename));
   } catch (error) {
     fs.writeFileSync(
       path.join(runDir, `${filename}.txt`),

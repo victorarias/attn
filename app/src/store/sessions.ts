@@ -55,6 +55,7 @@ interface SessionStore {
   connect: () => Promise<void>;
   createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean) => Promise<string>;
   closeSession: (id: string) => void;
+  removeSessionLocalState: (id: string) => void;
   setActiveSession: (id: string | null) => void;
   takeSessionSpawnArgs: (id: string, cols: number, rows: number) => PtySpawnArgs | null;
   reloadSession: (id: string, size?: { cols: number; rows: number }) => Promise<void>;
@@ -146,15 +147,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     return id;
   },
 
-  closeSession: (id: string) => {
+  removeSessionLocalState: (id: string) => {
     const { sessions, activeSessionId } = get();
-    const session = sessions.find((s) => s.id === id);
-
-    if (session) {
-      // Kill main session PTY
-      ptyKill({ id }).catch(console.error);
-    }
-
     const newSessions = sessions.filter((s) => s.id !== id);
     let newActiveId = activeSessionId;
 
@@ -166,6 +160,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       sessions: newSessions,
       activeSessionId: newActiveId,
     });
+  },
+
+  closeSession: (id: string) => {
+    const { sessions, removeSessionLocalState } = get();
+    const session = sessions.find((s) => s.id === id);
+
+    if (session) {
+      // Legacy local-only fallback for sessions that never became daemon-managed.
+      ptyKill({ id }).catch(console.error);
+    }
+
+    removeSessionLocalState(id);
   },
 
   setActiveSession: (id: string | null) => {

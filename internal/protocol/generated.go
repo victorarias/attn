@@ -69,6 +69,12 @@ type ApprovePRMessage struct {
 	ID string `json:"id"`
 }
 
+type AttachPolicy string
+
+const AttachPolicyFreshSpawn AttachPolicy = "fresh_spawn"
+const AttachPolicyRelaunchRestore AttachPolicy = "relaunch_restore"
+const AttachPolicySameAppRemount AttachPolicy = "same_app_remount"
+
 type AttachResultMessage struct {
 	// Cols corresponds to the JSON schema field "cols".
 	Cols *int `json:"cols,omitempty"`
@@ -87,6 +93,9 @@ type AttachResultMessage struct {
 
 	// Pid corresponds to the JSON schema field "pid".
 	Pid *int `json:"pid,omitempty"`
+
+	// ReplaySegments corresponds to the JSON schema field "replay_segments".
+	ReplaySegments []ReplaySegment `json:"replay_segments,omitempty"`
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows *int `json:"rows,omitempty"`
@@ -129,6 +138,9 @@ type AttachResultMessage struct {
 }
 
 type AttachSessionMessage struct {
+	// AttachPolicy corresponds to the JSON schema field "attach_policy".
+	AttachPolicy *AttachPolicy `json:"attach_policy,omitempty"`
+
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
@@ -1480,6 +1492,17 @@ type RemoveEndpointMessage struct {
 
 	// EndpointID corresponds to the JSON schema field "endpoint_id".
 	EndpointID string `json:"endpoint_id"`
+}
+
+type ReplaySegment struct {
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// Data corresponds to the JSON schema field "data".
+	Data string `json:"data"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
 }
 
 type RepoInfo struct {
