@@ -2,7 +2,12 @@ mod daemon_client;
 mod terminal_model;
 mod terminal_view;
 
-use gpui::{prelude::*, px, size, App, Application, Bounds, Focusable, WindowBounds, WindowOptions};
+use gpui::{
+    prelude::*, actions, px, size, App, Application, Bounds, Focusable, KeyBinding,
+    WindowBounds, WindowOptions,
+};
+
+actions!(attn_native, [Quit]);
 
 use daemon_client::DaemonClient;
 use terminal_model::TerminalModel;
@@ -109,6 +114,10 @@ impl gpui::Render for RootView {
 
 fn main() {
     Application::new().run(|cx: &mut App| {
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.on_action::<Quit>(|_, cx| cx.quit());
+        let _ = cx.on_window_closed(|cx| cx.quit());
+
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
         cx.open_window(
             WindowOptions {
