@@ -1361,6 +1361,12 @@ export function useDaemonSocket({
             }
             break;
 
+          case 'pty_resized':
+            if (data.id && data.cols && data.rows) {
+              emitPtyEvent({ event: 'local_resize', id: data.id, cols: data.cols, rows: data.rows });
+            }
+            break;
+
           case 'session_registered':
             if (data.session) {
               sessionsRef.current = upsertSessionByID(sessionsRef.current, data.session);

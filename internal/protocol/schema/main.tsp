@@ -1218,6 +1218,13 @@ model PtyDesyncMessage {
   reason: string;
 }
 
+model PtyResizedMessage {
+  event: "pty_resized";
+  id: string;
+  cols: integer;
+  rows: integer;
+}
+
 model CommandErrorMessage {
   event: "command_error";
   cmd?: string;
@@ -1377,4 +1384,5 @@ alias DaemonEvent =
   | PtyOutputMessage
   | SessionExitedMessage
   | PtyDesyncMessage
+  | PtyResizedMessage
   | CommandErrorMessage;
