@@ -126,6 +126,7 @@ html, body, #root {
   display: flex;
   background: var(--color-bg-app);
   position: relative;
+  overflow: clip;
 }
 
 /* Custom scrollbar styling */

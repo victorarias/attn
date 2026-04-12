@@ -61,6 +61,40 @@ DEBUG=debug attn -s test
 - do not use `log.Printf()` for daemon logging because stderr is discarded in background mode
 - use prefixed `console.log/warn/error` in frontend code and inspect via Tauri DevTools
 
+### Frontend Instrumentation (disk-based)
+
+For hard-to-reproduce UI bugs (viewport shifts, race conditions, layout glitches), prefer **disk-based instrumentation** over `console.log`. This lets the agent read the log file directly without needing browser DevTools access.
+
+Pattern: use Tauri's `writeTextFile` to append JSONL to `$APPLOCALDATA/debug/<name>.jsonl`. See `app/src/utils/paneRuntimeDebug.ts` and `app/src/utils/terminalRuntimeLog.ts` for the canonical pattern.
+
+Quick approach for temporary investigation:
+
+```typescript
+// app/src/utils/viewportDebug.ts (example)
+import { isTauri } from '@tauri-apps/api/core';
+
+let chain: Promise<void> = Promise.resolve();
+
+export function vpLog(event: string, details?: Record<string, unknown>) {
+  const entry = { at: new Date().toISOString(), event, ...details };
+  chain = chain.catch(() => {}).then(async () => {
+    if (!isTauri()) return;
+    const { mkdir, writeTextFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
+    await mkdir('debug', { baseDir: BaseDirectory.AppLocalData, recursive: true });
+    await writeTextFile('debug/<name>.jsonl', JSON.stringify(entry) + '\n', {
+      baseDir: BaseDirectory.AppLocalData, append: true, create: true,
+    });
+  });
+}
+```
+
+Read the log: `cat ~/Library/Application\ Support/com.attn.manager/debug/<name>.jsonl`
+
+Rules:
+- Always write to disk, not just console — agents can't read DevTools
+- Use JSONL format (one JSON object per line) so the file is easy to parse
+- Remove temporary instrumentation files once the bug is resolved
+
 ## Architecture Snapshot
 
 - `cmd/attn`: CLI wrapper that launches agents, registers sessions, and wires hooks/settings
