@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/attn-protocol",
+    "crates/attn-native-app",
+]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"
