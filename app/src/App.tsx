@@ -996,8 +996,6 @@ sendFetchPRDetails,
   // Location picker state management
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
 
-  
-
   // Thumbs (Quick Find) state
   const [thumbsOpen, setThumbsOpen] = useState(false);
   const [thumbsText, setThumbsText] = useState('');

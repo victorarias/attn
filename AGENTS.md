@@ -61,6 +61,10 @@ DEBUG=debug attn -s test
 - do not use `log.Printf()` for daemon logging because stderr is discarded in background mode
 - use prefixed `console.log/warn/error` in frontend code and inspect via Tauri DevTools
 
+### Frontend Instrumentation (disk-based)
+
+For hard-to-reproduce UI bugs, prefer disk-based JSONL logs over `console.log` — agents can read files but not DevTools. Write to `$APPLOCALDATA/debug/<name>.jsonl` using Tauri's `writeTextFile`. See `app/src/utils/paneRuntimeDebug.ts` and `app/src/utils/terminalRuntimeLog.ts` for the pattern. Remove temporary instrumentation once the bug is resolved.
+
 ## Architecture Snapshot
 
 - `cmd/attn`: CLI wrapper that launches agents, registers sessions, and wires hooks/settings
