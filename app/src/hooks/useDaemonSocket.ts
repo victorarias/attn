@@ -2642,6 +2642,29 @@ export function useDaemonSocket({
     });
   }, [hasPendingEndpointAction]);
 
+  const sendBootstrapEndpoint = useCallback((endpointId: string): Promise<EndpointActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      if (hasPendingEndpointAction()) {
+        reject(new Error('Another endpoint action is already in progress'));
+        return;
+      }
+      const key = `endpoint_action:bootstrap:${endpointId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'bootstrap_endpoint', endpoint_id: endpointId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Bootstrap endpoint timed out'));
+        }
+      }, 60000);
+    });
+  }, [hasPendingEndpointAction]);
+
   const sendListEndpoints = useCallback((): Promise<DaemonEndpoint[]> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -3355,6 +3378,7 @@ export function useDaemonSocket({
     sendUpdateEndpoint,
     sendRemoveEndpoint,
     sendSetEndpointRemoteWeb,
+    sendBootstrapEndpoint,
     sendListEndpoints,
     sendGetRecentLocations,
     sendBrowseDirectory,

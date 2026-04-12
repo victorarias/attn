@@ -164,6 +164,14 @@ type AuthorsUpdatedMessage struct {
 	Event string `json:"event"`
 }
 
+type BootstrapEndpointMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID string `json:"endpoint_id"`
+}
+
 type Branch struct {
 	// CommitHash corresponds to the JSON schema field "commit_hash".
 	CommitHash *string `json:"commit_hash,omitempty,omitzero"`

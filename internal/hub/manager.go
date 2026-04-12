@@ -63,6 +63,7 @@ type endpointRuntime struct {
 	cmd              *exec.Cmd
 	writeMu          sync.Mutex
 	pendingRemoteWeb *pendingRemoteWebAction
+	pendingBootstrap bool
 
 	sessions   map[string]protocol.Session
 	workspaces map[string]protocol.WorkspaceSnapshot
@@ -238,6 +239,37 @@ func (m *Manager) AddEndpoint(name, sshTarget string) (*store.EndpointRecord, er
 	return record, nil
 }
 
+// BootstrapEndpoint requests an explicit bootstrap (install binary + start daemon) for the
+// given endpoint.  The flag is consumed at the top of runEndpointLoop so it fires once on
+// the next loop iteration.  Upgrade must be intentional — this is the only path that calls
+// EnsureRemoteReady when the remote daemon is already running.
+func (m *Manager) BootstrapEndpoint(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rt, ok := m.runtimes[id]
+	if !ok {
+		return fmt.Errorf("endpoint %s not found", id)
+	}
+	rt.pendingBootstrap = true
+	m.stopRuntimeLocked(rt)
+	if m.started && rt.record.Enabled {
+		m.startRuntimeLocked(id)
+	}
+	return nil
+}
+
+func (m *Manager) consumeBootstrapFlag(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rt, ok := m.runtimes[id]
+	if !ok {
+		return false
+	}
+	v := rt.pendingBootstrap
+	rt.pendingBootstrap = false
+	return v
+}
+
 func (m *Manager) UpdateEndpoint(id string, update store.EndpointUpdate) (*store.EndpointRecord, error) {
 	record, err := m.store.UpdateEndpoint(id, update)
 	if err != nil {
@@ -383,6 +415,22 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		record, ok := m.recordFor(id)
 		if !ok {
 			return
+		}
+
+		// Explicit bootstrap requested (e.g. user clicked Sync) — install binary and start daemon.
+		if m.consumeBootstrapFlag(id) {
+			m.updateStatus(id, "bootstrapping", "Installing remote binary", nil, nil)
+			bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			err := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget)
+			cancel()
+			if err != nil {
+				m.updateStatus(id, "error", err.Error(), nil, nil)
+				if !sleepOrDone(ctx, backoff) {
+					return
+				}
+				backoff = nextBackoff(backoff)
+				continue
+			}
 		}
 
 		// Try to connect; if it fails the daemon is not running — bootstrap and retry.

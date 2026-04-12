@@ -46,6 +46,7 @@ const (
 	CmdUpdateEndpoint           = "update_endpoint"
 	CmdListEndpoints            = "list_endpoints"
 	CmdSetEndpointRemoteWeb     = "set_endpoint_remote_web"
+	CmdBootstrapEndpoint        = "bootstrap_endpoint"
 	CmdApprovePR                = "approve_pr"
 	CmdMergePR                  = "merge_pr"
 	CmdInjectTestPR             = "inject_test_pr"
@@ -442,6 +443,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdSetEndpointRemoteWeb:
 		var msg SetEndpointRemoteWebMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdBootstrapEndpoint:
+		var msg BootstrapEndpointMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

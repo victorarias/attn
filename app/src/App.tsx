@@ -253,6 +253,7 @@ function App() {
     sendUpdateEndpoint,
     sendRemoveEndpoint,
     sendSetEndpointRemoteWeb,
+    sendBootstrapEndpoint,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
@@ -356,6 +357,7 @@ function App() {
         sendUpdateEndpoint={sendUpdateEndpoint}
         sendRemoveEndpoint={sendRemoveEndpoint}
         sendSetEndpointRemoteWeb={sendSetEndpointRemoteWeb}
+        sendBootstrapEndpoint={sendBootstrapEndpoint}
         sendGetRecentLocations={sendGetRecentLocations}
         sendBrowseDirectory={sendBrowseDirectory}
         sendInspectPath={sendInspectPath}
@@ -428,6 +430,7 @@ interface AppContentProps {
   sendUpdateEndpoint: ReturnType<typeof useDaemonSocket>['sendUpdateEndpoint'];
   sendRemoveEndpoint: ReturnType<typeof useDaemonSocket>['sendRemoveEndpoint'];
   sendSetEndpointRemoteWeb: ReturnType<typeof useDaemonSocket>['sendSetEndpointRemoteWeb'];
+  sendBootstrapEndpoint: ReturnType<typeof useDaemonSocket>['sendBootstrapEndpoint'];
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
   sendInspectPath: ReturnType<typeof useDaemonSocket>['sendInspectPath'];
@@ -495,6 +498,7 @@ function AppContent({
   sendUpdateEndpoint,
   sendRemoveEndpoint,
   sendSetEndpointRemoteWeb,
+  sendBootstrapEndpoint,
   sendGetRecentLocations,
   sendBrowseDirectory,
 sendInspectPath,
@@ -1017,23 +1021,11 @@ sendFetchPRDetails,
 
   const handleRebootstrapEndpoint = useCallback(async (endpointId: string) => {
     try {
-      await sendUpdateEndpoint(endpointId, { enabled: false });
-    } catch {
-      showError('Failed to disable endpoint for sync.');
-      return;
+      await sendBootstrapEndpoint(endpointId);
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Sync failed.');
     }
-    try {
-      await sendUpdateEndpoint(endpointId, { enabled: true });
-    } catch {
-      // Disable succeeded but enable failed — retry enable once to avoid leaving it dark.
-      showError('Sync failed to re-enable endpoint. Retrying…');
-      try {
-        await sendUpdateEndpoint(endpointId, { enabled: true });
-      } catch {
-        showError('Endpoint left disabled after failed sync. Re-enable it in Settings.');
-      }
-    }
-  }, [sendUpdateEndpoint, showError]);
+  }, [sendBootstrapEndpoint, showError]);
 
   const activeReviewLoopState = useMemo(
     () => (activeSessionId ? reviewLoopsBySessionId[activeSessionId] ?? null : null),

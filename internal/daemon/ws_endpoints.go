@@ -88,6 +88,18 @@ func (d *Daemon) handleSetEndpointRemoteWebWS(client *wsClient, msg *protocol.Se
 	d.sendEndpointActionResult(client, "remote_web", endpointID, true, "")
 }
 
+func (d *Daemon) handleBootstrapEndpointWS(client *wsClient, msg *protocol.BootstrapEndpointMessage) {
+	if d.hubManager == nil {
+		d.sendEndpointActionResult(client, "bootstrap", msg.EndpointID, false, "endpoint manager unavailable")
+		return
+	}
+	if err := d.hubManager.BootstrapEndpoint(msg.EndpointID); err != nil {
+		d.sendEndpointActionResult(client, "bootstrap", msg.EndpointID, false, err.Error())
+		return
+	}
+	d.sendEndpointActionResult(client, "bootstrap", msg.EndpointID, true, "")
+}
+
 func (d *Daemon) sendEndpointActionResult(client *wsClient, action, endpointID string, success bool, errMsg string) {
 	result := &protocol.EndpointActionResultMessage{
 		Event:   protocol.EventEndpointActionResult,

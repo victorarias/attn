@@ -427,6 +427,11 @@ model SetEndpointRemoteWebMessage {
   enabled: boolean;
 }
 
+model BootstrapEndpointMessage {
+  cmd: "bootstrap_endpoint";
+  endpoint_id: string;
+}
+
 model ApprovePRMessage {
   cmd: "approve_pr";
   id: string;

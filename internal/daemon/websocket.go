@@ -723,6 +723,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleRemoveEndpointWS(client, msg.(*protocol.RemoveEndpointMessage))
 	case protocol.CmdUpdateEndpoint:
 		d.handleUpdateEndpointWS(client, msg.(*protocol.UpdateEndpointMessage))
+	case protocol.CmdBootstrapEndpoint:
+		d.handleBootstrapEndpointWS(client, msg.(*protocol.BootstrapEndpointMessage))
 	case protocol.CmdListEndpoints:
 		d.handleListEndpointsWS(client)
 	case protocol.CmdSetEndpointRemoteWeb:
