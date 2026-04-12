@@ -629,7 +629,16 @@ func (d *Daemon) handlePtyResize(client *wsClient, msg *protocol.PtyResizeMessag
 		if shouldLogPtyCommandError(err) {
 			d.logf("pty_resize failed for %s: %v", msg.ID, err)
 		}
+		return
 	}
+	// Broadcast the new geometry to all other attached clients so they can
+	// keep their local terminal models in sync.
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event: protocol.EventPtyResized,
+		ID:    protocol.Ptr(msg.ID),
+		Cols:  protocol.Ptr(msg.Cols),
+		Rows:  protocol.Ptr(msg.Rows),
+	})
 }
 
 func parseSignal(name string) syscall.Signal {

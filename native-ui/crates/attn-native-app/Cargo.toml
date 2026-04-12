@@ -15,3 +15,6 @@ serde_json = { workspace = true }
 futures-util = { workspace = true }
 async-tungstenite = { version = "0.28", features = ["async-std-runtime"] }
 smol = "2"
+alacritty_terminal = "0.26.0"
+base64 = "0.22"
+async-channel = "2"

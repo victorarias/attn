@@ -143,6 +143,7 @@ const (
 	EventAttachResult             = "attach_result"
 	EventSessionExited            = "session_exited"
 	EventPtyDesync                = "pty_desync"
+	EventPtyResized               = "pty_resized"
 	EventWorkspaceSnapshot        = "workspace_snapshot"
 	EventWorkspaceUpdated         = "workspace_updated"
 	EventWorkspaceActionResult    = "workspace_action_result"

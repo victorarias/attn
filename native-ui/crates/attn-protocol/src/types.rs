@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachPolicy {
+    #[default]
+    FreshSpawn,
+    RelaunchRestore,
+    SameAppRemount,
+}
+
+/// A segment of PTY replay data returned on attach.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReplaySegment {
+    pub cols: i32,
+    pub rows: i32,
+    /// Base64-encoded PTY bytes.
+    pub data: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionState {
