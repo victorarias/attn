@@ -10,67 +10,6 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-const fetchCacheTTL = 30 * time.Minute
-
-func (d *Daemon) getCachedBranches(repo string) ([]protocol.Branch, time.Time, bool) {
-	d.repoCacheMu.RLock()
-	defer d.repoCacheMu.RUnlock()
-
-	cache, ok := d.repoCaches[repo]
-	if !ok {
-		return nil, time.Time{}, false
-	}
-	if time.Since(cache.fetchedAt) > fetchCacheTTL {
-		return nil, time.Time{}, false
-	}
-	return cache.branches, cache.fetchedAt, true
-}
-
-func (d *Daemon) setCachedBranches(repo string, branches []protocol.Branch) {
-	d.repoCacheMu.Lock()
-	defer d.repoCacheMu.Unlock()
-
-	d.repoCaches[repo] = &repoCache{
-		fetchedAt: time.Now(),
-		branches:  branches,
-	}
-}
-
-func (d *Daemon) invalidateBranchCache(repo string) {
-	d.repoCacheMu.Lock()
-	defer d.repoCacheMu.Unlock()
-	delete(d.repoCaches, repo)
-}
-
-// doListBranches fetches local branches not checked out in any worktree
-func (d *Daemon) doListBranches(mainRepo string) ([]protocol.Branch, error) {
-	branches, err := git.ListBranches(mainRepo)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]protocol.Branch, len(branches))
-	for i, b := range branches {
-		result[i] = protocol.Branch{Name: b}
-	}
-	return result, nil
-}
-
-// doDeleteBranch deletes a local branch
-func (d *Daemon) doDeleteBranch(mainRepo, branch string, force bool) error {
-	return git.DeleteBranch(mainRepo, branch, force)
-}
-
-// doSwitchBranch switches the main repo to a different branch
-func (d *Daemon) doSwitchBranch(mainRepo, branch string) error {
-	return git.SwitchBranch(mainRepo, branch)
-}
-
-// doCreateBranch creates a new branch (without checking it out)
-func (d *Daemon) doCreateBranch(mainRepo, branch string) error {
-	return git.CreateBranch(mainRepo, branch)
-}
-
 // doCreateWorktreeFromBranch creates a worktree from an existing branch
 func (d *Daemon) doCreateWorktreeFromBranch(msg *protocol.CreateWorktreeFromBranchMessage) (string, error) {
 	mainRepo := git.ResolveMainRepoPath(msg.MainRepo)
@@ -127,63 +66,6 @@ func (d *Daemon) doCreateWorktreeFromBranch(msg *protocol.CreateWorktreeFromBran
 
 // WebSocket handlers
 
-func (d *Daemon) handleListBranchesWS(client *wsClient, msg *protocol.ListBranchesMessage) {
-	go func() {
-		branches, err := d.doListBranches(msg.MainRepo)
-		if err != nil {
-			d.sendToClient(client, &protocol.WebSocketEvent{
-				Event:   protocol.EventBranchesResult,
-				Success: protocol.Ptr(false),
-				Error:   protocol.Ptr(err.Error()),
-			})
-			return
-		}
-		d.sendToClient(client, &protocol.WebSocketEvent{
-			Event:    protocol.EventBranchesResult,
-			Branches: branches,
-			Success:  protocol.Ptr(true),
-		})
-	}()
-}
-
-func (d *Daemon) handleDeleteBranchWS(client *wsClient, msg *protocol.DeleteBranchMessage) {
-	go func() {
-		err := d.doDeleteBranch(msg.MainRepo, msg.Branch, msg.Force)
-		result := &protocol.DeleteBranchResultMessage{
-			Event:      protocol.EventDeleteBranchResult,
-			Branch:     msg.Branch,
-			EndpointID: msg.EndpointID,
-			Success:    err == nil,
-		}
-		if err != nil {
-			result.Error = protocol.Ptr(err.Error())
-			d.logf("Delete branch failed for %s: %v", msg.Branch, err)
-		} else {
-			d.invalidateBranchCache(msg.MainRepo)
-			d.logf("Delete branch succeeded: %s", msg.Branch)
-		}
-		d.sendToClient(client, result)
-	}()
-}
-
-func (d *Daemon) handleSwitchBranchWS(client *wsClient, msg *protocol.SwitchBranchMessage) {
-	go func() {
-		err := d.doSwitchBranch(msg.MainRepo, msg.Branch)
-		result := &protocol.WebSocketEvent{
-			Event:   protocol.EventSwitchBranchResult,
-			Branch:  protocol.Ptr(msg.Branch),
-			Success: protocol.Ptr(err == nil),
-		}
-		if err != nil {
-			result.Error = protocol.Ptr(err.Error())
-			d.logf("Switch branch failed for %s: %v", msg.Branch, err)
-		} else {
-			d.logf("Switch branch succeeded: %s", msg.Branch)
-		}
-		d.sendToClient(client, result)
-	}()
-}
-
 func (d *Daemon) handleCreateWorktreeFromBranchWS(client *wsClient, msg *protocol.CreateWorktreeFromBranchMessage) {
 	go func() {
 		path, err := d.doCreateWorktreeFromBranch(msg)
@@ -197,27 +79,25 @@ func (d *Daemon) handleCreateWorktreeFromBranchWS(client *wsClient, msg *protoco
 			d.logf("Create worktree from branch failed for %s: %v", msg.Branch, err)
 		} else {
 			d.logf("Create worktree from branch succeeded: %s at %s", msg.Branch, path)
-			// Invalidate branch cache since a branch is now checked out in worktree
-			d.invalidateBranchCache(msg.MainRepo)
 		}
 		d.sendToClient(client, result)
 	}()
 }
 
-func (d *Daemon) handleCreateBranchWS(client *wsClient, msg *protocol.CreateBranchMessage) {
+func (d *Daemon) handleListBranchesWS(client *wsClient, msg *protocol.ListBranchesMessage) {
 	go func() {
-		err := d.doCreateBranch(msg.MainRepo, msg.Branch)
-		result := protocol.CreateBranchResultMessage{
-			Event:   protocol.EventCreateBranchResult,
-			Branch:  msg.Branch,
+		branches, err := git.ListBranchesWithCommits(msg.MainRepo)
+		result := protocol.BranchesResultMessage{
+			Event:   protocol.EventBranchesResult,
 			Success: err == nil,
 		}
 		if err != nil {
 			result.Error = protocol.Ptr(err.Error())
-			d.logf("Create branch failed for %s: %v", msg.Branch, err)
 		} else {
-			d.invalidateBranchCache(msg.MainRepo)
-			d.logf("Create branch succeeded: %s", msg.Branch)
+			result.Branches = make([]protocol.Branch, len(branches))
+			for i, b := range branches {
+				result.Branches[i] = b.ToProtocol()
+			}
 		}
 		d.sendToClient(client, result)
 	}()
@@ -225,7 +105,7 @@ func (d *Daemon) handleCreateBranchWS(client *wsClient, msg *protocol.CreateBran
 
 func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfoMessage) {
 	go func() {
-		repo := git.ExpandPath(msg.Repo)
+		repo := git.CanonicalizePath(msg.Repo)
 
 		// Get current branch and commit
 		currentBranch, err := git.GetCurrentBranch(repo)
@@ -251,38 +131,6 @@ func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfo
 		// Get worktrees
 		worktrees := d.doListWorktrees(repo)
 
-		// Check cache first
-		var branches []protocol.Branch
-		var fetchedAt *string
-		cachedBranches, cachedTime, cacheHit := d.getCachedBranches(repo)
-
-		if cacheHit {
-			// Use cached branches
-			branches = cachedBranches
-			timeStr := cachedTime.Format(time.RFC3339)
-			fetchedAt = &timeStr
-		} else {
-			// Cache miss - fetch branches with commit info
-			branchesWithCommits, err := git.ListBranchesWithCommits(repo)
-			if err != nil {
-				d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
-					Event:      protocol.EventGetRepoInfoResult,
-					EndpointID: msg.EndpointID,
-					Success:    false,
-					Error:      protocol.Ptr(err.Error()),
-				})
-				return
-			}
-
-			branches = make([]protocol.Branch, len(branchesWithCommits))
-			for i, b := range branchesWithCommits {
-				branches[i] = b.ToProtocol()
-			}
-
-			// Cache the result
-			d.setCachedBranches(repo, branches)
-		}
-
 		d.sendToClient(client, &protocol.GetRepoInfoResultMessage{
 			Event:      protocol.EventGetRepoInfoResult,
 			EndpointID: msg.EndpointID,
@@ -293,10 +141,100 @@ func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfo
 				CurrentCommitTime: commitTime,
 				DefaultBranch:     defaultBranch,
 				Worktrees:         worktrees,
-				Branches:          branches,
-				FetchedAt:         fetchedAt,
 			},
 			Success: true,
 		})
+	}()
+}
+
+func (d *Daemon) handleGetDefaultBranchWS(client *wsClient, msg *protocol.GetDefaultBranchMessage) {
+	go func() {
+		branch, err := git.GetDefaultBranch(msg.Repo)
+		result := &protocol.WebSocketEvent{
+			Event:   protocol.EventGetDefaultBranchResult,
+			Success: protocol.Ptr(err == nil),
+		}
+		if err != nil {
+			result.Error = protocol.Ptr(err.Error())
+		} else {
+			result.Branch = protocol.Ptr(branch)
+		}
+		d.sendToClient(client, result)
+	}()
+}
+
+func (d *Daemon) handleFetchRemotesWS(client *wsClient, msg *protocol.FetchRemotesMessage) {
+	go func() {
+		err := git.FetchRemotes(msg.Repo)
+		result := &protocol.WebSocketEvent{
+			Event:   protocol.EventFetchRemotesResult,
+			Success: protocol.Ptr(err == nil),
+		}
+		if err != nil {
+			result.Error = protocol.Ptr(err.Error())
+			d.logf("FetchRemotes failed for %s: %v", msg.Repo, err)
+		} else {
+			d.logf("FetchRemotes succeeded for %s", msg.Repo)
+		}
+		d.sendToClient(client, result)
+	}()
+}
+
+func (d *Daemon) handleListRemoteBranchesWS(client *wsClient, msg *protocol.ListRemoteBranchesMessage) {
+	go func() {
+		branches, err := git.ListRemoteBranches(msg.Repo)
+		result := &protocol.WebSocketEvent{
+			Event:   protocol.EventListRemoteBranchesResult,
+			Success: protocol.Ptr(err == nil),
+		}
+		if err != nil {
+			result.Error = protocol.Ptr(err.Error())
+		} else {
+			branchList := make([]protocol.Branch, len(branches))
+			for i, b := range branches {
+				branchList[i] = protocol.Branch{Name: b}
+			}
+			result.Branches = branchList
+		}
+		d.sendToClient(client, result)
+	}()
+}
+
+func (d *Daemon) handleEnsureRepoWS(client *wsClient, msg *protocol.EnsureRepoMessage) {
+	go func() {
+		result := &protocol.WebSocketEvent{
+			Event:      protocol.EventEnsureRepoResult,
+			TargetPath: protocol.Ptr(msg.TargetPath),
+		}
+
+		// Ensure the repo exists (clone if needed)
+		cloned, err := git.EnsureRepo(msg.CloneURL, msg.TargetPath)
+		if err != nil {
+			result.Success = protocol.Ptr(false)
+			result.Error = protocol.Ptr(err.Error())
+			result.Cloned = protocol.Ptr(false)
+			d.logf("EnsureRepo failed for %s: %v", msg.TargetPath, err)
+			d.sendToClient(client, result)
+			return
+		}
+
+		// Fetch remotes (whether repo was cloned or already existed)
+		if err := git.FetchRemotes(msg.TargetPath); err != nil {
+			result.Success = protocol.Ptr(false)
+			result.Error = protocol.Ptr("repo exists but fetch failed: " + err.Error())
+			result.Cloned = protocol.Ptr(cloned)
+			d.logf("FetchRemotes failed for %s after ensure: %v", msg.TargetPath, err)
+			d.sendToClient(client, result)
+			return
+		}
+
+		result.Success = protocol.Ptr(true)
+		result.Cloned = protocol.Ptr(cloned)
+		if cloned {
+			d.logf("EnsureRepo cloned %s to %s", msg.CloneURL, msg.TargetPath)
+		} else {
+			d.logf("EnsureRepo found existing repo at %s, fetched remotes", msg.TargetPath)
+		}
+		d.sendToClient(client, result)
 	}()
 }

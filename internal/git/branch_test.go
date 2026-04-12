@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+func writeFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListRemoteBranches(t *testing.T) {
 	// This test requires a repo with remotes, skip in CI
 	if os.Getenv("CI") != "" {

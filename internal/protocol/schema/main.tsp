@@ -474,58 +474,11 @@ model ListBranchesMessage {
   main_repo: string;
 }
 
-model DeleteBranchMessage {
-  cmd: "delete_branch";
-  main_repo: string;
-  branch: string;
-  force: boolean;
-  endpoint_id?: string;
-}
-
-model SwitchBranchMessage {
-  cmd: "switch_branch";
-  main_repo: string;
-  branch: string;
-}
-
 model CreateWorktreeFromBranchMessage {
   cmd: "create_worktree_from_branch";
   main_repo: string;
   branch: string;
   path?: string;
-}
-
-model CreateBranchMessage {
-  cmd: "create_branch";
-  main_repo: string;
-  branch: string;
-}
-
-model CheckDirtyMessage {
-  cmd: "check_dirty";
-  repo: string;
-}
-
-model StashMessage {
-  cmd: "stash";
-  repo: string;
-  message: string;
-}
-
-model StashPopMessage {
-  cmd: "stash_pop";
-  repo: string;
-}
-
-model CheckAttnStashMessage {
-  cmd: "check_attn_stash";
-  repo: string;
-  branch: string;
-}
-
-model CommitWIPMessage {
-  cmd: "commit_wip";
-  repo: string;
 }
 
 model GetDefaultBranchMessage {
@@ -971,62 +924,6 @@ model BranchesResultMessage {
   error?: string;
 }
 
-model DeleteBranchResultMessage {
-  event: "delete_branch_result";
-  branch: string;
-  endpoint_id?: string;
-  success: boolean;
-  error?: string;
-}
-
-model SwitchBranchResultMessage {
-  event: "switch_branch_result";
-  branch: string;
-  success: boolean;
-  error?: string;
-}
-
-model CreateBranchResultMessage {
-  event: "create_branch_result";
-  branch: string;
-  success: boolean;
-  error?: string;
-}
-
-model CheckDirtyResultMessage {
-  event: "check_dirty_result";
-  dirty: boolean;
-  success: boolean;
-  error?: string;
-}
-
-model StashResultMessage {
-  event: "stash_result";
-  success: boolean;
-  error?: string;
-}
-
-model StashPopResultMessage {
-  event: "stash_pop_result";
-  success: boolean;
-  conflict?: boolean;
-  error?: string;
-}
-
-model CheckAttnStashResultMessage {
-  event: "check_attn_stash_result";
-  found: boolean;
-  stash_ref?: string;
-  success: boolean;
-  error?: string;
-}
-
-model CommitWIPResultMessage {
-  event: "commit_wip_result";
-  success: boolean;
-  error?: string;
-}
-
 model GetDefaultBranchResultMessage {
   event: "get_default_branch_result";
   branch: string;
@@ -1457,14 +1354,6 @@ alias DaemonEvent =
   | SettingsUpdatedMessage
   | RecentLocationsResultMessage
   | BranchesResultMessage
-  | DeleteBranchResultMessage
-  | SwitchBranchResultMessage
-  | CreateBranchResultMessage
-  | CheckDirtyResultMessage
-  | StashResultMessage
-  | StashPopResultMessage
-  | CheckAttnStashResultMessage
-  | CommitWIPResultMessage
   | GetDefaultBranchResultMessage
   | FetchRemotesResultMessage
   | ListRemoteBranchesResultMessage

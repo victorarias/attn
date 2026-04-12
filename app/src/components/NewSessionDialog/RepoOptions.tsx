@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './RepoOptions.css';
 
 interface RepoInfo {
@@ -8,26 +8,20 @@ interface RepoInfo {
   currentCommitTime: string;
   defaultBranch: string;
   worktrees: Array<{ path: string; branch: string }>;
-  branches: Array<{ name: string; commit_hash?: string; commit_time?: string }>;
-  fetchedAt?: string;
 }
 
 interface RepoOptionsProps {
   repoInfo: RepoInfo;
-  currentSessionBranch?: string;
+  selectedPath?: string;
+  onSelectedPathChange: (path: string) => void;
   onSelectMainRepo: () => void;
   onSelectWorktree: (path: string) => void;
-  onSelectBranch: (branch: string) => void;
   onCreateWorktree: (branchName: string, startingFrom: string) => Promise<void>;
   onDeleteWorktree?: (path: string) => Promise<void>;
-  onDeleteBranch?: (branch: string) => Promise<void>;
   onError?: (message: string) => void;
   onRefresh: () => void;
   onBack: () => void;
   refreshing?: boolean;
-  yoloMode?: boolean;
-  yoloSupported?: boolean;
-  onToggleYoloMode?: () => void;
 }
 
 const formatTime = (isoTime?: string) => {
@@ -43,266 +37,307 @@ const formatTime = (isoTime?: string) => {
   return `${diffDays}d ago`;
 };
 
+const baseName = (path: string) => {
+  const parts = path.split('/').filter(Boolean);
+  return parts[parts.length - 1] || path;
+};
+
+type DestinationItem =
+  | {
+      kind: 'main-repo';
+      path: string;
+      branch: string;
+      icon: string;
+      iconColor: string;
+      name: string;
+      detail: string;
+    }
+  | {
+      kind: 'worktree';
+      path: string;
+      branch: string;
+      icon: string;
+      iconColor: string;
+      name: string;
+      detail: string;
+    };
+
 export const RepoOptions: React.FC<RepoOptionsProps> = ({
   repoInfo,
-  currentSessionBranch,
+  selectedPath,
+  onSelectedPathChange,
   onSelectMainRepo,
   onSelectWorktree,
-  onSelectBranch,
   onCreateWorktree,
   onDeleteWorktree,
-  onDeleteBranch,
   onError,
   onRefresh,
   onBack,
   refreshing = false,
-  yoloMode = false,
-  yoloSupported = false,
-  onToggleYoloMode,
 }) => {
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const destinationListRef = useRef<HTMLDivElement>(null);
+  const destinationItems = useMemo<DestinationItem[]>(
+    () => [
+      {
+        kind: 'main-repo',
+        path: repoInfo.repo,
+        branch: repoInfo.currentBranch,
+        icon: '●',
+        iconColor: 'icon-green',
+        name: baseName(repoInfo.repo),
+        detail: `${repoInfo.repo} • ${repoInfo.currentBranch} • ${repoInfo.currentCommitHash.substring(0, 7)} • ${formatTime(repoInfo.currentCommitTime)}`,
+      },
+      ...repoInfo.worktrees.map((worktree) => ({
+        kind: 'worktree' as const,
+        path: worktree.path,
+        branch: worktree.branch,
+        icon: '◎',
+        iconColor: 'icon-purple',
+        name: baseName(worktree.path),
+        detail: `${worktree.path} • ${worktree.branch}`,
+      })),
+    ],
+    [repoInfo],
+  );
+  const createWorktreeIndex = destinationItems.length;
+  const selectedDestinationIndex = useMemo(
+    () => destinationItems.findIndex((item) => item.path === selectedPath),
+    [destinationItems, selectedPath],
+  );
+  const committedDestinationIndex = selectedDestinationIndex >= 0 ? selectedDestinationIndex : 0;
+  const selectedDestination = destinationItems[committedDestinationIndex];
+  // Focus can temporarily move to the action row, but selectedPath remains the committed destination.
+  const [focusIndex, setFocusIndex] = useState(committedDestinationIndex);
   const [showNewWorktree, setShowNewWorktree] = useState(false);
   const [newWorktreeName, setNewWorktreeName] = useState('');
   const [startingBranch, setStartingBranch] = useState<'current' | 'default'>('current');
-  const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
+  const [pendingDeletePath, setPendingDeletePath] = useState<string | null>(null);
 
-  // Clear pending delete when repoInfo changes externally (e.g., after refresh)
   useEffect(() => {
-    setPendingDeleteIndex(null);
-  }, [repoInfo]);
+    setPendingDeletePath(null);
+    setFocusIndex((prev) => {
+      if (showNewWorktree || prev === createWorktreeIndex) {
+        return prev;
+      }
+      return committedDestinationIndex;
+    });
+  }, [committedDestinationIndex, createWorktreeIndex, showNewWorktree]);
 
-  // Calculate total items for navigation
-  const mainRepoCount = 1;
-  const worktreeCount = repoInfo.worktrees.length;
-  const newWorktreeCount = 1; // "New worktree..." option
-  const branchCount = repoInfo.branches.length;
-  const totalItems = mainRepoCount + worktreeCount + newWorktreeCount + branchCount;
-
-  // Check if the currently selected item can be deleted
-  const canDeleteSelectedItem = useCallback(() => {
-    // Index 0 = main repo (can't delete)
-    if (selectedIndex === 0) return false;
-
-    // Worktrees (indices 1 to worktreeCount)
-    if (selectedIndex > 0 && selectedIndex <= worktreeCount) return true;
-
-    // "New worktree..." option (can't delete)
-    if (selectedIndex === worktreeCount + 1) return false;
-
-    // Branches - check if it's the default branch
-    const branchStartIndex = worktreeCount + 2;
-    if (selectedIndex >= branchStartIndex) {
-      const branchIndex = selectedIndex - branchStartIndex;
-      const branch = repoInfo.branches[branchIndex];
-      // Can't delete default branch
-      return branch && branch.name !== repoInfo.defaultBranch;
-    }
-
-    return false;
-  }, [repoInfo.branches, repoInfo.defaultBranch, selectedIndex, worktreeCount]);
-
-  const handleSelect = useCallback((index: number) => {
-    let currentIndex = 0;
-
-    // Main repository
-    if (index === currentIndex) {
-      onSelectMainRepo();
+  useEffect(() => {
+    if (showNewWorktree) {
       return;
     }
-    currentIndex += mainRepoCount;
+    rootRef.current?.focus();
+  }, [showNewWorktree]);
 
-    // Worktrees
-    if (index < currentIndex + worktreeCount) {
-      const worktreeIndex = index - currentIndex;
-      onSelectWorktree(repoInfo.worktrees[worktreeIndex].path);
+  useEffect(() => {
+    if (pendingDeletePath) {
+      rootRef.current?.focus();
+    }
+  }, [pendingDeletePath]);
+
+  useEffect(() => {
+    const activeIndex = pendingDeletePath
+      ? destinationItems.findIndex((item) => item.path === pendingDeletePath)
+      : committedDestinationIndex;
+    if (activeIndex < 0) {
       return;
     }
-    currentIndex += worktreeCount;
+    destinationListRef.current
+      ?.querySelector<HTMLElement>(`[data-option-index="${activeIndex}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [committedDestinationIndex, destinationItems, pendingDeletePath]);
 
-    // New worktree option
-    if (index === currentIndex) {
-      setShowNewWorktree(true);
+  const focusedDestination = focusIndex >= 0 && focusIndex < destinationItems.length
+    ? destinationItems[focusIndex]
+    : null;
+  const canDeleteSelectedItem = Boolean(
+    onDeleteWorktree &&
+    focusedDestination &&
+    focusedDestination.kind === 'worktree',
+  );
+
+  const commitDestination = useCallback((index: number) => {
+    const clamped = Math.max(0, Math.min(index, destinationItems.length - 1));
+    const item = destinationItems[clamped];
+    setFocusIndex(clamped);
+    if (item) {
+      onSelectedPathChange(item.path);
+    }
+  }, [destinationItems, onSelectedPathChange]);
+
+  const openNewWorktree = useCallback(() => {
+    setPendingDeletePath(null);
+    setFocusIndex(createWorktreeIndex);
+    setShowNewWorktree(true);
+  }, [createWorktreeIndex]);
+
+  const beginDeleteWorktree = useCallback((path: string) => {
+    setShowNewWorktree(false);
+    setNewWorktreeName('');
+    setPendingDeletePath(path);
+  }, []);
+
+  const handleActivate = useCallback((index: number) => {
+    if (index < destinationItems.length) {
+      const item = destinationItems[index];
+      onSelectedPathChange(item.path);
+      if (item.kind === 'main-repo') {
+        onSelectMainRepo();
+      } else {
+        onSelectWorktree(item.path);
+      }
       return;
     }
-    currentIndex += newWorktreeCount;
+    openNewWorktree();
+  }, [destinationItems, onSelectMainRepo, onSelectWorktree, onSelectedPathChange, openNewWorktree]);
 
-    // Branches
-    if (index < currentIndex + branchCount) {
-      const branchIndex = index - currentIndex;
-      onSelectBranch(repoInfo.branches[branchIndex].name);
-      return;
-    }
-  }, [
-    branchCount,
-    mainRepoCount,
-    newWorktreeCount,
-    onSelectBranch,
-    onSelectMainRepo,
-    onSelectWorktree,
-    repoInfo.branches,
-    repoInfo.worktrees,
-    worktreeCount,
-  ]);
-
-  // Execute the pending delete operation
   const executeDelete = useCallback(async () => {
-    if (pendingDeleteIndex === null) return;
+    if (!pendingDeletePath || !onDeleteWorktree) {
+      return;
+    }
 
-    const deletedIndex = pendingDeleteIndex;
+    const deletedIndex = destinationItems.findIndex((item) => item.path === pendingDeletePath);
+    const survivingItems = destinationItems.filter((item) => item.path !== pendingDeletePath);
+    const nextSelectedPath = survivingItems[Math.min(deletedIndex, survivingItems.length - 1)]?.path || repoInfo.repo;
+
     try {
-      // Worktree deletion
-      if (pendingDeleteIndex > 0 && pendingDeleteIndex <= worktreeCount) {
-        const worktree = repoInfo.worktrees[pendingDeleteIndex - 1];
-        if (onDeleteWorktree) {
-          await onDeleteWorktree(worktree.path);
-        }
-      }
-      // Branch deletion
-      else {
-        const branchIndex = pendingDeleteIndex - worktreeCount - 2;
-        const branch = repoInfo.branches[branchIndex];
-        if (onDeleteBranch && branch) {
-          await onDeleteBranch(branch.name);
-        }
-      }
-      // After successful delete, adjust selectedIndex if needed
-      // If we deleted an item at or before current selection, move selection up
-      if (selectedIndex >= deletedIndex && selectedIndex > 0) {
-        setSelectedIndex(prev => Math.max(0, prev - 1));
-      }
+      await onDeleteWorktree(pendingDeletePath);
+      onSelectedPathChange(nextSelectedPath);
+      setFocusIndex(Math.min(deletedIndex, survivingItems.length - 1));
     } catch (err) {
       console.error('Delete failed:', err);
-      const message = err instanceof Error ? err.message : 'Delete failed';
-      onError?.(message);
+      onError?.(err instanceof Error ? err.message : 'Delete failed');
+    } finally {
+      setPendingDeletePath(null);
+    }
+  }, [destinationItems, onDeleteWorktree, onError, onSelectedPathChange, pendingDeletePath, repoInfo.repo]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (pendingDeletePath) {
+      e.stopPropagation();
+      if (e.key === 'y' || e.key === 'Y') {
+        void executeDelete();
+        e.preventDefault();
+      } else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') {
+        setPendingDeletePath(null);
+        e.preventDefault();
+      } else {
+        setPendingDeletePath(null);
+      }
+      return;
     }
 
-    setPendingDeleteIndex(null);
-  }, [
-    onDeleteBranch,
-    onDeleteWorktree,
-    onError,
-    pendingDeleteIndex,
-    repoInfo.branches,
-    repoInfo.worktrees,
-    selectedIndex,
-    worktreeCount,
-  ]);
+    if (showNewWorktree) {
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        setShowNewWorktree(false);
+        setNewWorktreeName('');
+        setFocusIndex(committedDestinationIndex);
+        e.preventDefault();
+      } else if (e.key === 'Enter' && newWorktreeName.trim()) {
+        const startFrom = startingBranch === 'current'
+          ? selectedDestination?.branch || repoInfo.currentBranch
+          : `origin/${repoInfo.defaultBranch}`;
+        void onCreateWorktree(newWorktreeName.trim(), startFrom);
+        e.preventDefault();
+      } else if (e.key === 'Tab') {
+        setStartingBranch((prev) => prev === 'current' ? 'default' : 'current');
+        e.preventDefault();
+      }
+      return;
+    }
 
-  // Handle keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Handle delete confirmation
-      if (pendingDeleteIndex !== null) {
-        if (e.key === 'y' || e.key === 'Y') {
-          executeDelete();
-          e.preventDefault();
-        } else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') {
-          setPendingDeleteIndex(null);
-          e.preventDefault();
+    const totalItems = destinationItems.length + 1;
+    switch (e.key) {
+      case 'ArrowUp':
+        e.stopPropagation();
+        if (focusIndex <= 0) {
+          commitDestination(0);
+        } else if (focusIndex <= destinationItems.length) {
+          commitDestination(focusIndex - 1);
+        }
+        e.preventDefault();
+        break;
+      case 'ArrowDown':
+        e.stopPropagation();
+        if (focusIndex < destinationItems.length - 1) {
+          commitDestination(focusIndex + 1);
         } else {
-          // Any other key cancels and is processed normally
-          setPendingDeleteIndex(null);
+          setFocusIndex(Math.min(totalItems - 1, focusIndex + 1));
         }
-        return;
-      }
-
-      if (showNewWorktree) {
-        if (e.key === 'Escape') {
-          setShowNewWorktree(false);
-          setNewWorktreeName('');
-          e.preventDefault();
-        } else if (e.key === 'Enter' && newWorktreeName.trim()) {
-          const startFrom = startingBranch === 'current'
-            ? currentSessionBranch || repoInfo.currentBranch
-            : `origin/${repoInfo.defaultBranch}`;
-          onCreateWorktree(newWorktreeName.trim(), startFrom);
-          e.preventDefault();
-        } else if (e.key === 'Tab') {
-          setStartingBranch(prev => prev === 'current' ? 'default' : 'current');
-          e.preventDefault();
+        e.preventDefault();
+        break;
+      case 'Enter':
+        e.stopPropagation();
+        handleActivate(focusIndex);
+        e.preventDefault();
+        break;
+      case 'd':
+      case 'D':
+        e.stopPropagation();
+        if (canDeleteSelectedItem) {
+          if (focusedDestination) {
+            beginDeleteWorktree(focusedDestination.path);
+          }
         }
-        return;
-      }
-
-      switch (e.key) {
-        case 'ArrowUp':
-          setSelectedIndex(prev => Math.max(0, prev - 1));
-          e.preventDefault();
-          break;
-        case 'ArrowDown':
-          setSelectedIndex(prev => Math.min(totalItems - 1, prev + 1));
-          e.preventDefault();
-          break;
-        case 'Enter':
-          handleSelect(selectedIndex);
-          e.preventDefault();
-          break;
-        case 'd':
-        case 'D':
-          if (canDeleteSelectedItem()) {
-            setPendingDeleteIndex(selectedIndex);
+        e.preventDefault();
+        break;
+      case 'r':
+      case 'R':
+        e.stopPropagation();
+        onRefresh();
+        e.preventDefault();
+        break;
+      case 'Escape':
+        e.stopPropagation();
+        onBack();
+        e.preventDefault();
+        break;
+      default:
+        if (/^[1-9]$/.test(e.key)) {
+          e.stopPropagation();
+          const index = parseInt(e.key, 10) - 1;
+          if (index < destinationItems.length) {
+            commitDestination(index);
+          } else if (index === createWorktreeIndex) {
+            openNewWorktree();
           }
           e.preventDefault();
-          break;
-        case 'r':
-        case 'R':
-          onRefresh();
-          e.preventDefault();
-          break;
-        case 'Escape':
-          onBack();
-          e.preventDefault();
-          break;
-        default:
-          // Number shortcuts (1-9)
-          if (/^[1-9]$/.test(e.key)) {
-            const index = parseInt(e.key) - 1;
-            if (index < totalItems) {
-              handleSelect(index);
-              e.preventDefault();
-            }
-          }
-          break;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+        }
+        break;
+    }
   }, [
     canDeleteSelectedItem,
-    currentSessionBranch,
+    beginDeleteWorktree,
+    commitDestination,
+    focusIndex,
+    destinationItems,
     executeDelete,
-    handleSelect,
+    focusedDestination,
+    handleActivate,
     newWorktreeName,
     onBack,
     onCreateWorktree,
     onRefresh,
-    pendingDeleteIndex,
+    openNewWorktree,
+    pendingDeletePath,
     repoInfo.currentBranch,
     repoInfo.defaultBranch,
-    selectedIndex,
+    committedDestinationIndex,
     showNewWorktree,
     startingBranch,
-    totalItems,
   ]);
 
-  const renderItem = (
-    itemIndex: number,
-    icon: string,
-    iconColor: string,
-    name: string,
-    detail?: string,
-    shortcut?: number,
-    kind?: string,
-  ) => {
-    const isSelected = selectedIndex === itemIndex;
-    const isDeleting = pendingDeleteIndex === itemIndex;
+  const renderDestination = (itemIndex: number, item: DestinationItem) => {
+    const isSelected = committedDestinationIndex === itemIndex;
+    const isDeleting = pendingDeletePath === item.path;
 
-    // Show delete confirmation inline
     if (isDeleting) {
       return (
         <div className="repo-option-item selected delete-confirm">
-          <span className="delete-prompt">Delete {name}? (y/n)</span>
+          <span className="delete-prompt">Delete {baseName(item.path)}? (y/n)</span>
         </div>
       );
     }
@@ -312,184 +347,107 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
         className={`repo-option-item ${isSelected ? 'selected' : ''}`}
         data-testid={`repo-option-${itemIndex}`}
         data-option-index={itemIndex}
-        data-option-kind={kind || ''}
-        onClick={() => handleSelect(itemIndex)}
-        onMouseEnter={() => setSelectedIndex(itemIndex)}
+        data-option-kind={item.kind}
+        onClick={() => handleActivate(itemIndex)}
       >
-        <span className={`repo-option-icon ${iconColor}`}>{icon}</span>
-        <span className="repo-option-name">{name}</span>
-        {detail && <span className="repo-option-detail">{detail}</span>}
-        {shortcut && <span className="repo-option-shortcut">{shortcut}</span>}
+        <span className={`repo-option-icon ${item.iconColor}`}>{item.icon}</span>
+        <span className="repo-option-name">{item.name}</span>
+        <span className="repo-option-detail">{item.detail}</span>
+        <span className="repo-option-shortcut">{itemIndex + 1}</span>
       </div>
     );
   };
 
-  let currentIndex = 0;
-  const items: React.ReactElement[] = [];
+  return (
+    <div
+      ref={rootRef}
+      className="repo-options"
+      data-testid="repo-options"
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+    >
+      <div className="repo-options-content">
+        <div className="repo-options-destinations">
+          <div className="repo-section-header">DESTINATIONS</div>
+          <div
+            ref={destinationListRef}
+            className="repo-destination-list"
+            data-testid="repo-destination-list"
+          >
+            {destinationItems.map((item, index) => (
+              <div key={item.path}>
+                {renderDestination(index, item)}
+              </div>
+            ))}
+          </div>
+        </div>
 
-  // Main repository section
-  items.push(
-    <div key="main-header" className="repo-section-header">
-      MAIN REPOSITORY
-    </div>
-  );
-  const mainCommitInfo = `${repoInfo.currentCommitHash.substring(0, 7)} • ${formatTime(repoInfo.currentCommitTime)}`;
-  items.push(
-    <div key="main-item">
-      {renderItem(
-        currentIndex++,
-        '●',
-        'icon-green',
-        repoInfo.currentBranch,
-        mainCommitInfo,
-        1,
-        'main-repo',
-      )}
-    </div>
-  );
-
-  // Worktrees section
-  if (repoInfo.worktrees.length > 0) {
-    items.push(
-      <div key="worktrees-header" className="repo-section-header">
-        WORKTREES
-      </div>
-    );
-    repoInfo.worktrees.forEach((worktree, idx) => {
-      items.push(
-        <div key={`worktree-${idx}`}>
-          {renderItem(
-            currentIndex++,
-            '◎',
-            'icon-purple',
-            worktree.branch,
-            worktree.path,
-            idx + 2,
-            'worktree',
+        <div className="repo-options-actions">
+          <div className="repo-section-header">ACTIONS</div>
+          {showNewWorktree ? (
+            <div key="new-worktree-form" className="new-worktree-form" data-testid="repo-new-worktree-form">
+              <div className="new-worktree-input-row">
+                <span className="repo-option-icon icon-blue">+</span>
+                <input
+                  type="text"
+                  className="new-worktree-input"
+                  data-testid="repo-new-worktree-input"
+                  placeholder="Branch name..."
+                  value={newWorktreeName}
+                  onChange={(e) => setNewWorktreeName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="new-worktree-radio-row">
+                <label className={startingBranch === 'current' ? 'selected' : ''}>
+                  <input
+                    type="radio"
+                    name="startingBranch"
+                    value="current"
+                    data-testid="repo-new-worktree-start-current"
+                    checked={startingBranch === 'current'}
+                    onChange={() => setStartingBranch('current')}
+                  />
+                  Start from {selectedDestination?.branch || repoInfo.currentBranch}
+                </label>
+                <label className={startingBranch === 'default' ? 'selected' : ''}>
+                  <input
+                    type="radio"
+                    name="startingBranch"
+                    value="default"
+                    data-testid="repo-new-worktree-start-default"
+                    checked={startingBranch === 'default'}
+                    onChange={() => setStartingBranch('default')}
+                  />
+                  Start from origin/{repoInfo.defaultBranch}
+                </label>
+              </div>
+              <div className="new-worktree-hint">
+                Press Enter to create • Tab to toggle • Esc to cancel
+              </div>
+            </div>
+          ) : (
+            <div
+              className={`repo-option-item ${focusIndex === createWorktreeIndex ? 'selected' : ''}`}
+              data-testid={`repo-option-${createWorktreeIndex}`}
+              data-option-index={createWorktreeIndex}
+              data-option-kind="new-worktree"
+              onClick={openNewWorktree}
+            >
+              <span className="repo-option-icon icon-blue">+</span>
+              <span className="repo-option-name">Create worktree...</span>
+              <span className="repo-option-detail">Create a new worktree and open it immediately</span>
+              <span className="repo-option-shortcut">{createWorktreeIndex + 1}</span>
+            </div>
           )}
         </div>
-      );
-    });
-  }
-
-  // Branches section
-  items.push(
-    <div key="branches-header" className="repo-section-header">
-      BRANCHES
-    </div>
-  );
-
-  // New worktree option
-  if (showNewWorktree) {
-    items.push(
-      <div key="new-worktree-form" className="new-worktree-form" data-testid="repo-new-worktree-form">
-        <div className="new-worktree-input-row">
-          <span className="repo-option-icon icon-blue">+</span>
-          <input
-            type="text"
-            className="new-worktree-input"
-            data-testid="repo-new-worktree-input"
-            placeholder="Branch name..."
-            value={newWorktreeName}
-            onChange={(e) => setNewWorktreeName(e.target.value)}
-            autoFocus
-          />
-        </div>
-        <div className="new-worktree-radio-row">
-          <label className={startingBranch === 'current' ? 'selected' : ''}>
-            <input
-              type="radio"
-              name="startingBranch"
-              value="current"
-              data-testid="repo-new-worktree-start-current"
-              checked={startingBranch === 'current'}
-              onChange={() => setStartingBranch('current')}
-            />
-            Start from {currentSessionBranch || repoInfo.currentBranch}
-          </label>
-          <label className={startingBranch === 'default' ? 'selected' : ''}>
-            <input
-              type="radio"
-              name="startingBranch"
-              value="default"
-              data-testid="repo-new-worktree-start-default"
-              checked={startingBranch === 'default'}
-              onChange={() => setStartingBranch('default')}
-            />
-            Start from origin/{repoInfo.defaultBranch}
-          </label>
-        </div>
-        <div className="new-worktree-hint">
-          Press Enter to create • Tab to toggle • Esc to cancel
-        </div>
-      </div>
-    );
-  } else {
-    items.push(
-      <div key="new-worktree">
-        {renderItem(
-          currentIndex++,
-          '+',
-          'icon-blue',
-          'New worktree...',
-          undefined,
-          repoInfo.worktrees.length + 2,
-          'new-worktree',
-        )}
-      </div>
-    );
-  }
-
-  // Available branches
-  repoInfo.branches.forEach((branch, idx) => {
-    const commitInfo = branch.commit_hash && branch.commit_time
-      ? `${branch.commit_hash.substring(0, 7)} • ${formatTime(branch.commit_time)}`
-      : undefined;
-    items.push(
-      <div key={`branch-${idx}`}>
-        {renderItem(
-          currentIndex++,
-          '○',
-          'icon-muted',
-          branch.name,
-          commitInfo,
-          repoInfo.worktrees.length + idx + 3,
-          'branch',
-        )}
-      </div>
-    );
-  });
-
-  return (
-    <div className="repo-options" data-testid="repo-options">
-      <div className="repo-options-toolbar">
-        <div className="repo-options-toolbar-label">LAUNCH MODE</div>
-        <button
-          type="button"
-          className={`repo-options-yolo ${yoloMode ? 'active' : ''}`}
-          onClick={onToggleYoloMode}
-          disabled={!yoloSupported}
-          role="switch"
-          aria-checked={yoloMode}
-          title={!yoloSupported ? 'Selected agent does not support yolo mode' : undefined}
-        >
-          <span>YOLO</span>
-          {yoloSupported && <kbd>⌥Y</kbd>}
-        </button>
-      </div>
-      <div className="repo-options-content">
-        {items}
       </div>
       <div className="repo-options-footer">
         <span>↑↓ Navigate</span>
-        <span>Enter Select</span>
-        {yoloSupported && <span>⌥Y YOLO</span>}
-        {canDeleteSelectedItem() && <span>D Delete</span>}
+        <span>Enter Open</span>
+        {canDeleteSelectedItem && <span>D Delete worktree</span>}
         <span>R Refresh{refreshing && ' ...'}</span>
         <span>Esc Back</span>
-        {repoInfo.fetchedAt && (
-          <span className="fetch-time">Updated {formatTime(repoInfo.fetchedAt)}</span>
-        )}
       </div>
     </div>
   );

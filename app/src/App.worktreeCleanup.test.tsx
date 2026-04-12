@@ -44,7 +44,6 @@ vi.mock('./components/Sidebar', () => ({
 vi.mock('./components/Dashboard', () => ({ Dashboard: () => null }));
 vi.mock('./components/AttentionDrawer', () => ({ AttentionDrawer: () => null }));
 vi.mock('./components/LocationPicker', () => ({ LocationPicker: () => null }));
-vi.mock('./components/BranchPicker', () => ({ BranchPicker: () => null }));
 vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
 vi.mock('./components/ChangesPanel', () => ({ ChangesPanel: () => null }));
 vi.mock('./components/DiffDetailPanel', () => ({ DiffDetailPanel: () => null }));
@@ -181,20 +180,10 @@ describe('worktree cleanup prompt', () => {
       sendSetSetting: fn,
       sendCreateWorktree: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
       sendDeleteWorktree: vi.fn(async () => ({ success: true })),
-      sendDeleteBranch: fn,
       sendGetRecentLocations: vi.fn(async () => ({ success: true, locations: [] })),
-      sendListBranches: vi.fn(async () => ({ success: true, branches: [] })),
-      sendSwitchBranch: vi.fn(async () => ({ success: true })),
       sendCreateWorktreeFromBranch: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
-      sendCheckDirty: vi.fn(async () => ({ success: true, dirty: false })),
-      sendStash: vi.fn(async () => ({ success: true })),
-      sendStashPop: vi.fn(async () => ({ success: true })),
-      sendCheckAttnStash: vi.fn(async () => ({ success: true, has_stash: false })),
-      sendCommitWIP: vi.fn(async () => ({ success: true })),
-      sendGetDefaultBranch: vi.fn(async () => ({ success: true, branch: 'main' })),
       sendFetchRemotes: vi.fn(async () => ({ success: true })),
       sendFetchPRDetails: vi.fn(async () => ({ success: true })),
-      sendListRemoteBranches: vi.fn(async () => ({ success: true, branches: [] })),
       sendEnsureRepo: vi.fn(async () => ({ success: true, path: '/tmp/repo' })),
       sendSubscribeGitStatus: fn,
       sendUnsubscribeGitStatus: fn,
@@ -310,20 +299,10 @@ describe('worktree cleanup prompt', () => {
       sendSetSetting: fn,
       sendCreateWorktree: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
       sendDeleteWorktree: vi.fn(async () => ({ success: true })),
-      sendDeleteBranch: fn,
       sendGetRecentLocations: vi.fn(async () => ({ success: true, locations: [] })),
-      sendListBranches: vi.fn(async () => ({ success: true, branches: [] })),
-      sendSwitchBranch: vi.fn(async () => ({ success: true })),
       sendCreateWorktreeFromBranch: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
-      sendCheckDirty: vi.fn(async () => ({ success: true, dirty: false })),
-      sendStash: vi.fn(async () => ({ success: true })),
-      sendStashPop: vi.fn(async () => ({ success: true })),
-      sendCheckAttnStash: vi.fn(async () => ({ success: true, has_stash: false })),
-      sendCommitWIP: vi.fn(async () => ({ success: true })),
-      sendGetDefaultBranch: vi.fn(async () => ({ success: true, branch: 'main' })),
       sendFetchRemotes: vi.fn(async () => ({ success: true })),
       sendFetchPRDetails: vi.fn(async () => ({ success: true })),
-      sendListRemoteBranches: vi.fn(async () => ({ success: true, branches: [] })),
       sendEnsureRepo: vi.fn(async () => ({ success: true, path: '/tmp/repo' })),
       sendSubscribeGitStatus: fn,
       sendUnsubscribeGitStatus: fn,

@@ -41,7 +41,6 @@ export const SHORTCUTS = {
   'session.goToDashboard': { key: 'g', meta: true },
   'session.jumpToWaiting': { key: 'j', meta: true },
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
-  'session.openBranchPicker': { key: 'b', meta: true },
   'session.refreshPRs': { key: 'r', meta: true },
   'session.fork': { key: 'f', meta: true, shift: true },
 

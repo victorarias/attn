@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "51"
+const ProtocolVersion = "52"
 
 // Commands
 const (
@@ -54,15 +54,7 @@ const (
 	CmdBrowseDirectory          = "browse_directory"
 	CmdInspectPath              = "inspect_path"
 	CmdListBranches             = "list_branches"
-	CmdDeleteBranch             = "delete_branch"
-	CmdSwitchBranch             = "switch_branch"
 	CmdCreateWorktreeFromBranch = "create_worktree_from_branch"
-	CmdCreateBranch             = "create_branch"
-	CmdCheckDirty               = "check_dirty"
-	CmdStash                    = "stash"
-	CmdStashPop                 = "stash_pop"
-	CmdCheckAttnStash           = "check_attn_stash"
-	CmdCommitWIP                = "commit_wip"
 	CmdGetDefaultBranch         = "get_default_branch"
 	CmdFetchRemotes             = "fetch_remotes"
 	CmdListRemoteBranches       = "list_remote_branches"
@@ -128,14 +120,6 @@ const (
 	EventBrowseDirectoryResult    = "browse_directory_result"
 	EventInspectPathResult        = "inspect_path_result"
 	EventBranchesResult           = "branches_result"
-	EventDeleteBranchResult       = "delete_branch_result"
-	EventSwitchBranchResult       = "switch_branch_result"
-	EventCreateBranchResult       = "create_branch_result"
-	EventCheckDirtyResult         = "check_dirty_result"
-	EventStashResult              = "stash_result"
-	EventStashPopResult           = "stash_pop_result"
-	EventCheckAttnStashResult     = "check_attn_stash_result"
-	EventCommitWIPResult          = "commit_wip_result"
 	EventGetDefaultBranchResult   = "get_default_branch_result"
 	EventFetchRemotesResult       = "fetch_remotes_result"
 	EventListRemoteBranchesResult = "list_remote_branches_result"
@@ -518,64 +502,8 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdDeleteBranch:
-		var msg DeleteBranchMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdSwitchBranch:
-		var msg SwitchBranchMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
 	case CmdCreateWorktreeFromBranch:
 		var msg CreateWorktreeFromBranchMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdCreateBranch:
-		var msg CreateBranchMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdCheckDirty:
-		var msg CheckDirtyMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdStash:
-		var msg StashMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdStashPop:
-		var msg StashPopMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdCheckAttnStash:
-		var msg CheckAttnStashMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdCommitWIP:
-		var msg CommitWIPMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
 import { PathInput } from './NewSessionDialog/PathInput';
 import { RepoOptions } from './NewSessionDialog/RepoOptions';
@@ -13,17 +13,49 @@ import {
   isAgentAvailable,
   resolvePreferredAgent,
 } from '../utils/agentAvailability';
+import {
+  buildInitialPickerInput,
+  expandDisplayPath,
+  normalizePickerPath,
+  toDisplayPath,
+} from '../utils/locationPickerPaths';
 import './LocationPicker.css';
 
-interface RepoInfo {
+interface BackendRepoInfo {
   repo: string;
   current_branch: string;
   current_commit_hash: string;
   current_commit_time: string;
   default_branch: string;
   worktrees: Array<{ path: string; branch: string }>;
-  branches: Array<{ name: string; commit_hash?: string; commit_time?: string }>;
-  fetched_at?: string;
+}
+
+interface RepoInfo {
+  repo: string;
+  currentBranch: string;
+  currentCommitHash: string;
+  currentCommitTime: string;
+  defaultBranch: string;
+  worktrees: Array<{ path: string; branch: string }>;
+}
+
+interface PickerTarget {
+  id: string;
+  endpointId?: string;
+  name: string;
+  connected: boolean;
+  metaLabel: string;
+  metaClassName?: string;
+  projectsDirectory?: string;
+  placeholder: string;
+  daemonInstanceId?: string;
+}
+
+interface PathSelectableItem {
+  kind: 'recent' | 'directory';
+  key: string;
+  label: string;
+  path: string;
 }
 
 interface LocationPickerProps {
@@ -33,10 +65,9 @@ interface LocationPickerProps {
   onGetRecentLocations?: (endpointId?: string) => Promise<{ locations: RecentLocation[]; home_path?: string }>;
   onBrowseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>;
   onInspectPath?: (path: string, endpointId?: string) => Promise<InspectPathResult>;
-  onGetRepoInfo?: (mainRepo: string, endpointId?: string) => Promise<{ success: boolean; info?: RepoInfo; error?: string }>;
+  onGetRepoInfo?: (mainRepo: string, endpointId?: string) => Promise<{ success: boolean; info?: BackendRepoInfo; error?: string }>;
   onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string, endpointId?: string) => Promise<{ success: boolean; path?: string }>;
   onDeleteWorktree?: (path: string, endpointId?: string) => Promise<{ success: boolean; error?: string }>;
-  onDeleteBranch?: (mainRepo: string, branch: string, force?: boolean, endpointId?: string) => Promise<{ success: boolean; error?: string }>;
   onError?: (message: string) => void;
   projectsDirectory?: string;
   agentAvailability?: AgentAvailability;
@@ -64,25 +95,10 @@ const normalizeAgent = (value?: string): SessionAgent | null => {
   return lower || null;
 };
 
-function toDisplayPath(path: string, homePath: string): string {
-  if (!path) {
-    return '';
-  }
-  if (path.startsWith(homePath + '/')) {
-    return '~' + path.slice(homePath.length);
-  }
-  if (path === homePath) {
-    return '~';
-  }
-  return path;
-}
-
-function buildInitialInput(path: string | undefined, homePath: string): string {
-  if (!path) {
-    return '';
-  }
-  const displayPath = homePath ? toDisplayPath(path, homePath) : path;
-  return displayPath.endsWith('/') ? displayPath : `${displayPath}/`;
+function pathStartsWith(candidate: string, input: string): boolean {
+  const normalizedCandidate = candidate.toLowerCase();
+  const normalizedInput = input.toLowerCase();
+  return normalizedCandidate.startsWith(normalizedInput);
 }
 
 function parseBooleanSetting(value?: string): boolean | null {
@@ -99,8 +115,8 @@ function parseBooleanSetting(value?: string): boolean | null {
   return null;
 }
 
-function yoloSettingKeys(endpointId: string, daemonInstanceId?: string): string[] {
-  if (endpointId === LOCAL_TARGET) {
+function yoloSettingKeys(targetId: string, daemonInstanceId?: string): string[] {
+  if (targetId === LOCAL_TARGET) {
     return [`${SESSION_YOLO_KEY}_local`, SESSION_YOLO_KEY];
   }
   const keys: string[] = [];
@@ -108,28 +124,31 @@ function yoloSettingKeys(endpointId: string, daemonInstanceId?: string): string[
   if (daemonID) {
     keys.push(`${SESSION_YOLO_KEY}_daemon_${daemonID}`);
   }
-  if (endpointId.trim()) {
-    keys.push(`${SESSION_YOLO_KEY}_endpoint_${endpointId}`);
+  if (targetId.trim()) {
+    keys.push(`${SESSION_YOLO_KEY}_endpoint_${targetId}`);
   }
   return keys;
 }
 
-type Mode = 'path-input' | 'repo-options';
-
-interface State {
-  mode: Mode;
-  inputValue: string;
-  selectedIndex: number;
-  selectedRepo: string | null;
-  repoInfo: RepoInfo | null;
-  recentLocations: RecentLocation[];
-  homePath: string;
-  refreshing: boolean;
-  hasSelectedSinceTab: boolean;
-  agent: SessionAgent;
-  endpointId: string;
-  yoloMode: boolean;
+function initialInputPathForTarget(target: PickerTarget): string | undefined {
+  if (target.projectsDirectory) {
+    return target.projectsDirectory;
+  }
+  return target.endpointId ? '~' : undefined;
 }
+
+function toChooserRepoInfo(info: BackendRepoInfo): RepoInfo {
+  return {
+    repo: info.repo,
+    currentBranch: info.current_branch,
+    currentCommitHash: info.current_commit_hash,
+    currentCommitTime: info.current_commit_time,
+    defaultBranch: info.default_branch,
+    worktrees: info.worktrees,
+  };
+}
+
+type Mode = 'path-input' | 'repo-options';
 
 export function LocationPicker({
   isOpen,
@@ -141,7 +160,6 @@ export function LocationPicker({
   onGetRepoInfo,
   onCreateWorktree,
   onDeleteWorktree,
-  onDeleteBranch,
   onError,
   projectsDirectory,
   agentAvailability,
@@ -151,40 +169,59 @@ export function LocationPicker({
   const effectiveAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
   const hasAvailableAgents = hasAnyAvailableAgents(effectiveAgentAvailability);
   const noAgentsMessage = 'No supported agent CLI found in PATH.';
-  const [state, setState] = useState<State>({
-    mode: 'path-input',
-    inputValue: '',
-    selectedIndex: -1,
-    selectedRepo: null,
-    repoInfo: null,
-    recentLocations: [],
-    homePath: '',
-    refreshing: false,
-    hasSelectedSinceTab: false,
-    agent: 'claude',
-    endpointId: LOCAL_TARGET,
-    yoloMode: false,
-  });
 
-  const isLocalTarget = state.endpointId === LOCAL_TARGET;
+  const [mode, setMode] = useState<Mode>('path-input');
+  const [inputValue, setInputValue] = useState('');
+  const [highlightedItemKey, setHighlightedItemKey] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState('');
+  const [recentLocations, setRecentLocations] = useState<RecentLocation[]>([]);
+  const [homePath, setHomePath] = useState('');
+  const [agent, setAgent] = useState<SessionAgent>('claude');
+  const [targetId, setTargetId] = useState(LOCAL_TARGET);
+  const [yoloMode, setYoloMode] = useState(false);
+  const [repoRootPath, setRepoRootPath] = useState<string | null>(null);
+  const [repoInfo, setRepoInfo] = useState<RepoInfo | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [hasSelectedSinceTab, setHasSelectedSinceTab] = useState(true);
+  const requestGenerationRef = useRef(0);
+
   const agentCapabilities = useMemo(() => getAgentCapabilities(settings), [settings]);
-  const { suggestions: fsSuggestions, currentDir, homePath: suggestedHomePath } = useFilesystemSuggestions(
-    state.inputValue,
-    isLocalTarget ? undefined : state.endpointId,
-    onBrowseDirectory,
-  );
   const availableEndpoints = useMemo(
     () => endpoints.filter((endpoint) => endpoint.enabled !== false),
     [endpoints],
   );
-  const selectedEndpoint = useMemo(
-    () => availableEndpoints.find((endpoint) => endpoint.id === state.endpointId),
-    [availableEndpoints, state.endpointId],
+  const selectableTargets = useMemo<PickerTarget[]>(
+    () => [
+      {
+        id: LOCAL_TARGET,
+        name: 'Local',
+        connected: true,
+        metaLabel: 'this machine',
+        projectsDirectory,
+        placeholder: 'Type path (e.g., ~/projects) or search...',
+      },
+      ...availableEndpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.id,
+        name: endpoint.name,
+        connected: endpoint.status === 'connected',
+        metaLabel: endpoint.status,
+        metaClassName: `status-${endpoint.status}`,
+        projectsDirectory: endpoint.capabilities?.projects_directory,
+        placeholder: `Type path on ${endpoint.name} (e.g., ~/projects/repo)`,
+        daemonInstanceId: endpoint.capabilities?.daemon_instance_id,
+      })),
+    ],
+    [availableEndpoints, projectsDirectory],
   );
-  const selectedEndpointId = selectedEndpoint?.id;
+  const selectedTarget = useMemo(
+    () => selectableTargets.find((target) => target.id === targetId) || selectableTargets[0],
+    [selectableTargets, targetId],
+  );
+  const selectedEndpointId = selectedTarget?.endpointId;
   const yoloKeys = useMemo(
-    () => yoloSettingKeys(state.endpointId, selectedEndpoint?.capabilities?.daemon_instance_id),
-    [selectedEndpoint?.capabilities?.daemon_instance_id, state.endpointId],
+    () => yoloSettingKeys(selectedTarget.id, selectedTarget.daemonInstanceId),
+    [selectedTarget.daemonInstanceId, selectedTarget.id],
   );
   const yoloSettingKey = yoloKeys[0];
   const savedYoloMode = useMemo(() => {
@@ -196,27 +233,14 @@ export function LocationPicker({
     }
     return false;
   }, [settings, yoloKeys]);
-  const selectedProjectsDirectory = isLocalTarget
-    ? projectsDirectory
-    : selectedEndpoint?.capabilities?.projects_directory;
-  const selectableTargets = useMemo(
-    () => [
-      { id: LOCAL_TARGET, connected: true },
-      ...availableEndpoints.map((endpoint) => ({
-        id: endpoint.id,
-        connected: endpoint.status === 'connected',
-      })),
-    ],
-    [availableEndpoints],
-  );
+
   const targetShortcutByID = useMemo(() => {
     const shortcuts = new Map<string, string>();
     selectableTargets.forEach((target, index) => {
       const shortcutKey = TARGET_SHORTCUT_KEYS[index];
-      if (!shortcutKey) {
-        return;
+      if (shortcutKey) {
+        shortcuts.set(target.id, shortcutKey);
       }
-      shortcuts.set(target.id, shortcutKey);
     });
     return shortcuts;
   }, [selectableTargets]);
@@ -224,440 +248,546 @@ export function LocationPicker({
     const shortcuts = new Map<string, string>();
     selectableTargets.forEach((target, index) => {
       const shortcutCode = TARGET_SHORTCUT_CODES[index];
-      if (!shortcutCode) {
-        return;
+      if (shortcutCode) {
+        shortcuts.set(shortcutCode, target.id);
       }
-      shortcuts.set(shortcutCode, target.id);
     });
     return shortcuts;
   }, [selectableTargets]);
 
-  useEffect(() => {
-    if (isOpen && onGetRecentLocations) {
-      onGetRecentLocations(selectedEndpointId)
-        .then((result) => {
-          setState((prev) => ({
-            ...prev,
-            recentLocations: result.locations,
-            homePath: result.home_path || prev.homePath,
-          }));
-        })
-        .catch((err) => {
-          console.error('[LocationPicker] Failed to fetch recent locations:', err);
-          setState((prev) => ({ ...prev, recentLocations: [] }));
-        });
-    } else if (isOpen) {
-      setState((prev) => ({ ...prev, recentLocations: [] }));
-    }
-  }, [isOpen, onGetRecentLocations, selectedEndpointId]);
-
-  useEffect(() => {
-    if (!suggestedHomePath) {
-      return;
-    }
-    setState((prev) => (prev.homePath === suggestedHomePath ? prev : { ...prev, homePath: suggestedHomePath }));
-  }, [suggestedHomePath]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-    const defaultPath = selectedProjectsDirectory || (!isLocalTarget ? '~' : undefined);
-    const initialValue = buildInitialInput(defaultPath, state.homePath);
-    setState((prev) => ({
-      ...prev,
-      mode: 'path-input',
-      inputValue: initialValue,
-      selectedIndex: -1,
-      selectedRepo: null,
-      repoInfo: null,
-      refreshing: false,
-      hasSelectedSinceTab: false,
-    }));
-  }, [isLocalTarget, isOpen, selectedProjectsDirectory]);
+  const { suggestions: fsSuggestions, currentDir } = useFilesystemSuggestions(
+    inputValue,
+    selectedEndpointId,
+    onBrowseDirectory,
+    homePath,
+    (nextHomePath) => {
+      setHomePath((prev) => (prev === nextHomePath ? prev : nextHomePath));
+    },
+  );
 
   const orderedAgentList = useMemo(() => {
     const ordered: SessionAgent[] = [];
     const seen = new Set<SessionAgent>();
-    const push = (agent: SessionAgent) => {
-      if (seen.has(agent)) return;
-      seen.add(agent);
-      ordered.push(agent);
+    const push = (candidate: SessionAgent) => {
+      if (seen.has(candidate)) return;
+      seen.add(candidate);
+      ordered.push(candidate);
     };
-    for (const agent of FIXED_AGENT_ORDER) {
-      push(agent);
+    for (const candidate of FIXED_AGENT_ORDER) {
+      push(candidate);
     }
     const dynamicAgents = Object.keys(effectiveAgentAvailability) as SessionAgent[];
     dynamicAgents.sort((a, b) => a.localeCompare(b));
-    for (const agent of dynamicAgents) {
-      push(agent);
+    for (const candidate of dynamicAgents) {
+      push(candidate);
     }
     return ordered;
   }, [effectiveAgentAvailability]);
-
   const agentShortcutByName = useMemo(() => {
     const shortcuts = new Map<SessionAgent, number>();
-    orderedAgentList.forEach((agent, index) => {
-      shortcuts.set(agent, index + 1);
+    orderedAgentList.forEach((candidate, index) => {
+      shortcuts.set(candidate, index + 1);
     });
     return shortcuts;
   }, [orderedAgentList]);
 
   const savedAgent = normalizeAgent(settings[SESSION_AGENT_KEY]);
-  const yoloSupported = Boolean(agentCapabilities[state.agent]?.yolo);
+  const yoloSupported = Boolean(agentCapabilities[agent]?.yolo);
+
+  const invalidateRequestGeneration = useCallback(() => {
+    requestGenerationRef.current += 1;
+  }, []);
+
+  const beginRequestGeneration = useCallback(() => {
+    const nextGeneration = requestGenerationRef.current + 1;
+    requestGenerationRef.current = nextGeneration;
+    return nextGeneration;
+  }, []);
+
+  const isRequestCurrent = useCallback(
+    (requestGeneration: number) => requestGenerationRef.current === requestGeneration,
+    [],
+  );
+
+  useEffect(() => {
+    if (!selectedTarget) {
+      return;
+    }
+    setTargetId((prev) => (prev === selectedTarget.id ? prev : selectedTarget.id));
+  }, [selectedTarget]);
 
   useEffect(() => {
     if (!savedAgent) return;
     const resolvedSavedAgent = resolvePreferredAgent(savedAgent, effectiveAgentAvailability, 'codex');
-    setState((prev) => (prev.agent === resolvedSavedAgent ? prev : { ...prev, agent: resolvedSavedAgent }));
+    setAgent((prev) => (prev === resolvedSavedAgent ? prev : resolvedSavedAgent));
   }, [effectiveAgentAvailability, savedAgent]);
 
   useEffect(() => {
-    const resolvedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-    if (resolvedAgent === state.agent) {
-      return;
+    const resolvedAgent = resolvePreferredAgent(agent, effectiveAgentAvailability, 'codex');
+    if (resolvedAgent !== agent) {
+      setAgent(resolvedAgent);
     }
-    setState((prev) => ({ ...prev, agent: resolvedAgent }));
-  }, [effectiveAgentAvailability, state.agent]);
+  }, [agent, effectiveAgentAvailability]);
 
   useEffect(() => {
-    setState((prev) => (prev.yoloMode === savedYoloMode ? prev : { ...prev, yoloMode: savedYoloMode }));
+    setYoloMode((prev) => (prev === savedYoloMode ? prev : savedYoloMode));
   }, [savedYoloMode]);
 
   useEffect(() => {
-    if (yoloSupported) {
-      return;
+    if (!yoloSupported) {
+      setYoloMode(false);
     }
-    setState((prev) => (prev.yoloMode ? { ...prev, yoloMode: false } : prev));
   }, [yoloSupported]);
 
-  const expandedInput = state.inputValue.startsWith('~')
-    ? (state.homePath ? state.inputValue.replace('~', state.homePath) : state.inputValue)
-    : state.inputValue;
-
-  const filteredRecent = expandedInput
-    ? state.recentLocations.filter(
-        (loc) =>
-          loc.label.toLowerCase().includes(expandedInput.toLowerCase()) ||
-          loc.path.toLowerCase().includes(expandedInput.toLowerCase()),
-      )
-    : state.recentLocations;
-
-  const visibleRecent = filteredRecent;
-  const visibleSuggestions = fsSuggestions;
-
-  const getSelectedPath = () => {
-    if (state.selectedIndex === -1) {
-      return visibleSuggestions[0]?.path || visibleRecent[0]?.path || '';
-    }
-    if (state.selectedIndex < visibleRecent.length) {
-      return visibleRecent[state.selectedIndex]?.path || '';
-    }
-    const fsIndex = state.selectedIndex - visibleRecent.length;
-    return visibleSuggestions[fsIndex]?.path || '';
-  };
-  const selectedPath = getSelectedPath();
-  const ghostText = state.homePath ? toDisplayPath(selectedPath, state.homePath) : selectedPath;
-
   useEffect(() => {
-    setState((prev) => ({ ...prev, selectedIndex: -1 }));
-  }, [state.inputValue]);
-
-  useEffect(() => {
-    if (state.selectedIndex >= 0) {
-      const el = document.querySelector(`[data-index="${state.selectedIndex}"]`);
-      el?.scrollIntoView({ block: 'nearest' });
-    }
-  }, [state.selectedIndex]);
-
-  const handleSelect = useCallback(async (rawPath: string) => {
-    if (!hasAvailableAgents) {
-      onError?.(noAgentsMessage);
+    if (!isOpen) {
+      invalidateRequestGeneration();
       return;
     }
+    setMode('path-input');
+    setInputValue(buildInitialPickerInput(initialInputPathForTarget(selectedTarget), homePath));
+    setHighlightedItemKey(null);
+    setSelectedPath('');
+    setRepoRootPath(null);
+    setRepoInfo(null);
+    setRefreshing(false);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    let cancelled = false;
+    if (!onGetRecentLocations) {
+      setRecentLocations([]);
+      return;
+    }
+
+    onGetRecentLocations(selectedEndpointId)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setRecentLocations(result.locations);
+        const nextHomePath = result.home_path;
+        if (nextHomePath) {
+          setHomePath((prev) => (prev === nextHomePath ? prev : nextHomePath));
+        }
+      })
+      .catch((err) => {
+        if (cancelled) {
+          return;
+        }
+        console.error('[LocationPicker] Failed to fetch recent locations:', err);
+        setRecentLocations([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, onGetRecentLocations, selectedEndpointId]);
+
+  const expandedInput = expandDisplayPath(inputValue, homePath);
+  const filteredRecent = useMemo(
+    () => (expandedInput
+      ? recentLocations.filter(
+          (loc) =>
+            loc.label.toLowerCase().includes(expandedInput.toLowerCase()) ||
+            loc.path.toLowerCase().includes(expandedInput.toLowerCase()),
+        )
+      : recentLocations),
+    [expandedInput, recentLocations],
+  );
+  const visibleRecent = useMemo(
+    () => filteredRecent.slice(0, MAX_RECENT_LOCATIONS).map((loc) => ({
+      ...loc,
+      selectionPath: homePath ? toDisplayPath(loc.path, homePath) : loc.path,
+    })),
+    [filteredRecent, homePath],
+  );
+  const selectableItems = useMemo<PathSelectableItem[]>(
+    () => [
+      ...visibleRecent.map((loc) => ({
+        kind: 'recent' as const,
+        key: `recent:${loc.path}`,
+        label: loc.label,
+        path: loc.selectionPath,
+      })),
+      ...fsSuggestions.map((item) => ({
+        kind: 'directory' as const,
+        key: `directory:${item.path}`,
+        label: item.name,
+        path: item.path,
+      })),
+    ],
+    [fsSuggestions, visibleRecent],
+  );
+  const highlightedIndex = useMemo(
+    () => (highlightedItemKey ? selectableItems.findIndex((item) => item.key === highlightedItemKey) : -1),
+    [highlightedItemKey, selectableItems],
+  );
+  const highlightedItem = highlightedIndex >= 0 ? selectableItems[highlightedIndex] : null;
+  const completionCandidate = useMemo(() => {
+    const trimmedInput = inputValue.trim();
+    if (!trimmedInput) {
+      return '';
+    }
+    return selectableItems.find((item) => pathStartsWith(item.path, trimmedInput))?.path || '';
+  }, [inputValue, selectableItems]);
+  const ghostText = completionCandidate !== inputValue && pathStartsWith(completionCandidate, inputValue)
+    ? completionCandidate
+    : '';
+  const tabCompletionValue = highlightedItem?.path || ghostText;
+
+  useEffect(() => {
+    if (highlightedItemKey && highlightedIndex < 0) {
+      setHighlightedItemKey(null);
+    }
+  }, [highlightedIndex, highlightedItemKey]);
+
+  useEffect(() => {
+    if (highlightedIndex >= 0) {
+      document.querySelector(`[data-index="${highlightedIndex}"]`)?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightedIndex]);
+
+  const launchSelection = useCallback((path: string) => {
+    const selectedAgent = resolvePreferredAgent(agent, effectiveAgentAvailability, 'codex');
+    onSelect(path, selectedAgent, selectedEndpointId, yoloMode && yoloSupported);
+    onClose();
+  }, [agent, effectiveAgentAvailability, onClose, onSelect, selectedEndpointId, yoloMode, yoloSupported]);
+
+  const updateInputValue = useCallback((nextPath: string) => {
+    if (nextPath === inputValue) {
+      return;
+    }
+    invalidateRequestGeneration();
+    setInputValue(nextPath);
+    setHighlightedItemKey(null);
+    setSelectedPath('');
+    setHasSelectedSinceTab(true);
+  }, [inputValue, invalidateRequestGeneration]);
+
+  const handleTabComplete = useCallback((nextPath: string) => {
+    if (nextPath === inputValue) {
+      return;
+    }
+    invalidateRequestGeneration();
+    setInputValue(nextPath);
+    setHighlightedItemKey(null);
+    setSelectedPath('');
+    setHasSelectedSinceTab(false);
+  }, [inputValue, invalidateRequestGeneration]);
+
+  const handlePathSelect = useCallback((path: string) => {
+    setSelectedPath(path);
+  }, []);
+
+  const setSelectedPathFromPhysical = useCallback((path: string) => {
+    setSelectedPath((prev) => (prev === path ? prev : path));
+  }, []);
+
+  const handleSelectPath = useCallback(async (rawPath: string) => {
     if (!onInspectPath) {
       onError?.('Path inspection is not available.');
       return;
     }
-    const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
+
+    const sanitizedPath = normalizePickerPath(rawPath, homePath);
+    if (!sanitizedPath) {
+      return;
+    }
+    const requestGeneration = beginRequestGeneration();
 
     try {
-      const inspected = await onInspectPath(rawPath.replace(/\/$/, ''), selectedEndpointId);
+      const inspected = await onInspectPath(sanitizedPath, selectedEndpointId);
+      if (!isRequestCurrent(requestGeneration)) {
+        return;
+      }
       const inspection = inspected.inspection;
       if (!inspection?.exists || !inspection.is_directory) {
-        onError?.(`Directory not found: ${rawPath.replace(/\/$/, '')}`);
+        onError?.(`Directory not found: ${sanitizedPath}`);
         return;
       }
 
-      const path = inspection.resolved_path;
+      const inspectedHomePath = inspection.home_path;
+      if (inspectedHomePath) {
+        setHomePath((prev) => (prev === inspectedHomePath ? prev : inspectedHomePath));
+      }
+      const resolvedPath = inspection.resolved_path;
+      setSelectedPathFromPhysical(resolvedPath);
       const repoRoot = inspection.repo_root;
       if (repoRoot && onGetRepoInfo) {
         const result = await onGetRepoInfo(repoRoot, selectedEndpointId);
-        if (result.success && result.info) {
-          setState((prev) => ({
-            ...prev,
-            mode: 'repo-options',
-            selectedRepo: repoRoot,
-            repoInfo: result.info || null,
-          }));
-        } else {
-          onSelect(path, selectedAgent, selectedEndpointId);
-          onClose();
+        if (!isRequestCurrent(requestGeneration)) {
+          return;
         }
-        return;
+        if (result.success && result.info) {
+          setMode('repo-options');
+          setRepoRootPath(repoRoot);
+          setRepoInfo(toChooserRepoInfo(result.info));
+          return;
+        }
       }
 
-      onSelect(path, selectedAgent, selectedEndpointId, state.yoloMode && yoloSupported);
-      onClose();
+      if (!isRequestCurrent(requestGeneration)) {
+        return;
+      }
+      launchSelection(resolvedPath);
     } catch (err) {
+      if (!isRequestCurrent(requestGeneration)) {
+        return;
+      }
       console.log('[LocationPicker] inspect path error:', err);
       onError?.(err instanceof Error ? err.message : String(err));
+    }
+  }, [
+    beginRequestGeneration,
+    homePath,
+    isRequestCurrent,
+    launchSelection,
+    onError,
+    onGetRepoInfo,
+    onInspectPath,
+    selectedEndpointId,
+    setSelectedPathFromPhysical,
+  ]);
+
+  const handleAgentChange = useCallback((nextAgent: SessionAgent) => {
+    if (!isAgentAvailable(effectiveAgentAvailability, nextAgent)) {
       return;
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onGetRepoInfo, onInspectPath, onSelect, selectedEndpointId, state.agent, state.yoloMode, yoloSupported]);
-
-  const handleAgentChange = useCallback((agent: SessionAgent) => {
-    if (!isAgentAvailable(effectiveAgentAvailability, agent)) return;
-    setState((prev) => ({ ...prev, agent }));
-    setSetting(SESSION_AGENT_KEY, agent);
+    setAgent(nextAgent);
+    setSetting(SESSION_AGENT_KEY, nextAgent);
   }, [effectiveAgentAvailability, setSetting]);
 
-  const handleEndpointChange = useCallback((endpointId: string) => {
-    if (endpointId === state.endpointId) {
+  const handleTargetChange = useCallback((nextTargetId: string) => {
+    if (nextTargetId === selectedTarget.id) {
       if (!yoloSupported || !yoloSettingKey) {
         return;
       }
-      const nextYoloMode = !state.yoloMode;
+      const nextYoloMode = !yoloMode;
       setSetting(yoloSettingKey, String(nextYoloMode));
-      setState((prev) => ({ ...prev, yoloMode: nextYoloMode }));
+      setYoloMode(nextYoloMode);
       return;
     }
-    const nextEndpoint = endpointId === LOCAL_TARGET
-      ? null
-      : availableEndpoints.find((endpoint) => endpoint.id === endpointId);
-    const nextProjectsDirectory = endpointId === LOCAL_TARGET
-      ? projectsDirectory
-      : nextEndpoint?.capabilities?.projects_directory;
-    const defaultPath = nextProjectsDirectory || (endpointId === LOCAL_TARGET ? undefined : '~');
-    setState((prev) => ({
-      ...prev,
-      endpointId,
-      mode: 'path-input',
-      inputValue: buildInitialInput(defaultPath, prev.homePath),
-      selectedIndex: -1,
-      selectedRepo: null,
-      repoInfo: null,
-      recentLocations: [],
-      hasSelectedSinceTab: false,
-    }));
-  }, [availableEndpoints, projectsDirectory, setSetting, state.endpointId, state.yoloMode, yoloSettingKey, yoloSupported]);
 
-  const handleYoloToggle = useCallback(() => {
-    if (!yoloSupported || !yoloSettingKey) {
+    const nextTarget = selectableTargets.find((target) => target.id === nextTargetId);
+    if (!nextTarget || !nextTarget.connected) {
       return;
     }
-    const nextYoloMode = !state.yoloMode;
-    setSetting(yoloSettingKey, String(nextYoloMode));
-    setState((prev) => ({ ...prev, yoloMode: nextYoloMode }));
-  }, [setSetting, state.yoloMode, yoloSettingKey, yoloSupported]);
 
-  const handlePathInputChange = useCallback((value: string) => {
-    setState((prev) => ({ ...prev, inputValue: value, hasSelectedSinceTab: true }));
-  }, []);
+    setTargetId(nextTargetId);
+    invalidateRequestGeneration();
+    setMode('path-input');
+    setInputValue(buildInitialPickerInput(initialInputPathForTarget(nextTarget), homePath));
+    setHighlightedItemKey(null);
+    setSelectedPath('');
+    setRepoRootPath(null);
+    setRepoInfo(null);
+    setRecentLocations([]);
+    setRefreshing(false);
+  }, [homePath, invalidateRequestGeneration, selectableTargets, selectedTarget.id, setSetting, yoloMode, yoloSettingKey, yoloSupported]);
 
-  const handleTabComplete = useCallback((value: string) => {
-    setState((prev) => ({ ...prev, inputValue: value, hasSelectedSinceTab: false }));
-  }, []);
-
-  const handlePathInputSelect = useCallback((path: string) => {
-    handleSelect(path);
-  }, [handleSelect]);
+  const handlePathInputSubmit = useCallback(() => {
+    const pathToOpen = highlightedItem?.path || inputValue;
+    if (!pathToOpen.trim()) {
+      return;
+    }
+    void handleSelectPath(pathToOpen);
+  }, [handleSelectPath, highlightedItem, inputValue]);
 
   const handleSelectMainRepo = useCallback(() => {
     if (!hasAvailableAgents) {
       onError?.(noAgentsMessage);
       return;
     }
-    if (state.selectedRepo) {
-      const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-      onSelect(state.selectedRepo, selectedAgent, selectedEndpointId, state.yoloMode && yoloSupported);
-      onClose();
+    if (repoRootPath) {
+      launchSelection(repoRootPath);
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo, state.yoloMode, yoloSupported]);
+  }, [hasAvailableAgents, launchSelection, onError, repoRootPath]);
 
   const handleSelectWorktree = useCallback((path: string) => {
     if (!hasAvailableAgents) {
       onError?.(noAgentsMessage);
       return;
     }
-    const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-    onSelect(path, selectedAgent, selectedEndpointId, state.yoloMode && yoloSupported);
-    onClose();
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent, state.yoloMode, yoloSupported]);
-
-  const handleSelectBranch = useCallback((_branch: string) => {
-    if (!hasAvailableAgents) {
-      onError?.(noAgentsMessage);
-      return;
-    }
-    if (state.selectedRepo) {
-      const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-      onSelect(state.selectedRepo, selectedAgent, selectedEndpointId, state.yoloMode && yoloSupported);
-      onClose();
-    }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo, state.yoloMode, yoloSupported]);
+    launchSelection(path);
+  }, [hasAvailableAgents, launchSelection, onError]);
 
   const handleCreateWorktree = useCallback(async (branchName: string, startingFrom: string) => {
     if (!hasAvailableAgents) {
       onError?.(noAgentsMessage);
       return;
     }
-    if (!state.selectedRepo || !onCreateWorktree) return;
+    if (!repoRootPath || !onCreateWorktree) {
+      return;
+    }
 
+    const requestGeneration = beginRequestGeneration();
     try {
-      const result = await onCreateWorktree(state.selectedRepo, branchName, undefined, startingFrom, selectedEndpointId);
+      const result = await onCreateWorktree(repoRootPath, branchName, undefined, startingFrom, selectedEndpointId);
+      if (!isRequestCurrent(requestGeneration)) {
+        return;
+      }
       if (result.success && result.path) {
-        const selectedAgent = resolvePreferredAgent(state.agent, effectiveAgentAvailability, 'codex');
-        onSelect(result.path, selectedAgent, selectedEndpointId, state.yoloMode && yoloSupported);
-        onClose();
+        setSelectedPathFromPhysical(result.path);
+        launchSelection(result.path);
       }
     } catch (err) {
+      if (!isRequestCurrent(requestGeneration)) {
+        return;
+      }
       console.error('[LocationPicker] Failed to create worktree:', err);
+      onError?.(err instanceof Error ? err.message : 'Failed to create worktree');
     }
-  }, [effectiveAgentAvailability, hasAvailableAgents, onClose, onCreateWorktree, onError, onSelect, selectedEndpointId, state.agent, state.selectedRepo, state.yoloMode, yoloSupported]);
+  }, [
+    beginRequestGeneration,
+    hasAvailableAgents,
+    isRequestCurrent,
+    launchSelection,
+    onCreateWorktree,
+    onError,
+    repoRootPath,
+    selectedEndpointId,
+    setSelectedPathFromPhysical,
+  ]);
 
   const handleRefresh = useCallback(async () => {
-    if (!state.selectedRepo || !onGetRepoInfo || state.refreshing) return;
+    if (!repoRootPath || !onGetRepoInfo || refreshing) {
+      return;
+    }
 
-    setState((prev) => ({ ...prev, refreshing: true }));
+    const requestGeneration = requestGenerationRef.current;
+    setRefreshing(true);
     try {
-      const result = await onGetRepoInfo(state.selectedRepo, selectedEndpointId);
-      if (result.success && result.info) {
-        setState((prev) => ({
-          ...prev,
-          repoInfo: result.info || null,
-          refreshing: false,
-        }));
+      const result = await onGetRepoInfo(repoRootPath, selectedEndpointId);
+      if (isRequestCurrent(requestGeneration) && result.success && result.info) {
+        setRepoInfo(toChooserRepoInfo(result.info));
       }
     } catch (err) {
       console.error('[LocationPicker] Failed to refresh repo info:', err);
     } finally {
-      setState((prev) => ({ ...prev, refreshing: false }));
+      if (isRequestCurrent(requestGeneration)) {
+        setRefreshing(false);
+      }
     }
-  }, [onGetRepoInfo, state.refreshing, state.selectedRepo]);
+  }, [isRequestCurrent, onGetRepoInfo, refreshing, repoRootPath, selectedEndpointId]);
 
   const handleBack = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      mode: 'path-input',
-      selectedRepo: null,
-      repoInfo: null,
-    }));
-  }, []);
+    invalidateRequestGeneration();
+    setMode('path-input');
+    setRepoRootPath(null);
+    setRepoInfo(null);
+    setRefreshing(false);
+  }, [invalidateRequestGeneration]);
 
-  useEffect(() => {
-    if (!isOpen) return;
+  const movePathSelection = useCallback((direction: 'up' | 'down') => {
+    const totalItems = selectableItems.length;
+    if (totalItems === 0) {
+      return;
+    }
 
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.altKey && !e.metaKey && !e.ctrlKey) {
-        const targetID = targetShortcutIDByCode.get(e.code);
-        if (targetID) {
-          const target = selectableTargets.find((candidate) => candidate.id === targetID);
-          e.preventDefault();
-          e.stopPropagation();
-          if (!target || !target.connected) {
-            return;
-          }
-          handleEndpointChange(target.id);
-          return;
-        }
+    const nextIndex = direction === 'down'
+      ? (highlightedIndex < 0 ? 0 : Math.min(highlightedIndex + 1, totalItems - 1))
+      : (highlightedIndex < 0 ? totalItems - 1 : Math.max(highlightedIndex - 1, 0));
+    const nextItem = selectableItems[nextIndex];
+    if (nextItem) {
+      setHighlightedItemKey(nextItem.key);
+    }
+  }, [highlightedIndex, selectableItems]);
 
-        const digitMatch = /^Digit([1-9])$/.exec(e.code);
-        if (digitMatch) {
-          const idx = Number(digitMatch[1]) - 1;
-          if (idx < orderedAgentList.length) {
-            const targetAgent = orderedAgentList[idx];
-            e.preventDefault();
-            e.stopPropagation();
-            if (!isAgentAvailable(effectiveAgentAvailability, targetAgent)) {
-              return;
-            }
-            handleAgentChange(targetAgent);
-            return;
-          }
-        }
-      }
+  const handleClosePicker = useCallback(() => {
+    invalidateRequestGeneration();
+    onClose();
+  }, [invalidateRequestGeneration, onClose]);
 
-      if (e.key === 'Escape') {
+  const handleDialogKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.altKey && !e.metaKey && !e.ctrlKey) {
+      const shortcutTargetId = targetShortcutIDByCode.get(e.code);
+      if (shortcutTargetId) {
         e.preventDefault();
-        if (state.mode === 'repo-options') {
-          handleBack();
-        } else {
-          onClose();
-        }
+        handleTargetChange(shortcutTargetId);
         return;
       }
 
-      if (state.mode !== 'path-input') return;
-
-      const totalItems = visibleRecent.length + visibleSuggestions.length;
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setState((prev) => ({
-          ...prev,
-          selectedIndex: Math.min(prev.selectedIndex + 1, totalItems - 1),
-          hasSelectedSinceTab: true,
-        }));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setState((prev) => ({
-          ...prev,
-          selectedIndex: Math.max(prev.selectedIndex - 1, 0),
-          hasSelectedSinceTab: true,
-        }));
+      const digitMatch = /^Digit([1-9])$/.exec(e.code);
+      if (digitMatch) {
+        const idx = Number(digitMatch[1]) - 1;
+        const nextAgent = orderedAgentList[idx];
+        if (nextAgent) {
+          e.preventDefault();
+          handleAgentChange(nextAgent);
+        }
+        return;
       }
-    };
+    }
 
-    window.addEventListener('keydown', handleGlobalKeyDown, true);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
-  }, [effectiveAgentAvailability, handleAgentChange, handleBack, handleEndpointChange, isOpen, onClose, orderedAgentList, selectableTargets, state.mode, targetShortcutIDByCode, visibleRecent.length, visibleSuggestions.length]);
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (mode === 'repo-options') {
+        handleBack();
+      } else {
+        handleClosePicker();
+      }
+      return;
+    }
 
-  const transformedRepoInfo = state.repoInfo ? {
-    repo: state.repoInfo.repo,
-    currentBranch: state.repoInfo.current_branch,
-    currentCommitHash: state.repoInfo.current_commit_hash,
-    currentCommitTime: state.repoInfo.current_commit_time,
-    defaultBranch: state.repoInfo.default_branch,
-    worktrees: state.repoInfo.worktrees,
-    branches: state.repoInfo.branches,
-    fetchedAt: state.repoInfo.fetched_at,
-  } : null;
+    if (mode !== 'path-input') {
+      return;
+    }
 
-  if (!isOpen) return null;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      movePathSelection('down');
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      movePathSelection('up');
+    }
+  }, [
+    handleAgentChange,
+    handleBack,
+    handleClosePicker,
+    handleTargetChange,
+    mode,
+    movePathSelection,
+    orderedAgentList,
+    targetShortcutIDByCode,
+  ]);
+
+  if (!isOpen || !selectedTarget) {
+    return null;
+  }
 
   return (
-    <div className="location-picker-overlay" data-testid="location-picker-overlay" onClick={onClose}>
-      <div className="location-picker" data-testid="location-picker" onClick={(e) => e.stopPropagation()}>
+    <div className="location-picker-overlay" data-testid="location-picker-overlay" onClick={handleClosePicker}>
+      <div
+        className="location-picker"
+        data-testid="location-picker"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleDialogKeyDown}
+      >
         <div className="picker-agent-bar">
           <div className="picker-agent-label">SESSION AGENT</div>
           <div className="picker-agent-controls">
             <div className="agent-toggle" role="radiogroup" aria-label="Session agent">
-              {orderedAgentList.map((agent) => {
-                const available = isAgentAvailable(effectiveAgentAvailability, agent);
-                const shortcutNumber = agentShortcutByName.get(agent);
+              {orderedAgentList.map((candidate) => {
+                const available = isAgentAvailable(effectiveAgentAvailability, candidate);
+                const shortcutNumber = agentShortcutByName.get(candidate);
                 const shortcut = shortcutNumber && shortcutNumber <= 9 ? `⌥${shortcutNumber}` : null;
                 return (
                   <button
-                    key={agent}
+                    key={candidate}
                     type="button"
-                    className={`agent-option ${state.agent === agent ? 'active' : ''}`}
-                    onClick={() => handleAgentChange(agent)}
+                    className={`agent-option ${agent === candidate ? 'active' : ''}`}
+                    onClick={() => handleAgentChange(candidate)}
                     role="radio"
-                    aria-checked={state.agent === agent}
+                    aria-checked={agent === candidate}
                     disabled={!available}
-                    title={!available ? `${agentLabel(agent)} CLI not found in PATH` : undefined}
+                    title={!available ? `${agentLabel(candidate)} CLI not found in PATH` : undefined}
                   >
-                    <span className="agent-option-name">{agentLabel(agent)}</span>
+                    <span className="agent-option-name">{agentLabel(candidate)}</span>
                     {available && shortcut && <kbd className="agent-shortcut">{shortcut}</kbd>}
                   </button>
                 );
@@ -670,46 +800,29 @@ export function LocationPicker({
             <div className="picker-endpoint-label">SESSION TARGET</div>
           </div>
           <div className="picker-endpoint-controls" role="radiogroup" aria-label="Session target">
-            <button
-              type="button"
-              className={`endpoint-option ${isLocalTarget ? 'active' : ''} ${isLocalTarget && state.yoloMode ? 'yolo-active' : ''}`}
-              data-testid="location-picker-target-local"
-              onClick={() => handleEndpointChange(LOCAL_TARGET)}
-              role="radio"
-              aria-checked={isLocalTarget}
-            >
-              <span className="endpoint-option-name">Local</span>
-              {isLocalTarget && state.yoloMode && (
-                <span className="endpoint-option-badge">YOLO</span>
-              )}
-              <div className="endpoint-option-footer">
-                <span className="endpoint-option-meta">this machine</span>
-                <kbd className="agent-shortcut endpoint-shortcut">{`⌥${targetShortcutByID.get(LOCAL_TARGET)?.toUpperCase()}`}</kbd>
-              </div>
-            </button>
-            {availableEndpoints.map((endpoint) => {
-              const connected = endpoint.status === 'connected';
-              const shortcutKey = targetShortcutByID.get(endpoint.id);
+            {selectableTargets.map((target) => {
+              const shortcutKey = targetShortcutByID.get(target.id);
+              const active = target.id === selectedTarget.id;
               return (
                 <button
-                  key={endpoint.id}
+                  key={target.id}
                   type="button"
-                  className={`endpoint-option ${state.endpointId === endpoint.id ? 'active' : ''} ${state.endpointId === endpoint.id && state.yoloMode ? 'yolo-active' : ''}`}
-                  data-testid={`location-picker-target-${endpoint.id}`}
-                  data-endpoint-id={endpoint.id}
-                  onClick={() => handleEndpointChange(endpoint.id)}
+                  className={`endpoint-option ${active ? 'active' : ''} ${active && yoloMode ? 'yolo-active' : ''}`}
+                  data-testid={target.id === LOCAL_TARGET ? 'location-picker-target-local' : `location-picker-target-${target.id}`}
+                  data-endpoint-id={target.endpointId}
+                  onClick={() => handleTargetChange(target.id)}
                   role="radio"
-                  aria-checked={state.endpointId === endpoint.id}
-                  disabled={!connected}
-                  title={!connected ? `${endpoint.name} is ${endpoint.status}` : undefined}
+                  aria-checked={active}
+                  disabled={!target.connected}
+                  title={!target.connected ? `${target.name} is ${target.metaLabel}` : undefined}
                 >
-                  <span className="endpoint-option-name">{endpoint.name}</span>
-                  {state.endpointId === endpoint.id && state.yoloMode && (
+                  <span className="endpoint-option-name">{target.name}</span>
+                  {active && yoloMode && (
                     <span className="endpoint-option-badge">YOLO</span>
                   )}
                   <div className="endpoint-option-footer">
-                    <span className={`endpoint-option-meta status-${endpoint.status}`}>{endpoint.status}</span>
-                    {connected && shortcutKey && <kbd className="agent-shortcut endpoint-shortcut">{`⌥${shortcutKey.toUpperCase()}`}</kbd>}
+                    <span className={`endpoint-option-meta ${target.metaClassName || ''}`.trim()}>{target.metaLabel}</span>
+                    {target.connected && shortcutKey && <kbd className="agent-shortcut endpoint-shortcut">{`⌥${shortcutKey.toUpperCase()}`}</kbd>}
                   </div>
                 </button>
               );
@@ -719,7 +832,7 @@ export function LocationPicker({
         {!hasAvailableAgents && (
           <div className="picker-agent-warning">{noAgentsMessage}</div>
         )}
-        {state.mode === 'path-input' ? (
+        {mode === 'path-input' ? (
           <>
             <div className="picker-header">
               <div className="picker-header-top">
@@ -728,19 +841,21 @@ export function LocationPicker({
                 </div>
                 <div
                   className={`picker-endpoint-hint ${!yoloSupported ? 'disabled' : ''}`}
-                  title={!yoloSupported ? `${agentLabel(state.agent)} does not support yolo mode` : undefined}
+                  title={!yoloSupported ? `${agentLabel(agent)} does not support yolo mode` : undefined}
                 >
-                  {yoloSupported ? 'reselect to toggle YOLO' : 'YOLO unavailable'}
+                  {yoloSupported ? 'select the same target again for YOLO' : 'YOLO unavailable'}
                 </div>
               </div>
               <PathInput
-                value={state.inputValue}
-                onChange={handlePathInputChange}
+                value={inputValue}
+                onChange={updateInputValue}
                 onTabComplete={handleTabComplete}
-                onSelect={handlePathInputSelect}
+                onSelect={handlePathSelect}
+                onSubmit={handlePathInputSubmit}
                 ghostText={ghostText}
-                hasSelectedSinceTab={state.hasSelectedSinceTab}
-                placeholder={isLocalTarget ? 'Type path (e.g., ~/projects) or search...' : `Type path on ${selectedEndpoint?.name || 'remote host'} (e.g., ~/projects/repo)`}
+                completionValue={tabCompletionValue}
+                hasSelectedSinceTab={hasSelectedSinceTab}
+                placeholder={selectedTarget.placeholder}
               />
               {currentDir && (
                 <div className="picker-breadcrumb" data-testid="location-picker-breadcrumb">
@@ -754,42 +869,42 @@ export function LocationPicker({
               {visibleRecent.length > 0 && (
                 <div className="picker-section">
                   <div className="picker-section-title">RECENT</div>
-                  {visibleRecent.slice(0, MAX_RECENT_LOCATIONS).map((loc, index) => (
+                  {visibleRecent.map((loc, index) => (
                     <div
                       key={loc.path}
-                      className={`picker-item ${index === state.selectedIndex ? 'selected' : ''}`}
+                      className={`picker-item ${index === highlightedIndex ? 'selected' : ''}`}
                       data-testid={`location-picker-item-${index}`}
                       data-index={index}
                       data-kind="recent"
-                      data-path={loc.path}
-                      onClick={() => handleSelect(loc.path)}
-                      onMouseEnter={() => setState((prev) => ({ ...prev, selectedIndex: index }))}
+                      data-path={loc.selectionPath}
+                      onClick={() => setHighlightedItemKey(`recent:${loc.path}`)}
+                      onDoubleClick={() => void handleSelectPath(loc.selectionPath)}
                     >
                       <div className="picker-icon">🕐</div>
                       <div className="picker-info">
                         <div className="picker-name">{loc.label}</div>
-                        <div className="picker-path">{state.homePath ? toDisplayPath(loc.path, state.homePath) : loc.path}</div>
+                        <div className="picker-path">{loc.selectionPath}</div>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {visibleSuggestions.length > 0 && (
+              {fsSuggestions.length > 0 && (
                 <div className="picker-section">
                   <div className="picker-section-title">DIRECTORIES</div>
-                  {visibleSuggestions.map((item, index) => {
+                  {fsSuggestions.map((item, index) => {
                     const globalIndex = visibleRecent.length + index;
                     return (
                       <div
                         key={item.path}
-                        className={`picker-item ${globalIndex === state.selectedIndex ? 'selected' : ''}`}
+                        className={`picker-item ${globalIndex === highlightedIndex ? 'selected' : ''}`}
                         data-testid={`location-picker-item-${globalIndex}`}
                         data-index={globalIndex}
                         data-kind="directory"
                         data-path={item.path}
-                        onClick={() => handleSelect(item.path)}
-                        onMouseEnter={() => setState((prev) => ({ ...prev, selectedIndex: globalIndex }))}
+                        onClick={() => setHighlightedItemKey(`directory:${item.path}`)}
+                        onDoubleClick={() => void handleSelectPath(item.path)}
                       >
                         <div className="picker-icon">📁</div>
                         <div className="picker-info">
@@ -801,9 +916,9 @@ export function LocationPicker({
                 </div>
               )}
 
-              {visibleSuggestions.length === 0 && visibleRecent.length === 0 && (
+              {fsSuggestions.length === 0 && visibleRecent.length === 0 && (
                 <div className="picker-empty" data-testid="location-picker-empty">
-                  {state.inputValue
+                  {inputValue
                     ? 'No matches. Press Enter to use path directly.'
                     : 'Type a path to browse directories'}
                 </div>
@@ -817,40 +932,30 @@ export function LocationPicker({
               <span className="shortcut"><kbd>Esc</kbd> cancel</span>
             </div>
           </>
-        ) : state.mode === 'repo-options' && transformedRepoInfo ? (
+        ) : repoInfo ? (
           <RepoOptions
-            repoInfo={transformedRepoInfo}
+            repoInfo={repoInfo}
+            selectedPath={selectedPath || repoRootPath || undefined}
+            onSelectedPathChange={(path) => {
+              setSelectedPathFromPhysical(path);
+            }}
             onSelectMainRepo={handleSelectMainRepo}
             onSelectWorktree={handleSelectWorktree}
-            onSelectBranch={handleSelectBranch}
             onCreateWorktree={handleCreateWorktree}
             onDeleteWorktree={onDeleteWorktree ? async (path) => {
+              const requestGeneration = requestGenerationRef.current;
               await onDeleteWorktree(path, selectedEndpointId);
-              if (state.selectedRepo && onGetRepoInfo) {
-                const result = await onGetRepoInfo(state.selectedRepo, selectedEndpointId);
-                if (result.success && result.info) {
-                  setState((prev) => ({ ...prev, repoInfo: result.info || null }));
-                }
-              }
-            } : undefined}
-            onDeleteBranch={onDeleteBranch ? async (branch) => {
-              if (state.selectedRepo) {
-                await onDeleteBranch(state.selectedRepo, branch, true, selectedEndpointId);
-                if (onGetRepoInfo) {
-                  const result = await onGetRepoInfo(state.selectedRepo, selectedEndpointId);
-                  if (result.success && result.info) {
-                    setState((prev) => ({ ...prev, repoInfo: result.info || null }));
-                  }
+              if (repoRootPath && onGetRepoInfo) {
+                const result = await onGetRepoInfo(repoRootPath, selectedEndpointId);
+                if (isRequestCurrent(requestGeneration) && result.success && result.info) {
+                  setRepoInfo(toChooserRepoInfo(result.info));
                 }
               }
             } : undefined}
             onError={onError}
             onRefresh={handleRefresh}
             onBack={handleBack}
-            refreshing={state.refreshing}
-            yoloMode={state.yoloMode && yoloSupported}
-            yoloSupported={yoloSupported}
-            onToggleYoloMode={handleYoloToggle}
+            refreshing={refreshing}
           />
         ) : null}
       </div>

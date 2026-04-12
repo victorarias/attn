@@ -733,24 +733,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleInspectPathWS(client, msg.(*protocol.InspectPathMessage))
 	case protocol.CmdListBranches:
 		d.handleListBranchesWS(client, msg.(*protocol.ListBranchesMessage))
-	case protocol.CmdDeleteBranch:
-		d.handleDeleteBranchWS(client, msg.(*protocol.DeleteBranchMessage))
-	case protocol.CmdSwitchBranch:
-		d.handleSwitchBranchWS(client, msg.(*protocol.SwitchBranchMessage))
 	case protocol.CmdCreateWorktreeFromBranch:
 		d.handleCreateWorktreeFromBranchWS(client, msg.(*protocol.CreateWorktreeFromBranchMessage))
-	case protocol.CmdCreateBranch:
-		d.handleCreateBranchWS(client, msg.(*protocol.CreateBranchMessage))
-	case protocol.CmdCheckDirty:
-		d.handleCheckDirtyWS(client, msg.(*protocol.CheckDirtyMessage))
-	case protocol.CmdStash:
-		d.handleStashWS(client, msg.(*protocol.StashMessage))
-	case protocol.CmdStashPop:
-		d.handleStashPopWS(client, msg.(*protocol.StashPopMessage))
-	case protocol.CmdCheckAttnStash:
-		d.handleCheckAttnStashWS(client, msg.(*protocol.CheckAttnStashMessage))
-	case protocol.CmdCommitWIP:
-		d.handleCommitWIPWS(client, msg.(*protocol.CommitWIPMessage))
 	case protocol.CmdGetDefaultBranch:
 		d.handleGetDefaultBranchWS(client, msg.(*protocol.GetDefaultBranchMessage))
 	case protocol.CmdFetchRemotes:
@@ -978,10 +962,6 @@ func remoteCommandEndpointID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.DeleteWorktreeMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
-	case protocol.CmdDeleteBranch:
-		if typed, ok := msg.(*protocol.DeleteBranchMessage); ok {
-			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
-		}
 	case protocol.CmdGetRepoInfo:
 		if typed, ok := msg.(*protocol.GetRepoInfoMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
@@ -1059,24 +1039,8 @@ func remoteCommandPath(msg interface{}) string {
 		return typed.Path
 	case *protocol.ListBranchesMessage:
 		return typed.MainRepo
-	case *protocol.DeleteBranchMessage:
-		return typed.MainRepo
-	case *protocol.SwitchBranchMessage:
-		return typed.MainRepo
 	case *protocol.CreateWorktreeFromBranchMessage:
 		return typed.MainRepo
-	case *protocol.CreateBranchMessage:
-		return typed.MainRepo
-	case *protocol.CheckDirtyMessage:
-		return typed.Repo
-	case *protocol.StashMessage:
-		return typed.Repo
-	case *protocol.StashPopMessage:
-		return typed.Repo
-	case *protocol.CheckAttnStashMessage:
-		return typed.Repo
-	case *protocol.CommitWIPMessage:
-		return typed.Repo
 	case *protocol.GetDefaultBranchMessage:
 		return typed.Repo
 	case *protocol.FetchRemotesMessage:

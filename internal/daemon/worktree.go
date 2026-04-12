@@ -101,6 +101,7 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 	if path == "" {
 		path = git.GenerateWorktreePath(mainRepo, msg.Branch)
 	}
+	path = git.CanonicalizePath(path)
 
 	startingFrom := protocol.Deref(msg.StartingFrom)
 	var err error

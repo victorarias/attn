@@ -281,3 +281,30 @@ func GetHeadCommitInfo(repoDir string) (hash string, time string) {
 	}
 	return "", ""
 }
+
+// GetDefaultBranch returns the default branch name (main, master, etc).
+func GetDefaultBranch(repoDir string) (string, error) {
+	// Try to get from remote HEAD
+	cmd := exec.Command("git", "symbolic-ref", "refs/remotes/origin/HEAD")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err == nil {
+		// Format: refs/remotes/origin/main
+		ref := strings.TrimSpace(string(out))
+		parts := strings.Split(ref, "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1], nil
+		}
+	}
+
+	// Fallback: check if main or master exists
+	for _, branch := range []string{"main", "master"} {
+		cmd := exec.Command("git", "rev-parse", "--verify", branch)
+		cmd.Dir = repoDir
+		if err := cmd.Run(); err == nil {
+			return branch, nil
+		}
+	}
+
+	return "main", nil // Default fallback
+}

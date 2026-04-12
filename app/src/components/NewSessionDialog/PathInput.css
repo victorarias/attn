@@ -12,7 +12,7 @@
   border-radius: 4px;
   padding: 12px 14px;
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--font-size);
   color: var(--color-text-primary);
   caret-color: #ff6b35;
   outline: none;
@@ -34,7 +34,7 @@
   visibility: hidden;
   white-space: pre;
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--font-size);
   /* No padding - we only want to measure text width */
   pointer-events: none;
 }
@@ -44,7 +44,7 @@
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 14px;
+  font-size: var(--font-size);
   color: var(--color-text-dimmed);
   pointer-events: none;
   white-space: pre;

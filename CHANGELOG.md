@@ -12,10 +12,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **App-Owned Daemon Startup**: Desktop app startup now routes through a bundled-binary `attn daemon ensure` flow so the app asks its own runtime to reconcile, replace, and health-check the local daemon before connecting instead of treating any live socket as good enough.
 - **Source Dev Install Flow**: `make install` now updates the installed app's bundled `attn` sidecar and runs `daemon ensure`, while `make install-all` becomes a deprecated shim to the simpler default source install path.
 - **Install Surface Simplification**: Remove the CLI-only Homebrew formula from the supported install and release surface, update cask/docs accordingly, and stop steering app users toward a standalone `attn` install as part of normal setup or upgrades.
+- **New Session Location Picker**: The location picker now keeps the typed path and highlighted result separate, so arrow keys and clicks move a transient highlight without rewriting the query, hover stays passive throughout the flow, dialog shortcuts are owned by the picker instead of a global key trap, and `Tab` completion stays an explicit accept action instead of silently becoming the path that launches.
+- **Repo And Worktree Chooser**: The repo chooser now opens only for actual repo or worktree roots, preselects the exact worktree path you typed even when Git reports canonicalized filesystem paths, keeps remove/create flows on physical destinations, and focuses on openable destinations plus worktree actions instead of mixing in branch rows.
+- **YOLO Target Toggle UI**: The repo chooser no longer shows a separate launch-mode row or `⌥Y` affordance; YOLO is once again exposed only by selecting the same target again, with that behavior explained in the picker copy.
 
 ### Fixed
 - **Packaged-App Daemon Upgrade Reconciliation**: App startup now verifies that the live local daemon matches the daemon binary the current install would launch, so Homebrew and packaged-app upgrades replace stale daemons from older install paths instead of silently reusing them until session startup fails.
 - **macOS Worker Binary Fallback**: Worker-side PTY recovery now checks both `~/Applications/attn.app` and `/Applications/attn.app`, so packaged installs can recover the bundled `attn` binary even when Homebrew placed the app in the system Applications folder.
+- **Location Picker Path And Chooser Stability**: Submitting `/` now inspects the filesystem root instead of collapsing to the current directory, and stale inspect or repo-info responses no longer reopen old chooser state after you change targets, go back, or close and reopen the picker.
 
 ## [2026-04-10]
 

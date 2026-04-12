@@ -2,10 +2,19 @@
 package git
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
+
+func CanonicalizePath(path string) string {
+	expanded := ExpandPath(path)
+	if resolved, err := filepath.EvalSymlinks(expanded); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return filepath.Clean(expanded)
+}
 
 // BranchInfo contains git branch and worktree information for a directory
 type BranchInfo struct {
@@ -63,6 +72,44 @@ func getCurrentBranch(dir string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// GetRepoRoot returns the worktree root for dir when it is inside a git worktree.
+func GetRepoRoot(dir string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return CanonicalizePath(strings.TrimSpace(string(out))), nil
+}
+
+func sameDirectory(left string, right string) bool {
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	if leftErr != nil || rightErr != nil {
+		return filepath.Clean(left) == filepath.Clean(right)
+	}
+	return os.SameFile(leftInfo, rightInfo)
+}
+
+// ResolvePickerRepoTarget returns the main repo path to use for the location picker
+// when dir is exactly a repo root or worktree root. Subdirectories inside a repo
+// return ok=false so the picker can open them directly instead of rewriting them.
+func ResolvePickerRepoTarget(dir string) (repoRoot string, ok bool, err error) {
+	resolvedDir := CanonicalizePath(dir)
+	worktreeRoot, err := GetRepoRoot(resolvedDir)
+	if err != nil || worktreeRoot == "" {
+		return "", false, nil
+	}
+	if !sameDirectory(resolvedDir, worktreeRoot) {
+		return "", false, nil
+	}
+	if mainRepo := GetMainRepoFromWorktree(resolvedDir); mainRepo != "" {
+		return CanonicalizePath(mainRepo), true, nil
+	}
+	return resolvedDir, true, nil
 }
 
 // GetHeadCommit returns the full SHA of the HEAD commit

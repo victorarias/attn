@@ -100,7 +100,7 @@ func inspectPickerPath(input string) (*protocol.PathInspection, error) {
 	if err != nil {
 		return nil, err
 	}
-	resolved = filepath.Clean(resolved)
+	resolved = git.CanonicalizePath(resolved)
 
 	inspection := &protocol.PathInspection{
 		InputPath:    input,
@@ -124,14 +124,11 @@ func inspectPickerPath(input string) (*protocol.PathInspection, error) {
 		return inspection, nil
 	}
 
-	branchInfo, err := git.GetBranchInfo(resolved)
-	if err != nil || branchInfo == nil || branchInfo.Branch == "" {
+	repoRoot, isRepoTarget, err := git.ResolvePickerRepoTarget(resolved)
+	if err != nil || !isRepoTarget || repoRoot == "" {
 		return inspection, nil
 	}
-	repoRoot := git.ResolveMainRepoPath(resolved)
-	if repoRoot != "" {
-		inspection.RepoRoot = protocol.Ptr(repoRoot)
-	}
+	inspection.RepoRoot = protocol.Ptr(repoRoot)
 	return inspection, nil
 }
 
