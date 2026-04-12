@@ -5,7 +5,7 @@
 Spike plan. Prototypes to prove feasibility before building the real client.
 
 **Completed:** Spikes 1, 2, 3, 4 (`attn-native`, `attn-native`, `attn-canvas`, `attn-spike4`)
-**Next:** Spike 5 (Session Model + Panel Registry) or Spike 6 (UI Test Automation)
+**Next:** Spike 5 (Workspace Entity Model + Sidebar) — prerequisite: SessionLayout rename commit first
 
 ## Why
 
@@ -184,22 +184,151 @@ Spike 6 (UI Test Automation)  ←── Spike 1 (needs a window + daemon connect
 
 ---
 
-### Spike 5: Session Model + Panel Registry
+### Spike 5: Workspace Entity Model + Sidebar
 
-**Proves**: The workspace/session/panel entity model works — session owns metadata, panels are typed views, multiple panel types coexist.
+**Proves**: The workspace/session/panel entity model works end-to-end — daemon owns workspace lifecycle, native UI reflects it, sidebar shows rollup status, canvas has mixed panel types.
+
+#### Concept definitions
+
+**Session** (existing daemon concept): one agent, many PTYs, one directory. Registered via `spawn_session` WebSocket command from the UI, or via unix socket from `cmd/attn` CLI.
+
+**Workspace** (new concept): a directory + multiple agents (sessions) + panels of any type. First-class daemon entity with its own ID and lifecycle. One sidebar row per workspace. Workspace status = rollup of its member sessions' statuses (`working > waiting_input > pending_approval > idle > unknown`).
+
+#### Prerequisite: SessionLayout rename
+
+The daemon already has a concept called `workspace` — but it means something different: the split-pane layout within a single session (main agent pane + shell panes). To free the name and eliminate confusion, rename it first in its own commit:
+
+| Before | After |
+|---|---|
+| `internal/workspace` package | `internal/sessionlayout` package |
+| `workspace.Snapshot` | `sessionlayout.SessionLayout` |
+| `protocol.WorkspaceSnapshot` | `protocol.SessionLayout` |
+| `EventWorkspaceSnapshot`, `EventWorkspaceUpdated` | `EventSessionLayout`, `EventSessionLayoutUpdated` |
+| `CmdWorkspaceGet`, `CmdWorkspaceSplitPane`, etc. | `CmdSessionLayoutGet`, `CmdSessionLayoutSplitPane`, etc. |
+
+This rename cascades through Go daemon, generated protocol types, and Tauri frontend (event/command name strings). Tauri behavior does not change — only names change. Bump protocol version.
+
+#### Daemon changes
+
+New `Workspace` entity in the daemon:
+```
+Workspace
+  id:        string   (uuid)
+  title:     string   (basename of directory, or user-set)
+  directory: string
+  status:    WorkspaceStatus  (rollup of member sessions)
+```
+
+Status rollup rule: `working > waiting_input > pending_approval > idle > unknown`. Recomputed whenever any member session's state changes.
+
+New WebSocket events (old Tauri client ignores unknown event types — forward compatible):
+```
+WorkspaceRegistered   { id, title, directory, status }
+WorkspaceUnregistered { id }
+WorkspaceStateChanged { id, status }
+```
+
+New WebSocket commands:
+```
+register_workspace    { id, title, directory }  →  WorkspaceRegistered broadcast
+unregister_workspace  { id }                    →  WorkspaceUnregistered broadcast
+```
+
+`InitialState` grows a `workspaces: []Workspace` field (old Tauri client ignores unknown fields on deserialized objects).
+
+Sessions get an optional `workspace_id: string | null` field — populated when a session is spawned within a workspace context.
+
+Bump protocol version. Tauri frontend gets a no-op handler for the three new event types.
+
+#### Native UI module layout
+
+New files:
+```
+spike5_main.rs          binary entry point (cargo run --bin attn-spike5)
+spike5_app.rs           Spike5App root view — owns sessions, lays out sidebar + canvas
+workspace_session.rs    Entity<WorkspaceSession> — metadata + panels + rollup status
+panel.rs                Panel, PanelContent enum, PlaceholderView
+sidebar.rs              Sidebar view — workspace list with rollup status badges
+spike5_canvas.rs        Canvas view refactored to read panels from one WorkspaceSession
+```
+
+Unchanged: `canvas_view.rs`, `daemon_client.rs`, `terminal_model.rs`, `terminal_view.rs`
+
+#### Native UI entity model
+
+`WorkspaceSession` is a GPUI `Entity` (not a plain struct) because the sidebar and canvas are siblings — they can't share data through a parent-child read. Each holds cloned `Entity<WorkspaceSession>` handles and subscribes independently.
+
+```
+Spike5App
+  daemon:    Entity<DaemonClient>
+  sessions:  Vec<Entity<WorkspaceSession>>   ← source of truth
+  sidebar:   Entity<Sidebar>
+  canvas:    Entity<Spike5Canvas>
+
+WorkspaceSession
+  id, title, directory
+  status: WorkspaceStatus                    ← updated from DaemonEvent::WorkspaceStateChanged
+  panels: Vec<Panel>
+
+Panel
+  id, world_x, world_y, width, height
+  content: PanelContent
+
+PanelContent                                 ← enum dispatch, not trait objects
+  Terminal(Entity<TerminalView>)
+  Placeholder(Entity<PlaceholderView>)
+```
+
+**Why enum dispatch over trait objects or `AnyView`**: panels need type-specific behavior beyond rendering (resize → `PtyResize` only for Terminal panels, focus handle only on Terminal panels). `AnyView` gives type erasure for rendering only; when you need to call type-specific methods, you need the enum back anyway.
+
+**Why `Entity<WorkspaceSession>` over plain struct**: sidebar and canvas are peer views, not parent-child. Two views sharing state across a sibling boundary requires GPUI entity handles. Agent waiting-status badges in the sidebar also require reactive updates from daemon events — `cx.notify()` on the entity re-renders all subscribers.
+
+#### Data flow
+
+```
+DaemonClient
+  └── Spike5App subscribes
+        on WorkspaceRegistered/Unregistered → create/remove Entity<WorkspaceSession>
+        → push handles to Sidebar + Spike5Canvas
+
+WorkspaceSession (each) subscribes to DaemonClient, filters by own id
+  on WorkspaceStateChanged → update status → cx.notify()
+    ├── Sidebar re-renders status badge
+    └── Spike5Canvas re-renders panel border color (focused/unfocused)
+```
+
+#### Layout
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Sidebar (fixed width, anchored left)  │  Canvas    │
+│                                        │            │
+│  ● Workspace A  [working]              │  panels    │
+│  ● Workspace B  [waiting]              │  from      │
+│  ● Workspace C  [idle]                 │  selected  │
+│                                        │  workspace │
+└─────────────────────────────────────────────────────┘
+```
+
+Clicking a workspace row sets `Spike5App.selected` → passes new `Entity<WorkspaceSession>` handle to `Spike5Canvas`.
 
 **Build**:
-- `WorkspaceSession` entity holding session metadata (title, directory, agents, state)
-- `PanelRegistry` with enum dispatch for panel types: `Terminal`, `Placeholder` (stub for future types)
-- Panel type trait so adding new types is: implement trait + register
-- Add a placeholder panel type (static text: "Todo Panel") to prove the registry works
-- Session metadata display (sidebar or overlay) separate from panel content
+- Prerequisite rename commit: `internal/workspace` → `internal/sessionlayout` + protocol + Tauri no-ops
+- Daemon `Workspace` entity: register/unregister/status-rollup, new WS events + commands
+- `InitialState` extended with `workspaces` array; sessions get optional `workspace_id`
+- Protocol version bump
+- Tauri: no-op handlers for three new workspace events
+- Native UI: `WorkspaceSession` entity, `Panel`/`PanelContent` enum, `Sidebar`, `Spike5Canvas`, `Spike5App`
+- Placeholder panel type (`PlaceholderView`: static text "Todo Panel") alongside Terminal panels
 
-**Done when**: Canvas has mixed panel types. Session metadata is separate from panel content. Adding a new panel type is mechanical.
+**Done when**: Sidebar shows live workspaces with rollup status badges. Canvas shows panels for the selected workspace, with at least one Terminal panel and one Placeholder panel coexisting. Adding a new panel type is: define struct, implement `Render`, add one enum arm.
 
-**Key risk**: Does the entity model scale to multiple panel types without boilerplate explosion?
+**Key risks**:
+- SessionLayout rename is wide — protocol, Go, TypeScript — easy to miss a reference
+- Forward-compat assumptions (old client ignores unknown fields/events) need verification against the actual Tauri deserialization code
+- Workspace status rollup logic must handle sessions joining/leaving mid-lifecycle
 
-**Effort**: Small-Medium (1 day)
+**Effort**: Medium (2-3 days — daemon + protocol + rename + Tauri compat + native UI entity model)
 
 ### Spike 6: UI Test Automation Sidecar
 
