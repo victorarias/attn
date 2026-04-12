@@ -272,8 +272,9 @@ test.describe('LocationPicker', () => {
           await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
           const input = page.locator('[data-testid="location-picker-path-input"]');
-          await input.fill(typedPath);
-          await input.press('Enter');
+          await input.focus();
+          await page.keyboard.type(typedPath);
+          await page.keyboard.press('Enter');
 
           await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
           await expect(page.locator('[data-testid="repo-option-1"]')).toHaveClass(/selected/);
@@ -299,8 +300,9 @@ test.describe('LocationPicker', () => {
         await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
-        await input.fill(repo.repoPath);
-        await input.press('Enter');
+        await input.focus();
+        await page.keyboard.type(repo.repoPath);
+        await page.keyboard.press('Enter');
 
         await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
         await expect(page.locator('[data-testid="repo-option-0"]')).toHaveClass(/selected/);
@@ -328,15 +330,17 @@ test.describe('LocationPicker', () => {
         await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
-        await input.fill(repo.worktrees[0].path);
-        await input.press('Enter');
+        await input.focus();
+        await page.keyboard.type(repo.worktrees[0].path);
+        await page.keyboard.press('Enter');
 
         await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
         await page.locator('[data-testid="repo-option-2"]').click();
         await expect(page.locator('[data-testid="repo-new-worktree-input"]')).toBeVisible({ timeout: 2000 });
         await expect(page.getByText('Start from feat-images')).toBeVisible();
 
-        await page.locator('[data-testid="repo-new-worktree-input"]').fill('feat-more');
+        await page.locator('[data-testid="repo-new-worktree-input"]').focus();
+        await page.keyboard.type('feat-more');
         await page.keyboard.press('Enter');
 
         await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 10000 });
@@ -357,8 +361,9 @@ test.describe('LocationPicker', () => {
         await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
-        await input.fill(repo.worktrees[1].path);
-        await input.press('Enter');
+        await input.focus();
+        await page.keyboard.type(repo.worktrees[1].path);
+        await page.keyboard.press('Enter');
 
         await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
         await expect(page.locator('[data-testid="repo-option-2"]')).toHaveClass(/selected/);
@@ -392,8 +397,9 @@ test.describe('LocationPicker', () => {
         await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
-        await input.fill(`${projectDir}/`);
-        await input.press('Enter');
+        await input.focus();
+        await page.keyboard.type(`${projectDir}/`);
+        await page.keyboard.press('Enter');
 
         await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 5000 });
         await expect(page.locator('.session-name', { hasText: 'project-with-hidden-child' }).first()).toBeVisible({ timeout: 10000 });

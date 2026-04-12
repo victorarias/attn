@@ -52,9 +52,10 @@ export function PathInput({
       // Decision logic:
       // - If user has intentionally selected (typed or arrowed), accept ghost text as completion
       // - If user just Tabbed (hasSelectedSinceTab=false), confirm the current value
+      // - Fall back to completionValue (highlighted row) when input is empty
       const pathToSelect = (ghostText && ghostText.startsWith(value) && hasSelectedSinceTab)
         ? ghostText  // User intentionally selected, accept ghost as completion
-        : value;     // User just Tabbed, confirm current path
+        : (value || completionValue);  // User just Tabbed or input empty, use value or highlighted row
       if (pathToSelect) {
         onSelect(pathToSelect);
         onSubmit();
