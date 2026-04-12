@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-04-12]
 
+### Added
+- **Native UI Spike 3 — Infinite Canvas**: New `attn-canvas` binary proves the GPUI-based canvas interaction model. Pan by dragging empty space, zoom toward cursor with Cmd+scroll or regular scroll, drag panels by their title bars, and resize panels by dragging their corner handles. Eight dummy panels are laid out at fixed world positions across an infinite dot-grid canvas. Viewport culling skips off-screen panels every frame.
+
 ### Fixed
 - **Location Picker Viewport Shift**: Closing the location picker no longer shifts the entire viewport left. WebKit's `scrollIntoView` was walking past the fixed overlay and scrolling the app shell; `overflow: clip` on `.app` prevents this.
 

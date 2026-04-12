@@ -54,7 +54,9 @@ Two-layer approach (proven by gpui-flow):
 1. `canvas()` layer for painted elements: grid background, connection lines, selection box
 2. Absolute-positioned `div()` elements for interactive panels
 
-Nodes store canvas-space (world) coordinates. Screen positions computed via `Viewport { origin, zoom }` transform every render. Panels do NOT scale with zoom — terminal text stays readable at all zoom levels.
+Nodes store canvas-space (world) coordinates. Screen positions AND sizes are computed via `Viewport { origin, zoom }` transform every render — panels scale with zoom so the canvas feels like tldraw.
+
+The one exception is the terminal surface inside a panel: the `TerminalSurfaceElement` paints at a fixed cell size regardless of zoom so text stays readable. The panel frame scales; the terminal content inside does not.
 
 ### Terminal Rendering
 
