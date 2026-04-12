@@ -890,6 +890,7 @@ sendFetchPRDetails,
     setView('dashboard');
   }, [setActiveSession]);
 
+
   const clearDockPanelCloseTimer = useCallback((panelId: DockPanelId) => {
     const closeTimer = dockPanelCloseTimersRef.current[panelId];
     if (closeTimer) {
@@ -1013,6 +1014,27 @@ sendFetchPRDetails,
   const [zoomModeBySessionId, setZoomModeBySessionId] = useState<Record<string, boolean>>({});
   const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
   const { message: errorMessage, showError, clearError } = useErrorToast();
+
+  const handleRebootstrapEndpoint = useCallback(async (endpointId: string) => {
+    try {
+      await sendUpdateEndpoint(endpointId, { enabled: false });
+    } catch {
+      showError('Failed to disable endpoint for sync.');
+      return;
+    }
+    try {
+      await sendUpdateEndpoint(endpointId, { enabled: true });
+    } catch {
+      // Disable succeeded but enable failed — retry enable once to avoid leaving it dark.
+      showError('Sync failed to re-enable endpoint. Retrying…');
+      try {
+        await sendUpdateEndpoint(endpointId, { enabled: true });
+      } catch {
+        showError('Endpoint left disabled after failed sync. Re-enable it in Settings.');
+      }
+    }
+  }, [sendUpdateEndpoint, showError]);
+
   const activeReviewLoopState = useMemo(
     () => (activeSessionId ? reviewLoopsBySessionId[activeSessionId] ?? null : null),
     [activeSessionId, reviewLoopsBySessionId],
@@ -1895,6 +1917,8 @@ sendFetchPRDetails,
           isRefreshing={isRefreshingPRs}
           refreshError={refreshError}
           rateLimit={rateLimit}
+          endpoints={daemonEndpoints}
+          onRebootstrapEndpoint={handleRebootstrapEndpoint}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onRefreshPRs={handleRefreshPRs}

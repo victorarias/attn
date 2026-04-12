@@ -3,16 +3,19 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"nhooyr.io/websocket"
 
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
@@ -21,6 +24,24 @@ import (
 type StatusCallback func(info protocol.EndpointInfo)
 type SessionsChangedCallback func()
 type RawEventCallback func(data []byte)
+
+type VersionMismatchError struct {
+	RemoteVersion string
+	LocalVersion  string
+}
+
+func (e *VersionMismatchError) Error() string {
+	return fmt.Sprintf("protocol mismatch: remote=%s local=%s", e.RemoteVersion, e.LocalVersion)
+}
+
+// BinaryMismatchError is returned by consumeRemote when the connection closes
+// while in binary_mismatch state, so the caller can apply the same slow-retry
+// policy as VersionMismatchError instead of the normal fast reconnect.
+type BinaryMismatchError struct {
+	Message string
+}
+
+func (e *BinaryMismatchError) Error() string { return e.Message }
 
 const (
 	settingProjectsDirectory = "projects_directory"
@@ -358,38 +379,61 @@ func (m *Manager) stopRuntimeLocked(runtime *endpointRuntime) {
 
 func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 	backoff := time.Second
+	firstIteration := true
 	for {
 		record, ok := m.recordFor(id)
 		if !ok {
 			return
 		}
 
-		m.updateStatus(id, "bootstrapping", "Checking remote platform", nil, nil)
-		bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		err := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget)
-		cancel()
-		if err != nil {
-			m.updateStatus(id, "error", err.Error(), nil, nil)
-			if !sleepOrDone(ctx, backoff) {
-				return
+		if firstIteration {
+			// Bootstrap once at loop start: install the binary and start the daemon.
+			m.updateStatus(id, "bootstrapping", "Checking remote platform", nil, nil)
+			bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			err := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget)
+			cancel()
+			if err != nil {
+				m.updateStatus(id, "error", err.Error(), nil, nil)
+				if !sleepOrDone(ctx, backoff) {
+					return
+				}
+				backoff = nextBackoff(backoff)
+				continue
 			}
-			backoff = nextBackoff(backoff)
-			continue
+			firstIteration = false
 		}
 
+		// Try to connect; if it fails the daemon is not running — bootstrap and retry.
 		m.updateStatus(id, "connecting", "Connecting to remote daemon", nil, nil)
 		conn, cmd, err := connectViaSSH(ctx, record.SSHTarget, config.WSAuthToken())
 		if err != nil {
-			m.updateStatus(id, "error", err.Error(), nil, nil)
-			if !sleepOrDone(ctx, backoff) {
-				return
+			// Daemon appears down — bootstrap then try once more.
+			m.updateStatus(id, "bootstrapping", "Checking remote platform", nil, nil)
+			bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			bootErr := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget)
+			cancel()
+			if bootErr != nil {
+				m.updateStatus(id, "error", bootErr.Error(), nil, nil)
+				if !sleepOrDone(ctx, backoff) {
+					return
+				}
+				backoff = nextBackoff(backoff)
+				continue
 			}
-			backoff = nextBackoff(backoff)
-			continue
+			m.updateStatus(id, "connecting", "Connecting to remote daemon", nil, nil)
+			conn, cmd, err = connectViaSSH(ctx, record.SSHTarget, config.WSAuthToken())
+			if err != nil {
+				m.updateStatus(id, "error", err.Error(), nil, nil)
+				if !sleepOrDone(ctx, backoff) {
+					return
+				}
+				backoff = nextBackoff(backoff)
+				continue
+			}
 		}
 
 		m.setConnection(id, conn, cmd)
-		connected, err := m.consumeRemote(ctx, id, conn)
+		connected, consumeErr := m.consumeRemote(ctx, id, conn)
 		m.clearConnection(id)
 		if m.clearRemoteSessions(id) {
 			m.publishSessionsChanged()
@@ -399,10 +443,37 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		if ctx.Err() != nil {
 			return
 		}
+
+		var versionErr *VersionMismatchError
+		if errors.As(consumeErr, &versionErr) {
+			// Version mismatch — surface to user instead of auto-bootstrapping.
+			status, message := versionMismatchStatus(versionErr)
+			m.updateStatus(id, status, message, nil, nil)
+			// Sleep longer before retrying; the user needs to click Sync.
+			if !sleepOrDone(ctx, 30*time.Second) {
+				return
+			}
+			continue
+		}
+
+		var binaryErr *BinaryMismatchError
+		if errors.As(consumeErr, &binaryErr) {
+			// Binary mismatch — connection dropped while in mismatch state.
+			// Keep the binary_mismatch status and use the same slow-retry policy
+			// so the banner stays visible and the user can click Sync.
+			m.updateStatus(id, "binary_mismatch", binaryErr.Message, nil, nil)
+			if !sleepOrDone(ctx, 30*time.Second) {
+				return
+			}
+			continue
+		}
+
 		if connected {
 			m.updateStatus(id, "disconnected", "Disconnected; reconnecting", nil, nil)
-		} else if err != nil {
-			m.updateStatus(id, "error", err.Error(), nil, nil)
+			// Reset backoff after a successful session — it was healthy.
+			backoff = time.Second
+		} else if consumeErr != nil {
+			m.updateStatus(id, "error", consumeErr.Error(), nil, nil)
 		}
 		if !sleepOrDone(ctx, backoff) {
 			return
@@ -411,11 +482,38 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 	}
 }
 
+// versionMismatchStatus returns the status string and human-readable message for a
+// VersionMismatchError.  "version_mismatch" means the remote is older (safe to sync
+// by upgrading it).  "version_ahead" means the remote is newer (syncing would downgrade it).
+func versionMismatchStatus(e *VersionMismatchError) (string, string) {
+	remoteN, remoteErr := strconv.Atoi(e.RemoteVersion)
+	localN, localErr := strconv.Atoi(e.LocalVersion)
+	if remoteErr == nil && localErr == nil && remoteN > localN {
+		return "version_ahead", fmt.Sprintf(
+			"remote v%s is ahead of this client v%s — sync will downgrade it",
+			e.RemoteVersion, e.LocalVersion,
+		)
+	}
+	return "version_mismatch", fmt.Sprintf(
+		"remote v%s, this client v%s — remote needs update",
+		e.RemoteVersion, e.LocalVersion,
+	)
+}
+
 func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.Conn) (bool, error) {
 	connected := false
+	// activeStatus and activeMsg track the status established on initial_state so
+	// that subsequent session events preserve it rather than blindly writing
+	// "connected".  For a binary_mismatch connection the WebSocket stays alive
+	// but the endpoint must remain non-"connected" throughout.
+	activeStatus := "connected"
+	activeMsg := "Connected"
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
+			if activeStatus == "binary_mismatch" {
+				return connected, &BinaryMismatchError{Message: activeMsg}
+			}
 			if connected {
 				return true, err
 			}
@@ -439,13 +537,17 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 				return connected, err
 			}
 			if remoteProtocol := strings.TrimSpace(protocol.Deref(msg.ProtocolVersion)); remoteProtocol != "" && remoteProtocol != protocol.ProtocolVersion {
-				return false, fmt.Errorf("protocol mismatch: remote=%s local=%s", remoteProtocol, protocol.ProtocolVersion)
+				return false, &VersionMismatchError{RemoteVersion: remoteProtocol, LocalVersion: protocol.ProtocolVersion}
 			}
 			changed := m.replaceRemoteSessions(id, msg.Sessions)
 			m.replaceRemoteWorkspaces(id, msg.Workspaces)
 			caps := capabilitiesFromInitialState(&msg)
 			sessionCount := int32(len(msg.Sessions))
-			m.updateStatus(id, "connected", "Connected", caps, &sessionCount)
+			if fingerMismatch, fingerMsg := fingerprintMismatch(msg.SourceFingerprint); fingerMismatch {
+				activeStatus = "binary_mismatch"
+				activeMsg = fingerMsg
+			}
+			m.updateStatus(id, activeStatus, activeMsg, caps, &sessionCount)
 			if changed {
 				m.publishSessionsChanged()
 			}
@@ -464,7 +566,7 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			}
 			changed := m.replaceRemoteSessions(id, msg.Sessions)
 			sessionCount := int32(len(msg.Sessions))
-			m.updateStatus(id, "connected", "Connected", nil, &sessionCount)
+			m.updateStatus(id, activeStatus, activeMsg, nil, &sessionCount)
 			if changed {
 				m.publishSessionsChanged()
 			}
@@ -477,7 +579,7 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			}
 			changed, sessionCount := m.upsertRemoteSession(id, *msg.Session)
 			countValue := int32(sessionCount)
-			m.updateStatus(id, "connected", "Connected", nil, &countValue)
+			m.updateStatus(id, activeStatus, activeMsg, nil, &countValue)
 			if changed {
 				m.publishSessionsChanged()
 			}
@@ -491,7 +593,7 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			changed, sessionCount := m.removeRemoteSession(id, msg.Session.ID)
 			m.removeRemoteWorkspace(id, msg.Session.ID)
 			countValue := int32(sessionCount)
-			m.updateStatus(id, "connected", "Connected", nil, &countValue)
+			m.updateStatus(id, activeStatus, activeMsg, nil, &countValue)
 			if changed {
 				m.publishSessionsChanged()
 			}
@@ -1566,4 +1668,47 @@ func sleepOrDone(ctx context.Context, delay time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+// fingerprintMismatch returns true (and a human-readable message) when the remote
+// daemon was built from a different source than this client.
+//
+// Rules:
+//   - If the local fingerprint is unknown (dev build, no ldflags) — skip; we can't
+//     make any claims about what "our" binary is.
+//   - If the local fingerprint is known but the remote is absent/unknown — mismatch:
+//     the running daemon is either an old binary that pre-dates source_fingerprint
+//     tracking, or a dev build.
+//   - If both are known and equal — no mismatch.
+//   - If both are known and differ — mismatch.
+func fingerprintMismatch(remoteFingerprint *string) (bool, string) {
+	local := normalizeFingerprint(buildinfo.SourceFingerprint)
+	if local == "" {
+		return false, ""
+	}
+	remote := normalizeFingerprint(protocol.Deref(remoteFingerprint))
+	if local == remote {
+		return false, ""
+	}
+	shortLocal := shortFingerprint(local)
+	if remote == "" {
+		return true, fmt.Sprintf("remote binary (unknown) differs from this client (%s) — click Sync to update", shortLocal)
+	}
+	shortRemote := shortFingerprint(remote)
+	return true, fmt.Sprintf("remote binary (%s) differs from this client (%s) — click Sync to update", shortRemote, shortLocal)
+}
+
+func normalizeFingerprint(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "unknown" {
+		return ""
+	}
+	return v
+}
+
+func shortFingerprint(v string) string {
+	if len(v) > 12 {
+		return v[:12]
+	}
+	return v
 }

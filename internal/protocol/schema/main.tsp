@@ -718,6 +718,7 @@ model WorkspaceRenamePaneMessage {
 model InitialStateMessage {
   event: "initial_state";
   protocol_version?: string;
+  source_fingerprint?: string;
   daemon_instance_id?: string;
   sessions?: Session[];
   endpoints?: EndpointInfo[];

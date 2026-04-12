@@ -14,6 +14,7 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -526,9 +527,10 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) sendInitialState(client *wsClient) {
 	event := &protocol.InitialStateMessage{
-		Event:            protocol.EventInitialState,
-		ProtocolVersion:  protocol.Ptr(protocol.ProtocolVersion),
-		DaemonInstanceID: protocol.Ptr(d.daemonInstanceID),
+		Event:              protocol.EventInitialState,
+		ProtocolVersion:    protocol.Ptr(protocol.ProtocolVersion),
+		SourceFingerprint:  protocol.Ptr(buildinfo.SourceFingerprint),
+		DaemonInstanceID:   protocol.Ptr(d.daemonInstanceID),
 		Sessions:         d.mergedSessionsForBroadcast(),
 		Endpoints:        d.listEndpointInfos(),
 		Workspaces:       d.mergedWorkspacesForBroadcast(),

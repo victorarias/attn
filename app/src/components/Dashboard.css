@@ -95,6 +95,87 @@
   flex-shrink: 0;
 }
 
+/* Version mismatch banner */
+.version-mismatch-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: 6px;
+  color: rgba(253, 224, 71, 0.92);
+  font-size: var(--font-size-md);
+}
+
+.version-mismatch-banner--ahead {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: rgba(252, 165, 165, 0.92);
+}
+
+.version-mismatch-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.version-mismatch-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.version-mismatch-name {
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+}
+
+.version-mismatch-message {
+  font-size: var(--font-size-sm);
+  opacity: 0.85;
+}
+
+.version-mismatch-warning {
+  font-size: var(--font-size-xs);
+  color: rgba(252, 165, 165, 0.92);
+  margin-top: 2px;
+}
+
+.version-mismatch-sync-btn {
+  align-self: center;
+  background: rgba(234, 179, 8, 0.15);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  border-radius: 4px;
+  color: rgba(253, 224, 71, 0.92);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: var(--font-size-sm);
+  padding: 4px 12px;
+  transition: background 150ms ease;
+}
+
+.version-mismatch-sync-btn:hover:not(:disabled) {
+  background: rgba(234, 179, 8, 0.25);
+}
+
+.version-mismatch-sync-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.version-mismatch-banner--ahead .version-mismatch-sync-btn {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: rgba(252, 165, 165, 0.92);
+}
+
+.version-mismatch-banner--ahead .version-mismatch-sync-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.25);
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -364,7 +445,10 @@
 }
 
 .session-endpoint-badge.status-connecting,
-.session-endpoint-badge.status-bootstrapping {
+.session-endpoint-badge.status-bootstrapping,
+.session-endpoint-badge.status-binary_mismatch,
+.session-endpoint-badge.status-version_mismatch,
+.session-endpoint-badge.status-version_ahead {
   border-color: rgba(245, 158, 11, 0.22);
   color: rgba(253, 224, 71, 0.92);
 }

@@ -1062,6 +1062,7 @@ export interface InitialStateMessage {
     repos?:              RepoElement[];
     sessions?:           SessionElement[];
     settings?:           { [key: string]: any };
+    source_fingerprint?: string;
     warnings?:           WarningElement[];
     workspaces?:         Workspace[];
     [property: string]: any;
@@ -4426,6 +4427,7 @@ const typeMap: any = {
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "source_fingerprint", js: "source_fingerprint", typ: u(undefined, "") },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
         { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("Workspace"))) },
     ], "any"),

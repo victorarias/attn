@@ -1,6 +1,6 @@
 // app/src/components/Dashboard.tsx
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { DaemonPR, RateLimitState } from '../hooks/useDaemonSocket';
+import { DaemonEndpoint, DaemonPR, RateLimitState } from '../hooks/useDaemonSocket';
 import { usePRsNeedingAttention } from '../hooks/usePRsNeedingAttention';
 import { PRActions } from './PRActions';
 import { StateIndicator } from './StateIndicator';
@@ -35,6 +35,8 @@ interface DashboardProps {
   isRefreshing?: boolean;
   refreshError?: string | null;
   rateLimit?: RateLimitState | null;
+  endpoints?: DaemonEndpoint[];
+  onRebootstrapEndpoint?: (endpointId: string) => Promise<void>;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onRefreshPRs?: () => void;
@@ -51,6 +53,8 @@ export function Dashboard({
   isRefreshing,
   refreshError,
   rateLimit,
+  endpoints,
+  onRebootstrapEndpoint,
   onSelectSession,
   onNewSession,
   onRefreshPRs,
@@ -180,6 +184,17 @@ export function Dashboard({
     }).catch(console.error);
   }, []);
 
+  const [syncingEndpointId, setSyncingEndpointId] = useState<string | null>(null);
+  const handleSync = useCallback(async (endpointId: string) => {
+    if (!onRebootstrapEndpoint || syncingEndpointId) return;
+    setSyncingEndpointId(endpointId);
+    try {
+      await onRebootstrapEndpoint(endpointId);
+    } finally {
+      setSyncingEndpointId(null);
+    }
+  }, [onRebootstrapEndpoint, syncingEndpointId]);
+
   // Rate limit countdown
   const [rateLimitCountdown, setRateLimitCountdown] = useState<string | null>(null);
   useEffect(() => {
@@ -240,6 +255,37 @@ export function Dashboard({
           <span>GitHub rate limited. Resuming in {rateLimitCountdown}</span>
         </div>
       )}
+
+      {/* Version mismatch banners */}
+      {endpoints?.filter(ep => ep.status === 'version_mismatch' || ep.status === 'version_ahead' || ep.status === 'binary_mismatch').map(ep => (
+        <div
+          key={ep.id}
+          className={`version-mismatch-banner${ep.status === 'version_ahead' ? ' version-mismatch-banner--ahead' : ''}`}
+        >
+          <svg className="version-mismatch-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <div className="version-mismatch-body">
+            <span className="version-mismatch-name">{ep.name}</span>
+            {ep.status_message && (
+              <span className="version-mismatch-message">{ep.status_message}</span>
+            )}
+            {ep.status === 'version_ahead' && (
+              <span className="version-mismatch-warning">Syncing will downgrade the remote — data migration may be required.</span>
+            )}
+          </div>
+          <button
+            className="version-mismatch-sync-btn"
+            aria-label={`Sync ${ep.name}`}
+            disabled={syncingEndpointId === ep.id}
+            onClick={() => handleSync(ep.id)}
+          >
+            {syncingEndpointId === ep.id ? '…' : 'Sync'}
+          </button>
+        </div>
+      ))}
 
       <div className="dashboard-grid">
         {/* Sessions Card */}
