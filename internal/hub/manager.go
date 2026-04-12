@@ -379,28 +379,10 @@ func (m *Manager) stopRuntimeLocked(runtime *endpointRuntime) {
 
 func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 	backoff := time.Second
-	firstIteration := true
 	for {
 		record, ok := m.recordFor(id)
 		if !ok {
 			return
-		}
-
-		if firstIteration {
-			// Bootstrap once at loop start: install the binary and start the daemon.
-			m.updateStatus(id, "bootstrapping", "Checking remote platform", nil, nil)
-			bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			err := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget)
-			cancel()
-			if err != nil {
-				m.updateStatus(id, "error", err.Error(), nil, nil)
-				if !sleepOrDone(ctx, backoff) {
-					return
-				}
-				backoff = nextBackoff(backoff)
-				continue
-			}
-			firstIteration = false
 		}
 
 		// Try to connect; if it fails the daemon is not running — bootstrap and retry.
