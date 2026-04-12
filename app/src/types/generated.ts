@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PathInspection, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, WorkspaceActionResultMessage, WorkspaceClosePaneMessage, WorkspaceFocusPaneMessage, WorkspaceGetMessage, WorkspacePane, WorkspacePaneKind, WorkspaceRenamePaneMessage, WorkspaceRuntimeExitedMessage, WorkspaceSnapshot, WorkspaceSnapshotMessage, WorkspaceSplitDirection, WorkspaceSplitPaneMessage, WorkspaceUpdatedMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PathInspection, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WontFixCommentMessage, WontFixCommentResultMessage, WorkspaceActionResultMessage, WorkspaceClosePaneMessage, WorkspaceFocusPaneMessage, WorkspaceGetMessage, WorkspacePane, WorkspacePaneKind, WorkspaceRenamePaneMessage, WorkspaceRuntimeExitedMessage, WorkspaceSnapshot, WorkspaceSnapshotMessage, WorkspaceSplitDirection, WorkspaceSplitPaneMessage, WorkspaceUpdatedMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -90,6 +90,7 @@
 //   const ptyDesyncMessage = Convert.toPtyDesyncMessage(json);
 //   const ptyInputMessage = Convert.toPtyInputMessage(json);
 //   const ptyOutputMessage = Convert.toPtyOutputMessage(json);
+//   const ptyResizedMessage = Convert.toPtyResizedMessage(json);
 //   const ptyResizeMessage = Convert.toPtyResizeMessage(json);
 //   const queryAuthorsMessage = Convert.toQueryAuthorsMessage(json);
 //   const queryMessage = Convert.toQueryMessage(json);
@@ -1406,6 +1407,18 @@ export interface PtyOutputMessage {
 
 export enum PtyOutputMessageEvent {
     PtyOutput = "pty_output",
+}
+
+export interface PtyResizedMessage {
+    cols:  number;
+    event: PtyResizedMessageEvent;
+    id:    string;
+    rows:  number;
+    [property: string]: any;
+}
+
+export enum PtyResizedMessageEvent {
+    PtyResized = "pty_resized",
 }
 
 export interface PtyResizeMessage {
@@ -3107,6 +3120,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("PtyOutputMessage")), null, 2);
     }
 
+    public static toPtyResizedMessage(json: string): PtyResizedMessage {
+        return cast(JSON.parse(json), r("PtyResizedMessage"));
+    }
+
+    public static ptyResizedMessageToJson(value: PtyResizedMessage): string {
+        return JSON.stringify(uncast(value, r("PtyResizedMessage")), null, 2);
+    }
+
     public static toPtyResizeMessage(json: string): PtyResizeMessage {
         return cast(JSON.parse(json), r("PtyResizeMessage"));
     }
@@ -4589,6 +4610,12 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "seq", js: "seq", typ: 0 },
     ], "any"),
+    "PtyResizedMessage": o([
+        { json: "cols", js: "cols", typ: 0 },
+        { json: "event", js: "event", typ: r("PtyResizedMessageEvent") },
+        { json: "id", js: "id", typ: "" },
+        { json: "rows", js: "rows", typ: 0 },
+    ], "any"),
     "PtyResizeMessage": o([
         { json: "cmd", js: "cmd", typ: r("PtyResizeMessageCmd") },
         { json: "cols", js: "cols", typ: 0 },
@@ -5424,6 +5451,9 @@ const typeMap: any = {
     ],
     "PtyOutputMessageEvent": [
         "pty_output",
+    ],
+    "PtyResizedMessageEvent": [
+        "pty_resized",
     ],
     "PtyResizeMessageCmd": [
         "pty_resize",

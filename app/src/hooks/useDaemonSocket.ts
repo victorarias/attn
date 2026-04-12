@@ -140,7 +140,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '52';
+const PROTOCOL_VERSION = '53';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 const INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD = import.meta.env.VITE_UI_AUTOMATION === '1';
 
@@ -1358,6 +1358,12 @@ export function useDaemonSocket({
               emitPtyEvent({ event: 'reset', id: data.id, reason: data.reason || 'desync' });
               ptyTransportRef.current.clearRuntimeStream(data.id);
               ws.send(JSON.stringify({ cmd: 'attach_session', id: data.id }));
+            }
+            break;
+
+          case 'pty_resized':
+            if (data.id && data.cols && data.rows) {
+              emitPtyEvent({ event: 'local_resize', id: data.id, cols: data.cols, rows: data.rows });
             }
             break;
 

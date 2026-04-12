@@ -1,0 +1,28 @@
+[package]
+name = "attn-native-app"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "attn-native"
+path = "src/main.rs"
+
+[[bin]]
+name = "attn-canvas"
+path = "src/canvas_main.rs"
+
+[[bin]]
+name = "attn-spike4"
+path = "src/spike4_main.rs"
+
+[dependencies]
+attn-protocol = { path = "../attn-protocol" }
+gpui = "0.2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures-util = { workspace = true }
+async-tungstenite = { version = "0.28", features = ["async-std-runtime"] }
+smol = "2"
+alacritty_terminal = "0.26.0"
+base64 = "0.22"
+async-channel = "2"
