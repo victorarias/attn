@@ -210,10 +210,12 @@ impl DaemonClient {
         &self.sessions
     }
 
+    #[allow(dead_code)]
     pub fn connected(&self) -> bool {
         self.connected
     }
 
+    #[allow(dead_code)]
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }

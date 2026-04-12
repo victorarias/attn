@@ -14,13 +14,33 @@ When implementing terminal cell backgrounds with GPUI's div/flex system, `.bg()`
 
 ---
 
-### Panel frame scales with zoom; terminal surface inside does not
+### Panel frame and terminal content both scale with zoom; cols/rows do not
 
 Panel width/height are world-space values. Screen size = `world_size * zoom`. Both position and size scale with zoom so the canvas feels like tldraw.
 
-The exception is the `TerminalSurfaceElement` painted inside a panel: it renders at a fixed cell size regardless of zoom so terminal text stays readable. The panel frame scales; the terminal content inside does not.
+Terminal rendering (font size, row height) also scales with zoom: `text_size = BASE_SIZE * zoom`, `line_height = ROW_HEIGHT * zoom`. This makes the whole panel — frame and content — shrink and grow together, which is the correct tldraw feel.
+
+**What does NOT change with zoom:** terminal cols/rows. Those are computed from world-space panel dimensions (`world_w / CHAR_WIDTH`, `(world_h - TITLE_HEIGHT) / ROW_HEIGHT`) and only change when the user drag-resizes the panel, triggering a `PtyResize` to the daemon.
+
+The two concerns are separate:
+- **Rendering zoom** → `TerminalView.zoom` field, updated every canvas frame, scales font and row height
+- **Logical size (cols/rows)** → derived from world-space panel dimensions, zoom-invariant, drives `PtyResize`
 
 Storing panel sizes as fixed screen pixels (only position scaling) makes panels overlap when zoomed out and stay the same size when zoomed in — it does not feel like a canvas.
+
+---
+
+### Focus routing: read `focus_handle` from the entity, don't store it separately in the canvas
+
+When the canvas needs to focus a specific `TerminalView` on a mouse click, the correct pattern is:
+
+```rust
+panel.view.read(cx).focus_handle.clone().focus(window);
+```
+
+Do not try to cache focus handles separately in the canvas — they can drift. Reading directly from the entity at click time is always current.
+
+Also: focusing in a `needs_focus_panel` flag + `render()` application (same pattern as spike 2's `needs_focus`) avoids calling `focus(window)` from inside `spawn_panel` where `window` is not available.
 
 ---
 

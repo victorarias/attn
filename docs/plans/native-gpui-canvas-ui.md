@@ -4,6 +4,9 @@
 
 Spike plan. Prototypes to prove feasibility before building the real client.
 
+**Completed:** Spikes 1, 2, 3, 4 (`attn-native`, `attn-native`, `attn-canvas`, `attn-spike4`)
+**Next:** Spike 5 (Session Model + Panel Registry) or Spike 6 (UI Test Automation)
+
 ## Why
 
 The current Tauri+React frontend works but is a web view. A native GPUI canvas UI would give:

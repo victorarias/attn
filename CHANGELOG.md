@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-04-12]
 
 ### Added
+- **Native UI Spike 4 — Terminal Panels on Canvas**: New `attn-spike4` binary merges the terminal surface (spike 2) with the infinite canvas (spike 3). Up to three live agent terminals attach to daemon sessions and appear as draggable, resizable panels on the canvas. Click a terminal body to focus it for keyboard input; drag its title bar to move it; drag corner handles to resize it and reflow the PTY. Zoom changes update visible cell counts automatically. A blue border highlights the focused panel.
 - **Native UI Spike 3 — Infinite Canvas**: New `attn-canvas` binary proves the GPUI-based canvas interaction model. Pan by dragging empty space, zoom toward cursor with Cmd+scroll or regular scroll, drag panels by their title bars, and resize panels by dragging their corner handles. Eight dummy panels are laid out at fixed world positions across an infinite dot-grid canvas. Viewport culling skips off-screen panels every frame.
 
 ### Fixed

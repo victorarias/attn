@@ -12,8 +12,8 @@ use crate::daemon_client::DaemonClient;
 use crate::terminal_model::{RenderedCell, TerminalEvent, TerminalModel};
 
 /// Approximate character cell dimensions for Source Code Pro at 13px.
-const CHAR_WIDTH: f32 = 7.8;
-const ROW_HEIGHT: f32 = 17.0;
+pub const CHAR_WIDTH: f32 = 7.8;
+pub const ROW_HEIGHT: f32 = 17.0;
 
 /// Default terminal colors (dark theme).
 const COLOR_BG: u32 = 0x1a1a1a;
@@ -84,6 +84,9 @@ fn resolve_color(color: &Color, default_color: u32) -> u32 {
 pub struct TerminalElement {
     cells: Vec<Vec<RenderedCell>>,
     cols: usize,
+    /// Canvas zoom factor. Scales font size and row height so the terminal
+    /// content visually shrinks/grows with the panel. Cols/rows are unaffected.
+    zoom: f32,
 }
 
 pub struct TerminalPrepaint {
@@ -144,7 +147,9 @@ impl Element for TerminalElement {
         };
         let shaped = window.text_system().shape_line("m".into(), font_size, &[run], None);
         let cell_width = shaped.width;
-        let line_height = px(ROW_HEIGHT);
+        // Scale line height by the same zoom factor applied to the font size so
+        // background quads and text baselines stay aligned.
+        let line_height = px(ROW_HEIGHT * self.zoom);
 
         TerminalPrepaint { cell_width, line_height, font, font_size }
     }
@@ -281,7 +286,14 @@ impl IntoElement for TerminalElement {
 pub struct TerminalView {
     terminal: Entity<TerminalModel>,
     daemon: Entity<DaemonClient>,
-    focus_handle: FocusHandle,
+    pub focus_handle: FocusHandle,
+    /// Explicit content area size (world-space pixels) for use inside canvas panels.
+    /// When set, terminal sizing uses these instead of the window viewport.
+    content_size: Option<(f32, f32)>,
+    /// Canvas zoom factor for rendering. Scales font size and row height so the
+    /// terminal scales visually with the panel. Cols/rows are not affected.
+    /// Defaults to 1.0 (fullscreen / no canvas).
+    zoom: f32,
 }
 
 impl Focusable for TerminalView {
@@ -307,7 +319,31 @@ impl TerminalView {
         })
         .detach();
 
-        Self { terminal, daemon, focus_handle }
+        Self { terminal, daemon, focus_handle, content_size: None, zoom: 1.0 }
+    }
+
+    /// Set the canvas zoom factor used for rendering. Returns true if changed.
+    #[allow(dead_code)]
+    pub fn set_zoom(&mut self, zoom: f32) -> bool {
+        let changed = (self.zoom - zoom).abs() >= 0.001;
+        if changed {
+            self.zoom = zoom;
+        }
+        changed
+    }
+
+    /// Set the content area size (world-space units) used for terminal dimension
+    /// computation. Returns true if the value changed by more than half a pixel.
+    #[allow(dead_code)]
+    pub fn set_content_size(&mut self, w: f32, h: f32) -> bool {
+        let changed = match self.content_size {
+            Some((cw, ch)) => (cw - w).abs() >= 0.5 || (ch - h).abs() >= 0.5,
+            None => true,
+        };
+        if changed {
+            self.content_size = Some((w, h));
+        }
+        changed
     }
 
     fn send_input(&self, data: &str, cx: &mut Context<Self>) {
@@ -329,10 +365,17 @@ impl TerminalView {
 
 impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Sync terminal size to the current viewport.
-        let viewport = window.viewport_size();
-        let new_cols = ((viewport.width / px(CHAR_WIDTH)) as u16).max(1);
-        let new_rows = ((viewport.height / px(ROW_HEIGHT)) as u16).max(1);
+        // Sync terminal size to the available content area.
+        // When hosted inside a canvas panel, content_size overrides viewport size.
+        let (new_cols, new_rows) = if let Some((w, h)) = self.content_size {
+            (((w / CHAR_WIDTH) as u16).max(1), ((h / ROW_HEIGHT) as u16).max(1))
+        } else {
+            let viewport = window.viewport_size();
+            (
+                ((viewport.width / px(CHAR_WIDTH)) as u16).max(1),
+                ((viewport.height / px(ROW_HEIGHT)) as u16).max(1),
+            )
+        };
         let (cur_cols, cur_rows, session_id) = {
             let t = self.terminal.read(cx);
             (t.cols, t.rows, t.session_id.clone())
@@ -354,15 +397,17 @@ impl Render for TerminalView {
         }
 
         let focus_handle = self.focus_handle.clone();
+        let zoom = self.zoom;
 
         div()
             .size_full()
             .bg(rgb(COLOR_BG))
             .font_family("Source Code Pro for Powerline")
-            .text_size(px(13.))
+            // Scale font size with zoom so text visually shrinks/grows with the panel.
+            .text_size(px(13. * zoom))
             .track_focus(&focus_handle)
             .on_key_down(cx.listener(Self::on_key_down))
-            .child(TerminalElement { cells: all_cells, cols })
+            .child(TerminalElement { cells: all_cells, cols, zoom })
     }
 }
 

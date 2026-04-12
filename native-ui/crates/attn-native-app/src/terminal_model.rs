@@ -164,6 +164,7 @@ impl TerminalModel {
     }
 
     /// Cursor position as (col, row), 0-based.
+    #[allow(dead_code)]
     pub fn cursor(&self) -> (usize, usize) {
         let point = self.term.grid().cursor.point;
         (point.column.0, point.line.0 as usize)

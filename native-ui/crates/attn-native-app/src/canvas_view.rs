@@ -1,3 +1,6 @@
+// This module is shared between attn-canvas (spike 3) and attn-spike4.
+// Not all items are used by both binaries.
+#![allow(dead_code)]
 /// Spike 3: Infinite canvas with dummy panels.
 ///
 /// Viewport transforms world ↔ screen coordinates. Panels are positioned in
@@ -26,7 +29,7 @@ const GRID_DOT_COLOR: u32 = 0x333333;
 
 /// Extract the underlying f32 from a Pixels value.
 #[inline]
-fn pf(p: Pixels) -> f32 {
+pub fn pf(p: Pixels) -> f32 {
     f32::from(p)
 }
 
@@ -417,12 +420,12 @@ impl Render for WorkspaceCanvasView {
 
 // ── Grid background element ───────────────────────────────────────────────────
 
-struct GridElement {
-    viewport: Viewport,
+pub struct GridElement {
+    pub viewport: Viewport,
 }
 
-struct GridPrepaint {
-    bounds: Bounds<Pixels>,
+pub struct GridPrepaint {
+    pub bounds: Bounds<Pixels>,
 }
 
 impl Element for GridElement {
