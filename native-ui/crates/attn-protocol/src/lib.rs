@@ -4,14 +4,14 @@
 //! TypeSpec schema. Only the subset needed by the native UI is defined here;
 //! extend as new spikes need more events/commands.
 
-mod events;
 mod commands;
+mod events;
 mod types;
 
-pub use events::*;
 pub use commands::*;
+pub use events::*;
 pub use types::*;
 
 /// Current protocol version — must match `ProtocolVersion` in
 /// `internal/protocol/constants.go`.
-pub const PROTOCOL_VERSION: &str = "51";
+pub const PROTOCOL_VERSION: &str = "52";

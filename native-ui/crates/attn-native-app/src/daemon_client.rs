@@ -21,7 +21,7 @@ impl EventEmitter<DaemonEvent> for DaemonClient {}
 
 impl DaemonClient {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        cx.spawn(|this: WeakEntity<DaemonClient>, cx: &mut AsyncApp| async move {
+        cx.spawn(async |this: WeakEntity<DaemonClient>, cx: &mut AsyncApp| {
             loop {
                 let connect_result =
                     async_tungstenite::async_std::connect_async(DAEMON_WS_URL).await;
