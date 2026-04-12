@@ -301,22 +301,25 @@ test.describe('Keyboard Shortcuts', () => {
 
       await expect(keep).toBeFocused();
 
-      await keep.press('ArrowRight');
+      // Use page.keyboard instead of locator.press() — locator.press()
+      // re-focuses the element first, which can cause the document to lose
+      // OS-level focus in CI, making the next toBeFocused() return "inactive".
+      await page.keyboard.press('ArrowRight');
       await expect(del).toBeFocused();
 
-      await del.press('ArrowRight');
+      await page.keyboard.press('ArrowRight');
       await expect(always).toBeFocused();
 
-      await always.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
       await expect(del).toBeFocused();
 
-      await del.press('Tab');
+      await page.keyboard.press('Tab');
       await expect(always).toBeFocused();
 
-      await always.press('Tab');
+      await page.keyboard.press('Tab');
       await expect(keep).toBeFocused();
 
-      await keep.press('Shift+Tab');
+      await page.keyboard.press('Shift+Tab');
       await expect(always).toBeFocused();
     });
   });

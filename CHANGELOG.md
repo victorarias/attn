@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-12]
+
+### Fixed
+- **Location Picker Viewport Shift**: Closing the location picker no longer shifts the entire viewport left. WebKit's `scrollIntoView` was walking past the fixed overlay and scrolling the app shell; `overflow: clip` on `.app` prevents this.
+
 ## [2026-04-11]
 
 ### Changed
