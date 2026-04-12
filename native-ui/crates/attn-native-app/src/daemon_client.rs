@@ -2,13 +2,13 @@ use attn_protocol::{ServerEvent, Session, PROTOCOL_VERSION};
 use futures_util::StreamExt;
 use gpui::{AsyncApp, Context, EventEmitter, WeakEntity};
 
-const DAEMON_WS_URL: &str = "ws://localhost:9849";
+const DAEMON_WS_URL: &str = "ws://localhost:9849/ws";
 
 #[derive(Debug, Clone)]
 pub enum DaemonEvent {
     Connected,
-    Disconnected(String),
-    SessionsChanged(Vec<Session>),
+    Disconnected,
+    SessionsChanged,
 }
 
 pub struct DaemonClient {
@@ -61,7 +61,7 @@ impl DaemonClient {
                         let _ = this.update(cx, |client: &mut DaemonClient, cx: &mut Context<DaemonClient>| {
                             client.connected = false;
                             client.error = Some("Connection lost".into());
-                            cx.emit(DaemonEvent::Disconnected("Connection lost".into()));
+                            cx.emit(DaemonEvent::Disconnected);
                             cx.notify();
                         });
                     }
@@ -69,7 +69,7 @@ impl DaemonClient {
                         let _ = this.update(cx, |client: &mut DaemonClient, cx: &mut Context<DaemonClient>| {
                             client.connected = false;
                             client.error = Some(format!("Connect failed: {e}"));
-                            cx.emit(DaemonEvent::Disconnected(format!("{e}")));
+                            cx.emit(DaemonEvent::Disconnected);
                             cx.notify();
                         });
                     }
@@ -100,31 +100,31 @@ impl DaemonClient {
                     }
                 }
                 self.sessions = msg.sessions;
-                cx.emit(DaemonEvent::SessionsChanged(self.sessions.clone()));
+                cx.emit(DaemonEvent::SessionsChanged);
                 cx.notify();
             }
             ServerEvent::SessionRegistered(msg) => {
                 if !self.sessions.iter().any(|s| s.id == msg.session.id) {
                     self.sessions.push(msg.session);
                 }
-                cx.emit(DaemonEvent::SessionsChanged(self.sessions.clone()));
+                cx.emit(DaemonEvent::SessionsChanged);
                 cx.notify();
             }
             ServerEvent::SessionUnregistered(msg) => {
                 self.sessions.retain(|s| s.id != msg.session.id);
-                cx.emit(DaemonEvent::SessionsChanged(self.sessions.clone()));
+                cx.emit(DaemonEvent::SessionsChanged);
                 cx.notify();
             }
             ServerEvent::SessionStateChanged(msg) => {
                 if let Some(s) = self.sessions.iter_mut().find(|s| s.id == msg.session.id) {
                     *s = msg.session;
                 }
-                cx.emit(DaemonEvent::SessionsChanged(self.sessions.clone()));
+                cx.emit(DaemonEvent::SessionsChanged);
                 cx.notify();
             }
             ServerEvent::SessionsUpdated(msg) => {
                 self.sessions = msg.sessions;
-                cx.emit(DaemonEvent::SessionsChanged(self.sessions.clone()));
+                cx.emit(DaemonEvent::SessionsChanged);
                 cx.notify();
             }
             ServerEvent::Unknown(_) => {}
