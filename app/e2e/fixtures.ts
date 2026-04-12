@@ -155,6 +155,25 @@ async function waitForSocket(
   });
 }
 
+// Create a bin directory with minimal agent stubs so the daemon reports agents
+// as available on CI machines that have no real agent CLIs installed.
+// Returns the bin dir path and a cleanup function.
+function createFakeAgentStubs(): { binDir: string; cleanup: () => void } {
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-e2e-stubs-'));
+  for (const name of ['claude', 'codex', 'copilot']) {
+    const stubPath = path.join(binDir, name);
+    // Minimal stub: just sleep so the session appears alive briefly.
+    fs.writeFileSync(stubPath, '#!/bin/sh\nsleep 600\n');
+    fs.chmodSync(stubPath, 0o755);
+  }
+  return {
+    binDir,
+    cleanup: () => {
+      try { fs.rmSync(binDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    },
+  };
+}
+
 // Daemon launcher - creates isolated temp directory for DB and socket
 async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketPath: string; tempDir: string; stop: () => void }> {
   // Create temp directory for test isolation
@@ -162,6 +181,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
   const socketPath = path.join(tempDir, 'attn.sock');
   const dbPath = path.join(tempDir, 'attn.db');
   const attnPath = resolveAttnBinaryPath();
+  const stubs = createFakeAgentStubs();
 
   console.log(`[E2E] Test isolation: tempDir=${tempDir}, socket=${socketPath}, db=${dbPath}`);
   console.log(`[E2E] Using daemon binary: ${attnPath}`);
@@ -178,6 +198,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
   const proc = spawn(attnPath, ['daemon'], {
     env: {
       ...process.env,
+      PATH: `${stubs.binDir}${path.delimiter}${process.env.PATH}`,
       ATTN_WS_PORT: TEST_DAEMON_PORT, // Use test port to avoid conflicts with production daemon
       ATTN_SOCKET_PATH: socketPath, // Test isolation: separate socket
       ATTN_DB_PATH: dbPath, // Test isolation: separate database
@@ -214,6 +235,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
     tempDir,
     stop() {
       proc.kill();
+      stubs.cleanup();
       // Clean up temp directory and all contents
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -289,6 +311,7 @@ function createManagedDaemon(ghUrl: string): ManagedDaemon {
   const socketPath = path.join(tempDir, 'attn.sock');
   const dbPath = path.join(tempDir, 'attn.db');
   const attnPath = resolveAttnBinaryPath();
+  const stubs = createFakeAgentStubs();
   let proc: ChildProcess | null = null;
   let stdout = '';
   let stderr = '';
@@ -311,6 +334,7 @@ function createManagedDaemon(ghUrl: string): ManagedDaemon {
     proc = spawn(attnPath, ['daemon'], {
       env: {
         ...process.env,
+        PATH: `${stubs.binDir}${path.delimiter}${process.env.PATH}`,
         ATTN_WS_PORT: TEST_DAEMON_PORT,
         ATTN_SOCKET_PATH: socketPath,
         ATTN_DB_PATH: dbPath,
@@ -381,6 +405,7 @@ function createManagedDaemon(ghUrl: string): ManagedDaemon {
 
   const cleanup = async () => {
     await stop();
+    stubs.cleanup();
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
       console.log(`[Managed daemon] cleaned up temp dir ${tempDir}`);

@@ -296,24 +296,16 @@ export function LocationPicker({
 
   const invalidateRequestGeneration = useCallback(() => {
     requestGenerationRef.current += 1;
-    console.warn('[LP:gen] invalidate -> %d', requestGenerationRef.current);
   }, []);
 
   const beginRequestGeneration = useCallback(() => {
     const nextGeneration = requestGenerationRef.current + 1;
     requestGenerationRef.current = nextGeneration;
-    console.warn('[LP:gen] begin -> %d', nextGeneration);
     return nextGeneration;
   }, []);
 
   const isRequestCurrent = useCallback(
-    (requestGeneration: number) => {
-      const current = requestGenerationRef.current === requestGeneration;
-      if (!current) {
-        console.warn('[LP:gen] STALE check=%d current=%d', requestGeneration, requestGenerationRef.current);
-      }
-      return current;
-    },
+    (requestGeneration: number) => requestGenerationRef.current === requestGeneration,
     [],
   );
 
@@ -497,35 +489,24 @@ export function LocationPicker({
   }, []);
 
   const handleSelectPath = useCallback(async (rawPath: string) => {
-    console.warn('[LP:select] rawPath=%s hasAgents=%s hasInspect=%s', rawPath, hasAvailableAgents, !!onInspectPath);
-    if (!hasAvailableAgents) {
-      onError?.(noAgentsMessage);
-      return;
-    }
     if (!onInspectPath) {
       onError?.('Path inspection is not available.');
       return;
     }
 
     const sanitizedPath = normalizePickerPath(rawPath, homePath);
-    console.warn('[LP:select] sanitizedPath=%s homePath=%s', sanitizedPath, homePath);
     if (!sanitizedPath) {
-      console.warn('[LP:select] empty sanitizedPath, bailing');
       return;
     }
     const requestGeneration = beginRequestGeneration();
-    console.warn('[LP:select] requestGeneration=%d', requestGeneration);
 
     try {
       const inspected = await onInspectPath(sanitizedPath, selectedEndpointId);
-      console.warn('[LP:select] inspected=%s', JSON.stringify(inspected));
       if (!isRequestCurrent(requestGeneration)) {
-        console.warn('[LP:select] stale after inspect (gen=%d, current=%d)', requestGeneration, (globalThis as any).__LP_GEN_DEBUG__);
         return;
       }
       const inspection = inspected.inspection;
       if (!inspection?.exists || !inspection.is_directory) {
-        console.warn('[LP:select] not found or not dir: exists=%s isDir=%s', inspection?.exists, inspection?.is_directory);
         onError?.(`Directory not found: ${sanitizedPath}`);
         return;
       }
@@ -537,16 +518,12 @@ export function LocationPicker({
       const resolvedPath = inspection.resolved_path;
       setSelectedPathFromPhysical(resolvedPath);
       const repoRoot = inspection.repo_root;
-      console.warn('[LP:select] resolvedPath=%s repoRoot=%s hasGetRepoInfo=%s', resolvedPath, repoRoot, !!onGetRepoInfo);
       if (repoRoot && onGetRepoInfo) {
         const result = await onGetRepoInfo(repoRoot, selectedEndpointId);
-        console.warn('[LP:select] repoInfo result=%s', JSON.stringify(result).slice(0, 500));
         if (!isRequestCurrent(requestGeneration)) {
-          console.warn('[LP:select] stale after repoInfo');
           return;
         }
         if (result.success && result.info) {
-          console.warn('[LP:select] -> repo-options mode');
           setMode('repo-options');
           setRepoRootPath(repoRoot);
           setRepoInfo(toChooserRepoInfo(result.info));
@@ -555,22 +532,18 @@ export function LocationPicker({
       }
 
       if (!isRequestCurrent(requestGeneration)) {
-        console.warn('[LP:select] stale before launch');
         return;
       }
-      console.warn('[LP:select] -> launchSelection(%s)', resolvedPath);
       launchSelection(resolvedPath);
     } catch (err) {
       if (!isRequestCurrent(requestGeneration)) {
-        console.warn('[LP:select] stale in catch');
         return;
       }
-      console.warn('[LP:select] error:', err);
+      console.log('[LocationPicker] inspect path error:', err);
       onError?.(err instanceof Error ? err.message : String(err));
     }
   }, [
     beginRequestGeneration,
-    hasAvailableAgents,
     homePath,
     isRequestCurrent,
     launchSelection,
@@ -619,9 +592,7 @@ export function LocationPicker({
 
   const handlePathInputSubmit = useCallback(() => {
     const pathToOpen = highlightedItem?.path || inputValue;
-    console.warn('[LP:submit] pathToOpen=%s highlighted=%s inputValue=%s', pathToOpen, highlightedItem?.path, inputValue);
     if (!pathToOpen.trim()) {
-      console.warn('[LP:submit] empty path, bailing');
       return;
     }
     void handleSelectPath(pathToOpen);

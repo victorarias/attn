@@ -259,15 +259,6 @@ test.describe('LocationPicker', () => {
   });
 
   test.describe('Regression Cases', () => {
-    test.beforeEach(async ({ page }) => {
-      page.on('console', (msg) => {
-        const text = msg.text();
-        if (text.startsWith('[LP:') || text.startsWith('[PathInput:')) {
-          console.log(`[browser] ${text}`);
-        }
-      });
-    });
-
     test('preselects the exact worktree row for typed worktree paths with and without trailing slash', async ({ page, daemon }) => {
       await daemon.start();
       const repo = createLocationPickerRepo(['feat-images']);

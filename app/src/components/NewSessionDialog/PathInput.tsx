@@ -56,7 +56,6 @@ export function PathInput({
       const pathToSelect = (ghostText && ghostText.startsWith(value) && hasSelectedSinceTab)
         ? ghostText  // User intentionally selected, accept ghost as completion
         : (value || completionValue);  // User just Tabbed or input empty, use value or highlighted row
-      console.warn('[PathInput:Enter] value=%s ghost=%s completion=%s hasSelected=%s -> pathToSelect=%s', value, ghostText, completionValue, hasSelectedSinceTab, pathToSelect);
       if (pathToSelect) {
         onSelect(pathToSelect);
         onSubmit();
