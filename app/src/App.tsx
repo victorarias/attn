@@ -1914,6 +1914,7 @@ sendFetchPRDetails,
           onOpenPR={handleOpenPR}
           onOpenSettings={() => setSettingsOpen(true)}
           onMutedGroupClick={() => {
+            setSidebarCollapsed(false);
             setSidebarMutedExpanded(true);
             setView('session');
           }}
