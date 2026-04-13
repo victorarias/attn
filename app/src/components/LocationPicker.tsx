@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useEscapeStack } from '../hooks/useEscapeStack';
 import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
 import { PathInput } from './NewSessionDialog/PathInput';
 import { RepoOptions } from './NewSessionDialog/RepoOptions';
@@ -703,6 +704,19 @@ export function LocationPicker({
     onClose();
   }, [invalidateRequestGeneration, onClose]);
 
+  const handleEscape = useCallback(() => {
+    if (mode === 'repo-options') {
+      // RepoOptions pushes its own sub-state handlers (pendingDeletePath, showNewWorktree)
+      // above this one in the escape stack. This branch fires only when those are inactive.
+      handleBack();
+    } else if (highlightedItemKey) {
+      setHighlightedItemKey(null);
+    } else {
+      handleClosePicker();
+    }
+  }, [mode, handleBack, highlightedItemKey, handleClosePicker]);
+  useEscapeStack(handleEscape, isOpen);
+
   const handleDialogKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.altKey && !e.metaKey && !e.ctrlKey) {
       const shortcutTargetId = targetShortcutIDByCode.get(e.code);
@@ -724,18 +738,6 @@ export function LocationPicker({
       }
     }
 
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      if (mode === 'repo-options') {
-        handleBack();
-      } else if (highlightedItemKey) {
-        setHighlightedItemKey(null);
-      } else {
-        handleClosePicker();
-      }
-      return;
-    }
-
     if (mode !== 'path-input') {
       return;
     }
@@ -749,10 +751,7 @@ export function LocationPicker({
     }
   }, [
     handleAgentChange,
-    handleBack,
-    handleClosePicker,
     handleTargetChange,
-    highlightedItemKey,
     mode,
     movePathSelection,
     orderedAgentList,

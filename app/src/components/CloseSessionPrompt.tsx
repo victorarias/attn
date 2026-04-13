@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { KeyboardEvent } from 'react';
+import { useEscapeStack } from '../hooks/useEscapeStack';
 import './CloseSessionPrompt.css';
 
 interface CloseSessionPromptProps {
@@ -20,20 +21,14 @@ export function CloseSessionPrompt({
   const confirmRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
-  const handleConfirm = useCallback(() => {
-    onConfirm();
-  }, [onConfirm]);
-
-  const handleCancel = useCallback(() => {
-    onCancel();
-  }, [onCancel]);
+  useEscapeStack(onCancel, isVisible);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     const buttons = [confirmRef.current, cancelRef.current].filter(Boolean) as HTMLButtonElement[];
     const key = event.key.toLowerCase();
     const active = document.activeElement as HTMLButtonElement | null;
 
-    if (event.key === 'Escape' || key === 'n') {
+    if (key === 'n') {
       event.preventDefault();
       onCancel();
       return;
@@ -91,7 +86,7 @@ export function CloseSessionPrompt({
   const splitLabel = splitCount === 1 ? '1 split terminal' : `${splitCount} split terminals`;
 
   return (
-    <div className="close-session-prompt" role="presentation" onClick={handleCancel}>
+    <div className="close-session-prompt" role="presentation" onClick={onCancel}>
       <div
         className="close-session-content"
         role="dialog"
@@ -114,10 +109,10 @@ export function CloseSessionPrompt({
           Enter / Space uses the focused button, Y confirms, N / Esc cancel
         </div>
         <div className="close-session-actions">
-          <button ref={confirmRef} className="close-session-btn confirm" onClick={handleConfirm}>
+          <button ref={confirmRef} className="close-session-btn confirm" onClick={onConfirm}>
             Close Session
           </button>
-          <button ref={cancelRef} className="close-session-btn cancel" onClick={handleCancel}>
+          <button ref={cancelRef} className="close-session-btn cancel" onClick={onCancel}>
             Keep Session
           </button>
         </div>

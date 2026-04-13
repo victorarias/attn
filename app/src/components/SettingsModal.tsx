@@ -1,5 +1,6 @@
 // app/src/components/SettingsModal.tsx
 import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useEscapeStack } from '../hooks/useEscapeStack';
 import { open } from '@tauri-apps/plugin-dialog';
 import { DaemonEndpoint, DaemonSettings } from '../hooks/useDaemonSocket';
 import { normalizeSessionAgent, type SessionAgent } from '../types/sessionAgent';
@@ -177,21 +178,7 @@ export function SettingsModal({
     }
   }, [actualReviewLoopPresets, isOpen, selectedReviewLoopPresetID]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') {
-        return;
-      }
-      e.preventDefault();
-      e.stopPropagation();
-      onClose();
-    };
-
-    window.addEventListener('keydown', handleGlobalKeyDown, true);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
-  }, [isOpen, onClose]);
+  useEscapeStack(onClose, isOpen);
 
   const handleBrowse = useCallback(async () => {
     const selected = await open({

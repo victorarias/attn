@@ -10,6 +10,7 @@
  * - Comments attach to document positions, not DOM elements
  */
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+import { useEscapeStack } from '../hooks/useEscapeStack';
 import { EditorView, Decoration, DecorationSet, WidgetType, gutter, GutterMarker } from '@codemirror/view';
 import { EditorState, StateField, StateEffect, RangeSetBuilder, Extension, Range } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -986,6 +987,11 @@ export function UnifiedDiffEditor({
 
   // Track which lines have open "new comment" forms
   const [newCommentLines, setNewCommentLines] = useState<Set<number>>(new Set());
+
+  // Dismiss inline comment forms via the escape stack so overlays stay LIFO
+  const cancelAllNewComments = useCallback(() => setNewCommentLines(new Set()), []);
+  useEscapeStack(cancelAllNewComments, newCommentLines.size > 0);
+  useEscapeStack(onCancelEdit, editingCommentId !== null);
 
   // Track text selection for popup
   const [selection, setSelection] = useState<{

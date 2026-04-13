@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ReviewComment } from '../types/generated';
+import { useEscapeStack } from '../hooks/useEscapeStack';
 import './CommentPopover.css';
 
 interface CommentPopoverProps {
@@ -63,10 +64,10 @@ export function CommentPopover({
     }
   };
 
+  useEscapeStack(onCancel, true); // enabled while mounted; parent controls visibility
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      onCancel();
-    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSave();
     }

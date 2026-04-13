@@ -1,6 +1,7 @@
 // app/src/components/WorktreeCleanupPrompt.tsx
 import { useCallback, useEffect, useRef } from 'react';
 import type { KeyboardEvent } from 'react';
+import { useEscapeStack } from '../hooks/useEscapeStack';
 import './WorktreeCleanupPrompt.css';
 
 interface WorktreeCleanupPromptProps {
@@ -25,29 +26,13 @@ export function WorktreeCleanupPrompt({
   const deleteRef = useRef<HTMLButtonElement>(null);
   const alwaysRef = useRef<HTMLButtonElement>(null);
 
-  const handleKeep = useCallback(() => {
-    onKeep();
-  }, [onKeep]);
-
-  const handleDelete = useCallback(() => {
-    onDelete();
-  }, [onDelete]);
-
-  const handleAlwaysKeep = useCallback(() => {
-    onAlwaysKeep();
-  }, [onAlwaysKeep]);
+  useEscapeStack(onKeep, isVisible);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       const buttons = [keepRef.current, deleteRef.current, alwaysRef.current].filter(
         Boolean
       ) as HTMLButtonElement[];
-
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onKeep();
-        return;
-      }
 
       if (event.key === 'Tab') {
         if (buttons.length === 0) return;
@@ -70,7 +55,7 @@ export function WorktreeCleanupPrompt({
       buttons[nextIndex]?.focus();
       event.preventDefault();
     },
-    [onKeep]
+    []
   );
 
   useEffect(() => {
@@ -113,17 +98,17 @@ export function WorktreeCleanupPrompt({
           Keep worktree <span className="cleanup-branch">{displayName}</span> for later?
         </div>
         <div className="cleanup-actions">
-          <button ref={keepRef} type="button" autoFocus className="cleanup-btn keep" onClick={handleKeep}>
+          <button ref={keepRef} type="button" autoFocus className="cleanup-btn keep" onClick={onKeep}>
             Keep
           </button>
-          <button ref={deleteRef} type="button" className="cleanup-btn delete" onClick={handleDelete}>
+          <button ref={deleteRef} type="button" className="cleanup-btn delete" onClick={onDelete}>
             Delete
           </button>
           <button
             ref={alwaysRef}
             type="button"
             className="cleanup-btn always"
-            onClick={handleAlwaysKeep}
+            onClick={onAlwaysKeep}
           >
             Always keep (this app run)
           </button>
