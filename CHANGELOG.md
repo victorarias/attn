@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-13]
+
+### Added
+- **Muted Sessions**: Sessions can now be muted to park them out of active attention surfaces without closing them. A 🔕 button appears on session rows in the sidebar on hover; muted sessions move to a collapsed "Muted Sessions" section at the sidebar bottom. The dashboard shows a "Muted Sessions (N)" summary group that navigates to the sessions view and expands the muted section on click. Unmuting restores the session to the normal list in its current state. Muted state persists across restarts.
+
 ## [2026-04-12]
 
 ### Added

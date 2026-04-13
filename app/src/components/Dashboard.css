@@ -849,3 +849,20 @@
 .pr-row.approved:hover {
   opacity: 0.8;
 }
+
+/* Muted sessions summary group */
+.session-group.muted-summary {
+  cursor: pointer;
+  border-top: 1px solid var(--color-border);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+
+.session-group.muted-summary:hover .group-label {
+  color: var(--color-text-dimmed);
+}
+
+.group-label.dim {
+  color: var(--color-text-muted);
+  font-style: italic;
+}

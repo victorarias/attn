@@ -2367,6 +2367,13 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'mute_author', author }));
   }, [onAuthorsUpdate]);
 
+  // Mute a session (toggle muted state)
+  const sendMuteSession = useCallback((id: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'mute', id }));
+  }, []);
+
   // Request daemon to refresh PRs from GitHub
   const sendRefreshPRs = useCallback((): Promise<PRActionResult> => {
     return new Promise((resolve, reject) => {
@@ -3334,6 +3341,7 @@ export function useDaemonSocket({
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,
+    sendMuteSession,
     sendRefreshPRs,
     sendFetchPRDetails,
     sendClearSessions,

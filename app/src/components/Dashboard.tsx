@@ -17,16 +17,19 @@ import {
 import appIcon from '../assets/icon.png';
 import './Dashboard.css';
 
+type DashboardSession = {
+  id: string;
+  label: string;
+  state: UISessionState;
+  cwd: string;
+  endpointName?: string;
+  endpointStatus?: string;
+  reviewLoopStatus?: string;
+};
+
 interface DashboardProps {
-  sessions: Array<{
-    id: string;
-    label: string;
-    state: UISessionState;
-    cwd: string;
-    endpointName?: string;
-    endpointStatus?: string;
-    reviewLoopStatus?: string;
-  }>;
+  sessions: DashboardSession[];
+  mutedSessions?: DashboardSession[];
   prs: DaemonPR[];
   isLoading: boolean;
   isRefreshing?: boolean;
@@ -37,10 +40,12 @@ interface DashboardProps {
   onRefreshPRs?: () => void;
   onOpenPR?: (pr: DaemonPR) => void;
   onOpenSettings: () => void;
+  onMutedGroupClick?: () => void;
 }
 
 export function Dashboard({
   sessions,
+  mutedSessions = [],
   prs,
   isLoading,
   isRefreshing,
@@ -51,6 +56,7 @@ export function Dashboard({
   onRefreshPRs,
   onOpenPR,
   onOpenSettings,
+  onMutedGroupClick,
 }: DashboardProps) {
   const reviewLoopIndicator = (status?: string): { glyph: string; label: string } | null => {
     switch (status) {
@@ -245,7 +251,7 @@ export function Dashboard({
             </button>
           </div>
           <div className="card-body">
-            {sessions.length === 0 ? (
+            {sessions.length === 0 && mutedSessions.length === 0 ? (
               <div className="card-empty">No active sessions</div>
             ) : (
               <>
@@ -389,6 +395,15 @@ export function Dashboard({
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
+                {mutedSessions.length > 0 && (
+                  <div
+                    className="session-group muted-summary clickable"
+                    data-testid="session-group-muted"
+                    onClick={onMutedGroupClick}
+                  >
+                    <div className="group-label dim">Muted Sessions ({mutedSessions.length})</div>
                   </div>
                 )}
               </>
