@@ -295,32 +295,36 @@ test.describe('Keyboard Shortcuts', () => {
       const dialog = page.locator('.worktree-cleanup-prompt .cleanup-content');
       await expect(dialog).toBeVisible({ timeout: 2000 });
 
-      const keep = page.locator('.cleanup-btn.keep');
-      const del = page.locator('.cleanup-btn.delete');
-      const always = page.locator('.cleanup-btn.always');
+      // In headless CI document.hasFocus() returns false, so two problems arise:
+      // 1. page.keyboard.press() routes via the OS focus chain, which may not
+      //    point at the button — the event never reaches the dialog's onKeyDown.
+      // 2. toBeFocused() requires hasFocus() && activeElement, so it always fails.
+      //
+      // Fix: dispatch each key directly to the currently-focused button via
+      // locator.press() (CDP routes to that element regardless of hasFocus).
+      // Check document.activeElement?.matches() directly to bypass hasFocus().
+      const activeEl = (sel: string) =>
+        page.evaluate((s) => document.activeElement?.matches(s) ?? false, sel);
 
-      await expect(keep).toBeFocused();
+      await expect.poll(() => activeEl('.cleanup-btn.keep')).toBe(true);
 
-      // Use page.keyboard instead of locator.press() — locator.press()
-      // re-focuses the element first, which can cause the document to lose
-      // OS-level focus in CI, making the next toBeFocused() return "inactive".
-      await page.keyboard.press('ArrowRight');
-      await expect(del).toBeFocused();
+      await page.locator('.cleanup-btn.keep').press('ArrowRight');
+      await expect.poll(() => activeEl('.cleanup-btn.delete')).toBe(true);
 
-      await page.keyboard.press('ArrowRight');
-      await expect(always).toBeFocused();
+      await page.locator('.cleanup-btn.delete').press('ArrowRight');
+      await expect.poll(() => activeEl('.cleanup-btn.always')).toBe(true);
 
-      await page.keyboard.press('ArrowLeft');
-      await expect(del).toBeFocused();
+      await page.locator('.cleanup-btn.always').press('ArrowLeft');
+      await expect.poll(() => activeEl('.cleanup-btn.delete')).toBe(true);
 
-      await page.keyboard.press('Tab');
-      await expect(always).toBeFocused();
+      await page.locator('.cleanup-btn.delete').press('Tab');
+      await expect.poll(() => activeEl('.cleanup-btn.always')).toBe(true);
 
-      await page.keyboard.press('Tab');
-      await expect(keep).toBeFocused();
+      await page.locator('.cleanup-btn.always').press('Tab');
+      await expect.poll(() => activeEl('.cleanup-btn.keep')).toBe(true);
 
-      await page.keyboard.press('Shift+Tab');
-      await expect(always).toBeFocused();
+      await page.locator('.cleanup-btn.keep').press('Shift+Tab');
+      await expect.poll(() => activeEl('.cleanup-btn.always')).toBe(true);
     });
   });
 
