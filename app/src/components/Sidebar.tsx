@@ -1,5 +1,6 @@
 import './Sidebar.css';
 import type { ReactNode } from 'react';
+import { useState } from 'react';
 import { StateIndicator } from './StateIndicator';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
 import type { SessionGroup } from '../utils/sessionGrouping';
@@ -17,6 +18,7 @@ interface LocalSession {
   endpointStatus?: string;
   recoverable?: boolean;
   reviewLoopStatus?: string;
+  muted?: boolean;
 }
 
 function reviewLoopIndicator(status?: string): { glyph: string; label: string } | null {
@@ -44,6 +46,10 @@ interface SidebarProps {
   collapsed: boolean;
   headerActions: SidebarHeaderAction[];
   footerShortcuts?: FooterShortcut[];
+  mutedSessions?: LocalSession[];
+  mutedExpanded?: boolean;
+  onMutedExpandedChange?: (expanded: boolean) => void;
+  onMuteSession?: (id: string) => void;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onCloseSession: (id: string) => void;
@@ -101,6 +107,7 @@ function ExpandIcon() {
   );
 }
 
+
 export function ReviewLoopIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -149,6 +156,10 @@ export function Sidebar({
   collapsed,
   headerActions,
   footerShortcuts,
+  mutedSessions = [],
+  mutedExpanded: mutedExpandedProp,
+  onMutedExpandedChange,
+  onMuteSession,
   onSelectSession,
   onNewSession,
   onCloseSession,
@@ -156,6 +167,13 @@ export function Sidebar({
   onGoToDashboard,
   onToggleCollapse,
 }: SidebarProps) {
+  const [mutedExpandedLocal, setMutedExpandedLocal] = useState(false);
+  const mutedExpanded = mutedExpandedProp ?? mutedExpandedLocal;
+  const setMutedExpanded = (v: boolean) => {
+    setMutedExpandedLocal(v);
+    onMutedExpandedChange?.(v);
+  };
+
   const visualIndexOf = (id: string) => visualIndexBySessionId.get(id) ?? -1;
   const dockShortcutHints = Array.from(new Map([
     ...headerActions
@@ -291,6 +309,20 @@ export function Sidebar({
                 {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                 <span className="session-shortcut">⌘{globalIndex + 1}</span>
                 <div className="session-actions">
+                  {onMuteSession && (
+                    <button
+                      className="session-action-btn mute-session-btn"
+                      data-testid={`mute-session-${session.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onMuteSession(session.id);
+                      }}
+                      title="Mute session"
+                      aria-label={`Mute session ${session.label}`}
+                    >
+                      ⊘
+                    </button>
+                  )}
                   <button
                     className="session-action-btn close-session-btn"
                     data-testid={`close-session-${session.id}`}
@@ -366,6 +398,20 @@ export function Sidebar({
                     {session.isWorktree && <span className="worktree-indicator">⎇</span>}
                     <span className="session-shortcut">⌘{globalIndex + 1}</span>
                     <div className="session-actions">
+                      {onMuteSession && (
+                        <button
+                          className="session-action-btn mute-session-btn"
+                          data-testid={`mute-session-${session.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMuteSession(session.id);
+                          }}
+                          title="Mute session"
+                          aria-label={`Mute session ${session.label}`}
+                        >
+                          ⊘
+                        </button>
+                      )}
                       <button
                         className="session-action-btn close-session-btn"
                         data-testid={`close-session-${session.id}`}
@@ -398,6 +444,60 @@ export function Sidebar({
           );
         })}
       </div>
+
+      {mutedSessions.length > 0 && (
+        <div className="muted-sessions-section">
+          <button
+            className="muted-sessions-header"
+            onClick={() => setMutedExpanded(!mutedExpanded)}
+            aria-expanded={mutedExpanded}
+          >
+            <span className={`muted-sessions-chevron ${mutedExpanded ? 'expanded' : ''}`}>▸</span>
+            Muted Sessions ({mutedSessions.length})
+          </button>
+          {mutedExpanded && (
+            <div className="muted-sessions-list">
+              {mutedSessions.map((session) => (
+                <div
+                  key={session.id}
+                  className={`session-item muted-session ${selectedId === session.id ? 'selected' : ''}`}
+                  data-testid={`sidebar-session-${session.id}`}
+                  data-state={session.state}
+                  onClick={() => onSelectSession(session.id)}
+                >
+                  <StateIndicator state={session.state} size="md" seed={session.id} />
+                  <div className="session-info">
+                    <span className="session-label">{session.label}</span>
+                    {session.endpointName && (
+                      <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
+                        {session.endpointName}
+                      </span>
+                    )}
+                    {session.branch && (
+                      <span className="session-branch">{session.branch}</span>
+                    )}
+                  </div>
+                  <div className="session-actions">
+                    {onMuteSession && (
+                      <button
+                        className="session-action-btn unmute-session-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMuteSession(session.id);
+                        }}
+                        title="Unmute session"
+                        aria-label={`Unmute session ${session.label}`}
+                      >
+                        ⊙
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="sidebar-footer">
         <span className="sidebar-footer-label">Dock</span>

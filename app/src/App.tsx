@@ -242,6 +242,7 @@ function App() {
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,
+    sendMuteSession,
     sendPRVisited,
     sendRefreshPRs,
     sendUnregisterSession,
@@ -344,6 +345,7 @@ function App() {
         sendMutePR={sendMutePR}
         sendMuteRepo={sendMuteRepo}
         sendMuteAuthor={sendMuteAuthor}
+        sendMuteSession={sendMuteSession}
         sendPRVisited={sendPRVisited}
         sendRefreshPRs={sendRefreshPRs}
         sendUnregisterSession={sendUnregisterSession}
@@ -415,6 +417,7 @@ interface AppContentProps {
   sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
   sendMuteRepo: ReturnType<typeof useDaemonSocket>['sendMuteRepo'];
   sendMuteAuthor: ReturnType<typeof useDaemonSocket>['sendMuteAuthor'];
+  sendMuteSession: ReturnType<typeof useDaemonSocket>['sendMuteSession'];
   sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
   sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
   sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
@@ -481,6 +484,7 @@ function AppContent({
   sendMutePR,
   sendMuteRepo,
   sendMuteAuthor,
+  sendMuteSession,
   sendPRVisited,
   sendRefreshPRs,
   sendUnregisterSession,
@@ -708,8 +712,12 @@ sendFetchPRDetails,
       isWorktree: daemonSession?.is_worktree ?? s.isWorktree,
       recoverable: daemonSession?.recoverable ?? false,
       reviewLoopStatus: reviewLoop?.status,
+      muted: daemonSession?.muted ?? false,
     };
   });
+
+  const unmutedEnrichedSessions = enrichedLocalSessions.filter((s) => !s.muted);
+  const mutedEnrichedSessions = enrichedLocalSessions.filter((s) => s.muted);
 
   const {
     eventRouter: paneRuntimeEventRouter,
@@ -739,6 +747,9 @@ sendFetchPRDetails,
   }, [connect]);
 
   type DockPanelId = 'diff' | 'reviewLoop' | 'attention' | 'diffDetail';
+
+  // Muted section expansion (controlled by Dashboard click)
+  const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
 
   // View state management
   const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
@@ -1447,8 +1458,8 @@ sendFetchPRDetails,
     setClosedWorktree(null);
   }, []);
 
-  // Calculate attention count for drawer badge
-  const waitingLocalSessions = enrichedLocalSessions
+  // Calculate attention count for drawer badge (muted sessions excluded)
+  const waitingLocalSessions = unmutedEnrichedSessions
     .filter((s) => isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error')
     .map((s) => ({
       ...s,
@@ -1463,15 +1474,15 @@ sendFetchPRDetails,
 
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
-    const waiting = enrichedLocalSessions.find((s) =>
+    const waiting = unmutedEnrichedSessions.find((s) =>
       isAttentionSessionState(s.state) || s.reviewLoopStatus === 'awaiting_user' || s.reviewLoopStatus === 'error'
     );
     if (waiting) {
       handleSelectSession(waiting.id);
     }
-  }, [enrichedLocalSessions, handleSelectSession]);
+  }, [unmutedEnrichedSessions, handleSelectSession]);
 
-  const sessionGroups = useMemo(() => groupSessionsByDirectory(enrichedLocalSessions), [enrichedLocalSessions]);
+  const sessionGroups = useMemo(() => groupSessionsByDirectory(unmutedEnrichedSessions), [unmutedEnrichedSessions]);
 
   // Use visual (grouped) order so ⌘1-9 and prev/next match the sidebar
   const visualSessions = useMemo(() => sessionGroups.flatMap((group) => group.sessions), [sessionGroups]);
@@ -1890,7 +1901,8 @@ sendFetchPRDetails,
       {/* Dashboard - always rendered, shown/hidden via z-index */}
       <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
         <Dashboard
-          sessions={enrichedLocalSessions}
+          sessions={unmutedEnrichedSessions}
+          mutedSessions={mutedEnrichedSessions}
           prs={prs}
           isLoading={!hasReceivedInitialState}
           isRefreshing={isRefreshingPRs}
@@ -1901,6 +1913,11 @@ sendFetchPRDetails,
           onRefreshPRs={handleRefreshPRs}
           onOpenPR={handleOpenPR}
           onOpenSettings={() => setSettingsOpen(true)}
+          onMutedGroupClick={() => {
+            setSidebarCollapsed(false);
+            setSidebarMutedExpanded(true);
+            setView('session');
+          }}
         />
       </div>
 
@@ -1914,6 +1931,10 @@ sendFetchPRDetails,
           collapsed={sidebarCollapsed}
           headerActions={sidebarHeaderActions}
           footerShortcuts={sidebarFooterShortcuts}
+          mutedSessions={mutedEnrichedSessions}
+          mutedExpanded={sidebarMutedExpanded}
+          onMutedExpandedChange={setSidebarMutedExpanded}
+          onMuteSession={sendMuteSession}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onCloseSession={handleRequestCloseSession}

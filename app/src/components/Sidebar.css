@@ -403,6 +403,7 @@
 .session-actions {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 2px;
   opacity: 0;
   pointer-events: none;
@@ -423,8 +424,14 @@
   cursor: pointer;
   padding: 0;
   width: 14px;
+  height: 14px;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
+
 
 .session-action-btn:hover {
   color: var(--color-text-primary);
@@ -568,4 +575,66 @@
 @keyframes flash-pending {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+/* Muted sessions section */
+.muted-sessions-section {
+  border-top: 1px solid var(--color-border);
+  padding: 4px 0;
+}
+
+.muted-sessions-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.muted-sessions-header:hover {
+  color: var(--color-text-dimmed);
+}
+
+.muted-sessions-chevron {
+  font-size: 9px;
+  transition: transform 120ms ease;
+  display: inline-block;
+}
+
+.muted-sessions-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.muted-sessions-list {
+  padding: 0;
+}
+
+.muted-session {
+  opacity: 0.55;
+}
+
+.muted-session:hover {
+  opacity: 0.75;
+}
+
+.muted-session[data-state="waiting_input"]::before {
+  display: none;
+}
+
+.session-action-btn.mute-session-btn {
+  opacity: 0;
+}
+
+.session-item:hover .session-action-btn.mute-session-btn {
+  opacity: 1;
 }

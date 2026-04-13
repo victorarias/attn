@@ -691,6 +691,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleMuteRepoWS(msg.(*protocol.MuteRepoMessage))
 	case protocol.CmdMuteAuthor:
 		d.handleMuteAuthorWS(msg.(*protocol.MuteAuthorMessage))
+	case protocol.CmdMute:
+		d.handleMuteSessionWS(msg.(*protocol.MuteMessage))
 	case protocol.CmdRefreshPRs:
 		d.handleRefreshPRsWS(client)
 	case protocol.CmdFetchPRDetails:

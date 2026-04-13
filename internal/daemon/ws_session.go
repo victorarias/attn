@@ -9,6 +9,11 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
+func (d *Daemon) handleMuteSessionWS(msg *protocol.MuteMessage) {
+	d.store.ToggleMute(msg.ID)
+	d.broadcastSessionsUpdated()
+}
+
 func (d *Daemon) handleClearSessionsWS() {
 	d.logf("Clearing all sessions")
 	d.clearAllSessions()
