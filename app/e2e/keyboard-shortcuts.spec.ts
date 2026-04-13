@@ -295,32 +295,30 @@ test.describe('Keyboard Shortcuts', () => {
       const dialog = page.locator('.worktree-cleanup-prompt .cleanup-content');
       await expect(dialog).toBeVisible({ timeout: 2000 });
 
-      const keep = page.locator('.cleanup-btn.keep');
-      const del = page.locator('.cleanup-btn.delete');
-      const always = page.locator('.cleanup-btn.always');
+      // activeEl bypasses document.hasFocus() which returns false in headless CI
+      // even when an element is nominally active, making toBeFocused() flaky.
+      const activeEl = (sel: string) =>
+        page.evaluate((s) => document.activeElement?.matches(s) ?? false, sel);
 
-      await expect(keep).toBeFocused();
-
-      // Use page.keyboard instead of locator.press() — locator.press()
-      // re-focuses the element first, which can cause the document to lose
-      // OS-level focus in CI, making the next toBeFocused() return "inactive".
-      await page.keyboard.press('ArrowRight');
-      await expect(del).toBeFocused();
+      await expect.poll(() => activeEl('.cleanup-btn.keep')).toBe(true);
 
       await page.keyboard.press('ArrowRight');
-      await expect(always).toBeFocused();
+      await expect.poll(() => activeEl('.cleanup-btn.delete')).toBe(true);
+
+      await page.keyboard.press('ArrowRight');
+      await expect.poll(() => activeEl('.cleanup-btn.always')).toBe(true);
 
       await page.keyboard.press('ArrowLeft');
-      await expect(del).toBeFocused();
+      await expect.poll(() => activeEl('.cleanup-btn.delete')).toBe(true);
 
       await page.keyboard.press('Tab');
-      await expect(always).toBeFocused();
+      await expect.poll(() => activeEl('.cleanup-btn.always')).toBe(true);
 
       await page.keyboard.press('Tab');
-      await expect(keep).toBeFocused();
+      await expect.poll(() => activeEl('.cleanup-btn.keep')).toBe(true);
 
       await page.keyboard.press('Shift+Tab');
-      await expect(always).toBeFocused();
+      await expect.poll(() => activeEl('.cleanup-btn.always')).toBe(true);
     });
   });
 
