@@ -42,6 +42,12 @@ const baseName = (path: string) => {
   return parts[parts.length - 1] || path;
 };
 
+const tildify = (path: string): string => {
+  const homeMatch = /^(\/(?:Users|home)\/[^/]+)/.exec(path);
+  if (!homeMatch) return path;
+  return '~' + path.slice(homeMatch[1].length);
+};
+
 type DestinationItem =
   | {
       kind: 'main-repo';
@@ -85,8 +91,8 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
         branch: repoInfo.currentBranch,
         icon: '●',
         iconColor: 'icon-green',
-        name: baseName(repoInfo.repo),
-        detail: `${repoInfo.repo} • ${repoInfo.currentBranch} • ${repoInfo.currentCommitHash.substring(0, 7)} • ${formatTime(repoInfo.currentCommitTime)}`,
+        name: repoInfo.currentBranch,
+        detail: `${tildify(repoInfo.repo)} • ${repoInfo.currentCommitHash.substring(0, 7)} • ${formatTime(repoInfo.currentCommitTime)}`,
       },
       ...repoInfo.worktrees.map((worktree) => ({
         kind: 'worktree' as const,
@@ -94,8 +100,8 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
         branch: worktree.branch,
         icon: '◎',
         iconColor: 'icon-purple',
-        name: baseName(worktree.path),
-        detail: `${worktree.path} • ${worktree.branch}`,
+        name: worktree.branch,
+        detail: tildify(worktree.path),
       })),
     ],
     [repoInfo],

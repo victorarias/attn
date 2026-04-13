@@ -192,7 +192,7 @@ describe('LocationPicker', () => {
     });
   });
 
-  it('clicking a row highlights it without rewriting the input until Enter', async () => {
+  it('clicking a row selects it immediately', async () => {
     const onInspectPath = vi.fn(async () => ({
       success: true,
       inspection: {
@@ -203,20 +203,15 @@ describe('LocationPicker', () => {
         is_directory: true,
       },
     }));
-    renderPicker({ onInspectPath });
+    const { onSelect } = renderPicker({ onInspectPath });
 
     const input = screen.getByRole('textbox') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/pro' } });
     fireEvent.click(screen.getByTestId('location-picker-item-0'));
 
-    expect(input.value).toBe('~/pro');
-    expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
-    expect(onInspectPath).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(input, { key: 'Enter' });
-
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('~/projects', undefined);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false);
     });
   });
 
@@ -251,6 +246,12 @@ describe('LocationPicker', () => {
       expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
     });
 
+    // First Escape deselects the highlighted item without closing
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId('location-picker-item-0')).not.toHaveClass('selected');
+
+    // Second Escape closes the dialog
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });

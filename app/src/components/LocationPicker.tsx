@@ -690,8 +690,8 @@ export function LocationPicker({
     }
 
     const nextIndex = direction === 'down'
-      ? (highlightedIndex < 0 ? 0 : Math.min(highlightedIndex + 1, totalItems - 1))
-      : (highlightedIndex < 0 ? totalItems - 1 : Math.max(highlightedIndex - 1, 0));
+      ? (highlightedIndex < 0 ? 0 : (highlightedIndex + 1) % totalItems)
+      : (highlightedIndex <= 0 ? totalItems - 1 : highlightedIndex - 1);
     const nextItem = selectableItems[nextIndex];
     if (nextItem) {
       setHighlightedItemKey(nextItem.key);
@@ -728,6 +728,8 @@ export function LocationPicker({
       e.preventDefault();
       if (mode === 'repo-options') {
         handleBack();
+      } else if (highlightedItemKey) {
+        setHighlightedItemKey(null);
       } else {
         handleClosePicker();
       }
@@ -750,6 +752,7 @@ export function LocationPicker({
     handleBack,
     handleClosePicker,
     handleTargetChange,
+    highlightedItemKey,
     mode,
     movePathSelection,
     orderedAgentList,
@@ -765,6 +768,7 @@ export function LocationPicker({
       <div
         className="location-picker"
         data-testid="location-picker"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleDialogKeyDown}
       >
@@ -781,6 +785,7 @@ export function LocationPicker({
                     key={candidate}
                     type="button"
                     className={`agent-option ${agent === candidate ? 'active' : ''}`}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleAgentChange(candidate)}
                     role="radio"
                     aria-checked={agent === candidate}
@@ -810,6 +815,7 @@ export function LocationPicker({
                   className={`endpoint-option ${active ? 'active' : ''} ${active && yoloMode ? 'yolo-active' : ''}`}
                   data-testid={target.id === LOCAL_TARGET ? 'location-picker-target-local' : `location-picker-target-${target.id}`}
                   data-endpoint-id={target.endpointId}
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => handleTargetChange(target.id)}
                   role="radio"
                   aria-checked={active}
@@ -877,8 +883,8 @@ export function LocationPicker({
                       data-index={index}
                       data-kind="recent"
                       data-path={loc.selectionPath}
-                      onClick={() => setHighlightedItemKey(`recent:${loc.path}`)}
-                      onDoubleClick={() => void handleSelectPath(loc.selectionPath)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => void handleSelectPath(loc.selectionPath)}
                     >
                       <div className="picker-icon">🕐</div>
                       <div className="picker-info">
@@ -903,8 +909,8 @@ export function LocationPicker({
                         data-index={globalIndex}
                         data-kind="directory"
                         data-path={item.path}
-                        onClick={() => setHighlightedItemKey(`directory:${item.path}`)}
-                        onDoubleClick={() => void handleSelectPath(item.path)}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => void handleSelectPath(item.path)}
                       >
                         <div className="picker-icon">📁</div>
                         <div className="picker-info">
