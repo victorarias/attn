@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useEscapeStack } from '../hooks/useEscapeStack';
 import './ForkDialog.css';
 
 interface ForkDialogProps {
@@ -55,15 +56,14 @@ export function ForkDialog({
     onFork(name.trim(), createWorktree);
   }, [name, createWorktree, isLoading, onFork]);
 
+  useEscapeStack(onClose, isOpen);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
-    } else if (e.key === 'Enter') {
+    if (e.key === 'Enter') {
       e.preventDefault();
       handleSubmit();
     }
-  }, [onClose, handleSubmit]);
+  }, [handleSubmit]);
 
   if (!isOpen) return null;
 

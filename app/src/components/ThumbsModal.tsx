@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useEscapeStack } from '../hooks/useEscapeStack';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import FocusTrap from 'focus-trap-react';
@@ -105,23 +106,21 @@ export function ThumbsModal({ isOpen, terminalText, onClose, onCopy }: ThumbsMod
     }
   }, [findPatternByHint, handleAction]);
 
-  // Handle keyboard input
+  const handleEscape = useCallback(() => {
+    if (isFiltering) {
+      setIsFiltering(false);
+      setFilter('');
+    } else {
+      onClose();
+    }
+  }, [isFiltering, onClose]);
+  useEscapeStack(handleEscape, isOpen);
+
+  // Handle keyboard input (non-Escape keys)
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Escape handling
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        if (isFiltering) {
-          setIsFiltering(false);
-          setFilter('');
-        } else {
-          onClose();
-        }
-        return;
-      }
-
       // Enter to confirm filter and return to hint mode (keeps filter text)
       if (e.key === 'Enter' && isFiltering) {
         e.preventDefault();
@@ -182,7 +181,7 @@ export function ThumbsModal({ isOpen, terminalText, onClose, onCopy }: ThumbsMod
         clearTimeout(hintTimeoutRef.current);
       }
     };
-  }, [isOpen, isFiltering, hintBuffer, patterns, processHint, onClose]);
+  }, [isOpen, isFiltering, hintBuffer, patterns, processHint]);
 
   if (!isOpen) return null;
 

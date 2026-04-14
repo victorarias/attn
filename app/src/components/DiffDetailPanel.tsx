@@ -1,5 +1,6 @@
 // app/src/components/DiffDetailPanel.tsx
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useEscapeStack } from '../hooks/useEscapeStack';
 import type { GitStatusUpdate, FileDiffResult, ReviewState, BranchDiffFile, BranchDiffFilesResult } from '../hooks/useDaemonSocket';
 import type { ResolvedTheme } from '../hooks/useTheme';
 import type { ReviewComment } from '../types/generated';
@@ -658,13 +659,16 @@ export function DiffDetailPanel({
     });
   }, [gitStatus, viewedFiles, selectedFilePath, allFiles, fetchDiff, baseRef]);
 
-  // Keyboard navigation
+  useEscapeStack(onClose, isOpen);
+
+  // Keyboard navigation — capture phase to intercept before CodeMirror
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't capture keystrokes when typing in inputs
       const target = e.target as HTMLElement;
+
+      // Don't capture navigation keystrokes when typing in inputs or editors
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
       }
@@ -731,7 +735,7 @@ export function DiffDetailPanel({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, onClose, allFiles, selectedFile]);
+  }, [isOpen, allFiles, selectedFile]);
 
   const navigateFiles = useCallback((direction: 'prev' | 'next') => {
     if (!selectedFilePath || allFiles.length === 0) return;

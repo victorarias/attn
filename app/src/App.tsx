@@ -1635,19 +1635,6 @@ sendFetchPRDetails,
     setInitialReviewFile(null);
   }, [closeDockPanel]);
 
-  useEffect(() => {
-    if (!diffDetailPanelOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        handleCloseDiffDetailPanel();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown, true);
-    };
-  }, [diffDetailPanelOpen, handleCloseDiffDetailPanel]);
 
   const isZedEditorConfigured = useMemo(() => {
     const editor = (settings.editor_executable || '').trim().toLowerCase();

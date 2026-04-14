@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useEscapeStack } from '../../hooks/useEscapeStack';
 import './RepoOptions.css';
 
 interface RepoInfo {
@@ -119,6 +120,18 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const [newWorktreeName, setNewWorktreeName] = useState('');
   const [startingBranch, setStartingBranch] = useState<'current' | 'default'>('current');
   const [pendingDeletePath, setPendingDeletePath] = useState<string | null>(null);
+
+  // Sub-state Escape handling via the stack so LIFO order is preserved.
+  // pendingDeletePath and showNewWorktree are pushed above LocationPicker's handler.
+  const cancelPendingDelete = useCallback(() => setPendingDeletePath(null), []);
+  useEscapeStack(cancelPendingDelete, pendingDeletePath !== null);
+
+  const cancelNewWorktree = useCallback(() => {
+    setShowNewWorktree(false);
+    setNewWorktreeName('');
+    setFocusIndex(committedDestinationIndex);
+  }, [committedDestinationIndex]);
+  useEscapeStack(cancelNewWorktree, showNewWorktree);
 
   useEffect(() => {
     setPendingDeletePath(null);

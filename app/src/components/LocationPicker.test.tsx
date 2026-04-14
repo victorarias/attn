@@ -228,30 +228,34 @@ describe('LocationPicker', () => {
     expect(firstItem).not.toHaveClass('selected');
   });
 
-  it('does not depend on a global window listener for picker navigation or escape', async () => {
-    const { onClose } = renderPicker();
+  it('ArrowDown on window does not affect picker input or item selection', () => {
+    renderPicker();
 
     const input = screen.getByRole('textbox') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/pro' } });
 
     fireEvent.keyDown(window, { key: 'ArrowDown' });
     expect(input.value).toBe('~/pro');
+    expect(screen.queryByTestId('location-picker-item-0')).not.toHaveClass?.('selected');
+  });
 
-    fireEvent.keyDown(window, { key: 'Escape' });
-    expect(onClose).not.toHaveBeenCalled();
+  it('Escape first deselects highlighted item then closes', async () => {
+    const { onClose } = renderPicker();
+
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '~/pro' } });
 
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     await waitFor(() => {
-      expect(input.value).toBe('~/pro');
       expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
     });
 
-    // First Escape deselects the highlighted item without closing
+    // First Escape deselects without closing
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByTestId('location-picker-item-0')).not.toHaveClass('selected');
 
-    // Second Escape closes the dialog
+    // Second Escape closes
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
