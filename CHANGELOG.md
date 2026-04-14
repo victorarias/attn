@@ -10,6 +10,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Mute Remote Sessions**: Muting a session on a remote endpoint now works correctly. The mute command was not being forwarded to the remote daemon, causing it to silently no-op.
+- **Sync Button Version Re-Prompt**: After successfully bootstrapping a remote endpoint, the home screen no longer re-shows the version-mismatch banner on the next connection attempt.
+- **Inline Comment Form Stability**: Pasting into a comment textarea now works correctly (keystrokes were being intercepted by the editor). Opening a comment on one file, switching to another file, and switching back now restores the open form and any typed draft. Pressing Escape to dismiss a form now clears the draft so stale text cannot be submitted later.
 
 ## [2026-04-13]
 
