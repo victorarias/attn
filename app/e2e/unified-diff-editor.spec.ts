@@ -120,6 +120,94 @@ test.describe('UnifiedDiffEditor', () => {
       expect(calls).toHaveLength(1);
     });
   });
+  test.describe('comment form draft persistence', () => {
+    /**
+     * Regression: paste events were intercepted by CodeMirror because
+     * ignoreEvent() only returned true for mouse events. Fixed by returning
+     * true for all events in both comment widgets.
+     */
+    test('paste works inside comment textarea', async ({ page, context }) => {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+      await page.locator('.cm-line').first().click();
+      const textarea = page.locator('.unified-comment-textarea');
+      await expect(textarea).toBeFocused();
+
+      // Type some text first
+      await page.keyboard.type('typed ');
+
+      // Set clipboard and paste
+      await page.evaluate(() => navigator.clipboard.writeText('pasted'));
+      const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+      await page.keyboard.press(`${modifier}+v`);
+
+      // Pasted content should appear in the textarea, not be eaten by CodeMirror
+      await expect(textarea).toHaveValue('typed pasted');
+    });
+
+    /**
+     * Regression: when file content changed the EditorView was rebuilt but
+     * the comment widgets effect did not re-run (content was missing from deps),
+     * so the open form was lost. Fixed by adding content to the effect deps.
+     * Draft text also needed to survive via a ref (not state) to avoid per-keystroke
+     * widget DOM recreation.
+     */
+    test('open comment form survives content refresh', async ({ page }) => {
+      await page.locator('.cm-line').first().click();
+      const textarea = page.locator('.unified-comment-textarea');
+      await expect(textarea).toBeFocused();
+
+      await page.keyboard.type('draft text');
+      await expect(textarea).toHaveValue('draft text');
+
+      // Simulate a file content update (e.g. background write)
+      await page.evaluate(() => (window.__HARNESS__ as any).refreshContent());
+
+      // Form should still be visible with the typed draft preserved
+      await expect(textarea).toBeVisible();
+      await expect(textarea).toHaveValue('draft text');
+    });
+
+    /**
+     * Regression: newCommentLines was a single Set shared across files, so
+     * switching files left the form open but pointing at the new file's content.
+     * Fixed by keying open forms per filePath.
+     */
+    test('comment form does not appear on a different file after switch', async ({ page }) => {
+      await page.locator('.cm-line').first().click();
+      await expect(page.locator('.unified-comment-form')).toBeVisible();
+
+      // Switch to a different file
+      await page.evaluate(() => (window.__HARNESS__ as any).switchFile('fileB.ts'));
+
+      // The form should not be visible on the new file
+      await expect(page.locator('.unified-comment-form')).not.toBeVisible();
+    });
+
+    /**
+     * The form and its draft should be restored when switching back to the
+     * original file, so the user doesn't lose in-progress work.
+     */
+    test('open form and draft are restored when switching back', async ({ page }) => {
+      await page.locator('.cm-line').first().click();
+      const textarea = page.locator('.unified-comment-textarea');
+      await expect(textarea).toBeFocused();
+
+      await page.keyboard.type('my draft');
+      await expect(textarea).toHaveValue('my draft');
+
+      // Switch away and back
+      await page.evaluate(() => (window.__HARNESS__ as any).switchFile('fileB.ts'));
+      await expect(page.locator('.unified-comment-form')).not.toBeVisible();
+
+      await page.evaluate(() => (window.__HARNESS__ as any).switchFile('fileA.ts'));
+
+      // Form should reappear with the draft intact
+      await expect(page.locator('.unified-comment-form')).toBeVisible();
+      await expect(page.locator('.unified-comment-textarea')).toHaveValue('my draft');
+    });
+  });
+
   test.describe('scrolling', () => {
     test('scroll position preserved when saving comment', async ({ page }) => {
       const editor = page.locator('.cm-scroller');

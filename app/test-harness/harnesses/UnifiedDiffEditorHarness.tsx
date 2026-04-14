@@ -24,6 +24,28 @@ const SMALL_MODIFIED = `function example() {
   console.log('line 5');
 }`;
 
+// Second file for file-switch tests
+const FILE_B_ORIGINAL = `class Calculator {
+  add(a: number, b: number) {
+    return a + b;
+  }
+  multiply(a: number, b: number) {
+    return a * b;
+  }
+}`;
+
+const FILE_B_MODIFIED = `class Calculator {
+  add(a: number, b: number) {
+    return a + b;
+  }
+  subtract(a: number, b: number) {
+    return a - b;
+  }
+  multiply(a: number, b: number) {
+    return a * b;
+  }
+}`;
+
 // Larger sample to demonstrate hunks/context mode
 const LARGE_ORIGINAL = `/**
  * User authentication module
@@ -182,8 +204,15 @@ export function UnifiedDiffEditorHarness({ onReady }: HarnessProps) {
   const [contextLines, setContextLines] = useState(0); // 0 = full diff
   const [useLargeDiff, setUseLargeDiff] = useState(false);
 
-  const original = useLargeDiff ? LARGE_ORIGINAL : SMALL_ORIGINAL;
-  const modified = useLargeDiff ? LARGE_MODIFIED : SMALL_MODIFIED;
+  // File switching and content refresh (for tests)
+  const [filePath, setFilePath] = useState<string>('fileA.ts');
+  const [refreshCount, setRefreshCount] = useState(0);
+
+  const baseOriginal = filePath === 'fileB.ts' ? FILE_B_ORIGINAL : (useLargeDiff ? LARGE_ORIGINAL : SMALL_ORIGINAL);
+  const baseModified = filePath === 'fileB.ts' ? FILE_B_MODIFIED : (useLargeDiff ? LARGE_MODIFIED : SMALL_MODIFIED);
+  // Append a marker line on refresh so content reference changes and triggers editor rebuild
+  const original = refreshCount > 0 ? `${baseOriginal}\n// refresh-${refreshCount}` : baseOriginal;
+  const modified = refreshCount > 0 ? `${baseModified}\n// refresh-${refreshCount}` : baseModified;
 
   // Mock addComment
   const addComment = useCallback(async (docLine: number, content: string, anchor: import('../../src/components/UnifiedDiffEditor').CommentAnchor) => {
@@ -261,6 +290,12 @@ export function UnifiedDiffEditorHarness({ onReady }: HarnessProps) {
     const timer = setTimeout(() => onReady(), 300);
     return () => clearTimeout(timer);
   }, [onReady]);
+
+  // Expose programmatic controls for tests
+  useEffect(() => {
+    (window.__HARNESS__ as unknown as Record<string, unknown>).switchFile = (path: string) => setFilePath(path);
+    (window.__HARNESS__ as unknown as Record<string, unknown>).refreshContent = () => setRefreshCount((c) => c + 1);
+  }, []);
 
   const controlsStyle: React.CSSProperties = {
     display: 'flex',
@@ -360,6 +395,7 @@ export function UnifiedDiffEditorHarness({ onReady }: HarnessProps) {
         <UnifiedDiffEditor
           original={original}
           modified={modified}
+          filePath={filePath}
           comments={comments}
           editingCommentId={editingCommentId}
           fontSize={fontSize}
