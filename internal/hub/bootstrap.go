@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/config"
 )
 
@@ -339,12 +340,19 @@ func (b *Bootstrapper) buildBinaryFromSource(ctx context.Context, platform Remot
 		return fmt.Errorf("source checkout not available for fallback build")
 	}
 
+	ldflags := "-X github.com/victorarias/attn/internal/buildinfo.Version=" + version
+	if fp := buildinfo.SourceFingerprint; fp != "" && fp != "unknown" {
+		ldflags += " -X github.com/victorarias/attn/internal/buildinfo.SourceFingerprint=" + fp
+	}
+	if gc := buildinfo.GitCommit; gc != "" && gc != "unknown" {
+		ldflags += " -X github.com/victorarias/attn/internal/buildinfo.GitCommit=" + gc
+	}
 	cmd := exec.CommandContext(
 		ctx,
 		"go",
 		"build",
 		"-ldflags",
-		"-X github.com/victorarias/attn/internal/buildinfo.Version="+version,
+		ldflags,
 		"-o",
 		outputPath,
 		"./cmd/attn",
