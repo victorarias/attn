@@ -824,9 +824,8 @@ class CommentWidget extends WidgetType {
     return wrapper;
   }
 
-  ignoreEvent(event: Event) {
-    // Let the widget handle mouse events
-    return event.type.startsWith('mouse');
+  ignoreEvent() {
+    return true;
   }
 }
 
@@ -836,8 +835,10 @@ class CommentWidget extends WidgetType {
 
 interface NewCommentFormConfig {
   docLine: number;
+  initialValue: string;
   onSave: (docLine: number, content: string) => void;
   onCancel: (docLine: number) => void;
+  onDraftChange: (docLine: number, value: string) => void;
 }
 
 class NewCommentFormWidget extends WidgetType {
@@ -846,14 +847,17 @@ class NewCommentFormWidget extends WidgetType {
   }
 
   toDOM() {
-    const { docLine, onSave, onCancel } = this.config;
+    const { docLine, initialValue, onSave, onCancel, onDraftChange } = this.config;
 
     const wrapper = document.createElement('div');
     wrapper.className = 'unified-comment-form';
     wrapper.innerHTML = `<textarea class="unified-comment-textarea" rows="2" placeholder="Add a comment..."></textarea><div class="unified-comment-form-actions"><button class="cancel-btn">Cancel</button><button class="save-btn">Save</button></div>`;
 
     const textarea = wrapper.querySelector('textarea')!;
+    textarea.value = initialValue;
     setTimeout(() => textarea.focus(), 0);
+
+    textarea.addEventListener('input', () => onDraftChange(docLine, textarea.value));
 
     // Keyboard shortcuts - stop propagation to prevent CodeMirror from handling
     textarea.addEventListener('keydown', (e) => {
@@ -886,8 +890,8 @@ class NewCommentFormWidget extends WidgetType {
     return wrapper;
   }
 
-  ignoreEvent(event: Event) {
-    return event.type.startsWith('mouse');
+  ignoreEvent() {
+    return true;
   }
 }
 
@@ -985,11 +989,37 @@ export function UnifiedDiffEditor({
   const buildDocumentDurationMsRef = useRef(0);
   const collapsedRegionCountRef = useRef(0);
 
-  // Track which lines have open "new comment" forms
-  const [newCommentLines, setNewCommentLines] = useState<Set<number>>(new Set());
+  // Track which lines have open "new comment" forms, keyed by filePath so
+  // forms survive file switches and reappear when switching back.
+  const [newCommentLinesByFile, setNewCommentLinesByFile] = useState<Record<string, Set<number>>>({});
+  const newCommentLines = newCommentLinesByFile[filePath ?? ''] ?? new Set<number>();
+
+  const setNewCommentLines = useCallback((updater: (prev: Set<number>) => Set<number>) => {
+    setNewCommentLinesByFile((prev) => {
+      const key = filePath ?? '';
+      return { ...prev, [key]: updater(prev[key] ?? new Set()) };
+    });
+  }, [filePath]);
+
+  // Persist in-progress textarea content keyed by filePath so it survives
+  // widget/editor rebuilds and file switches without causing re-renders on
+  // every keystroke (ref avoids the state→effect→DOM-recreate cycle).
+  const draftCommentValuesRef = useRef<Record<string, Record<number, string>>>({});
+
+  const handleDraftChange = useCallback((docLine: number, value: string) => {
+    const key = filePath ?? '';
+    if (!draftCommentValuesRef.current[key]) draftCommentValuesRef.current[key] = {};
+    draftCommentValuesRef.current[key][docLine] = value;
+  }, [filePath]);
+
+  const clearDraft = useCallback((docLine: number) => {
+    delete draftCommentValuesRef.current[filePath ?? '']?.[docLine];
+  }, [filePath]);
 
   // Dismiss inline comment forms via the escape stack so overlays stay LIFO
-  const cancelAllNewComments = useCallback(() => setNewCommentLines(new Set()), []);
+  const cancelAllNewComments = useCallback(() => {
+    setNewCommentLines(() => new Set());
+  }, [setNewCommentLines]);
   useEscapeStack(cancelAllNewComments, newCommentLines.size > 0);
   useEscapeStack(onCancelEdit, editingCommentId !== null);
 
@@ -1085,8 +1115,9 @@ export function UnifiedDiffEditor({
         next.delete(docLine);
         return next;
       });
+      clearDraft(docLine);
     },
-    [onAddComment]
+    [onAddComment, clearDraft]
   );
 
   const handleCancelComment = useCallback((docLine: number) => {
@@ -1095,7 +1126,8 @@ export function UnifiedDiffEditor({
       next.delete(docLine);
       return next;
     });
-  }, []);
+    clearDraft(docLine);
+  }, [clearDraft]);
 
   // Selection popup handlers
   const handleSendToClaudeFromSelection = useCallback(() => {
@@ -1586,8 +1618,10 @@ export function UnifiedDiffEditor({
           pos: line.to,
           widget: new NewCommentFormWidget({
             docLine,
+            initialValue: draftCommentValuesRef.current[filePath ?? '']?.[docLine] ?? '',
             onSave: handleSaveComment,
             onCancel: handleCancelComment,
+            onDraftChange: handleDraftChange,
           }),
         });
       }
@@ -1602,7 +1636,7 @@ export function UnifiedDiffEditor({
     view.dispatch({ effects: setCommentWidgets.of(decorations) });
   // NOTE: fontSize is included because the main editor effect recreates the EditorView when fontSize changes.
   // Without fontSize here, this effect wouldn't re-run and comment widgets would be lost.
-  }, [comments, newCommentLines, editingCommentId, handleSaveComment, handleCancelComment, onStartEdit, onEditComment, onCancelEdit, onResolveComment, onWontFixComment, onDeleteComment, onSendToClaude, filePath, fontSize]);
+  }, [content, comments, newCommentLines, editingCommentId, handleSaveComment, handleCancelComment, handleDraftChange, onStartEdit, onEditComment, onCancelEdit, onResolveComment, onWontFixComment, onDeleteComment, onSendToClaude, filePath, fontSize]);
 
   // Update collapsed region decorations when contextLines or expandedRegions change
   useEffect(() => {
