@@ -894,6 +894,10 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 
 func remoteCommandSessionID(cmd string, msg interface{}) string {
 	switch cmd {
+	case protocol.CmdMute:
+		if typed, ok := msg.(*protocol.MuteMessage); ok {
+			return typed.ID
+		}
 	case protocol.CmdSessionVisualized:
 		if typed, ok := msg.(*protocol.SessionVisualizedMessage); ok {
 			return typed.ID
