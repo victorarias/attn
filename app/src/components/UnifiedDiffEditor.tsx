@@ -722,13 +722,7 @@ function buildLineDecorations(view: EditorView, lines: DiffLine[]): DecorationSe
 interface CommentWidgetConfig {
   comment: InlineComment;
   isEditing: boolean;
-  onEdit: (id: string) => void;
-  onSaveEdit: (id: string, content: string) => void;
-  onCancelEdit: () => void;
-  onResolve: (id: string, resolved: boolean) => void;
-  onWontFix: (id: string, wontFix: boolean) => void;
-  onDelete: (id: string) => void;
-  onSendToClaude?: () => void;
+  showSendToClaude: boolean;
 }
 
 class CommentWidget extends WidgetType {
@@ -736,15 +730,35 @@ class CommentWidget extends WidgetType {
     super();
   }
 
+  eq(other: CommentWidget) {
+    const a = this.config;
+    const b = other.config;
+    return (
+      a.comment.id === b.comment.id &&
+      a.comment.content === b.comment.content &&
+      a.comment.resolved === b.comment.resolved &&
+      a.comment.wontFix === b.comment.wontFix &&
+      a.comment.resolvedBy === b.comment.resolvedBy &&
+      a.comment.wontFixBy === b.comment.wontFixBy &&
+      a.comment.author === b.comment.author &&
+      a.comment.isOutdated === b.comment.isOutdated &&
+      a.comment.isOrphaned === b.comment.isOrphaned &&
+      a.isEditing === b.isEditing &&
+      a.showSendToClaude === b.showSendToClaude
+    );
+  }
+
   toDOM() {
-    const { comment, isEditing, onEdit, onSaveEdit, onCancelEdit, onResolve, onWontFix, onDelete, onSendToClaude } = this.config;
+    const { comment, isEditing, showSendToClaude } = this.config;
 
     const wrapper = document.createElement('div');
     wrapper.className = `unified-comment ${comment.resolved ? 'resolved' : ''} ${comment.wontFix ? 'wont-fix' : ''}`;
+    wrapper.dataset.widgetType = 'comment';
+    wrapper.dataset.commentId = comment.id;
 
     if (isEditing) {
       // Edit mode
-      wrapper.innerHTML = `<textarea class="unified-comment-textarea">${escapeHtml(comment.content)}</textarea><div class="unified-comment-form-actions"><button class="cancel-btn">Cancel</button><button class="save-btn">Save</button></div>`;
+      wrapper.innerHTML = `<textarea class="unified-comment-textarea">${escapeHtml(comment.content)}</textarea><div class="unified-comment-form-actions"><button class="cancel-btn" data-action="cancel-edit">Cancel</button><button class="save-btn" data-action="save-edit">Save</button></div>`;
 
       const textarea = wrapper.querySelector('textarea')!;
       setTimeout(() => {
@@ -752,33 +766,7 @@ class CommentWidget extends WidgetType {
         textarea.setSelectionRange(textarea.value.length, textarea.value.length);
       }, 0);
 
-      textarea.addEventListener('keydown', (e) => {
-        // Stop all key events from bubbling to CodeMirror
-        e.stopPropagation();
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          onCancelEdit();
-        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault();
-          const content = textarea.value.trim();
-          if (content) {
-            onSaveEdit(comment.id, content);
-          }
-        }
-      });
-
-      wrapper.querySelector('.cancel-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onCancelEdit();
-      });
-
-      wrapper.querySelector('.save-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const content = textarea.value.trim();
-        if (content) {
-          onSaveEdit(comment.id, content);
-        }
-      });
+      textarea.addEventListener('keydown', (e) => e.stopPropagation());
     } else {
       // Display mode
       const resolvedBadge = comment.resolved
@@ -787,38 +775,13 @@ class CommentWidget extends WidgetType {
       const wontFixBadge = comment.wontFix
         ? `<span class="unified-comment-wontfix">Won't Fix by ${comment.wontFixBy === 'agent' ? 'Claude' : 'you'}</span>`
         : '';
-      const sendToClaudeBtn = onSendToClaude
-        ? `<button class="send-btn">Send to CC</button>`
+      const sendToClaudeBtn = showSendToClaude
+        ? `<button class="send-btn" data-action="send-to-claude">Send to CC</button>`
         : '';
       const wontFixBtn = comment.wontFix
-        ? `<button class="wontfix-btn">Undo Won't Fix</button>`
-        : `<button class="wontfix-btn">Won't Fix</button>`;
-      wrapper.innerHTML = `<div class="unified-comment-header"><div class="unified-comment-left"><span class="unified-comment-author">${comment.author === 'agent' ? 'Claude' : 'You'}</span>${resolvedBadge}${wontFixBadge}</div><div class="unified-comment-actions"><button class="edit-btn">Edit</button>${sendToClaudeBtn}<button class="resolve-btn">${comment.resolved ? 'Unresolve' : 'Resolve'}</button>${wontFixBtn}<button class="delete-btn">Delete</button></div></div><div class="unified-comment-content">${renderMarkdown(comment.content)}</div>`;
-
-      wrapper.querySelector('.edit-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onEdit(comment.id);
-      });
-
-      wrapper.querySelector('.send-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onSendToClaude?.();
-      });
-
-      wrapper.querySelector('.resolve-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onResolve(comment.id, !comment.resolved);
-      });
-
-      wrapper.querySelector('.wontfix-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onWontFix(comment.id, !comment.wontFix);
-      });
-
-      wrapper.querySelector('.delete-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onDelete(comment.id);
-      });
+        ? `<button class="wontfix-btn" data-action="wontfix">Undo Won't Fix</button>`
+        : `<button class="wontfix-btn" data-action="wontfix">Won't Fix</button>`;
+      wrapper.innerHTML = `<div class="unified-comment-header"><div class="unified-comment-left"><span class="unified-comment-author">${comment.author === 'agent' ? 'Claude' : 'You'}</span>${resolvedBadge}${wontFixBadge}</div><div class="unified-comment-actions"><button class="edit-btn" data-action="edit">Edit</button>${sendToClaudeBtn}<button class="resolve-btn" data-action="resolve">${comment.resolved ? 'Unresolve' : 'Resolve'}</button>${wontFixBtn}<button class="delete-btn" data-action="delete">Delete</button></div></div><div class="unified-comment-content">${renderMarkdown(comment.content)}</div>`;
     }
 
     return wrapper;
@@ -836,9 +799,6 @@ class CommentWidget extends WidgetType {
 interface NewCommentFormConfig {
   docLine: number;
   initialValue: string;
-  onSave: (docLine: number, content: string) => void;
-  onCancel: (docLine: number) => void;
-  onDraftChange: (docLine: number, value: string) => void;
 }
 
 class NewCommentFormWidget extends WidgetType {
@@ -846,46 +806,24 @@ class NewCommentFormWidget extends WidgetType {
     super();
   }
 
+  eq(other: NewCommentFormWidget) {
+    return this.config.docLine === other.config.docLine;
+  }
+
   toDOM() {
-    const { docLine, initialValue, onSave, onCancel, onDraftChange } = this.config;
+    const { docLine, initialValue } = this.config;
 
     const wrapper = document.createElement('div');
     wrapper.className = 'unified-comment-form';
-    wrapper.innerHTML = `<textarea class="unified-comment-textarea" rows="2" placeholder="Add a comment..."></textarea><div class="unified-comment-form-actions"><button class="cancel-btn">Cancel</button><button class="save-btn">Save</button></div>`;
+    wrapper.dataset.widgetType = 'new-comment';
+    wrapper.dataset.docLine = String(docLine);
+    wrapper.innerHTML = `<textarea class="unified-comment-textarea" rows="2" placeholder="Add a comment..."></textarea><div class="unified-comment-form-actions"><button class="cancel-btn" data-action="cancel-new">Cancel</button><button class="save-btn" data-action="save-new">Save</button></div>`;
 
     const textarea = wrapper.querySelector('textarea')!;
     textarea.value = initialValue;
     setTimeout(() => textarea.focus(), 0);
 
-    textarea.addEventListener('input', () => onDraftChange(docLine, textarea.value));
-
-    // Keyboard shortcuts - stop propagation to prevent CodeMirror from handling
-    textarea.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onCancel(docLine);
-      } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        const content = textarea.value.trim();
-        if (content) {
-          onSave(docLine, content);
-        }
-      }
-    });
-
-    wrapper.querySelector('.cancel-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      onCancel(docLine);
-    });
-
-    wrapper.querySelector('.save-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const content = textarea.value.trim();
-      if (content) {
-        onSave(docLine, content);
-      }
-    });
+    textarea.addEventListener('keydown', (e) => e.stopPropagation());
 
     return wrapper;
   }
@@ -962,6 +900,20 @@ function renderMarkdown(text: string): string {
 // ============================================================================
 // Component
 // ============================================================================
+
+interface CommentActions {
+  onStartEdit: (id: string) => void;
+  onEditComment: (id: string, content: string) => Promise<void>;
+  onCancelEdit: () => void;
+  onResolveComment: (id: string, resolved: boolean) => Promise<void>;
+  onWontFixComment: (id: string, wontFix: boolean) => Promise<void>;
+  onDeleteComment: (id: string) => Promise<void>;
+  onSendToClaude?: (reference: string) => void;
+  handleSaveComment: (docLine: number, content: string) => Promise<void>;
+  handleCancelComment: (docLine: number) => void;
+  handleDraftChange: (docLine: number, value: string) => void;
+  filePath?: string;
+}
 
 export function UnifiedDiffEditor({
   original,
@@ -1128,6 +1080,19 @@ export function UnifiedDiffEditor({
     });
     clearDraft(docLine);
   }, [clearDraft]);
+
+  // Stable refs for event delegation — synced every render so delegated
+  // handlers always call the latest callbacks without being effect deps.
+  const actionsRef = useRef<CommentActions>(null!);
+  const commentsRef = useRef<InlineComment[]>([]);
+
+  actionsRef.current = {
+    onStartEdit, onEditComment, onCancelEdit,
+    onResolveComment, onWontFixComment, onDeleteComment,
+    onSendToClaude, handleSaveComment, handleCancelComment,
+    handleDraftChange, filePath,
+  };
+  commentsRef.current = comments;
 
   // Selection popup handlers
   const handleSendToClaudeFromSelection = useCallback(() => {
@@ -1572,7 +1537,135 @@ export function UnifiedDiffEditor({
     setSelection(null);
   }, [content]);
 
-  // Update comment widgets when comments or newCommentLines change
+  // Delegated event listeners for comment widget interactions.
+  // Mounted once; routes all widget clicks/input/keyboard to the latest
+  // callbacks via actionsRef so widget configs stay data-only.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const actionEl = target.closest('[data-action]') as HTMLElement | null;
+      if (!actionEl) return;
+
+      const action = actionEl.dataset.action;
+      const commentWidget = target.closest('[data-widget-type="comment"]') as HTMLElement | null;
+      const newCommentWidget = target.closest('[data-widget-type="new-comment"]') as HTMLElement | null;
+
+      if (commentWidget) {
+        const commentId = commentWidget.dataset.commentId!;
+        e.stopPropagation();
+
+        switch (action) {
+          case 'edit':
+            actionsRef.current.onStartEdit(commentId);
+            break;
+          case 'save-edit': {
+            const textarea = commentWidget.querySelector('textarea');
+            const val = textarea?.value.trim();
+            if (val) actionsRef.current.onEditComment(commentId, val);
+            break;
+          }
+          case 'cancel-edit':
+            actionsRef.current.onCancelEdit();
+            break;
+          case 'resolve': {
+            const comment = commentsRef.current.find(c => c.id === commentId);
+            if (comment) actionsRef.current.onResolveComment(commentId, !comment.resolved);
+            break;
+          }
+          case 'wontfix': {
+            const comment = commentsRef.current.find(c => c.id === commentId);
+            if (comment) actionsRef.current.onWontFixComment(commentId, !comment.wontFix);
+            break;
+          }
+          case 'delete':
+            actionsRef.current.onDeleteComment(commentId);
+            break;
+          case 'send-to-claude': {
+            const comment = commentsRef.current.find(c => c.id === commentId);
+            if (comment?.anchor && actionsRef.current.filePath && actionsRef.current.onSendToClaude) {
+              const lineNum = comment.anchor.line;
+              const reference = `@${actionsRef.current.filePath}:L${lineNum}\nComment: ${comment.content}`;
+              actionsRef.current.onSendToClaude(reference);
+            }
+            break;
+          }
+        }
+      } else if (newCommentWidget) {
+        const docLine = Number(newCommentWidget.dataset.docLine);
+        e.stopPropagation();
+
+        switch (action) {
+          case 'save-new': {
+            const textarea = newCommentWidget.querySelector('textarea');
+            const val = textarea?.value.trim();
+            if (val) actionsRef.current.handleSaveComment(docLine, val);
+            break;
+          }
+          case 'cancel-new':
+            actionsRef.current.handleCancelComment(docLine);
+            break;
+        }
+      }
+    };
+
+    const handleInput = (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName !== 'TEXTAREA') return;
+
+      const newCommentWidget = target.closest('[data-widget-type="new-comment"]') as HTMLElement | null;
+      if (newCommentWidget) {
+        const docLine = Number(newCommentWidget.dataset.docLine);
+        actionsRef.current.handleDraftChange(docLine, (target as HTMLTextAreaElement).value);
+      }
+    };
+
+    const handleKeydown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName !== 'TEXTAREA') return;
+
+      const commentWidget = target.closest('[data-widget-type="comment"]') as HTMLElement | null;
+      const newCommentWidget = target.closest('[data-widget-type="new-comment"]') as HTMLElement | null;
+
+      if (commentWidget) {
+        const commentId = commentWidget.dataset.commentId!;
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          actionsRef.current.onCancelEdit();
+        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          const val = (target as HTMLTextAreaElement).value.trim();
+          if (val) actionsRef.current.onEditComment(commentId, val);
+        }
+      } else if (newCommentWidget) {
+        const docLine = Number(newCommentWidget.dataset.docLine);
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          actionsRef.current.handleCancelComment(docLine);
+        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          const val = (target as HTMLTextAreaElement).value.trim();
+          if (val) actionsRef.current.handleSaveComment(docLine, val);
+        }
+      }
+    };
+
+    container.addEventListener('click', handleClick);
+    container.addEventListener('input', handleInput);
+    container.addEventListener('keydown', handleKeydown, true); // capture phase
+
+    return () => {
+      container.removeEventListener('click', handleClick);
+      container.removeEventListener('input', handleInput);
+      container.removeEventListener('keydown', handleKeydown, true);
+    };
+  }, []);
+
+  // Update comment widgets when comments or newCommentLines change.
+  // Callbacks are accessed via actionsRef (event delegation), so only
+  // data deps remain — avoids tearing down widget DOM on callback changes.
   useEffect(() => {
     const view = editorViewRef.current;
     if (!view) return;
@@ -1584,27 +1677,12 @@ export function UnifiedDiffEditor({
       if (comment.docLine > 0 && comment.docLine <= view.state.doc.lines) {
         const line = view.state.doc.line(comment.docLine);
 
-        // Create send to claude callback for this comment
-        const sendToClaudeForComment = onSendToClaude && filePath && comment.anchor
-          ? () => {
-              const lineNum = comment.anchor!.line;
-              const reference = `@${filePath}:L${lineNum}\nComment: ${comment.content}`;
-              onSendToClaude(reference);
-            }
-          : undefined;
-
         widgets.push({
           pos: line.to,
           widget: new CommentWidget({
             comment,
             isEditing: editingCommentId === comment.id,
-            onEdit: onStartEdit,
-            onSaveEdit: onEditComment,
-            onCancelEdit: onCancelEdit,
-            onResolve: onResolveComment,
-            onWontFix: onWontFixComment,
-            onDelete: onDeleteComment,
-            onSendToClaude: sendToClaudeForComment,
+            showSendToClaude: !!(actionsRef.current.onSendToClaude && filePath && comment.anchor),
           }),
         });
       }
@@ -1619,9 +1697,6 @@ export function UnifiedDiffEditor({
           widget: new NewCommentFormWidget({
             docLine,
             initialValue: draftCommentValuesRef.current[filePath ?? '']?.[docLine] ?? '',
-            onSave: handleSaveComment,
-            onCancel: handleCancelComment,
-            onDraftChange: handleDraftChange,
           }),
         });
       }
@@ -1636,7 +1711,7 @@ export function UnifiedDiffEditor({
     view.dispatch({ effects: setCommentWidgets.of(decorations) });
   // NOTE: fontSize is included because the main editor effect recreates the EditorView when fontSize changes.
   // Without fontSize here, this effect wouldn't re-run and comment widgets would be lost.
-  }, [content, comments, newCommentLines, editingCommentId, handleSaveComment, handleCancelComment, handleDraftChange, onStartEdit, onEditComment, onCancelEdit, onResolveComment, onWontFixComment, onDeleteComment, onSendToClaude, filePath, fontSize]);
+  }, [content, comments, newCommentLines, editingCommentId, filePath, fontSize]);
 
   // Update collapsed region decorations when contextLines or expandedRegions change
   useEffect(() => {

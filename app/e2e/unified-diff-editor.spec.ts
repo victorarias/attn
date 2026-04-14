@@ -206,6 +206,30 @@ test.describe('UnifiedDiffEditor', () => {
       await expect(page.locator('.unified-comment-form')).toBeVisible();
       await expect(page.locator('.unified-comment-textarea')).toHaveValue('my draft');
     });
+
+    /**
+     * Regression: after multiple round-trips (A→B→A→B→A), the form and draft
+     * should still be intact each time we return to the original file.
+     */
+    test('open form and draft survive multiple file round-trips', async ({ page }) => {
+      await page.locator('.cm-line').first().click();
+      const textarea = page.locator('.unified-comment-textarea');
+      await expect(textarea).toBeFocused();
+
+      await page.keyboard.type('persistent draft');
+      await expect(textarea).toHaveValue('persistent draft');
+
+      // Do three full round-trips A→B→A
+      for (let i = 0; i < 3; i++) {
+        await page.evaluate(() => (window.__HARNESS__ as any).switchFile('fileB.ts'));
+        await expect(page.locator('.unified-comment-form')).not.toBeVisible();
+
+        await page.evaluate(() => (window.__HARNESS__ as any).switchFile('fileA.ts'));
+
+        await expect(page.locator('.unified-comment-form')).toBeVisible();
+        await expect(page.locator('.unified-comment-textarea')).toHaveValue('persistent draft');
+      }
+    });
   });
 
   test.describe('scrolling', () => {

@@ -1114,7 +1114,7 @@ export function DiffDetailPanel({
               </div>
             </div>
             <div className="diff-content">
-              {loading ? (
+              {loading && !diffContent ? (
                 <div className="diff-loading">Loading diff...</div>
               ) : error ? (
                 <div className="diff-error">{error}</div>
