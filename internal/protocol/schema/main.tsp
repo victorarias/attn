@@ -427,6 +427,11 @@ model SetEndpointRemoteWebMessage {
   enabled: boolean;
 }
 
+model BootstrapEndpointMessage {
+  cmd: "bootstrap_endpoint";
+  endpoint_id: string;
+}
+
 model ApprovePRMessage {
   cmd: "approve_pr";
   id: string;
@@ -718,6 +723,7 @@ model WorkspaceRenamePaneMessage {
 model InitialStateMessage {
   event: "initial_state";
   protocol_version?: string;
+  source_fingerprint?: string;
   daemon_instance_id?: string;
   sessions?: Session[];
   endpoints?: EndpointInfo[];

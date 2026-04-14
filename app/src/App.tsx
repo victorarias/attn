@@ -253,6 +253,7 @@ function App() {
     sendUpdateEndpoint,
     sendRemoveEndpoint,
     sendSetEndpointRemoteWeb,
+    sendBootstrapEndpoint,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
@@ -356,6 +357,7 @@ function App() {
         sendUpdateEndpoint={sendUpdateEndpoint}
         sendRemoveEndpoint={sendRemoveEndpoint}
         sendSetEndpointRemoteWeb={sendSetEndpointRemoteWeb}
+        sendBootstrapEndpoint={sendBootstrapEndpoint}
         sendGetRecentLocations={sendGetRecentLocations}
         sendBrowseDirectory={sendBrowseDirectory}
         sendInspectPath={sendInspectPath}
@@ -428,6 +430,7 @@ interface AppContentProps {
   sendUpdateEndpoint: ReturnType<typeof useDaemonSocket>['sendUpdateEndpoint'];
   sendRemoveEndpoint: ReturnType<typeof useDaemonSocket>['sendRemoveEndpoint'];
   sendSetEndpointRemoteWeb: ReturnType<typeof useDaemonSocket>['sendSetEndpointRemoteWeb'];
+  sendBootstrapEndpoint: ReturnType<typeof useDaemonSocket>['sendBootstrapEndpoint'];
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
   sendInspectPath: ReturnType<typeof useDaemonSocket>['sendInspectPath'];
@@ -495,6 +498,7 @@ function AppContent({
   sendUpdateEndpoint,
   sendRemoveEndpoint,
   sendSetEndpointRemoteWeb,
+  sendBootstrapEndpoint,
   sendGetRecentLocations,
   sendBrowseDirectory,
 sendInspectPath,
@@ -890,6 +894,7 @@ sendFetchPRDetails,
     setView('dashboard');
   }, [setActiveSession]);
 
+
   const clearDockPanelCloseTimer = useCallback((panelId: DockPanelId) => {
     const closeTimer = dockPanelCloseTimersRef.current[panelId];
     if (closeTimer) {
@@ -1013,6 +1018,15 @@ sendFetchPRDetails,
   const [zoomModeBySessionId, setZoomModeBySessionId] = useState<Record<string, boolean>>({});
   const { message: copyMessage, showToast: showCopyToast, clearToast: clearCopyToast } = useCopyToast();
   const { message: errorMessage, showError, clearError } = useErrorToast();
+
+  const handleRebootstrapEndpoint = useCallback(async (endpointId: string) => {
+    try {
+      await sendBootstrapEndpoint(endpointId);
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Sync failed.');
+    }
+  }, [sendBootstrapEndpoint, showError]);
+
   const activeReviewLoopState = useMemo(
     () => (activeSessionId ? reviewLoopsBySessionId[activeSessionId] ?? null : null),
     [activeSessionId, reviewLoopsBySessionId],
@@ -1895,6 +1909,8 @@ sendFetchPRDetails,
           isRefreshing={isRefreshingPRs}
           refreshError={refreshError}
           rateLimit={rateLimit}
+          endpoints={daemonEndpoints}
+          onRebootstrapEndpoint={handleRebootstrapEndpoint}
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onRefreshPRs={handleRefreshPRs}

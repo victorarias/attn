@@ -164,6 +164,14 @@ type AuthorsUpdatedMessage struct {
 	Event string `json:"event"`
 }
 
+type BootstrapEndpointMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID string `json:"endpoint_id"`
+}
+
 type Branch struct {
 	// CommitHash corresponds to the JSON schema field "commit_hash".
 	CommitHash *string `json:"commit_hash,omitempty,omitzero"`
@@ -868,6 +876,9 @@ type InitialStateMessage struct {
 	// Settings corresponds to the JSON schema field "settings".
 	Settings RecordString `json:"settings,omitempty,omitzero"`
 
+	// SourceFingerprint corresponds to the JSON schema field "source_fingerprint".
+	SourceFingerprint *string `json:"source_fingerprint,omitempty,omitzero"`
+
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty,omitzero"`
 
@@ -1240,6 +1251,20 @@ type PtyResizeMessage struct {
 
 	// Cols corresponds to the JSON schema field "cols".
 	Cols int `json:"cols"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
+}
+
+type PtyResizedMessage struct {
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`

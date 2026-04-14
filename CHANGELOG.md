@@ -18,6 +18,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-04-12]
 
+### Fixed
+- **Remote Endpoint Sync Detection**: When connecting to a remote daemon built by a different machine, the home screen now shows a warning banner with a Sync button instead of silently connecting. Clicking Sync reinstalls the remote binary from your local build and restarts the daemon. The endpoint is shown as unavailable (greyed out in the location picker) until synced.
+- **Remote Endpoint Bootstrap Loop**: Reconnecting to a remote endpoint after a clean disconnect no longer re-bootstraps the daemon binary. Bootstrap now runs only on the first connection attempt per loop lifetime, or when the daemon is actually unreachable — eliminating the ping-pong between two machines sharing the same remote daemon.
+- **Protocol Version Mismatch Banner**: Connecting to a remote daemon running a different protocol version surfaces the same Sync banner instead of auto-reinstalling. A "version ahead" warning is shown when the remote is newer than the local client.
+
+## [2026-04-12]
+
 ### Added
 - **Native UI Spike 4 — Terminal Panels on Canvas**: New `attn-spike4` binary merges the terminal surface (spike 2) with the infinite canvas (spike 3). Up to three live agent terminals attach to daemon sessions and appear as draggable, resizable panels on the canvas. Click a terminal body to focus it for keyboard input; drag its title bar to move it; drag corner handles to resize it and reflow the PTY. Zoom changes update visible cell counts automatically. A blue border highlights the focused panel.
 - **Native UI Spike 3 — Infinite Canvas**: New `attn-canvas` binary proves the GPUI-based canvas interaction model. Pan by dragging empty space, zoom toward cursor with Cmd+scroll or regular scroll, drag panels by their title bars, and resize panels by dragging their corner handles. Eight dummy panels are laid out at fixed world positions across an infinite dot-grid canvas. Viewport culling skips off-screen panels every frame.

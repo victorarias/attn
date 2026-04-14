@@ -14,6 +14,7 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -526,17 +527,18 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) sendInitialState(client *wsClient) {
 	event := &protocol.InitialStateMessage{
-		Event:            protocol.EventInitialState,
-		ProtocolVersion:  protocol.Ptr(protocol.ProtocolVersion),
-		DaemonInstanceID: protocol.Ptr(d.daemonInstanceID),
-		Sessions:         d.mergedSessionsForBroadcast(),
-		Endpoints:        d.listEndpointInfos(),
-		Workspaces:       d.mergedWorkspacesForBroadcast(),
-		Prs:              protocol.PRsToValues(d.store.ListPRs("")),
-		Repos:            protocol.RepoStatesToValues(d.store.ListRepoStates()),
-		Authors:          protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
-		Settings:         d.settingsWithAgentAvailability(),
-		Warnings:         d.getWarnings(),
+		Event:             protocol.EventInitialState,
+		ProtocolVersion:   protocol.Ptr(protocol.ProtocolVersion),
+		SourceFingerprint: protocol.Ptr(buildinfo.SourceFingerprint),
+		DaemonInstanceID:  protocol.Ptr(d.daemonInstanceID),
+		Sessions:          d.mergedSessionsForBroadcast(),
+		Endpoints:         d.listEndpointInfos(),
+		Workspaces:        d.mergedWorkspacesForBroadcast(),
+		Prs:               protocol.PRsToValues(d.store.ListPRs("")),
+		Repos:             protocol.RepoStatesToValues(d.store.ListRepoStates()),
+		Authors:           protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
+		Settings:          d.settingsWithAgentAvailability(),
+		Warnings:          d.getWarnings(),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -721,6 +723,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleRemoveEndpointWS(client, msg.(*protocol.RemoveEndpointMessage))
 	case protocol.CmdUpdateEndpoint:
 		d.handleUpdateEndpointWS(client, msg.(*protocol.UpdateEndpointMessage))
+	case protocol.CmdBootstrapEndpoint:
+		d.handleBootstrapEndpointWS(client, msg.(*protocol.BootstrapEndpointMessage))
 	case protocol.CmdListEndpoints:
 		d.handleListEndpointsWS(client)
 	case protocol.CmdSetEndpointRemoteWeb:
