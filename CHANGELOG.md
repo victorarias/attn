@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-14]
+
+### Fixed
+- **Mute Remote Sessions**: Muting a session on a remote endpoint now works correctly. The mute command was not being forwarded to the remote daemon, causing it to silently no-op.
+
 ## [2026-04-13]
 
 ### Added
