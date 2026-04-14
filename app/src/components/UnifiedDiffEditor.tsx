@@ -970,8 +970,14 @@ export function UnifiedDiffEditor({
 
   // Dismiss inline comment forms via the escape stack so overlays stay LIFO
   const cancelAllNewComments = useCallback(() => {
-    setNewCommentLines(() => new Set());
-  }, [setNewCommentLines]);
+    setNewCommentLines((prev) => {
+      const key = filePath ?? '';
+      for (const docLine of prev) {
+        delete draftCommentValuesRef.current[key]?.[docLine];
+      }
+      return new Set();
+    });
+  }, [setNewCommentLines, filePath]);
   useEscapeStack(cancelAllNewComments, newCommentLines.size > 0);
   useEscapeStack(onCancelEdit, editingCommentId !== null);
 
