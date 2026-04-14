@@ -4,6 +4,7 @@ package daemon
 import (
 	"net"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -104,6 +105,13 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 	path = git.CanonicalizePath(path)
 
 	startingFrom := protocol.Deref(msg.StartingFrom)
+	// If starting from a remote ref (e.g. "origin/main"), fetch it first so
+	// the worktree is created from the latest upstream commit, not a stale cache.
+	if remote, branch, ok := strings.Cut(startingFrom, "/"); ok {
+		if ferr := git.FetchRemoteBranch(mainRepo, remote, branch); ferr != nil {
+			d.logf("Warning: could not fetch %s before creating worktree: %v", startingFrom, ferr)
+		}
+	}
 	var err error
 	if startingFrom != "" {
 		err = git.CreateWorktreeFromPoint(mainRepo, msg.Branch, path, startingFrom)

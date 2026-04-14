@@ -184,6 +184,25 @@ func GetCurrentBranch(repoDir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// FetchRemoteBranch fetches a single branch from a remote.
+// remote should be e.g. "origin", branch should be e.g. "main".
+func FetchRemoteBranch(repoDir, remote, branch string) error {
+	cmd := exec.Command("git", "fetch", remote, branch)
+	resolvedDir, err := ResolveRepoDir(repoDir)
+	if err != nil {
+		return err
+	}
+	cmd.Dir = resolvedDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		outStr := strings.TrimSpace(string(out))
+		if outStr == "" {
+			return fmt.Errorf("git fetch failed: %w", err)
+		}
+		return fmt.Errorf("git fetch failed: %s (%w)", outStr, err)
+	}
+	return nil
+}
+
 // FetchRemotes fetches all remotes with prune.
 func FetchRemotes(repoDir string) error {
 	cmd := exec.Command("git", "fetch", "--all", "--prune")

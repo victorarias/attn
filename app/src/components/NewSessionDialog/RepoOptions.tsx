@@ -402,6 +402,9 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
                   value={newWorktreeName}
                   onChange={(e) => setNewWorktreeName(e.target.value)}
                   autoFocus
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                 />
               </div>
               <div className="new-worktree-radio-row">
