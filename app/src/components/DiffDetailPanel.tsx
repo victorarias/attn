@@ -450,6 +450,12 @@ export function DiffDetailPanel({
     [allReviewComments, diffFilePaths]
   );
 
+  // Wrap onSendToClaude so any send — header button or per-comment — also closes the panel.
+  const sendToClaudeAndClose = useCallback((reference: string) => {
+    onSendToClaude?.(reference);
+    onClose();
+  }, [onSendToClaude, onClose]);
+
   const handleSendUnresolvedToClaude = useCallback(() => {
     if (!onSendToClaude || unresolvedComments.length === 0) return;
 
@@ -472,8 +478,8 @@ export function DiffDetailPanel({
       }
     }
 
-    onSendToClaude(lines.join('\n'));
-  }, [onSendToClaude, unresolvedComments]);
+    sendToClaudeAndClose(lines.join('\n'));
+  }, [onSendToClaude, unresolvedComments, sendToClaudeAndClose]);
 
   // Derive selectedFile from path (stable across gitStatus updates)
   const selectedFile = useMemo(() => {
@@ -1199,7 +1205,7 @@ export function DiffDetailPanel({
                   onResolveComment={handleEditorResolveComment}
                   onWontFixComment={handleEditorWontFixComment}
                   onDeleteComment={handleEditorDeleteComment}
-                  onSendToClaude={onSendToClaude}
+                  onSendToClaude={onSendToClaude ? sendToClaudeAndClose : undefined}
                 />
               )}
             </div>
