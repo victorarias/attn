@@ -206,6 +206,8 @@ interface DiffDetailPanelProps {
   resolvedTheme?: ResolvedTheme;
   // Initial file to select when panel opens
   initialSelectedFile?: string;
+  // Send a code reference to the active agent session
+  onSendToClaude?: (reference: string) => void;
 }
 
 export function DiffDetailPanel({
@@ -228,6 +230,7 @@ export function DiffDetailPanel({
   getComments,
   resolvedTheme = 'dark',
   initialSelectedFile,
+  onSendToClaude,
 }: DiffDetailPanelProps) {
   const [contentVisible, setContentVisible] = useState(isOpen);
   // Track selected file by path for stability across gitStatus updates
@@ -440,6 +443,38 @@ export function DiffDetailPanel({
   const needsReviewTree = useMemo(() => buildTree(needsReviewFiles), [needsReviewFiles]);
   const autoSkipTree = useMemo(() => buildTree(autoSkipFiles), [autoSkipFiles]);
 
+  // Only count unresolved comments on files that are currently in the diff
+  const diffFilePaths = useMemo(() => new Set(allFiles.map(f => f.path)), [allFiles]);
+  const unresolvedComments = useMemo(
+    () => allReviewComments.filter(c => !c.resolved && !c.wont_fix && diffFilePaths.has(c.filepath)),
+    [allReviewComments, diffFilePaths]
+  );
+
+  const handleSendUnresolvedToClaude = useCallback(() => {
+    if (!onSendToClaude || unresolvedComments.length === 0) return;
+
+    const byFile = new Map<string, typeof unresolvedComments>();
+    for (const comment of unresolvedComments) {
+      const list = byFile.get(comment.filepath) || [];
+      list.push(comment);
+      byFile.set(comment.filepath, list);
+    }
+
+    const lines: string[] = ['Unresolved review comments:'];
+    for (const [filepath, fileComments] of byFile.entries()) {
+      lines.push(`\n${filepath}`);
+      for (const comment of fileComments) {
+        const lineStart = comment.line_start;
+        const lineEnd = Math.abs(comment.line_end);
+        const side = comment.line_end < 0 ? 'original' : 'modified';
+        const lineRef = lineStart === lineEnd ? `L${lineStart}` : `L${lineStart}-L${lineEnd}`;
+        lines.push(`- @${filepath}:${lineRef} (${side}) ${comment.content}`);
+      }
+    }
+
+    onSendToClaude(lines.join('\n'));
+  }, [onSendToClaude, unresolvedComments]);
+
   // Derive selectedFile from path (stable across gitStatus updates)
   const selectedFile = useMemo(() => {
     if (!selectedFilePath) return null;
@@ -508,6 +543,20 @@ export function DiffDetailPanel({
       })
       .catch(console.error);
   }, [reviewId, getComments]);
+
+  // Auto-delete comments for files no longer in the branch diff.
+  // diffFilePaths.size === 0 means the diff is still loading — don't touch anything yet.
+  useEffect(() => {
+    if (!deleteComment || diffFilePaths.size === 0 || allReviewComments.length === 0) return;
+
+    const orphaned = allReviewComments.filter(c => !diffFilePaths.has(c.filepath));
+    if (orphaned.length === 0) return;
+
+    setAllReviewComments(prev => prev.filter(c => diffFilePaths.has(c.filepath)));
+    for (const comment of orphaned) {
+      deleteComment(comment.id).catch(console.error);
+    }
+  }, [allReviewComments, diffFilePaths, deleteComment]);
 
   // Clear "changed" status when navigating away from a file
   useEffect(() => {
@@ -667,7 +716,6 @@ export function DiffDetailPanel({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-
       // Don't capture navigation keystrokes when typing in inputs or editors
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
@@ -1061,6 +1109,16 @@ export function DiffDetailPanel({
                 Open in Editor
               </button>
             )}
+            {onSendToClaude && (
+              <button
+                className="review-send-btn"
+                onClick={handleSendUnresolvedToClaude}
+                disabled={unresolvedComments.length === 0}
+                title="Send all unresolved comments to the active agent session"
+              >
+                Send unresolved ({unresolvedComments.length})
+              </button>
+            )}
             <button className="review-close" onClick={onClose} title="Hide diff panel (Esc or ⌘⇧E)">
               Hide <kbd>Esc</kbd>
             </button>
@@ -1141,6 +1199,7 @@ export function DiffDetailPanel({
                   onResolveComment={handleEditorResolveComment}
                   onWontFixComment={handleEditorWontFixComment}
                   onDeleteComment={handleEditorDeleteComment}
+                  onSendToClaude={onSendToClaude}
                 />
               )}
             </div>

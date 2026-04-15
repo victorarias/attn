@@ -1649,6 +1649,11 @@ sendFetchPRDetails,
     setInitialReviewFile(null);
   }, [closeDockPanel]);
 
+  const handleSendToClaude = useCallback((reference: string) => {
+    if (!activeSessionId) return;
+    sendRuntimeInput(activeSessionId, reference, 'user');
+  }, [activeSessionId, sendRuntimeInput]);
+
 
   const isZedEditorConfigured = useMemo(() => {
     const editor = (settings.editor_executable || '').trim().toLowerCase();
@@ -2078,6 +2083,7 @@ sendFetchPRDetails,
                   resolvedTheme={resolvedTheme}
                   initialSelectedFile={initialReviewFile || undefined}
                   onOpenEditor={handleOpenEditorForReview}
+                  onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
                 />
               ),
             },
