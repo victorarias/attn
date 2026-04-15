@@ -43,9 +43,11 @@ function toEditorComment(
 ): EditorComment | null {
   // Detect side from line_end convention: negative = original (deleted lines)
   const isOriginalSide = comment.line_end < 0;
+  const endLine = Math.abs(comment.line_end);
   const anchor: CommentAnchor = {
     side: isOriginalSide ? 'original' : 'modified',
     line: comment.line_start,
+    lineEnd: endLine !== comment.line_start ? endLine : undefined,
     anchorContent: '',
   };
 
@@ -95,9 +97,10 @@ function fromEditorAnchor(anchor: CommentAnchor): {
   line_start: number;
   line_end: number;
 } {
+  const endLine = anchor.lineEnd ?? anchor.line;
   return {
     line_start: anchor.line,
-    line_end: anchor.side === 'original' ? -anchor.line : anchor.line,
+    line_end: anchor.side === 'original' ? -endLine : endLine,
   };
 }
 

@@ -46,7 +46,8 @@ export interface DiffLine {
 
 export interface CommentAnchor {
   side: 'original' | 'modified'; // Which side of the diff the comment is on
-  line: number; // Line number on that side
+  line: number; // Start line number on that side
+  lineEnd?: number; // End line number for range comments (undefined = same as line)
   anchorContent?: string; // Content of the line when comment was created (for staleness detection)
   anchorHash?: string; // Hash of anchor content for quick comparison
 }
@@ -528,6 +529,20 @@ export function createAnchor(docLine: number, lines: DiffLine[]): CommentAnchor 
 }
 
 /**
+ * Create a range comment anchor spanning startDocLine to endDocLine.
+ * Falls back to a single-line anchor if the lines are the same or end is unavailable.
+ */
+export function createAnchorFromRange(startDocLine: number, endDocLine: number, lines: DiffLine[]): CommentAnchor | null {
+  const anchor = createAnchor(startDocLine, lines);
+  if (!anchor || startDocLine === endDocLine) return anchor;
+  const endDiffLine = lines[endDocLine - 1];
+  if (!endDiffLine) return anchor;
+  const endLineNum = endDiffLine.type === 'deleted' ? endDiffLine.originalLine : endDiffLine.modifiedLine;
+  if (endLineNum == null) return anchor;
+  return { ...anchor, lineEnd: endLineNum };
+}
+
+/**
  * Find the document line for a persisted comment anchor.
  * Also detects if the comment is outdated or orphaned.
  */
@@ -953,6 +968,10 @@ export function UnifiedDiffEditor({
     });
   }, [filePath]);
 
+  // Range info for forms opened from a multi-line selection: endDocLine → startDocLine.
+  // Stored as a ref (no re-render needed) since it's only read during save/cancel.
+  const newCommentRangesRef = useRef<Map<number, number>>(new Map());
+
   // Persist in-progress textarea content keyed by filePath so it survives
   // widget/editor rebuilds and file switches without causing re-renders on
   // every keystroke (ref avoids the state→effect→DOM-recreate cycle).
@@ -977,6 +996,7 @@ export function UnifiedDiffEditor({
       }
       return new Set();
     });
+    newCommentRangesRef.current.clear();
   }, [setNewCommentLines, filePath]);
   useEscapeStack(cancelAllNewComments, newCommentLines.size > 0);
   useEscapeStack(onCancelEdit, editingCommentId !== null);
@@ -1062,12 +1082,14 @@ export function UnifiedDiffEditor({
   // Handlers for comment forms
   const handleSaveComment = useCallback(
     async (docLine: number, commentContent: string) => {
-      const anchor = createAnchor(docLine, linesRef.current);
+      const startDocLine = newCommentRangesRef.current.get(docLine) ?? docLine;
+      const anchor = createAnchorFromRange(startDocLine, docLine, linesRef.current);
       if (!anchor) {
         console.error('Failed to create anchor for line', docLine);
         return;
       }
       await onAddComment(docLine, commentContent, anchor);
+      newCommentRangesRef.current.delete(docLine);
       setNewCommentLines((prev) => {
         const next = new Set(prev);
         next.delete(docLine);
@@ -1079,6 +1101,7 @@ export function UnifiedDiffEditor({
   );
 
   const handleCancelComment = useCallback((docLine: number) => {
+    newCommentRangesRef.current.delete(docLine);
     setNewCommentLines((prev) => {
       const next = new Set(prev);
       next.delete(docLine);
@@ -1125,7 +1148,10 @@ export function UnifiedDiffEditor({
 
   const handleAddCommentFromSelection = useCallback(() => {
     if (!selection) return;
-    // Open comment form on the end line of the selection
+    // Open comment form on the end line of the selection, recording range for save
+    if (selection.startLine !== selection.endLine) {
+      newCommentRangesRef.current.set(selection.endLine, selection.startLine);
+    }
     setNewCommentLines((prev) => {
       const next = new Set(prev);
       next.add(selection.endLine);
@@ -1592,8 +1618,9 @@ export function UnifiedDiffEditor({
           case 'send-to-claude': {
             const comment = commentsRef.current.find(c => c.id === commentId);
             if (comment?.anchor && actionsRef.current.filePath && actionsRef.current.onSendToClaude) {
-              const lineNum = comment.anchor.line;
-              const reference = `@${actionsRef.current.filePath}:L${lineNum}\nComment: ${comment.content}`;
+              const { line, lineEnd } = comment.anchor;
+              const lineRef = lineEnd && lineEnd !== line ? `L${line}-L${lineEnd}` : `L${line}`;
+              const reference = `@${actionsRef.current.filePath}:${lineRef}\nComment: ${comment.content}`;
               actionsRef.current.onSendToClaude(reference);
             }
             break;
