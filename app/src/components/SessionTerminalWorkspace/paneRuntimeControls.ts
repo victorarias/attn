@@ -41,6 +41,16 @@ export function createPaneRuntimeControls({
 }: PaneRuntimeControlsDependencies) {
   const focusPaneWithRetry = (paneId: string, retries = 20) => {
     const tryFocus = (remaining: number) => {
+      // Don't steal focus from user inputs outside the terminal (e.g. comment forms, search boxes).
+      const active = document.activeElement as HTMLElement | null;
+      if (active) {
+        const isUserInput = active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable;
+        const isInsideTerminal = !!active.closest('.session-terminal-workspace');
+        if (isUserInput && !isInsideTerminal) {
+          return; // Abort — something else has intentional focus
+        }
+      }
+
       const pane = getCurrentPane(paneId);
       const handle = getTerminalHandle(paneId);
       const xterm = getXterm(paneId);

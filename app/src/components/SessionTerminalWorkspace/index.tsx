@@ -309,7 +309,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [activePaneId, activeRuntimeId, enabled, isActiveSession, paneIds, sessionId]);
 
     const focusActivePane = useCallback(() => {
-      binder.focusPaneWithRetry(activePaneId, 40);
+      // Single attempt — terminal is already mounted in every case this fires.
+      // Retries caused overlapping focus chains that stole focus from comment forms.
+      // The init/ready path (focusPaneIfCurrentlyActive) handles the mounting case.
+      binder.focusPaneWithRetry(activePaneId, 0);
     }, [activePaneId, binder]);
 
     useEffect(() => {
