@@ -171,6 +171,11 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     ]), [cwd, getMainPaneSpawnArgs, sessionEndpointId, sessionId, workspace.terminals]);
 
     const binder = usePaneRuntimeBinder(runtimePanes, activePaneId, eventRouter);
+    // binder is a new object every render (createPaneRuntimeControls is not memoized).
+    // Store it in a ref so callbacks that only need the latest binder don't trigger
+    // effects on every render.
+    const binderRef = useRef(binder);
+    binderRef.current = binder;
     const fitPane = binder.fitPane;
     const getPaneSize = binder.getPaneSize;
     const setTerminalHandle = binder.setTerminalHandle;
@@ -310,10 +315,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
 
     const focusActivePane = useCallback(() => {
       // Single attempt — terminal is already mounted in every case this fires.
-      // Retries caused overlapping focus chains that stole focus from comment forms.
-      // The init/ready path (focusPaneIfCurrentlyActive) handles the mounting case.
-      binder.focusPaneWithRetry(activePaneId, 0);
-    }, [activePaneId, binder]);
+      // Read from binderRef so this callback is stable across renders (binder is
+      // a new object every render because createPaneRuntimeControls isn't memoized).
+      binderRef.current.focusPaneWithRetry(activePaneId, 0);
+    }, [activePaneId]);
 
     useEffect(() => {
       if (!sessionVisible) {
