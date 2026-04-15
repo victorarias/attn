@@ -284,6 +284,7 @@ var migrations = []migration{
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`},
+	{33, "drop unused wont_fix columns from review_comments", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -379,6 +380,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 31 {
 			if err := applyMigration31(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 33 {
+			if err := applyMigration33(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -509,6 +515,22 @@ func applyMigration31(tx *sql.Tx) error {
 	}
 	if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN endpoint_id TEXT"); err != nil {
 		return err
+	}
+	return nil
+}
+
+func applyMigration33(tx *sql.Tx) error {
+	for _, col := range []string{"wont_fix", "wont_fix_by", "wont_fix_at"} {
+		exists, err := columnExists(tx, "review_comments", col)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		if _, err := tx.Exec("ALTER TABLE review_comments DROP COLUMN " + col); err != nil {
+			return err
+		}
 	}
 	return nil
 }
