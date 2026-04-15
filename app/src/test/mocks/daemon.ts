@@ -154,13 +154,6 @@ export class MockDaemon {
     };
   }
 
-  createWontFixComment(): (commentId: string, wontFix: boolean) => Promise<{ success: boolean }> {
-    return async (commentId: string, wontFix: boolean) => {
-      this.recordCall('wontFixComment', [commentId, wontFix]);
-      return this.getResponse('wontFixComment', [commentId, wontFix]);
-    };
-  }
-
   createDeleteComment(): (commentId: string) => Promise<{ success: boolean }> {
     return async (commentId: string) => {
       this.recordCall('deleteComment', [commentId]);
@@ -264,7 +257,6 @@ export function createReviewComment(overrides: Partial<ReviewComment> = {}): Rev
     content: 'Test comment',
     author: 'user',
     resolved: false,
-    wont_fix: false,
     created_at: new Date().toISOString(),
     ...overrides,
   };

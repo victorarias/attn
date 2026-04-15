@@ -277,7 +277,6 @@ function App() {
     sendAddComment,
     sendUpdateComment,
     sendResolveComment,
-    sendWontFixComment,
     sendDeleteComment,
     sendGetComments,
     sendStartReviewLoop,
@@ -381,7 +380,6 @@ function App() {
         sendAddComment={sendAddComment}
         sendUpdateComment={sendUpdateComment}
         sendResolveComment={sendResolveComment}
-        sendWontFixComment={sendWontFixComment}
         sendDeleteComment={sendDeleteComment}
         sendGetComments={sendGetComments}
         sendStartReviewLoop={sendStartReviewLoop}
@@ -454,7 +452,6 @@ interface AppContentProps {
   sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
   sendUpdateComment: ReturnType<typeof useDaemonSocket>['sendUpdateComment'];
   sendResolveComment: ReturnType<typeof useDaemonSocket>['sendResolveComment'];
-  sendWontFixComment: ReturnType<typeof useDaemonSocket>['sendWontFixComment'];
   sendDeleteComment: ReturnType<typeof useDaemonSocket>['sendDeleteComment'];
   sendGetComments: ReturnType<typeof useDaemonSocket>['sendGetComments'];
   sendStartReviewLoop: ReturnType<typeof useDaemonSocket>['sendStartReviewLoop'];
@@ -522,7 +519,6 @@ sendFetchPRDetails,
   sendAddComment,
   sendUpdateComment,
   sendResolveComment,
-  sendWontFixComment,
   sendDeleteComment,
   sendGetComments,
   sendStartReviewLoop,
@@ -1373,7 +1369,6 @@ sendFetchPRDetails,
     addComment: sendAddComment,
     updateComment: sendUpdateComment,
     resolveComment: sendResolveComment,
-    wontFixComment: sendWontFixComment,
     deleteComment: sendDeleteComment,
     getComments: sendGetComments,
     startReviewLoop: async (prompt: string, iterationLimit: number, presetId?: string) => {
@@ -2077,7 +2072,6 @@ sendFetchPRDetails,
                   addComment={sendAddComment}
                   updateComment={sendUpdateComment}
                   resolveComment={sendResolveComment}
-                  wontFixComment={sendWontFixComment}
                   deleteComment={sendDeleteComment}
                   getComments={sendGetComments}
                   resolvedTheme={resolvedTheme}
