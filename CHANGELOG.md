@@ -6,6 +6,22 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-16]
+
+### Added
+- **Send To Claude From Diff Panel**: Unresolved review comments can again be sent to the active agent session from the diff panel — individually or grouped as "Send unresolved (N)". The panel closes on send so the terminal is visible.
+- **Multi-Line Comment Ranges**: Selecting multiple lines and adding a comment now preserves the full range and includes it in send-to-Claude references (e.g. `L5-L10`).
+- **Dashboard Pane Debug Toggle**: A toggle in the Dashboard footer enables pane runtime debug logging for diagnosing terminal focus and render issues.
+
+### Fixed
+- **Comment Form Focus Theft**: Typing in a diff-panel comment or search form no longer loses focus as the terminal emits output in the background. Overlapping focus-retry chains and an unstable workspace binder were letting terminal focus preempt active form input.
+- **Ghost Click Targets In Closed Dock Panels**: Closed side panels no longer intercept clicks on the diff editor. Descendants with `pointer-events: auto` could override the panel's `pointer-events: none`; closed panels are now fully `inert`.
+- **Duplicate Terminal Link Opens**: Cmd-clicking a link in the terminal no longer opens the URL twice. The in-xterm link handlers were redundant with the Tauri opener plugin.
+- **Orphan Comment Cross-Branch Cleanup**: Switching branches while the diff panel was open could misclassify valid comments on the new branch as orphaned and auto-delete them. Cached diff data is now cleared on branch change so cleanup waits for fresh data before running.
+
+### Removed
+- **Won't Fix**: The "won't fix" review-comment state has been removed end to end — UI, protocol, daemon handlers, and store fields. Migration 33 drops the related columns. Comments are now strictly resolved or unresolved.
+
 ## [2026-04-14]
 
 ### Fixed
