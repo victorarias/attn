@@ -39,7 +39,7 @@ export function createPaneRuntimeControls({
   injectPanePayload,
   drainPaneWriteChain,
 }: PaneRuntimeControlsDependencies) {
-  const focusPaneWithRetry = (paneId: string, retries = 20) => {
+  const focusPane = (paneId: string, retries = 20) => {
     const tryFocus = (remaining: number) => {
       const pane = getCurrentPane(paneId);
       const handle = getTerminalHandle(paneId);
@@ -167,7 +167,7 @@ export function createPaneRuntimeControls({
   };
 
   return {
-    focusPaneWithRetry,
+    focusPane,
     fitPane,
     fitActivePane,
     typeTextViaPaneInput,

@@ -90,7 +90,7 @@ export interface PaneRuntimeBinder {
   handleTerminalInit: (paneId: string) => (xterm: XTerm) => void;
   handleTerminalReady: (paneId: string) => (xterm: XTerm) => void;
   handleTerminalResize: (paneId: string) => (cols: number, rows: number, options?: { reason?: string }) => void;
-  focusPaneWithRetry: (paneId: string, retries?: number) => void;
+  focusPane: (paneId: string, retries?: number) => void;
   fitPane: (paneId: string) => void;
   fitActivePane: () => void;
   typeTextViaPaneInput: (paneId: string, text: string) => boolean;
