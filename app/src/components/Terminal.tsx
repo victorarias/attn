@@ -79,7 +79,13 @@ function createEmptyStartupSnapshot(): TerminalPerfStartupSnapshot {
   };
 }
 
+let lastOpenedUri: { uri: string; at: number } | null = null;
 async function openExternalUri(uri: string): Promise<void> {
+  const now = Date.now();
+  if (lastOpenedUri && lastOpenedUri.uri === uri && now - lastOpenedUri.at < 500) {
+    return;
+  }
+  lastOpenedUri = { uri, at: now };
   try {
     await openUrl(uri);
   } catch (error) {
