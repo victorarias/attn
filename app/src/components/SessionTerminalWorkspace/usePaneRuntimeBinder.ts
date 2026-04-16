@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { ptyAttach, ptyResize, ptySpawn, ptyWrite, type PtyEventPayload, type PtySpawnArgs } from '../../pty/bridge';
 import {
@@ -981,21 +981,38 @@ export function usePaneRuntimeBinder(
     }
   }, [getCurrentPane, scheduleGeometrySync]);
 
-  const controls = createPaneRuntimeControls({
+  const getTerminalHandle = useCallback(
+    (paneId: string) => terminalHandlesRef.current.get(paneId),
+    [],
+  );
+  const getXterm = useCallback(
+    (paneId: string) => xtermsRef.current.get(paneId),
+    [],
+  );
+  const clearPendingTerminalEvents = useCallback(
+    (paneId: string) => paneRuntimeLifecycle.clearPendingTerminalEvents(paneId),
+    [paneRuntimeLifecycle],
+  );
+  const drainPaneWriteChain = useCallback(
+    (paneId: string) => paneRuntimeLifecycle.get(paneId)?.writeState?.writeChain,
+    [paneRuntimeLifecycle],
+  );
+
+  const controls = useMemo(() => createPaneRuntimeControls({
     activePaneId,
     getCurrentPane,
-    getTerminalHandle: (paneId) => terminalHandlesRef.current.get(paneId),
-    getXterm: (paneId) => xtermsRef.current.get(paneId),
-    clearPendingTerminalEvents: (paneId) => paneRuntimeLifecycle.clearPendingTerminalEvents(paneId),
+    getTerminalHandle,
+    getXterm,
+    clearPendingTerminalEvents,
     injectPanePayload,
-    drainPaneWriteChain: (paneId) => paneRuntimeLifecycle.get(paneId)?.writeState?.writeChain,
-  });
+    drainPaneWriteChain,
+  }), [activePaneId, getCurrentPane, getTerminalHandle, getXterm, clearPendingTerminalEvents, injectPanePayload, drainPaneWriteChain]);
 
-  return {
+  return useMemo(() => ({
     setTerminalHandle,
     handleTerminalInit,
     handleTerminalReady,
     handleTerminalResize,
     ...controls,
-  };
+  }), [setTerminalHandle, handleTerminalInit, handleTerminalReady, handleTerminalResize, controls]);
 }
