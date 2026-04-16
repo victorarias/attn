@@ -88,7 +88,6 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdAddComment:               commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdUpdateComment:            commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdResolveComment:           commandMetadata(ScopeEndpoint, false, true),
-	protocol.CmdWontFixComment:           commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdDeleteComment:            commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdGetComments:              commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdSpawnSession:             commandMetadata(ScopeEndpoint, true, true),

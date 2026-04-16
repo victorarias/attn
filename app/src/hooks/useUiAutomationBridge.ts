@@ -76,7 +76,6 @@ interface UseUiAutomationBridgeArgs {
   addComment?: (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => Promise<{ success: boolean; comment?: unknown }>;
   updateComment?: (commentId: string, content: string) => Promise<{ success: boolean }>;
   resolveComment?: (commentId: string, resolved: boolean) => Promise<{ success: boolean }>;
-  wontFixComment?: (commentId: string, wontFix: boolean) => Promise<{ success: boolean }>;
   deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
   getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: unknown[] }>;
   startReviewLoop?: (prompt: string, iterationLimit: number, presetId?: string) => Promise<void>;
@@ -1129,7 +1128,6 @@ export function useUiAutomationBridge({
   addComment,
   updateComment,
   resolveComment,
-  wontFixComment,
   deleteComment,
   getComments,
   startReviewLoop,
@@ -1637,17 +1635,6 @@ export function useUiAutomationBridge({
           throw new Error('review_resolve_comment requires commentId');
         }
         return resolveComment(commentId, resolved);
-      }
-      case 'review_wont_fix_comment': {
-        if (!wontFixComment) {
-          throw new Error('review_wont_fix_comment is not configured');
-        }
-        const commentId = typeof payload.commentId === 'string' ? payload.commentId : '';
-        const wontFix = payload.wontFix !== false;
-        if (!commentId) {
-          throw new Error('review_wont_fix_comment requires commentId');
-        }
-        return wontFixComment(commentId, wontFix);
       }
       case 'review_delete_comment': {
         if (!deleteComment) {

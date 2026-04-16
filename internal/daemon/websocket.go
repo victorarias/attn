@@ -781,8 +781,6 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleUpdateComment(client, msg.(*protocol.UpdateCommentMessage))
 	case protocol.CmdResolveComment:
 		d.handleResolveComment(client, msg.(*protocol.ResolveCommentMessage))
-	case protocol.CmdWontFixComment:
-		d.handleWontFixComment(client, msg.(*protocol.WontFixCommentMessage))
 	case protocol.CmdDeleteComment:
 		d.handleDeleteComment(client, msg.(*protocol.DeleteCommentMessage))
 	case protocol.CmdGetComments:
@@ -1090,8 +1088,6 @@ func remoteCommandCommentID(msg interface{}) string {
 	case *protocol.UpdateCommentMessage:
 		return typed.CommentID
 	case *protocol.ResolveCommentMessage:
-		return typed.CommentID
-	case *protocol.WontFixCommentMessage:
 		return typed.CommentID
 	case *protocol.DeleteCommentMessage:
 		return typed.CommentID

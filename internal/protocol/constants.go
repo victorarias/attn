@@ -76,7 +76,6 @@ const (
 	CmdAddComment               = "add_comment"
 	CmdUpdateComment            = "update_comment"
 	CmdResolveComment           = "resolve_comment"
-	CmdWontFixComment           = "wont_fix_comment"
 	CmdDeleteComment            = "delete_comment"
 	CmdGetComments              = "get_comments"
 	CmdSpawnSession             = "spawn_session"
@@ -136,7 +135,6 @@ const (
 	EventAddCommentResult         = "add_comment_result"
 	EventUpdateCommentResult      = "update_comment_result"
 	EventResolveCommentResult     = "resolve_comment_result"
-	EventWontFixCommentResult     = "wont_fix_comment_result"
 	EventDeleteCommentResult      = "delete_comment_result"
 	EventGetCommentsResult        = "get_comments_result"
 	EventPtyOutput                = "pty_output"
@@ -655,13 +653,6 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg ResolveCommentMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal resolve_comment: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdWontFixComment:
-		var msg WontFixCommentMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal wont_fix_comment: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

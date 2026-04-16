@@ -126,6 +126,24 @@ export function isPaneRuntimeDebugEnabled(): boolean {
   }
 }
 
+export function setPaneRuntimeDebugEnabled(enabled: boolean): void {
+  try {
+    if (enabled) {
+      window.localStorage.setItem(PANE_RUNTIME_DEBUG_STORAGE_KEY, '1');
+    } else {
+      window.localStorage.removeItem(PANE_RUNTIME_DEBUG_STORAGE_KEY);
+    }
+    if (enabled && typeof window !== 'undefined') {
+      window.__ATTN_PANE_DEBUG_EVENTS = [];
+      void clearDebugFile();
+    }
+  } catch {
+    // Ignore localStorage errors in constrained environments.
+  }
+}
+
+export { clearDebugFile as clearPaneRuntimeDebugLog };
+
 export function recordPaneRuntimeDebugEvent(event: PaneRuntimeDebugEventInput) {
   if (typeof window === 'undefined') {
     return;

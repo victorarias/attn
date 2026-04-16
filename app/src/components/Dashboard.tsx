@@ -14,6 +14,11 @@ import {
   isTerminalRuntimeTraceEnabled,
   setTerminalRuntimeTraceEnabled,
 } from '../utils/terminalRuntimeLog';
+import {
+  clearPaneRuntimeDebugLog,
+  isPaneRuntimeDebugEnabled,
+  setPaneRuntimeDebugEnabled,
+} from '../utils/paneRuntimeDebug';
 import appIcon from '../assets/icon.png';
 import './Dashboard.css';
 
@@ -159,6 +164,7 @@ export function Dashboard({
   // Terminal resize debug toggle
   const [termDebug, setTermDebug] = useState(isTerminalDebugEnabled);
   const [runtimeTraceEnabled, setRuntimeTraceEnabled] = useState(isTerminalRuntimeTraceEnabled);
+  const [paneDebugEnabled, setPaneDebugEnabled] = useState(isPaneRuntimeDebugEnabled);
   const copyBtnRef = useRef<HTMLButtonElement>(null);
   const toggleTermDebug = useCallback(() => {
     const next = !termDebug;
@@ -175,6 +181,14 @@ export function Dashboard({
   }, [runtimeTraceEnabled]);
   const clearRuntimeTrace = useCallback(() => {
     clearTerminalRuntimeLog();
+  }, []);
+  const togglePaneDebug = useCallback(() => {
+    const next = !paneDebugEnabled;
+    setPaneRuntimeDebugEnabled(next);
+    setPaneDebugEnabled(next);
+  }, [paneDebugEnabled]);
+  const clearPaneDebug = useCallback(() => {
+    clearPaneRuntimeDebugLog();
   }, []);
   const copyResizeLog = useCallback(() => {
     const log = formatResizeLog();
@@ -647,6 +661,22 @@ export function Dashboard({
               title="Clear the current terminal runtime trace log"
             >
               Clear runtime trace
+            </button>
+          )}
+          <button
+            className={`debug-toggle ${paneDebugEnabled ? 'active' : ''}`}
+            onClick={togglePaneDebug}
+            title="Toggle pane runtime debug tracing to AppLocalData/debug/pane-runtime-debug.jsonl"
+          >
+            Pane debug {paneDebugEnabled ? 'ON' : 'off'}
+          </button>
+          {paneDebugEnabled && (
+            <button
+              className="debug-copy-btn"
+              onClick={clearPaneDebug}
+              title="Clear the current pane runtime debug log"
+            >
+              Clear pane debug
             </button>
           )}
         </div>

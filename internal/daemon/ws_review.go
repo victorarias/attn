@@ -17,7 +17,6 @@ func reviewCommentToProtocol(comment *store.ReviewComment) protocol.ReviewCommen
 		Content:   comment.Content,
 		Author:    comment.Author,
 		Resolved:  comment.Resolved,
-		WontFix:   comment.WontFix,
 		CreatedAt: comment.CreatedAt.Format(time.RFC3339),
 	}
 	if comment.ResolvedBy != "" {
@@ -25,12 +24,6 @@ func reviewCommentToProtocol(comment *store.ReviewComment) protocol.ReviewCommen
 	}
 	if comment.ResolvedAt != nil {
 		out.ResolvedAt = protocol.Ptr(comment.ResolvedAt.Format(time.RFC3339))
-	}
-	if comment.WontFixBy != "" {
-		out.WontFixBy = protocol.Ptr(comment.WontFixBy)
-	}
-	if comment.WontFixAt != nil {
-		out.WontFixAt = protocol.Ptr(comment.WontFixAt.Format(time.RFC3339))
 	}
 	return out
 }
@@ -171,27 +164,6 @@ func (d *Daemon) handleResolveComment(client *wsClient, msg *protocol.ResolveCom
 		resolvedBy = "user"
 	}
 	err := d.store.ResolveComment(msg.CommentID, msg.Resolved, resolvedBy)
-	if err != nil {
-		result.Error = protocol.Ptr(err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-
-	result.Success = true
-	d.sendToClient(client, result)
-}
-
-func (d *Daemon) handleWontFixComment(client *wsClient, msg *protocol.WontFixCommentMessage) {
-	result := protocol.WontFixCommentResultMessage{
-		Event:   protocol.EventWontFixCommentResult,
-		Success: false,
-	}
-
-	wontFixBy := ""
-	if msg.WontFix {
-		wontFixBy = "user"
-	}
-	err := d.store.WontFixComment(msg.CommentID, msg.WontFix, wontFixBy)
 	if err != nil {
 		result.Error = protocol.Ptr(err.Error())
 		d.sendToClient(client, result)

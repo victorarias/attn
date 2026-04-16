@@ -122,13 +122,11 @@ describe('SessionTerminalWorkspace', () => {
     vi.useRealTimers();
   });
 
-  it('retries focus for the main pane until the terminal handle is ready', () => {
+  it('focuses the main pane exactly once on active session render — no retries', () => {
     vi.useFakeTimers();
-    mockTerminalFocus
-      .mockReset()
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(false)
-      .mockReturnValue(true);
+    // Focus fails — but focusActivePane should not retry; retries belong to the
+    // init/ready path (focusPaneIfCurrentlyActive) which runs from Terminal callbacks.
+    mockTerminalFocus.mockReset().mockReturnValue(false);
 
     render(
       <SessionTerminalWorkspace
@@ -152,11 +150,9 @@ describe('SessionTerminalWorkspace', () => {
 
     expect(mockTerminalFocus).toHaveBeenCalledTimes(1);
 
-    vi.advanceTimersByTime(50);
-    expect(mockTerminalFocus).toHaveBeenCalledTimes(2);
-
-    vi.advanceTimersByTime(50);
-    expect(mockTerminalFocus).toHaveBeenCalledTimes(3);
+    vi.advanceTimersByTime(200);
+    // Still exactly 1 — no retry chains started
+    expect(mockTerminalFocus).toHaveBeenCalledTimes(1);
   });
 
   it('focuses the main Claude pane immediately on mouse down', () => {

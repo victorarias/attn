@@ -16,7 +16,6 @@ interface CommentPopoverProps {
   onSave: (content: string) => Promise<void>;
   onCancel: () => void;
   onResolve?: (resolved: boolean) => Promise<void>;
-  onWontFix?: (wontFix: boolean) => Promise<void>;
   onDelete?: () => Promise<void>;
   onSendToClaude?: () => void;
   // Position
@@ -31,7 +30,6 @@ export function CommentPopover({
   onSave,
   onCancel,
   onResolve,
-  onWontFix,
   onDelete: _onDelete,
   onSendToClaude,
   position,
@@ -85,7 +83,7 @@ export function CommentPopover({
 
   return (
     <div
-      className={`comment-popover ${comment?.resolved ? 'resolved' : ''} ${comment?.wont_fix ? 'wont-fix' : ''}`}
+      className={`comment-popover ${comment?.resolved ? 'resolved' : ''}`}
       style={{ top: position.top, left: position.left }}
       onKeyDown={handleKeyDown}
     >
@@ -96,7 +94,6 @@ export function CommentPopover({
           </span>
           <span className="comment-time">{formatTimestamp(comment.created_at)}</span>
           {comment.resolved && <span className="comment-resolved-badge">Resolved</span>}
-          {comment.wont_fix && <span className="comment-wontfix-badge">Won't Fix</span>}
         </div>
       )}
 
@@ -163,22 +160,6 @@ export function CommentPopover({
                 onClick={() => onResolve(false)}
               >
                 Unresolve
-              </button>
-            )}
-            {onWontFix && !comment?.wont_fix && (
-              <button
-                className="comment-btn wontfix"
-                onClick={() => onWontFix(true)}
-              >
-                Won't Fix
-              </button>
-            )}
-            {onWontFix && comment?.wont_fix && (
-              <button
-                className="comment-btn undo-wontfix"
-                onClick={() => onWontFix(false)}
-              >
-                Undo Won't Fix
               </button>
             )}
           </>

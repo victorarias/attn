@@ -86,26 +86,6 @@ test.describe('UnifiedDiffEditor', () => {
       await page.waitForSelector('.unified-comment');
     }
 
-    test('resolved and won\'t fix are mutually exclusive', async ({ page }) => {
-      await addComment(page, 'Test comment');
-
-      const comment = page.locator('.unified-comment');
-
-      // Mark as won't fix first
-      await comment.locator('.wontfix-btn').click();
-      await expect(comment).toHaveClass(/wont-fix/);
-
-      // Resolve - should clear won't fix
-      await comment.locator('.resolve-btn').click();
-      await expect(comment).toHaveClass(/resolved/);
-      await expect(comment).not.toHaveClass(/wont-fix/);
-
-      // Mark won't fix again - should clear resolved
-      await comment.locator('.wontfix-btn').click();
-      await expect(comment).toHaveClass(/wont-fix/);
-      await expect(comment).not.toHaveClass(/resolved/);
-    });
-
     test('delete button removes comment', async ({ page }) => {
       await addComment(page, 'Comment to delete');
 

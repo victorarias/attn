@@ -244,8 +244,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     useImperativeHandle(ref, () => ({
       fitPane: binder.fitPane,
       fitActivePane: binder.fitActivePane,
-      focusPane: binder.focusPaneWithRetry,
-      focusActivePane: binder.focusPaneWithRetry.bind(null, activePaneId),
+      focusPane: binder.focusPane,
+      focusActivePane: binder.focusPane.bind(null, activePaneId),
       typePaneTextViaUI: binder.typeTextViaPaneInput,
       isPaneInputFocused: binder.isPaneInputFocused,
       scrollPaneToTop: binder.scrollPaneToTop,
@@ -309,7 +309,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [activePaneId, activeRuntimeId, enabled, isActiveSession, paneIds, sessionId]);
 
     const focusActivePane = useCallback(() => {
-      binder.focusPaneWithRetry(activePaneId, 40);
+      // Single attempt — terminal is already mounted in every case this fires.
+      binder.focusPane(activePaneId, 0);
     }, [activePaneId, binder]);
 
     useEffect(() => {
@@ -435,7 +436,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           details: { direction, nextPaneId },
         });
         onFocusPane(nextPaneId);
-        binder.focusPaneWithRetry(nextPaneId);
+        binder.focusPane(nextPaneId);
         return;
       }
       recordPaneRuntimeDebugEvent({
@@ -457,7 +458,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         details: activeElementSummary,
       });
       onFocusPane(MAIN_TERMINAL_PANE_ID);
-      binder.focusPaneWithRetry(MAIN_TERMINAL_PANE_ID);
+      binder.focusPane(MAIN_TERMINAL_PANE_ID);
     }, [binder, onFocusPane, sessionId]);
 
     const handleUtilityPaneMouseDown = useCallback((paneId: string) => {
@@ -469,7 +470,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         details: activeElementSummary,
       });
       onFocusPane(paneId);
-      binder.focusPaneWithRetry(paneId);
+      binder.focusPane(paneId);
     }, [binder, onFocusPane, sessionId]);
 
     const focusPaneIfCurrentlyActive = useCallback((paneId: string, phase: 'init' | 'ready') => {
@@ -483,7 +484,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         message: `focus pane from terminal ${phase}`,
         details: activeElementSummary,
       });
-      binder.focusPaneWithRetry(paneId);
+      binder.focusPane(paneId);
     }, [binder, sessionId]);
 
     const handleTerminalInit = useCallback((paneId: string) => (xterm: XTerm) => {

@@ -2,7 +2,6 @@ import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useSta
 import { Terminal as XTerm } from '@xterm/xterm';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled, recordResizeEvent, formatResizeLog, type ResizeDiagnostics } from '../utils/terminalDebug';
@@ -79,13 +78,10 @@ function createEmptyStartupSnapshot(): TerminalPerfStartupSnapshot {
   };
 }
 
-async function openExternalUri(uri: string): Promise<void> {
-  try {
-    await openUrl(uri);
-  } catch (error) {
-    console.error('[Terminal] Failed to open external URL:', uri, error);
-  }
-}
+// Link opening is handled by the Tauri opener plugin at the webview level.
+// Our xterm handlers are no-ops — they exist only to suppress xterm's default
+// confirm() dialog for OSC 8 hyperlinks and to enable WebLinksAddon decorations
+// (underline + pointer cursor on hover).
 
 export interface TerminalHandle {
   terminal: XTerm | null;
@@ -545,14 +541,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           showTopBorder: true,
         },
         theme: getTerminalTheme(resolvedTheme),
-        // Handle OSC 8 hyperlinks without the default confirm prompt + window.open fallback.
-        linkHandler: {
-          activate: (event, text) => {
-            if (event.metaKey || event.ctrlKey) {
-              void openExternalUri(text);
-            }
-          },
-        },
+        // Suppress xterm's default confirm() dialog for OSC 8 hyperlinks.
+        // Actual opening is handled at the webview level.
+        linkHandler: { activate: () => {} },
       });
       appliedFontSizeRef.current = initialFontSize;
       startupSnapshotRef.current = {
@@ -571,12 +562,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         skippedInitialFontEffect: false,
       };
 
-      // Load WebLinksAddon before open - Cmd/Ctrl+click to open URLs
-      term.loadAddon(new WebLinksAddon(async (event, uri) => {
-        if (event.metaKey || event.ctrlKey) {
-          await openExternalUri(uri);
-        }
-      }));
+      // WebLinksAddon decorates URLs (underline + pointer on hover).
+      // No-op handler — actual opening is handled at the webview level.
+      term.loadAddon(new WebLinksAddon(() => {}));
 
       // Enable Unicode 11 for correct emoji/CJK width calculation
       term.loadAddon(new Unicode11Addon());

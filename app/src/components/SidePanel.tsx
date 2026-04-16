@@ -31,6 +31,7 @@ export function SidePanel({
         className={`side-panel side-panel--${tone} ${className}`.trim()}
         style={style}
         aria-hidden={!isOpen}
+        inert={!isOpen || undefined}
       >
         {children}
       </aside>

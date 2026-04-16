@@ -46,7 +46,8 @@ export interface DiffLine {
 
 export interface CommentAnchor {
   side: 'original' | 'modified'; // Which side of the diff the comment is on
-  line: number; // Line number on that side
+  line: number; // Start line number on that side
+  lineEnd?: number; // End line number for range comments (undefined = same as line)
   anchorContent?: string; // Content of the line when comment was created (for staleness detection)
   anchorHash?: string; // Hash of anchor content for quick comparison
 }
@@ -57,8 +58,6 @@ export interface InlineComment {
   content: string;
   resolved: boolean;
   resolvedBy?: 'user' | 'agent'; // Who resolved the comment
-  wontFix?: boolean;
-  wontFixBy?: 'user' | 'agent'; // Who marked won't fix
   author?: 'user' | 'agent';
   anchor?: CommentAnchor; // For persistence and staleness detection
   isOutdated?: boolean; // Line content changed since comment was created
@@ -96,7 +95,6 @@ export interface UnifiedDiffEditorProps {
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
   onResolveComment: (id: string, resolved: boolean) => Promise<void>;
-  onWontFixComment: (id: string, wontFix: boolean) => Promise<void>;
   onDeleteComment: (id: string) => Promise<void>;
   onSendToClaude?: (reference: string) => void;
 }
@@ -112,13 +110,10 @@ type DiffEditorTheme = {
   commentBg: string;
   commentBorder: string;
   commentResolvedBg: string;
-  commentWontFixBg: string;
   authorText: string;
   authorBg: string;
   resolvedText: string;
   resolvedBadgeBg: string;
-  wontFixText: string;
-  wontFixBadgeBg: string;
   commentContent: string;
   commentCodeBg: string;
   commentLink: string;
@@ -129,7 +124,6 @@ type DiffEditorTheme = {
   buttonHoverBg: string;
   buttonHoverText: string;
   resolveButton: string;
-  wontFixButton: string;
   deleteButton: string;
   sendButton: string;
   newCommentBg: string;
@@ -164,13 +158,10 @@ const DARK_THEME: DiffEditorTheme = {
   commentBg: '#2d3748',
   commentBorder: '#3b82f6',
   commentResolvedBg: '#1e3a2f',
-  commentWontFixBg: '#3a2f1e',
   authorText: '#ffffff',
   authorBg: '#2563eb',
   resolvedText: '#22c55e',
   resolvedBadgeBg: 'rgba(34, 197, 94, 0.15)',
-  wontFixText: '#d97706',
-  wontFixBadgeBg: 'rgba(217, 119, 6, 0.15)',
   commentContent: '#e5e7eb',
   commentCodeBg: '#1f2937',
   commentLink: '#60a5fa',
@@ -181,7 +172,6 @@ const DARK_THEME: DiffEditorTheme = {
   buttonHoverBg: '#374151',
   buttonHoverText: '#e5e7eb',
   resolveButton: '#22c55e',
-  wontFixButton: '#d97706',
   deleteButton: '#ef4444',
   sendButton: '#d97706',
   newCommentBg: '#312e81',
@@ -216,13 +206,10 @@ const LIGHT_THEME: DiffEditorTheme = {
   commentBg: '#f6f8fa',
   commentBorder: '#0969da',
   commentResolvedBg: '#dafbe1',
-  commentWontFixBg: '#fff8c5',
   authorText: '#ffffff',
   authorBg: '#0969da',
   resolvedText: '#1a7f37',
   resolvedBadgeBg: '#dcffe4',
-  wontFixText: '#9a6700',
-  wontFixBadgeBg: '#fff8c5',
   commentContent: '#24292f',
   commentCodeBg: '#eaedf1',
   commentLink: '#0969da',
@@ -233,7 +220,6 @@ const LIGHT_THEME: DiffEditorTheme = {
   buttonHoverBg: '#eaeef2',
   buttonHoverText: '#24292f',
   resolveButton: '#1a7f37',
-  wontFixButton: '#9a6700',
   deleteButton: '#cf222e',
   sendButton: '#9a6700',
   newCommentBg: '#eef2ff',
@@ -528,6 +514,20 @@ export function createAnchor(docLine: number, lines: DiffLine[]): CommentAnchor 
 }
 
 /**
+ * Create a range comment anchor spanning startDocLine to endDocLine.
+ * Falls back to a single-line anchor if the lines are the same or end is unavailable.
+ */
+export function createAnchorFromRange(startDocLine: number, endDocLine: number, lines: DiffLine[]): CommentAnchor | null {
+  const anchor = createAnchor(startDocLine, lines);
+  if (!anchor || startDocLine === endDocLine) return anchor;
+  const endDiffLine = lines[endDocLine - 1];
+  if (!endDiffLine) return anchor;
+  const endLineNum = endDiffLine.type === 'deleted' ? endDiffLine.originalLine : endDiffLine.modifiedLine;
+  if (endLineNum == null) return anchor;
+  return { ...anchor, lineEnd: endLineNum };
+}
+
+/**
  * Find the document line for a persisted comment anchor.
  * Also detects if the comment is outdated or orphaned.
  */
@@ -737,9 +737,7 @@ class CommentWidget extends WidgetType {
       a.comment.id === b.comment.id &&
       a.comment.content === b.comment.content &&
       a.comment.resolved === b.comment.resolved &&
-      a.comment.wontFix === b.comment.wontFix &&
       a.comment.resolvedBy === b.comment.resolvedBy &&
-      a.comment.wontFixBy === b.comment.wontFixBy &&
       a.comment.author === b.comment.author &&
       a.comment.isOutdated === b.comment.isOutdated &&
       a.comment.isOrphaned === b.comment.isOrphaned &&
@@ -752,7 +750,7 @@ class CommentWidget extends WidgetType {
     const { comment, isEditing, showSendToClaude } = this.config;
 
     const wrapper = document.createElement('div');
-    wrapper.className = `unified-comment ${comment.resolved ? 'resolved' : ''} ${comment.wontFix ? 'wont-fix' : ''}`;
+    wrapper.className = `unified-comment ${comment.resolved ? 'resolved' : ''}`;
     wrapper.dataset.widgetType = 'comment';
     wrapper.dataset.commentId = comment.id;
 
@@ -772,16 +770,10 @@ class CommentWidget extends WidgetType {
       const resolvedBadge = comment.resolved
         ? `<span class="unified-comment-resolved">Resolved by ${comment.resolvedBy === 'agent' ? 'Claude' : 'you'}</span>`
         : '';
-      const wontFixBadge = comment.wontFix
-        ? `<span class="unified-comment-wontfix">Won't Fix by ${comment.wontFixBy === 'agent' ? 'Claude' : 'you'}</span>`
-        : '';
       const sendToClaudeBtn = showSendToClaude
         ? `<button class="send-btn" data-action="send-to-claude">Send to CC</button>`
         : '';
-      const wontFixBtn = comment.wontFix
-        ? `<button class="wontfix-btn" data-action="wontfix">Undo Won't Fix</button>`
-        : `<button class="wontfix-btn" data-action="wontfix">Won't Fix</button>`;
-      wrapper.innerHTML = `<div class="unified-comment-header"><div class="unified-comment-left"><span class="unified-comment-author">${comment.author === 'agent' ? 'Claude' : 'You'}</span>${resolvedBadge}${wontFixBadge}</div><div class="unified-comment-actions"><button class="edit-btn" data-action="edit">Edit</button>${sendToClaudeBtn}<button class="resolve-btn" data-action="resolve">${comment.resolved ? 'Unresolve' : 'Resolve'}</button>${wontFixBtn}<button class="delete-btn" data-action="delete">Delete</button></div></div><div class="unified-comment-content">${renderMarkdown(comment.content)}</div>`;
+      wrapper.innerHTML = `<div class="unified-comment-header"><div class="unified-comment-left"><span class="unified-comment-author">${comment.author === 'agent' ? 'Claude' : 'You'}</span>${resolvedBadge}</div><div class="unified-comment-actions"><button class="edit-btn" data-action="edit">Edit</button>${sendToClaudeBtn}<button class="resolve-btn" data-action="resolve">${comment.resolved ? 'Unresolve' : 'Resolve'}</button><button class="delete-btn" data-action="delete">Delete</button></div></div><div class="unified-comment-content">${renderMarkdown(comment.content)}</div>`;
     }
 
     return wrapper;
@@ -906,7 +898,6 @@ interface CommentActions {
   onEditComment: (id: string, content: string) => Promise<void>;
   onCancelEdit: () => void;
   onResolveComment: (id: string, resolved: boolean) => Promise<void>;
-  onWontFixComment: (id: string, wontFix: boolean) => Promise<void>;
   onDeleteComment: (id: string) => Promise<void>;
   onSendToClaude?: (reference: string) => void;
   handleSaveComment: (docLine: number, content: string) => Promise<void>;
@@ -931,7 +922,6 @@ export function UnifiedDiffEditor({
   onStartEdit,
   onCancelEdit,
   onResolveComment,
-  onWontFixComment,
   onDeleteComment,
   onSendToClaude,
 }: UnifiedDiffEditorProps) {
@@ -952,6 +942,10 @@ export function UnifiedDiffEditor({
       return { ...prev, [key]: updater(prev[key] ?? new Set()) };
     });
   }, [filePath]);
+
+  // Range info for forms opened from a multi-line selection: endDocLine → startDocLine.
+  // Stored as a ref (no re-render needed) since it's only read during save/cancel.
+  const newCommentRangesRef = useRef<Map<number, number>>(new Map());
 
   // Persist in-progress textarea content keyed by filePath so it survives
   // widget/editor rebuilds and file switches without causing re-renders on
@@ -977,6 +971,7 @@ export function UnifiedDiffEditor({
       }
       return new Set();
     });
+    newCommentRangesRef.current.clear();
   }, [setNewCommentLines, filePath]);
   useEscapeStack(cancelAllNewComments, newCommentLines.size > 0);
   useEscapeStack(onCancelEdit, editingCommentId !== null);
@@ -1062,12 +1057,14 @@ export function UnifiedDiffEditor({
   // Handlers for comment forms
   const handleSaveComment = useCallback(
     async (docLine: number, commentContent: string) => {
-      const anchor = createAnchor(docLine, linesRef.current);
+      const startDocLine = newCommentRangesRef.current.get(docLine) ?? docLine;
+      const anchor = createAnchorFromRange(startDocLine, docLine, linesRef.current);
       if (!anchor) {
         console.error('Failed to create anchor for line', docLine);
         return;
       }
       await onAddComment(docLine, commentContent, anchor);
+      newCommentRangesRef.current.delete(docLine);
       setNewCommentLines((prev) => {
         const next = new Set(prev);
         next.delete(docLine);
@@ -1079,6 +1076,7 @@ export function UnifiedDiffEditor({
   );
 
   const handleCancelComment = useCallback((docLine: number) => {
+    newCommentRangesRef.current.delete(docLine);
     setNewCommentLines((prev) => {
       const next = new Set(prev);
       next.delete(docLine);
@@ -1094,7 +1092,7 @@ export function UnifiedDiffEditor({
 
   actionsRef.current = {
     onStartEdit, onEditComment, onCancelEdit,
-    onResolveComment, onWontFixComment, onDeleteComment,
+    onResolveComment, onDeleteComment,
     onSendToClaude, handleSaveComment, handleCancelComment,
     handleDraftChange, filePath,
   };
@@ -1125,7 +1123,10 @@ export function UnifiedDiffEditor({
 
   const handleAddCommentFromSelection = useCallback(() => {
     if (!selection) return;
-    // Open comment form on the end line of the selection
+    // Open comment form on the end line of the selection, recording range for save
+    if (selection.startLine !== selection.endLine) {
+      newCommentRangesRef.current.set(selection.endLine, selection.startLine);
+    }
     setNewCommentLines((prev) => {
       const next = new Set(prev);
       next.add(selection.endLine);
@@ -1218,10 +1219,6 @@ export function UnifiedDiffEditor({
           borderLeftColor: colorTheme.resolveButton,
           background: colorTheme.commentResolvedBg,
         },
-        '.unified-comment.wont-fix': {
-          borderLeftColor: colorTheme.wontFixButton,
-          background: colorTheme.commentWontFixBg,
-        },
         '.unified-comment-header': {
           display: 'flex',
           alignItems: 'center',
@@ -1248,14 +1245,6 @@ export function UnifiedDiffEditor({
           borderRadius: '4px',
           color: colorTheme.resolvedText,
           background: colorTheme.resolvedBadgeBg,
-        },
-        '.unified-comment-wontfix': {
-          fontSize: `${fontSize - 2}px`,
-          fontWeight: '500',
-          padding: '2px 8px',
-          borderRadius: '4px',
-          color: colorTheme.wontFixText,
-          background: colorTheme.wontFixBadgeBg,
         },
         '.unified-comment-content': {
           color: colorTheme.commentContent,
@@ -1332,14 +1321,6 @@ export function UnifiedDiffEditor({
         },
         '.unified-comment-actions .resolve-btn:hover': {
           background: colorTheme.resolveButton,
-          color: colorTheme.authorText,
-        },
-        '.unified-comment-actions .wontfix-btn': {
-          borderColor: colorTheme.wontFixButton,
-          color: colorTheme.wontFixButton,
-        },
-        '.unified-comment-actions .wontfix-btn:hover': {
-          background: colorTheme.wontFixButton,
           color: colorTheme.authorText,
         },
         '.unified-comment-actions .delete-btn': {
@@ -1581,19 +1562,15 @@ export function UnifiedDiffEditor({
             if (comment) actionsRef.current.onResolveComment(commentId, !comment.resolved);
             break;
           }
-          case 'wontfix': {
-            const comment = commentsRef.current.find(c => c.id === commentId);
-            if (comment) actionsRef.current.onWontFixComment(commentId, !comment.wontFix);
-            break;
-          }
           case 'delete':
             actionsRef.current.onDeleteComment(commentId);
             break;
           case 'send-to-claude': {
             const comment = commentsRef.current.find(c => c.id === commentId);
             if (comment?.anchor && actionsRef.current.filePath && actionsRef.current.onSendToClaude) {
-              const lineNum = comment.anchor.line;
-              const reference = `@${actionsRef.current.filePath}:L${lineNum}\nComment: ${comment.content}`;
+              const { line, lineEnd } = comment.anchor;
+              const lineRef = lineEnd && lineEnd !== line ? `L${line}-L${lineEnd}` : `L${line}`;
+              const reference = `@${actionsRef.current.filePath}:${lineRef}\nComment: ${comment.content}`;
               actionsRef.current.onSendToClaude(reference);
             }
             break;

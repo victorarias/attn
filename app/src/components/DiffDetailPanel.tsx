@@ -43,9 +43,11 @@ function toEditorComment(
 ): EditorComment | null {
   // Detect side from line_end convention: negative = original (deleted lines)
   const isOriginalSide = comment.line_end < 0;
+  const endLine = Math.abs(comment.line_end);
   const anchor: CommentAnchor = {
     side: isOriginalSide ? 'original' : 'modified',
     line: comment.line_start,
+    lineEnd: endLine !== comment.line_start ? endLine : undefined,
     anchorContent: '',
   };
 
@@ -61,8 +63,6 @@ function toEditorComment(
       content: comment.content,
       resolved: comment.resolved,
       resolvedBy: comment.resolved_by as 'user' | 'agent' | undefined,
-      wontFix: comment.wont_fix,
-      wontFixBy: comment.wont_fix_by as 'user' | 'agent' | undefined,
       author: comment.author as 'user' | 'agent',
       anchor,
       isOrphaned: true,
@@ -75,8 +75,6 @@ function toEditorComment(
     content: comment.content,
     resolved: comment.resolved,
     resolvedBy: comment.resolved_by as 'user' | 'agent' | undefined,
-    wontFix: comment.wont_fix,
-    wontFixBy: comment.wont_fix_by as 'user' | 'agent' | undefined,
     author: comment.author as 'user' | 'agent',
     anchor,
     isOutdated: result.isOutdated,
@@ -95,9 +93,10 @@ function fromEditorAnchor(anchor: CommentAnchor): {
   line_start: number;
   line_end: number;
 } {
+  const endLine = anchor.lineEnd ?? anchor.line;
   return {
     line_start: anchor.line,
-    line_end: anchor.side === 'original' ? -anchor.line : anchor.line,
+    line_end: anchor.side === 'original' ? -endLine : endLine,
   };
 }
 
@@ -200,12 +199,13 @@ interface DiffDetailPanelProps {
   addComment?: (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => Promise<{ success: boolean; comment?: ReviewComment }>;
   updateComment?: (commentId: string, content: string) => Promise<{ success: boolean }>;
   resolveComment?: (commentId: string, resolved: boolean) => Promise<{ success: boolean }>;
-  wontFixComment?: (commentId: string, wontFix: boolean) => Promise<{ success: boolean }>;
   deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
   getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: ReviewComment[] }>;
   resolvedTheme?: ResolvedTheme;
   // Initial file to select when panel opens
   initialSelectedFile?: string;
+  // Send a code reference to the active agent session
+  onSendToClaude?: (reference: string) => void;
 }
 
 export function DiffDetailPanel({
@@ -223,11 +223,11 @@ export function DiffDetailPanel({
   addComment,
   updateComment,
   resolveComment,
-  wontFixComment,
   deleteComment,
   getComments,
   resolvedTheme = 'dark',
   initialSelectedFile,
+  onSendToClaude,
 }: DiffDetailPanelProps) {
   const [contentVisible, setContentVisible] = useState(isOpen);
   // Track selected file by path for stability across gitStatus updates
@@ -350,6 +350,9 @@ export function DiffDetailPanel({
       localApplied = true;
       setIsLoadingBranchDiff(false);
     } else {
+      // Clear stale files from a previous branch so orphan-cleanup
+      // doesn't run against the wrong file list while the fetch is in-flight.
+      setBranchDiffFiles([]);
       setIsLoadingBranchDiff(true);
       // Small delay avoids guaranteed duplicate heavy diff calls when remote sync is fast.
       localTimer = setTimeout(() => {
@@ -440,6 +443,44 @@ export function DiffDetailPanel({
   const needsReviewTree = useMemo(() => buildTree(needsReviewFiles), [needsReviewFiles]);
   const autoSkipTree = useMemo(() => buildTree(autoSkipFiles), [autoSkipFiles]);
 
+  // Only count unresolved comments on files that are currently in the diff
+  const diffFilePaths = useMemo(() => new Set(allFiles.map(f => f.path)), [allFiles]);
+  const unresolvedComments = useMemo(
+    () => allReviewComments.filter(c => !c.resolved && diffFilePaths.has(c.filepath)),
+    [allReviewComments, diffFilePaths]
+  );
+
+  // Wrap onSendToClaude so any send — header button or per-comment — also closes the panel.
+  const sendToClaudeAndClose = useCallback((reference: string) => {
+    onSendToClaude?.(reference);
+    onClose();
+  }, [onSendToClaude, onClose]);
+
+  const handleSendUnresolvedToClaude = useCallback(() => {
+    if (!onSendToClaude || unresolvedComments.length === 0) return;
+
+    const byFile = new Map<string, typeof unresolvedComments>();
+    for (const comment of unresolvedComments) {
+      const list = byFile.get(comment.filepath) || [];
+      list.push(comment);
+      byFile.set(comment.filepath, list);
+    }
+
+    const lines: string[] = ['Unresolved review comments:'];
+    for (const [filepath, fileComments] of byFile.entries()) {
+      lines.push(`\n${filepath}`);
+      for (const comment of fileComments) {
+        const lineStart = comment.line_start;
+        const lineEnd = Math.abs(comment.line_end);
+        const side = comment.line_end < 0 ? 'original' : 'modified';
+        const lineRef = lineStart === lineEnd ? `L${lineStart}` : `L${lineStart}-L${lineEnd}`;
+        lines.push(`- @${filepath}:${lineRef} (${side}) ${comment.content}`);
+      }
+    }
+
+    sendToClaudeAndClose(lines.join('\n'));
+  }, [onSendToClaude, unresolvedComments, sendToClaudeAndClose]);
+
   // Derive selectedFile from path (stable across gitStatus updates)
   const selectedFile = useMemo(() => {
     if (!selectedFilePath) return null;
@@ -508,6 +549,21 @@ export function DiffDetailPanel({
       })
       .catch(console.error);
   }, [reviewId, getComments]);
+
+  // Auto-delete comments for files no longer in the branch diff.
+  // diffFilePaths.size === 0 means the diff is still loading — don't touch anything yet.
+  // (branchDiffFiles is cleared to [] on branch change before the fresh fetch returns.)
+  useEffect(() => {
+    if (!deleteComment || diffFilePaths.size === 0 || allReviewComments.length === 0) return;
+
+    const orphaned = allReviewComments.filter(c => !diffFilePaths.has(c.filepath));
+    if (orphaned.length === 0) return;
+
+    setAllReviewComments(prev => prev.filter(c => diffFilePaths.has(c.filepath)));
+    for (const comment of orphaned) {
+      deleteComment(comment.id).catch(console.error);
+    }
+  }, [allReviewComments, diffFilePaths, deleteComment]);
 
   // Clear "changed" status when navigating away from a file
   useEffect(() => {
@@ -667,7 +723,6 @@ export function DiffDetailPanel({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-
       // Don't capture navigation keystrokes when typing in inputs or editors
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
@@ -916,7 +971,7 @@ export function DiffDetailPanel({
     setEditingCommentId(null);
   }, []);
 
-  // Resolve comment - also clears won't fix (mutual exclusivity)
+  // Resolve comment
   const handleEditorResolveComment = useCallback(async (id: string, resolved: boolean) => {
     if (!resolveComment) return;
     try {
@@ -927,9 +982,6 @@ export function DiffDetailPanel({
             ...c,
             resolved,
             resolved_by: resolved ? 'user' : '',
-            // Clear won't fix when resolving (mutual exclusivity)
-            wont_fix: resolved ? false : c.wont_fix,
-            wont_fix_by: resolved ? '' : c.wont_fix_by,
           } : c)
         );
       } else {
@@ -940,31 +992,6 @@ export function DiffDetailPanel({
       console.error('Resolve comment error:', err);
     }
   }, [resolveComment]);
-
-  // Won't fix comment - also clears resolved (mutual exclusivity)
-  const handleEditorWontFixComment = useCallback(async (id: string, wontFix: boolean) => {
-    if (!wontFixComment) return;
-    try {
-      const result = await wontFixComment(id, wontFix);
-      if (result.success) {
-        setAllReviewComments(prev =>
-          prev.map(c => c.id === id ? {
-            ...c,
-            wont_fix: wontFix,
-            wont_fix_by: wontFix ? 'user' : '',
-            // Clear resolved when marking won't fix (mutual exclusivity)
-            resolved: wontFix ? false : c.resolved,
-            resolved_by: wontFix ? '' : c.resolved_by,
-          } : c)
-        );
-      } else {
-        setCommentError('Failed to update comment');
-      }
-    } catch (err) {
-      setCommentError('Failed to update comment');
-      console.error('Won\'t fix comment error:', err);
-    }
-  }, [wontFixComment]);
 
   const handleEditorDeleteComment = useCallback(async (id: string) => {
     if (!deleteComment) return;
@@ -1061,6 +1088,16 @@ export function DiffDetailPanel({
                 Open in Editor
               </button>
             )}
+            {onSendToClaude && (
+              <button
+                className="review-send-btn"
+                onClick={handleSendUnresolvedToClaude}
+                disabled={unresolvedComments.length === 0}
+                title="Send all unresolved comments to the active agent session"
+              >
+                Send unresolved ({unresolvedComments.length})
+              </button>
+            )}
             <button className="review-close" onClick={onClose} title="Hide diff panel (Esc or ⌘⇧E)">
               Hide <kbd>Esc</kbd>
             </button>
@@ -1139,8 +1176,8 @@ export function DiffDetailPanel({
                   onStartEdit={handleEditorStartEdit}
                   onCancelEdit={handleEditorCancelEdit}
                   onResolveComment={handleEditorResolveComment}
-                  onWontFixComment={handleEditorWontFixComment}
                   onDeleteComment={handleEditorDeleteComment}
+                  onSendToClaude={onSendToClaude ? sendToClaudeAndClose : undefined}
                 />
               )}
             </div>
