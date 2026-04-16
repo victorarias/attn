@@ -245,37 +245,3 @@
   color: var(--color-text-primary);
 }
 
-.comment-btn.wontfix {
-  background: #d97706;
-  color: #fff;
-}
-
-.comment-btn.wontfix:hover:not(:disabled) {
-  background: #b45309;
-}
-
-.comment-btn.undo-wontfix {
-  background: transparent;
-  color: var(--color-text-tertiary);
-  border: 1px solid var(--color-border-focus);
-}
-
-.comment-btn.undo-wontfix:hover:not(:disabled) {
-  background: var(--color-border-hover);
-  color: var(--color-text-primary);
-}
-
-/* Won't fix state styling */
-.comment-popover.wont-fix {
-  opacity: 0.7;
-}
-
-.comment-wontfix-badge {
-  background: #d97706;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 4px;
-  margin-left: auto;
-}

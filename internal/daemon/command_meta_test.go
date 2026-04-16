@@ -64,7 +64,6 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdAddComment,
 		protocol.CmdUpdateComment,
 		protocol.CmdResolveComment,
-		protocol.CmdWontFixComment,
 		protocol.CmdDeleteComment,
 		protocol.CmdGetComments,
 		protocol.CmdSpawnSession,

@@ -1444,16 +1444,6 @@ printf '%s\\n' ${shellQuote(diffMarker)} >> ${shellQuote(preparedRepo.trackedFil
         throw new Error(`Remote resolve comment failed: ${JSON.stringify(resolveComment, null, 2)}`);
       }
 
-      const wontFixComment = await client.request('review_wont_fix_comment', {
-        commentId: addComment.comment.id,
-        wontFix: true,
-      }, {
-        timeoutMs: 20_000,
-      });
-      if (!wontFixComment?.success) {
-        throw new Error(`Remote wont-fix comment failed: ${JSON.stringify(wontFixComment, null, 2)}`);
-      }
-
       const commentsAfterMutation = await client.request('review_get_comments', {
         reviewId: reviewState.state.review_id,
         filepath: preparedRepo.trackedFile,
@@ -1487,7 +1477,6 @@ printf '%s\\n' ${shellQuote(diffMarker)} >> ${shellQuote(preparedRepo.trackedFil
         addComment,
         updateComment,
         resolveComment,
-        wontFixComment,
         commentsAfterMutation,
         deleteComment,
         commentsAfterDelete,

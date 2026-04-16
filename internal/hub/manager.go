@@ -718,7 +718,6 @@ func forwardsRawEvent(event string) bool {
 		protocol.EventAddCommentResult,
 		protocol.EventUpdateCommentResult,
 		protocol.EventResolveCommentResult,
-		protocol.EventWontFixCommentResult,
 		protocol.EventDeleteCommentResult,
 		protocol.EventGetCommentsResult,
 		protocol.EventWorkspaceRuntimeExited,

@@ -1788,19 +1788,6 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'wont_fix_comment_result': {
-            const pending = pendingActionsRef.current.get('wont_fix_comment');
-            if (pending) {
-              pendingActionsRef.current.delete('wont_fix_comment');
-              if ((data as any).success) {
-                pending.resolve({ success: true });
-              } else {
-                pending.reject(new Error((data as any).error || 'Failed to mark comment as won\'t fix'));
-              }
-            }
-            break;
-          }
-
           case 'delete_comment_result': {
             const pending = pendingActionsRef.current.get('delete_comment');
             if (pending) {
@@ -3262,32 +3249,6 @@ export function useDaemonSocket({
     });
   }, []);
 
-  // Mark or unmark a comment as won't fix
-  const sendWontFixComment = useCallback((commentId: string, wontFix: boolean): Promise<CommentActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'wont_fix_comment';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'wont_fix_comment',
-        comment_id: commentId,
-        wont_fix: wontFix,
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Won\'t fix comment timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
 
   // Delete a comment
   const sendDeleteComment = useCallback((commentId: string): Promise<CommentActionResult> => {
@@ -3405,7 +3366,6 @@ export function useDaemonSocket({
     sendAddComment,
     sendUpdateComment,
     sendResolveComment,
-    sendWontFixComment,
     sendDeleteComment,
     sendGetComments,
     sendStartReviewLoop,

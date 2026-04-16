@@ -58,8 +58,6 @@ export interface InlineComment {
   content: string;
   resolved: boolean;
   resolvedBy?: 'user' | 'agent'; // Who resolved the comment
-  wontFix?: boolean;
-  wontFixBy?: 'user' | 'agent'; // Who marked won't fix
   author?: 'user' | 'agent';
   anchor?: CommentAnchor; // For persistence and staleness detection
   isOutdated?: boolean; // Line content changed since comment was created
@@ -97,7 +95,6 @@ export interface UnifiedDiffEditorProps {
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
   onResolveComment: (id: string, resolved: boolean) => Promise<void>;
-  onWontFixComment: (id: string, wontFix: boolean) => Promise<void>;
   onDeleteComment: (id: string) => Promise<void>;
   onSendToClaude?: (reference: string) => void;
 }
@@ -113,13 +110,10 @@ type DiffEditorTheme = {
   commentBg: string;
   commentBorder: string;
   commentResolvedBg: string;
-  commentWontFixBg: string;
   authorText: string;
   authorBg: string;
   resolvedText: string;
   resolvedBadgeBg: string;
-  wontFixText: string;
-  wontFixBadgeBg: string;
   commentContent: string;
   commentCodeBg: string;
   commentLink: string;
@@ -130,7 +124,6 @@ type DiffEditorTheme = {
   buttonHoverBg: string;
   buttonHoverText: string;
   resolveButton: string;
-  wontFixButton: string;
   deleteButton: string;
   sendButton: string;
   newCommentBg: string;
@@ -165,13 +158,10 @@ const DARK_THEME: DiffEditorTheme = {
   commentBg: '#2d3748',
   commentBorder: '#3b82f6',
   commentResolvedBg: '#1e3a2f',
-  commentWontFixBg: '#3a2f1e',
   authorText: '#ffffff',
   authorBg: '#2563eb',
   resolvedText: '#22c55e',
   resolvedBadgeBg: 'rgba(34, 197, 94, 0.15)',
-  wontFixText: '#d97706',
-  wontFixBadgeBg: 'rgba(217, 119, 6, 0.15)',
   commentContent: '#e5e7eb',
   commentCodeBg: '#1f2937',
   commentLink: '#60a5fa',
@@ -182,7 +172,6 @@ const DARK_THEME: DiffEditorTheme = {
   buttonHoverBg: '#374151',
   buttonHoverText: '#e5e7eb',
   resolveButton: '#22c55e',
-  wontFixButton: '#d97706',
   deleteButton: '#ef4444',
   sendButton: '#d97706',
   newCommentBg: '#312e81',
@@ -217,13 +206,10 @@ const LIGHT_THEME: DiffEditorTheme = {
   commentBg: '#f6f8fa',
   commentBorder: '#0969da',
   commentResolvedBg: '#dafbe1',
-  commentWontFixBg: '#fff8c5',
   authorText: '#ffffff',
   authorBg: '#0969da',
   resolvedText: '#1a7f37',
   resolvedBadgeBg: '#dcffe4',
-  wontFixText: '#9a6700',
-  wontFixBadgeBg: '#fff8c5',
   commentContent: '#24292f',
   commentCodeBg: '#eaedf1',
   commentLink: '#0969da',
@@ -234,7 +220,6 @@ const LIGHT_THEME: DiffEditorTheme = {
   buttonHoverBg: '#eaeef2',
   buttonHoverText: '#24292f',
   resolveButton: '#1a7f37',
-  wontFixButton: '#9a6700',
   deleteButton: '#cf222e',
   sendButton: '#9a6700',
   newCommentBg: '#eef2ff',
@@ -752,9 +737,7 @@ class CommentWidget extends WidgetType {
       a.comment.id === b.comment.id &&
       a.comment.content === b.comment.content &&
       a.comment.resolved === b.comment.resolved &&
-      a.comment.wontFix === b.comment.wontFix &&
       a.comment.resolvedBy === b.comment.resolvedBy &&
-      a.comment.wontFixBy === b.comment.wontFixBy &&
       a.comment.author === b.comment.author &&
       a.comment.isOutdated === b.comment.isOutdated &&
       a.comment.isOrphaned === b.comment.isOrphaned &&
@@ -767,7 +750,7 @@ class CommentWidget extends WidgetType {
     const { comment, isEditing, showSendToClaude } = this.config;
 
     const wrapper = document.createElement('div');
-    wrapper.className = `unified-comment ${comment.resolved ? 'resolved' : ''} ${comment.wontFix ? 'wont-fix' : ''}`;
+    wrapper.className = `unified-comment ${comment.resolved ? 'resolved' : ''}`;
     wrapper.dataset.widgetType = 'comment';
     wrapper.dataset.commentId = comment.id;
 
@@ -787,16 +770,10 @@ class CommentWidget extends WidgetType {
       const resolvedBadge = comment.resolved
         ? `<span class="unified-comment-resolved">Resolved by ${comment.resolvedBy === 'agent' ? 'Claude' : 'you'}</span>`
         : '';
-      const wontFixBadge = comment.wontFix
-        ? `<span class="unified-comment-wontfix">Won't Fix by ${comment.wontFixBy === 'agent' ? 'Claude' : 'you'}</span>`
-        : '';
       const sendToClaudeBtn = showSendToClaude
         ? `<button class="send-btn" data-action="send-to-claude">Send to CC</button>`
         : '';
-      const wontFixBtn = comment.wontFix
-        ? `<button class="wontfix-btn" data-action="wontfix">Undo Won't Fix</button>`
-        : `<button class="wontfix-btn" data-action="wontfix">Won't Fix</button>`;
-      wrapper.innerHTML = `<div class="unified-comment-header"><div class="unified-comment-left"><span class="unified-comment-author">${comment.author === 'agent' ? 'Claude' : 'You'}</span>${resolvedBadge}${wontFixBadge}</div><div class="unified-comment-actions"><button class="edit-btn" data-action="edit">Edit</button>${sendToClaudeBtn}<button class="resolve-btn" data-action="resolve">${comment.resolved ? 'Unresolve' : 'Resolve'}</button>${wontFixBtn}<button class="delete-btn" data-action="delete">Delete</button></div></div><div class="unified-comment-content">${renderMarkdown(comment.content)}</div>`;
+      wrapper.innerHTML = `<div class="unified-comment-header"><div class="unified-comment-left"><span class="unified-comment-author">${comment.author === 'agent' ? 'Claude' : 'You'}</span>${resolvedBadge}</div><div class="unified-comment-actions"><button class="edit-btn" data-action="edit">Edit</button>${sendToClaudeBtn}<button class="resolve-btn" data-action="resolve">${comment.resolved ? 'Unresolve' : 'Resolve'}</button><button class="delete-btn" data-action="delete">Delete</button></div></div><div class="unified-comment-content">${renderMarkdown(comment.content)}</div>`;
     }
 
     return wrapper;
@@ -921,7 +898,6 @@ interface CommentActions {
   onEditComment: (id: string, content: string) => Promise<void>;
   onCancelEdit: () => void;
   onResolveComment: (id: string, resolved: boolean) => Promise<void>;
-  onWontFixComment: (id: string, wontFix: boolean) => Promise<void>;
   onDeleteComment: (id: string) => Promise<void>;
   onSendToClaude?: (reference: string) => void;
   handleSaveComment: (docLine: number, content: string) => Promise<void>;
@@ -946,7 +922,6 @@ export function UnifiedDiffEditor({
   onStartEdit,
   onCancelEdit,
   onResolveComment,
-  onWontFixComment,
   onDeleteComment,
   onSendToClaude,
 }: UnifiedDiffEditorProps) {
@@ -1117,7 +1092,7 @@ export function UnifiedDiffEditor({
 
   actionsRef.current = {
     onStartEdit, onEditComment, onCancelEdit,
-    onResolveComment, onWontFixComment, onDeleteComment,
+    onResolveComment, onDeleteComment,
     onSendToClaude, handleSaveComment, handleCancelComment,
     handleDraftChange, filePath,
   };
@@ -1244,10 +1219,6 @@ export function UnifiedDiffEditor({
           borderLeftColor: colorTheme.resolveButton,
           background: colorTheme.commentResolvedBg,
         },
-        '.unified-comment.wont-fix': {
-          borderLeftColor: colorTheme.wontFixButton,
-          background: colorTheme.commentWontFixBg,
-        },
         '.unified-comment-header': {
           display: 'flex',
           alignItems: 'center',
@@ -1274,14 +1245,6 @@ export function UnifiedDiffEditor({
           borderRadius: '4px',
           color: colorTheme.resolvedText,
           background: colorTheme.resolvedBadgeBg,
-        },
-        '.unified-comment-wontfix': {
-          fontSize: `${fontSize - 2}px`,
-          fontWeight: '500',
-          padding: '2px 8px',
-          borderRadius: '4px',
-          color: colorTheme.wontFixText,
-          background: colorTheme.wontFixBadgeBg,
         },
         '.unified-comment-content': {
           color: colorTheme.commentContent,
@@ -1358,14 +1321,6 @@ export function UnifiedDiffEditor({
         },
         '.unified-comment-actions .resolve-btn:hover': {
           background: colorTheme.resolveButton,
-          color: colorTheme.authorText,
-        },
-        '.unified-comment-actions .wontfix-btn': {
-          borderColor: colorTheme.wontFixButton,
-          color: colorTheme.wontFixButton,
-        },
-        '.unified-comment-actions .wontfix-btn:hover': {
-          background: colorTheme.wontFixButton,
           color: colorTheme.authorText,
         },
         '.unified-comment-actions .delete-btn': {
@@ -1605,11 +1560,6 @@ export function UnifiedDiffEditor({
           case 'resolve': {
             const comment = commentsRef.current.find(c => c.id === commentId);
             if (comment) actionsRef.current.onResolveComment(commentId, !comment.resolved);
-            break;
-          }
-          case 'wontfix': {
-            const comment = commentsRef.current.find(c => c.id === commentId);
-            if (comment) actionsRef.current.onWontFixComment(commentId, !comment.wontFix);
             break;
           }
           case 'delete':
