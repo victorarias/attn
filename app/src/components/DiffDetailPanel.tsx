@@ -350,6 +350,9 @@ export function DiffDetailPanel({
       localApplied = true;
       setIsLoadingBranchDiff(false);
     } else {
+      // Clear stale files from a previous branch so orphan-cleanup
+      // doesn't run against the wrong file list while the fetch is in-flight.
+      setBranchDiffFiles([]);
       setIsLoadingBranchDiff(true);
       // Small delay avoids guaranteed duplicate heavy diff calls when remote sync is fast.
       localTimer = setTimeout(() => {
@@ -549,6 +552,7 @@ export function DiffDetailPanel({
 
   // Auto-delete comments for files no longer in the branch diff.
   // diffFilePaths.size === 0 means the diff is still loading — don't touch anything yet.
+  // (branchDiffFiles is cleared to [] on branch change before the fresh fetch returns.)
   useEffect(() => {
     if (!deleteComment || diffFilePaths.size === 0 || allReviewComments.length === 0) return;
 
