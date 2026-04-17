@@ -53,7 +53,7 @@ func connectViaSSHOnce(ctx context.Context, sshTarget, authToken string) (*webso
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		_ = cmd.Process.Kill()
+		killAndReap(cmd)
 		return nil, nil, err
 	}
 
@@ -90,7 +90,7 @@ func connectViaSSHOnce(ctx context.Context, sshTarget, authToken string) (*webso
 	ws, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: headers})
 	if err != nil {
 		_ = ln.Close()
-		_ = cmd.Process.Kill()
+		killAndReap(cmd)
 		if acceptErr != nil {
 			return nil, nil, acceptErr
 		}
@@ -98,6 +98,18 @@ func connectViaSSHOnce(ctx context.Context, sshTarget, authToken string) (*webso
 	}
 	ws.SetReadLimit(remoteWSMessageReadLimit)
 	return ws, cmd, nil
+}
+
+// killAndReap terminates cmd and waits for it to exit so the child is not left
+// as a zombie on macOS. cmd.Wait also drains the Std{in,out,err}Pipe goroutines
+// that StdinPipe/StdoutPipe spawned; calling only os.Process.Kill leaks both the
+// OS-level zombie and the pipe goroutines.
+func killAndReap(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
 }
 
 func isRetryableWSRelayDialError(err error) bool {

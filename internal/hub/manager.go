@@ -396,9 +396,8 @@ func (m *Manager) stopRuntimeLocked(runtime *endpointRuntime) {
 		_ = runtime.conn.Close(websocket.StatusNormalClosure, "")
 		runtime.conn = nil
 	}
-	if runtime.cmd != nil && runtime.cmd.Process != nil {
-		_ = runtime.cmd.Process.Kill()
-		_, _ = runtime.cmd.Process.Wait()
+	if runtime.cmd != nil {
+		killAndReap(runtime.cmd)
 		runtime.cmd = nil
 	}
 	runtime.sessions = make(map[string]protocol.Session)
@@ -1605,9 +1604,8 @@ func (m *Manager) clearConnection(id string) {
 		_ = runtime.conn.Close(websocket.StatusNormalClosure, "")
 		runtime.conn = nil
 	}
-	if runtime.cmd != nil && runtime.cmd.Process != nil {
-		_ = runtime.cmd.Process.Kill()
-		_, _ = runtime.cmd.Process.Wait()
+	if runtime.cmd != nil {
+		killAndReap(runtime.cmd)
 		runtime.cmd = nil
 	}
 }
