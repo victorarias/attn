@@ -85,6 +85,12 @@ vi.mock('@xterm/xterm', () => {
     attachCustomKeyEventHandler() { return true; }
     hasSelection() { return false; }
     getSelection() { return ''; }
+    parser = {
+      registerOscHandler() { return { dispose() {} }; },
+      registerCsiHandler() { return { dispose() {} }; },
+      registerDcsHandler() { return { dispose() {} }; },
+      registerEscHandler() { return { dispose() {} }; },
+    };
   }
 
   return { Terminal: MockTerminal };
