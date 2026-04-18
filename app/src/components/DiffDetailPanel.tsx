@@ -206,6 +206,8 @@ interface DiffDetailPanelProps {
   initialSelectedFile?: string;
   // Send a code reference to the active agent session
   onSendToClaude?: (reference: string) => void;
+  // Global UI scale; drives the CodeMirror editor font size.
+  scale?: number;
 }
 
 export function DiffDetailPanel({
@@ -228,6 +230,7 @@ export function DiffDetailPanel({
   resolvedTheme = 'dark',
   initialSelectedFile,
   onSendToClaude,
+  scale = 1,
 }: DiffDetailPanelProps) {
   const [contentVisible, setContentVisible] = useState(isOpen);
   // Track selected file by path for stability across gitStatus updates
@@ -238,7 +241,7 @@ export function DiffDetailPanel({
   const [error, setError] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState<{ original: string; modified: string } | null>(null);
   const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks mode (uses 3 lines context), -1 = full file
-  const [fontSize, setFontSize] = useState(13); // Default font size
+  const fontSize = Math.round(13 * scale);
   const [scrollToLine, setScrollToLine] = useState<number | undefined>(undefined);
 
   // Branch diff state - PR-like comparison against origin/main
@@ -728,24 +731,10 @@ export function DiffDetailPanel({
         return;
       }
 
-      // Handle Cmd/Ctrl + / - for font size
+      // Font size (Cmd/Ctrl + = / - / 0) is handled by the global
+      // useUIScale shortcut, which drives `scale` and thus `fontSize`.
       if (e.metaKey || e.ctrlKey) {
-        if (e.key === '=' || e.key === '+') {
-          e.preventDefault();
-          setFontSize(prev => Math.min(prev + 1, 24));
-          return;
-        }
-        if (e.key === '-') {
-          e.preventDefault();
-          setFontSize(prev => Math.max(prev - 1, 9));
-          return;
-        }
-        if (e.key === '0') {
-          e.preventDefault();
-          setFontSize(13); // Reset to default
-          return;
-        }
-        return; // Don't process other keys with modifiers
+        return;
       }
 
       if (e.altKey) return;

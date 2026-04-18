@@ -2078,6 +2078,7 @@ sendFetchPRDetails,
                   initialSelectedFile={initialReviewFile || undefined}
                   onOpenEditor={handleOpenEditorForReview}
                   onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
+                  scale={scale}
                 />
               ),
             },

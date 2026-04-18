@@ -26,18 +26,18 @@
 
 .review-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
   color: var(--color-text-primary);
 }
 
 .review-file-count {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   color: var(--color-text-tertiary);
   margin-left: auto;
 }
 
 .review-sync-status {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: #8ea3ba;
   white-space: nowrap;
 }
@@ -54,7 +54,7 @@
   background: var(--color-border);
   border: 1px solid var(--color-border-hover);
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   cursor: pointer;
   padding: 6px 10px;
   border-radius: 6px;
@@ -72,7 +72,7 @@
   border: 1px solid var(--color-border-hover);
   border-radius: 4px;
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--color-text-secondary);
 }
 
@@ -97,7 +97,7 @@
 }
 
 .file-group-header {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-weight: 600;
   color: var(--color-text-tertiary);
   padding: 4px 12px 8px;
@@ -111,7 +111,7 @@
 
 .review-tree-dir {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   padding: 6px 12px;
 }
 
@@ -121,7 +121,7 @@
   padding: 6px 12px;
   gap: 8px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   color: var(--color-text-secondary);
 }
 
@@ -151,7 +151,7 @@
 
 .file-icon {
   width: 14px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   color: #4ec9b0;
 }
 
@@ -160,7 +160,7 @@
 }
 
 .file-status {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   font-weight: 600;
   width: 14px;
   text-align: center;
@@ -190,7 +190,7 @@
 }
 
 .file-stats {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   display: flex;
   gap: 4px;
 }
@@ -207,7 +207,7 @@
   padding: 24px;
   text-align: center;
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
 }
 
 .review-diff-area {
@@ -228,7 +228,7 @@
 }
 
 .diff-filename {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   font-family: 'JetBrains Mono', monospace;
   color: var(--color-text-secondary);
   flex: 1;
@@ -241,7 +241,7 @@
 }
 
 .changed-badge {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
   font-weight: 600;
   text-transform: uppercase;
@@ -263,7 +263,7 @@
   border: 1px solid var(--color-border-focus);
   color: var(--color-text-secondary);
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -296,7 +296,7 @@
   justify-content: center;
   height: 100%;
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
   background: var(--color-bg-editor);
 }
 
@@ -314,7 +314,7 @@
 }
 
 .review-footer .shortcut {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--color-text-tertiary);
 }
 
@@ -324,7 +324,7 @@
   border-radius: 3px;
   padding: 1px 4px;
   font-family: inherit;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   color: var(--color-text-secondary);
 }
 
@@ -332,7 +332,7 @@
 .file-comment-count {
   background: #2563eb;
   color: white;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 10px;
@@ -363,7 +363,7 @@
   border: 1px solid #3b82f6;
   color: white;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -392,7 +392,7 @@
   border: 1px solid var(--color-border-hover);
   color: var(--color-text-primary);
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -413,7 +413,7 @@
   border: 1px solid var(--color-border-hover);
   color: var(--color-text-primary);
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -461,7 +461,7 @@
   gap: 8px;
   padding: 8px 16px;
   background: var(--color-bg-button);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   font-weight: 600;
   color: var(--color-text-primary);
   position: relative;
@@ -473,7 +473,7 @@
 }
 
 .reviewer-collapse-icon {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   opacity: 0.7;
 }
 
@@ -521,7 +521,7 @@
 .reviewer-output-content {
   padding: 12px 16px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   color: var(--color-text-secondary);
   line-height: 1.6;
   overflow-y: auto;
@@ -537,9 +537,9 @@
   font-weight: 600;
 }
 
-.reviewer-output-content h1 { font-size: 18px; }
-.reviewer-output-content h2 { font-size: 16px; }
-.reviewer-output-content h3 { font-size: 14px; }
+.reviewer-output-content h1 { font-size: calc(18px * var(--ui-scale)); }
+.reviewer-output-content h2 { font-size: calc(16px * var(--ui-scale)); }
+.reviewer-output-content h3 { font-size: calc(14px * var(--ui-scale)); }
 
 .reviewer-output-content p {
   margin: 8px 0;
@@ -560,7 +560,7 @@
   padding: 2px 6px;
   border-radius: 3px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
 }
 
 .reviewer-output-content pre {
@@ -689,7 +689,7 @@
 }
 
 .reviewer-loading-text {
-  font-size: 15px;
+  font-size: calc(15px * var(--ui-scale));
   font-weight: 500;
   color: var(--color-text-tertiary);
   letter-spacing: 0.01em;
