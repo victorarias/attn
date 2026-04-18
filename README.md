@@ -100,6 +100,12 @@ Long-run review behavior: if a run takes 5+ minutes, attn keeps it yellow when i
 | Cmd+Up / Down | Jump between sessions |
 | Cmd+R | Refresh PRs |
 
+### Selecting text in agent terminals
+
+Agents like Claude Code enable terminal mouse tracking, which means a normal click-drag is forwarded to the agent instead of creating a selection. **Hold Option while dragging** to bypass mouse tracking and make a selection you can copy — this is the same convention iTerm2, Terminal.app, and kitty use.
+
+If the agent explicitly copies text for you (e.g. "copy this to my clipboard"), attn honors the terminal's OSC 52 clipboard sequence and writes to your Mac clipboard directly. No xclip / X server needed on the remote.
+
 ## How it works
 
 1. The bundled attn runtime wraps your agent CLI and installs hooks (Claude) or reads PTY output (Codex, Copilot) to detect state.

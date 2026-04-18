@@ -16,6 +16,7 @@
     "fs:allow-read-dir",
     "fs:allow-exists",
     "fs:allow-mkdir",
+    "clipboard-manager:allow-write-text",
     {
       "identifier": "fs:scope",
       "allow": [

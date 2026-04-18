@@ -32,6 +32,7 @@ import {
 import { installTerminalRendererLifecycle } from '../utils/terminalRendererLifecycle';
 import { installTerminalViewportLifecycle } from '../utils/terminalViewportLifecycle';
 import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
+import { writeClipboardText } from '../utils/clipboardBridge';
 import type { TerminalPerfStartupSnapshot } from '../utils/terminalPerf';
 export type { ResolvedTheme } from '../utils/terminalSizing';
 
@@ -619,9 +620,28 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         if (performance.now() < mdCopyUntil) return;
         const selection = term.getSelection();
         if (selection) {
-          const lines = selection.split('\n').map(line => line.trimEnd());
-          navigator.clipboard.writeText(cleanTerminalLines(lines).join('\n'));
+          const text = cleanTerminalLines(selection.split('\n').map(line => line.trimEnd())).join('\n');
+          void writeClipboardText(text);
         }
+      });
+
+      // OSC 52: remote programs (Claude Code, vim, tmux, etc.) can copy text to
+      // the client's clipboard via `ESC ] 52 ; <selections> ; <base64> BEL`.
+      // We honor writes only — never reads, which would leak clipboard state
+      // to whatever is running on the remote PTY.
+      const osc52Disposable = term.parser.registerOscHandler(52, (data) => {
+        const sep = data.indexOf(';');
+        if (sep < 0) return false;
+        const payload = data.slice(sep + 1);
+        if (payload === '?') return false; // refuse read-clipboard queries
+        let text: string;
+        try {
+          text = atob(payload);
+        } catch {
+          return false;
+        }
+        void writeClipboardText(text);
+        return true;
       });
 
       // Cmd+Shift+C: copy selection as markdown (bold → **text**, etc.)
@@ -631,7 +651,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         if (e.key.toLowerCase() === 'c' && e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey) {
           if (term.hasSelection()) {
             mdCopyUntil = performance.now() + 200;
-            navigator.clipboard.writeText(bufferSelectionToMarkdown(term));
+            void writeClipboardText(bufferSelectionToMarkdown(term));
             e.preventDefault();
             e.stopPropagation();
           }
@@ -879,6 +899,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           }
           renderDisposable.dispose();
           writeParsedDisposable.dispose();
+          osc52Disposable.dispose();
           window.clearInterval(heartbeatInterval);
           viewportLifecycle.dispose();
         window.removeEventListener('keydown', handleMdCopy, true);

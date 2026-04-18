@@ -8,6 +8,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-04-18]
 
+### Added
+- **OSC 52 Clipboard Forwarding**: When a remote program (Claude Code, vim, tmux, etc.) asks the terminal to copy text via the OSC 52 escape sequence, attn now writes that text to your Mac clipboard. This works over SSH to a Linux host without xclip or an X server — the copy happens in the Mac-side terminal emulator, not on the remote. Read requests (`OSC 52 ; c ; ?`) are refused to avoid leaking your clipboard to whatever is running on the remote.
+
+### Changed
+- **Selecting Text While An Agent Is Running**: Agents that enable terminal mouse tracking (notably Claude Code) forward click-drag to the agent instead of creating a selection, so attn's copy-on-select never fires. Hold **Option** while dragging to force a native selection — the same convention iTerm2, Terminal.app, and kitty use. This is now documented in the README.
+
 ### Fixed
 - **Terminal Link Clicks**: Cmd/Ctrl-clicking a URL in the terminal opens it once, whether the TUI renders the URL as an OSC 8 hyperlink or as plain text. Fixes a regression where cmd-click stopped opening plain-text URLs, and where URLs that matched both renderings could open twice.
 - **Diff Panel Font Scaling**: Cmd+=/Cmd+- now resizes the diff panel's file list and editor regardless of which pane is focused. The panel previously kept its own local font size that only updated when the panel itself had focus, and the file list ignored the global UI scale entirely.
