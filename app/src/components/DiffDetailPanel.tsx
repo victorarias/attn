@@ -770,7 +770,6 @@ export function DiffDetailPanel({
           navigateToNextUnreviewed();
           break;
         case 'e':
-        case 'E':
           // Toggle between the two modes the UI actually supports:
           // hunks (0) and full file (-1).
           e.preventDefault();
@@ -1162,7 +1161,7 @@ export function DiffDetailPanel({
                 <button
                   className={`expand-btn ${expandedContext === -1 ? 'active' : ''}`}
                   onClick={() => setExpandedContext(-1)}
-                  title="Full file (e toggles)"
+                  title="Full file (e)"
                 >
                   Full
                 </button>
