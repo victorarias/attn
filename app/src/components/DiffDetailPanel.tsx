@@ -202,8 +202,11 @@ interface DiffDetailPanelProps {
   deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
   getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: ReviewComment[] }>;
   resolvedTheme?: ResolvedTheme;
-  // Initial file to select when panel opens
-  initialSelectedFile?: string;
+  // Controlled selection. The parent owns which file is shown so that
+  // external triggers (ChangesPanel clicks, shortcut open) and internal
+  // navigation share a single source of truth.
+  selectedFilePath: string | null;
+  onSelectFilePath: (path: string | null) => void;
   // Send a code reference to the active agent session
   onSendToClaude?: (reference: string) => void;
   // Global UI scale; drives the CodeMirror editor font size.
@@ -228,13 +231,12 @@ export function DiffDetailPanel({
   deleteComment,
   getComments,
   resolvedTheme = 'dark',
-  initialSelectedFile,
+  selectedFilePath,
+  onSelectFilePath,
   onSendToClaude,
   scale = 1,
 }: DiffDetailPanelProps) {
   const [contentVisible, setContentVisible] = useState(isOpen);
-  // Track selected file by path for stability across gitStatus updates
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -507,16 +509,12 @@ export function DiffDetailPanel({
     }
   }, [isOpen, repoPath, branch, getReviewState]);
 
-  // Auto-select file when opening - use initialSelectedFile if provided, else first file
+  // Fallback: when the panel opens without a selection, pick the first
+  // reviewable file.
   useEffect(() => {
-    if (isOpen && !selectedFilePath) {
-      if (initialSelectedFile) {
-        setSelectedFilePath(initialSelectedFile);
-      } else if (needsReviewFiles.length > 0) {
-        setSelectedFilePath(needsReviewFiles[0].path);
-      }
-    }
-  }, [isOpen, needsReviewFiles, selectedFilePath, initialSelectedFile]);
+    if (!isOpen || selectedFilePath || needsReviewFiles.length === 0) return;
+    onSelectFilePath(needsReviewFiles[0].path);
+  }, [isOpen, needsReviewFiles, selectedFilePath, onSelectFilePath]);
 
   // Keep current selection on branch diff refresh when possible.
   // If the file disappears, select the first available review file.
@@ -527,14 +525,14 @@ export function DiffDetailPanel({
     if (allFiles.some((f) => f.path === selectedFilePath)) return;
 
     if (needsReviewFiles.length > 0) {
-      setSelectedFilePath(needsReviewFiles[0].path);
+      onSelectFilePath(needsReviewFiles[0].path);
       return;
     }
     if (allFiles.length > 0) {
-      setSelectedFilePath(allFiles[0].path);
+      onSelectFilePath(allFiles[0].path);
       return;
     }
-    setSelectedFilePath(null);
+    onSelectFilePath(null);
   }, [isOpen, selectedFilePath, needsReviewFiles, allFiles]);
 
   // Load all comments for the review
@@ -595,7 +593,7 @@ export function DiffDetailPanel({
   // Reset state when closing
   useEffect(() => {
     if (!contentVisible) {
-      setSelectedFilePath(null);
+      onSelectFilePath(null);
       setDiffContent(null);
       setError(null);
       setExpandedContext(0);
@@ -614,7 +612,7 @@ export function DiffDetailPanel({
     if (!isOpen) return;
     const prevRepo = previousRepoPathRef.current;
     if (prevRepo && prevRepo !== repoPath) {
-      setSelectedFilePath(null);
+      onSelectFilePath(null);
       setDiffContent(null);
       setError(null);
       setLoading(false);
@@ -796,7 +794,7 @@ export function DiffDetailPanel({
     const newIndex = direction === 'next'
       ? Math.min(currentIndex + 1, allFiles.length - 1)
       : Math.max(currentIndex - 1, 0);
-    setSelectedFilePath(allFiles[newIndex].path);
+    onSelectFilePath(allFiles[newIndex].path);
   }, [allFiles, selectedFilePath]);
 
   const navigateToNextUnreviewed = useCallback(() => {
@@ -829,14 +827,14 @@ export function DiffDetailPanel({
       f => f.path !== current && changedSinceViewed.has(f.path)
     );
     if (changedFile) {
-      setSelectedFilePath(changedFile.path);
+      onSelectFilePath(changedFile.path);
       return;
     }
     const unreviewed = needsReviewFiles.find(
       f => f.path !== current && !viewedFiles.has(f.path)
     );
     if (unreviewed) {
-      setSelectedFilePath(unreviewed.path);
+      onSelectFilePath(unreviewed.path);
     }
   }, [needsReviewFiles, viewedFiles, changedSinceViewed, selectedFilePath, reviewId, markFileViewed]);
 
@@ -1059,7 +1057,7 @@ export function DiffDetailPanel({
           key={`file-${file.path}-${index}`}
           className={`file-item ${isSelected ? 'selected' : ''} ${isViewed ? 'viewed' : ''} ${isChanged ? 'changed' : ''} ${isAutoSkip ? 'auto-skip' : ''}`}
           style={{ paddingLeft: `${depth * 12 + 12}px` }}
-          onClick={() => setSelectedFilePath(file.path)}
+          onClick={() => onSelectFilePath(file.path)}
         >
           <span className="file-icon">{getFileIcon(file)}</span>
           <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>

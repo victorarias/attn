@@ -585,7 +585,10 @@ sendFetchPRDetails,
   } | null>(null);
   const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(false);
 
-  const [initialReviewFile, setInitialReviewFile] = useState<string | null>(null);
+  // Owning the diff panel's selected file here keeps external triggers
+  // (ChangesPanel clicks, shortcut open) and internal navigation using
+  // the same setter, so re-clicking the same path always lands on it.
+  const [diffSelectedFilePath, setDiffSelectedFilePath] = useState<string | null>(null);
   const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
   const hasAvailableAgents = useMemo(
     () => hasAnyAvailableAgents(agentAvailability),
@@ -1566,7 +1569,7 @@ sendFetchPRDetails,
 
   // Open file in diff detail panel
   const handleFileSelect = useCallback((path: string, _staged: boolean) => {
-    setInitialReviewFile(path);
+    setDiffSelectedFilePath(path);
     openDockPanel('diffDetail');
   }, [openDockPanel]);
 
@@ -1635,13 +1638,13 @@ sendFetchPRDetails,
 
   // Diff detail panel handlers
   const handleOpenDiffDetailPanel = useCallback(() => {
-    setInitialReviewFile(null); // No specific file, let the diff detail panel pick first
+    setDiffSelectedFilePath(null); // Let the panel pick the first reviewable file.
     openDockPanel('diffDetail');
   }, [openDockPanel]);
 
   const handleCloseDiffDetailPanel = useCallback(() => {
     closeDockPanel('diffDetail');
-    setInitialReviewFile(null);
+    setDiffSelectedFilePath(null);
   }, [closeDockPanel]);
 
   const handleSendToClaude = useCallback((reference: string) => {
@@ -2075,7 +2078,8 @@ sendFetchPRDetails,
                   deleteComment={sendDeleteComment}
                   getComments={sendGetComments}
                   resolvedTheme={resolvedTheme}
-                  initialSelectedFile={initialReviewFile || undefined}
+                  selectedFilePath={diffSelectedFilePath}
+                  onSelectFilePath={setDiffSelectedFilePath}
                   onOpenEditor={handleOpenEditorForReview}
                   onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
                   scale={scale}
