@@ -14,7 +14,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-04-18]
 
 ### Fixed
-- **Terminal Link Clicks**: Cmd/Ctrl-clicking a URL in the terminal opens it again, whether the TUI renders it as an OSC 8 hyperlink or as plain text. Both xterm surfaces route through a shared opener that de-duplicates same-URL opens within 1s, so links that render in both surfaces still open exactly once.
+- **Terminal Link Clicks**: Cmd/Ctrl-clicking a URL in the terminal opens it once, whether the TUI renders the URL as an OSC 8 hyperlink or as plain text. Fixes a regression where cmd-click stopped opening plain-text URLs, and where URLs that matched both renderings could open twice.
 
 ## [2026-04-16]
 
