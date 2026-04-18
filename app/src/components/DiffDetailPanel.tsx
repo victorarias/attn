@@ -202,10 +202,15 @@ interface DiffDetailPanelProps {
   deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
   getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: ReviewComment[] }>;
   resolvedTheme?: ResolvedTheme;
-  // Initial file to select when panel opens
-  initialSelectedFile?: string;
+  // Controlled selection. The parent owns which file is shown so that
+  // external triggers (ChangesPanel clicks, shortcut open) and internal
+  // navigation share a single source of truth.
+  selectedFilePath: string | null;
+  onSelectFilePath: (path: string | null) => void;
   // Send a code reference to the active agent session
   onSendToClaude?: (reference: string) => void;
+  // Global UI scale; drives the CodeMirror editor font size.
+  scale?: number;
 }
 
 export function DiffDetailPanel({
@@ -226,20 +231,21 @@ export function DiffDetailPanel({
   deleteComment,
   getComments,
   resolvedTheme = 'dark',
-  initialSelectedFile,
+  selectedFilePath,
+  onSelectFilePath,
   onSendToClaude,
+  scale = 1,
 }: DiffDetailPanelProps) {
   const [contentVisible, setContentVisible] = useState(isOpen);
-  // Track selected file by path for stability across gitStatus updates
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState<{ original: string; modified: string } | null>(null);
   const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks mode (uses 3 lines context), -1 = full file
-  const [fontSize, setFontSize] = useState(13); // Default font size
+  const fontSize = Math.round(13 * scale);
   const [scrollToLine, setScrollToLine] = useState<number | undefined>(undefined);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Branch diff state - PR-like comparison against origin/main
   const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
@@ -503,16 +509,12 @@ export function DiffDetailPanel({
     }
   }, [isOpen, repoPath, branch, getReviewState]);
 
-  // Auto-select file when opening - use initialSelectedFile if provided, else first file
+  // Fallback: when the panel opens without a selection, pick the first
+  // reviewable file.
   useEffect(() => {
-    if (isOpen && !selectedFilePath) {
-      if (initialSelectedFile) {
-        setSelectedFilePath(initialSelectedFile);
-      } else if (needsReviewFiles.length > 0) {
-        setSelectedFilePath(needsReviewFiles[0].path);
-      }
-    }
-  }, [isOpen, needsReviewFiles, selectedFilePath, initialSelectedFile]);
+    if (!isOpen || selectedFilePath || needsReviewFiles.length === 0) return;
+    onSelectFilePath(needsReviewFiles[0].path);
+  }, [isOpen, needsReviewFiles, selectedFilePath, onSelectFilePath]);
 
   // Keep current selection on branch diff refresh when possible.
   // If the file disappears, select the first available review file.
@@ -523,14 +525,14 @@ export function DiffDetailPanel({
     if (allFiles.some((f) => f.path === selectedFilePath)) return;
 
     if (needsReviewFiles.length > 0) {
-      setSelectedFilePath(needsReviewFiles[0].path);
+      onSelectFilePath(needsReviewFiles[0].path);
       return;
     }
     if (allFiles.length > 0) {
-      setSelectedFilePath(allFiles[0].path);
+      onSelectFilePath(allFiles[0].path);
       return;
     }
-    setSelectedFilePath(null);
+    onSelectFilePath(null);
   }, [isOpen, selectedFilePath, needsReviewFiles, allFiles]);
 
   // Load all comments for the review
@@ -580,10 +582,18 @@ export function DiffDetailPanel({
     previousSelectedPathRef.current = selectedFilePath;
   }, [selectedFilePath]);
 
+  // Move focus into the panel when it opens so keyboard shortcuts
+  // (j/k, ], e, etc.) work immediately instead of being swallowed by
+  // the previously focused terminal textarea or contentEditable editor.
+  useEffect(() => {
+    if (!isOpen) return;
+    panelRef.current?.focus({ preventScroll: true });
+  }, [isOpen]);
+
   // Reset state when closing
   useEffect(() => {
     if (!contentVisible) {
-      setSelectedFilePath(null);
+      onSelectFilePath(null);
       setDiffContent(null);
       setError(null);
       setExpandedContext(0);
@@ -602,7 +612,7 @@ export function DiffDetailPanel({
     if (!isOpen) return;
     const prevRepo = previousRepoPathRef.current;
     if (prevRepo && prevRepo !== repoPath) {
-      setSelectedFilePath(null);
+      onSelectFilePath(null);
       setDiffContent(null);
       setError(null);
       setLoading(false);
@@ -728,24 +738,10 @@ export function DiffDetailPanel({
         return;
       }
 
-      // Handle Cmd/Ctrl + / - for font size
+      // Font size (Cmd/Ctrl + = / - / 0) is handled by the global
+      // useUIScale shortcut, which drives `scale` and thus `fontSize`.
       if (e.metaKey || e.ctrlKey) {
-        if (e.key === '=' || e.key === '+') {
-          e.preventDefault();
-          setFontSize(prev => Math.min(prev + 1, 24));
-          return;
-        }
-        if (e.key === '-') {
-          e.preventDefault();
-          setFontSize(prev => Math.max(prev - 1, 9));
-          return;
-        }
-        if (e.key === '0') {
-          e.preventDefault();
-          setFontSize(13); // Reset to default
-          return;
-        }
-        return; // Don't process other keys with modifiers
+        return;
       }
 
       if (e.altKey) return;
@@ -774,16 +770,10 @@ export function DiffDetailPanel({
           navigateToNextUnreviewed();
           break;
         case 'e':
+          // Toggle between the two modes the UI actually supports:
+          // hunks (0) and full file (-1).
           e.preventDefault();
-          if (e.shiftKey) {
-            setExpandedContext(-1); // Full file
-          } else {
-            setExpandedContext(prev => prev === -1 ? 0 : prev + 10);
-          }
-          break;
-        case 'E':
-          e.preventDefault();
-          setExpandedContext(-1); // Full file
+          setExpandedContext(prev => prev === -1 ? 0 : -1);
           break;
       }
     };
@@ -798,22 +788,49 @@ export function DiffDetailPanel({
     const newIndex = direction === 'next'
       ? Math.min(currentIndex + 1, allFiles.length - 1)
       : Math.max(currentIndex - 1, 0);
-    setSelectedFilePath(allFiles[newIndex].path);
+    onSelectFilePath(allFiles[newIndex].path);
   }, [allFiles, selectedFilePath]);
 
   const navigateToNextUnreviewed = useCallback(() => {
-    // First look for files that changed since viewed
-    const changedFile = needsReviewFiles.find(f => changedSinceViewed.has(f.path));
+    const current = selectedFilePath;
+
+    // Mark the current file viewed on its way out so `]` consistently
+    // advances instead of re-selecting the same file.
+    if (current) {
+      const wasFirstView = !viewedFiles.has(current);
+      setViewedFiles(prev => {
+        if (prev.has(current)) return prev;
+        return new Set(prev).add(current);
+      });
+      setChangedSinceViewed(prev => {
+        if (!prev.has(current)) return prev;
+        const next = new Set(prev);
+        next.delete(current);
+        return next;
+      });
+      if (wasFirstView && reviewId) {
+        markFileViewed(reviewId, current, true).catch(err => {
+          console.error('Failed to persist viewed state:', err);
+        });
+      }
+    }
+
+    // Prefer files changed since last viewed, then any unviewed file,
+    // always excluding the one we just marked.
+    const changedFile = needsReviewFiles.find(
+      f => f.path !== current && changedSinceViewed.has(f.path)
+    );
     if (changedFile) {
-      setSelectedFilePath(changedFile.path);
+      onSelectFilePath(changedFile.path);
       return;
     }
-    // Then look for unviewed files
-    const unreviewed = needsReviewFiles.find(f => !viewedFiles.has(f.path));
+    const unreviewed = needsReviewFiles.find(
+      f => f.path !== current && !viewedFiles.has(f.path)
+    );
     if (unreviewed) {
-      setSelectedFilePath(unreviewed.path);
+      onSelectFilePath(unreviewed.path);
     }
-  }, [needsReviewFiles, viewedFiles, changedSinceViewed]);
+  }, [needsReviewFiles, viewedFiles, changedSinceViewed, selectedFilePath, reviewId, markFileViewed]);
 
   const getFileIcon = useCallback((file: ReviewFile) => {
     if (file.isAutoSkip) return '⊘';
@@ -1034,7 +1051,7 @@ export function DiffDetailPanel({
           key={`file-${file.path}-${index}`}
           className={`file-item ${isSelected ? 'selected' : ''} ${isViewed ? 'viewed' : ''} ${isChanged ? 'changed' : ''} ${isAutoSkip ? 'auto-skip' : ''}`}
           style={{ paddingLeft: `${depth * 12 + 12}px` }}
-          onClick={() => setSelectedFilePath(file.path)}
+          onClick={() => onSelectFilePath(file.path)}
         >
           <span className="file-icon">{getFileIcon(file)}</span>
           <span className={`file-status ${file.status}`}>{getStatusLabel(file.status)}</span>
@@ -1060,7 +1077,7 @@ export function DiffDetailPanel({
   const currentFileIndex = selectedFile ? allFiles.findIndex(f => f.path === selectedFile.path) : -1;
 
   return (
-      <div className="review-panel">
+      <div className="review-panel" ref={panelRef} tabIndex={-1}>
         <div className="review-header">
           <span className="review-title">
             Diff: {gitStatus?.directory?.split('/').pop() || 'changes'}
@@ -1144,7 +1161,7 @@ export function DiffDetailPanel({
                 <button
                   className={`expand-btn ${expandedContext === -1 ? 'active' : ''}`}
                   onClick={() => setExpandedContext(-1)}
-                  title="Full file (E)"
+                  title="Full file (e)"
                 >
                   Full
                 </button>
@@ -1187,7 +1204,7 @@ export function DiffDetailPanel({
         <div className="review-footer">
           <span className="shortcut"><kbd>j</kbd>/<kbd>k</kbd> navigate</span>
           <span className="shortcut"><kbd>]</kbd> next unreviewed</span>
-          <span className="shortcut"><kbd>e</kbd>/<kbd>E</kbd> expand</span>
+          <span className="shortcut"><kbd>e</kbd> toggle full/hunks</span>
           <span className="shortcut"><kbd>⌘+</kbd>/<kbd>⌘-</kbd> zoom</span>
           <span className="shortcut"><kbd>Esc</kbd> close</span>
         </div>

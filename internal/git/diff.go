@@ -99,7 +99,10 @@ func GetBranchDiffFiles(repoDir, baseRef string) ([]DiffFileInfo, error) {
 	}
 
 	// 3. Get uncommitted changes: git status --porcelain
-	porcelainCmd := exec.Command("git", "status", "--porcelain")
+	// --untracked-files=all expands a brand-new untracked directory into
+	// its individual files; without it, git collapses the whole folder
+	// into a single "?? dir/" entry, which hides every file inside.
+	porcelainCmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
 	porcelainCmd.Dir = repoDir
 	porcelainOut, _ := porcelainCmd.Output()
 

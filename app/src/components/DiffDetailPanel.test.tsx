@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor } from '../test/utils';
 import {
@@ -35,6 +36,38 @@ describe('DiffDetailPanel', () => {
     onClose = vi.fn();
   });
 
+  function ControlledDiffDetailPanel(props: {
+    gitStatus: ReturnType<typeof createGitStatus>;
+    isOpen: boolean;
+    initialSelectedFile?: string;
+  }) {
+    const [selectedFilePath, setSelectedFilePath] = useState<string | null>(
+      props.initialSelectedFile ?? null
+    );
+    // Freeze mock callbacks for the component's lifetime so wrapper
+    // re-renders (from selection changes) don't retrigger fetch effects
+    // that depend on callback identity.
+    const callbacks = useMemo(() => ({
+      fetchDiff: mockDaemon.createFetchDiff(),
+      sendGetBranchDiffFiles: mockDaemon.createGetBranchDiffFiles(),
+      sendFetchRemotes: mockDaemon.createFetchRemotes(),
+      getReviewState: mockDaemon.createGetReviewState(),
+      markFileViewed: mockDaemon.createMarkFileViewed(),
+    }), []);
+    return (
+      <DiffDetailPanel
+        isOpen={props.isOpen}
+        gitStatus={props.gitStatus}
+        repoPath="/test/repo"
+        branch="main"
+        selectedFilePath={selectedFilePath}
+        onSelectFilePath={setSelectedFilePath}
+        onClose={onClose}
+        {...callbacks}
+      />
+    );
+  }
+
   function renderPanel(overrides?: {
     gitStatus?: ReturnType<typeof createGitStatus>;
     isOpen?: boolean;
@@ -42,21 +75,11 @@ describe('DiffDetailPanel', () => {
   }) {
     const gitStatus = overrides?.gitStatus ?? createGitStatus(['src/App.tsx']);
     const isOpen = overrides?.isOpen ?? true;
-    const initialSelectedFile = overrides?.initialSelectedFile;
-
     return render(
-      <DiffDetailPanel
-        isOpen={isOpen}
+      <ControlledDiffDetailPanel
         gitStatus={gitStatus}
-        repoPath="/test/repo"
-        branch="main"
-        initialSelectedFile={initialSelectedFile}
-        onClose={onClose}
-        fetchDiff={mockDaemon.createFetchDiff()}
-        sendGetBranchDiffFiles={mockDaemon.createGetBranchDiffFiles()}
-        sendFetchRemotes={mockDaemon.createFetchRemotes()}
-        getReviewState={mockDaemon.createGetReviewState()}
-        markFileViewed={mockDaemon.createMarkFileViewed()}
+        isOpen={isOpen}
+        initialSelectedFile={overrides?.initialSelectedFile}
       />
     );
   }

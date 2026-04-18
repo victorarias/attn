@@ -10,6 +10,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Terminal Link Clicks**: Cmd/Ctrl-clicking a URL in the terminal opens it once, whether the TUI renders the URL as an OSC 8 hyperlink or as plain text. Fixes a regression where cmd-click stopped opening plain-text URLs, and where URLs that matched both renderings could open twice.
+- **Diff Panel Font Scaling**: Cmd+=/Cmd+- now resizes the diff panel's file list and editor regardless of which pane is focused. The panel previously kept its own local font size that only updated when the panel itself had focus, and the file list ignored the global UI scale entirely.
+- **Diff Panel `]` Advances Consistently**: Pressing `]` in the diff panel now marks the current file viewed and advances to the next file that still needs review. Previously `]` always searched from the top of the list, so once it landed on the first unreviewed file repeated presses were no-ops until `j`/`k` moved the selection elsewhere.
+- **Diff Panel Keyboard Shortcuts On Open**: Opening the diff panel now moves focus into the panel so `j`/`k`, `]`, `e`, and friends work immediately. Previously the terminal kept focus and its hidden textarea swallowed the first keystrokes.
+- **ChangesPanel → Diff Panel Clicks Always Apply**: Clicking a file in the ChangesPanel while the diff panel is already open now switches the diff view to that file (and re-clicking the same file after in-panel `j`/`k` navigation jumps back to it). Previously the panel only honored the first click on open.
+- **Diff Panel `e` Toggles Hunks/Full**: `e` now flips between the Hunks and Full views that the UI actually supports. The previous handler tried to progressively widen context with `+10` per press, but the editor hardcoded three lines of context, so presses after the first did nothing visible and the "Hunks" button silently lost its highlight.
+- **New Untracked Folders Show Individual Files**: When a branch adds a brand-new directory full of new files, the diff panel now lists each file instead of collapsing the whole folder into a single unusable entry. The branch-diff query was using `git status --porcelain` with its default `--untracked-files=normal`, which reports new directories as one `?? dir/` line.
 
 ## [2026-04-17]
 
