@@ -175,7 +175,10 @@ func parseGitDiffNumstat(output string) map[string]diffStats {
 // getGitStatus runs git commands and returns parsed status
 func getGitStatus(dir string) (*protocol.GitStatusUpdateMessage, error) {
 	// Get porcelain status
-	statusCmd := exec.Command("git", "status", "--porcelain", "-z")
+	// --untracked-files=all expands brand-new untracked directories into
+	// their individual files; the default collapses each into a single
+	// "?? dir/" line which hides everything inside.
+	statusCmd := exec.Command("git", "status", "--porcelain", "-z", "--untracked-files=all")
 	statusCmd.Dir = dir
 	statusOutput, err := statusCmd.Output()
 	if err != nil {
