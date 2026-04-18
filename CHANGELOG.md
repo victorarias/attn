@@ -11,6 +11,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Remote Endpoint Zombie Leak**: Failed WebSocket dials to remote endpoints over SSH no longer leave `<defunct>` `ssh` children behind. On macOS a slow or flapping remote could accumulate thousands of zombies over a day and exhaust `kern.maxprocperuid`, producing `fork: Resource temporarily unavailable` across the whole user session.
 
+## [2026-04-18]
+
+### Fixed
+- **Terminal Link Clicks**: Cmd/Ctrl-clicking a URL in the terminal opens it again, whether the TUI renders it as an OSC 8 hyperlink or as plain text. Both xterm surfaces route through a shared opener that de-duplicates same-URL opens within 1s, so links that render in both surfaces still open exactly once.
+
 ## [2026-04-16]
 
 ### Added
