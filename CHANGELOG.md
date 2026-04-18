@@ -6,15 +6,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
-## [2026-04-17]
-
-### Fixed
-- **Remote Endpoint Zombie Leak**: Failed WebSocket dials to remote endpoints over SSH no longer leave `<defunct>` `ssh` children behind. On macOS a slow or flapping remote could accumulate thousands of zombies over a day and exhaust `kern.maxprocperuid`, producing `fork: Resource temporarily unavailable` across the whole user session.
-
 ## [2026-04-18]
 
 ### Fixed
 - **Terminal Link Clicks**: Cmd/Ctrl-clicking a URL in the terminal opens it once, whether the TUI renders the URL as an OSC 8 hyperlink or as plain text. Fixes a regression where cmd-click stopped opening plain-text URLs, and where URLs that matched both renderings could open twice.
+
+## [2026-04-17]
+
+### Fixed
+- **Remote Endpoint Zombie Leak**: Failed WebSocket dials to remote endpoints over SSH no longer leave `<defunct>` `ssh` children behind. On macOS a slow or flapping remote could accumulate thousands of zombies over a day and exhaust `kern.maxprocperuid`, producing `fork: Resource temporarily unavailable` across the whole user session.
 
 ## [2026-04-16]
 

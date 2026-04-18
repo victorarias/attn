@@ -79,22 +79,10 @@ function createEmptyStartupSnapshot(): TerminalPerfStartupSnapshot {
   };
 }
 
-// Open a URL externally, de-duplicating same-URL opens inside a 1s window.
-// Both xterm surfaces (OSC 8 linkHandler and WebLinksAddon) route through here,
-// so if they both fire for the same click the second call is a no-op.
+// Window within which a same-URL open is considered a duplicate of the prior
+// click (OSC 8 linkHandler and WebLinksAddon can both fire on a single click
+// when a plain-text URL is also wrapped in an OSC 8 hyperlink).
 const LINK_DEDUP_WINDOW_MS = 1000;
-let lastOpenedUri: { uri: string; at: number } | null = null;
-
-async function openExternalUri(uri: string): Promise<void> {
-  const now = Date.now();
-  if (lastOpenedUri?.uri === uri && now - lastOpenedUri.at < LINK_DEDUP_WINDOW_MS) return;
-  lastOpenedUri = { uri, at: now };
-  try {
-    await openUrl(uri);
-  } catch (err) {
-    console.error('[Terminal] Failed to open external URL:', uri, err);
-  }
-}
 
 export interface TerminalHandle {
   terminal: XTerm | null;
@@ -136,6 +124,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const perfRegistryIdRef = useRef(`terminal-${Math.random().toString(16).slice(2)}`);
     const readyFiredRef = useRef(false);
     const appliedFontSizeRef = useRef<number | null>(null);
+    const lastLinkOpenRef = useRef<{ uri: string; at: number } | null>(null);
     const startupSnapshotRef = useRef<TerminalPerfStartupSnapshot>(createEmptyStartupSnapshot());
     const lastResizeSnapshotRef = useRef<{
       at: number;
@@ -521,6 +510,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
     useEffect(() => {
       if (!containerRef.current) return;
+
+      const openExternalUri = async (uri: string): Promise<void> => {
+        const now = Date.now();
+        const last = lastLinkOpenRef.current;
+        if (last?.uri === uri && now - last.at < LINK_DEDUP_WINDOW_MS) return;
+        lastLinkOpenRef.current = { uri, at: now };
+        try {
+          await openUrl(uri);
+        } catch (err) {
+          console.error('[Terminal] Failed to open external URL:', uri, err);
+        }
+      };
 
       // VS Code: Pre-calculate initial dimensions before creating terminal
       // This prevents xterm from initializing with default 80x24 and then resizing
