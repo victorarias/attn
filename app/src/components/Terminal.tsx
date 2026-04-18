@@ -2,6 +2,7 @@ import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useSta
 import { Terminal as XTerm } from '@xterm/xterm';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 import { isSuspiciousTerminalSize, isTerminalDebugEnabled, recordResizeEvent, formatResizeLog, type ResizeDiagnostics } from '../utils/terminalDebug';
@@ -78,10 +79,22 @@ function createEmptyStartupSnapshot(): TerminalPerfStartupSnapshot {
   };
 }
 
-// Link opening is handled by the Tauri opener plugin at the webview level.
-// Our xterm handlers are no-ops — they exist only to suppress xterm's default
-// confirm() dialog for OSC 8 hyperlinks and to enable WebLinksAddon decorations
-// (underline + pointer cursor on hover).
+// Open a URL externally, de-duplicating same-URL opens inside a 1s window.
+// Both xterm surfaces (OSC 8 linkHandler and WebLinksAddon) route through here,
+// so if they both fire for the same click the second call is a no-op.
+const LINK_DEDUP_WINDOW_MS = 1000;
+let lastOpenedUri: { uri: string; at: number } | null = null;
+
+async function openExternalUri(uri: string): Promise<void> {
+  const now = Date.now();
+  if (lastOpenedUri?.uri === uri && now - lastOpenedUri.at < LINK_DEDUP_WINDOW_MS) return;
+  lastOpenedUri = { uri, at: now };
+  try {
+    await openUrl(uri);
+  } catch (err) {
+    console.error('[Terminal] Failed to open external URL:', uri, err);
+  }
+}
 
 export interface TerminalHandle {
   terminal: XTerm | null;
@@ -541,9 +554,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           showTopBorder: true,
         },
         theme: getTerminalTheme(resolvedTheme),
-        // Suppress xterm's default confirm() dialog for OSC 8 hyperlinks.
-        // Actual opening is handled at the webview level.
-        linkHandler: { activate: () => {} },
+        // OSC 8 hyperlinks: Cmd/Ctrl+click to open; suppress xterm's default confirm() dialog.
+        linkHandler: {
+          activate: (event, text) => {
+            if (event.metaKey || event.ctrlKey) {
+              void openExternalUri(text);
+            }
+          },
+        },
       });
       appliedFontSizeRef.current = initialFontSize;
       startupSnapshotRef.current = {
@@ -562,9 +580,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         skippedInitialFontEffect: false,
       };
 
-      // WebLinksAddon decorates URLs (underline + pointer on hover).
-      // No-op handler — actual opening is handled at the webview level.
-      term.loadAddon(new WebLinksAddon(() => {}));
+      // Plain-text URLs: Cmd/Ctrl+click to open (underline + pointer on hover).
+      term.loadAddon(new WebLinksAddon((event, uri) => {
+        if (event.metaKey || event.ctrlKey) {
+          void openExternalUri(uri);
+        }
+      }));
 
       // Enable Unicode 11 for correct emoji/CJK width calculation
       term.loadAddon(new Unicode11Addon());
