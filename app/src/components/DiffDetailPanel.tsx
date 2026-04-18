@@ -770,16 +770,11 @@ export function DiffDetailPanel({
           navigateToNextUnreviewed();
           break;
         case 'e':
-          e.preventDefault();
-          if (e.shiftKey) {
-            setExpandedContext(-1); // Full file
-          } else {
-            setExpandedContext(prev => prev === -1 ? 0 : prev + 10);
-          }
-          break;
         case 'E':
+          // Toggle between the two modes the UI actually supports:
+          // hunks (0) and full file (-1).
           e.preventDefault();
-          setExpandedContext(-1); // Full file
+          setExpandedContext(prev => prev === -1 ? 0 : -1);
           break;
       }
     };
@@ -1167,7 +1162,7 @@ export function DiffDetailPanel({
                 <button
                   className={`expand-btn ${expandedContext === -1 ? 'active' : ''}`}
                   onClick={() => setExpandedContext(-1)}
-                  title="Full file (E)"
+                  title="Full file (e toggles)"
                 >
                   Full
                 </button>
