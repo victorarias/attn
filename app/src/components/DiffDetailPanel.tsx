@@ -243,6 +243,7 @@ export function DiffDetailPanel({
   const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks mode (uses 3 lines context), -1 = full file
   const fontSize = Math.round(13 * scale);
   const [scrollToLine, setScrollToLine] = useState<number | undefined>(undefined);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Branch diff state - PR-like comparison against origin/main
   const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
@@ -582,6 +583,14 @@ export function DiffDetailPanel({
     }
     previousSelectedPathRef.current = selectedFilePath;
   }, [selectedFilePath]);
+
+  // Move focus into the panel when it opens so keyboard shortcuts
+  // (j/k, ], e, etc.) work immediately instead of being swallowed by
+  // the previously focused terminal textarea or contentEditable editor.
+  useEffect(() => {
+    if (!isOpen) return;
+    panelRef.current?.focus({ preventScroll: true });
+  }, [isOpen]);
 
   // Reset state when closing
   useEffect(() => {
@@ -1076,7 +1085,7 @@ export function DiffDetailPanel({
   const currentFileIndex = selectedFile ? allFiles.findIndex(f => f.path === selectedFile.path) : -1;
 
   return (
-      <div className="review-panel">
+      <div className="review-panel" ref={panelRef} tabIndex={-1}>
         <div className="review-header">
           <span className="review-title">
             Diff: {gitStatus?.directory?.split('/').pop() || 'changes'}
