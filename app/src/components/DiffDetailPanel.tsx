@@ -1204,7 +1204,7 @@ export function DiffDetailPanel({
         <div className="review-footer">
           <span className="shortcut"><kbd>j</kbd>/<kbd>k</kbd> navigate</span>
           <span className="shortcut"><kbd>]</kbd> next unreviewed</span>
-          <span className="shortcut"><kbd>e</kbd>/<kbd>E</kbd> expand</span>
+          <span className="shortcut"><kbd>e</kbd> toggle full/hunks</span>
           <span className="shortcut"><kbd>⌘+</kbd>/<kbd>⌘-</kbd> zoom</span>
           <span className="shortcut"><kbd>Esc</kbd> close</span>
         </div>
