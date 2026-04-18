@@ -109,6 +109,7 @@ export function DiffDetailPanelHarness({ onReady, setTriggerRerender }: HarnessP
   const remotesFetchedRef = useRef(false);
 
   const [savedComments, setSavedComments] = useState<ReviewComment[]>([]);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   // Force re-renders by changing props that trigger the editor effect
   // We use a state that gets passed to DiffDetailPanel and causes effect re-run
   const [, forceRender] = useState(0);
@@ -240,6 +241,8 @@ export function DiffDetailPanelHarness({ onReady, setTriggerRerender }: HarnessP
       gitStatus={createGitStatus()}
       repoPath="/test/repo"
       branch="main"
+      selectedFilePath={selectedFilePath}
+      onSelectFilePath={setSelectedFilePath}
       onClose={() => {
         window.__HARNESS__.recordCall('onClose', []);
       }}
