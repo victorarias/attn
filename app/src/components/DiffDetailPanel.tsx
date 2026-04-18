@@ -791,18 +791,45 @@ export function DiffDetailPanel({
   }, [allFiles, selectedFilePath]);
 
   const navigateToNextUnreviewed = useCallback(() => {
-    // First look for files that changed since viewed
-    const changedFile = needsReviewFiles.find(f => changedSinceViewed.has(f.path));
+    const current = selectedFilePath;
+
+    // Mark the current file viewed on its way out so `]` consistently
+    // advances instead of re-selecting the same file.
+    if (current) {
+      const wasFirstView = !viewedFiles.has(current);
+      setViewedFiles(prev => {
+        if (prev.has(current)) return prev;
+        return new Set(prev).add(current);
+      });
+      setChangedSinceViewed(prev => {
+        if (!prev.has(current)) return prev;
+        const next = new Set(prev);
+        next.delete(current);
+        return next;
+      });
+      if (wasFirstView && reviewId) {
+        markFileViewed(reviewId, current, true).catch(err => {
+          console.error('Failed to persist viewed state:', err);
+        });
+      }
+    }
+
+    // Prefer files changed since last viewed, then any unviewed file,
+    // always excluding the one we just marked.
+    const changedFile = needsReviewFiles.find(
+      f => f.path !== current && changedSinceViewed.has(f.path)
+    );
     if (changedFile) {
       setSelectedFilePath(changedFile.path);
       return;
     }
-    // Then look for unviewed files
-    const unreviewed = needsReviewFiles.find(f => !viewedFiles.has(f.path));
+    const unreviewed = needsReviewFiles.find(
+      f => f.path !== current && !viewedFiles.has(f.path)
+    );
     if (unreviewed) {
       setSelectedFilePath(unreviewed.path);
     }
-  }, [needsReviewFiles, viewedFiles, changedSinceViewed]);
+  }, [needsReviewFiles, viewedFiles, changedSinceViewed, selectedFilePath, reviewId, markFileViewed]);
 
   const getFileIcon = useCallback((file: ReviewFile) => {
     if (file.isAutoSkip) return '⊘';

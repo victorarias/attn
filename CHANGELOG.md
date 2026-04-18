@@ -11,6 +11,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Terminal Link Clicks**: Cmd/Ctrl-clicking a URL in the terminal opens it once, whether the TUI renders the URL as an OSC 8 hyperlink or as plain text. Fixes a regression where cmd-click stopped opening plain-text URLs, and where URLs that matched both renderings could open twice.
 - **Diff Panel Font Scaling**: Cmd+=/Cmd+- now resizes the diff panel's file list and editor regardless of which pane is focused. The panel previously kept its own local font size that only updated when the panel itself had focus, and the file list ignored the global UI scale entirely.
+- **Diff Panel `]` Advances Consistently**: Pressing `]` in the diff panel now marks the current file viewed and advances to the next file that still needs review. Previously `]` always searched from the top of the list, so once it landed on the first unreviewed file repeated presses were no-ops until `j`/`k` moved the selection elsewhere.
 
 ## [2026-04-17]
 
