@@ -636,7 +636,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         if (payload === '?') return false; // refuse read-clipboard queries
         let text: string;
         try {
-          text = atob(payload);
+          // atob yields a binary (Latin-1) string; decode it as UTF-8 so non-ASCII copies survive.
+          const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+          text = new TextDecoder('utf-8').decode(bytes);
         } catch {
           return false;
         }
