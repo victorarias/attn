@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Listener, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Listener, LogicalPosition, LogicalSize, Manager, Runtime};
 
 pub const UI_AUTOMATION_ENABLED: bool = option_env!("ATTN_UI_AUTOMATION").is_some();
 
@@ -270,15 +270,13 @@ fn handle_request<R: Runtime>(
         };
     }
 
-    if request.action == "capture_window_screenshot" {
-        return match capture_screenshot(app, request.payload.as_ref()) {
+    if request.action == "set_window_bounds" {
+        let payload = request.payload.clone().unwrap_or(Value::Null);
+        return match set_window_bounds(app, &payload) {
             Ok(result) => {
                 append_log(
                     app,
-                    &format!(
-                        "request ok id={} action=capture_window_screenshot",
-                        request_id
-                    ),
+                    &format!("request ok id={} action=set_window_bounds", request_id),
                 );
                 AutomationSocketResponse {
                     id: request_id,
@@ -291,7 +289,7 @@ fn handle_request<R: Runtime>(
                 append_log(
                     app,
                     &format!(
-                        "request err id={} action=capture_window_screenshot error={}",
+                        "request err id={} action=set_window_bounds error={}",
                         request_id, error
                     ),
                 );
@@ -664,31 +662,78 @@ fn window_bounds<R: Runtime>(app: &AppHandle<R>) -> Result<Value, String> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
+    let scale_factor = window
+        .scale_factor()
+        .map_err(|error| format!("failed to get scale factor: {error}"))?;
     let position = window
         .outer_position()
         .map_err(|error| format!("failed to get outer position: {error}"))?;
     let size = window
         .outer_size()
         .map_err(|error| format!("failed to get outer size: {error}"))?;
+    let minimized = window
+        .is_minimized()
+        .map_err(|error| format!("failed to check minimized: {error}"))?;
+    let logical_position = position.to_logical::<f64>(scale_factor);
+    let logical_size = size.to_logical::<f64>(scale_factor);
+    // Shape matches the JS bridge in `useUiAutomationBridge.ts` so harness
+    // callers (`readUiAutomationWindowBounds`) get a consistent result whether
+    // the request is served by this Rust shortcut or the webview after it's
+    // ready. Mismatched shapes silently fell through to the AppleScript
+    // fallback, which is unreliable for Tauri/wry windows.
     Ok(serde_json::json!({
-        "x": position.x,
-        "y": position.y,
-        "width": size.width,
-        "height": size.height,
+        "scaleFactor": scale_factor,
+        "minimized": minimized,
+        "logicalBounds": {
+            "x": logical_position.x,
+            "y": logical_position.y,
+            "width": logical_size.width,
+            "height": logical_size.height,
+        },
     }))
 }
 
-fn focus_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+// Mirror of window_bounds for moving/resizing. Accepts logical bounds (same
+// coordinate system window_bounds returns) and drives Tauri's window API
+// directly, sidestepping AppleScript which is unreliable for Tauri/wry
+// windows — especially under `open -g` where attn isn't frontmost.
+fn set_window_bounds<R: Runtime>(app: &AppHandle<R>, payload: &Value) -> Result<Value, String> {
+    let bounds = payload
+        .get("logicalBounds")
+        .ok_or_else(|| "missing logicalBounds in payload".to_string())?;
+    let x = bounds
+        .get("x")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| "logicalBounds.x must be a number".to_string())?;
+    let y = bounds
+        .get("y")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| "logicalBounds.y must be a number".to_string())?;
+    let width = bounds
+        .get("width")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| "logicalBounds.width must be a number".to_string())?;
+    let height = bounds
+        .get("height")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| "logicalBounds.height must be a number".to_string())?;
+    if width <= 0.0 || height <= 0.0 {
+        return Err(format!(
+            "logicalBounds must have positive width and height (got width={width} height={height})"
+        ));
+    }
+
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
-    let _ = window.show();
-    let _ = window.unminimize();
     window
-        .set_focus()
-        .map_err(|error| format!("failed to focus main window: {error}"))?;
-    thread::sleep(Duration::from_millis(150));
-    Ok(())
+        .set_position(LogicalPosition::new(x, y))
+        .map_err(|error| format!("failed to set outer position: {error}"))?;
+    window
+        .set_size(LogicalSize::new(width, height))
+        .map_err(|error| format!("failed to set outer size: {error}"))?;
+
+    window_bounds(app)
 }
 
 fn default_screenshot_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
@@ -706,68 +751,3 @@ fn default_screenshot_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, St
     Ok(dir.join(format!("screenshot-{timestamp}.png")))
 }
 
-fn capture_screenshot<R: Runtime>(
-    app: &AppHandle<R>,
-    payload: Option<&Value>,
-) -> Result<Value, String> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = app;
-        let _ = payload;
-        return Err("capture_screenshot is currently implemented only on macOS".into());
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        focus_main_window(app)?;
-        let bounds = window_bounds(app)?;
-        let x = bounds
-            .get("x")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| "invalid x bound".to_string())?;
-        let y = bounds
-            .get("y")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| "invalid y bound".to_string())?;
-        let width = bounds
-            .get("width")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| "invalid width bound".to_string())?;
-        let height = bounds
-            .get("height")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| "invalid height bound".to_string())?;
-
-        let output_path = match payload
-            .and_then(|value| value.get("path"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            Some(path) => PathBuf::from(path),
-            None => default_screenshot_path(app)?,
-        };
-
-        if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("failed to create screenshot parent dir: {error}"))?;
-        }
-
-        let region = format!("{x},{y},{width},{height}");
-        let status = std::process::Command::new("/usr/sbin/screencapture")
-            .args(["-x", "-R", &region, output_path.to_string_lossy().as_ref()])
-            .status()
-            .map_err(|error| format!("failed to run screencapture: {error}"))?;
-
-        if !status.success() {
-            return Err(format!(
-                "screencapture exited with status {status}. On macOS this usually means Screen Recording permission is missing for attn.app or the current terminal session."
-            ));
-        }
-
-        Ok(serde_json::json!({
-            "path": output_path.to_string_lossy().to_string(),
-            "bounds": bounds,
-        }))
-    }
-}
