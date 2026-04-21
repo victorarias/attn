@@ -735,14 +735,18 @@ pub fn run() {
                             if let Ok(Some(monitor)) = window.primary_monitor() {
                                 let scale = monitor.scale_factor();
                                 let mon_size = monitor.size();
+                                let mon_pos = monitor.position();
                                 let logical_w = mon_size.width as f64 / scale;
                                 let logical_h = mon_size.height as f64 / scale;
+                                let logical_origin_x = mon_pos.x as f64 / scale;
+                                let logical_origin_y = mon_pos.y as f64 / scale;
                                 let win_h_logical = window
                                     .inner_size()
                                     .map(|s| s.height as f64 / scale)
                                     .unwrap_or(800.0);
-                                let new_x = logical_w - visible_px;
-                                let new_y = ((logical_h - win_h_logical) / 2.0).max(0.0);
+                                let new_x = logical_origin_x + logical_w - visible_px;
+                                let new_y =
+                                    logical_origin_y + ((logical_h - win_h_logical) / 2.0).max(0.0);
                                 let _ =
                                     window.set_position(tauri::LogicalPosition::new(new_x, new_y));
                             }

@@ -507,10 +507,10 @@ func windowPark(bundleId: String, visiblePx: Int) throws {
     let screenFrame = screen.frame
 
     // AX window positions are in top-left screen coordinates, same as
-    // CGWindowList. NSScreen.frame.width/height give the raw display size
-    // (independent of the bottom-left-origin NSScreen coordinate system).
-    let newX = screenFrame.width - CGFloat(visiblePx)
-    let newY = max(0, (screenFrame.height - size.height) / 2)
+    // CGWindowList. Include screenFrame.origin so the math works on multi-
+    // monitor setups where the main display isn't anchored at (0, 0).
+    let newX = screenFrame.origin.x + screenFrame.width - CGFloat(visiblePx)
+    let newY = screenFrame.origin.y + max(0, (screenFrame.height - size.height) / 2)
     var newPos = CGPoint(x: newX, y: newY)
     guard let posValue = AXValueCreate(.cgPoint, &newPos) else {
         throw DriverError.eventCreationFailed("Failed to create AXValue for position")
