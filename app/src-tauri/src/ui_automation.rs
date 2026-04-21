@@ -750,4 +750,3 @@ fn default_screenshot_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, St
         .as_secs();
     Ok(dir.join(format!("screenshot-{timestamp}.png")))
 }
-

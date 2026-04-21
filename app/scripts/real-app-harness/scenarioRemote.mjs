@@ -247,11 +247,11 @@ export async function waitForEndpointConnected(observer, name, timeoutMs = 180_0
         throw new Error(`Endpoint ${name} entered error state: ${endpoint.status_message || 'unknown error'}`);
       }
       if (SYNC_REQUIRED_STATUSES.has(endpoint.status) && !bootstrappedIds.has(endpoint.id)) {
-        bootstrappedIds.add(endpoint.id);
         try {
           observer.send({ cmd: 'bootstrap_endpoint', endpoint_id: endpoint.id });
+          bootstrappedIds.add(endpoint.id);
         } catch {
-          // Ignore — the status poll will retry on the next tick.
+          // Leave endpoint out of the bootstrapped set so the next tick retries.
         }
       }
     }

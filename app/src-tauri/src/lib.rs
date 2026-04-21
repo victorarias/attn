@@ -707,8 +707,11 @@ pub fn run() {
             // Accessory policy hides the Dock tile and prevents macOS from making
             // attn frontmost on launch; set_focusable(false) ensures the window
             // can't take key via a stray click either.
-            if env::var("ATTN_HARNESS_ALWAYS_ON_TOP").ok().is_some_and(|v| v == "1") {
-                #[cfg(target_os = "macos")]
+            #[cfg(target_os = "macos")]
+            if env::var("ATTN_HARNESS_ALWAYS_ON_TOP")
+                .ok()
+                .is_some_and(|v| v == "1")
+            {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_always_on_top(true);

@@ -171,7 +171,7 @@ export async function waitForPaneShellReady(
   {
     timeoutMs = 15_000,
     idleMs = 400,
-    promptRegex = /[\$#❯>»⟫]\s*$/,
+    promptRegex = /[\$#%❯>»⟫]\s*$/,
     description,
   } = {},
 ) {
@@ -676,8 +676,6 @@ export async function assertPaneNativePaintCoverage(
     minBusyRowRatio = 0.18,
     minBBoxWidthRatio = 0.45,
     minBBoxHeightRatio = 0.18,
-    activityThreshold = 18,
-    insetPx = 2,
     timeoutMs = 4_000,
     retryIntervalMs = 250,
     description = `pane ${paneId} native paint coverage`,
@@ -694,11 +692,7 @@ export async function assertPaneNativePaintCoverage(
       prefix,
       sessionId,
       paneId,
-      {
-        target,
-        activityThreshold,
-        insetPx,
-      },
+      { target },
     );
 
     const analysis = metrics.analysis || {};
@@ -775,12 +769,7 @@ async function assertPaneNativePaintStable(
     prefix,
     sessionId,
     paneId,
-    {
-      target: options.target || 'paneBody',
-      activityThreshold: options.activityThreshold ?? 18,
-      insetPx: options.insetPx ?? 2,
-      bundleId: options.bundleId || 'com.attn.manager',
-    },
+    { target: options.target || 'paneBody' },
   );
 
   const comparison = assertPaneNativePaintDelta(baselineMetrics, candidateMetrics, options);
@@ -843,12 +832,7 @@ export async function assertPaneNativePaintRecovered(
     prefix,
     sessionId,
     paneId,
-    {
-      target: options.target || 'paneBody',
-      activityThreshold: options.activityThreshold ?? 18,
-      insetPx: options.insetPx ?? 2,
-      bundleId: options.bundleId || 'com.attn.manager',
-    },
+    { target: options.target || 'paneBody' },
   );
 
   const comparison = assertPaneNativePaintNotWorse(baselineMetrics, candidateMetrics, options);
