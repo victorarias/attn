@@ -185,18 +185,30 @@ export function installTerminalViewportLifecycle({
     if (!readyFiredRef.current) {
       requestAnimationFrame(() => {
         if (!container.isConnected) {
+          logTerminal('log', 'ready RAF bail: container disconnected', {});
           return;
         }
         const dims = getScaledDimensions(container, term, fontSizeRef.current);
-        if (dims && dims.cols > 0 && dims.rows > 0) {
-          lastCols = dims.cols;
-          lastRows = dims.rows;
-          applyMeasuredTerminalGeometry(term, dims, {
-            readySource: 'resize_observer',
-            readyReason: 'ready',
-            resizeReason: 'ready',
+        if (!dims) {
+          logTerminal('log', 'ready RAF bail: dims null', {
+            fontSize: fontSizeRef.current,
           });
+          return;
         }
+        if (dims.cols <= 0 || dims.rows <= 0) {
+          logTerminal('log', 'ready RAF bail: zero dims', {
+            cols: dims.cols,
+            rows: dims.rows,
+          });
+          return;
+        }
+        lastCols = dims.cols;
+        lastRows = dims.rows;
+        applyMeasuredTerminalGeometry(term, dims, {
+          readySource: 'resize_observer',
+          readyReason: 'ready',
+          resizeReason: 'ready',
+        });
       });
       return;
     }
