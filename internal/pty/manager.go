@@ -286,7 +286,16 @@ func (m *Manager) Resize(sessionID string, cols, rows uint16) error {
 	if err != nil {
 		return err
 	}
-	return session.resize(cols, rows)
+	session.metaMu.RLock()
+	prevCols, prevRows := session.cols, session.rows
+	session.metaMu.RUnlock()
+	pid := 0
+	if session.cmd != nil && session.cmd.Process != nil {
+		pid = session.cmd.Process.Pid
+	}
+	resizeErr := session.resize(cols, rows)
+	m.logf("pty resize: id=%s prev=%dx%d new=%dx%d pid=%d err=%v", sessionID, prevCols, prevRows, cols, rows, pid, resizeErr)
+	return resizeErr
 }
 
 func (m *Manager) Kill(sessionID string, sig syscall.Signal) error {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -20,8 +21,16 @@ import (
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
+// Each attach gets its own subscriber id. The PTY session's subscriber map is
+// keyed by subscriber id, and a workerStream close emits a Detach RPC for the
+// id it registered. Reusing a subID on re-attach lets the dying stream's
+// Detach remove the freshly installed subscriber, silently starving the new
+// stream of output.
+var wsSubscriberCounter atomic.Int64
+
 func wsSubscriberID(client *wsClient, sessionID string) string {
-	return fmt.Sprintf("%p:%s", client, sessionID)
+	n := wsSubscriberCounter.Add(1)
+	return fmt.Sprintf("%p:%s:%d", client, sessionID, n)
 }
 
 type attachReplayPayload struct {
