@@ -124,33 +124,10 @@ export class UiAutomationClient {
     this.bundleId = bundleId;
     this.currentSourceIdentityPromise = null;
     this.verifiedBuildIdentityKey = null;
-    this.callerBundleIdForRestore = null;
+    this.callerBundleIdForLaunch = null;
   }
 
   async launchApp() {
-    // Capture the caller's frontmost bundle at launch so `quitApp()` can hand
-    // focus back when the scenario ends. Scenarios run with attn frontmost:
-    // an `open -g` (hidden) launch puts WKWebView into
-    // `NSWindowOcclusionState.occluded` where rAF/ResizeObserver are
-    // throttled and freshly-split panes stall at `runtimeAttached: false`.
-    //
-    // A "corner panel" variant (`#parkWindowAsPanel` + hand key back to
-    // caller, keeping the window visible but small) was prototyped on
-    // 2026-04-20. Empirically it made the pre-existing tr204 /
-    // `runtimeAttached` flake slightly worse (3/3 fail under parking vs 2/3
-    // under floor), so we shipped the conservative foreground approach.
-    // The `#parkWindowAsPanel` helper is retained for future experiments —
-    // callers that want to try parking can invoke it after launch.
-    const focusDriver = this.#focusDriver();
-    const callerBundleId = await focusDriver.frontmostBundleId().catch(() => '');
-    if (
-      callerBundleId &&
-      callerBundleId !== this.bundleId &&
-      callerBundleId !== 'com.attn.manager'
-    ) {
-      this.callerBundleIdForRestore = callerBundleId;
-    }
-
     // Default to always-on-top so scenarios don't steal focus and WKWebView
     // rAF/ResizeObserver stay unthrottled. Probes that deliberately exercise
     // the focus-stealing or occlusion paths set ATTN_HARNESS_ALWAYS_ON_TOP=0
@@ -159,6 +136,28 @@ export class UiAutomationClient {
     const effectiveLaunchEnv = alwaysOnTop
       ? { ...(this.launchEnv || {}), ATTN_HARNESS_ALWAYS_ON_TOP: '1' }
       : this.launchEnv;
+
+    const focusDriver = this.#focusDriver();
+
+    // Tauri applies ActivationPolicy::Accessory + set_focusable(false) in the
+    // .setup() hook, but that runs *after* NSApp has already become regular
+    // and stolen frontmost for ~1-3s during bootstrap. During that flash,
+    // WKWebView throttles rAF/ResizeObserver and the ReadyGate misses its
+    // first measurement — runtimeAttached never fires and scenarios time out
+    // waiting. Grab the caller's bundle id and re-activate it throughout the
+    // bootstrap window to prevent the flash. This is the only place we bring
+    // a non-attn app into focus; it's a workaround for Tauri's early-launch
+    // focus steal, not an active hand-off.
+    if (alwaysOnTop) {
+      const callerBundleId = await focusDriver.frontmostBundleId().catch(() => '');
+      if (
+        callerBundleId &&
+        callerBundleId !== this.bundleId &&
+        callerBundleId !== 'com.attn.manager'
+      ) {
+        this.callerBundleIdForLaunch = callerBundleId;
+      }
+    }
 
     if (effectiveLaunchEnv && Object.keys(effectiveLaunchEnv).length > 0) {
       // Scenarios that need custom env vars (e.g. tr502's remote harness
@@ -181,14 +180,9 @@ export class UiAutomationClient {
         },
       });
       child.unref();
-      // When running in always-on-top mode, keep re-activating the caller in
-      // parallel with window creation. `set_focusable(false)` stops attn's
-      // *window* from taking key, but macOS still makes the launching app
-      // frontmost at the NSApp level for ~1-3s while Tauri boots. Repeatedly
-      // activating the caller during that window prevents the visible flash.
       let stopActivationLoop = () => {};
-      if (alwaysOnTop && this.callerBundleIdForRestore) {
-        const callerId = this.callerBundleIdForRestore;
+      if (alwaysOnTop && this.callerBundleIdForLaunch) {
+        const callerId = this.callerBundleIdForLaunch;
         let keepGoing = true;
         stopActivationLoop = () => { keepGoing = false; };
         (async () => {
@@ -203,11 +197,12 @@ export class UiAutomationClient {
       }
       await focusDriver.waitForMainWindow(10_000).catch(() => null);
       stopActivationLoop();
-      if (alwaysOnTop && this.callerBundleIdForRestore) {
-        // One final activate after the window exists to settle state.
+      if (alwaysOnTop && this.callerBundleIdForLaunch) {
+        // One final activate after the window exists to settle focus state
+        // before the scenario starts observing runtimeAttached.
         await execFileAsync('osascript', [
           '-e',
-          `tell application id "${this.callerBundleIdForRestore}" to activate`,
+          `tell application id "${this.callerBundleIdForLaunch}" to activate`,
         ]).catch(() => {});
       }
       return;
@@ -242,7 +237,6 @@ export class UiAutomationClient {
     while (Date.now() - startedAt < timeoutMs) {
       const appPids = await this.listAppPids();
       if ((!existingPid || !processExists(existingPid)) && appPids.length === 0) {
-        await this.#restoreCallerFrontmost();
         return;
       }
       await delay(200);
@@ -260,45 +254,6 @@ export class UiAutomationClient {
         process.kill(pid, 'SIGKILL');
       } catch {}
     }
-    await this.#restoreCallerFrontmost();
-  }
-
-  async #restoreCallerFrontmost() {
-    const bundleId = this.callerBundleIdForRestore;
-    if (!bundleId) return;
-    await execFileAsync('osascript', [
-      '-e',
-      `tell application id "${bundleId}" to activate`,
-    ]).catch(() => {});
-  }
-
-  async #parkWindowAsPanel() {
-    // Move the first attn window to a ~1000x700 panel in the bottom-right
-    // corner. Tauri's `tauri.conf.json` minWidth/minHeight is 800x600 so
-    // smaller requests get clamped up; 1000x700 gives utility panes enough
-    // columns (55+) that 30-char test tokens don't wrap. Tolerant of
-    // errors — if the window isn't there yet or System Events isn't
-    // authorized, we fall through with the default geometry.
-    const script = [
-      'ObjC.import("AppKit");',
-      'const screen = $.NSScreen.mainScreen;',
-      'const frame = screen.frame;',
-      'const w = 1000, h = 700;',
-      'const x = Math.max(0, frame.size.width - w - 24);',
-      'const y = Math.max(0, frame.size.height - h - 80);',
-      'const se = Application("System Events");',
-      'const proc = se.processes["attn"];',
-      'if (proc && proc.windows().length > 0) {',
-      '  const win = proc.windows[0];',
-      '  win.size = [w, h];',
-      '  win.position = [x, y];',
-      '  "ok";',
-      '} else {',
-      '  "no-window";',
-      '}',
-    ].join('\n');
-    await execFileAsync('osascript', ['-l', 'JavaScript', '-e', script], { timeout: 5_000 })
-      .catch(() => {});
   }
 
   async launchFreshApp() {
