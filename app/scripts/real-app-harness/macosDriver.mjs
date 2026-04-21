@@ -137,6 +137,16 @@ export class MacOSDriver {
     await delay(this.actionDelayMs);
   }
 
+  async parkWindow(visiblePx) {
+    const stdout = await this.runInputDriverCapture([
+      'window_park',
+      '--visible-px',
+      String(visiblePx),
+      '--prompt-accessibility',
+    ]);
+    console.log(`[RealAppHarness] Parked window: ${stdout.trim()}`);
+  }
+
   async screenshot(outputPath) {
     await execFileAsync('/usr/sbin/screencapture', ['-x', outputPath]);
   }

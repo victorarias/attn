@@ -36,6 +36,7 @@ struct Options {
     var relativeY: Double?
     var modifiers = [String]()
     var menuPath = [String]()
+    var visiblePx: Int?
 }
 
 func parseOptions() throws -> Options {
@@ -46,8 +47,14 @@ func parseOptions() throws -> Options {
     while index < args.count {
         let arg = args[index]
         switch arg {
-        case "activate", "activate_background", "frontmost", "windowid", "text", "key", "keycode", "click", "menu":
+        case "activate", "activate_background", "frontmost", "windowid", "text", "key", "keycode", "click", "menu", "window_park":
             options.command = arg
+        case "--visible-px":
+            index += 1
+            guard index < args.count, let value = Int(args[index]), value > 0 else {
+                throw DriverError.invalidArgument("Missing or invalid value for --visible-px")
+            }
+            options.visiblePx = value
         case "--bundle-id":
             index += 1
             guard index < args.count else {
@@ -116,6 +123,7 @@ func parseOptions() throws -> Options {
               InputDriver.swift keycode --key-code 36 [--modifiers command]
               InputDriver.swift click --relative-x 0.75 --relative-y 0.5
               InputDriver.swift menu --path "File>New Session" [--bundle-id ...]
+              InputDriver.swift window_park --visible-px 200 [--bundle-id ...]
             """)
         default:
             throw DriverError.invalidArgument("Unknown argument: \(arg)")
@@ -469,6 +477,53 @@ func postText(_ text: String) throws {
     }
 }
 
+// Reposition the first AX window so only `visiblePx` pixels remain on-screen at
+// the right edge of the main display; the rest extends off the right side. Used
+// by the harness to keep attn "visible" (so WKWebView keeps ticking) while
+// occupying a narrow strip instead of the full display.
+func windowPark(bundleId: String, visiblePx: Int) throws {
+    let (_, appElement) = try axApplication(bundleId: bundleId)
+    guard let raw = axCopyAttribute(appElement, kAXWindowsAttribute as String),
+          let windows = raw as? [AXUIElement],
+          let window = windows.first
+    else {
+        throw DriverError.eventCreationFailed("No AX windows for \(bundleId)")
+    }
+
+    var size = CGSize(width: 0, height: 0)
+    if let sizeRef = axCopyAttribute(window, kAXSizeAttribute as String) {
+        let axSize = sizeRef as! AXValue
+        AXValueGetValue(axSize, .cgSize, &size)
+    }
+    var curPos = CGPoint(x: 0, y: 0)
+    if let posRef = axCopyAttribute(window, kAXPositionAttribute as String) {
+        let axPos = posRef as! AXValue
+        AXValueGetValue(axPos, .cgPoint, &curPos)
+    }
+
+    guard let screen = NSScreen.main else {
+        throw DriverError.eventCreationFailed("No main screen")
+    }
+    let screenFrame = screen.frame
+
+    // AX window positions are in top-left screen coordinates, same as
+    // CGWindowList. NSScreen.frame.width/height give the raw display size
+    // (independent of the bottom-left-origin NSScreen coordinate system).
+    let newX = screenFrame.width - CGFloat(visiblePx)
+    let newY = max(0, (screenFrame.height - size.height) / 2)
+    var newPos = CGPoint(x: newX, y: newY)
+    guard let posValue = AXValueCreate(.cgPoint, &newPos) else {
+        throw DriverError.eventCreationFailed("Failed to create AXValue for position")
+    }
+    let status = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, posValue)
+    guard status == .success else {
+        throw DriverError.eventCreationFailed(
+            "AXUIElementSetAttributeValue(position) failed: status=\(status.rawValue)"
+        )
+    }
+    print("screen=\(Int(screenFrame.width))x\(Int(screenFrame.height)) win=\(Int(size.width))x\(Int(size.height)) from=\(Int(curPos.x)),\(Int(curPos.y)) to=\(Int(newX)),\(Int(newY))")
+}
+
 func clickWindow(bundleId: String, relativeX: Double, relativeY: Double) throws {
     let bounds = try mainWindowBounds(bundleId: bundleId)
     let clampedX = min(max(relativeX, 0), 1)
@@ -542,6 +597,12 @@ do {
             throw DriverError.invalidArgument("Missing --relative-x/--relative-y for click")
         }
         try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY)
+    case "window_park":
+        try ensureAccessibility(prompt: options.promptAccessibility)
+        guard let visiblePx = options.visiblePx else {
+            throw DriverError.invalidArgument("Missing --visible-px for window_park")
+        }
+        try windowPark(bundleId: options.bundleId, visiblePx: visiblePx)
     default:
         throw DriverError.invalidArgument("Unsupported command")
     }

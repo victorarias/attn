@@ -205,6 +205,16 @@ export class UiAutomationClient {
           `tell application id "${this.callerBundleIdForLaunch}" to activate`,
         ]).catch(() => {});
       }
+      // Re-issue the park via AX after the window exists. Tauri positions the
+      // window in on_page_load so there's no visual flash, but the AX
+      // set-position call also nudges the WebView out of the off-screen-init
+      // throttle state it otherwise enters.
+      const parkPx = Number.parseInt(process.env.ATTN_HARNESS_PARK_VISIBLE_PX || '', 10);
+      if (alwaysOnTop && Number.isInteger(parkPx) && parkPx > 0) {
+        await focusDriver.parkWindow(parkPx).catch((error) => {
+          console.warn(`[RealAppHarness] Park failed: ${error?.message || error}`);
+        });
+      }
       return;
     }
     const openArgs = this.backgroundLaunch ? ['-g', this.appPath] : [this.appPath];
@@ -217,6 +227,7 @@ export class UiAutomationClient {
     }
     return this._focusDriver;
   }
+
 
   async quitApp(timeoutMs = 10_000) {
     let existingPid = null;

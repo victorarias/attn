@@ -721,6 +721,37 @@ pub fn run() {
             Ok(())
         })
         .on_page_load(|webview, _payload| {
+            // Position the window before showing it, so parked harness runs
+            // don't flash at center first. Visible strip is specified in logical
+            // pixels; Tauri's primary_monitor().size() is physical, so we divide
+            // by scale_factor to reason about logical coordinates and then use
+            // LogicalPosition to set the window.
+            #[cfg(target_os = "macos")]
+            {
+                if let Ok(px_str) = std::env::var("ATTN_HARNESS_PARK_VISIBLE_PX") {
+                    if let Ok(visible_px) = px_str.parse::<f64>() {
+                        if visible_px > 0.0 {
+                            let window = webview.window();
+                            if let Ok(Some(monitor)) = window.primary_monitor() {
+                                let scale = monitor.scale_factor();
+                                let mon_size = monitor.size();
+                                let logical_w = mon_size.width as f64 / scale;
+                                let logical_h = mon_size.height as f64 / scale;
+                                let win_h_logical = window
+                                    .inner_size()
+                                    .map(|s| s.height as f64 / scale)
+                                    .unwrap_or(800.0);
+                                let new_x = logical_w - visible_px;
+                                let new_y =
+                                    ((logical_h - win_h_logical) / 2.0).max(0.0);
+                                let _ = window.set_position(
+                                    tauri::LogicalPosition::new(new_x, new_y),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
             // Show window as soon as page content is loaded (loading screen visible)
             let _ = webview.window().show();
         })
