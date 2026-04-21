@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Terminal Goes Blank After Closing A Split In A Relaunched Remote Session**: The websocket subscriber id was derived from `<client_ptr>:<sessionID>`, which stays stable when the same client reattaches to the same session during remount/relaunch. The PTY session's subscriber map is keyed by that id, so a second attach silently overwrote the first subscriber's callback in place; then when the first stream closed it emitted a `Detach` RPC that removed the subscriber id — now pointing at the *new* stream — leaving the session with no one to forward output to. Claude's post-SIGWINCH redraw bytes continued to be generated but had no subscriber, so the pane kept showing the stale narrow frame from before the close. Each attach now gets a monotonically unique subscriber id, so a dying stream's detach removes only its own subscription. Verified with the tr205-claude scenario (previously 0/2 passes, now 3/3) and a dedicated byte-level PTY probe that confirmed claude does emit full redraws on every resize.
 
+### Changed
+- **`scenario-tr201-local-relaunch-existing-split` Waits For Post-Split Reflow Before Baseline Capture**: After `split_pane`, xterm keeps the pre-split wide buffer until the agent (claude) responds to SIGWINCH with a fresh narrow redraw. Sampling the main pane's visible content during that window captured the stale wide frame as the baseline, then after relaunch the restored pane showed the correct narrow frame — the scenario flagged the mismatch as "main pane content not preserved." Baseline capture now waits for `visibleContent.summary.maxLineLength <= visibleContent.cols` (the observable reflow signal) before recording the baseline, eliminating the race.
+
 ---
 
 ## [2026-04-20]

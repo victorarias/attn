@@ -18,6 +18,7 @@ import {
   captureSessionArtifacts,
   waitForNewShellPane,
   waitForPaneInputFocus,
+  waitForPaneReflowed,
   waitForPaneState,
   waitForPaneText,
   waitForPaneVisible,
@@ -108,6 +109,8 @@ async function main() {
         'utility pane before relaunch',
         20_000,
       );
+
+      await waitForPaneReflowed(client, sessionId, 'main', 20_000, 'main pane reflowed after split before baseline capture');
 
       const baselineMainState = await assertPaneVisibleContent(client, sessionId, 'main', {
         contains: agentToken,

@@ -336,6 +336,33 @@ function visibleContentAnchorLines(
     .slice(0, maxAnchors);
 }
 
+// After a resize (e.g. split_pane), xterm keeps the pre-resize buffer around
+// until the agent responds to SIGWINCH with a fresh redraw. Sampling the pane
+// during that window captures stale wide content and misrepresents the post-
+// resize baseline. Wait until no visible line exceeds the pane's current
+// column count — that's the observable signal that reflow has landed.
+export async function waitForPaneReflowed(client, sessionId, paneId, timeoutMs = 20_000, description) {
+  const label = description || `pane ${paneId} reflowed to current geometry`;
+  return waitForPaneVisibleContent(
+    client,
+    sessionId,
+    paneId,
+    (visibleContent) => {
+      if (!visibleContent) {
+        return false;
+      }
+      const cols = visibleContent.cols;
+      const maxLineLength = visibleContent.summary?.maxLineLength;
+      if (typeof cols !== 'number' || typeof maxLineLength !== 'number') {
+        return false;
+      }
+      return maxLineLength <= cols;
+    },
+    label,
+    timeoutMs,
+  );
+}
+
 export async function assertPaneVisibleContentPreserved(
   client,
   sessionId,
