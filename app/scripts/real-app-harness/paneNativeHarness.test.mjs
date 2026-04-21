@@ -1,71 +1,34 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  analyzePanePixelCoverage,
+  analyzePaneTextCoverage,
   comparePaneNativePaintCoverage,
   comparePaneNativePaintRegression,
   evaluatePaneNativePaintCoverage,
 } from './paneNativeAnalysis.mjs';
-import { analyzePngCropCoverage } from './paneNativeMetrics.mjs';
-import { writeFixturePng } from './pngFixtureUtils.mjs';
 
-const createdDirs = [];
-
-function rgba(r, g, b, a = 255) {
-  return [r, g, b, a];
+function paddedLine(cols, text, leftPad = 0) {
+  const body = text.padEnd(cols - leftPad, ' ');
+  return ' '.repeat(leftPad) + body.slice(0, cols - leftPad);
 }
 
-function buildImage(width, height, background, painter) {
-  const data = new Uint8Array(width * height * 4);
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const color = painter?.(x, y) || background;
-      const offset = (y * width + x) * 4;
-      data[offset] = color[0];
-      data[offset + 1] = color[1];
-      data[offset + 2] = color[2];
-      data[offset + 3] = color[3];
-    }
-  }
-
-  return data;
+function blankLine(cols) {
+  return ' '.repeat(cols);
 }
 
-function makeTempDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-pane-native-'));
-  createdDirs.push(dir);
-  return dir;
-}
-
-function writeFixtureImage(filePath, fixture) {
-  writeFixturePng(filePath, fixture);
-}
-
-afterEach(() => {
-  while (createdDirs.length > 0) {
-    const dir = createdDirs.pop();
-    if (dir) {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  }
-});
-
-describe('pane native analysis', () => {
+describe('pane native analysis (text coverage)', () => {
   it('passes a healthy full-area synthetic pane', () => {
-    const width = 120;
-    const height = 80;
-    const background = rgba(30, 30, 30);
-    const data = buildImage(width, height, background, (x, y) => {
-      if (x >= 12 && x <= 108 && y >= 10 && y <= 52) {
-        return rgba(220, 220, 220);
+    const cols = 80;
+    const rows = 24;
+    const lines = [];
+    for (let r = 0; r < rows; r += 1) {
+      if (r >= 2 && r <= 18) {
+        lines.push(paddedLine(cols, `row${r} some terminal content spanning most columns to mimic a busy pane`));
+      } else {
+        lines.push(blankLine(cols));
       }
-      return background;
-    });
+    }
 
-    const analysis = analyzePanePixelCoverage({ width, height, data });
+    const analysis = analyzePaneTextCoverage({ cols, lines });
     expect(analysis.busyColumnRatio).toBeGreaterThan(0.75);
     expect(analysis.busyRowRatio).toBeGreaterThan(0.45);
     expect(analysis.bboxWidthRatio).toBeGreaterThan(0.75);
@@ -78,6 +41,7 @@ describe('pane native analysis', () => {
       minBBoxHeightRatio: 0.2,
     });
     expect(evaluation.ok).toBe(true);
+
     const comparison = comparePaneNativePaintCoverage(analysis, analysis);
     expect(comparison.ok).toBe(true);
     expect(comparison.deltas).toEqual({
@@ -90,17 +54,18 @@ describe('pane native analysis', () => {
   });
 
   it('fails a narrow left-strip render', () => {
-    const width = 120;
-    const height = 80;
-    const background = rgba(30, 30, 30);
-    const data = buildImage(width, height, background, (x, y) => {
-      if (x >= 4 && x <= 20 && y >= 8 && y <= 58) {
-        return rgba(230, 230, 230);
+    const cols = 80;
+    const rows = 24;
+    const lines = [];
+    for (let r = 0; r < rows; r += 1) {
+      if (r >= 2 && r <= 18) {
+        lines.push(paddedLine(cols, 'abc'));
+      } else {
+        lines.push(blankLine(cols));
       }
-      return background;
-    });
+    }
 
-    const analysis = analyzePanePixelCoverage({ width, height, data });
+    const analysis = analyzePaneTextCoverage({ cols, lines });
     const evaluation = evaluatePaneNativePaintCoverage(analysis, {
       minBusyColumnRatio: 0.45,
       minBusyRowRatio: 0.18,
@@ -113,17 +78,18 @@ describe('pane native analysis', () => {
   });
 
   it('fails a footer-band render', () => {
-    const width = 120;
-    const height = 80;
-    const background = rgba(30, 30, 30);
-    const data = buildImage(width, height, background, (x, y) => {
-      if (x >= 8 && x <= 112 && y >= 62 && y <= 74) {
-        return rgba(210, 210, 210);
+    const cols = 80;
+    const rows = 24;
+    const lines = [];
+    for (let r = 0; r < rows; r += 1) {
+      if (r >= 20 && r <= 22) {
+        lines.push(paddedLine(cols, 'bottom row content filling most of the available width'));
+      } else {
+        lines.push(blankLine(cols));
       }
-      return background;
-    });
+    }
 
-    const analysis = analyzePanePixelCoverage({ width, height, data });
+    const analysis = analyzePaneTextCoverage({ cols, lines });
     const evaluation = evaluatePaneNativePaintCoverage(analysis, {
       minBusyColumnRatio: 0.45,
       minBusyRowRatio: 0.18,
@@ -135,180 +101,11 @@ describe('pane native analysis', () => {
     expect(evaluation.failures.some((failure) => failure.includes('bboxHeightRatio'))).toBe(true);
   });
 
-  it('analyzes real PNG fixtures written to disk', async () => {
-    const dir = makeTempDir();
-    const imagePath = path.join(dir, 'wide.png');
-    const cropPath = path.join(dir, 'wide-crop.png');
-    writeFixtureImage(imagePath, {
-      width: 420,
-      height: 260,
-      background: [32, 32, 32, 255],
-      rects: [
-        { x: 18, y: 22, width: 270, height: 32, fill: [220, 220, 220, 255] },
-        { x: 18, y: 74, width: 344, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 98, width: 332, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 122, width: 352, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 146, width: 338, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 170, width: 326, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 208, width: 380, height: 26, fill: [76, 76, 76, 255] },
-      ],
-    });
-
-    const result = await analyzePngCropCoverage(imagePath, {
-      cropPath,
-      crop: { x: 0, y: 0, width: 420, height: 260 },
-    });
-
-    expect(fs.existsSync(cropPath)).toBe(true);
-    expect(result.image).toEqual({ width: 420, height: 260 });
-    expect(result.analysis.busyColumnRatio).toBeGreaterThan(0.75);
-    expect(result.analysis.busyRowRatio).toBeGreaterThan(0.35);
-
-    const evaluation = evaluatePaneNativePaintCoverage(result.analysis, {
-      minBusyColumnRatio: 0.45,
-      minBusyRowRatio: 0.18,
-      minBBoxWidthRatio: 0.45,
-      minBBoxHeightRatio: 0.18,
-    });
-    expect(evaluation.ok).toBe(true);
-  });
-
-  it('fails a real PNG fixture that paints only a narrow strip', async () => {
-    const dir = makeTempDir();
-    const imagePath = path.join(dir, 'narrow.png');
-    writeFixtureImage(imagePath, {
-      width: 420,
-      height: 260,
-      background: [32, 32, 32, 255],
-      rects: [
-        { x: 10, y: 18, width: 84, height: 28, fill: [220, 220, 220, 255] },
-        { x: 10, y: 68, width: 78, height: 12, fill: [170, 170, 170, 255] },
-        { x: 10, y: 92, width: 80, height: 12, fill: [170, 170, 170, 255] },
-        { x: 10, y: 116, width: 76, height: 12, fill: [170, 170, 170, 255] },
-        { x: 10, y: 140, width: 82, height: 12, fill: [170, 170, 170, 255] },
-        { x: 10, y: 164, width: 74, height: 12, fill: [170, 170, 170, 255] },
-      ],
-    });
-
-    const result = await analyzePngCropCoverage(imagePath, {
-      crop: { x: 0, y: 0, width: 420, height: 260 },
-    });
-
-    const evaluation = evaluatePaneNativePaintCoverage(result.analysis, {
-      minBusyColumnRatio: 0.45,
-      minBusyRowRatio: 0.18,
-      minBBoxWidthRatio: 0.45,
-      minBBoxHeightRatio: 0.18,
-    });
-    expect(evaluation.ok).toBe(false);
-    expect(evaluation.failures.some((failure) => failure.includes('busyColumnRatio'))).toBe(true);
-    expect(evaluation.failures.some((failure) => failure.includes('bboxWidthRatio'))).toBe(true);
-  });
-
-  it('accepts a subtle healthy delta within tolerance', async () => {
-    const dir = makeTempDir();
-    const basePath = path.join(dir, 'base.png');
-    const subtlePath = path.join(dir, 'subtle.png');
-    const common = {
-      width: 420,
-      height: 260,
-      background: [32, 32, 32, 255],
-    };
-
-    writeFixtureImage(basePath, {
-      ...common,
-      rects: [
-        { x: 18, y: 22, width: 270, height: 32, fill: [220, 220, 220, 255] },
-        { x: 18, y: 74, width: 344, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 98, width: 332, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 122, width: 352, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 146, width: 338, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 170, width: 326, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 208, width: 380, height: 26, fill: [76, 76, 76, 255] },
-      ],
-    });
-
-    writeFixtureImage(subtlePath, {
-      ...common,
-      rects: [
-        { x: 18, y: 22, width: 270, height: 32, fill: [220, 220, 220, 255] },
-        { x: 18, y: 74, width: 344, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 98, width: 332, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 122, width: 352, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 146, width: 338, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 170, width: 326, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 194, width: 168, height: 10, fill: [170, 170, 170, 255] },
-        { x: 18, y: 208, width: 380, height: 26, fill: [76, 76, 76, 255] },
-      ],
-    });
-
-    const base = await analyzePngCropCoverage(basePath, {
-      crop: { x: 0, y: 0, width: 420, height: 260 },
-    });
-    const subtle = await analyzePngCropCoverage(subtlePath, {
-      crop: { x: 0, y: 0, width: 420, height: 260 },
-    });
-
-    const comparison = comparePaneNativePaintCoverage(base.analysis, subtle.analysis, {
-      maxBusyColumnRatioDelta: 0.05,
-      maxBusyRowRatioDelta: 0.05,
-      maxBBoxWidthRatioDelta: 0.05,
-      maxBBoxHeightRatioDelta: 0.05,
-      maxActivePixelRatioDelta: 0.03,
-    });
-    expect(comparison.ok).toBe(true);
-    expect(comparison.deltas.busyRowRatioDelta).toBeGreaterThan(0);
-  });
-
-  it('rejects a materially degraded before/after delta', async () => {
-    const dir = makeTempDir();
-    const basePath = path.join(dir, 'healthy.png');
-    const degradedPath = path.join(dir, 'degraded.png');
-    const common = {
-      width: 420,
-      height: 260,
-      background: [32, 32, 32, 255],
-    };
-
-    writeFixtureImage(basePath, {
-      ...common,
-      rects: [
-        { x: 18, y: 22, width: 270, height: 32, fill: [220, 220, 220, 255] },
-        { x: 18, y: 74, width: 344, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 98, width: 332, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 122, width: 352, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 146, width: 338, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 170, width: 326, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 208, width: 380, height: 26, fill: [76, 76, 76, 255] },
-      ],
-    });
-
-    writeFixtureImage(degradedPath, {
-      ...common,
-      rects: [
-        { x: 18, y: 208, width: 180, height: 24, fill: [76, 76, 76, 255] },
-        { x: 18, y: 74, width: 90, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 98, width: 88, height: 12, fill: [170, 170, 170, 255] },
-        { x: 18, y: 122, width: 92, height: 12, fill: [170, 170, 170, 255] },
-      ],
-    });
-
-    const base = await analyzePngCropCoverage(basePath, {
-      crop: { x: 0, y: 0, width: 420, height: 260 },
-    });
-    const degraded = await analyzePngCropCoverage(degradedPath, {
-      crop: { x: 0, y: 0, width: 420, height: 260 },
-    });
-
-    const comparison = comparePaneNativePaintCoverage(base.analysis, degraded.analysis, {
-      maxBusyColumnRatioDelta: 0.08,
-      maxBusyRowRatioDelta: 0.08,
-      maxBBoxWidthRatioDelta: 0.08,
-      maxBBoxHeightRatioDelta: 0.08,
-      maxActivePixelRatioDelta: 0.03,
-    });
-    expect(comparison.ok).toBe(false);
-    expect(comparison.failures.length).toBeGreaterThan(0);
+  it('treats missing cols or empty lines as zero coverage', () => {
+    const empty = analyzePaneTextCoverage({ cols: 0, lines: [] });
+    expect(empty.busyColumnRatio).toBe(0);
+    expect(empty.busyRowRatio).toBe(0);
+    expect(empty.bbox).toBeNull();
   });
 
   it('allows callers to ignore selected delta metrics', () => {

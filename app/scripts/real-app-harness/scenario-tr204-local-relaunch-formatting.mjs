@@ -16,7 +16,7 @@ import {
   assertPaneVisibleContent,
   captureSessionArtifacts,
   waitForNewShellPane,
-  waitForPaneInputFocus,
+  waitForPaneAttached,
   waitForPaneStyle,
   waitForPaneText,
   waitForPaneVisible,
@@ -106,7 +106,7 @@ async function main() {
       );
       await client.request('focus_pane', { sessionId, paneId: utilityPane.paneId });
       await waitForPaneVisible(client, sessionId, utilityPane.paneId, 20_000);
-      await waitForPaneInputFocus(client, sessionId, utilityPane.paneId, 20_000, { stableMs: 400 });
+      await waitForPaneAttached(client, sessionId, utilityPane.paneId, 20_000);
       await client.request('write_pane', {
         sessionId,
         paneId: utilityPane.paneId,

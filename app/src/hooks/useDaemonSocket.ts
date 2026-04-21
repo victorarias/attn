@@ -2001,6 +2001,10 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'detach_session', id }));
   }, []);
 
+  const isRuntimeAttached = useCallback((runtimeId: string): boolean => {
+    return ptyTransportRef.current.hasAttachedRuntime(runtimeId);
+  }, []);
+
   const sendPtyInput = useCallback((id: string, data: string, source?: string) => {
     const ws = wsRef.current;
     const transportReady = Boolean(ws && ws.readyState === WebSocket.OPEN && hasReceivedInitialStateRef.current);
@@ -3356,6 +3360,7 @@ export function useDaemonSocket({
     sendWorkspaceFocusPane,
     sendWorkspaceRenamePane,
     sendRuntimeInput: sendPtyInput,
+    isRuntimeAttached,
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,

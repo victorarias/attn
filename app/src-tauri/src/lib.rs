@@ -700,7 +700,21 @@ pub fn run() {
             thumbs::reveal_in_finder,
         ])
         .setup(|app| {
+            use tauri::Manager;
             ui_automation::maybe_start(&app.handle().clone());
+            // Harness-only: keep attn visible (and unthrottled by WKWebView occlusion)
+            // without ever becoming the active app, so scenarios don't steal focus.
+            // Accessory policy hides the Dock tile and prevents macOS from making
+            // attn frontmost on launch; set_focusable(false) ensures the window
+            // can't take key via a stray click either.
+            if env::var("ATTN_HARNESS_ALWAYS_ON_TOP").ok().is_some_and(|v| v == "1") {
+                #[cfg(target_os = "macos")]
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_always_on_top(true);
+                    let _ = window.set_focusable(false);
+                }
+            }
             Ok(())
         })
         .on_page_load(|webview, _payload| {

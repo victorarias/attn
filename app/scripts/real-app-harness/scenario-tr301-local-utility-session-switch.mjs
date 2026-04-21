@@ -91,7 +91,6 @@ async function main() {
       );
       await client.request('focus_pane', { sessionId: primarySessionId, paneId: utilityPane.paneId });
       await waitForPaneVisible(client, primarySessionId, utilityPane.paneId, 20_000);
-      await waitForPaneInputFocus(client, primarySessionId, utilityPane.paneId, 20_000, { stableMs: 500 });
       return utilityPane.paneId;
     });
 

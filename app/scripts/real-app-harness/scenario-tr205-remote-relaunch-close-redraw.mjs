@@ -422,7 +422,7 @@ async function main() {
     endpoint = await runner.step('connect_remote_endpoint', async () => {
       const endpointName = `harness-${runner.runId}`;
       observer.addEndpoint(endpointName, options.sshTarget);
-      const connected = await waitForEndpointConnected(observer, endpointName, 120_000);
+      const connected = await waitForEndpointConnected(observer, endpointName);
       runner.writeJson('endpoint.json', connected);
       return connected;
     });

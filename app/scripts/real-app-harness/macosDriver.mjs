@@ -41,6 +41,57 @@ export class MacOSDriver {
     await delay(this.actionDelayMs);
   }
 
+  async activateBackground() {
+    // Verify the app is running without changing frontmost. Silent success
+    // means the target process is resolvable via AX; no HID tap is engaged.
+    await this.runInputDriver(['activate_background']);
+    await delay(this.actionDelayMs);
+  }
+
+  async menu(pathSegments) {
+    const path = Array.isArray(pathSegments) ? pathSegments : [pathSegments];
+    if (path.length === 0) {
+      throw new Error('MacOSDriver.menu requires at least one path segment');
+    }
+    await this.runInputDriver([
+      'menu',
+      '--path',
+      path.join('>'),
+      '--prompt-accessibility',
+    ]);
+    await delay(this.actionDelayMs);
+  }
+
+  async frontmostBundleId() {
+    return this.runInputDriverCapture(['frontmost']);
+  }
+
+  // Returns the CGWindowID of the driver's bundle's largest layer-0 onscreen
+  // window, or null if no such window exists. Reliable gate for "attn's window
+  // has been created": System Events returns 0 for Tauri/wry apps even when a
+  // window is visible, so this path uses CGWindowListCopyWindowInfo instead.
+  async mainWindowId() {
+    try {
+      const value = await this.runInputDriverCapture(['windowid']);
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async waitForMainWindow(timeoutMs = 10_000, pollIntervalMs = 150) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const wid = await this.mainWindowId();
+      if (wid) {
+        return wid;
+      }
+      await delay(pollIntervalMs);
+    }
+    return null;
+  }
+
   async typeText(text) {
     await this.runInputDriver(['text', '--text', text, '--prompt-accessibility']);
     await delay(this.actionDelayMs);
@@ -126,6 +177,20 @@ export class MacOSDriver {
         ? 'Grant Accessibility access to the attn real-app input driver when macOS prompts, then rerun the harness.'
         : 'macOS automation failed.';
       throw new Error(`${hint}\n${stderr || error.message}`);
+    }
+  }
+
+  async runInputDriverCapture(args) {
+    const binaryPath = await this.ensureInputDriver();
+    const fullArgs = ['--bundle-id', this.bundleId, ...args];
+    try {
+      const { stdout } = await execFileAsync(binaryPath, fullArgs, {
+        timeout: 5_000,
+      });
+      return stdout.toString().trim();
+    } catch (error) {
+      const stderr = error?.stderr?.toString?.() || '';
+      throw new Error(`macOS input driver capture failed: ${stderr || error.message}`);
     }
   }
 }

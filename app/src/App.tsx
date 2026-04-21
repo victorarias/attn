@@ -267,6 +267,7 @@ function App() {
     sendWorkspaceSplitPane,
     sendWorkspaceClosePane,
     sendRuntimeInput,
+    isRuntimeAttached,
     sendGetFileDiff,
     sendGetBranchDiffFiles,
     getRepoInfo,
@@ -370,6 +371,7 @@ function App() {
         sendWorkspaceSplitPane={sendWorkspaceSplitPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendRuntimeInput={sendRuntimeInput}
+        isRuntimeAttached={isRuntimeAttached}
         sendGetFileDiff={sendGetFileDiff}
         sendGetBranchDiffFiles={sendGetBranchDiffFiles}
         getRepoInfo={getRepoInfo}
@@ -442,6 +444,7 @@ interface AppContentProps {
   sendWorkspaceSplitPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceSplitPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
+  isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
   sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
   sendGetBranchDiffFiles: ReturnType<typeof useDaemonSocket>['sendGetBranchDiffFiles'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
@@ -509,6 +512,7 @@ sendFetchPRDetails,
   sendWorkspaceSplitPane,
   sendWorkspaceClosePane,
   sendRuntimeInput,
+  isRuntimeAttached,
   sendGetFileDiff,
   sendGetBranchDiffFiles,
   getRepoInfo,
@@ -1368,6 +1372,7 @@ sendFetchPRDetails,
     getPaneVisibleStyleSummary,
     fitSessionActivePane,
     sendRuntimeInput,
+    isRuntimeAttached,
     getReviewState,
     addComment: sendAddComment,
     updateComment: sendUpdateComment,
