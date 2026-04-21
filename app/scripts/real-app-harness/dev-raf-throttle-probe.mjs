@@ -20,6 +20,10 @@
 //     trip timeouts (tr204, tr401) will fail intermittently. Fall back to the
 //     capture-and-restore pattern.
 
+// This probe cycles through frontmost/non-key/occluded window states, so opt
+// out of the harness default always-on-top mode.
+process.env.ATTN_HARNESS_ALWAYS_ON_TOP = '0';
+
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

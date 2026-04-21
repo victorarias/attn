@@ -5,6 +5,10 @@
 // exercises the same code without paying for a full remote-harness round
 // trip. `dev-` prefix keeps it out of scenario discovery.
 
+// This probe deliberately exercises focus-stealing + caller-restore; opt out
+// of the default always-on-top mode so launch behaves like production.
+process.env.ATTN_HARNESS_ALWAYS_ON_TOP = '0';
+
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { MacOSDriver } from './macosDriver.mjs';

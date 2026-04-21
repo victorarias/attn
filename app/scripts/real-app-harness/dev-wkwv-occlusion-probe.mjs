@@ -25,6 +25,10 @@
 // or rebuild from app/scripts/real-app-harness/InputDriver.swift's
 // mainWindowBounds helper if missing).
 
+// This probe deliberately occludes attn, so opt out of the default always-on-
+// top harness mode — otherwise the window refuses to be covered.
+process.env.ATTN_HARNESS_ALWAYS_ON_TOP = '0';
+
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';

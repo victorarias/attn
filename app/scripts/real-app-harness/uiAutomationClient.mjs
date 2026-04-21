@@ -151,11 +151,11 @@ export class UiAutomationClient {
       this.callerBundleIdForRestore = callerBundleId;
     }
 
-    // Allow the harness caller to opt into always-on-top via env. This keeps
-    // attn visible (so WKWebView rAF/ResizeObserver don't throttle) without
-    // holding key status, so the user can keep typing in their own app while
-    // scenarios run.
-    const alwaysOnTop = process.env.ATTN_HARNESS_ALWAYS_ON_TOP === '1';
+    // Default to always-on-top so scenarios don't steal focus and WKWebView
+    // rAF/ResizeObserver stay unthrottled. Probes that deliberately exercise
+    // the focus-stealing or occlusion paths set ATTN_HARNESS_ALWAYS_ON_TOP=0
+    // to opt out.
+    const alwaysOnTop = process.env.ATTN_HARNESS_ALWAYS_ON_TOP !== '0';
     const effectiveLaunchEnv = alwaysOnTop
       ? { ...(this.launchEnv || {}), ATTN_HARNESS_ALWAYS_ON_TOP: '1' }
       : this.launchEnv;

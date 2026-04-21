@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+// Dev scenario that measures witness → attn → witness focus transitions, so
+// opt out of the default always-on-top harness mode.
+process.env.ATTN_HARNESS_ALWAYS_ON_TOP = '0';
+
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
