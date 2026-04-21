@@ -742,11 +742,9 @@ pub fn run() {
                                     .map(|s| s.height as f64 / scale)
                                     .unwrap_or(800.0);
                                 let new_x = logical_w - visible_px;
-                                let new_y =
-                                    ((logical_h - win_h_logical) / 2.0).max(0.0);
-                                let _ = window.set_position(
-                                    tauri::LogicalPosition::new(new_x, new_y),
-                                );
+                                let new_y = ((logical_h - win_h_logical) / 2.0).max(0.0);
+                                let _ =
+                                    window.set_position(tauri::LogicalPosition::new(new_x, new_y));
                             }
                         }
                     }
