@@ -360,7 +360,7 @@ func (d *Daemon) handleSessionLayoutClosePane(client *wsClient, msg *protocol.Se
 	}
 }
 
-func (d *Daemon) killWorkspaceRuntimesForSession(sessionID string) {
+func (d *Daemon) killSessionLayoutRuntimesForSession(sessionID string) {
 	snapshot, err := d.ensureSessionLayout(sessionID)
 	if err != nil {
 		return
@@ -370,7 +370,7 @@ func (d *Daemon) killWorkspaceRuntimesForSession(sessionID string) {
 	}
 }
 
-func (d *Daemon) handleWorkspaceRuntimeExit(runtimeID string, exitCode int, signal string) bool {
+func (d *Daemon) handleSessionLayoutRuntimeExit(runtimeID string, exitCode int, signal string) bool {
 	sessionID, paneID, ok := d.store.FindSessionLayoutPaneByRuntimeID(runtimeID)
 	if !ok {
 		return false
@@ -417,7 +417,7 @@ func optionalStringPtr(value string) *string {
 	return protocol.Ptr(value)
 }
 
-func (d *Daemon) reconcileWorkspacesWithPTYBackend(ctx context.Context) {
+func (d *Daemon) reconcileSessionLayoutsWithPTYBackend(ctx context.Context) {
 	if d.store == nil {
 		return
 	}

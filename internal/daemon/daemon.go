@@ -650,7 +650,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 
 	if _, ok := d.ptyBackend.(ptybackend.RecoverableRuntime); ok {
 		d.reconcileStartupWorkerSessions(recoveryReport, recoverErr, recoveryStartedAt)
-		d.reconcileWorkspacesWithPTYBackend(context.Background())
+		d.reconcileSessionLayoutsWithPTYBackend(context.Background())
 		return
 	}
 
@@ -662,7 +662,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 			fmt.Sprintf("Removed %d stale sessions from a previous daemon run because no live PTY was found.", removedSessions),
 		)
 	}
-	d.reconcileWorkspacesWithPTYBackend(context.Background())
+	d.reconcileSessionLayoutsWithPTYBackend(context.Background())
 }
 
 func (d *Daemon) recoverPTYBackend(timeout time.Duration) (ptybackend.RecoveryReport, error) {
@@ -1081,7 +1081,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 			})
 		}
 	} else {
-		d.handleWorkspaceRuntimeExit(info.ID, info.ExitCode, info.Signal)
+		d.handleSessionLayoutRuntimeExit(info.ID, info.ExitCode, info.Signal)
 	}
 
 	event := &protocol.WebSocketEvent{
@@ -1142,7 +1142,7 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 	if session == nil && d.hubManager != nil {
 		session = d.hubManager.RemoteSession(sessionID)
 	}
-	d.killWorkspaceRuntimesForSession(sessionID)
+	d.killSessionLayoutRuntimesForSession(sessionID)
 	d.terminateSession(sessionID, sig)
 	d.handleReviewLoopSourceSessionExit(sessionID)
 	d.setPendingInputSource(sessionID, "")
