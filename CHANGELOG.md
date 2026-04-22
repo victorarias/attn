@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-22]
+
+### Fixed
+- **Closing A Session Restores The Previous Selection**: Closing the active session used to leave the UI with nothing selected because the daemon sync cleared `activeSessionId` as soon as the session disappeared and the local removal path fell back to an arbitrary first-in-list. The store now tracks recently-active session IDs as an MRU history; when the active one goes away (either via explicit close or a daemon-driven removal such as a remote session dropping), the UI re-selects the most recent still-existing entry. Ghost IDs are pruned on every removal and filtered again when choosing a fallback, so sessions that were closed without ever being focused can't resurrect themselves.
+
+---
+
 ## [2026-04-21]
 
 ### Fixed
