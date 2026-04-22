@@ -66,7 +66,7 @@ type endpointRuntime struct {
 	pendingBootstrap bool
 
 	sessions   map[string]protocol.Session
-	workspaces map[string]protocol.WorkspaceSnapshot
+	workspaces map[string]protocol.SessionLayout
 }
 
 type pendingRemoteWebAction struct {
@@ -126,7 +126,7 @@ func NewManager(
 			record:     record,
 			info:       infoFromRecord(record),
 			sessions:   make(map[string]protocol.Session),
-			workspaces: make(map[string]protocol.WorkspaceSnapshot),
+			workspaces: make(map[string]protocol.SessionLayout),
 		}
 	}
 	return m
@@ -228,7 +228,7 @@ func (m *Manager) AddEndpoint(name, sshTarget string) (*store.EndpointRecord, er
 		record:     *record,
 		info:       infoFromRecord(*record),
 		sessions:   make(map[string]protocol.Session),
-		workspaces: make(map[string]protocol.WorkspaceSnapshot),
+		workspaces: make(map[string]protocol.SessionLayout),
 	}
 	if m.started && record.Enabled {
 		m.startRuntimeLocked(record.ID)
@@ -282,7 +282,7 @@ func (m *Manager) UpdateEndpoint(id string, update store.EndpointUpdate) (*store
 	if !ok {
 		runtime = &endpointRuntime{
 			sessions:   make(map[string]protocol.Session),
-			workspaces: make(map[string]protocol.WorkspaceSnapshot),
+			workspaces: make(map[string]protocol.SessionLayout),
 		}
 		m.runtimes[id] = runtime
 	}
@@ -401,7 +401,7 @@ func (m *Manager) stopRuntimeLocked(runtime *endpointRuntime) {
 		runtime.cmd = nil
 	}
 	runtime.sessions = make(map[string]protocol.Session)
-	runtime.workspaces = make(map[string]protocol.WorkspaceSnapshot)
+	runtime.workspaces = make(map[string]protocol.SessionLayout)
 	m.clearPendingRoutesLocked(runtime.record.ID)
 	m.clearRouteCachesLocked(runtime.record.ID)
 	zero := 0
@@ -467,7 +467,7 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		if m.clearRemoteSessions(id) {
 			m.publishSessionsChanged()
 		}
-		m.clearRemoteWorkspaces(id)
+		m.clearRemoteSessionLayouts(id)
 
 		if ctx.Err() != nil {
 			return
@@ -569,7 +569,7 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 				return false, &VersionMismatchError{RemoteVersion: remoteProtocol, LocalVersion: protocol.ProtocolVersion}
 			}
 			changed := m.replaceRemoteSessions(id, msg.Sessions)
-			m.replaceRemoteWorkspaces(id, msg.Workspaces)
+			m.replaceRemoteSessionLayouts(id, msg.SessionLayouts)
 			caps := capabilitiesFromInitialState(&msg)
 			sessionCount := int32(len(msg.Sessions))
 			if fingerMismatch, fingerMsg := fingerprintMismatch(msg.SourceFingerprint); fingerMismatch {
@@ -580,7 +580,7 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			if changed {
 				m.publishSessionsChanged()
 			}
-			m.publishWorkspaceSnapshots(msg.Workspaces)
+			m.publishSessionLayouts(msg.SessionLayouts)
 			connected = true
 		case protocol.EventSettingsUpdated:
 			var msg protocol.SettingsUpdatedMessage
@@ -620,20 +620,20 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 				continue
 			}
 			changed, sessionCount := m.removeRemoteSession(id, msg.Session.ID)
-			m.removeRemoteWorkspace(id, msg.Session.ID)
+			m.removeRemoteSessionLayout(id, msg.Session.ID)
 			countValue := int32(sessionCount)
 			m.updateStatus(id, activeStatus, activeMsg, nil, &countValue)
 			if changed {
 				m.publishSessionsChanged()
 			}
-		case protocol.EventWorkspaceSnapshot, protocol.EventWorkspaceUpdated:
+		case protocol.EventSessionLayout, protocol.EventSessionLayoutUpdated:
 			var msg struct {
-				Workspace *protocol.WorkspaceSnapshot `json:"workspace"`
+				SessionLayout *protocol.SessionLayout `json:"session_layout"`
 			}
-			if err := json.Unmarshal(data, &msg); err != nil || msg.Workspace == nil {
+			if err := json.Unmarshal(data, &msg); err != nil || msg.SessionLayout == nil {
 				continue
 			}
-			m.upsertRemoteWorkspace(id, *msg.Workspace)
+			m.upsertRemoteSessionLayout(id, *msg.SessionLayout)
 			m.publishRawEvent(data)
 		default:
 			if forwardsRawEvent(peek.Event) {
@@ -719,13 +719,13 @@ func forwardsRawEvent(event string) bool {
 		protocol.EventResolveCommentResult,
 		protocol.EventDeleteCommentResult,
 		protocol.EventGetCommentsResult,
-		protocol.EventWorkspaceRuntimeExited,
+		protocol.EventSessionLayoutRuntimeExited,
 		protocol.EventSpawnResult,
 		protocol.EventAttachResult,
 		protocol.EventPtyOutput,
 		protocol.EventPtyDesync,
 		protocol.EventSessionExited,
-		protocol.EventWorkspaceActionResult,
+		protocol.EventSessionLayoutActionResult,
 		protocol.EventCommandError:
 		return true
 	default:
@@ -763,7 +763,7 @@ func (m *Manager) RemoteSessions() []protocol.Session {
 	return out
 }
 
-func (m *Manager) RemoteWorkspaces() []protocol.WorkspaceSnapshot {
+func (m *Manager) RemoteWorkspaces() []protocol.SessionLayout {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -775,7 +775,7 @@ func (m *Manager) RemoteWorkspaces() []protocol.WorkspaceSnapshot {
 		return nil
 	}
 
-	out := make([]protocol.WorkspaceSnapshot, 0, total)
+	out := make([]protocol.SessionLayout, 0, total)
 	for _, runtime := range m.runtimes {
 		for _, workspace := range runtime.workspaces {
 			out = append(out, workspace)
@@ -858,8 +858,8 @@ func (m *Manager) EndpointIDForPTYTarget(targetID string) (string, bool) {
 		if _, ok := runtime.sessions[targetID]; ok {
 			return endpointID, true
 		}
-		for _, workspace := range runtime.workspaces {
-			for _, pane := range workspace.Panes {
+		for _, layout := range runtime.workspaces {
+			for _, pane := range layout.Panes {
 				if protocol.Deref(pane.RuntimeID) == targetID {
 					return endpointID, true
 				}
@@ -1171,14 +1171,14 @@ func (m *Manager) recordLoopRoute(endpointID, loopID string) {
 	m.loops[loopID] = endpointID
 }
 
-func (m *Manager) replaceRemoteWorkspaces(id string, workspaces []protocol.WorkspaceSnapshot) bool {
+func (m *Manager) replaceRemoteSessionLayouts(id string, workspaces []protocol.SessionLayout) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	runtime, ok := m.runtimes[id]
 	if !ok {
 		return false
 	}
-	next := make(map[string]protocol.WorkspaceSnapshot, len(workspaces))
+	next := make(map[string]protocol.SessionLayout, len(workspaces))
 	for _, workspace := range workspaces {
 		if runtime.sessions != nil {
 			if _, ok := runtime.sessions[workspace.SessionID]; !ok {
@@ -1187,14 +1187,14 @@ func (m *Manager) replaceRemoteWorkspaces(id string, workspaces []protocol.Works
 		}
 		next[workspace.SessionID] = workspace
 	}
-	if workspacesEqual(runtime.workspaces, next) {
+	if sessionLayoutsEqual(runtime.workspaces, next) {
 		return false
 	}
 	runtime.workspaces = next
 	return true
 }
 
-func (m *Manager) upsertRemoteWorkspace(id string, workspace protocol.WorkspaceSnapshot) bool {
+func (m *Manager) upsertRemoteSessionLayout(id string, workspace protocol.SessionLayout) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	runtime, ok := m.runtimes[id]
@@ -1207,16 +1207,16 @@ func (m *Manager) upsertRemoteWorkspace(id string, workspace protocol.WorkspaceS
 		}
 	}
 	if runtime.workspaces == nil {
-		runtime.workspaces = make(map[string]protocol.WorkspaceSnapshot)
+		runtime.workspaces = make(map[string]protocol.SessionLayout)
 	}
-	if existing, ok := runtime.workspaces[workspace.SessionID]; ok && workspacesMatch(existing, workspace) {
+	if existing, ok := runtime.workspaces[workspace.SessionID]; ok && sessionLayoutsMatch(existing, workspace) {
 		return false
 	}
 	runtime.workspaces[workspace.SessionID] = workspace
 	return true
 }
 
-func (m *Manager) removeRemoteWorkspace(id, sessionID string) bool {
+func (m *Manager) removeRemoteSessionLayout(id, sessionID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	runtime, ok := m.runtimes[id]
@@ -1230,14 +1230,14 @@ func (m *Manager) removeRemoteWorkspace(id, sessionID string) bool {
 	return true
 }
 
-func (m *Manager) clearRemoteWorkspaces(id string) bool {
+func (m *Manager) clearRemoteSessionLayouts(id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	runtime, ok := m.runtimes[id]
 	if !ok || len(runtime.workspaces) == 0 {
 		return false
 	}
-	runtime.workspaces = make(map[string]protocol.WorkspaceSnapshot)
+	runtime.workspaces = make(map[string]protocol.SessionLayout)
 	return true
 }
 
@@ -1255,11 +1255,11 @@ func (m *Manager) publishRawEvent(data []byte) {
 	m.onRawEvent(cloned)
 }
 
-func (m *Manager) publishWorkspaceSnapshots(workspaces []protocol.WorkspaceSnapshot) {
-	for _, workspace := range workspaces {
-		payload, err := json.Marshal(protocol.WorkspaceSnapshotMessage{
-			Event:     protocol.EventWorkspaceSnapshot,
-			Workspace: workspace,
+func (m *Manager) publishSessionLayouts(layouts []protocol.SessionLayout) {
+	for _, layout := range layouts {
+		payload, err := json.Marshal(protocol.SessionLayoutMessage{
+			Event:         protocol.EventSessionLayout,
+			SessionLayout: layout,
 		})
 		if err != nil {
 			continue
@@ -1309,20 +1309,20 @@ func sessionsMatch(left, right protocol.Session) bool {
 		left.Muted == right.Muted
 }
 
-func workspacesEqual(left, right map[string]protocol.WorkspaceSnapshot) bool {
+func sessionLayoutsEqual(left, right map[string]protocol.SessionLayout) bool {
 	if len(left) != len(right) {
 		return false
 	}
 	for id, leftWorkspace := range left {
 		rightWorkspace, ok := right[id]
-		if !ok || !workspacesMatch(leftWorkspace, rightWorkspace) {
+		if !ok || !sessionLayoutsMatch(leftWorkspace, rightWorkspace) {
 			return false
 		}
 	}
 	return true
 }
 
-func workspacesMatch(left, right protocol.WorkspaceSnapshot) bool {
+func sessionLayoutsMatch(left, right protocol.SessionLayout) bool {
 	if left.SessionID != right.SessionID ||
 		left.ActivePaneID != right.ActivePaneID ||
 		left.LayoutJson != right.LayoutJson ||

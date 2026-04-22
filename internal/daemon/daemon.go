@@ -1534,7 +1534,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		}
 	}
 	d.store.Add(session)
-	if _, err := d.ensureWorkspaceSnapshot(session.ID); err != nil {
+	if _, err := d.ensureSessionLayout(session.ID); err != nil {
 		d.logf("workspace bootstrap failed for session %s: %v", session.ID, err)
 	}
 
@@ -1553,7 +1553,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		Event:   eventType,
 		Session: d.sessionForBroadcast(session),
 	})
-	d.broadcastWorkspaceSnapshot(session.ID)
+	d.broadcastSessionLayout(session.ID)
 }
 
 func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage) {
@@ -2092,16 +2092,16 @@ func (d *Daemon) mergedSessionsForBroadcast() []protocol.Session {
 	return merged
 }
 
-func (d *Daemon) mergedWorkspacesForBroadcast() []protocol.WorkspaceSnapshot {
-	localWorkspaces := d.listWorkspaceSnapshots(d.store.List(""))
-	remoteWorkspaces := d.remoteWorkspacesForBroadcast()
+func (d *Daemon) mergedSessionLayoutsForBroadcast() []protocol.SessionLayout {
+	localWorkspaces := d.listSessionLayouts(d.store.List(""))
+	remoteWorkspaces := d.remoteSessionLayoutsForBroadcast()
 	if len(localWorkspaces) == 0 {
 		return remoteWorkspaces
 	}
 	if len(remoteWorkspaces) == 0 {
 		return localWorkspaces
 	}
-	merged := make([]protocol.WorkspaceSnapshot, 0, len(localWorkspaces)+len(remoteWorkspaces))
+	merged := make([]protocol.SessionLayout, 0, len(localWorkspaces)+len(remoteWorkspaces))
 	merged = append(merged, localWorkspaces...)
 	merged = append(merged, remoteWorkspaces...)
 	return merged
@@ -2114,7 +2114,7 @@ func (d *Daemon) remoteSessionsForBroadcast() []protocol.Session {
 	return d.hubManager.RemoteSessions()
 }
 
-func (d *Daemon) remoteWorkspacesForBroadcast() []protocol.WorkspaceSnapshot {
+func (d *Daemon) remoteSessionLayoutsForBroadcast() []protocol.SessionLayout {
 	if d.hubManager == nil {
 		return nil
 	}

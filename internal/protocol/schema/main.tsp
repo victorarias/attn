@@ -30,12 +30,12 @@ enum SessionAgent {
   pi,
 }
 
-enum WorkspacePaneKind {
+enum SessionLayoutPaneKind {
   main,
   shell,
 }
 
-enum WorkspaceSplitDirection {
+enum SessionLayoutSplitDirection {
   vertical,
   horizontal,
 }
@@ -204,18 +204,18 @@ model GitFileChange {
   old_path?: string;     // For renames
 }
 
-model WorkspacePane {
+model SessionLayoutPane {
   pane_id: string;
   runtime_id?: string;
-  kind: WorkspacePaneKind;
+  kind: SessionLayoutPaneKind;
   title: string;
 }
 
-model WorkspaceSnapshot {
+model SessionLayout {
   session_id: string;
   active_pane_id: string;
   layout_json: string;
-  panes: WorkspacePane[];
+  panes: SessionLayoutPane[];
   updated_at?: string;
 }
 
@@ -679,32 +679,32 @@ model KillSessionMessage {
   signal?: string; // "SIGTERM", "SIGINT", ...
 }
 
-model WorkspaceGetMessage {
-  cmd: "workspace_get";
+model SessionLayoutGetMessage {
+  cmd: "session_layout_get";
   session_id: string;
 }
 
-model WorkspaceSplitPaneMessage {
-  cmd: "workspace_split_pane";
+model SessionLayoutSplitPaneMessage {
+  cmd: "session_layout_split_pane";
   session_id: string;
   target_pane_id: string;
-  direction: WorkspaceSplitDirection;
+  direction: SessionLayoutSplitDirection;
 }
 
-model WorkspaceClosePaneMessage {
-  cmd: "workspace_close_pane";
+model SessionLayoutClosePaneMessage {
+  cmd: "session_layout_close_pane";
   session_id: string;
   pane_id: string;
 }
 
-model WorkspaceFocusPaneMessage {
-  cmd: "workspace_focus_pane";
+model SessionLayoutFocusPaneMessage {
+  cmd: "session_layout_focus_pane";
   session_id: string;
   pane_id: string;
 }
 
-model WorkspaceRenamePaneMessage {
-  cmd: "workspace_rename_pane";
+model SessionLayoutRenamePaneMessage {
+  cmd: "session_layout_rename_pane";
   session_id: string;
   pane_id: string;
   title: string;
@@ -721,7 +721,7 @@ model InitialStateMessage {
   daemon_instance_id?: string;
   sessions?: Session[];
   endpoints?: EndpointInfo[];
-  workspaces?: WorkspaceSnapshot[];
+  session_layouts?: SessionLayout[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
@@ -772,18 +772,18 @@ model SessionsUpdatedMessage {
   sessions?: Session[];
 }
 
-model WorkspaceSnapshotMessage {
-  event: "workspace_snapshot";
-  workspace: WorkspaceSnapshot;
+model SessionLayoutMessage {
+  event: "session_layout";
+  session_layout: SessionLayout;
 }
 
-model WorkspaceUpdatedMessage {
-  event: "workspace_updated";
-  workspace: WorkspaceSnapshot;
+model SessionLayoutUpdatedMessage {
+  event: "session_layout_updated";
+  session_layout: SessionLayout;
 }
 
-model WorkspaceActionResultMessage {
-  event: "workspace_action_result";
+model SessionLayoutActionResultMessage {
+  event: "session_layout_action_result";
   action: string;
   session_id: string;
   pane_id?: string;
@@ -791,8 +791,8 @@ model WorkspaceActionResultMessage {
   error?: string;
 }
 
-model WorkspaceRuntimeExitedMessage {
-  event: "workspace_runtime_exited";
+model SessionLayoutRuntimeExitedMessage {
+  event: "session_layout_runtime_exited";
   session_id: string;
   pane_id: string;
   runtime_id: string;
@@ -1231,7 +1231,7 @@ model Response {
   ok: boolean;
   error?: string;
   sessions?: Session[];
-  workspaces?: WorkspaceSnapshot[];
+  session_layouts?: SessionLayout[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
@@ -1257,8 +1257,8 @@ model WebSocketEvent {
   session_id?: string;
   session?: Session;
   sessions?: Session[];
-  workspace?: WorkspaceSnapshot;
-  workspaces?: WorkspaceSnapshot[];
+  session_layout?: SessionLayout;
+  session_layouts?: SessionLayout[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
@@ -1332,10 +1332,10 @@ alias DaemonEvent =
   | SessionStateChangedMessage
   | SessionTodosUpdatedMessage
   | SessionsUpdatedMessage
-  | WorkspaceSnapshotMessage
-  | WorkspaceUpdatedMessage
-  | WorkspaceActionResultMessage
-  | WorkspaceRuntimeExitedMessage
+  | SessionLayoutMessage
+  | SessionLayoutUpdatedMessage
+  | SessionLayoutActionResultMessage
+  | SessionLayoutRuntimeExitedMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage
   | AuthorsUpdatedMessage

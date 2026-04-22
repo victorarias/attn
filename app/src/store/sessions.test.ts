@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSessionStore } from './sessions';
-import { WorkspacePaneKind } from '../types/generated';
+import { SessionLayoutPaneKind } from '../types/generated';
 
 const { mockPtySpawn, mockPtyKill } = vi.hoisted(() => ({
   mockPtySpawn: vi.fn(),
@@ -154,8 +154,8 @@ describe('sessions store', () => {
           ],
         }),
         panes: [
-          { pane_id: 'main', kind: WorkspacePaneKind.Main, title: 'Session', runtime_id: sessionId },
-          { pane_id: 'pane-shell', kind: WorkspacePaneKind.Shell, title: 'Shell 1', runtime_id: 'runtime-shell' },
+          { pane_id: 'main', kind: SessionLayoutPaneKind.Main, title: 'Session', runtime_id: sessionId },
+          { pane_id: 'pane-shell', kind: SessionLayoutPaneKind.Shell, title: 'Shell 1', runtime_id: 'runtime-shell' },
         ],
       },
     ]);
@@ -188,7 +188,7 @@ describe('sessions store', () => {
         active_pane_id: 'missing-pane',
         layout_json: '{not-json',
         panes: [
-          { pane_id: 'main', kind: WorkspacePaneKind.Main, title: 'Session', runtime_id: sessionId },
+          { pane_id: 'main', kind: SessionLayoutPaneKind.Main, title: 'Session', runtime_id: sessionId },
         ],
       },
       {
@@ -196,7 +196,7 @@ describe('sessions store', () => {
         active_pane_id: 'pane-x',
         layout_json: '',
         panes: [
-          { pane_id: 'pane-x', kind: WorkspacePaneKind.Shell, title: 'Shell X', runtime_id: 'runtime-x' },
+          { pane_id: 'pane-x', kind: SessionLayoutPaneKind.Shell, title: 'Shell X', runtime_id: 'runtime-x' },
         ],
       },
     ]);
