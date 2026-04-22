@@ -65,16 +65,16 @@ func protocolSessionLayout(snapshot sessionlayout.SessionLayout) (*protocol.Sess
 		}
 		panes = append(panes, next)
 	}
-	ws := &protocol.SessionLayout{
+	layout := &protocol.SessionLayout{
 		SessionID:    snapshot.SessionID,
 		ActivePaneID: snapshot.ActivePaneID,
 		LayoutJson:   layoutJSON,
 		Panes:        panes,
 	}
 	if strings.TrimSpace(snapshot.UpdatedAt) != "" {
-		ws.UpdatedAt = protocol.Ptr(snapshot.UpdatedAt)
+		layout.UpdatedAt = protocol.Ptr(snapshot.UpdatedAt)
 	}
-	return ws, nil
+	return layout, nil
 }
 
 func (d *Daemon) listSessionLayouts(sessions []*protocol.Session) []protocol.SessionLayout {
