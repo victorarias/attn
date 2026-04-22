@@ -1535,7 +1535,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	}
 	d.store.Add(session)
 	if _, err := d.ensureSessionLayout(session.ID); err != nil {
-		d.logf("workspace bootstrap failed for session %s: %v", session.ID, err)
+		d.logf("session layout bootstrap failed for session %s: %v", session.ID, err)
 	}
 
 	// Track this location in recent locations
@@ -2093,17 +2093,17 @@ func (d *Daemon) mergedSessionsForBroadcast() []protocol.Session {
 }
 
 func (d *Daemon) mergedSessionLayoutsForBroadcast() []protocol.SessionLayout {
-	localWorkspaces := d.listSessionLayouts(d.store.List(""))
-	remoteWorkspaces := d.remoteSessionLayoutsForBroadcast()
-	if len(localWorkspaces) == 0 {
-		return remoteWorkspaces
+	localLayouts := d.listSessionLayouts(d.store.List(""))
+	remoteLayouts := d.remoteSessionLayoutsForBroadcast()
+	if len(localLayouts) == 0 {
+		return remoteLayouts
 	}
-	if len(remoteWorkspaces) == 0 {
-		return localWorkspaces
+	if len(remoteLayouts) == 0 {
+		return localLayouts
 	}
-	merged := make([]protocol.SessionLayout, 0, len(localWorkspaces)+len(remoteWorkspaces))
-	merged = append(merged, localWorkspaces...)
-	merged = append(merged, remoteWorkspaces...)
+	merged := make([]protocol.SessionLayout, 0, len(localLayouts)+len(remoteLayouts))
+	merged = append(merged, localLayouts...)
+	merged = append(merged, remoteLayouts...)
 	return merged
 }
 

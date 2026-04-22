@@ -81,19 +81,19 @@ func (d *Daemon) listSessionLayouts(sessions []*protocol.Session) []protocol.Ses
 	if len(sessions) == 0 {
 		return nil
 	}
-	workspaces := make([]protocol.SessionLayout, 0, len(sessions))
+	layouts := make([]protocol.SessionLayout, 0, len(sessions))
 	for _, session := range sessions {
 		if session == nil {
 			continue
 		}
 		snapshot, err := d.protocolSessionLayout(session.ID)
 		if err != nil {
-			d.logf("workspace snapshot failed for session %s: %v", session.ID, err)
+			d.logf("session layout snapshot failed for session %s: %v", session.ID, err)
 			continue
 		}
-		workspaces = append(workspaces, *snapshot)
+		layouts = append(layouts, *snapshot)
 	}
-	return workspaces
+	return layouts
 }
 
 func (d *Daemon) sendSessionLayout(client *wsClient, sessionID string) {
@@ -127,7 +127,7 @@ func (d *Daemon) sendSessionLayoutActionResult(client *wsClient, action, session
 func (d *Daemon) broadcastSessionLayoutUpdated(sessionID string) {
 	snapshot, err := d.protocolSessionLayout(sessionID)
 	if err != nil {
-		d.logf("workspace update failed for session %s: %v", sessionID, err)
+		d.logf("session layout update failed for session %s: %v", sessionID, err)
 		return
 	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
@@ -139,7 +139,7 @@ func (d *Daemon) broadcastSessionLayoutUpdated(sessionID string) {
 func (d *Daemon) broadcastSessionLayout(sessionID string) {
 	snapshot, err := d.protocolSessionLayout(sessionID)
 	if err != nil {
-		d.logf("workspace snapshot failed for session %s: %v", sessionID, err)
+		d.logf("session layout snapshot failed for session %s: %v", sessionID, err)
 		return
 	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
@@ -378,7 +378,7 @@ func (d *Daemon) handleSessionLayoutRuntimeExit(runtimeID string, exitCode int, 
 
 	snapshot, err := d.ensureSessionLayout(sessionID)
 	if err != nil {
-		d.logf("workspace runtime exit reconcile failed for runtime %s: %v", runtimeID, err)
+		d.logf("session layout runtime exit reconcile failed for runtime %s: %v", runtimeID, err)
 		return false
 	}
 
@@ -393,7 +393,7 @@ func (d *Daemon) handleSessionLayoutRuntimeExit(runtimeID string, exitCode int, 
 	snapshot.Panes = nextPanes
 	normalized := sessionlayout.NormalizeSessionLayout(*snapshot, sessionID)
 	if err := d.store.SaveSessionLayout(normalized); err != nil {
-		d.logf("workspace runtime exit save failed for runtime %s: %v", runtimeID, err)
+		d.logf("session layout runtime exit save failed for runtime %s: %v", runtimeID, err)
 		return false
 	}
 
@@ -433,7 +433,7 @@ func (d *Daemon) reconcileSessionLayoutsWithPTYBackend(ctx context.Context) {
 	for _, session := range d.store.List("") {
 		snapshot, err := d.ensureSessionLayout(session.ID)
 		if err != nil {
-			d.logf("workspace ensure failed for session %s: %v", session.ID, err)
+			d.logf("session layout ensure failed for session %s: %v", session.ID, err)
 			continue
 		}
 
@@ -456,7 +456,7 @@ func (d *Daemon) reconcileSessionLayoutsWithPTYBackend(ctx context.Context) {
 			snapshot.Panes = nextPanes
 			normalized := sessionlayout.NormalizeSessionLayout(*snapshot, session.ID)
 			if err := d.store.SaveSessionLayout(normalized); err != nil {
-				d.logf("workspace reconcile save failed for session %s: %v", session.ID, err)
+				d.logf("session layout reconcile save failed for session %s: %v", session.ID, err)
 			}
 			continue
 		}
@@ -475,7 +475,7 @@ func (d *Daemon) reconcileSessionLayoutsWithPTYBackend(ctx context.Context) {
 			continue
 		}
 		if err := d.removePTYSession(runtimeID); err != nil {
-			d.logf("workspace reconcile prune failed for runtime %s: %v", runtimeID, err)
+			d.logf("session layout reconcile prune failed for runtime %s: %v", runtimeID, err)
 		}
 	}
 }
