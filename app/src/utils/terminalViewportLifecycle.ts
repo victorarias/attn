@@ -70,6 +70,70 @@ export function installTerminalViewportLifecycle({
   let latestDiagnostics: ResizeDiagnostics | null = null;
   let xResizeTimeout: number | undefined;
   let isVisible = true;
+  // Tracks an in-flight ready attempt so we don't pile up retries if the
+  // ResizeObserver fires repeatedly before the first attempt resolves.
+  let readyRetryTimeout: number | undefined;
+
+  const clearReadyRetryTimeout = () => {
+    if (readyRetryTimeout !== undefined) {
+      window.clearTimeout(readyRetryTimeout);
+      readyRetryTimeout = undefined;
+    }
+  };
+
+  // Ready requires three preconditions that each fail silently if the
+  // ResizeObserver fires before they're in place: container attached, scaled
+  // dimensions resolve, dimensions are positive. When they all hold the next
+  // RAF fires onReady; when any fails, retry with a brief backoff so we catch
+  // the state a few hundred ms later without re-entering once ready landed.
+  const MAX_READY_RETRIES = 20;
+  const READY_RETRY_DELAY_MS = 50;
+
+  const scheduleReadyAttempt = (attempt: number) => {
+    if (readyFiredRef.current) {
+      clearReadyRetryTimeout();
+      return;
+    }
+    clearReadyRetryTimeout();
+    requestAnimationFrame(() => {
+      if (readyFiredRef.current) {
+        return;
+      }
+      if (!container.isConnected) {
+        logTerminal('log', 'ready RAF bail: container disconnected', { attempt });
+        return;
+      }
+      const dims = getScaledDimensions(container, term, fontSizeRef.current);
+      let bailReason: 'dims_null' | 'zero_dims' | null = null;
+      if (!dims) {
+        bailReason = 'dims_null';
+      } else if (dims.cols <= 0 || dims.rows <= 0) {
+        bailReason = 'zero_dims';
+      }
+      if (bailReason) {
+        if (attempt + 1 >= MAX_READY_RETRIES) {
+          logTerminal('warn', 'ready RAF bail: giving up', {
+            reason: bailReason,
+            attempt,
+            fontSize: fontSizeRef.current,
+          });
+          return;
+        }
+        readyRetryTimeout = window.setTimeout(
+          () => scheduleReadyAttempt(attempt + 1),
+          READY_RETRY_DELAY_MS,
+        );
+        return;
+      }
+      lastCols = dims!.cols;
+      lastRows = dims!.rows;
+      applyMeasuredTerminalGeometry(term, dims!, {
+        readySource: 'resize_observer',
+        readyReason: 'ready',
+        resizeReason: 'ready',
+      });
+    });
+  };
 
   const clearXResizeTimeout = () => {
     if (xResizeTimeout !== undefined) {
@@ -183,21 +247,7 @@ export function installTerminalViewportLifecycle({
     }
 
     if (!readyFiredRef.current) {
-      requestAnimationFrame(() => {
-        if (!container.isConnected) {
-          return;
-        }
-        const dims = getScaledDimensions(container, term, fontSizeRef.current);
-        if (dims && dims.cols > 0 && dims.rows > 0) {
-          lastCols = dims.cols;
-          lastRows = dims.rows;
-          applyMeasuredTerminalGeometry(term, dims, {
-            readySource: 'resize_observer',
-            readyReason: 'ready',
-            resizeReason: 'ready',
-          });
-        }
-      });
+      scheduleReadyAttempt(0);
       return;
     }
 
@@ -258,6 +308,7 @@ export function installTerminalViewportLifecycle({
       resizeObserver.disconnect();
       visibilityObserver.disconnect();
       clearXResizeTimeout();
+      clearReadyRetryTimeout();
       dprMediaQuery.removeEventListener('change', handleDprChange);
     },
   };

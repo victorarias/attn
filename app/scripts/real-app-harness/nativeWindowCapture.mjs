@@ -146,11 +146,35 @@ end tell
   return parseWindowBoundsOutput(output, bundleId);
 }
 
+async function writeUiAutomationWindowBounds(client, targetBounds) {
+  if (!client || typeof client.request !== 'function') {
+    return null;
+  }
+  try {
+    const result = await client.request(
+      'set_window_bounds',
+      { logicalBounds: targetBounds },
+      { timeoutMs: 5_000 },
+    );
+    return normalizeLogicalBounds(result?.logicalBounds);
+  } catch {
+    return null;
+  }
+}
+
 export async function setFrontWindowBounds(targetBounds, options = {}) {
   const bundleId = options.bundleId || 'com.attn.manager';
   const normalizedTarget = normalizeLogicalBounds(targetBounds);
   if (!normalizedTarget) {
     throw new Error(`Invalid target window bounds: ${JSON.stringify(targetBounds)}`);
+  }
+
+  const automationResult = await writeUiAutomationWindowBounds(options.client, normalizedTarget);
+  if (
+    automationResult &&
+    boundsWithinTolerance(automationResult, normalizedTarget, options.settleTolerancePx ?? 8)
+  ) {
+    return automationResult;
   }
 
   let lastError = null;

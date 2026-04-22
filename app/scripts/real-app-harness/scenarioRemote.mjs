@@ -220,9 +220,22 @@ export function chooseRemoteWSPort() {
   return 19000 + Math.floor(Math.random() * 2000);
 }
 
-export async function waitForEndpointConnected(observer, name, timeoutMs = 120_000) {
+// When the home screen shipped the Sync-button flow (2026-04-12), remote
+// endpoints stopped silently auto-bootstrapping on binary or protocol
+// mismatches — they park in `binary_mismatch` / `version_mismatch` /
+// `version_ahead` waiting for the user to click Sync. The harness doesn't
+// have a UI to click, so we send `bootstrap_endpoint` programmatically the
+// first time we observe one of those statuses, mirroring what the button does.
+const SYNC_REQUIRED_STATUSES = new Set([
+  'binary_mismatch',
+  'version_mismatch',
+  'version_ahead',
+]);
+
+export async function waitForEndpointConnected(observer, name, timeoutMs = 180_000) {
   const startedAt = Date.now();
   let lastEndpoint = null;
+  const bootstrappedIds = new Set();
   while (Date.now() - startedAt < timeoutMs) {
     const endpoint = observer.findEndpointByName(name);
     if (endpoint) {
@@ -232,6 +245,14 @@ export async function waitForEndpointConnected(observer, name, timeoutMs = 120_0
       }
       if (endpoint.status === 'error') {
         throw new Error(`Endpoint ${name} entered error state: ${endpoint.status_message || 'unknown error'}`);
+      }
+      if (SYNC_REQUIRED_STATUSES.has(endpoint.status) && !bootstrappedIds.has(endpoint.id)) {
+        try {
+          observer.send({ cmd: 'bootstrap_endpoint', endpoint_id: endpoint.id });
+          bootstrappedIds.add(endpoint.id);
+        } catch {
+          // Leave endpoint out of the bootstrapped set so the next tick retries.
+        }
       }
     }
     await sleep(500);

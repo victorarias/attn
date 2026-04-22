@@ -35,6 +35,8 @@ struct Options {
     var relativeX: Double?
     var relativeY: Double?
     var modifiers = [String]()
+    var menuPath = [String]()
+    var visiblePx: Int?
 }
 
 func parseOptions() throws -> Options {
@@ -45,8 +47,14 @@ func parseOptions() throws -> Options {
     while index < args.count {
         let arg = args[index]
         switch arg {
-        case "activate", "text", "key", "keycode", "click":
+        case "activate", "activate_background", "frontmost", "windowid", "text", "key", "keycode", "click", "menu", "window_park":
             options.command = arg
+        case "--visible-px":
+            index += 1
+            guard index < args.count, let value = Int(args[index]), value > 0 else {
+                throw DriverError.invalidArgument("Missing or invalid value for --visible-px")
+            }
+            options.visiblePx = value
         case "--bundle-id":
             index += 1
             guard index < args.count else {
@@ -94,14 +102,28 @@ func parseOptions() throws -> Options {
                 throw DriverError.invalidArgument("Missing or invalid value for --relative-y")
             }
             options.relativeY = value
+        case "--path":
+            index += 1
+            guard index < args.count else {
+                throw DriverError.invalidArgument("Missing value for --path")
+            }
+            options.menuPath = args[index]
+                .split(separator: ">")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
         case "--help", "-h":
             throw DriverError.usage("""
             Usage:
               InputDriver.swift activate [--bundle-id com.attn.manager]
+              InputDriver.swift activate_background [--bundle-id ...]
+              InputDriver.swift frontmost
+              InputDriver.swift windowid [--bundle-id ...]
               InputDriver.swift text --text "hello" [--bundle-id ...] [--prompt-accessibility]
               InputDriver.swift key --key d [--modifiers command,option]
               InputDriver.swift keycode --key-code 36 [--modifiers command]
               InputDriver.swift click --relative-x 0.75 --relative-y 0.5
+              InputDriver.swift menu --path "File>New Session" [--bundle-id ...]
+              InputDriver.swift window_park --visible-px 200 [--bundle-id ...]
             """)
         default:
             throw DriverError.invalidArgument("Unknown argument: \(arg)")
@@ -110,7 +132,7 @@ func parseOptions() throws -> Options {
     }
 
     guard options.command != nil else {
-        throw DriverError.usage("Missing command. Use activate, text, key, or keycode.")
+        throw DriverError.usage("Missing command. Use activate, activate_background, frontmost, windowid, text, key, keycode, click, or menu.")
     }
 
     return options
@@ -133,6 +155,81 @@ func activateApp(bundleId: String) throws {
     }
     app.activate(options: [.activateIgnoringOtherApps])
     Thread.sleep(forTimeInterval: 0.2)
+}
+
+// Non-activating resolution: verify the app is running but do not change
+// frontmost. Returns the process-scoped AX handle so callers can drive menus
+// or window-chrome actions without an HID event tap.
+func axApplication(bundleId: String) throws -> (pid: pid_t, element: AXUIElement) {
+    let pid = try runningPID(bundleId: bundleId)
+    return (pid, AXUIElementCreateApplication(pid))
+}
+
+func axCopyAttribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    var raw: CFTypeRef?
+    let status = AXUIElementCopyAttributeValue(element, name as CFString, &raw)
+    return status == .success ? raw : nil
+}
+
+func axChildren(_ element: AXUIElement) -> [AXUIElement] {
+    guard let raw = axCopyAttribute(element, kAXChildrenAttribute as String) else {
+        return []
+    }
+    return (raw as? [AXUIElement]) ?? []
+}
+
+func axTitle(_ element: AXUIElement) -> String? {
+    axCopyAttribute(element, kAXTitleAttribute as String) as? String
+}
+
+func axRole(_ element: AXUIElement) -> String? {
+    axCopyAttribute(element, kAXRoleAttribute as String) as? String
+}
+
+// Descend one level: find a child (direct or inside the owning AXMenu) whose
+// title matches `segment`. AppKit menus expose a two-tier shape where menu
+// items are wrapped in an AXMenu intermediate; flatten that for traversal.
+func axFindNext(_ element: AXUIElement, title segment: String) -> AXUIElement? {
+    for child in axChildren(element) {
+        if axTitle(child) == segment {
+            return child
+        }
+    }
+    for child in axChildren(element) where axRole(child) == "AXMenu" {
+        if let match = axFindNext(child, title: segment) {
+            return match
+        }
+    }
+    return nil
+}
+
+func axPressMenuItem(bundleId: String, path: [String]) throws {
+    guard !path.isEmpty else {
+        throw DriverError.invalidArgument("menu --path requires at least one segment")
+    }
+    let (_, appElement) = try axApplication(bundleId: bundleId)
+    guard let rawMenuBar = axCopyAttribute(appElement, kAXMenuBarAttribute as String) else {
+        throw DriverError.eventCreationFailed("App \(bundleId) exposes no AX menu bar")
+    }
+    var current = rawMenuBar as! AXUIElement
+    for segment in path {
+        guard let next = axFindNext(current, title: segment) else {
+            throw DriverError.eventCreationFailed(
+                "AX menu path segment \(segment.debugDescription) not found under \(path.joined(separator: ">"))"
+            )
+        }
+        current = next
+    }
+    let pressStatus = AXUIElementPerformAction(current, kAXPressAction as CFString)
+    guard pressStatus == .success else {
+        throw DriverError.eventCreationFailed(
+            "AXPressAction on menu item \(path.joined(separator: ">")) failed (status=\(pressStatus.rawValue))"
+        )
+    }
+}
+
+func frontmostBundleIdentifier() -> String {
+    NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
 }
 
 func ensureAccessibility(prompt: Bool) throws {
@@ -164,6 +261,36 @@ func mainWindowBounds(bundleId: String) throws -> CGRect {
         throw DriverError.eventCreationFailed("Failed to find an onscreen window for \(bundleId)")
     }
     return bounds
+}
+
+// Return the CGWindowID of the largest layer-0 onscreen window owned by the
+// bundle. AppleScript's `count of windows of application process ...` returns 0
+// for Tauri/wry apps even while a visible window exists, so callers needing a
+// reliable "window exists now" gate should use CGWindowList instead.
+func mainWindowID(bundleId: String) throws -> CGWindowID {
+    let pid = try runningPID(bundleId: bundleId)
+    let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+    guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+        throw DriverError.eventCreationFailed("Failed to read window list.")
+    }
+
+    let matches = windows
+        .filter { (($0[kCGWindowOwnerPID as String] as? pid_t) ?? -1) == pid }
+        .filter { (($0[kCGWindowLayer as String] as? Int) ?? 1) == 0 }
+        .compactMap { entry -> (CGWindowID, CGFloat)? in
+            guard let number = entry[kCGWindowNumber as String] as? CGWindowID else {
+                return nil
+            }
+            let rect: CGRect = (entry[kCGWindowBounds as String] as? NSDictionary)
+                .flatMap { CGRect(dictionaryRepresentation: $0) } ?? .zero
+            return (number, rect.width * rect.height)
+        }
+        .sorted { $0.1 > $1.1 }
+
+    guard let first = matches.first else {
+        throw DriverError.eventCreationFailed("No onscreen window for \(bundleId)")
+    }
+    return first.0
 }
 
 func modifierFlags(_ modifiers: [String]) -> CGEventFlags {
@@ -350,6 +477,53 @@ func postText(_ text: String) throws {
     }
 }
 
+// Reposition the first AX window so only `visiblePx` pixels remain on-screen at
+// the right edge of the main display; the rest extends off the right side. Used
+// by the harness to keep attn "visible" (so WKWebView keeps ticking) while
+// occupying a narrow strip instead of the full display.
+func windowPark(bundleId: String, visiblePx: Int) throws {
+    let (_, appElement) = try axApplication(bundleId: bundleId)
+    guard let raw = axCopyAttribute(appElement, kAXWindowsAttribute as String),
+          let windows = raw as? [AXUIElement],
+          let window = windows.first
+    else {
+        throw DriverError.eventCreationFailed("No AX windows for \(bundleId)")
+    }
+
+    var size = CGSize(width: 0, height: 0)
+    if let sizeRef = axCopyAttribute(window, kAXSizeAttribute as String) {
+        let axSize = sizeRef as! AXValue
+        AXValueGetValue(axSize, .cgSize, &size)
+    }
+    var curPos = CGPoint(x: 0, y: 0)
+    if let posRef = axCopyAttribute(window, kAXPositionAttribute as String) {
+        let axPos = posRef as! AXValue
+        AXValueGetValue(axPos, .cgPoint, &curPos)
+    }
+
+    guard let screen = NSScreen.main else {
+        throw DriverError.eventCreationFailed("No main screen")
+    }
+    let screenFrame = screen.frame
+
+    // AX window positions are in top-left screen coordinates, same as
+    // CGWindowList. Include screenFrame.origin so the math works on multi-
+    // monitor setups where the main display isn't anchored at (0, 0).
+    let newX = screenFrame.origin.x + screenFrame.width - CGFloat(visiblePx)
+    let newY = screenFrame.origin.y + max(0, (screenFrame.height - size.height) / 2)
+    var newPos = CGPoint(x: newX, y: newY)
+    guard let posValue = AXValueCreate(.cgPoint, &newPos) else {
+        throw DriverError.eventCreationFailed("Failed to create AXValue for position")
+    }
+    let status = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, posValue)
+    guard status == .success else {
+        throw DriverError.eventCreationFailed(
+            "AXUIElementSetAttributeValue(position) failed: status=\(status.rawValue)"
+        )
+    }
+    print("screen=\(Int(screenFrame.width))x\(Int(screenFrame.height)) win=\(Int(size.width))x\(Int(size.height)) from=\(Int(curPos.x)),\(Int(curPos.y)) to=\(Int(newX)),\(Int(newY))")
+}
+
 func clickWindow(bundleId: String, relativeX: Double, relativeY: Double) throws {
     let bounds = try mainWindowBounds(bundleId: bundleId)
     let clampedX = min(max(relativeX, 0), 1)
@@ -374,11 +548,31 @@ func clickWindow(bundleId: String, relativeX: Double, relativeY: Double) throws 
 
 do {
     let options = try parseOptions()
-    try activateApp(bundleId: options.bundleId)
+
+    // HID-based commands must run against a frontmost app; AX-based and
+    // observation-only commands must NOT activate (that is the whole point).
+    switch options.command {
+    case "activate", "text", "key", "keycode", "click":
+        try activateApp(bundleId: options.bundleId)
+    default:
+        break
+    }
 
     switch options.command {
     case "activate":
         break
+    case "activate_background":
+        // Resolve the app without changing frontmost. If the app is not
+        // running, surface a clear error; otherwise this is a no-op.
+        _ = try axApplication(bundleId: options.bundleId)
+    case "frontmost":
+        print(frontmostBundleIdentifier())
+    case "windowid":
+        let wid = try mainWindowID(bundleId: options.bundleId)
+        print(wid)
+    case "menu":
+        try ensureAccessibility(prompt: options.promptAccessibility)
+        try axPressMenuItem(bundleId: options.bundleId, path: options.menuPath)
     case "text":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let text = options.text else {
@@ -403,6 +597,12 @@ do {
             throw DriverError.invalidArgument("Missing --relative-x/--relative-y for click")
         }
         try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY)
+    case "window_park":
+        try ensureAccessibility(prompt: options.promptAccessibility)
+        guard let visiblePx = options.visiblePx else {
+            throw DriverError.invalidArgument("Missing --visible-px for window_park")
+        }
+        try windowPark(bundleId: options.bundleId, visiblePx: visiblePx)
     default:
         throw DriverError.invalidArgument("Unsupported command")
     }

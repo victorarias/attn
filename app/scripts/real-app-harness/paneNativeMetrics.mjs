@@ -1,17 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PNG } from 'pngjs';
-import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
-import { analyzePanePixelCoverage } from './paneNativeAnalysis.mjs';
+import { analyzePaneTextCoverage } from './paneNativeAnalysis.mjs';
 
-function clampRect(value, max) {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  return Math.max(0, Math.min(Math.round(value), Math.max(0, max)));
-}
-
-function resolveTargetMetrics(state, target) {
+function resolveTargetBounds(state, target) {
   const pane = state?.pane || null;
   const dom = pane?.dom || null;
   const selected = (
@@ -39,85 +30,11 @@ function resolveTargetMetrics(state, target) {
   };
 }
 
-async function readImageMetadata(imagePath) {
-  const buffer = fs.readFileSync(imagePath);
-  const image = PNG.sync.read(buffer);
-  return {
-    width: image.width,
-    height: image.height,
-  };
-}
-
-async function extractCropPixels({ imagePath, cropPath, crop }) {
-  const buffer = fs.readFileSync(imagePath);
-  const image = PNG.sync.read(buffer);
-  const x = Math.max(0, Math.min(Math.round(crop.x), image.width));
-  const y = Math.max(0, Math.min(Math.round(crop.y), image.height));
-  const width = Math.max(1, Math.min(Math.round(crop.width), image.width - x));
-  const height = Math.max(1, Math.min(Math.round(crop.height), image.height - y));
-  const cropped = new PNG({ width, height });
-
-  for (let row = 0; row < height; row += 1) {
-    for (let col = 0; col < width; col += 1) {
-      const srcOffset = ((y + row) * image.width + (x + col)) * 4;
-      const dstOffset = (row * width + col) * 4;
-      cropped.data[dstOffset] = image.data[srcOffset];
-      cropped.data[dstOffset + 1] = image.data[srcOffset + 1];
-      cropped.data[dstOffset + 2] = image.data[srcOffset + 2];
-      cropped.data[dstOffset + 3] = image.data[srcOffset + 3];
-    }
-  }
-
-  if (cropPath) {
-    fs.writeFileSync(cropPath, PNG.sync.write(cropped));
-  }
-
-  return {
-    width,
-    height,
-    pixelsBase64: Buffer.from(cropped.data).toString('base64'),
-    crop: {
-      x,
-      y,
-      width,
-      height,
-      path: cropPath,
-    },
-  };
-}
-
-export async function analyzePngCropCoverage(
-  imagePath,
-  {
-    cropPath = null,
-    crop,
-    insetPx = 2,
-    activityThreshold = 18,
-  },
-) {
-  const imageMetadata = await readImageMetadata(imagePath);
-  const extracted = await extractCropPixels({
-    imagePath,
-    cropPath,
-    crop,
-  });
-  const pixelData = Uint8Array.from(Buffer.from(extracted.pixelsBase64, 'base64'));
-  const analysis = analyzePanePixelCoverage({
-    width: extracted.width,
-    height: extracted.height,
-    data: pixelData,
-  }, {
-    insetPx,
-    activityThreshold,
-  });
-
-  return {
-    image: imageMetadata,
-    crop: extracted.crop,
-    analysis,
-  };
-}
-
+// Pane coverage assertions used to sample WKWebView-composited pixels. That
+// path required attn frontmost because occluded WebViews serve stale backing
+// store, and the focus steal was visually disruptive. xterm's in-process
+// buffer is the rendering ground truth for terminal content, so we analyse
+// cell occupancy instead of pixel activity — no screencap, no focus steal.
 export async function capturePaneNativeMetrics(
   client,
   runDir,
@@ -126,35 +43,22 @@ export async function capturePaneNativeMetrics(
   paneId,
   {
     target = 'paneBody',
-    insetPx = 2,
-    activityThreshold = 18,
-    bundleId = 'com.attn.manager',
   } = {},
 ) {
   const state = await client.request('get_pane_state', { sessionId, paneId }, { timeoutMs: 20_000 });
-  const targetBounds = resolveTargetMetrics(state, target);
-  const screenshotPath = path.join(runDir, `${prefix}-${paneId}-${target}-window.png`);
-  const cropPath = path.join(runDir, `${prefix}-${paneId}-${target}-crop.png`);
+  const targetBounds = resolveTargetBounds(state, target);
   const summaryPath = path.join(runDir, `${prefix}-${paneId}-${target}-analysis.json`);
 
-  const nativeScreenshot = await captureWindowScreenshot(client, screenshotPath, { bundleId });
-  const nativeWidth = nativeScreenshot?.bounds?.width || 0;
-  const nativeHeight = nativeScreenshot?.bounds?.height || 0;
-  const imageMetadata = await readImageMetadata(screenshotPath);
-  const scaleX = nativeWidth > 0 ? imageMetadata.width / nativeWidth : 1;
-  const scaleY = nativeHeight > 0 ? imageMetadata.height / nativeHeight : 1;
-  const scaledCrop = {
-    x: clampRect(targetBounds.x * scaleX, imageMetadata.width),
-    y: clampRect(targetBounds.y * scaleY, imageMetadata.height),
-    width: clampRect(targetBounds.width * scaleX, imageMetadata.width),
-    height: clampRect(targetBounds.height * scaleY, imageMetadata.height),
-  };
+  const visibleContent = state?.pane?.visibleContent || null;
+  if (!visibleContent || !Array.isArray(visibleContent.lines) || visibleContent.lines.length === 0) {
+    throw new Error(
+      `Pane ${paneId} has no visible content to analyse (cols=${visibleContent?.cols ?? 'n/a'}, lines=${visibleContent?.lines?.length ?? 'n/a'})`
+    );
+  }
 
-  const analyzed = await analyzePngCropCoverage(screenshotPath, {
-    cropPath,
-    crop: scaledCrop,
-    insetPx,
-    activityThreshold,
+  const analysis = analyzePaneTextCoverage({
+    cols: visibleContent.cols,
+    lines: visibleContent.lines,
   });
 
   const result = {
@@ -162,48 +66,21 @@ export async function capturePaneNativeMetrics(
     paneId,
     target,
     cssBounds: targetBounds,
-    nativeScreenshot,
-    scale: {
-      x: scaleX,
-      y: scaleY,
+    grid: {
+      cols: visibleContent.cols,
+      rows: visibleContent.lines.length,
     },
-    crop: analyzed.crop,
-    image: analyzed.image,
-    analysis: analyzed.analysis,
+    analysis,
     paneState: {
       bounds: state?.pane?.bounds || null,
       paneBodyBounds: state?.pane?.dom?.paneBody?.bounds || null,
       xtermScreenBounds: state?.pane?.dom?.xtermScreen?.bounds || null,
-      visibleContent: state?.pane?.visibleContent || null,
+      visibleContent,
       renderHealth: state?.renderHealth || null,
     },
   };
 
+  fs.mkdirSync(runDir, { recursive: true });
   fs.writeFileSync(summaryPath, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
   return result;
-}
-
-async function captureWindowScreenshot(client, screenshotPath, { bundleId }) {
-  try {
-    const result = await client.request('capture_window_screenshot', {
-      path: screenshotPath,
-      bundleId,
-    }, { timeoutMs: 20_000 });
-    if (result?.path && result?.bounds) {
-      return {
-        source: 'ui_automation_window',
-        bundleId,
-        bounds: result.bounds,
-        path: result.path,
-      };
-    }
-  } catch {
-    // Fall through to the native front-window path.
-  }
-
-  try {
-    return await captureFrontWindowScreenshot(screenshotPath, { bundleId, client });
-  } catch (error) {
-    throw new Error(`capture_window_screenshot returned no image for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
-  }
 }

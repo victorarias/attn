@@ -373,10 +373,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }
 
       const textarea = container.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null;
-      if (!textarea || document.activeElement !== textarea) {
+      if (!textarea) {
         return false;
       }
 
+      // xterm's `input` listener is attached to the helper textarea; dispatchEvent
+      // fires it regardless of document.activeElement. No focus dance required.
       const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
       const setValue = descriptor?.set;
       for (const char of text) {

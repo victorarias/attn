@@ -9,7 +9,6 @@ import {
 } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
-import { MacOSDriver } from './macosDriver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
 import {
@@ -20,7 +19,7 @@ import {
   captureSessionArtifacts,
   shellPanes,
   waitForNewShellPane,
-  waitForPaneInputFocus,
+  waitForPaneShellReady,
   waitForPaneTextChange,
   waitForPaneText,
   waitForPaneVisible,
@@ -34,6 +33,24 @@ import {
   removeStaleHarnessEndpoints,
   waitForEndpointConnected,
 } from './scenarioRemote.mjs';
+
+// Drives `type_pane_via_ui` one character at a time with a short pause
+// between sends. Twelve back-to-back single-byte pty_inputs (~1ms apart)
+// cause remote zsh+Starship to mis-echo: its syntax-highlight and
+// autosuggest plugins race against rapid zle callbacks and leave a
+// rotated/mangled token on screen (write_pane, which sends the whole
+// string in one PTY write, doesn't trip this). Pacing keeps the UI input
+// path under test while avoiding the shell-plugin race that has nothing to
+// do with attn.
+const HUMAN_TYPING_INTERVAL_MS = 35;
+async function typeIntoPaneAtHumanCadence(client, sessionId, paneId, text, intervalMs = HUMAN_TYPING_INTERVAL_MS) {
+  for (const char of text) {
+    await client.request('type_pane_via_ui', { sessionId, paneId, text: char });
+    if (intervalMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+}
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -108,7 +125,6 @@ async function main() {
       ATTN_REMOTE_WS_PORT: remoteHarnessWSPort,
     },
   });
-  const driver = new MacOSDriver({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
 
   let endpoint = null;
@@ -133,7 +149,6 @@ async function main() {
   const preRelaunchMarker = /tr502p\d{6}/;
   const postRelaunchMainMarker = /tr502m\d{6}/;
   const postRelaunchShellMarker = /tr502s\d{6}/;
-  const shellFocusSettleMs = 300;
   let cleanupStarted = false;
 
   const runFinalCleanup = async () => {
@@ -186,7 +201,6 @@ async function main() {
 
     await runner.step('launch_app_and_connect_daemon', async () => {
       await launchFreshAppAndConnect(client, observer);
-      await driver.activateApp();
       const paneDebugConfig = await client.request('set_pane_debug', { enabled: true });
       const terminalRuntimeTraceConfig = await client.request('set_terminal_runtime_trace', { enabled: true });
       runner.writeJson('ui-debug-config.json', {
@@ -199,7 +213,7 @@ async function main() {
     endpoint = await runner.step('connect_remote_endpoint', async () => {
       const endpointName = `harness-${runner.runId}`;
       observer.addEndpoint(endpointName, options.sshTarget);
-      const connected = await waitForEndpointConnected(observer, endpointName, 120_000);
+      const connected = await waitForEndpointConnected(observer, endpointName);
       runner.writeJson('endpoint.json', connected);
       return connected;
     });
@@ -292,8 +306,8 @@ async function main() {
     await runner.step('seed_initial_shell_before_relaunch', async () => {
       await client.request('focus_pane', { sessionId, paneId: initialShellPaneId });
       await waitForPaneVisible(client, sessionId, initialShellPaneId, 20_000);
-      await waitForPaneInputFocus(client, sessionId, initialShellPaneId, 20_000, {
-        stableMs: shellFocusSettleMs,
+      await waitForPaneShellReady(client, sessionId, initialShellPaneId, {
+        description: 'initial remote shell prompt ready',
       });
       const readyState = await client.request('get_pane_state', { sessionId, paneId: initialShellPaneId });
       shellTypingReadiness.initialShell = {
@@ -307,7 +321,7 @@ async function main() {
       });
       const preTypeState = await client.request('read_pane_text', { sessionId, paneId: initialShellPaneId });
       const typeStartedAt = Date.now();
-      await driver.typeText(preRelaunchToken);
+      await typeIntoPaneAtHumanCadence(client, sessionId, initialShellPaneId, preRelaunchToken);
       const typedEchoState = await waitForPaneTextChange(
         client,
         sessionId,
@@ -424,8 +438,8 @@ async function main() {
     await runner.step('assert_main_split_after_relaunch', async () => {
       await client.request('focus_pane', { sessionId, paneId: postRelaunchMainSplitPaneId });
       await waitForPaneVisible(client, sessionId, postRelaunchMainSplitPaneId, 20_000);
-      await waitForPaneInputFocus(client, sessionId, postRelaunchMainSplitPaneId, 20_000, {
-        stableMs: shellFocusSettleMs,
+      await waitForPaneShellReady(client, sessionId, postRelaunchMainSplitPaneId, {
+        description: 'post-relaunch main-split shell prompt ready',
       });
       const readyState = await client.request('get_pane_state', { sessionId, paneId: postRelaunchMainSplitPaneId });
       shellTypingReadiness.postRelaunchMainSplit = {
@@ -439,7 +453,7 @@ async function main() {
       });
       const preTypeState = await client.request('read_pane_text', { sessionId, paneId: postRelaunchMainSplitPaneId });
       const typeStartedAt = Date.now();
-      await driver.typeText(postRelaunchMainToken);
+      await typeIntoPaneAtHumanCadence(client, sessionId, postRelaunchMainSplitPaneId, postRelaunchMainToken);
       const typedEchoState = await waitForPaneTextChange(
         client,
         sessionId,
@@ -498,8 +512,8 @@ async function main() {
     await runner.step('assert_shell_split_after_relaunch', async () => {
       await client.request('focus_pane', { sessionId, paneId: postRelaunchShellSplitPaneId });
       await waitForPaneVisible(client, sessionId, postRelaunchShellSplitPaneId, 20_000);
-      await waitForPaneInputFocus(client, sessionId, postRelaunchShellSplitPaneId, 20_000, {
-        stableMs: shellFocusSettleMs,
+      await waitForPaneShellReady(client, sessionId, postRelaunchShellSplitPaneId, {
+        description: 'post-relaunch shell-split shell prompt ready',
       });
       const readyState = await client.request('get_pane_state', { sessionId, paneId: postRelaunchShellSplitPaneId });
       shellTypingReadiness.postRelaunchShellSplit = {
@@ -513,7 +527,7 @@ async function main() {
       });
       const preTypeState = await client.request('read_pane_text', { sessionId, paneId: postRelaunchShellSplitPaneId });
       const typeStartedAt = Date.now();
-      await driver.typeText(postRelaunchShellToken);
+      await typeIntoPaneAtHumanCadence(client, sessionId, postRelaunchShellSplitPaneId, postRelaunchShellToken);
       const typedEchoState = await waitForPaneTextChange(
         client,
         sessionId,

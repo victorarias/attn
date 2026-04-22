@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "real-app:smoke": "node scripts/real-app-harness/smoke.mjs",
+    "real-app:focus-probe": "node scripts/real-app-harness/scenario-focus-probe.mjs",
     "real-app:repro-panes": "node scripts/real-app-harness/repro-older-pane-writability.mjs",
     "real-app:bridge-smoke": "node scripts/real-app-harness/bridge-smoke.mjs",
     "real-app:bridge-remote-hub": "node scripts/real-app-harness/bridge-remote-hub.mjs",

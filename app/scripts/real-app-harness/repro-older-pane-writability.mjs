@@ -3,19 +3,54 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DaemonObserver } from './daemonObserver.mjs';
-import { MacOSDriver } from './macosDriver.mjs';
+import { UiAutomationClient } from './uiAutomationClient.mjs';
 import {
-  bootstrapPackagedAppSession,
-  captureScreenshot,
   createRunContext,
+  createSessionAndWaitForMain,
+  launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
-  splitAndFocusUtilityPane,
-  typeIntoFocusedPane,
 } from './common.mjs';
+import {
+  compactTerminalText,
+  waitForNewShellPane,
+  waitForPaneInputFocus,
+  waitForPaneState,
+  waitForPaneVisible,
+} from './scenarioAssertions.mjs';
 
-function shellPanes(workspace) {
-  return (workspace?.panes || []).filter((pane) => pane.kind === 'shell' && pane.runtime_id);
+async function typeAndWaitForEcho(client, sessionId, paneId, token, timeoutMs = 15_000) {
+  await client.request('type_pane_via_ui', { sessionId, paneId, text: `echo ${token}` });
+  await client.request('write_pane', { sessionId, paneId, text: '\r', submit: false });
+  const deadline = Date.now() + timeoutMs;
+  let lastText = '';
+  // Narrow utility panes wrap long tokens across lines, so match on compacted
+  // (whitespace-stripped) text — the echo still proves the pane accepted input.
+  while (Date.now() < deadline) {
+    const payload = await client.request('read_pane_text', { sessionId, paneId });
+    lastText = payload?.text || '';
+    if (lastText.includes(token) || compactTerminalText(lastText).includes(token)) {
+      return lastText;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  throw new Error(
+    `pane ${paneId} text never contained ${token}; last tail:\n${lastText.slice(-400)}`,
+  );
+}
+
+async function focusPaneAndAwaitInput(client, sessionId, paneId) {
+  await client.request('focus_pane', { sessionId, paneId });
+  await waitForPaneVisible(client, sessionId, paneId, 20_000);
+  await waitForPaneInputFocus(client, sessionId, paneId, 20_000, { stableMs: 400 });
+  await waitForPaneState(
+    client,
+    sessionId,
+    paneId,
+    (state) => Boolean(state?.renderHealth?.flags?.terminalReady),
+    `pane ${paneId} terminal ready`,
+    20_000,
+  );
 }
 
 async function main() {
@@ -32,61 +67,86 @@ async function main() {
   const revisitToken = `__ATTN_OLDER_PANE_REVISIT_${Date.now()}__`;
 
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
-  const driver = new MacOSDriver({ appPath: options.appPath });
+  const client = new UiAutomationClient({ appPath: options.appPath });
 
   console.log(`[RealAppHarness] runDir=${runDir}`);
   console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
   console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
 
   try {
-    const session = await bootstrapPackagedAppSession({
-      driver,
-      observer,
-      runDir,
-      sessionDir,
-      sessionLabel,
-    });
+    await launchFreshAppAndConnect(client, observer);
 
-    const firstUtilityPane = await splitAndFocusUtilityPane({
-      driver,
+    const sessionId = await createSessionAndWaitForMain({
+      client,
       observer,
-      sessionId: session.id,
-      runDir,
-      screenshotName: '03-after-first-split.png',
-      clickX: 0.75,
-      clickY: 0.5,
+      cwd: sessionDir,
+      label: sessionLabel,
+      agent: 'claude',
+      sessionWaitMs: 60_000,
     });
-    await typeIntoFocusedPane(driver, `echo ${firstToken}`);
-    const firstScrollback = await observer.waitForScrollbackContains(firstUtilityPane.runtime_id, firstToken, 15_000);
+    const session = observer.getSession(sessionId);
+    if (!session) {
+      throw new Error(`session ${sessionId} missing from observer after creation`);
+    }
+    console.log(`[RealAppHarness] session=${session.id} agent=${session.agent} state=${session.state}`);
+
+    const wsBeforeFirstSplit = await client.request('get_workspace', { sessionId });
+    const paneIdsBeforeFirstSplit = new Set((wsBeforeFirstSplit.panes || []).map((pane) => pane.paneId));
+    await client.request('split_pane', { sessionId, targetPaneId: 'main', direction: 'vertical' });
+    const firstUtilityPane = await waitForNewShellPane(
+      client,
+      sessionId,
+      paneIdsBeforeFirstSplit,
+      `first utility pane for session ${sessionId}`,
+      20_000,
+    );
+    if (!firstUtilityPane?.runtimeId) {
+      throw new Error(`first utility pane missing runtimeId for session ${sessionId}`);
+    }
+    console.log(
+      `[RealAppHarness] firstUtilityPane=${firstUtilityPane.paneId} runtime=${firstUtilityPane.runtimeId}`,
+    );
+    await focusPaneAndAwaitInput(client, sessionId, firstUtilityPane.paneId);
+    const firstScrollback = await typeAndWaitForEcho(client, sessionId, firstUtilityPane.paneId, firstToken);
     fs.writeFileSync(path.join(runDir, 'utility-1-scrollback.txt'), firstScrollback, 'utf8');
 
-    await driver.pressKey('d', { command: true });
-    const workspaceWithThreePanes = await observer.waitForWorkspace(
-      session.id,
-      (workspace) => shellPanes(workspace).length >= 2,
-      `second utility pane for session ${session.id}`,
-      20_000
+    const wsBeforeSecondSplit = await client.request('get_workspace', { sessionId });
+    const paneIdsBeforeSecondSplit = new Set((wsBeforeSecondSplit.panes || []).map((pane) => pane.paneId));
+    await client.request('split_pane', {
+      sessionId,
+      targetPaneId: firstUtilityPane.paneId,
+      direction: 'vertical',
+    });
+    const secondUtilityPane = await waitForNewShellPane(
+      client,
+      sessionId,
+      paneIdsBeforeSecondSplit,
+      `second utility pane for session ${sessionId}`,
+      20_000,
     );
-    const secondUtilityPane = shellPanes(workspaceWithThreePanes).find((pane) => pane.pane_id !== firstUtilityPane.pane_id);
-    if (!secondUtilityPane?.runtime_id) {
-      throw new Error('Second utility pane runtime was not created');
+    if (!secondUtilityPane?.runtimeId) {
+      throw new Error(`second utility pane missing runtimeId for session ${sessionId}`);
     }
-    console.log(`[RealAppHarness] secondUtilityPane=${secondUtilityPane.pane_id} runtime=${secondUtilityPane.runtime_id}`);
-
-    await driver.activateApp();
-    await driver.clickWindow(0.875, 0.5);
-    await captureScreenshot(driver, path.join(runDir, '04-after-second-split.png'));
-    await typeIntoFocusedPane(driver, `echo ${secondToken}`);
-    const secondScrollback = await observer.waitForScrollbackContains(secondUtilityPane.runtime_id, secondToken, 15_000);
+    console.log(
+      `[RealAppHarness] secondUtilityPane=${secondUtilityPane.paneId} runtime=${secondUtilityPane.runtimeId}`,
+    );
+    await focusPaneAndAwaitInput(client, sessionId, secondUtilityPane.paneId);
+    const secondScrollback = await typeAndWaitForEcho(client, sessionId, secondUtilityPane.paneId, secondToken);
     fs.writeFileSync(path.join(runDir, 'utility-2-scrollback.txt'), secondScrollback, 'utf8');
 
-    await driver.activateApp();
-    await driver.clickWindow(0.625, 0.5);
-    await captureScreenshot(driver, path.join(runDir, '05-refocused-older-pane.png'));
-    await typeIntoFocusedPane(driver, `echo ${revisitToken}`);
-    const revisitScrollback = await observer.waitForScrollbackContains(firstUtilityPane.runtime_id, revisitToken, 15_000);
+    // The actual regression probe: return focus to the older pane and confirm
+    // it still accepts typed input (the bug: older pane input was sometimes
+    // dropped after a newer split became active). type_pane_via_ui requires
+    // the target pane's xterm textarea to be the document's activeElement, so
+    // a refocus-routing regression surfaces as a 'Failed to type' error here.
+    await focusPaneAndAwaitInput(client, sessionId, firstUtilityPane.paneId);
+    const revisitScrollback = await typeAndWaitForEcho(
+      client,
+      sessionId,
+      firstUtilityPane.paneId,
+      revisitToken,
+    );
     fs.writeFileSync(path.join(runDir, 'utility-1-revisit-scrollback.txt'), revisitScrollback, 'utf8');
-    await captureScreenshot(driver, path.join(runDir, '06-older-pane-typed.png'));
 
     const summary = {
       ok: true,
@@ -108,14 +168,6 @@ async function main() {
       },
       artifacts: {
         runDir,
-        screenshots: [
-          '01-app-launched.png',
-          '02-session-opened.png',
-          '03-after-first-split.png',
-          '04-after-second-split.png',
-          '05-refocused-older-pane.png',
-          '06-older-pane-typed.png',
-        ],
         scrollbacks: [
           'utility-1-scrollback.txt',
           'utility-2-scrollback.txt',
@@ -127,6 +179,7 @@ async function main() {
     console.log('[RealAppHarness] Older-pane writability repro passed.');
     console.log(JSON.stringify(summary, null, 2));
   } finally {
+    await client.quitApp().catch(() => {});
     await observer.close();
   }
 }

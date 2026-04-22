@@ -24,10 +24,25 @@ function hasCodexPrompt(text) {
   if (hasTrustPrompt(text)) {
     return false;
   }
+  if (hasCodexUpdatePrompt(text)) {
+    return false;
+  }
   return (
     text.includes('OpenAI Codex')
     || text.includes('/model to change')
     || text.includes('100% left')
+  );
+}
+
+// Codex sometimes interrupts startup with an "Update available!" chooser
+// (1 = update now, 2 = skip, 3 = skip until next version). If we don't
+// dismiss it, the usual `hasCodexPrompt` signals never arrive and the
+// scenario times out. We send "3" so the remote stops asking until the
+// next release.
+function hasCodexUpdatePrompt(text) {
+  return (
+    text.includes('Update available!')
+    && text.includes('Skip until next version')
   );
 }
 
@@ -68,6 +83,7 @@ export async function ensureClaudeMainPromptReady(client, sessionId, timeoutMs =
 export async function ensureCodexMainPromptReady(client, sessionId, timeoutMs = 40_000) {
   const startedAt = Date.now();
   let trustHandled = false;
+  let updatePromptHandled = false;
 
   while (Date.now() - startedAt < timeoutMs) {
     await client.request('select_session', { sessionId });
@@ -85,10 +101,20 @@ export async function ensureCodexMainPromptReady(client, sessionId, timeoutMs = 
       continue;
     }
 
+    if (hasCodexUpdatePrompt(text)) {
+      await client.request('click_pane', { sessionId, paneId: 'main' });
+      await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
+      await client.request('type_pane_via_ui', { sessionId, paneId: 'main', text: '3' });
+      await client.request('write_pane', { sessionId, paneId: 'main', text: '\r', submit: false });
+      updatePromptHandled = true;
+      await delay(500);
+      continue;
+    }
+
     if (hasCodexPrompt(text)) {
       await client.request('click_pane', { sessionId, paneId: 'main' });
       await waitForPaneInputFocus(client, sessionId, 'main', 15_000);
-      return { trustHandled, text };
+      return { trustHandled, updatePromptHandled, text };
     }
 
     await delay(300);

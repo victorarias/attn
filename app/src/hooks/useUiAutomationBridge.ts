@@ -72,6 +72,7 @@ interface UseUiAutomationBridgeArgs {
   getPaneVisibleStyleSummary: (sessionId: string, paneId: string) => TerminalVisibleStyleSnapshot;
   fitSessionActivePane: (sessionId: string) => void;
   sendRuntimeInput: (runtimeId: string, data: string, source?: string) => void;
+  isRuntimeAttached: (runtimeId: string) => boolean;
   getReviewState?: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: unknown; error?: string }>;
   addComment?: (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => Promise<{ success: boolean; comment?: unknown }>;
   updateComment?: (commentId: string, content: string) => Promise<{ success: boolean }>;
@@ -369,6 +370,7 @@ function collectVisualSnapshot(
   getPaneText: (sessionId: string, paneId: string) => string,
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null,
   getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot,
+  isRuntimeAttached: (runtimeId: string) => boolean,
   options?: {
     includePaneText?: boolean;
     sessionIds?: Set<string> | null;
@@ -390,6 +392,9 @@ function collectVisualSnapshot(
       const workspaceModel = serializeWorkspaceModel(session, getActivePaneIdForSession);
       const activePaneId = workspaceModel.activePaneId;
       const paneIds = workspaceModel.panes.map((pane) => pane.paneId);
+      const runtimeIdByPaneId = new Map(
+        workspaceModel.panes.map((pane) => [pane.paneId, pane.runtimeId] as const),
+      );
       const workspaceDom = collectWorkspaceShellMetrics(session.id);
       const workspaceView = collectWorkspaceViewState(session.id);
       const rootBounds = workspaceDom.workspaceRoot?.bounds;
@@ -432,8 +437,11 @@ function collectVisualSnapshot(
             `[data-pane-session-id="${session.id}"][data-pane-id="${paneId}"]`
           );
           const modelLayout = paneLayoutById.get(paneId) ?? null;
+          const runtimeId = runtimeIdByPaneId.get(paneId) ?? null;
           return {
             paneId,
+            runtimeId,
+            runtimeAttached: runtimeId ? isRuntimeAttached(runtimeId) : false,
             active: activePaneId === paneId,
             kind: paneId === MAIN_TERMINAL_PANE_ID ? 'main' : 'shell',
             path: paneElement instanceof HTMLElement ? paneElement.dataset.panePath || null : null,
@@ -516,6 +524,7 @@ function collectRenderHealthSnapshot(
   getPaneSize: (sessionId: string, paneId: string) => { cols: number; rows: number } | null,
   getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot,
   isSessionPaneInputFocused: (sessionId: string, paneId: string) => boolean,
+  isRuntimeAttached: (runtimeId: string) => boolean,
   options?: {
     sessionIds?: Set<string> | null;
   },
@@ -527,6 +536,7 @@ function collectRenderHealthSnapshot(
     getPaneText,
     getPaneSize,
     getPaneVisibleContent,
+    isRuntimeAttached,
     {
       includePaneText: false,
       sessionIds: options?.sessionIds || null,
@@ -1124,6 +1134,7 @@ export function useUiAutomationBridge({
   getPaneVisibleStyleSummary,
   fitSessionActivePane,
   sendRuntimeInput,
+  isRuntimeAttached,
   getReviewState,
   addComment,
   updateComment,
@@ -1558,6 +1569,7 @@ export function useUiAutomationBridge({
           getPaneText,
           getPaneSize,
           getPaneVisibleContent,
+          isRuntimeAttached,
         );
         return {
           sessionId,
@@ -1573,6 +1585,7 @@ export function useUiAutomationBridge({
             getPaneSize,
             getPaneVisibleContent,
             isSessionPaneInputFocused,
+            isRuntimeAttached,
           ).sessions[0]?.panes.find((pane) => pane.paneId === paneId) || null,
         };
       }
@@ -1735,6 +1748,7 @@ export function useUiAutomationBridge({
           getPaneText,
           getPaneSize,
           getPaneVisibleContent,
+          isRuntimeAttached,
           {
             includePaneText: payload.includePaneText !== false,
             sessionIds: Array.isArray(payload.sessionIds)
@@ -1751,6 +1765,7 @@ export function useUiAutomationBridge({
           getPaneSize,
           getPaneVisibleContent,
           isSessionPaneInputFocused,
+          isRuntimeAttached,
           {
             sessionIds: Array.isArray(payload.sessionIds)
               ? new Set(payload.sessionIds.filter((value): value is string => typeof value === 'string'))

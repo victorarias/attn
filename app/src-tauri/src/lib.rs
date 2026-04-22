@@ -700,10 +700,60 @@ pub fn run() {
             thumbs::reveal_in_finder,
         ])
         .setup(|app| {
+            use tauri::Manager;
             ui_automation::maybe_start(&app.handle().clone());
+            // Harness-only: keep attn visible (and unthrottled by WKWebView occlusion)
+            // without ever becoming the active app, so scenarios don't steal focus.
+            // Accessory policy hides the Dock tile and prevents macOS from making
+            // attn frontmost on launch; set_focusable(false) ensures the window
+            // can't take key via a stray click either.
+            #[cfg(target_os = "macos")]
+            if env::var("ATTN_HARNESS_ALWAYS_ON_TOP")
+                .ok()
+                .is_some_and(|v| v == "1")
+            {
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_always_on_top(true);
+                    let _ = window.set_focusable(false);
+                }
+            }
             Ok(())
         })
         .on_page_load(|webview, _payload| {
+            // Position the window before showing it, so parked harness runs
+            // don't flash at center first. Visible strip is specified in logical
+            // pixels; Tauri's primary_monitor().size() is physical, so we divide
+            // by scale_factor to reason about logical coordinates and then use
+            // LogicalPosition to set the window.
+            #[cfg(target_os = "macos")]
+            {
+                if let Ok(px_str) = std::env::var("ATTN_HARNESS_PARK_VISIBLE_PX") {
+                    if let Ok(visible_px) = px_str.parse::<f64>() {
+                        if visible_px > 0.0 {
+                            let window = webview.window();
+                            if let Ok(Some(monitor)) = window.primary_monitor() {
+                                let scale = monitor.scale_factor();
+                                let mon_size = monitor.size();
+                                let mon_pos = monitor.position();
+                                let logical_w = mon_size.width as f64 / scale;
+                                let logical_h = mon_size.height as f64 / scale;
+                                let logical_origin_x = mon_pos.x as f64 / scale;
+                                let logical_origin_y = mon_pos.y as f64 / scale;
+                                let win_h_logical = window
+                                    .inner_size()
+                                    .map(|s| s.height as f64 / scale)
+                                    .unwrap_or(800.0);
+                                let new_x = logical_origin_x + logical_w - visible_px;
+                                let new_y =
+                                    logical_origin_y + ((logical_h - win_h_logical) / 2.0).max(0.0);
+                                let _ =
+                                    window.set_position(tauri::LogicalPosition::new(new_x, new_y));
+                            }
+                        }
+                    }
+                }
+            }
             // Show window as soon as page content is loaded (loading screen visible)
             let _ = webview.window().show();
         })

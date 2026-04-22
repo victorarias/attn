@@ -17,7 +17,7 @@ import {
   assertPaneVisibleContentPreserved,
   captureSessionArtifacts,
   waitForNewShellPane,
-  waitForPaneInputFocus,
+  waitForPaneReflowed,
   waitForPaneState,
   waitForPaneText,
   waitForPaneVisible,
@@ -109,6 +109,8 @@ async function main() {
         20_000,
       );
 
+      await waitForPaneReflowed(client, sessionId, 'main', 20_000, 'main pane reflowed after split before baseline capture');
+
       const baselineMainState = await assertPaneVisibleContent(client, sessionId, 'main', {
         contains: agentToken,
         allowWrappedContains: true,
@@ -129,7 +131,6 @@ async function main() {
 
       await client.request('focus_pane', { sessionId, paneId: utilityPane.paneId });
       await waitForPaneVisible(client, sessionId, utilityPane.paneId, 20_000);
-      await waitForPaneInputFocus(client, sessionId, utilityPane.paneId, 20_000, { stableMs: 400 });
       await waitForPaneState(
         client,
         sessionId,

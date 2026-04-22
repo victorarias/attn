@@ -117,7 +117,7 @@ export async function bootstrapPackagedAppSession({
 }) {
   await driver.launchApp();
   await observer.connect();
-  await driver.activateApp();
+  await driver.activateBackground();
   await captureScreenshot(driver, path.join(runDir, '01-app-launched.png'));
 
   const deepLink = `attn://spawn?cwd=${encodeURIComponent(sessionDir)}&label=${encodeURIComponent(sessionLabel)}`;
@@ -139,7 +139,7 @@ export async function bootstrapPackagedAppSession({
     30_000
   );
 
-  await driver.activateApp();
+  await driver.activateBackground();
   await captureScreenshot(driver, path.join(runDir, '02-session-opened.png'));
   return session;
 }
@@ -160,7 +160,7 @@ export async function splitAndFocusUtilityPane({
   }
   console.log(`[RealAppHarness] utilityPane=${utilityPane.pane_id} runtime=${utilityPane.runtime_id}`);
 
-  await driver.activateApp();
+  await driver.activateBackground();
   await driver.clickWindow(clickX, clickY);
   if (runDir && screenshotName) {
     await captureScreenshot(driver, path.join(runDir, screenshotName));

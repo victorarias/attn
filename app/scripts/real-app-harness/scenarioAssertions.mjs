@@ -1,4 +1,3 @@
-import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
 import {
   comparePaneNativePaintCoverage,
   comparePaneNativePaintRegression,
@@ -98,6 +97,32 @@ export async function scrollPaneToTop(client, sessionId, paneId, timeoutMs = 12_
   );
 }
 
+// A freshly-split pane's xterm only starts receiving pty_output after the
+// frontend's `attach_session` RPC succeeds. `write_pane` bypasses xterm and
+// writes straight to the worker PTY, so input that arrives before attach
+// runs in the shell but drops output into the worker's scrollback without
+// reaching the xterm buffer (fresh_spawn attach omits replay). Gate writes
+// on `runtimeAttached=true` so visible content reflects what the shell did.
+// Returns { state, elapsedMs } — elapsedMs lets callers distinguish "gate
+// was cosmetic" (trivially true) from "gate caught a real attach stall".
+export async function waitForPaneAttached(
+  client,
+  sessionId,
+  paneId,
+  timeoutMs = 15_000,
+) {
+  const startedAt = Date.now();
+  const state = await waitForPaneState(
+    client,
+    sessionId,
+    paneId,
+    (entry) => Boolean(entry?.pane?.runtimeAttached),
+    `pane ${paneId} runtime attached`,
+    timeoutMs,
+  );
+  return { state, elapsedMs: Date.now() - startedAt };
+}
+
 export async function waitForPaneInputFocus(
   client,
   sessionId,
@@ -126,6 +151,75 @@ export async function waitForPaneInputFocus(
     (state) => Boolean(state?.inputFocused),
     `pane ${paneId} stable input focus`,
     Math.max(1_000, timeoutMs),
+  );
+}
+
+// Fresh shell panes emit their first prompt ~hundreds of ms after attach,
+// then continue a startup handshake (CPR/DA1 queries, bracketed-paste toggle,
+// keyboard-mode setup). Typing during the handshake makes the shell raw-echo
+// the first keystroke at col 6 *before* zle takes over — the visible token
+// ends up rotated (e.g. `3tr502p76785` instead of `tr502p767853`). A prompt
+// on screen is necessary but not sufficient; the shell must also be idle.
+//
+// The gate: require the prompt glyph at the tail of the buffer *and* wait
+// for xterm's write-parse count to sit still for `idleMs`. That marks the
+// end of the startup burst, after which keystrokes go straight into zle.
+export async function waitForPaneShellReady(
+  client,
+  sessionId,
+  paneId,
+  {
+    timeoutMs = 15_000,
+    idleMs = 400,
+    promptRegex = /[\$#%❯>»⟫]\s*$/,
+    description,
+  } = {},
+) {
+  const label = description || `shell prompt ready in pane ${paneId}`;
+  const startedAt = Date.now();
+  const pollMs = 100;
+  let lastChangeAt = Date.now();
+  let lastWriteCount = null;
+  let lastText = '';
+
+  while (Date.now() - startedAt < timeoutMs) {
+    let text = '';
+    let writeCount = null;
+    try {
+      const [textPayload, statePayload] = await Promise.all([
+        client.request('read_pane_text', { sessionId, paneId }, { timeoutMs: 20_000 }),
+        client.request('get_pane_state', { sessionId, paneId }, { timeoutMs: 20_000 }),
+      ]);
+      text = typeof textPayload?.text === 'string' ? textPayload.text : '';
+      writeCount = statePayload?.renderHealth?.terminal?.writeParsedCount ?? null;
+      lastText = text;
+    } catch (error) {
+      if (!isRetryableAutomationAbsence(error)) {
+        throw error;
+      }
+      await sleep(pollMs);
+      continue;
+    }
+
+    if (writeCount !== lastWriteCount) {
+      lastChangeAt = Date.now();
+      lastWriteCount = writeCount;
+    }
+
+    const lines = text.split(/\r?\n/);
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+      lines.pop();
+    }
+    const promptOnScreen = lines.length > 0 && promptRegex.test(lines[lines.length - 1]);
+    const idleFor = Date.now() - lastChangeAt;
+    if (promptOnScreen && (writeCount ?? 0) > 0 && idleFor >= idleMs) {
+      return { text, writeCount };
+    }
+    await sleep(pollMs);
+  }
+
+  throw new Error(
+    `Timed out waiting for ${label} (lastWriteCount=${lastWriteCount}). Tail:\n${lastText.slice(-400)}`
   );
 }
 
@@ -334,6 +428,33 @@ function visibleContentAnchorLines(
     .filter((line) => line.length >= minLineLength)
     .filter((line) => ignoreAnchorPatterns.every((pattern) => !pattern.test(line)))
     .slice(0, maxAnchors);
+}
+
+// After a resize (e.g. split_pane), xterm keeps the pre-resize buffer around
+// until the agent responds to SIGWINCH with a fresh redraw. Sampling the pane
+// during that window captures stale wide content and misrepresents the post-
+// resize baseline. Wait until no visible line exceeds the pane's current
+// column count — that's the observable signal that reflow has landed.
+export async function waitForPaneReflowed(client, sessionId, paneId, timeoutMs = 20_000, description) {
+  const label = description || `pane ${paneId} reflowed to current geometry`;
+  return waitForPaneVisibleContent(
+    client,
+    sessionId,
+    paneId,
+    (visibleContent) => {
+      if (!visibleContent) {
+        return false;
+      }
+      const cols = visibleContent.cols;
+      const maxLineLength = visibleContent.summary?.maxLineLength;
+      if (typeof cols !== 'number' || typeof maxLineLength !== 'number') {
+        return false;
+      }
+      return maxLineLength <= cols;
+    },
+    label,
+    timeoutMs,
+  );
 }
 
 export async function assertPaneVisibleContentPreserved(
@@ -555,8 +676,6 @@ export async function assertPaneNativePaintCoverage(
     minBusyRowRatio = 0.18,
     minBBoxWidthRatio = 0.45,
     minBBoxHeightRatio = 0.18,
-    activityThreshold = 18,
-    insetPx = 2,
     timeoutMs = 4_000,
     retryIntervalMs = 250,
     description = `pane ${paneId} native paint coverage`,
@@ -573,11 +692,7 @@ export async function assertPaneNativePaintCoverage(
       prefix,
       sessionId,
       paneId,
-      {
-        target,
-        activityThreshold,
-        insetPx,
-      },
+      { target },
     );
 
     const analysis = metrics.analysis || {};
@@ -654,12 +769,7 @@ async function assertPaneNativePaintStable(
     prefix,
     sessionId,
     paneId,
-    {
-      target: options.target || 'paneBody',
-      activityThreshold: options.activityThreshold ?? 18,
-      insetPx: options.insetPx ?? 2,
-      bundleId: options.bundleId || 'com.attn.manager',
-    },
+    { target: options.target || 'paneBody' },
   );
 
   const comparison = assertPaneNativePaintDelta(baselineMetrics, candidateMetrics, options);
@@ -722,12 +832,7 @@ export async function assertPaneNativePaintRecovered(
     prefix,
     sessionId,
     paneId,
-    {
-      target: options.target || 'paneBody',
-      activityThreshold: options.activityThreshold ?? 18,
-      insetPx: options.insetPx ?? 2,
-      bundleId: options.bundleId || 'com.attn.manager',
-    },
+    { target: options.target || 'paneBody' },
   );
 
   const comparison = assertPaneNativePaintNotWorse(baselineMetrics, candidateMetrics, options);
@@ -770,24 +875,4 @@ export async function captureSessionArtifacts(client, runDir, prefix, sessionId)
   });
   await writeJson(`${prefix}-pane-debug.json`, 'dump_pane_debug', {});
   await writeJson(`${prefix}-terminal-runtime-trace.json`, 'dump_terminal_runtime_trace', {});
-
-  try {
-    await client.request('capture_window_screenshot', {
-      path: `${runDir}/${prefix}-native-window.png`,
-      bundleId: 'com.attn.manager',
-    }, { timeoutMs: 20_000 });
-  } catch (error) {
-    try {
-      await captureFrontWindowScreenshot(`${runDir}/${prefix}-native-window.png`, { client, bundleId: 'com.attn.manager' });
-      return;
-    } catch (nativeError) {
-      const fs = await import('node:fs');
-      fs.writeFileSync(
-        `${runDir}/${prefix}-native-window.txt`,
-        nativeError instanceof Error ? nativeError.stack || nativeError.message : String(nativeError),
-        'utf8',
-      );
-      return;
-    }
-  }
 }
