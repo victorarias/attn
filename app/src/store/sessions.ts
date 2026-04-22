@@ -48,6 +48,9 @@ interface LauncherConfig {
 interface SessionStore {
   sessions: Session[];
   activeSessionId: string | null;
+  // Previously-active session IDs, most recent first. Used to restore
+  // selection when the active session disappears.
+  recentSessionIds: string[];
   connected: boolean;
   launcherConfig: LauncherConfig;
 
@@ -88,9 +91,31 @@ declare global {
   }
 }
 
+function pushRecent(recent: string[], id: string | null): string[] {
+  if (!id) return recent;
+  const filtered = recent.filter((entry) => entry !== id);
+  filtered.unshift(id);
+  return filtered;
+}
+
+function pickFallbackActive(
+  removedId: string,
+  remainingSessions: Session[],
+  recent: string[],
+): string | null {
+  const existing = new Set(remainingSessions.map((entry) => entry.id));
+  for (const candidate of recent) {
+    if (candidate !== removedId && existing.has(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
+  recentSessionIds: [],
   connected: false,
   launcherConfig: {
     executables: {},
@@ -142,23 +167,29 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set((state) => ({
       sessions: [...state.sessions, session],
       activeSessionId: id,
+      recentSessionIds:
+        state.activeSessionId && state.activeSessionId !== id
+          ? pushRecent(state.recentSessionIds, state.activeSessionId)
+          : state.recentSessionIds.filter((entry) => entry !== id),
     }));
 
     return id;
   },
 
   removeSessionLocalState: (id: string) => {
-    const { sessions, activeSessionId } = get();
+    const { sessions, activeSessionId, recentSessionIds } = get();
     const newSessions = sessions.filter((s) => s.id !== id);
+    const newRecent = recentSessionIds.filter((entry) => entry !== id);
     let newActiveId = activeSessionId;
 
     if (activeSessionId === id) {
-      newActiveId = newSessions.length > 0 ? newSessions[0].id : null;
+      newActiveId = pickFallbackActive(id, newSessions, recentSessionIds);
     }
 
     set({
       sessions: newSessions,
       activeSessionId: newActiveId,
+      recentSessionIds: newRecent,
     });
   },
 
@@ -175,7 +206,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   setActiveSession: (id: string | null) => {
-    set({ activeSessionId: id });
+    set((state) => {
+      if (state.activeSessionId === id) {
+        return state;
+      }
+      const nextRecent = pushRecent(state.recentSessionIds, state.activeSessionId);
+      return {
+        activeSessionId: id,
+        recentSessionIds: id ? nextRecent.filter((entry) => entry !== id) : nextRecent,
+      };
+    });
   },
 
   takeSessionSpawnArgs: (id: string, cols: number, rows: number) => {
@@ -322,14 +362,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         } satisfies Session;
       });
 
+      const syncedIds = new Set(syncedSessions.map((session) => session.id));
+      const prunedRecent = state.recentSessionIds.filter((entry) => syncedIds.has(entry));
+
       let nextActiveSessionID = state.activeSessionId;
-      if (nextActiveSessionID && !syncedSessions.some((session) => session.id === nextActiveSessionID)) {
-        nextActiveSessionID = null;
+      let nextRecent = prunedRecent;
+      if (nextActiveSessionID && !syncedIds.has(nextActiveSessionID)) {
+        const fallback = pickFallbackActive(nextActiveSessionID, syncedSessions, prunedRecent);
+        nextActiveSessionID = fallback;
+        nextRecent = fallback
+          ? prunedRecent.filter((entry) => entry !== fallback)
+          : prunedRecent;
       }
 
       return {
         sessions: syncedSessions,
         activeSessionId: nextActiveSessionID,
+        recentSessionIds: nextRecent,
       };
     });
   },
