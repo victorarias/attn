@@ -129,13 +129,23 @@ git clone https://github.com/victorarias/attn.git && cd attn
 | Command | What it does |
 |---|---|
 | `make build` | Build Go daemon binary |
-| `make install` | Rebuild and install the app bundle for source development, then ensure the bundled daemon is running |
+| `make` | Install attn.app and launch it — the one-command prod inner loop |
+| `make install` | Install the app bundle without launching (scripts / CI) |
 | `make install-daemon` | Update only the installed app's bundled daemon/runtime for the fast dev loop |
+| `make dev` | Install and launch `attn-dev.app` — the isolated dev sibling, for safely iterating on attn without touching your live install |
+| `make install-dev` | Same as `make dev` but without launching |
+| `make install-daemon-dev` | Fast sidecar-only loop for the dev install |
 | `make build-app` | Build daemon + Tauri app |
 | `make dist` | Create DMG |
 | `make test` | Go tests |
 | `make test-frontend` | Frontend tests (vitest) |
 | `make test-harness` | Go + frontend + E2E |
+
+### Iterating on attn itself (attn-on-attn)
+
+If you use attn daily and want to develop attn *with* attn running, use the dev sibling install instead of reinstalling your live copy. `make dev` builds and launches `~/Applications/attn-dev.app` — separate bundle identifier (`com.attn.manager.dev`), separate data dir (`~/.attn-dev/`), separate WebSocket port (`29849`). Both apps run side-by-side with zero cross-contamination. `make install` and `make install-daemon` refuse at parse time if `ATTN_PROFILE` is set in your shell, so you can't accidentally reinstall the live app while iterating on dev.
+
+The same `ATTN_PROFILE=<name>` env var scopes CLI commands (`eval "$(attn profile-env dev)"` to set it shell-wide), and the real-app serial matrix defaults to the dev install so it never takes over your live app.
 
 ## Docs
 
