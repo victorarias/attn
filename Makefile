@@ -1,8 +1,13 @@
-.PHONY: build build-linux-amd64 build-linux-arm64 install install-daemon test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-ui-automation app-screenshot dist release release-skip-tests
+.PHONY: build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-ui-automation build-app-dev app-screenshot dist release release-skip-tests
 
 BINARY_NAME=attn
 APP_BUNDLE=$(HOME)/Applications/attn.app
 APP_BINARY=$(APP_BUNDLE)/Contents/MacOS/attn
+# Dev sibling install. Separate bundle identifier (com.attn.manager.dev),
+# separate data dir (~/.attn-dev), separate port (29849). See
+# docs/plans or Phase 2 of the profiles feature for the full design.
+APP_BUNDLE_DEV=$(HOME)/Applications/attn-dev.app
+APP_BINARY_DEV=$(APP_BUNDLE_DEV)/Contents/MacOS/attn
 BUILD_DIR=./cmd/attn
 VERSION ?= $(shell bash ./scripts/version.sh)
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -62,7 +67,19 @@ test-all: test test-frontend
 
 UNAME_S := $(shell uname -s)
 
+# Installing the PROD bundle while ATTN_PROFILE is set is almost always
+# a mistake — it blows away the live install a developer is using. The
+# guard fires during Make's parse phase so we fail *before* the expensive
+# Tauri build, not after.
+GUARDED_PROD_TARGETS := install install-daemon
+ifneq (,$(filter $(GUARDED_PROD_TARGETS),$(MAKECMDGOALS)))
+ifneq (,$(ATTN_PROFILE))
+$(error ATTN_PROFILE=$(ATTN_PROFILE) is set. `make $(firstword $(MAKECMDGOALS))` targets the PROD bundle ($(APP_BUNDLE)). Did you mean `make dev`? To proceed anyway: env -u ATTN_PROFILE make $(firstword $(MAKECMDGOALS)))
+endif
+endif
+
 install: build-app-ui-automation
+	@echo ">>> Installing PROD: $(APP_BUNDLE) (profile=default, port=9849)"
 	@mkdir -p ~/Applications
 	@rm -rf ~/Applications/attn.app
 	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
@@ -74,10 +91,42 @@ install-daemon: build
 		echo "No installed attn.app found in ~/Applications; run make install first"; \
 		exit 1; \
 	fi
+	@echo ">>> Updating PROD daemon at $(APP_BINARY)"
 	cp $(OUTPUT) $(APP_BINARY)
 	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(APP_BINARY); fi
 	@$(APP_BINARY) daemon ensure >/dev/null
 	@echo "Updated bundled daemon at $(APP_BINARY)"
+
+# Dev-sibling install. `make dev` is THE command for the attn-on-attn
+# inner loop: rebuild, reinstall, restart dev daemon — without ever
+# touching the prod install. Uses a separate bundle identifier
+# (com.attn.manager.dev), productName (attn-dev), data dir (~/.attn-dev),
+# and port (29849). Prod daemon and app keep running.
+#
+# Run `eval "$(attn profile-env dev)"` (or `attn profile-env --fish dev | source`)
+# in your shell if you want `attn ...` commands to target the dev daemon
+# by default.
+dev: install-dev
+
+install-dev: build-app-dev
+	@echo ">>> Installing DEV: $(APP_BUNDLE_DEV) (profile=dev, port=29849)"
+	@mkdir -p ~/Applications
+	@rm -rf $(APP_BUNDLE_DEV)
+	cp -r app/src-tauri/target/release/bundle/macos/attn-dev.app ~/Applications/
+	@ATTN_PROFILE=dev $(APP_BINARY_DEV) daemon ensure >/dev/null
+	@echo "Installed $(APP_BUNDLE_DEV) — profile=dev, data=~/.attn-dev, port=29849"
+	@echo "Launch: open $(APP_BUNDLE_DEV)"
+
+install-daemon-dev: build
+	@if [ ! -d "$(APP_BUNDLE_DEV)" ]; then \
+		echo "No installed attn-dev.app found in ~/Applications; run make dev first"; \
+		exit 1; \
+	fi
+	@echo ">>> Updating DEV daemon at $(APP_BINARY_DEV)"
+	cp $(OUTPUT) $(APP_BINARY_DEV)
+	@if [ "$(UNAME_S)" = "Darwin" ]; then codesign -s - -f $(APP_BINARY_DEV); fi
+	@ATTN_PROFILE=dev $(APP_BINARY_DEV) daemon ensure >/dev/null
+	@echo "Updated bundled dev daemon at $(APP_BINARY_DEV)"
 
 clean:
 	rm -f $(BINARY_NAME)
@@ -98,25 +147,40 @@ generate-types:
 check-types: generate-types
 	git diff --exit-code internal/protocol/generated.go app/src/types/generated.ts
 
-# Build Tauri app with bundled daemon (app bundle only, no DMG dialog)
+# Build Tauri app with bundled daemon (app bundle only, no DMG dialog).
+# Args:
+#   $(1) — build-time env-var prefix (VITE_* for frontend, ATTN_* for cargo)
+#   $(2) — productName (controls the .app bundle *folder* name — "attn" for
+#          prod, "attn-dev" for the dev sibling). Matches the productName
+#          in tauri.conf.json / tauri.dev.conf.json.
+#   $(3) — extra args for `pnpm tauri build` (e.g. --config for overlays)
+# The Go daemon is bundled as a sidecar under Contents/MacOS/attn regardless
+# of productName, so the codesign step is the same for both builds.
 define build_tauri_app
 	@mkdir -p app/src-tauri/binaries
 	cp $(BINARY_NAME) app/src-tauri/binaries/$(BINARY_NAME)-aarch64-apple-darwin
-	cd app && $(1) pnpm tauri build --bundles app
+	cd app && $(1) pnpm tauri build --bundles app $(3)
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		mkdir -p app/src-tauri/target/release/bundle/macos/attn.app/Contents/Resources; \
-		printf '{\n  "version": "%s",\n  "sourceFingerprint": "%s",\n  "gitCommit": "%s",\n  "buildTime": "%s"\n}\n' '$(VERSION)' '$(SOURCE_FINGERPRINT)' '$(GIT_COMMIT)' '$(BUILD_TIME)' > app/src-tauri/target/release/bundle/macos/attn.app/Contents/Resources/build-identity.json; \
+		mkdir -p app/src-tauri/target/release/bundle/macos/$(2).app/Contents/Resources; \
+		printf '{\n  "version": "%s",\n  "sourceFingerprint": "%s",\n  "gitCommit": "%s",\n  "buildTime": "%s"\n}\n' '$(VERSION)' '$(SOURCE_FINGERPRINT)' '$(GIT_COMMIT)' '$(BUILD_TIME)' > app/src-tauri/target/release/bundle/macos/$(2).app/Contents/Resources/build-identity.json; \
 	fi
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		codesign -s - -f app/src-tauri/target/release/bundle/macos/attn.app/Contents/MacOS/attn; \
+		codesign -s - -f app/src-tauri/target/release/bundle/macos/$(2).app/Contents/MacOS/attn; \
 	fi
 endef
 
 build-app: build
-	$(call build_tauri_app,VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)')
+	$(call build_tauri_app,VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn,)
 
 build-app-ui-automation: build
-	$(call build_tauri_app,ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)')
+	$(call build_tauri_app,ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn,)
+
+# Dev build. Bakes ATTN_BUILD_PROFILE=dev into the Rust binary and
+# VITE_ATTN_BUILD_PROFILE=dev + VITE_DAEMON_PORT=29849 into the frontend
+# so the dev bundle can never accidentally point at the prod daemon.
+# Output: app/src-tauri/target/release/bundle/macos/attn-dev.app
+build-app-dev: build
+	$(call build_tauri_app,ATTN_BUILD_PROFILE=dev VITE_ATTN_BUILD_PROFILE=dev VITE_DAEMON_PORT=29849 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn-dev,--config src-tauri/tauri.dev.conf.json)
 
 app-screenshot:
 	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path "$(SCREENSHOT_PATH)",) $(APP_SCREENSHOT_FLAGS)

@@ -1,3 +1,4 @@
+mod profile;
 mod thumbs;
 mod ui_automation;
 
@@ -445,6 +446,28 @@ fn parent_process_id() -> Option<u32> {
     None
 }
 
+#[derive(Debug, serde::Serialize)]
+struct BuildProfileInfo {
+    profile: &'static str,
+    label: &'static str,
+    expected_port: &'static str,
+    bundle_identifier: &'static str,
+}
+
+/// Returns the compile-time profile baked into this app bundle.
+/// The frontend calls this at startup to verify that the daemon it
+/// connects to reports the same profile — a mismatch is fatal
+/// (the app refuses to operate, per the design gate).
+#[tauri::command]
+fn get_build_profile() -> BuildProfileInfo {
+    BuildProfileInfo {
+        profile: profile::build_profile(),
+        label: profile::build_profile_label(),
+        expected_port: profile::default_port_for_build_profile(),
+        bundle_identifier: profile::bundle_identifier(),
+    }
+}
+
 #[tauri::command]
 fn ensure_daemon(_app: tauri::AppHandle) -> Result<(), String> {
     let _guard = ENSURE_DAEMON_LOCK
@@ -671,14 +694,20 @@ fn open_in_editor(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Must run before anything reads ATTN_PROFILE / ATTN_WS_PORT (including
+    // any spawned `attn daemon` child that inherits our env).
+    profile::apply_build_profile_env();
+
     // Disable macOS "press and hold for accents" popup so that holding
-    // a key in the terminal produces key repeat instead.
+    // a key in the terminal produces key repeat instead. Scope the
+    // preference change to the running bundle so a dev install
+    // (com.attn.manager.dev) never overwrites the prod preference.
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("defaults")
             .args([
                 "write",
-                "com.attn.manager",
+                profile::bundle_identifier(),
                 "ApplePressAndHoldEnabled",
                 "-bool",
                 "false",
@@ -696,6 +725,7 @@ pub fn run() {
             list_directory,
             ensure_daemon,
             open_in_editor,
+            get_build_profile,
             thumbs::extract_patterns,
             thumbs::reveal_in_finder,
         ])

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "attn-dev",
+  "identifier": "com.attn.manager.dev",
+  "app": {
+    "windows": [
+      {
+        "title": "attn-dev"
+      }
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["attn-dev"]
+      }
+    }
+  }
+}

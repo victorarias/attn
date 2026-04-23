@@ -23,6 +23,19 @@ go test ./internal/store -run TestList
 
 Use `make install` as the default source/dev install path; it rebuilds and installs the app bundle and ensures the bundled daemon is running. Use `make install-daemon` when only daemon/runtime code changed and you want the faster sidecar-only loop.
 
+### Iterating On Attn Itself (Attn-On-Attn Testing)
+
+When changing attn code while the user has a live attn install running, **never** run `make install` or `make install-daemon` — they overwrite the live `attn.app` / restart its daemon mid-session. Use the dev sibling install instead:
+
+```bash
+make dev              # builds + installs ~/Applications/attn-dev.app, starts dev daemon on port 29849
+make install-daemon-dev  # faster: only rebuild the Go sidecar inside attn-dev.app
+```
+
+The dev install is fully isolated: its own bundle identifier (`com.attn.manager.dev`), its own data dir (`~/.attn-dev/`), its own socket, its own port. Prod is never touched. `make install` and `make install-daemon` refuse at parse time if `ATTN_PROFILE` is set in the environment — if you hit that error, you meant `make dev`.
+
+To make CLI commands (`attn`, `attn list`, etc.) target the dev daemon in your shell, run `eval "$(./attn profile-env dev)"` (bash/zsh) or `./attn profile-env --fish dev | source` (fish). Any `attn` subcommand then prints a one-line `[attn profile=dev ...]` banner so you can always see which daemon you're talking to. Unset with `eval "$(attn profile-env --unset)"`.
+
 Frontend-only shortcuts:
 
 ```bash
