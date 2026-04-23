@@ -46,7 +46,7 @@ import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
 import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
 import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
-import { daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
+import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 
 // Re-export types from generated for consumers
 // Use type aliases to maintain backward compatibility
@@ -826,11 +826,14 @@ export function useDaemonSocket({
     await ensureDaemonRunning();
 
     // Verify the daemon's profile matches this build before opening the
-    // WebSocket. Protects the user from accidentally operating on the
-    // wrong data dir when (say) a misconfigured dev app lands on the
-    // prod port via a manual ATTN_WS_PORT override. First successful
-    // check latches — reconnects skip it.
-    if (!profileCheckedRef.current) {
+    // WebSocket. Only meaningful for non-default builds: the dev bundle
+    // (BUILD_PROFILE="dev") refuses to operate on a daemon that reports
+    // anything other than "dev". The default/prod build skips the check
+    // — a default frontend reaching a dev daemon would need a deliberate
+    // port override, and the initial_state protocol-version handshake
+    // over the WS still catches the common failure modes. Skipping also
+    // keeps existing WebSocket mocks in tests sync with the connect path.
+    if (BUILD_PROFILE !== '' && !profileCheckedRef.current) {
       try {
         const health = await fetchDaemonHealthProfile(resolvedWsUrl);
         if (!daemonProfileMatches(health.profile)) {
