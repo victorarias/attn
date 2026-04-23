@@ -95,6 +95,15 @@ func main() {
 		return
 	}
 
+	// `profile-env` is the self-recovery path: if ATTN_PROFILE is
+	// currently typo'd, the user needs `attn profile-env --unset` (or
+	// `profile-env <name>`) to fix their shell. Route it *before* the
+	// global validation so an invalid env value doesn't trap them.
+	if len(os.Args) >= 2 && os.Args[1] == "profile-env" {
+		runProfileEnv()
+		return
+	}
+
 	// Validate ATTN_PROFILE before we act on it. A typo'd profile would
 	// silently fall back to default, which is exactly the kind of mistake
 	// this whole feature exists to prevent.
@@ -122,8 +131,6 @@ func main() {
 	case "list":
 		maybePrintProfileBanner()
 		runList()
-	case "profile-env":
-		runProfileEnv()
 	case "_hook-stop":
 		runHookStop()
 	case "_hook-state":
@@ -732,8 +739,11 @@ func openAppWithDeepLink() {
 		label = filepath.Base(cwd)
 	}
 
-	// Build deep link URL
-	deepLink := fmt.Sprintf("attn://spawn?cwd=%s&label=%s",
+	// Build deep link URL. Scheme is profile-scoped so `attn` in a
+	// dev-scoped shell (ATTN_PROFILE=dev) opens attn-dev.app via its
+	// `attn-dev://` registration instead of the prod app.
+	deepLink := fmt.Sprintf("%s://spawn?cwd=%s&label=%s",
+		config.DeepLinkScheme(),
 		url.QueryEscape(cwd),
 		url.QueryEscape(label))
 

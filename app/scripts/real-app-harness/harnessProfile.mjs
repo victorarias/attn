@@ -45,3 +45,11 @@ export function manifestPathForProfile(profile = currentHarnessProfile()) {
     'ui-automation.json',
   );
 }
+
+// Match the deep-link scheme registered for each bundle:
+//   - prod: tauri.conf.json declares `attn`
+//   - dev:  tauri.dev.conf.json declares `attn-dev`
+// Must stay in sync with config.DeepLinkScheme() on the Go side.
+export function deepLinkSchemeForProfile(profile = currentHarnessProfile()) {
+  return profile === 'dev' ? 'attn-dev' : 'attn';
+}

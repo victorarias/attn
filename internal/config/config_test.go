@@ -250,3 +250,38 @@ func TestLegacyStatePath_SuffixedByProfile(t *testing.T) {
 		t.Errorf("StatePath() = %q, want %q", got, want)
 	}
 }
+
+func TestDeepLinkScheme(t *testing.T) {
+	t.Run("default → attn", func(t *testing.T) {
+		os.Unsetenv("ATTN_PROFILE")
+		if got := DeepLinkScheme(); got != "attn" {
+			t.Errorf("DeepLinkScheme() = %q, want %q", got, "attn")
+		}
+	})
+	t.Run("dev → attn-dev", func(t *testing.T) {
+		t.Setenv("ATTN_PROFILE", "dev")
+		if got := DeepLinkScheme(); got != "attn-dev" {
+			t.Errorf("DeepLinkScheme() = %q, want %q", got, "attn-dev")
+		}
+	})
+	t.Run("unknown profile → attn (prod scheme is safe default)", func(t *testing.T) {
+		t.Setenv("ATTN_PROFILE", "staging")
+		if got := DeepLinkScheme(); got != "attn" {
+			t.Errorf("DeepLinkScheme() = %q, want %q", got, "attn")
+		}
+	})
+}
+
+func TestValidateProfileName_PureFunction(t *testing.T) {
+	// Does NOT read the environment; only validates the argument.
+	t.Setenv("ATTN_PROFILE", "has space") // invalid env, but argument is fine
+	if err := ValidateProfileName("dev"); err != nil {
+		t.Errorf("ValidateProfileName(dev) unexpectedly errored: %v", err)
+	}
+	if err := ValidateProfileName(""); err != nil {
+		t.Errorf("ValidateProfileName(\"\") unexpectedly errored: %v", err)
+	}
+	if err := ValidateProfileName("bad name"); err == nil {
+		t.Error("ValidateProfileName(\"bad name\") should have errored")
+	}
+}

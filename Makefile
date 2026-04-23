@@ -77,10 +77,17 @@ UNAME_S := $(shell uname -s)
 # a mistake — it blows away the live install a developer is using. The
 # guard fires during Make's parse phase so we fail *before* the expensive
 # Tauri build, not after.
-GUARDED_PROD_TARGETS := install install-daemon
-ifneq (,$(filter $(GUARDED_PROD_TARGETS),$(MAKECMDGOALS)))
+#
+# Includes the default goal (`run`, invoked as bare `make`) — without it,
+# `ATTN_PROFILE=dev make` would silently reinstall the prod bundle.
+# The empty-goal case (bare `make`) is represented by the current
+# DEFAULT_GOAL ("run"); we substitute that in so the check catches it.
+GUARDED_PROD_TARGETS := run install install-daemon
+ACTIVE_GOALS := $(if $(MAKECMDGOALS),$(MAKECMDGOALS),$(.DEFAULT_GOAL))
+GUARDED_INVOCATION := $(filter $(GUARDED_PROD_TARGETS),$(ACTIVE_GOALS))
+ifneq (,$(GUARDED_INVOCATION))
 ifneq (,$(ATTN_PROFILE))
-$(error ATTN_PROFILE=$(ATTN_PROFILE) is set. `make $(firstword $(MAKECMDGOALS))` targets the PROD bundle ($(APP_BUNDLE)). Did you mean `make dev`? To proceed anyway: env -u ATTN_PROFILE make $(firstword $(MAKECMDGOALS)))
+$(error ATTN_PROFILE=$(ATTN_PROFILE) is set. `make $(firstword $(ACTIVE_GOALS))` targets the PROD bundle ($(APP_BUNDLE)). Did you mean `make dev`? To proceed anyway: env -u ATTN_PROFILE make $(firstword $(ACTIVE_GOALS)))
 endif
 endif
 

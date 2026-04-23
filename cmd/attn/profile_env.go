@@ -51,7 +51,7 @@ func runProfileEnv() {
 	// Validate the requested profile name using the same rules the rest
 	// of the binary applies, so typos fail here instead of silently
 	// mis-routing to the default profile later.
-	if err := validateRequestedProfile(arg); err != nil {
+	if err := config.ValidateProfileName(arg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -61,21 +61,6 @@ func runProfileEnv() {
 	} else {
 		fmt.Printf("export ATTN_PROFILE=%s\n", arg)
 	}
-}
-
-func validateRequestedProfile(name string) error {
-	// Reuse the package-level validation by temporarily setting and
-	// clearing the env var. config.ValidateProfile reads ATTN_PROFILE,
-	// so we need to scope this carefully.
-	prev, hadPrev := os.LookupEnv("ATTN_PROFILE")
-	os.Setenv("ATTN_PROFILE", name)
-	err := config.ValidateProfile()
-	if hadPrev {
-		os.Setenv("ATTN_PROFILE", prev)
-	} else {
-		os.Unsetenv("ATTN_PROFILE")
-	}
-	return err
 }
 
 func printProfileEnvHelp() {

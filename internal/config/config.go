@@ -91,13 +91,9 @@ func Profile() string {
 // ValidateProfile returns an error if ATTN_PROFILE is set to an invalid name.
 // Use this from CLI entry points to fail loudly on typos.
 func ValidateProfile() error {
-	raw := strings.TrimSpace(os.Getenv("ATTN_PROFILE"))
-	if raw == "" {
-		return nil
-	}
-	normalized := strings.ToLower(raw)
-	if !profileNamePattern.MatchString(normalized) {
-		return fmt.Errorf("invalid ATTN_PROFILE=%q: must match ^[a-z0-9][a-z0-9-]{0,15}$", raw)
+	raw := os.Getenv("ATTN_PROFILE")
+	if err := ValidateProfileName(raw); err != nil {
+		return fmt.Errorf("invalid ATTN_PROFILE=%q: must match ^[a-z0-9][a-z0-9-]{0,15}$", strings.TrimSpace(raw))
 	}
 	return nil
 }
@@ -108,6 +104,37 @@ func ProfileLabel() string {
 		return p
 	}
 	return "default"
+}
+
+// DeepLinkScheme returns the macOS URL scheme the running profile's .app
+// is registered under. Default → "attn", dev → "attn-dev". Must stay in
+// sync with the `deep-link.desktop.schemes` entries in:
+//   - app/src-tauri/tauri.conf.json         (prod)
+//   - app/src-tauri/tauri.dev.conf.json     (dev)
+//
+// Used by the CLI wrapper so `attn` in a dev-scoped shell opens
+// attn-dev.app, not attn.app.
+func DeepLinkScheme() string {
+	if p := Profile(); p == "dev" {
+		return "attn-dev"
+	}
+	return "attn"
+}
+
+// ValidateProfileName validates a profile name against the same rules
+// Profile()/ValidateProfile() apply, without consulting the environment.
+// Use this when you have a profile name from a non-env source (e.g. a
+// CLI argument) and want to reuse the validation logic.
+func ValidateProfileName(name string) error {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return nil
+	}
+	normalized := strings.ToLower(trimmed)
+	if !profileNamePattern.MatchString(normalized) {
+		return fmt.Errorf("invalid profile name %q: must match ^[a-z0-9][a-z0-9-]{0,15}$", name)
+	}
+	return nil
 }
 
 // attnDir returns the base directory for attn files. Profile-aware:

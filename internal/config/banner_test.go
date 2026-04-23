@@ -42,11 +42,12 @@ func TestCollapseHome(t *testing.T) {
 		"/Users/victor":                     "~",
 		"/Users/victor/.attn-dev":           "~/.attn-dev",
 		"/Users/victor/.attn-dev/attn.sock": "~/.attn-dev/attn.sock",
+		"/Users/victor/":                    "~",
 		"/tmp/other":                        "/tmp/other",
 	}
 	for in, want := range cases {
-		if got := collapseHome(in); got != want {
-			t.Errorf("collapseHome(%q) = %q, want %q", in, got, want)
+		if got := CollapseHome(in); got != want {
+			t.Errorf("CollapseHome(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

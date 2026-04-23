@@ -2,7 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { waitForPaneVisible } from './scenarioAssertions.mjs';
-import { defaultAppPathForProfile, defaultWSURLForProfile } from './harnessProfile.mjs';
+import {
+  defaultAppPathForProfile,
+  defaultWSURLForProfile,
+  deepLinkSchemeForProfile,
+} from './harnessProfile.mjs';
 
 export function parseCommonArgs(argv) {
   // Default to the prod install; ATTN_HARNESS_PROFILE=dev switches the
@@ -124,7 +128,11 @@ export async function bootstrapPackagedAppSession({
   await driver.activateBackground();
   await captureScreenshot(driver, path.join(runDir, '01-app-launched.png'));
 
-  const deepLink = `attn://spawn?cwd=${encodeURIComponent(sessionDir)}&label=${encodeURIComponent(sessionLabel)}`;
+  // Scheme is profile-scoped: ATTN_HARNESS_PROFILE=dev → `attn-dev://`,
+  // which the dev bundle registers. Sending `attn://` under a dev
+  // profile would open the prod app instead of attn-dev.app.
+  const scheme = deepLinkSchemeForProfile();
+  const deepLink = `${scheme}://spawn?cwd=${encodeURIComponent(sessionDir)}&label=${encodeURIComponent(sessionLabel)}`;
   console.log(`[RealAppHarness] deepLink=${deepLink}`);
   await driver.openDeepLink(deepLink);
 
