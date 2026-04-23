@@ -245,8 +245,8 @@ func LogPath() string {
 // WSPort returns the WebSocket/HTTP port.
 // Priority: ATTN_WS_PORT env var > per-profile default.
 // Default profile → 9849. Named profile "dev" → 29849. Any other named profile
-// gets a stable hash-derived port in [20000,29999] (avoiding 29849 for "dev"
-// and the e2e port 19849, which sits outside this range).
+// gets a stable hash-derived port in [20000,29848] (reserving 29849 for "dev";
+// the e2e port 19849 sits outside this range).
 func WSPort() string {
 	port := strings.TrimSpace(os.Getenv("ATTN_WS_PORT"))
 	if port != "" {
