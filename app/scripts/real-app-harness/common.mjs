@@ -2,11 +2,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { waitForPaneVisible } from './scenarioAssertions.mjs';
+import { defaultAppPathForProfile, defaultWSURLForProfile } from './harnessProfile.mjs';
 
 export function parseCommonArgs(argv) {
+  // Default to the prod install; ATTN_HARNESS_PROFILE=dev switches the
+  // whole harness (ws port, app path, bundle id) to the dev sibling
+  // without the caller having to set three separate env vars.
   const options = {
-    wsUrl: process.env.ATTN_REAL_APP_WS_URL || 'ws://127.0.0.1:9849/ws',
-    appPath: process.env.ATTN_REAL_APP_PATH || path.join(os.homedir(), 'Applications', 'attn.app'),
+    wsUrl: process.env.ATTN_REAL_APP_WS_URL || defaultWSURLForProfile(),
+    appPath: process.env.ATTN_REAL_APP_PATH || defaultAppPathForProfile(),
     artifactsDir: process.env.ATTN_REAL_APP_ARTIFACTS_DIR || path.join(os.tmpdir(), 'attn-real-app-harness'),
     sessionRootDir: process.env.ATTN_REAL_APP_SESSION_ROOT || path.join(os.tmpdir(), 'attn-real-app-sessions'),
   };

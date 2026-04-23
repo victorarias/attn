@@ -178,9 +178,17 @@ build-app-ui-automation: build
 # Dev build. Bakes ATTN_BUILD_PROFILE=dev into the Rust binary and
 # VITE_ATTN_BUILD_PROFILE=dev + VITE_DAEMON_PORT=29849 into the frontend
 # so the dev bundle can never accidentally point at the prod daemon.
+# UI automation is enabled by default (matching `make install` / the
+# prod install path) so real-app harness scenarios work against the
+# dev bundle too. Set ATTN_DEV_UI_AUTOMATION=0 to disable.
 # Output: app/src-tauri/target/release/bundle/macos/attn-dev.app
+ATTN_DEV_UI_AUTOMATION ?= 1
 build-app-dev: build
+ifeq ($(ATTN_DEV_UI_AUTOMATION),1)
+	$(call build_tauri_app,ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 ATTN_BUILD_PROFILE=dev VITE_ATTN_BUILD_PROFILE=dev VITE_DAEMON_PORT=29849 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn-dev,--config src-tauri/tauri.dev.conf.json)
+else
 	$(call build_tauri_app,ATTN_BUILD_PROFILE=dev VITE_ATTN_BUILD_PROFILE=dev VITE_DAEMON_PORT=29849 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn-dev,--config src-tauri/tauri.dev.conf.json)
+endif
 
 app-screenshot:
 	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path "$(SCREENSHOT_PATH)",) $(APP_SCREENSHOT_FLAGS)
