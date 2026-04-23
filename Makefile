@@ -1,4 +1,10 @@
-.PHONY: build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-ui-automation build-app-dev app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-ui-automation build-app-dev app-screenshot dist release release-skip-tests
+
+# Bare `make` does the full prod inner loop: install + open the app.
+# `make install` is install-only (for scripts/CI that drive the launch
+# separately). Same pattern mirrored for dev: `make dev` = install + open,
+# `make install-dev` = install only.
+.DEFAULT_GOAL := run
 
 BINARY_NAME=attn
 APP_BUNDLE=$(HOME)/Applications/attn.app
@@ -78,6 +84,10 @@ $(error ATTN_PROFILE=$(ATTN_PROFILE) is set. `make $(firstword $(MAKECMDGOALS))`
 endif
 endif
 
+run: install
+	@open $(APP_BUNDLE)
+	@echo "Launched $(APP_BUNDLE)"
+
 install: build-app-ui-automation
 	@echo ">>> Installing PROD: $(APP_BUNDLE) (profile=default, port=9849)"
 	@mkdir -p ~/Applications
@@ -85,8 +95,6 @@ install: build-app-ui-automation
 	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
 	@$(APP_BINARY) daemon ensure >/dev/null
 	@echo "Installed attn.app to ~/Applications"
-	@open $(APP_BUNDLE)
-	@echo "Launched $(APP_BUNDLE)"
 
 install-daemon: build
 	@if [ ! -d "$(APP_BUNDLE)" ]; then \
@@ -109,6 +117,8 @@ install-daemon: build
 # in your shell if you want `attn ...` commands to target the dev daemon
 # by default.
 dev: install-dev
+	@open $(APP_BUNDLE_DEV)
+	@echo "Launched $(APP_BUNDLE_DEV)"
 
 install-dev: build-app-dev
 	@echo ">>> Installing DEV: $(APP_BUNDLE_DEV) (profile=dev, port=29849)"
@@ -117,8 +127,6 @@ install-dev: build-app-dev
 	cp -r app/src-tauri/target/release/bundle/macos/attn-dev.app ~/Applications/
 	@ATTN_PROFILE=dev $(APP_BINARY_DEV) daemon ensure >/dev/null
 	@echo "Installed $(APP_BUNDLE_DEV) — profile=dev, data=~/.attn-dev, port=29849"
-	@open $(APP_BUNDLE_DEV)
-	@echo "Launched $(APP_BUNDLE_DEV)"
 
 install-daemon-dev: build
 	@if [ ! -d "$(APP_BUNDLE_DEV)" ]; then \

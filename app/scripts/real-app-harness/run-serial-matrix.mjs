@@ -1,9 +1,18 @@
 #!/usr/bin/env node
 
-import os from 'node:os';
-import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
+import { defaultAppPathForProfile } from './harnessProfile.mjs';
+
+// Matrix runs against the dev install by default. The dev install is the
+// whole point of the profile feature: iterate on attn-on-attn test
+// scenarios without ever taking over the live prod app. Opt out by
+// setting ATTN_HARNESS_PROFILE to an empty string (prod) or a different
+// profile name explicitly. This must happen before any import that reads
+// the env var at module-load time.
+if (process.env.ATTN_HARNESS_PROFILE === undefined) {
+  process.env.ATTN_HARNESS_PROFILE = 'dev';
+}
 
 const scenarioCatalog = [
   {
@@ -101,6 +110,11 @@ function printHelp() {
   node scripts/real-app-harness/run-serial-matrix.mjs --fail-fast
   node scripts/real-app-harness/run-serial-matrix.mjs --timeout-ms 180000
 
+Target: defaults to the dev install (~/Applications/attn-dev.app, port 29849)
+  so the matrix never takes over your live prod app. Run \`make dev\` first
+  if you haven't built one. To point at a different profile set
+  ATTN_HARNESS_PROFILE=<name> (empty for prod) before invoking.
+
 Available scenarios:
 ${scenarioCatalog.map((scenario) => `  - ${scenario.id}: ${scenario.label}`).join('\n')}
 `);
@@ -197,7 +211,8 @@ async function main() {
   }
 
   const scenarios = resolveScenarios(selected);
-  const appPath = process.env.ATTN_REAL_APP_PATH || path.join(os.homedir(), 'Applications', 'attn.app');
+  const appPath = process.env.ATTN_REAL_APP_PATH || defaultAppPathForProfile();
+  console.log(`Matrix target: ${appPath} (ATTN_HARNESS_PROFILE=${process.env.ATTN_HARNESS_PROFILE || '<default>'})`);
   const preflightKeys = new Set();
   for (const scenario of scenarios) {
     const preflightLaunchEnv = scenario.preflightLaunchEnv || null;
