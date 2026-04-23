@@ -131,34 +131,34 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 		t.Fatalf("upsertRemoteSession(second) = (%v, %d), want (true, 1)", changed, count)
 	}
 
-	if changed := manager.replaceRemoteWorkspaces(first.ID, []protocol.WorkspaceSnapshot{{
+	if changed := manager.replaceRemoteSessionLayouts(first.ID, []protocol.SessionLayout{{
 		SessionID:    "sess-a",
 		ActivePaneID: "main",
 		LayoutJson:   `{"type":"pane","paneId":"main"}`,
-		Panes: []protocol.WorkspacePane{{
+		Panes: []protocol.SessionLayoutPane{{
 			PaneID: "main",
-			Kind:   protocol.WorkspacePaneKindMain,
+			Kind:   protocol.SessionLayoutPaneKindMain,
 			Title:  "Main",
 		}, {
 			PaneID:    "shell-1",
-			Kind:      protocol.WorkspacePaneKindShell,
+			Kind:      protocol.SessionLayoutPaneKindShell,
 			Title:     "Shell 1",
 			RuntimeID: protocol.Ptr("runtime-a"),
 		}},
 	}}); !changed {
-		t.Fatal("replaceRemoteWorkspaces(first) reported no change")
+		t.Fatal("replaceRemoteSessionLayouts(first) reported no change")
 	}
-	if changed := manager.replaceRemoteWorkspaces(second.ID, []protocol.WorkspaceSnapshot{{
+	if changed := manager.replaceRemoteSessionLayouts(second.ID, []protocol.SessionLayout{{
 		SessionID:    "sess-b",
 		ActivePaneID: "main",
 		LayoutJson:   `{"type":"pane","paneId":"main"}`,
-		Panes: []protocol.WorkspacePane{{
+		Panes: []protocol.SessionLayoutPane{{
 			PaneID: "main",
-			Kind:   protocol.WorkspacePaneKindMain,
+			Kind:   protocol.SessionLayoutPaneKindMain,
 			Title:  "Main",
 		}},
 	}}); !changed {
-		t.Fatal("replaceRemoteWorkspaces(second) reported no change")
+		t.Fatal("replaceRemoteSessionLayouts(second) reported no change")
 	}
 
 	got := manager.RemoteWorkspaces()
@@ -181,8 +181,8 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 		t.Fatalf("EndpointIDForPTYTarget(runtime-a) = (%q, %v), want (%q, true)", endpointID, ok, first.ID)
 	}
 
-	if changed := manager.clearRemoteWorkspaces(first.ID); !changed {
-		t.Fatal("clearRemoteWorkspaces(first) reported no change")
+	if changed := manager.clearRemoteSessionLayouts(first.ID); !changed {
+		t.Fatal("clearRemoteSessionLayouts(first) reported no change")
 	}
 	got = manager.RemoteWorkspaces()
 	if len(got) != 1 || got[0].SessionID != "sess-b" {
@@ -201,26 +201,26 @@ func TestManagerIgnoresWorkspaceUpdatesForRemovedRemoteSessions(t *testing.T) {
 	if changed, count := manager.upsertRemoteSession(record.ID, protocol.Session{ID: "sess-1", Directory: "/srv/repo"}); !changed || count != 1 {
 		t.Fatalf("upsertRemoteSession() = (%v, %d), want (true, 1)", changed, count)
 	}
-	if changed := manager.upsertRemoteWorkspace(record.ID, protocol.WorkspaceSnapshot{
+	if changed := manager.upsertRemoteSessionLayout(record.ID, protocol.SessionLayout{
 		SessionID:    "sess-1",
 		ActivePaneID: "main",
 		LayoutJson:   `{"type":"pane","paneId":"main"}`,
 	}); !changed {
-		t.Fatal("upsertRemoteWorkspace() reported no change")
+		t.Fatal("upsertRemoteSessionLayout() reported no change")
 	}
 
 	if changed, count := manager.removeRemoteSession(record.ID, "sess-1"); !changed || count != 0 {
 		t.Fatalf("removeRemoteSession() = (%v, %d), want (true, 0)", changed, count)
 	}
-	if changed := manager.removeRemoteWorkspace(record.ID, "sess-1"); !changed {
-		t.Fatal("removeRemoteWorkspace() reported no change")
+	if changed := manager.removeRemoteSessionLayout(record.ID, "sess-1"); !changed {
+		t.Fatal("removeRemoteSessionLayout() reported no change")
 	}
-	if changed := manager.upsertRemoteWorkspace(record.ID, protocol.WorkspaceSnapshot{
+	if changed := manager.upsertRemoteSessionLayout(record.ID, protocol.SessionLayout{
 		SessionID:    "sess-1",
 		ActivePaneID: "main",
 		LayoutJson:   `{"type":"pane","paneId":"main"}`,
 	}); changed {
-		t.Fatal("upsertRemoteWorkspace() should ignore workspace for removed session")
+		t.Fatal("upsertRemoteSessionLayout() should ignore workspace for removed session")
 	}
 	if got := manager.RemoteWorkspaces(); len(got) != 0 {
 		t.Fatalf("RemoteWorkspaces() = %+v, want empty after stale workspace update", got)
@@ -238,12 +238,12 @@ func TestManagerForgetSessionRemovesRemoteSessionAndWorkspace(t *testing.T) {
 	if changed, count := manager.upsertRemoteSession(record.ID, protocol.Session{ID: "sess-1", Directory: "/srv/repo"}); !changed || count != 1 {
 		t.Fatalf("upsertRemoteSession() = (%v, %d), want (true, 1)", changed, count)
 	}
-	if changed := manager.upsertRemoteWorkspace(record.ID, protocol.WorkspaceSnapshot{
+	if changed := manager.upsertRemoteSessionLayout(record.ID, protocol.SessionLayout{
 		SessionID:    "sess-1",
 		ActivePaneID: "main",
 		LayoutJson:   `{"type":"pane","paneId":"main"}`,
 	}); !changed {
-		t.Fatal("upsertRemoteWorkspace() reported no change")
+		t.Fatal("upsertRemoteSessionLayout() reported no change")
 	}
 
 	session := manager.RemoteSession("sess-1")

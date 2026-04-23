@@ -1,4 +1,4 @@
-package workspace
+package sessionlayout
 
 import (
 	"math"
@@ -75,8 +75,8 @@ func TestRemoveCollapsesParentSplit(t *testing.T) {
 	}
 }
 
-func TestNormalizeSnapshotPrunesMissingPanes(t *testing.T) {
-	snapshot := Snapshot{
+func TestNormalizeSessionLayoutPrunesMissingPanes(t *testing.T) {
+	snapshot := SessionLayout{
 		SessionID:    "sess-1",
 		ActivePaneID: "pane-gone",
 		Layout: Node{
@@ -94,7 +94,7 @@ func TestNormalizeSnapshotPrunesMissingPanes(t *testing.T) {
 		},
 	}
 
-	normalized := NormalizeSnapshot(snapshot, "sess-1")
+	normalized := NormalizeSessionLayout(snapshot, "sess-1")
 	if normalized.Layout.Type != "pane" || normalized.Layout.PaneID != MainPaneID {
 		t.Fatalf("normalized layout = %+v, want single main pane", normalized.Layout)
 	}
@@ -106,8 +106,8 @@ func TestNormalizeSnapshotPrunesMissingPanes(t *testing.T) {
 	}
 }
 
-func TestNormalizeSnapshotRebalancesSameDirectionChains(t *testing.T) {
-	snapshot := Snapshot{
+func TestNormalizeSessionLayoutRebalancesSameDirectionChains(t *testing.T) {
+	snapshot := SessionLayout{
 		SessionID:    "sess-1",
 		ActivePaneID: "pane-b",
 		Layout: Node{
@@ -136,7 +136,7 @@ func TestNormalizeSnapshotRebalancesSameDirectionChains(t *testing.T) {
 		},
 	}
 
-	normalized := NormalizeSnapshot(snapshot, "sess-1")
+	normalized := NormalizeSessionLayout(snapshot, "sess-1")
 	if normalized.Layout.Type != "split" {
 		t.Fatalf("normalized layout = %+v, want split root", normalized.Layout)
 	}
@@ -149,8 +149,8 @@ func TestNormalizeSnapshotRebalancesSameDirectionChains(t *testing.T) {
 	}
 }
 
-func TestNormalizeSnapshotRebalancesAfterRemovingPaneFromChain(t *testing.T) {
-	snapshot := Snapshot{
+func TestNormalizeSessionLayoutRebalancesAfterRemovingPaneFromChain(t *testing.T) {
+	snapshot := SessionLayout{
 		SessionID:    "sess-1",
 		ActivePaneID: "pane-b",
 		Layout: Node{
@@ -178,7 +178,7 @@ func TestNormalizeSnapshotRebalancesAfterRemovingPaneFromChain(t *testing.T) {
 		},
 	}
 
-	normalized := NormalizeSnapshot(snapshot, "sess-1")
+	normalized := NormalizeSessionLayout(snapshot, "sess-1")
 	if normalized.Layout.Type != "split" {
 		t.Fatalf("normalized layout = %+v, want split root", normalized.Layout)
 	}

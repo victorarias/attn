@@ -650,7 +650,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 
 	if _, ok := d.ptyBackend.(ptybackend.RecoverableRuntime); ok {
 		d.reconcileStartupWorkerSessions(recoveryReport, recoverErr, recoveryStartedAt)
-		d.reconcileWorkspacesWithPTYBackend(context.Background())
+		d.reconcileSessionLayoutsWithPTYBackend(context.Background())
 		return
 	}
 
@@ -662,7 +662,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 			fmt.Sprintf("Removed %d stale sessions from a previous daemon run because no live PTY was found.", removedSessions),
 		)
 	}
-	d.reconcileWorkspacesWithPTYBackend(context.Background())
+	d.reconcileSessionLayoutsWithPTYBackend(context.Background())
 }
 
 func (d *Daemon) recoverPTYBackend(timeout time.Duration) (ptybackend.RecoveryReport, error) {
@@ -1081,7 +1081,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 			})
 		}
 	} else {
-		d.handleWorkspaceRuntimeExit(info.ID, info.ExitCode, info.Signal)
+		d.handleSessionLayoutRuntimeExit(info.ID, info.ExitCode, info.Signal)
 	}
 
 	event := &protocol.WebSocketEvent{
@@ -1142,7 +1142,7 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 	if session == nil && d.hubManager != nil {
 		session = d.hubManager.RemoteSession(sessionID)
 	}
-	d.killWorkspaceRuntimesForSession(sessionID)
+	d.killSessionLayoutRuntimesForSession(sessionID)
 	d.terminateSession(sessionID, sig)
 	d.handleReviewLoopSourceSessionExit(sessionID)
 	d.setPendingInputSource(sessionID, "")
@@ -1534,8 +1534,8 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		}
 	}
 	d.store.Add(session)
-	if _, err := d.ensureWorkspaceSnapshot(session.ID); err != nil {
-		d.logf("workspace bootstrap failed for session %s: %v", session.ID, err)
+	if _, err := d.ensureSessionLayout(session.ID); err != nil {
+		d.logf("session layout bootstrap failed for session %s: %v", session.ID, err)
 	}
 
 	// Track this location in recent locations
@@ -1553,7 +1553,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		Event:   eventType,
 		Session: d.sessionForBroadcast(session),
 	})
-	d.broadcastWorkspaceSnapshot(session.ID)
+	d.broadcastSessionLayout(session.ID)
 }
 
 func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage) {
@@ -2092,18 +2092,18 @@ func (d *Daemon) mergedSessionsForBroadcast() []protocol.Session {
 	return merged
 }
 
-func (d *Daemon) mergedWorkspacesForBroadcast() []protocol.WorkspaceSnapshot {
-	localWorkspaces := d.listWorkspaceSnapshots(d.store.List(""))
-	remoteWorkspaces := d.remoteWorkspacesForBroadcast()
-	if len(localWorkspaces) == 0 {
-		return remoteWorkspaces
+func (d *Daemon) mergedSessionLayoutsForBroadcast() []protocol.SessionLayout {
+	localLayouts := d.listSessionLayouts(d.store.List(""))
+	remoteLayouts := d.remoteSessionLayoutsForBroadcast()
+	if len(localLayouts) == 0 {
+		return remoteLayouts
 	}
-	if len(remoteWorkspaces) == 0 {
-		return localWorkspaces
+	if len(remoteLayouts) == 0 {
+		return localLayouts
 	}
-	merged := make([]protocol.WorkspaceSnapshot, 0, len(localWorkspaces)+len(remoteWorkspaces))
-	merged = append(merged, localWorkspaces...)
-	merged = append(merged, remoteWorkspaces...)
+	merged := make([]protocol.SessionLayout, 0, len(localLayouts)+len(remoteLayouts))
+	merged = append(merged, localLayouts...)
+	merged = append(merged, remoteLayouts...)
 	return merged
 }
 
@@ -2114,7 +2114,7 @@ func (d *Daemon) remoteSessionsForBroadcast() []protocol.Session {
 	return d.hubManager.RemoteSessions()
 }
 
-func (d *Daemon) remoteWorkspacesForBroadcast() []protocol.WorkspaceSnapshot {
+func (d *Daemon) remoteSessionLayoutsForBroadcast() []protocol.SessionLayout {
 	if d.hubManager == nil {
 		return nil
 	}

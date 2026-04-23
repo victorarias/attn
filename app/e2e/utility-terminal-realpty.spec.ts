@@ -109,7 +109,7 @@ async function readUtilityScrollback(wsUrl: string, ptyID: string): Promise<stri
   });
 }
 
-async function sendWorkspaceSplitPane(
+async function sendSessionLayoutSplitPane(
   wsUrl: string,
   sessionID: string,
   targetPaneID: string,
@@ -119,12 +119,12 @@ async function sendWorkspaceSplitPane(
     const ws = new WebSocket(wsUrl);
     const timeout = setTimeout(() => {
       ws.close();
-      reject(new Error('workspace_split_pane timeout'));
+      reject(new Error('session_layout_split_pane timeout'));
     }, 5000);
 
     ws.onopen = () => {
       ws.send(JSON.stringify({
-        cmd: 'workspace_split_pane',
+        cmd: 'session_layout_split_pane',
         session_id: sessionID,
         target_pane_id: targetPaneID,
         direction,
@@ -141,8 +141,8 @@ async function sendWorkspaceSplitPane(
         error?: string;
       };
       if (
-        msg.event !== 'workspace_action_result' ||
-        msg.action !== 'workspace_split_pane' ||
+        msg.event !== 'session_layout_action_result' ||
+        msg.action !== 'session_layout_split_pane' ||
         msg.session_id !== sessionID ||
         msg.pane_id !== targetPaneID
       ) {
@@ -155,7 +155,7 @@ async function sendWorkspaceSplitPane(
         resolve();
         return;
       }
-      reject(new Error(msg.error || 'workspace_split_pane failed'));
+      reject(new Error(msg.error || 'session_layout_split_pane failed'));
     };
 
     ws.onerror = (err) => {
@@ -405,7 +405,7 @@ test.describe('Utility Terminal Real PTY', () => {
       )
       .toBe(true);
 
-    await sendWorkspaceSplitPane(wsUrl, 's-real-pty-main', 'main', 'vertical');
+    await sendSessionLayoutSplitPane(wsUrl, 's-real-pty-main', 'main', 'vertical');
     await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 });
 
     await page.locator('[data-testid="session-s-real-pty-d"]').click();
@@ -589,7 +589,7 @@ test.describe('Utility Terminal Real PTY', () => {
       .toBeGreaterThan(initialInputEvents.length);
     console.log('[main-before-text]', JSON.stringify(await getMainTerminalText(page, 's-real-pty-main')));
 
-    await sendWorkspaceSplitPane(wsUrl, 's-real-pty-main', 'main', 'vertical');
+    await sendSessionLayoutSplitPane(wsUrl, 's-real-pty-main', 'main', 'vertical');
     await expect
       .poll(
         async () =>

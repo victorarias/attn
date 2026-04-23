@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-04-22]
 
+### Changed
+- **Internal Rename To Free The "Workspace" Name For A New Concept**: The daemon's split-pane-layout concept is now called "session layout" everywhere. The Go package moved from `internal/workspace` to `internal/sessionlayout`, the `WorkspaceSnapshot` type became `SessionLayout`, and the daemon↔client protocol renamed all `workspace_*` commands and events to `session_layout_*` (e.g. `workspace_split_pane` → `session_layout_split_pane`, `workspace_snapshot` → `session_layout`). Protocol version bumped from 53 to 54 so a stale daemon or client fails the version check instead of silently drifting. No user-visible behavior changes — this frees "workspace" for the upcoming top-level container that groups multiple sessions together.
+
 ### Fixed
 - **Closing A Session Restores The Previous Selection**: Closing the active session used to leave the UI with nothing selected because the daemon sync cleared `activeSessionId` as soon as the session disappeared and the local removal path fell back to an arbitrary first-in-list. The store now tracks recently-active session IDs as an MRU history; when the active one goes away (either via explicit close or a daemon-driven removal such as a remote session dropping), the UI re-selects the most recent still-existing entry. Ghost IDs are pruned on every removal and filtered again when choosing a fallback, so sessions that were closed without ever being focused can't resurrect themselves.
 

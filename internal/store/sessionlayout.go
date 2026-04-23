@@ -5,22 +5,22 @@ import (
 	"log"
 	"time"
 
-	"github.com/victorarias/attn/internal/workspace"
+	"github.com/victorarias/attn/internal/sessionlayout"
 )
 
-func (s *Store) SaveWorkspace(snapshot workspace.Snapshot) error {
+func (s *Store) SaveSessionLayout(snapshot sessionlayout.SessionLayout) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
 		if s.workspaces == nil {
-			s.workspaces = make(map[string]workspace.Snapshot)
+			s.workspaces = make(map[string]sessionlayout.SessionLayout)
 		}
 		s.workspaces[snapshot.SessionID] = snapshot
 		return nil
 	}
 
-	layoutJSON, err := workspace.EncodeLayout(snapshot.Layout)
+	layoutJSON, err := sessionlayout.EncodeLayout(snapshot.Layout)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (s *Store) SaveWorkspace(snapshot workspace.Snapshot) error {
 	return tx.Commit()
 }
 
-func (s *Store) GetWorkspace(sessionID string) *workspace.Snapshot {
+func (s *Store) GetSessionLayout(sessionID string) *sessionlayout.SessionLayout {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -87,7 +87,7 @@ func (s *Store) GetWorkspace(sessionID string) *workspace.Snapshot {
 		}
 		cloned := snapshot
 		if snapshot.Panes != nil {
-			cloned.Panes = append([]workspace.Pane(nil), snapshot.Panes...)
+			cloned.Panes = append([]sessionlayout.Pane(nil), snapshot.Panes...)
 		}
 		return &cloned
 	}
@@ -102,10 +102,10 @@ func (s *Store) GetWorkspace(sessionID string) *workspace.Snapshot {
 		return nil
 	}
 
-	layout, err := workspace.DecodeLayout(layoutJSON)
+	layout, err := sessionlayout.DecodeLayout(layoutJSON)
 	if err != nil {
-		log.Printf("[store] GetWorkspace: failed to decode layout for session %s: %v", sessionID, err)
-		layout = workspace.DefaultLayout()
+		log.Printf("[store] GetSessionLayout: failed to decode layout for session %s: %v", sessionID, err)
+		layout = sessionlayout.DefaultLayout()
 	}
 
 	rows, err := s.db.Query(`
@@ -119,16 +119,16 @@ func (s *Store) GetWorkspace(sessionID string) *workspace.Snapshot {
 	}
 	defer rows.Close()
 
-	snapshot := workspace.Snapshot{
+	snapshot := sessionlayout.SessionLayout{
 		SessionID:    sessionID,
 		ActivePaneID: activePaneID,
 		Layout:       layout,
 		UpdatedAt:    updatedAt,
 	}
 	for rows.Next() {
-		var pane workspace.Pane
+		var pane sessionlayout.Pane
 		if err := rows.Scan(&pane.PaneID, &pane.RuntimeID, &pane.Kind, &pane.Title); err != nil {
-			log.Printf("[store] GetWorkspace: failed to scan pane for session %s: %v", sessionID, err)
+			log.Printf("[store] GetSessionLayout: failed to scan pane for session %s: %v", sessionID, err)
 			continue
 		}
 		snapshot.Panes = append(snapshot.Panes, pane)
@@ -137,7 +137,7 @@ func (s *Store) GetWorkspace(sessionID string) *workspace.Snapshot {
 	return &snapshot
 }
 
-func (s *Store) HasWorkspace(sessionID string) bool {
+func (s *Store) HasSessionLayout(sessionID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -153,7 +153,7 @@ func (s *Store) HasWorkspace(sessionID string) bool {
 	return exists == 1
 }
 
-func (s *Store) FindWorkspacePaneByRuntimeID(runtimeID string) (sessionID string, paneID string, ok bool) {
+func (s *Store) FindSessionLayoutPaneByRuntimeID(runtimeID string) (sessionID string, paneID string, ok bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -176,7 +176,7 @@ func (s *Store) FindWorkspacePaneByRuntimeID(runtimeID string) (sessionID string
 	`, runtimeID).Scan(&rowSessionID, &rowPaneID)
 	if err != nil {
 		if err != sql.ErrNoRows {
-			log.Printf("[store] FindWorkspacePaneByRuntimeID: query failed for runtime %s: %v", runtimeID, err)
+			log.Printf("[store] FindSessionLayoutPaneByRuntimeID: query failed for runtime %s: %v", runtimeID, err)
 		}
 		return "", "", false
 	}

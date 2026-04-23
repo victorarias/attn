@@ -1,4 +1,4 @@
-package workspace
+package sessionlayout
 
 import (
 	"encoding/json"
@@ -43,7 +43,7 @@ type Node struct {
 	Children  []Node    `json:"children,omitempty"`
 }
 
-type Snapshot struct {
+type SessionLayout struct {
 	SessionID    string
 	ActivePaneID string
 	Layout       Node
@@ -58,8 +58,8 @@ func DefaultLayout() Node {
 	}
 }
 
-func DefaultSnapshot(sessionID string) Snapshot {
-	return Snapshot{
+func DefaultSessionLayout(sessionID string) SessionLayout {
+	return SessionLayout{
 		SessionID:    sessionID,
 		ActivePaneID: MainPaneID,
 		Layout:       DefaultLayout(),
@@ -93,7 +93,7 @@ func DecodeLayout(layoutJSON string) (Node, error) {
 	return node, nil
 }
 
-func NormalizeSnapshot(snapshot Snapshot, mainRuntimeID string) Snapshot {
+func NormalizeSessionLayout(snapshot SessionLayout, mainRuntimeID string) SessionLayout {
 	normalized := snapshot
 	if normalized.SessionID == "" {
 		normalized.SessionID = strings.TrimSpace(mainRuntimeID)
@@ -337,7 +337,7 @@ func collectPaneIDs(node Node, ids *[]string) {
 	}
 }
 
-func SortedShellRuntimeIDs(snapshot Snapshot) []string {
+func SortedShellRuntimeIDs(snapshot SessionLayout) []string {
 	runtimeIDs := make([]string, 0, len(snapshot.Panes))
 	for _, pane := range snapshot.Panes {
 		if pane.Kind != PaneKindShell {

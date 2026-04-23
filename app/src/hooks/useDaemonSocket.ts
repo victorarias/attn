@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@tauri-apps/api/core';
 import type {
   Session as GeneratedSession,
-  WorkspaceSnapshot as GeneratedWorkspaceSnapshot,
+  SessionLayout as GeneratedWorkspaceSnapshot,
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
   Endpoint as GeneratedEndpoint,
@@ -140,7 +140,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '53';
+const PROTOCOL_VERSION = '54';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 const INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD = import.meta.env.VITE_UI_AUTOMATION === '1';
 
@@ -716,10 +716,10 @@ export function useDaemonSocket({
       case 'unregister':
         rejectPendingByPredicate((key) => key.startsWith('unregister:'), error);
         return;
-      case 'workspace_split_pane':
-      case 'workspace_close_pane':
-      case 'workspace_focus_pane':
-      case 'workspace_rename_pane':
+      case 'session_layout_split_pane':
+      case 'session_layout_close_pane':
+      case 'session_layout_focus_pane':
+      case 'session_layout_rename_pane':
         rejectPendingByPredicate((key) => key.startsWith(`workspace:${cmd}:`), error);
         return;
       case 'approve_pr':
@@ -908,7 +908,7 @@ export function useDaemonSocket({
             const nextSessions = dedupeSessionsByID(data.sessions || []);
             sessionsRef.current = nextSessions;
             onSessionsUpdate(nextSessions);
-            const nextWorkspaces = data.workspaces || [];
+            const nextWorkspaces = data.session_layouts || [];
             workspacesRef.current = nextWorkspaces;
             onWorkspacesUpdate(nextWorkspaces);
             pruneAttachedPtySessions(nextSessions, nextWorkspaces);
@@ -948,24 +948,24 @@ export function useDaemonSocket({
             }
             break;
 
-          case 'workspace_snapshot':
-          case 'workspace_updated':
-            if (data.workspace) {
+          case 'session_layout':
+          case 'session_layout_updated':
+            if (data.session_layout) {
               recordPaneRuntimeDebugEvent({
                 scope: 'daemon',
-                sessionId: data.workspace.session_id,
-                paneId: data.workspace.active_pane_id,
-                message: data.event === 'workspace_snapshot' ? 'workspace snapshot received' : 'workspace updated received',
+                sessionId: data.session_layout.session_id,
+                paneId: data.session_layout.active_pane_id,
+                message: data.event === 'session_layout' ? 'session layout received' : 'session layout updated received',
                 details: {
-                  paneIds: (data.workspace.panes || []).map((pane) => pane.pane_id),
+                  paneIds: (data.session_layout.panes || []).map((pane) => pane.pane_id),
                 },
               });
-              const workspaceSessionID = data.workspace.session_id;
+              const workspaceSessionID = data.session_layout.session_id;
               const sessionExists = sessionsRef.current.some((session) => session.id === workspaceSessionID);
               const nextWorkspaces = sessionExists
                 ? [
                     ...workspacesRef.current.filter((entry) => entry.session_id !== workspaceSessionID),
-                    data.workspace,
+                    data.session_layout,
                   ]
                 : workspacesRef.current.filter((entry) => entry.session_id !== workspaceSessionID);
               workspacesRef.current = nextWorkspaces;
@@ -974,7 +974,7 @@ export function useDaemonSocket({
             }
             break;
 
-          case 'workspace_action_result': {
+          case 'session_layout_action_result': {
             const action = data.action || '';
             const sessionId = data.session_id || '';
             const paneId = data.pane_id;
@@ -1002,8 +1002,8 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'workspace_runtime_exited':
-            // The canonical pane removal arrives via workspace_updated.
+          case 'session_layout_runtime_exited':
+            // The canonical pane removal arrives via session_layout_updated.
             break;
 
           case 'endpoint_status_changed':
@@ -2119,7 +2119,7 @@ export function useDaemonSocket({
   }, []);
 
   const sendWorkspaceGet = useCallback((sessionId: string) => {
-    sendOrQueueCommand({ cmd: 'workspace_get', session_id: sessionId }, { waitForInitialState: true });
+    sendOrQueueCommand({ cmd: 'session_layout_get', session_id: sessionId }, { waitForInitialState: true });
   }, [sendOrQueueCommand]);
 
   const sendWorkspaceCommand = useCallback((
@@ -2151,10 +2151,10 @@ export function useDaemonSocket({
 
   const sendWorkspaceSplitPane = useCallback((sessionId: string, targetPaneId: string, direction: 'vertical' | 'horizontal') => {
     return sendWorkspaceCommand(
-      'workspace_split_pane',
+      'session_layout_split_pane',
       sessionId,
       {
-        cmd: 'workspace_split_pane',
+        cmd: 'session_layout_split_pane',
         session_id: sessionId,
         target_pane_id: targetPaneId,
         direction,
@@ -2165,10 +2165,10 @@ export function useDaemonSocket({
 
   const sendWorkspaceClosePane = useCallback((sessionId: string, paneId: string) => {
     return sendWorkspaceCommand(
-      'workspace_close_pane',
+      'session_layout_close_pane',
       sessionId,
       {
-        cmd: 'workspace_close_pane',
+        cmd: 'session_layout_close_pane',
         session_id: sessionId,
         pane_id: paneId,
       },
@@ -2178,10 +2178,10 @@ export function useDaemonSocket({
 
   const sendWorkspaceFocusPane = useCallback((sessionId: string, paneId: string) => {
     return sendWorkspaceCommand(
-      'workspace_focus_pane',
+      'session_layout_focus_pane',
       sessionId,
       {
-        cmd: 'workspace_focus_pane',
+        cmd: 'session_layout_focus_pane',
         session_id: sessionId,
         pane_id: paneId,
       },
@@ -2191,10 +2191,10 @@ export function useDaemonSocket({
 
   const sendWorkspaceRenamePane = useCallback((sessionId: string, paneId: string, title: string) => {
     return sendWorkspaceCommand(
-      'workspace_rename_pane',
+      'session_layout_rename_pane',
       sessionId,
       {
-        cmd: 'workspace_rename_pane',
+        cmd: 'session_layout_rename_pane',
         session_id: sessionId,
         pane_id: paneId,
         title,

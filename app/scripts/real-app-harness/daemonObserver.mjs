@@ -349,8 +349,8 @@ export class DaemonObserver {
           this.sessionsById.set(session.id, session);
         }
         this.workspacesBySessionId.clear();
-        for (const workspace of data.workspaces || []) {
-          this.workspacesBySessionId.set(workspace.session_id, workspace);
+        for (const layout of data.session_layouts || []) {
+          this.workspacesBySessionId.set(layout.session_id, layout);
         }
         this.endpointsById.clear();
         for (const endpoint of data.endpoints || []) {
@@ -388,13 +388,13 @@ export class DaemonObserver {
           this.workspacesBySessionId.delete(data.session.id);
         }
         break;
-      case 'workspace_snapshot':
-      case 'workspace_updated':
-        if (data.workspace?.session_id) {
-          if (this.sessionsById.has(data.workspace.session_id)) {
-            this.workspacesBySessionId.set(data.workspace.session_id, data.workspace);
+      case 'session_layout':
+      case 'session_layout_updated':
+        if (data.session_layout?.session_id) {
+          if (this.sessionsById.has(data.session_layout.session_id)) {
+            this.workspacesBySessionId.set(data.session_layout.session_id, data.session_layout);
           } else {
-            this.workspacesBySessionId.delete(data.workspace.session_id);
+            this.workspacesBySessionId.delete(data.session_layout.session_id);
           }
         }
         break;

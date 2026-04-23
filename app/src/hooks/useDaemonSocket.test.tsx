@@ -252,7 +252,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         event: 'initial_state',
         protocol_version: '41',
         sessions: [],
-        workspaces: [],
+        session_layouts: [],
         prs: [],
         repos: [],
         authors: [],
@@ -344,9 +344,9 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '53',
+        protocol_version: '54',
         sessions: [],
-        workspaces: [{
+        session_layouts: [{
           session_id: 'sess-remote',
           active_pane_id: 'main',
           layout_json: '',
@@ -420,7 +420,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '53',
+        protocol_version: '54',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -431,7 +431,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state_updated_at: '2026-04-08T00:00:00Z',
           last_seen: '2026-04-08T00:00:00Z',
         }],
-        workspaces: [],
+        session_layouts: [],
         prs: [],
         repos: [],
         authors: [],
@@ -499,7 +499,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '53',
+        protocol_version: '54',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -510,7 +510,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state_updated_at: '2026-04-08T00:00:00Z',
           last_seen: '2026-04-08T00:00:00Z',
         }],
-        workspaces: [],
+        session_layouts: [],
         prs: [],
         repos: [],
         authors: [],
@@ -592,7 +592,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '53',
+        protocol_version: '54',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -603,7 +603,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state_updated_at: '2026-04-08T00:00:00Z',
           last_seen: '2026-04-08T00:00:00Z',
         }],
-        workspaces: [],
+        session_layouts: [],
         prs: [],
         repos: [],
         authors: [],
@@ -689,7 +689,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '53',
+        protocol_version: '54',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -700,7 +700,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state_updated_at: '2026-04-08T00:00:00Z',
           last_seen: '2026-04-08T00:00:00Z',
         }],
-        workspaces: [],
+        session_layouts: [],
         prs: [],
         repos: [],
         authors: [],
@@ -772,9 +772,9 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '53',
+        protocol_version: '54',
         sessions: [],
-        workspaces: [{
+        session_layouts: [{
           session_id: 'sess-remote',
           active_pane_id: 'main',
           layout_json: '',
@@ -881,7 +881,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '53',
+        protocol_version: '54',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -889,7 +889,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state: 'working',
           last_seen: '2026-04-09T00:00:00Z',
         }],
-        workspaces: [{
+        session_layouts: [{
           session_id: 'sess-stale',
           active_pane_id: 'main',
           layout_json: '',
@@ -939,7 +939,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '53',
+        protocol_version: '54',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',
@@ -947,7 +947,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           state: 'working',
           last_seen: '2026-04-09T00:00:00Z',
         }],
-        workspaces: [{
+        session_layouts: [{
           session_id: 'sess-removed',
           active_pane_id: 'main',
           layout_json: '',
@@ -982,8 +982,8 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     act(() => {
       ws.emit({
-        event: 'workspace_updated',
-        workspace: {
+        event: 'session_layout_updated',
+        session_layout: {
           session_id: 'sess-removed',
           active_pane_id: 'main',
           layout_json: '',

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/workspace"
+	"github.com/victorarias/attn/internal/sessionlayout"
 )
 
 func TestWorkspaceSaveLoadRoundTrip(t *testing.T) {
@@ -22,32 +22,32 @@ func TestWorkspaceSaveLoadRoundTrip(t *testing.T) {
 		LastSeen:       string(protocol.TimestampNow()),
 	})
 
-	snapshot := workspace.Snapshot{
+	snapshot := sessionlayout.SessionLayout{
 		SessionID:    "sess-1",
 		ActivePaneID: "pane-b",
-		Layout: workspace.Node{
+		Layout: sessionlayout.Node{
 			Type:      "split",
 			SplitID:   "root",
-			Direction: workspace.DirectionVertical,
-			Ratio:     workspace.DefaultSplitRatio,
-			Children: []workspace.Node{
-				{Type: "pane", PaneID: workspace.MainPaneID},
+			Direction: sessionlayout.DirectionVertical,
+			Ratio:     sessionlayout.DefaultSplitRatio,
+			Children: []sessionlayout.Node{
+				{Type: "pane", PaneID: sessionlayout.MainPaneID},
 				{Type: "pane", PaneID: "pane-b"},
 			},
 		},
-		Panes: []workspace.Pane{
-			{PaneID: workspace.MainPaneID, RuntimeID: "sess-1", Kind: workspace.PaneKindMain, Title: workspace.DefaultPaneTitle},
-			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: workspace.PaneKindShell, Title: "Shell 1"},
+		Panes: []sessionlayout.Pane{
+			{PaneID: sessionlayout.MainPaneID, RuntimeID: "sess-1", Kind: sessionlayout.PaneKindMain, Title: sessionlayout.DefaultPaneTitle},
+			{PaneID: "pane-b", RuntimeID: "runtime-b", Kind: sessionlayout.PaneKindShell, Title: "Shell 1"},
 		},
 	}
 
-	if err := s.SaveWorkspace(snapshot); err != nil {
-		t.Fatalf("SaveWorkspace() error = %v", err)
+	if err := s.SaveSessionLayout(snapshot); err != nil {
+		t.Fatalf("SaveSessionLayout() error = %v", err)
 	}
 
-	loaded := s.GetWorkspace("sess-1")
+	loaded := s.GetSessionLayout("sess-1")
 	if loaded == nil {
-		t.Fatal("GetWorkspace() = nil, want snapshot")
+		t.Fatal("GetSessionLayout() = nil, want snapshot")
 	}
 	if loaded.ActivePaneID != "pane-b" {
 		t.Fatalf("ActivePaneID = %q, want pane-b", loaded.ActivePaneID)
@@ -75,20 +75,20 @@ func TestRemoveSessionDeletesWorkspaceRows(t *testing.T) {
 		LastSeen:       string(protocol.TimestampNow()),
 	})
 
-	if err := s.SaveWorkspace(workspace.DefaultSnapshot("sess-1")); err != nil {
-		t.Fatalf("SaveWorkspace() error = %v", err)
+	if err := s.SaveSessionLayout(sessionlayout.DefaultSessionLayout("sess-1")); err != nil {
+		t.Fatalf("SaveSessionLayout() error = %v", err)
 	}
 
 	s.Remove("sess-1")
-	if s.GetWorkspace("sess-1") != nil {
-		t.Fatal("GetWorkspace() != nil after session removal")
+	if s.GetSessionLayout("sess-1") != nil {
+		t.Fatal("GetSessionLayout() != nil after session removal")
 	}
 }
 
 func TestInMemoryFallbackSupportsSessionWorkspaceAndState(t *testing.T) {
 	s := &Store{
 		sessions:        make(map[string]*protocol.Session),
-		workspaces:      make(map[string]workspace.Snapshot),
+		workspaces:      make(map[string]sessionlayout.SessionLayout),
 		recentLocations: make(map[string]*protocol.RecentLocation),
 	}
 
@@ -103,9 +103,9 @@ func TestInMemoryFallbackSupportsSessionWorkspaceAndState(t *testing.T) {
 		LastSeen:       string(protocol.TimestampNow()),
 	})
 
-	snapshot := workspace.DefaultSnapshot("sess-1")
-	if err := s.SaveWorkspace(snapshot); err != nil {
-		t.Fatalf("SaveWorkspace() error = %v", err)
+	snapshot := sessionlayout.DefaultSessionLayout("sess-1")
+	if err := s.SaveSessionLayout(snapshot); err != nil {
+		t.Fatalf("SaveSessionLayout() error = %v", err)
 	}
 
 	got := s.Get("sess-1")
@@ -116,12 +116,12 @@ func TestInMemoryFallbackSupportsSessionWorkspaceAndState(t *testing.T) {
 		t.Fatalf("state = %s, want launching", got.State)
 	}
 
-	loadedWorkspace := s.GetWorkspace("sess-1")
+	loadedWorkspace := s.GetSessionLayout("sess-1")
 	if loadedWorkspace == nil {
-		t.Fatal("GetWorkspace() = nil, want snapshot")
+		t.Fatal("GetSessionLayout() = nil, want snapshot")
 	}
-	if loadedWorkspace.ActivePaneID != workspace.MainPaneID {
-		t.Fatalf("ActivePaneID = %q, want %q", loadedWorkspace.ActivePaneID, workspace.MainPaneID)
+	if loadedWorkspace.ActivePaneID != sessionlayout.MainPaneID {
+		t.Fatalf("ActivePaneID = %q, want %q", loadedWorkspace.ActivePaneID, sessionlayout.MainPaneID)
 	}
 
 	s.UpdateState("sess-1", protocol.StateWaitingInput)

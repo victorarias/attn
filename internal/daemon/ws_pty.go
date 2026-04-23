@@ -429,7 +429,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			}
 		}
 		d.store.Add(session)
-		if _, err := d.ensureWorkspaceSnapshot(session.ID); err != nil {
+		if _, err := d.ensureSessionLayout(session.ID); err != nil {
 			d.logf("workspace bootstrap failed for session %s: %v", session.ID, err)
 		}
 		if persistResumeID := agentdriver.SpawnResumeSessionID(
@@ -450,7 +450,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			Event:   eventType,
 			Session: d.sessionForBroadcast(session),
 		})
-		d.broadcastWorkspaceSnapshot(session.ID)
+		d.broadcastSessionLayout(session.ID)
 	}
 
 	d.sendToClient(client, protocol.SpawnResultMessage{

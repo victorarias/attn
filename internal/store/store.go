@@ -13,7 +13,7 @@ import (
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/workspace"
+	"github.com/victorarias/attn/internal/sessionlayout"
 )
 
 // Store manages session state in SQLite
@@ -22,7 +22,7 @@ type Store struct {
 	db *sql.DB
 
 	sessions        map[string]*protocol.Session
-	workspaces      map[string]workspace.Snapshot
+	workspaces      map[string]sessionlayout.SessionLayout
 	recentLocations map[string]*protocol.RecentLocation
 }
 
@@ -32,7 +32,7 @@ func New() *Store {
 	if err != nil {
 		return &Store{
 			sessions:        make(map[string]*protocol.Session),
-			workspaces:      make(map[string]workspace.Snapshot),
+			workspaces:      make(map[string]sessionlayout.SessionLayout),
 			recentLocations: make(map[string]*protocol.RecentLocation),
 		}
 	}
@@ -261,7 +261,7 @@ func (s *Store) ClearSessions() {
 
 	if s.db == nil {
 		s.sessions = make(map[string]*protocol.Session)
-		s.workspaces = make(map[string]workspace.Snapshot)
+		s.workspaces = make(map[string]sessionlayout.SessionLayout)
 		return
 	}
 

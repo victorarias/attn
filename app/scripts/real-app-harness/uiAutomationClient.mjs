@@ -124,7 +124,6 @@ export class UiAutomationClient {
     this.bundleId = bundleId;
     this.currentSourceIdentityPromise = null;
     this.verifiedBuildIdentityKey = null;
-    this.callerBundleIdForLaunch = null;
   }
 
   async launchApp() {
@@ -133,31 +132,19 @@ export class UiAutomationClient {
     // the focus-stealing or occlusion paths set ATTN_HARNESS_ALWAYS_ON_TOP=0
     // to opt out.
     const alwaysOnTop = process.env.ATTN_HARNESS_ALWAYS_ON_TOP !== '0';
+    // Park the attn window off-screen by default so scenarios don't cover the
+    // caller's work. Opt out with ATTN_HARNESS_PARK_VISIBLE_PX=0.
+    const HARNESS_PARK_VISIBLE_PX_DEFAULT = '20';
+    const parkPxStr = process.env.ATTN_HARNESS_PARK_VISIBLE_PX ?? HARNESS_PARK_VISIBLE_PX_DEFAULT;
     const effectiveLaunchEnv = alwaysOnTop
-      ? { ...(this.launchEnv || {}), ATTN_HARNESS_ALWAYS_ON_TOP: '1' }
+      ? {
+          ...(this.launchEnv || {}),
+          ATTN_HARNESS_ALWAYS_ON_TOP: '1',
+          ATTN_HARNESS_PARK_VISIBLE_PX: parkPxStr,
+        }
       : this.launchEnv;
 
     const focusDriver = this.#focusDriver();
-
-    // Tauri applies ActivationPolicy::Accessory + set_focusable(false) in the
-    // .setup() hook, but that runs *after* NSApp has already become regular
-    // and stolen frontmost for ~1-3s during bootstrap. During that flash,
-    // WKWebView throttles rAF/ResizeObserver and the ReadyGate misses its
-    // first measurement — runtimeAttached never fires and scenarios time out
-    // waiting. Grab the caller's bundle id and re-activate it throughout the
-    // bootstrap window to prevent the flash. This is the only place we bring
-    // a non-attn app into focus; it's a workaround for Tauri's early-launch
-    // focus steal, not an active hand-off.
-    if (alwaysOnTop) {
-      const callerBundleId = await focusDriver.frontmostBundleId().catch(() => '');
-      if (
-        callerBundleId &&
-        callerBundleId !== this.bundleId &&
-        callerBundleId !== 'com.attn.manager'
-      ) {
-        this.callerBundleIdForLaunch = callerBundleId;
-      }
-    }
 
     if (effectiveLaunchEnv && Object.keys(effectiveLaunchEnv).length > 0) {
       // Scenarios that need custom env vars (e.g. tr502's remote harness
@@ -180,36 +167,12 @@ export class UiAutomationClient {
         },
       });
       child.unref();
-      let stopActivationLoop = () => {};
-      if (alwaysOnTop && this.callerBundleIdForLaunch) {
-        const callerId = this.callerBundleIdForLaunch;
-        let keepGoing = true;
-        stopActivationLoop = () => { keepGoing = false; };
-        (async () => {
-          while (keepGoing) {
-            await execFileAsync('osascript', [
-              '-e',
-              `tell application id "${callerId}" to activate`,
-            ]).catch(() => {});
-            await delay(150);
-          }
-        })();
-      }
       await focusDriver.waitForMainWindow(10_000).catch(() => null);
-      stopActivationLoop();
-      if (alwaysOnTop && this.callerBundleIdForLaunch) {
-        // One final activate after the window exists to settle focus state
-        // before the scenario starts observing runtimeAttached.
-        await execFileAsync('osascript', [
-          '-e',
-          `tell application id "${this.callerBundleIdForLaunch}" to activate`,
-        ]).catch(() => {});
-      }
       // Re-issue the park via AX after the window exists. Tauri positions the
       // window in on_page_load so there's no visual flash, but the AX
       // set-position call also nudges the WebView out of the off-screen-init
       // throttle state it otherwise enters.
-      const parkPx = Number.parseInt(process.env.ATTN_HARNESS_PARK_VISIBLE_PX || '', 10);
+      const parkPx = Number.parseInt(parkPxStr || '', 10);
       if (alwaysOnTop && Number.isInteger(parkPx) && parkPx > 0) {
         await focusDriver.parkWindow(parkPx).catch((error) => {
           console.warn(`[RealAppHarness] Park failed: ${error?.message || error}`);

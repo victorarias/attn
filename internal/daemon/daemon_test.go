@@ -28,8 +28,8 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/sessionlayout"
 	"github.com/victorarias/attn/internal/store"
-	"github.com/victorarias/attn/internal/workspace"
 	"nhooyr.io/websocket"
 )
 
@@ -2265,16 +2265,16 @@ func TestDaemon_HandleUnregisterWS_RemovesWorkspaceAndBroadcastsSessionUnregiste
 		LastSeen:       time.Now().UTC().Format(time.RFC3339),
 	}
 	d.store.Add(session)
-	if err := d.store.SaveWorkspace(workspace.Snapshot{
+	if err := d.store.SaveSessionLayout(sessionlayout.SessionLayout{
 		SessionID:    session.ID,
-		ActivePaneID: workspace.MainPaneID,
-		Layout:       workspace.DefaultLayout(),
-		Panes: []workspace.Pane{
-			{PaneID: workspace.MainPaneID, RuntimeID: session.ID, Kind: workspace.PaneKindMain, Title: workspace.DefaultPaneTitle},
-			{PaneID: "pane-shell-1", RuntimeID: "runtime-shell-1", Kind: workspace.PaneKindShell, Title: "Shell 1"},
+		ActivePaneID: sessionlayout.MainPaneID,
+		Layout:       sessionlayout.DefaultLayout(),
+		Panes: []sessionlayout.Pane{
+			{PaneID: sessionlayout.MainPaneID, RuntimeID: session.ID, Kind: sessionlayout.PaneKindMain, Title: sessionlayout.DefaultPaneTitle},
+			{PaneID: "pane-shell-1", RuntimeID: "runtime-shell-1", Kind: sessionlayout.PaneKindShell, Title: "Shell 1"},
 		},
 	}); err != nil {
-		t.Fatalf("SaveWorkspace() error = %v", err)
+		t.Fatalf("SaveSessionLayout() error = %v", err)
 	}
 
 	client := &wsClient{
@@ -2289,8 +2289,8 @@ func TestDaemon_HandleUnregisterWS_RemovesWorkspaceAndBroadcastsSessionUnregiste
 	if got := d.store.Get(session.ID); got != nil {
 		t.Fatalf("store.Get(%q) = %+v, want nil", session.ID, got)
 	}
-	if got := d.store.GetWorkspace(session.ID); got != nil {
-		t.Fatalf("store.GetWorkspace(%q) = %+v, want nil", session.ID, got)
+	if got := d.store.GetSessionLayout(session.ID); got != nil {
+		t.Fatalf("store.GetSessionLayout(%q) = %+v, want nil", session.ID, got)
 	}
 
 	event := readOutboundEvent(t, client)

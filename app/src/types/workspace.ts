@@ -1,4 +1,4 @@
-import type { WorkspaceSnapshot as DaemonWorkspaceSnapshot, PaneElement } from './generated';
+import type { SessionLayout as DaemonWorkspaceSnapshot, PaneElement } from './generated';
 
 export const MAIN_TERMINAL_PANE_ID = 'main';
 
