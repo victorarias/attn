@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/victorarias/attn/internal/config"
@@ -183,6 +184,73 @@ func TestClient_NotRunning(t *testing.T) {
 	err := c.Register("id", "label", "/tmp")
 	if err == nil {
 		t.Error("expected error when daemon not running")
+	}
+}
+
+func TestClient_ConnectError_IncludesProfileAndSocket(t *testing.T) {
+	// No ATTN_PROFILE set → profile defaults to "default".
+	os.Unsetenv("ATTN_PROFILE")
+	sockPath := filepath.Join(t.TempDir(), "missing.sock")
+	c := New(sockPath)
+	err := c.Register("id", "label", "/tmp")
+	if err == nil {
+		t.Fatal("expected error when daemon not running")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "profile=default") {
+		t.Errorf("error missing profile=default: %q", msg)
+	}
+	if !strings.Contains(msg, "missing.sock") {
+		t.Errorf("error missing socket path: %q", msg)
+	}
+}
+
+func TestClient_ConnectError_HintsOtherProfileWhenLive(t *testing.T) {
+	// Simulate the user being in ATTN_PROFILE=dev but the default daemon is
+	// running. We fake a "default" daemon by listening on the default
+	// profile's socket path, and point dev at a missing socket.
+	//
+	// Unix socket paths on macOS are limited to ~104 chars, so we put the
+	// fake HOME under /tmp instead of using t.TempDir().
+	tmp, err := os.MkdirTemp("/tmp", "attn-client-")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
+
+	t.Setenv("HOME", tmp)            // so SocketPathForProfile("") → $tmp/.attn/attn.sock
+	t.Setenv("ATTN_PROFILE", "dev")  // current profile is dev
+	t.Setenv("ATTN_SOCKET_PATH", "") // don't let an env override mask the default resolution
+	config.ReloadForTesting()
+
+	// Create the "other" (default) socket directory and listen on it.
+	defaultDir := filepath.Join(tmp, ".attn")
+	if err := os.MkdirAll(defaultDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	defaultSock := filepath.Join(defaultDir, "attn.sock")
+	ln, err := net.Listen("unix", defaultSock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	// The dev profile's expected socket doesn't exist.
+	devSock := filepath.Join(tmp, ".attn-dev", "attn.sock")
+	c := New(devSock)
+	err = c.Register("id", "label", "/tmp")
+	if err == nil {
+		t.Fatal("expected error when dev daemon not running")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "profile=dev") {
+		t.Errorf("error missing profile=dev: %q", msg)
+	}
+	if !strings.Contains(msg, "hint:") {
+		t.Errorf("error missing cross-profile hint: %q", msg)
+	}
+	if !strings.Contains(msg, "default daemon is listening") {
+		t.Errorf("error should hint about default daemon: %q", msg)
 	}
 }
 

@@ -6,6 +6,11 @@ import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { MacOSDriver } from './macosDriver.mjs';
+import {
+  bundleIdentifierForProfile,
+  defaultAppPathForProfile,
+  manifestPathForProfile,
+} from './harnessProfile.mjs';
 
 const execFileAsync = promisify(execFile);
 const HARNESS_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -18,14 +23,9 @@ function delay(ms) {
 }
 
 function defaultManifestPath() {
-  return path.join(
-    os.homedir(),
-    'Library',
-    'Application Support',
-    'com.attn.manager',
-    'debug',
-    'ui-automation.json'
-  );
+  // Profile-aware: the dev bundle writes its manifest under
+  // ~/Library/Application Support/com.attn.manager.dev/...
+  return manifestPathForProfile();
 }
 
 function isTransientManifestReadError(error) {
@@ -111,11 +111,11 @@ function isFatalFrontendResponsivenessError(error) {
 
 export class UiAutomationClient {
   constructor({
-    appPath = path.join(os.homedir(), 'Applications', 'attn.app'),
+    appPath = defaultAppPathForProfile(),
     manifestPath = defaultManifestPath(),
     launchEnv = null,
     backgroundLaunch = false,
-    bundleId = 'com.attn.manager',
+    bundleId = bundleIdentifierForProfile(),
   } = {}) {
     this.appPath = appPath;
     this.manifestPath = manifestPath;
@@ -202,7 +202,7 @@ export class UiAutomationClient {
     }
 
     try {
-      await execFileAsync('osascript', ['-e', 'tell application id "com.attn.manager" to quit']);
+      await execFileAsync('osascript', ['-e', `tell application id "${this.bundleId}" to quit`]);
     } catch {
       // Fall through to process-based cleanup.
     }

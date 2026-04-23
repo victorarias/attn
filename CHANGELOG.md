@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-23]
+
+### Added
+- **Side-by-Side Dev Install For Safe Attn-On-Attn Testing**: You can now run a development copy of attn alongside your live install without either stepping on the other. `make dev` builds and installs a sibling `~/Applications/attn-dev.app` with its own bundle identifier (`com.attn.manager.dev`), data directory (`~/.attn-dev/`), socket, log, and WebSocket port (`29849`). The dev app runs its own daemon, which never touches the prod daemon's state. The prod `make install` / `make install-daemon` targets refuse at parse time if `ATTN_PROFILE` is set in your shell, so you can't accidentally reinstall the live app while iterating on dev. For CLI work, `eval "$(attn profile-env dev)"` scopes every subsequent `attn` command to the dev daemon (`attn profile-env --fish dev | source` for fish); `attn profile-env --unset` reverts. The underlying knob is `ATTN_PROFILE=<name>`, which derives all paths and ports per profile; the default profile keeps today's behavior exactly. Dial failures now tell you which profile and socket they tried, and point at the other profile's daemon if it happens to be running.
+
+---
+
 ## [2026-04-22]
 
 ### Changed

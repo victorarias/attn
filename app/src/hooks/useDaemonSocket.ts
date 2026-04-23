@@ -46,6 +46,7 @@ import { recordPaneRuntimeDebugEvent } from '../utils/paneRuntimeDebug';
 import { recordPtyCommand, recordWsJsonParse } from '../utils/ptyPerf';
 import { recordTerminalRuntimeLog } from '../utils/terminalRuntimeLog';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
+import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 
 // Re-export types from generated for consumers
 // Use type aliases to maintain backward compatibility
@@ -609,6 +610,11 @@ export function useDaemonSocket({
   const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
   const daemonInstanceIDRef = useRef<string>('');
   const hasReceivedInitialStateRef = useRef(false);
+  // Once we detect a profile mismatch, we refuse to operate forever — the
+  // user must quit and launch the matching app. Never clears inside the
+  // session.
+  const profileMismatchRef = useRef<boolean>(false);
+  const profileCheckedRef = useRef<boolean>(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
@@ -811,8 +817,40 @@ export function useDaemonSocket({
 
   const connect = useCallback(async () => {
     if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
+    if (profileMismatchRef.current) {
+      // Already detected a mismatch in a previous connect attempt; stay
+      // stopped. Reconnect would just bounce off the same check.
+      return;
+    }
 
     await ensureDaemonRunning();
+
+    // Verify the daemon's profile matches this build before opening the
+    // WebSocket. Only meaningful for non-default builds: the dev bundle
+    // (BUILD_PROFILE="dev") refuses to operate on a daemon that reports
+    // anything other than "dev". The default/prod build skips the check
+    // — a default frontend reaching a dev daemon would need a deliberate
+    // port override, and the initial_state protocol-version handshake
+    // over the WS still catches the common failure modes. Skipping also
+    // keeps existing WebSocket mocks in tests sync with the connect path.
+    if (BUILD_PROFILE !== '' && !profileCheckedRef.current) {
+      try {
+        const health = await fetchDaemonHealthProfile(resolvedWsUrl);
+        if (!daemonProfileMatches(health.profile)) {
+          profileMismatchRef.current = true;
+          setConnectionError(profileMismatchMessage(health.profile));
+          circuitOpenRef.current = true;
+          return;
+        }
+        profileCheckedRef.current = true;
+      } catch (err) {
+        // Health fetch failed (daemon still coming up, network hiccup,
+        // older daemon without /health). Don't block the WS connect —
+        // the initial_state handshake will surface hard errors, and a
+        // real mismatch will be caught on the next try.
+        console.warn('[Daemon] profile pre-check failed, proceeding without it:', err);
+      }
+    }
 
     const ws = new WebSocket(resolvedWsUrl);
 
