@@ -115,7 +115,8 @@ install-dev: build-app-dev
 	cp -r app/src-tauri/target/release/bundle/macos/attn-dev.app ~/Applications/
 	@ATTN_PROFILE=dev $(APP_BINARY_DEV) daemon ensure >/dev/null
 	@echo "Installed $(APP_BUNDLE_DEV) — profile=dev, data=~/.attn-dev, port=29849"
-	@echo "Launch: open $(APP_BUNDLE_DEV)"
+	@open $(APP_BUNDLE_DEV)
+	@echo "Launched $(APP_BUNDLE_DEV)"
 
 install-daemon-dev: build
 	@if [ ! -d "$(APP_BUNDLE_DEV)" ]; then \
