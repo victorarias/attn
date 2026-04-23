@@ -91,6 +91,11 @@ run: install
 install: build-app-ui-automation
 	@echo ">>> Installing PROD: $(APP_BUNDLE) (profile=default, port=9849)"
 	@mkdir -p ~/Applications
+	@# Quit a running instance first. macOS keeps the running image
+	@# via mmap, so rm -rf + cp alone would leave an old process running
+	@# out of a deleted bundle while disk has the new code. Quiet
+	@# no-op if nothing is running.
+	@osascript -e 'tell application id "com.attn.manager" to quit' 2>/dev/null || true
 	@rm -rf ~/Applications/attn.app
 	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
 	@$(APP_BINARY) daemon ensure >/dev/null
@@ -123,6 +128,8 @@ dev: install-dev
 install-dev: build-app-dev
 	@echo ">>> Installing DEV: $(APP_BUNDLE_DEV) (profile=dev, port=29849)"
 	@mkdir -p ~/Applications
+	@# Quit a running dev instance first; same mmap reasoning as `install`.
+	@osascript -e 'tell application id "com.attn.manager.dev" to quit' 2>/dev/null || true
 	@rm -rf $(APP_BUNDLE_DEV)
 	cp -r app/src-tauri/target/release/bundle/macos/attn-dev.app ~/Applications/
 	@ATTN_PROFILE=dev $(APP_BINARY_DEV) daemon ensure >/dev/null
