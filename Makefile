@@ -85,6 +85,8 @@ install: build-app-ui-automation
 	cp -r app/src-tauri/target/release/bundle/macos/attn.app ~/Applications/
 	@$(APP_BINARY) daemon ensure >/dev/null
 	@echo "Installed attn.app to ~/Applications"
+	@open $(APP_BUNDLE)
+	@echo "Launched $(APP_BUNDLE)"
 
 install-daemon: build
 	@if [ ! -d "$(APP_BUNDLE)" ]; then \
