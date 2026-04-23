@@ -2910,6 +2910,13 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"prs":                len(prs),
 		"ws_clients":         d.wsHub.ClientCount(),
 		"github_available":   d.githubAvailable(),
+		// Profile identity — lets clients (the app, in particular) verify
+		// they're connected to the daemon they expect and refuse to
+		// operate on a mismatch.
+		"profile":     config.ProfileLabel(),
+		"data_dir":    config.DataDir(),
+		"socket_path": config.SocketPath(),
+		"port":        config.WSPort(),
 	}
 
 	setNoStoreHeaders(w.Header())

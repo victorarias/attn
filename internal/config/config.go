@@ -2,8 +2,11 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -46,11 +49,7 @@ func loadConfig() {
 
 	configPath := os.Getenv("ATTN_CONFIG_PATH")
 	if configPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return
-		}
-		configPath = filepath.Join(home, ".attn", "config.json")
+		configPath = filepath.Join(attnDir(), "config.json")
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -66,13 +65,96 @@ func reloadConfig() {
 	loadConfig()
 }
 
-// attnDir returns the base directory for attn files
+// ReloadForTesting reloads configuration from disk. Exported for tests that
+// manipulate ATTN_PROFILE or ATTN_CONFIG_PATH between subtests.
+func ReloadForTesting() {
+	loadConfig()
+}
+
+var profileNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,15}$`)
+
+// Profile returns the active profile name (from ATTN_PROFILE), or "" for the
+// default profile. Invalid profile names return "" — callers that need to
+// validate should use ValidateProfile.
+func Profile() string {
+	raw := strings.TrimSpace(os.Getenv("ATTN_PROFILE"))
+	if raw == "" {
+		return ""
+	}
+	normalized := strings.ToLower(raw)
+	if !profileNamePattern.MatchString(normalized) {
+		return ""
+	}
+	return normalized
+}
+
+// ValidateProfile returns an error if ATTN_PROFILE is set to an invalid name.
+// Use this from CLI entry points to fail loudly on typos.
+func ValidateProfile() error {
+	raw := strings.TrimSpace(os.Getenv("ATTN_PROFILE"))
+	if raw == "" {
+		return nil
+	}
+	normalized := strings.ToLower(raw)
+	if !profileNamePattern.MatchString(normalized) {
+		return fmt.Errorf("invalid ATTN_PROFILE=%q: must match ^[a-z0-9][a-z0-9-]{0,15}$", raw)
+	}
+	return nil
+}
+
+// ProfileLabel returns a human-readable profile name ("default" for empty).
+func ProfileLabel() string {
+	if p := Profile(); p != "" {
+		return p
+	}
+	return "default"
+}
+
+// attnDir returns the base directory for attn files. Profile-aware:
+// default profile → ~/.attn, named profile → ~/.attn-<profile>.
 func attnDir() string {
 	home, err := os.UserHomeDir()
-	if err != nil {
-		return "/tmp/.attn"
+	base := "/tmp/.attn"
+	if err == nil {
+		base = filepath.Join(home, ".attn")
 	}
-	return filepath.Join(home, ".attn")
+	if p := Profile(); p != "" {
+		return base + "-" + p
+	}
+	return base
+}
+
+// DataDir returns the resolved per-profile data directory.
+func DataDir() string {
+	return attnDir()
+}
+
+// DataDirForProfile computes the canonical data directory for a given
+// profile name (without reading ATTN_PROFILE). Pass "" for the default
+// profile. Callers use this to probe whether the *other* profile's
+// daemon is running, for friendlier error messages.
+func DataDirForProfile(profile string) string {
+	home, err := os.UserHomeDir()
+	base := "/tmp/.attn"
+	if err == nil {
+		base = filepath.Join(home, ".attn")
+	}
+	p := strings.ToLower(strings.TrimSpace(profile))
+	if p == "" || p == "default" {
+		return base
+	}
+	if !profileNamePattern.MatchString(p) {
+		return base
+	}
+	return base + "-" + p
+}
+
+// SocketPathForProfile returns the default socket path for a given profile
+// name, independent of the current process's ATTN_PROFILE. Used for
+// cross-profile probing in error messages; does not consult env overrides
+// or the config file.
+func SocketPathForProfile(profile string) string {
+	return filepath.Join(DataDirForProfile(profile), "attn.sock")
 }
 
 // DBPath returns the SQLite database path
@@ -121,7 +203,11 @@ func StatePath() string {
 	if err != nil {
 		return "/tmp/." + binaryName + "-state.json"
 	}
-	return filepath.Join(home, "."+binaryName+"-state.json")
+	suffix := ""
+	if p := Profile(); p != "" {
+		suffix = "-" + p
+	}
+	return filepath.Join(home, "."+binaryName+"-state"+suffix+".json")
 }
 
 // LogPath returns the log file path
@@ -130,12 +216,33 @@ func LogPath() string {
 }
 
 // WSPort returns the WebSocket/HTTP port.
+// Priority: ATTN_WS_PORT env var > per-profile default.
+// Default profile → 9849. Named profile "dev" → 29849. Any other named profile
+// gets a stable hash-derived port in [20000,29999] (avoiding 29849 for "dev"
+// and the e2e port 19849, which sits outside this range).
 func WSPort() string {
 	port := strings.TrimSpace(os.Getenv("ATTN_WS_PORT"))
-	if port == "" {
-		return "9849"
+	if port != "" {
+		return port
 	}
-	return port
+	p := Profile()
+	switch p {
+	case "":
+		return "9849"
+	case "dev":
+		return "29849"
+	default:
+		return derivedProfilePort(p)
+	}
+}
+
+// derivedProfilePort maps a profile name to a stable port in [20000,29848],
+// reserving 29849 for "dev" so future named profiles never collide with it.
+func derivedProfilePort(profile string) string {
+	h := fnv.New32a()
+	h.Write([]byte(profile))
+	port := 20000 + int(h.Sum32()%9849)
+	return fmt.Sprintf("%d", port)
 }
 
 // WSBindAddress returns the interface/address the HTTP server binds to.

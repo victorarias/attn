@@ -2,9 +2,12 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
@@ -32,7 +35,7 @@ func New(socketPath string) *Client {
 func (c *Client) send(msg interface{}) (*protocol.Response, error) {
 	conn, err := net.Dial("unix", c.socketPath)
 	if err != nil {
-		return nil, fmt.Errorf("connect to daemon: %w", err)
+		return nil, explainConnectError(c.socketPath, err)
 	}
 	defer conn.Close()
 
@@ -360,4 +363,69 @@ func (c *Client) IsRunning() bool {
 	}
 	conn.Close()
 	return true
+}
+
+// explainConnectError wraps a dial failure with profile context and — if
+// the *other* profile's daemon happens to be running — a concrete hint
+// on how to reach it. This is the single foot-gun everyone hits when
+// first adopting ATTN_PROFILE, so we pay it down here.
+func explainConnectError(sockPath string, cause error) error {
+	profile := config.ProfileLabel()
+	base := fmt.Sprintf("connect to daemon at %s (profile=%s): %v",
+		collapseHome(sockPath), profile, cause)
+	if hint := crossProfileHint(); hint != "" {
+		return errors.New(base + "\n  " + hint)
+	}
+	return errors.New(base)
+}
+
+// crossProfileHint returns a one-line suggestion when the *other* profile's
+// daemon appears to be running. Returns "" when no such hint is useful.
+func crossProfileHint() string {
+	current := config.Profile()
+	if current == "" {
+		// Currently default → probe dev.
+		otherSock := config.SocketPathForProfile("dev")
+		if socketLive(otherSock) {
+			return fmt.Sprintf("hint: a dev daemon is listening at %s — run `eval \"$(attn profile-env dev)\"` to switch this shell",
+				collapseHome(otherSock))
+		}
+		return ""
+	}
+	// Currently non-default → probe default.
+	otherSock := config.SocketPathForProfile("")
+	if socketLive(otherSock) {
+		return fmt.Sprintf("hint: the default daemon is listening at %s — run `eval \"$(attn profile-env --unset)\"` to switch this shell",
+			collapseHome(otherSock))
+	}
+	return ""
+}
+
+func socketLive(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func collapseHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+"/") {
+		return "~" + path[len(home):]
+	}
+	return path
 }

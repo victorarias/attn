@@ -33,6 +33,10 @@ type healthResponse struct {
 	Protocol          string `json:"protocol"`
 	Version           string `json:"version"`
 	SourceFingerprint string `json:"source_fingerprint"`
+	Profile           string `json:"profile"`
+	DataDir           string `json:"data_dir"`
+	SocketPath        string `json:"socket_path"`
+	Port              string `json:"port"`
 }
 
 func Ensure(ctx context.Context, binaryPath string) (EnsureResult, error) {
@@ -78,6 +82,13 @@ func Ensure(ctx context.Context, binaryPath string) (EnsureResult, error) {
 }
 
 func daemonMatchesCurrentBinary(health healthResponse) bool {
+	// A daemon running under a different profile (e.g. dev answering on
+	// the default socket after a leftover state) must be restarted even
+	// if the source fingerprint matches — profile identity is stronger
+	// than binary identity.
+	if !profileMatchesCurrent(health) {
+		return false
+	}
 	currentFingerprint := normalizedFingerprint(buildinfo.SourceFingerprint)
 	if currentFingerprint != "" {
 		return normalizedFingerprint(health.SourceFingerprint) == currentFingerprint
@@ -85,9 +96,23 @@ func daemonMatchesCurrentBinary(health healthResponse) bool {
 	return strings.TrimSpace(health.Protocol) == protocol.ProtocolVersion
 }
 
+func profileMatchesCurrent(health healthResponse) bool {
+	expected := config.ProfileLabel()
+	// Older daemons predate the profile field. Treat an empty profile as
+	// "default" for backward compatibility.
+	reported := strings.TrimSpace(health.Profile)
+	if reported == "" {
+		reported = "default"
+	}
+	return reported == expected
+}
+
 func mismatchReason(healthErr error, health healthResponse) string {
 	if healthErr != nil {
 		return "health_unavailable"
+	}
+	if !profileMatchesCurrent(health) {
+		return "profile_mismatch"
 	}
 	currentFingerprint := normalizedFingerprint(buildinfo.SourceFingerprint)
 	runningFingerprint := normalizedFingerprint(health.SourceFingerprint)

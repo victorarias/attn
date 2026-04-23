@@ -95,13 +95,23 @@ func main() {
 		return
 	}
 
+	// Validate ATTN_PROFILE before we act on it. A typo'd profile would
+	// silently fall back to default, which is exactly the kind of mistake
+	// this whole feature exists to prevent.
+	if err := config.ValidateProfile(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	if len(os.Args) < 2 {
+		maybePrintProfileBanner()
 		runWrapper()
 		return
 	}
 
 	switch os.Args[1] {
 	case "daemon":
+		maybePrintProfileBanner()
 		runDaemonCommand()
 	case "ws-relay":
 		runWSRelay()
@@ -110,7 +120,10 @@ func main() {
 	case "review-loop":
 		runReviewLoop()
 	case "list":
+		maybePrintProfileBanner()
 		runList()
+	case "profile-env":
+		runProfileEnv()
 	case "_hook-stop":
 		runHookStop()
 	case "_hook-state":
@@ -120,12 +133,21 @@ func main() {
 	default:
 		// Check if it's a flag (starts with -)
 		if len(os.Args[1]) > 0 && os.Args[1][0] == '-' {
+			maybePrintProfileBanner()
 			runWrapper()
 		} else {
 			fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 			os.Exit(1)
 		}
 	}
+}
+
+// maybePrintProfileBanner prints the profile banner to stderr when a
+// non-default ATTN_PROFILE is active. Skipped for hook commands (called
+// on every Claude action) and for silent CLI subcommands (ws-relay,
+// pty-worker, review-loop) that have their own protocols on stderr.
+func maybePrintProfileBanner() {
+	config.PrintProfileBanner(os.Stderr)
 }
 
 func isVersionCommand(args []string) bool {

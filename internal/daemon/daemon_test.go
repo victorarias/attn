@@ -2676,6 +2676,20 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 	if got := resp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
 		t.Errorf("health Cache-Control = %q, want no-store, max-age=0", got)
 	}
+	// Profile identity: with no ATTN_PROFILE set, profile is "default" and
+	// port mirrors what the daemon is actually bound to.
+	if health["profile"] != "default" {
+		t.Errorf("profile = %v, want %q", health["profile"], "default")
+	}
+	if health["port"] != wsPort {
+		t.Errorf("port = %v, want %q", health["port"], wsPort)
+	}
+	if dataDir, ok := health["data_dir"].(string); !ok || dataDir == "" {
+		t.Errorf("data_dir = %v, want non-empty string", health["data_dir"])
+	}
+	if socketPath, ok := health["socket_path"].(string); !ok || socketPath == "" {
+		t.Errorf("socket_path = %v, want non-empty string", health["socket_path"])
+	}
 }
 
 func TestDaemon_WebRootServesEmbeddedClient(t *testing.T) {
