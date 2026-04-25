@@ -137,18 +137,34 @@ func ValidateProfileName(name string) error {
 	return nil
 }
 
-// NormalizeProfileName validates and returns the canonical profile name
-// (lowercased, trimmed). Empty input is valid and yields "". Use this at
-// every persistence/wire boundary so the value the remote daemon sees in
-// $ATTN_PROFILE matches the value stored in the local DB — Profile() on
-// the remote lowercases, so writing a mixed-case form here would split
-// data dirs (`~/.attn-DEV` referenced in scripts vs `~/.attn-dev` written
-// by the daemon).
+// NormalizeProfileName validates and returns the canonical profile name.
+// Use this at every persistence/wire boundary.
+//
+// Two normalization rules:
+//
+//  1. Lowercase + trim, so the value the remote daemon sees in
+//     $ATTN_PROFILE matches the value stored in the local DB — Profile()
+//     on the remote lowercases, so writing a mixed-case form here would
+//     split data dirs (~/.attn-DEV referenced in scripts vs ~/.attn-dev
+//     written by the daemon).
+//
+//  2. The literal "default" maps to "". WSPortForProfile and
+//     DataDirForProfile already treat "default" as the default profile;
+//     hub helpers (remoteBinaryName, ATTN_PROFILE export, log/data dir
+//     scripts) do not. Letting "default" reach those would build
+//     ~/.local/bin/attn-default and ~/.attn-default/ on the remote while
+//     reusing port 9849 — colliding with any real default-profile daemon
+//     on the same host. Canonicalizing here keeps every downstream code
+//     path on a single representation of "the default profile".
 func NormalizeProfileName(name string) (string, error) {
 	if err := ValidateProfileName(name); err != nil {
 		return "", err
 	}
-	return strings.ToLower(strings.TrimSpace(name)), nil
+	canonical := strings.ToLower(strings.TrimSpace(name))
+	if canonical == "default" {
+		canonical = ""
+	}
+	return canonical, nil
 }
 
 // attnDir returns the base directory for attn files. Profile-aware:

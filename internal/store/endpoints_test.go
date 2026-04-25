@@ -108,6 +108,27 @@ func TestAddEndpointNormalizesProfileCase(t *testing.T) {
 	}
 }
 
+func TestAddEndpointMapsDefaultProfileToEmpty(t *testing.T) {
+	// "default" is the human label for the empty profile, but downstream
+	// hub helpers (remoteBinaryName, ATTN_PROFILE export, data-dir scripts)
+	// would treat it as a named profile and build attn-default / ~/.attn-default
+	// on the remote while WSPortForProfile still returns 9849, colliding with
+	// any real default-profile daemon already on that port.
+	s := New()
+	for _, input := range []string{"default", "DEFAULT", "  default  "} {
+		t.Run(input, func(t *testing.T) {
+			record, err := s.AddEndpoint("gpu-box", "user@example", input)
+			if err != nil {
+				t.Fatalf("AddEndpoint(%q) error = %v", input, err)
+			}
+			if record.Profile != "" {
+				t.Fatalf("AddEndpoint(%q) Profile = %q, want \"\" (literal \"default\" must canonicalize to empty)", input, record.Profile)
+			}
+			_ = s.RemoveEndpoint(record.ID)
+		})
+	}
+}
+
 func TestUpdateEndpointClearsProfileWithEmptyString(t *testing.T) {
 	s := New()
 	record, err := s.AddEndpoint("gpu-box", "user@example", "dev")
