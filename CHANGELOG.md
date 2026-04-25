@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-25]
+
+### Added
+- **Per-Endpoint Profile For Remote Daemons**: Remote endpoints now carry a profile (the same knob as local `ATTN_PROFILE`), so a dev-profile attn can drive a dev-profile remote daemon side-by-side with prod. Set per endpoint in Settings (defaults to the calling daemon's own profile); threads through binary install path (`~/.local/bin/attn-<profile>`), data dir (`~/.attn-<profile>/`), socket, log, and WebSocket port on the remote. Existing endpoints stay on the default profile and behave exactly as before.
+
+---
+
 ## [2026-04-23]
 
 ### Added

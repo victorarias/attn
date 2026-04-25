@@ -2576,7 +2576,7 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'set_setting', key, value }));
   }, [onSettingsUpdate]);
 
-  const sendAddEndpoint = useCallback((name: string, sshTarget: string): Promise<EndpointActionResult> => {
+  const sendAddEndpoint = useCallback((name: string, sshTarget: string, profile?: string): Promise<EndpointActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -2589,7 +2589,12 @@ export function useDaemonSocket({
       }
       const key = 'endpoint_action:add:pending';
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'add_endpoint', name, ssh_target: sshTarget }));
+      const payload: Record<string, unknown> = { cmd: 'add_endpoint', name, ssh_target: sshTarget };
+      const trimmed = (profile ?? '').trim();
+      if (trimmed !== '') {
+        payload.profile = trimmed;
+      }
+      ws.send(JSON.stringify(payload));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
@@ -2601,7 +2606,7 @@ export function useDaemonSocket({
 
   const sendUpdateEndpoint = useCallback((
     endpointId: string,
-    updates: { name?: string; ssh_target?: string; enabled?: boolean }
+    updates: { name?: string; ssh_target?: string; enabled?: boolean; profile?: string }
   ): Promise<EndpointActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;

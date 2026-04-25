@@ -219,6 +219,18 @@
   border: 1px solid var(--color-border);
 }
 
+.endpoint-profile-badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+}
+
 .endpoint-status-badge.status-connected {
   color: #1f8f4c;
   background: rgba(31, 143, 76, 0.12);

@@ -133,13 +133,17 @@ func NewManager(
 }
 
 func infoFromRecord(record store.EndpointRecord) protocol.EndpointInfo {
-	return protocol.EndpointInfo{
+	info := protocol.EndpointInfo{
 		ID:        record.ID,
 		Name:      record.Name,
 		SshTarget: record.SSHTarget,
 		Status:    "disconnected",
 		Enabled:   protocol.Ptr(record.Enabled),
 	}
+	if strings.TrimSpace(record.Profile) != "" {
+		info.Profile = protocol.Ptr(record.Profile)
+	}
+	return info
 }
 
 func (m *Manager) Start(parent context.Context) {
@@ -159,7 +163,7 @@ func (m *Manager) Start(parent context.Context) {
 
 func (m *Manager) Stop() {
 	changed := false
-	shutdownTargets := make([]string, 0)
+	shutdownTargets := make([]isolatedShutdownTarget, 0)
 	seenTargets := make(map[string]struct{})
 	m.mu.Lock()
 	if m.cancel != nil {
@@ -167,9 +171,10 @@ func (m *Manager) Stop() {
 	}
 	for _, runtime := range m.runtimes {
 		changed = changed || len(runtime.sessions) > 0
-		if target := isolatedRemoteShutdownTarget(runtime.record); target != "" {
-			if _, exists := seenTargets[target]; !exists {
-				seenTargets[target] = struct{}{}
+		if target := isolatedRemoteShutdownTarget(runtime.record); target.Target != "" {
+			key := target.Target + "|" + target.Profile
+			if _, exists := seenTargets[key]; !exists {
+				seenTargets[key] = struct{}{}
 				shutdownTargets = append(shutdownTargets, target)
 			}
 		}
@@ -196,6 +201,11 @@ func (m *Manager) List() []protocol.EndpointInfo {
 			info.Name = record.Name
 			info.SshTarget = record.SSHTarget
 			info.Enabled = protocol.Ptr(record.Enabled)
+			if strings.TrimSpace(record.Profile) != "" {
+				info.Profile = protocol.Ptr(record.Profile)
+			} else {
+				info.Profile = nil
+			}
 		}
 		out = append(out, info)
 	}
@@ -208,9 +218,10 @@ func (m *Manager) List() []protocol.EndpointInfo {
 	return out
 }
 
-func (m *Manager) AddEndpoint(name, sshTarget string) (*store.EndpointRecord, error) {
+func (m *Manager) AddEndpoint(name, sshTarget, profile string) (*store.EndpointRecord, error) {
 	name = strings.TrimSpace(name)
 	sshTarget = strings.TrimSpace(sshTarget)
+	profile = strings.TrimSpace(profile)
 	if name == "" {
 		return nil, fmt.Errorf("endpoint name is required")
 	}
@@ -218,7 +229,7 @@ func (m *Manager) AddEndpoint(name, sshTarget string) (*store.EndpointRecord, er
 		return nil, fmt.Errorf("ssh target is required")
 	}
 
-	record, err := m.store.AddEndpoint(name, sshTarget)
+	record, err := m.store.AddEndpoint(name, sshTarget, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -292,6 +303,11 @@ func (m *Manager) UpdateEndpoint(id string, update store.EndpointUpdate) (*store
 	info.Name = record.Name
 	info.SshTarget = record.SSHTarget
 	info.Enabled = protocol.Ptr(record.Enabled)
+	if strings.TrimSpace(record.Profile) != "" {
+		info.Profile = protocol.Ptr(record.Profile)
+	} else {
+		info.Profile = nil
+	}
 	if info.Status == "" {
 		info.Status = "disconnected"
 	}
@@ -312,7 +328,7 @@ func (m *Manager) UpdateEndpoint(id string, update store.EndpointUpdate) (*store
 
 func (m *Manager) RemoveEndpoint(id string) error {
 	changed := false
-	shutdownTarget := ""
+	var shutdownTarget isolatedShutdownTarget
 	m.mu.Lock()
 	if runtime, ok := m.runtimes[id]; ok {
 		changed = len(runtime.sessions) > 0
@@ -321,45 +337,44 @@ func (m *Manager) RemoveEndpoint(id string) error {
 		delete(m.runtimes, id)
 	}
 	m.mu.Unlock()
-	m.stopIsolatedRemoteDaemons(nonEmptyStrings(shutdownTarget))
+	if shutdownTarget.Target != "" {
+		m.stopIsolatedRemoteDaemons([]isolatedShutdownTarget{shutdownTarget})
+	}
 	if changed {
 		m.publishSessionsChanged()
 	}
 	return m.store.RemoveEndpoint(id)
 }
 
-func isolatedRemoteShutdownTarget(record store.EndpointRecord) string {
+type isolatedShutdownTarget struct {
+	Target  string
+	Profile string
+}
+
+func isolatedRemoteShutdownTarget(record store.EndpointRecord) isolatedShutdownTarget {
 	if !remoteHarnessCleanupEnabled() {
-		return ""
+		return isolatedShutdownTarget{}
 	}
 	target := strings.TrimSpace(record.SSHTarget)
 	if target == "" {
-		return ""
+		return isolatedShutdownTarget{}
 	}
-	return target
+	return isolatedShutdownTarget{Target: target, Profile: strings.TrimSpace(record.Profile)}
 }
 
-func nonEmptyStrings(values ...string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		out = append(out, value)
-	}
-	return out
-}
-
-func (m *Manager) stopIsolatedRemoteDaemons(targets []string) {
+func (m *Manager) stopIsolatedRemoteDaemons(targets []isolatedShutdownTarget) {
 	if m == nil || m.bootstrapper == nil || len(targets) == 0 || !remoteHarnessCleanupEnabled() {
 		return
 	}
 	for _, target := range targets {
+		if target.Target == "" {
+			continue
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		err := m.bootstrapper.StopRemoteDaemon(ctx, target)
+		err := m.bootstrapper.StopRemoteDaemon(ctx, target.Target, target.Profile)
 		cancel()
 		if err != nil {
-			m.logf("remote harness daemon cleanup failed for %s: %v", target, err)
+			m.logf("remote harness daemon cleanup failed for %s: %v", target.Target, err)
 		}
 	}
 }
@@ -420,7 +435,7 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		if m.consumeBootstrapFlag(id) {
 			m.updateStatus(id, "bootstrapping", "Installing remote binary", nil, nil)
 			bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			err := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget)
+			err := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget, record.Profile)
 			cancel()
 			if err != nil {
 				m.updateStatus(id, "error", err.Error(), nil, nil)
@@ -434,12 +449,12 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 
 		// Try to connect; if it fails the daemon is not running — bootstrap and retry.
 		m.updateStatus(id, "connecting", "Connecting to remote daemon", nil, nil)
-		conn, cmd, err := connectViaSSH(ctx, record.SSHTarget, config.WSAuthToken())
+		conn, cmd, err := connectViaSSH(ctx, record.SSHTarget, config.WSAuthToken(), record.Profile)
 		if err != nil {
 			// Daemon appears down — bootstrap then try once more.
 			m.updateStatus(id, "bootstrapping", "Checking remote platform", nil, nil)
 			bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			bootErr := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget)
+			bootErr := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget, record.Profile)
 			cancel()
 			if bootErr != nil {
 				m.updateStatus(id, "error", bootErr.Error(), nil, nil)
@@ -450,7 +465,7 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 				continue
 			}
 			m.updateStatus(id, "connecting", "Connecting to remote daemon", nil, nil)
-			conn, cmd, err = connectViaSSH(ctx, record.SSHTarget, config.WSAuthToken())
+			conn, cmd, err = connectViaSSH(ctx, record.SSHTarget, config.WSAuthToken(), record.Profile)
 			if err != nil {
 				m.updateStatus(id, "error", err.Error(), nil, nil)
 				if !sleepOrDone(ctx, backoff) {
@@ -1632,6 +1647,11 @@ func (m *Manager) updateStatus(id, status, message string, caps *protocol.Endpoi
 	info.Name = runtime.record.Name
 	info.SshTarget = runtime.record.SSHTarget
 	info.Enabled = protocol.Ptr(runtime.record.Enabled)
+	if strings.TrimSpace(runtime.record.Profile) != "" {
+		info.Profile = protocol.Ptr(runtime.record.Profile)
+	} else {
+		info.Profile = nil
+	}
 	info.Status = status
 	if message != "" {
 		info.StatusMessage = protocol.Ptr(message)

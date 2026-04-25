@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS endpoints (
 	name TEXT NOT NULL,
 	ssh_target TEXT NOT NULL,
 	enabled INTEGER NOT NULL DEFAULT 1,
+	profile TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
@@ -285,6 +286,7 @@ var migrations = []migration{
 		updated_at TEXT NOT NULL
 	)`},
 	{33, "drop unused wont_fix columns from review_comments", ""},
+	{34, "add profile to endpoints", "ALTER TABLE endpoints ADD COLUMN profile TEXT NOT NULL DEFAULT ''"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -385,6 +387,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 33 {
 			if err := applyMigration33(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 34 {
+			if err := applyMigration34(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -531,6 +538,20 @@ func applyMigration33(tx *sql.Tx) error {
 		if _, err := tx.Exec("ALTER TABLE review_comments DROP COLUMN " + col); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func applyMigration34(tx *sql.Tx) error {
+	hasProfile, err := columnExists(tx, "endpoints", "profile")
+	if err != nil {
+		return err
+	}
+	if hasProfile {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE endpoints ADD COLUMN profile TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
 	}
 	return nil
 }

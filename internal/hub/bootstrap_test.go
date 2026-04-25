@@ -1,6 +1,9 @@
 package hub
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestShouldInstallRemoteBinary(t *testing.T) {
 	tests := []struct {
@@ -87,5 +90,80 @@ func TestRemoteHarnessCleanupEnabled(t *testing.T) {
 	t.Setenv("ATTN_REMOTE_SOCKET_PATH", "/home/victor/.attn/harness/run-456/attn.sock")
 	if !remoteHarnessCleanupEnabled() {
 		t.Fatal("remoteHarnessCleanupEnabled() = false, want true with harness socket override")
+	}
+}
+
+func TestStartRemoteDaemonScript_DefaultProfile(t *testing.T) {
+	script := startRemoteDaemonScript("")
+	if !strings.Contains(script, `mkdir -p "$HOME/.attn"`) {
+		t.Fatalf("default script missing default attn dir: %s", script)
+	}
+	if !strings.Contains(script, "$HOME/.local/bin/attn") {
+		t.Fatalf("default script missing default binary path: %s", script)
+	}
+	if strings.Contains(script, "$HOME/.local/bin/attn-") {
+		t.Fatalf("default script unexpectedly references named-profile binary: %s", script)
+	}
+	if !strings.Contains(script, `>>"$HOME/.attn"/daemon.log`) {
+		t.Fatalf("default script missing default log path: %s", script)
+	}
+}
+
+func TestStartRemoteDaemonScript_NamedProfile(t *testing.T) {
+	script := startRemoteDaemonScript("dev")
+	if !strings.Contains(script, "$HOME/.local/bin/attn-dev") {
+		t.Fatalf("dev script missing dev binary path: %s", script)
+	}
+	if !strings.Contains(script, `mkdir -p "$HOME/.attn-${ATTN_PROFILE}"`) {
+		t.Fatalf("dev script missing profile-aware data dir: %s", script)
+	}
+	if !strings.Contains(script, `>>"$HOME/.attn-${ATTN_PROFILE}"/daemon.log`) {
+		t.Fatalf("dev script missing profile-aware log path: %s", script)
+	}
+}
+
+func TestStopRemoteDaemonScript_PortByProfile(t *testing.T) {
+	defaultScript := stopRemoteDaemonScript("")
+	if !strings.Contains(defaultScript, "${ATTN_WS_PORT:-9849}") {
+		t.Fatalf("default stop script should fall back to 9849: %s", defaultScript)
+	}
+
+	devScript := stopRemoteDaemonScript("dev")
+	if !strings.Contains(devScript, "${ATTN_WS_PORT:-29849}") {
+		t.Fatalf("dev stop script should fall back to 29849: %s", devScript)
+	}
+}
+
+func TestRemoteSocketConfigScriptHonorsProfileEnv(t *testing.T) {
+	script := remoteSocketConfigScript()
+	if !strings.Contains(script, `attn_profile="${ATTN_PROFILE:-}"`) {
+		t.Fatalf("socket-config script missing ATTN_PROFILE read: %s", script)
+	}
+	if !strings.Contains(script, `attn_dir="$HOME/.attn-$attn_profile"`) {
+		t.Fatalf("socket-config script missing named-profile data dir: %s", script)
+	}
+	if !strings.Contains(script, `attn_dir="$HOME/.attn"`) {
+		t.Fatalf("socket-config script missing default data dir: %s", script)
+	}
+}
+
+func TestResolveRemoteInstallPath(t *testing.T) {
+	cases := []struct {
+		remoteHome string
+		override   string
+		profile    string
+		want       string
+	}{
+		{"/home/v", "", "", "/home/v/.local/bin/attn"},
+		{"/home/v", "", "dev", "/home/v/.local/bin/attn-dev"},
+		{"/home/v", "/opt/bin/attn", "dev", "/opt/bin/attn"},
+		{"/home/v", "~/bin/attn", "", "/home/v/bin/attn"},
+	}
+	for _, c := range cases {
+		got := resolveRemoteInstallPath(c.remoteHome, c.override, c.profile)
+		if got != c.want {
+			t.Fatalf("resolveRemoteInstallPath(%q,%q,%q) = %q, want %q",
+				c.remoteHome, c.override, c.profile, got, c.want)
+		}
 	}
 }

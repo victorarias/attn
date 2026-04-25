@@ -218,6 +218,7 @@ export enum AddCommentResultMessageEvent {
 export interface AddEndpointMessage {
     cmd:        AddEndpointMessageCmd;
     name:       string;
+    profile?:   string;
     ssh_target: string;
     [property: string]: any;
 }
@@ -654,6 +655,7 @@ export interface EndpointInfo {
     enabled?:        boolean;
     id:              string;
     name:            string;
+    profile?:        string;
     session_count?:  number;
     ssh_target:      string;
     status:          string;
@@ -687,6 +689,7 @@ export interface Endpoint {
     enabled?:        boolean;
     id:              string;
     name:            string;
+    profile?:        string;
     session_count?:  number;
     ssh_target:      string;
     status:          string;
@@ -2285,6 +2288,7 @@ export interface UpdateEndpointMessage {
     enabled?:    boolean;
     endpoint_id: string;
     name?:       string;
+    profile?:    string;
     ssh_target?: string;
     [property: string]: any;
 }
@@ -3926,6 +3930,7 @@ const typeMap: any = {
     "AddEndpointMessage": o([
         { json: "cmd", js: "cmd", typ: r("AddEndpointMessageCmd") },
         { json: "name", js: "name", typ: "" },
+        { json: "profile", js: "profile", typ: u(undefined, "") },
         { json: "ssh_target", js: "ssh_target", typ: "" },
     ], "any"),
     "AnswerReviewLoopMessage": o([
@@ -4166,6 +4171,7 @@ const typeMap: any = {
         { json: "enabled", js: "enabled", typ: u(undefined, true) },
         { json: "id", js: "id", typ: "" },
         { json: "name", js: "name", typ: "" },
+        { json: "profile", js: "profile", typ: u(undefined, "") },
         { json: "session_count", js: "session_count", typ: u(undefined, 0) },
         { json: "ssh_target", js: "ssh_target", typ: "" },
         { json: "status", js: "status", typ: "" },
@@ -4193,6 +4199,7 @@ const typeMap: any = {
         { json: "enabled", js: "enabled", typ: u(undefined, true) },
         { json: "id", js: "id", typ: "" },
         { json: "name", js: "name", typ: "" },
+        { json: "profile", js: "profile", typ: u(undefined, "") },
         { json: "session_count", js: "session_count", typ: u(undefined, 0) },
         { json: "ssh_target", js: "ssh_target", typ: "" },
         { json: "status", js: "status", typ: "" },
@@ -5076,6 +5083,7 @@ const typeMap: any = {
         { json: "enabled", js: "enabled", typ: u(undefined, true) },
         { json: "endpoint_id", js: "endpoint_id", typ: "" },
         { json: "name", js: "name", typ: u(undefined, "") },
+        { json: "profile", js: "profile", typ: u(undefined, "") },
         { json: "ssh_target", js: "ssh_target", typ: u(undefined, "") },
     ], "any"),
     "WebSocketEvent": o([

@@ -137,6 +137,20 @@ func ValidateProfileName(name string) error {
 	return nil
 }
 
+// NormalizeProfileName validates and returns the canonical profile name
+// (lowercased, trimmed). Empty input is valid and yields "". Use this at
+// every persistence/wire boundary so the value the remote daemon sees in
+// $ATTN_PROFILE matches the value stored in the local DB — Profile() on
+// the remote lowercases, so writing a mixed-case form here would split
+// data dirs (`~/.attn-DEV` referenced in scripts vs `~/.attn-dev` written
+// by the daemon).
+func NormalizeProfileName(name string) (string, error) {
+	if err := ValidateProfileName(name); err != nil {
+		return "", err
+	}
+	return strings.ToLower(strings.TrimSpace(name)), nil
+}
+
 // attnDir returns the base directory for attn files. Profile-aware:
 // default profile → ~/.attn, named profile → ~/.attn-<profile>.
 func attnDir() string {
@@ -252,13 +266,24 @@ func WSPort() string {
 	if port != "" {
 		return port
 	}
-	p := Profile()
+	return WSPortForProfile(Profile())
+}
+
+// WSPortForProfile returns the default WebSocket port for a given profile name,
+// independent of the current process's ATTN_PROFILE / ATTN_WS_PORT. Pass "" for
+// the default profile. Used by the hub to compute the right port to talk to a
+// profile-scoped remote daemon.
+func WSPortForProfile(profile string) string {
+	p := strings.ToLower(strings.TrimSpace(profile))
 	switch p {
-	case "":
+	case "", "default":
 		return "9849"
 	case "dev":
 		return "29849"
 	default:
+		if !profileNamePattern.MatchString(p) {
+			return "9849"
+		}
 		return derivedProfilePort(p)
 	}
 }

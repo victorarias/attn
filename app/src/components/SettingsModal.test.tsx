@@ -103,7 +103,7 @@ describe('SettingsModal review loop prompts', () => {
     fireEvent.click(screen.getByText('Add Endpoint'));
 
     await waitFor(() => {
-      expect(onAddEndpoint).toHaveBeenCalledWith('gpu-box', 'user@gpu-box');
+      expect(onAddEndpoint).toHaveBeenCalledWith('gpu-box', 'user@gpu-box', '');
     });
   });
 

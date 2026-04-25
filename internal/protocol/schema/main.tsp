@@ -245,6 +245,7 @@ model EndpointInfo {
   ssh_target: string;
   status: string;
   enabled?: boolean;
+  profile?: string;
   status_message?: string;
   session_count?: int32;
   capabilities?: EndpointCapabilities;
@@ -402,6 +403,7 @@ model AddEndpointMessage {
   cmd: "add_endpoint";
   name: string;
   ssh_target: string;
+  profile?: string;
 }
 
 model RemoveEndpointMessage {
@@ -415,6 +417,7 @@ model UpdateEndpointMessage {
   name?: string;
   ssh_target?: string;
   enabled?: boolean;
+  profile?: string;
 }
 
 model ListEndpointsMessage {

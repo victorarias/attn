@@ -11,11 +11,11 @@ import (
 
 func TestManagerRemoteSessionsTagAndSeparateEndpoints(t *testing.T) {
 	endpointStore := store.New()
-	first, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	first, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint(first) error = %v", err)
 	}
-	second, err := endpointStore.AddEndpoint("dev-box", "dev")
+	second, err := endpointStore.AddEndpoint("dev-box", "dev", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint(second) error = %v", err)
 	}
@@ -57,7 +57,7 @@ func TestManagerRemoteSessionsTagAndSeparateEndpoints(t *testing.T) {
 
 func TestManagerRemoteSessionsUpsertAndClear(t *testing.T) {
 	endpointStore := store.New()
-	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
@@ -113,11 +113,11 @@ func TestManagerRemoteSessionsUpsertAndClear(t *testing.T) {
 
 func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 	endpointStore := store.New()
-	first, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	first, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint(first) error = %v", err)
 	}
-	second, err := endpointStore.AddEndpoint("dev-box", "dev")
+	second, err := endpointStore.AddEndpoint("dev-box", "dev", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint(second) error = %v", err)
 	}
@@ -192,7 +192,7 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 
 func TestManagerIgnoresWorkspaceUpdatesForRemovedRemoteSessions(t *testing.T) {
 	endpointStore := store.New()
-	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
@@ -229,7 +229,7 @@ func TestManagerIgnoresWorkspaceUpdatesForRemovedRemoteSessions(t *testing.T) {
 
 func TestManagerForgetSessionRemovesRemoteSessionAndWorkspace(t *testing.T) {
 	endpointStore := store.New()
-	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
@@ -267,7 +267,7 @@ func TestManagerForgetSessionRemovesRemoteSessionAndWorkspace(t *testing.T) {
 
 func TestManagerPendingSessionRouteReservesSpawnEndpoint(t *testing.T) {
 	endpointStore := store.New()
-	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
@@ -299,7 +299,7 @@ func TestManagerPendingSessionRouteReservesSpawnEndpoint(t *testing.T) {
 
 func TestManagerPendingSessionRouteExpires(t *testing.T) {
 	endpointStore := store.New()
-	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
@@ -319,7 +319,7 @@ func TestManagerPendingSessionRouteExpires(t *testing.T) {
 
 func TestManagerEndpointIDForPathMatchesSessionDirectoryAndMainRepo(t *testing.T) {
 	endpointStore := store.New()
-	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
@@ -381,7 +381,7 @@ func TestCapabilitiesFromInitialStateIncludesRemoteWebFields(t *testing.T) {
 
 func TestManagerHandleRemoteSettingsUpdatedResolvesRemoteWebAction(t *testing.T) {
 	endpointStore := store.New()
-	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
@@ -429,7 +429,7 @@ func TestManagerHandleRemoteSettingsUpdatedResolvesRemoteWebAction(t *testing.T)
 
 func TestManagerHandleRemoteSettingsUpdatedIgnoresUnrelatedPendingRemoteWebUpdates(t *testing.T) {
 	endpointStore := store.New()
-	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
@@ -484,7 +484,7 @@ func TestForwardsRawEventIncludesPickerResults(t *testing.T) {
 
 func TestManagerObserveRemoteEventCachesReviewCommentAndLoopOwnership(t *testing.T) {
 	endpointStore := store.New()
-	record, err := endpointStore.AddEndpoint("gpu-box", "gpu")
+	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
 	if err != nil {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}

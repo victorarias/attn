@@ -24,6 +24,7 @@ import {
   type ReviewLoopPreset,
   serializeSavedReviewLoopPresets,
 } from '../utils/reviewLoopPresets';
+import { BUILD_PROFILE } from '../utils/buildProfile';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -36,8 +37,8 @@ interface SettingsModalProps {
   onUnmuteAuthor: (author: string) => void;
   settings: DaemonSettings;
   endpoints: DaemonEndpoint[];
-  onAddEndpoint: (name: string, sshTarget: string) => Promise<{ success: boolean }>;
-  onUpdateEndpoint: (endpointId: string, updates: { name?: string; ssh_target?: string; enabled?: boolean }) => Promise<{ success: boolean }>;
+  onAddEndpoint: (name: string, sshTarget: string, profile?: string) => Promise<{ success: boolean }>;
+  onUpdateEndpoint: (endpointId: string, updates: { name?: string; ssh_target?: string; enabled?: boolean; profile?: string }) => Promise<{ success: boolean }>;
   onRemoveEndpoint: (endpointId: string) => Promise<{ success: boolean }>;
   onSetEndpointRemoteWeb: (endpointId: string, enabled: boolean) => Promise<{ success: boolean }>;
   onSetSetting: (key: string, value: string) => void;
@@ -76,9 +77,11 @@ export function SettingsModal({
   const [reviewerModel, setReviewerModel] = useState(settings.reviewer_model || '');
   const [newEndpointName, setNewEndpointName] = useState('');
   const [newEndpointTarget, setNewEndpointTarget] = useState('');
+  const [newEndpointProfile, setNewEndpointProfile] = useState(BUILD_PROFILE);
   const [editingEndpointID, setEditingEndpointID] = useState<string | null>(null);
   const [editingEndpointName, setEditingEndpointName] = useState('');
   const [editingEndpointTarget, setEditingEndpointTarget] = useState('');
+  const [editingEndpointProfile, setEditingEndpointProfile] = useState('');
   const [endpointError, setEndpointError] = useState<string | null>(null);
   const [endpointActionID, setEndpointActionID] = useState<string | null>(null);
   const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
@@ -323,6 +326,7 @@ export function SettingsModal({
   const handleAddEndpoint = useCallback(async () => {
     const name = newEndpointName.trim();
     const sshTarget = newEndpointTarget.trim();
+    const profile = newEndpointProfile.trim();
     if (!name || !sshTarget) {
       setEndpointError('Endpoint name and SSH target are required.');
       return;
@@ -330,32 +334,36 @@ export function SettingsModal({
     setEndpointError(null);
     setEndpointActionID('new');
     try {
-      await onAddEndpoint(name, sshTarget);
+      await onAddEndpoint(name, sshTarget, profile);
       setNewEndpointName('');
       setNewEndpointTarget('');
+      setNewEndpointProfile(BUILD_PROFILE);
     } catch (error) {
       setEndpointError(error instanceof Error ? error.message : 'Failed to add endpoint');
     } finally {
       setEndpointActionID(null);
     }
-  }, [newEndpointName, newEndpointTarget, onAddEndpoint]);
+  }, [newEndpointName, newEndpointProfile, newEndpointTarget, onAddEndpoint]);
 
   const beginEditEndpoint = useCallback((endpoint: DaemonEndpoint) => {
     setEndpointError(null);
     setEditingEndpointID(endpoint.id);
     setEditingEndpointName(endpoint.name);
     setEditingEndpointTarget(endpoint.ssh_target);
+    setEditingEndpointProfile(endpoint.profile || '');
   }, []);
 
   const cancelEditEndpoint = useCallback(() => {
     setEditingEndpointID(null);
     setEditingEndpointName('');
     setEditingEndpointTarget('');
+    setEditingEndpointProfile('');
   }, []);
 
   const handleSaveEndpoint = useCallback(async (endpointId: string) => {
     const name = editingEndpointName.trim();
     const sshTarget = editingEndpointTarget.trim();
+    const profile = editingEndpointProfile.trim();
     if (!name || !sshTarget) {
       setEndpointError('Endpoint name and SSH target are required.');
       return;
@@ -363,14 +371,14 @@ export function SettingsModal({
     setEndpointError(null);
     setEndpointActionID(endpointId);
     try {
-      await onUpdateEndpoint(endpointId, { name, ssh_target: sshTarget });
+      await onUpdateEndpoint(endpointId, { name, ssh_target: sshTarget, profile });
       cancelEditEndpoint();
     } catch (error) {
       setEndpointError(error instanceof Error ? error.message : 'Failed to update endpoint');
     } finally {
       setEndpointActionID(null);
     }
-  }, [cancelEditEndpoint, editingEndpointName, editingEndpointTarget, onUpdateEndpoint]);
+  }, [cancelEditEndpoint, editingEndpointName, editingEndpointProfile, editingEndpointTarget, onUpdateEndpoint]);
 
   const handleToggleEndpoint = useCallback(async (endpoint: DaemonEndpoint) => {
     setEndpointError(null);
@@ -573,6 +581,19 @@ export function SettingsModal({
                 autoCorrect="off"
                 spellCheck={false}
               />
+              <input
+                type="text"
+                value={newEndpointProfile}
+                onChange={(e) => setNewEndpointProfile(e.target.value)}
+                placeholder="default"
+                pattern="[a-z0-9][a-z0-9-]{0,15}"
+                className="settings-input"
+                aria-label="Profile"
+                disabled={endpointActionInFlight}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
               <button
                 className="browse-btn"
                 onClick={() => void handleAddEndpoint()}
@@ -602,6 +623,7 @@ export function SettingsModal({
                       <div className="endpoint-card-header">
                         <div className="endpoint-card-title">
                           <span className="endpoint-name">{endpoint.name}</span>
+                          <span className="endpoint-profile-badge">{endpoint.profile || 'default'}</span>
                           <span className={`endpoint-status-badge status-${endpoint.status}`}>
                             {endpoint.status}
                           </span>
@@ -662,6 +684,19 @@ export function SettingsModal({
                             onChange={(e) => setEditingEndpointTarget(e.target.value)}
                             className="settings-input"
                             aria-label="Edit SSH target"
+                            disabled={endpointActionInFlight}
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                          />
+                          <input
+                            type="text"
+                            value={editingEndpointProfile}
+                            onChange={(e) => setEditingEndpointProfile(e.target.value)}
+                            className="settings-input"
+                            aria-label="Edit profile"
+                            placeholder="default"
+                            pattern="[a-z0-9][a-z0-9-]{0,15}"
                             disabled={endpointActionInFlight}
                             autoCapitalize="none"
                             autoCorrect="off"
