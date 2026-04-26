@@ -8,10 +8,13 @@
 /// reflow happen inside `TerminalView` itself — when the panel resizes,
 /// `set_content_size` propagates the new dims and the view emits the
 /// PtyResize on its next render.
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui::{
-    div, point, prelude::*, px, rgb, AnyElement, App, Context, Entity, FocusHandle, Focusable,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render,
-    ScrollDelta, ScrollWheelEvent, SharedString, Subscription, Window,
+    canvas, div, point, prelude::*, px, rgb, AnyElement, App, Bounds, Context, Entity, FocusHandle,
+    Focusable, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    Render, ScrollDelta, ScrollWheelEvent, SharedString, Subscription, Window,
 };
 
 use crate::canvas_view::{pf, GridElement, Viewport};
@@ -64,6 +67,12 @@ pub struct Spike5Canvas {
     focused_panel: Option<usize>,
     needs_focus_panel: Option<usize>,
     focus_handle: FocusHandle,
+    /// Window-relative bounds of the canvas's root element, captured each
+    /// frame via a `canvas()` prepaint callback. Mouse events arrive with
+    /// window-relative coordinates, so hit testing and zoom focal points
+    /// must subtract this origin to land in canvas-local space. Without
+    /// this, the sidebar's 240px width breaks every panel hit test.
+    bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
 }
 
 impl Spike5Canvas {
@@ -77,6 +86,17 @@ impl Spike5Canvas {
             focused_panel: None,
             needs_focus_panel: None,
             focus_handle: cx.focus_handle(),
+            bounds: Rc::new(Cell::new(None)),
+        }
+    }
+
+    /// Translate a window-relative position into canvas-local space using
+    /// the most recently captured bounds. Falls back to the input when
+    /// bounds aren't known yet (first frame before paint).
+    fn local_pos(&self, screen: gpui::Point<Pixels>) -> gpui::Point<Pixels> {
+        match self.bounds.get() {
+            Some(b) => point(screen.x - b.origin.x, screen.y - b.origin.y),
+            None => screen,
         }
     }
 
@@ -149,7 +169,7 @@ impl Spike5Canvas {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let pos = event.position;
+        let pos = self.local_pos(event.position);
         let hit = self.hit_test(pos, cx);
         match hit {
             HitResult::TitleBar(id) => {
@@ -184,6 +204,8 @@ impl Spike5Canvas {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Window-relative is fine here — every drag-state arm consumes
+        // deltas, and any constant offset cancels out when subtracting.
         let pos = event.position;
         match self.drag_state.clone() {
             DragState::Idle => return,
@@ -252,9 +274,11 @@ impl Spike5Canvas {
         };
 
         if event.modifiers.platform {
-            // Cmd+scroll → zoom toward cursor.
+            // Cmd+scroll → zoom toward cursor. Translate to canvas-local
+            // space so the focal point lands under the actual cursor and
+            // not 240px to its right.
             let factor = if dy > 0.0 { 1.08 } else { 1.0 / 1.08 };
-            self.viewport = self.viewport.zoom_toward(event.position, factor);
+            self.viewport = self.viewport.zoom_toward(self.local_pos(event.position), factor);
         } else {
             // Regular scroll → pan.
             self.viewport.origin.x -= dx / self.viewport.zoom;
@@ -308,6 +332,7 @@ impl Render for Spike5Canvas {
         let focus_handle = self.focus_handle.clone();
         let focused_panel = self.focused_panel;
 
+        let bounds_capture = self.bounds.clone();
         let mut root = div()
             .size_full()
             .bg(rgb(0x0e0e14))
@@ -316,6 +341,17 @@ impl Render for Spike5Canvas {
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
+            // Stamp the canvas's window-relative bounds into a shared
+            // cell so mouse handlers can translate event.position into
+            // canvas-local coords. The paint callback is a no-op.
+            .child(
+                canvas(
+                    move |new_bounds, _, _| bounds_capture.set(Some(new_bounds)),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
             .child(GridElement { viewport });
 
         let Some(selected) = self.selected.clone() else {
