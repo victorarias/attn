@@ -169,8 +169,12 @@ impl Spike5Canvas {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let pos = self.local_pos(event.position);
-        let hit = self.hit_test(pos, cx);
+        // hit_test takes canvas-local coords (panel screen positions are
+        // computed from world*zoom with no canvas offset). DragState's
+        // last_screen stays window-relative so it matches on_mouse_move,
+        // where deltas are computed against event.position.
+        let hit = self.hit_test(self.local_pos(event.position), cx);
+        let pos = event.position;
         match hit {
             HitResult::TitleBar(id) => {
                 self.focused_panel = Some(id);
