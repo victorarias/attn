@@ -132,13 +132,33 @@ impl Spike5App {
         }
     }
 
-    /// Walk current sessions and ensure every session whose
-    /// `workspace_id` matches a known workspace has a corresponding
-    /// Terminal panel. Idempotent — duplicates are skipped by id.
+    /// Reconcile each workspace's Terminal panels with the daemon's
+    /// current session list: spawn panels for new sessions, drop panels
+    /// whose session has gone away. Idempotent.
     fn sync_terminal_panels(&mut self, cx: &mut Context<Self>) {
         // Snapshot sessions out of the daemon read borrow before we
         // start mutating workspaces.
         let sessions: Vec<Session> = self.daemon.read(cx).sessions().to_vec();
+        let live_session_ids: std::collections::HashSet<&str> =
+            sessions.iter().map(|s| s.id.as_str()).collect();
+
+        // Prune Terminal panels whose session is no longer alive on the
+        // daemon. Dropping the panel drops the last handle to its
+        // TerminalView, which detaches subscriptions for free.
+        for ws_entity in self.workspaces_by_id.values().cloned().collect::<Vec<_>>() {
+            ws_entity.update(cx, |ws, cx| {
+                let before = ws.panels.len();
+                ws.panels.retain(|p| match &p.content {
+                    PanelContent::Terminal { session_id, .. } => {
+                        live_session_ids.contains(session_id.as_ref())
+                    }
+                    _ => true,
+                });
+                if ws.panels.len() != before {
+                    cx.notify();
+                }
+            });
+        }
 
         for session in sessions {
             let Some(ws_id) = session.workspace_id.as_deref() else {
