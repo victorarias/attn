@@ -1,10 +1,13 @@
-/// Spike 5 entry point — workspace entity model + sidebar + canvas with
-/// mixed panel types. Run with: `cargo run --bin attn-spike5`.
+/// Workspace canvas entry point — sidebar + pannable canvas with live
+/// terminal panels driven by the daemon. Run with: `cargo run --bin attn-spike5`.
+mod canvas_view;
 mod daemon_client;
 mod panel;
 mod sidebar;
 mod spike5_app;
 mod spike5_canvas;
+mod terminal_model;
+mod terminal_view;
 mod workspace;
 
 use gpui::{actions, px, size, App, AppContext, Application, Bounds, KeyBinding, WindowBounds, WindowOptions};

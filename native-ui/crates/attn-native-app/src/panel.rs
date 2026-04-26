@@ -11,6 +11,8 @@
 /// terminals).
 use gpui::{div, prelude::*, px, rgb, Context, Entity, ParentElement, Render, SharedString, Window};
 
+use crate::terminal_view::TerminalView;
+
 #[derive(Clone, Debug)]
 pub struct Panel {
     pub id: usize,
@@ -25,22 +27,24 @@ pub struct Panel {
 #[derive(Clone)]
 pub enum PanelContent {
     /// Stand-in for any non-terminal panel type — todo lists, browsers,
-    /// drawing canvases. Renders static text with a colour-coded body.
-    /// The variant exists in the spike to prove the enum dispatches over
-    /// at least two distinct render paths.
+    /// drawing canvases. Currently unused; reserved as the seam where
+    /// the next panel type plugs in (one variant, one render-match arm).
+    #[allow(dead_code)]
     Placeholder(Entity<PlaceholderView>),
-    /// Terminal panel — for the canvas-UI spike this renders the session
-    /// id and a stub label. Wiring real PTY rendering (TerminalView from
-    /// spike 4) into the workspace context is a follow-up; the architecture
-    /// already accommodates it.
-    Terminal { session_id: SharedString },
+    /// Terminal panel backed by a live `TerminalView` entity. The same
+    /// entity is reused across canvas re-renders and across workspace
+    /// switches — it owns the terminal model + focus handle.
+    Terminal {
+        session_id: SharedString,
+        view: Entity<TerminalView>,
+    },
 }
 
 impl std::fmt::Debug for PanelContent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Placeholder(_) => write!(f, "Placeholder(..)"),
-            Self::Terminal { session_id } => write!(f, "Terminal({session_id})"),
+            Self::Terminal { session_id, .. } => write!(f, "Terminal({session_id})"),
         }
     }
 }
@@ -53,6 +57,7 @@ pub struct PlaceholderView {
 }
 
 impl PlaceholderView {
+    #[allow(dead_code)]
     pub fn new(label: impl Into<SharedString>) -> Self {
         Self { label: label.into() }
     }

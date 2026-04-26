@@ -1,24 +1,30 @@
-/// Spike 5 root view. Owns the live `Vec<Entity<Workspace>>` (the
+/// Workspace root view. Owns the live `Vec<Entity<Workspace>>` (the
 /// authoritative list, sidebar and canvas just hold cloned handles), and
-/// subscribes to `DaemonClient` to grow/shrink it as workspaces appear
-/// and vanish on the wire.
+/// subscribes to `DaemonClient` to grow/shrink it as workspaces and
+/// sessions appear and vanish on the wire.
 ///
 /// Layout: sidebar pinned left at fixed width, canvas fills the rest.
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use gpui::{
-    div, prelude::*, rgb, App, Context, Entity, ParentElement, Render, SharedString, Window,
-};
+use attn_protocol::{AttachSessionMessage, Session};
+use gpui::{div, prelude::*, rgb, Context, Entity, ParentElement, Render, SharedString, Window};
 
 use crate::daemon_client::{DaemonClient, DaemonEvent};
-use crate::panel::{Panel, PanelContent, PlaceholderView};
+use crate::panel::{Panel, PanelContent};
 use crate::sidebar::Sidebar;
 use crate::spike5_canvas::Spike5Canvas;
+use crate::terminal_model::TerminalModel;
+use crate::terminal_view::TerminalView;
 use crate::workspace::Workspace;
 
+/// Initial terminal panel size in world-space units. Roughly 380×240
+/// matches the spike-4 default and gives ~48 cols × ~12 rows once the
+/// title bar is subtracted.
+const TERMINAL_W: f32 = 380.0;
+const TERMINAL_H: f32 = 240.0;
+
 pub struct Spike5App {
-    #[allow(dead_code)]
     daemon: Entity<DaemonClient>,
     workspaces_by_id: HashMap<SharedString, Entity<Workspace>>,
     sidebar: Entity<Sidebar>,
@@ -28,15 +34,13 @@ pub struct Spike5App {
 
 impl Spike5App {
     pub fn new(daemon: Entity<DaemonClient>, cx: &mut Context<Self>) -> Self {
-        let canvas = cx.new(|_| Spike5Canvas::new());
+        let canvas = cx.new(|cx| Spike5Canvas::new(daemon.clone(), cx));
         let canvas_for_select = canvas.clone();
         let app_handle = cx.entity().downgrade();
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 Vec::new(),
                 move |id, _window, cx| {
-                    // Resolve the workspace entity, hand it to the canvas,
-                    // and remember the selection on the app.
                     let app_handle = app_handle.clone();
                     let canvas = canvas_for_select.clone();
                     let _ = app_handle.update(cx, |app: &mut Spike5App, cx| {
@@ -49,22 +53,21 @@ impl Spike5App {
             )
         });
 
-        // Forward DaemonClient events into our own state. We subscribe to
-        // the daemon entity, not its raw stream, so GPUI handles the
-        // re-render machinery for us.
-        cx.subscribe(&daemon, |this, _client, event: &DaemonEvent, cx| {
-            match event {
-                DaemonEvent::WorkspaceRegistered { workspace } => {
-                    this.upsert_workspace(workspace.clone(), cx);
-                }
-                DaemonEvent::WorkspaceUnregistered { workspace_id } => {
-                    this.remove_workspace(workspace_id.clone(), cx);
-                }
-                DaemonEvent::WorkspaceStateChanged { workspace } => {
-                    this.apply_workspace_snapshot(workspace.clone(), cx);
-                }
-                _ => {}
+        cx.subscribe(&daemon, |this, _client, event: &DaemonEvent, cx| match event {
+            DaemonEvent::WorkspaceRegistered { workspace } => {
+                this.upsert_workspace(workspace.clone(), cx);
+                this.sync_terminal_panels(cx);
             }
+            DaemonEvent::WorkspaceUnregistered { workspace_id } => {
+                this.remove_workspace(workspace_id.clone(), cx);
+            }
+            DaemonEvent::WorkspaceStateChanged { workspace } => {
+                this.apply_workspace_snapshot(workspace.clone(), cx);
+            }
+            DaemonEvent::SessionsChanged | DaemonEvent::Connected => {
+                this.sync_terminal_panels(cx);
+            }
+            _ => {}
         })
         .detach();
 
@@ -83,18 +86,16 @@ impl Spike5App {
             existing.update(cx, |ws, cx| ws.apply_snapshot(data.clone(), cx));
             return;
         }
-        // First time we've seen this workspace — seed it with two demo
-        // panels so the spike has something to render. A real native UI
-        // would build panels from persisted layout state instead.
-        let panels = make_demo_panels(&id, cx);
-        let entity = cx.new(|_| Workspace::new(data, panels));
+        let entity = cx.new(|_| Workspace::new(data, Vec::new()));
         self.workspaces_by_id.insert(id.clone(), entity.clone());
-        self.sidebar.update(cx, |sidebar, cx| sidebar.upsert_workspace(entity.clone(), cx));
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.upsert_workspace(entity.clone(), cx));
 
         // First workspace to appear becomes the canvas's initial selection.
         if self.selected_id.is_none() {
             self.selected_id = Some(id.clone());
-            self.canvas.update(cx, |canvas, cx| canvas.set_selected(Some(entity), cx));
+            self.canvas
+                .update(cx, |canvas, cx| canvas.set_selected(Some(entity), cx));
             self.sidebar
                 .update(cx, |sidebar, cx| sidebar.set_selected(Some(id), cx));
         }
@@ -110,9 +111,8 @@ impl Spike5App {
             existing.update(cx, |ws, cx| ws.apply_snapshot(data, cx));
         } else {
             // State change for a workspace we haven't seen — treat as a
-            // late registration (daemon ordering guarantees say this
-            // shouldn't happen, but the cost of being defensive is one
-            // line).
+            // late registration. Daemon ordering says this shouldn't
+            // happen, but the cost of being defensive is one line.
             self.upsert_workspace(data, cx);
         }
     }
@@ -127,7 +127,86 @@ impl Spike5App {
             .update(cx, |sidebar, cx| sidebar.remove_workspace(&id_str, cx));
         if self.selected_id.as_ref() == Some(&id) {
             self.selected_id = None;
-            self.canvas.update(cx, |canvas, cx| canvas.set_selected(None, cx));
+            self.canvas
+                .update(cx, |canvas, cx| canvas.set_selected(None, cx));
+        }
+    }
+
+    /// Walk current sessions and ensure every session whose
+    /// `workspace_id` matches a known workspace has a corresponding
+    /// Terminal panel. Idempotent — duplicates are skipped by id.
+    fn sync_terminal_panels(&mut self, cx: &mut Context<Self>) {
+        // Snapshot sessions out of the daemon read borrow before we
+        // start mutating workspaces.
+        let sessions: Vec<Session> = self.daemon.read(cx).sessions().to_vec();
+
+        for session in sessions {
+            let Some(ws_id) = session.workspace_id.as_deref() else {
+                continue;
+            };
+            let key = SharedString::from(ws_id.to_string());
+            let Some(ws_entity) = self.workspaces_by_id.get(&key).cloned() else {
+                continue;
+            };
+
+            let already_present = ws_entity.read(cx).panels.iter().any(|p| matches!(
+                &p.content,
+                PanelContent::Terminal { session_id, .. } if session_id.as_ref() == session.id
+            ));
+            if already_present {
+                continue;
+            }
+
+            // Find a non-overlapping x position by counting existing
+            // terminal panels in this workspace.
+            let existing = ws_entity
+                .read(cx)
+                .panels
+                .iter()
+                .filter(|p| matches!(p.content, PanelContent::Terminal { .. }))
+                .count();
+            let world_x = 30.0 + existing as f32 * (TERMINAL_W + 30.0);
+            let world_y = 50.0;
+
+            let session_id = session.id.clone();
+            let label = session.label.clone();
+
+            // Default cols/rows derived from world-space size; the
+            // canvas re-pushes content_size each frame so these will
+            // be corrected on first render if needed.
+            let (cols, rows) = panel_terminal_dims(TERMINAL_W, TERMINAL_H);
+
+            let daemon = self.daemon.clone();
+            let model = cx.new(|cx| TerminalModel::new(session_id.clone(), cols, rows, &daemon, cx));
+            let view = cx.new(|cx| {
+                let mut tv = TerminalView::new(model, daemon.clone(), cx);
+                tv.set_content_size(TERMINAL_W, (TERMINAL_H - TITLE_HEIGHT).max(0.0));
+                tv
+            });
+
+            // Send attach. The TerminalView's render path will emit the
+            // initial PtyResize once it sees its first content_size.
+            self.daemon
+                .read(cx)
+                .send_cmd(&AttachSessionMessage::new(session_id.clone()));
+
+            let panel = Panel {
+                id: next_panel_id(),
+                title: SharedString::from(label),
+                world_x,
+                world_y,
+                width: TERMINAL_W,
+                height: TERMINAL_H,
+                content: PanelContent::Terminal {
+                    session_id: SharedString::from(session_id),
+                    view,
+                },
+            };
+
+            ws_entity.update(cx, |ws, cx| {
+                ws.panels.push(panel);
+                cx.notify();
+            });
         }
     }
 }
@@ -144,41 +223,22 @@ impl Render for Spike5App {
     }
 }
 
-/// Process-wide monotonically-increasing panel ID. Panels aren't keyed by id
-/// today (rendered by vec position), but reserving unique ids now keeps the
-/// door open for drag/lookup-by-id without a future rename pass.
+/// Process-wide monotonically-increasing panel ID. Panels are keyed by
+/// id for hit testing so collisions across workspaces would mis-target
+/// drag/resize.
 static NEXT_PANEL_ID: AtomicUsize = AtomicUsize::new(1);
 
 fn next_panel_id() -> usize {
     NEXT_PANEL_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Two panels for every workspace as it appears: one Placeholder, one
-/// Terminal stub. Demonstrates the enum dispatching across distinct
-/// render paths without requiring real PTY wiring in this spike.
-fn make_demo_panels(workspace_id: &SharedString, cx: &mut App) -> Vec<Panel> {
-    let placeholder_label =
-        SharedString::from(format!("Todo Panel · {workspace_id}"));
-    let placeholder_view = cx.new(|_| PlaceholderView::new(placeholder_label));
-    let session_id = SharedString::from(format!("{workspace_id}-demo"));
-    vec![
-        Panel {
-            id: next_panel_id(),
-            title: SharedString::from("Notes"),
-            world_x: 60.0,
-            world_y: 60.0,
-            width: 280.0,
-            height: 180.0,
-            content: PanelContent::Placeholder(placeholder_view),
-        },
-        Panel {
-            id: next_panel_id(),
-            title: SharedString::from("Agent"),
-            world_x: 380.0,
-            world_y: 60.0,
-            width: 320.0,
-            height: 200.0,
-            content: PanelContent::Terminal { session_id },
-        },
-    ]
+/// Mirror of the canvas's title-bar height. Kept in this file so the
+/// initial content_size matches the canvas's per-frame value.
+const TITLE_HEIGHT: f32 = 24.0;
+
+fn panel_terminal_dims(world_w: f32, world_h: f32) -> (u16, u16) {
+    use crate::terminal_view::{CHAR_WIDTH, ROW_HEIGHT};
+    let cols = ((world_w / CHAR_WIDTH) as u16).max(1);
+    let rows = (((world_h - TITLE_HEIGHT) / ROW_HEIGHT) as u16).max(1);
+    (cols, rows)
 }
