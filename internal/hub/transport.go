@@ -17,10 +17,10 @@ import (
 const remoteWSMessageReadLimit = 8 << 20
 const remoteWSDialRetryDelay = 250 * time.Millisecond
 
-func connectViaSSH(ctx context.Context, sshTarget, authToken string) (*websocket.Conn, *exec.Cmd, error) {
+func connectViaSSH(ctx context.Context, sshTarget, authToken, profile string) (*websocket.Conn, *exec.Cmd, error) {
 	var lastErr error
 	for attempt := 0; attempt < 5; attempt++ {
-		ws, cmd, err := connectViaSSHOnce(ctx, sshTarget, authToken)
+		ws, cmd, err := connectViaSSHOnce(ctx, sshTarget, authToken, profile)
 		if err == nil {
 			return ws, cmd, nil
 		}
@@ -37,8 +37,8 @@ func connectViaSSH(ctx context.Context, sshTarget, authToken string) (*websocket
 	return nil, nil, lastErr
 }
 
-func connectViaSSHOnce(ctx context.Context, sshTarget, authToken string) (*websocket.Conn, *exec.Cmd, error) {
-	cmd := exec.CommandContext(ctx, "ssh", append(sshBaseArgs(sshTarget), remoteShellCommand(remoteAttnCommand("ws-relay")))...)
+func connectViaSSHOnce(ctx context.Context, sshTarget, authToken, profile string) (*websocket.Conn, *exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, "ssh", append(sshBaseArgs(sshTarget), remoteShellCommand(profile, remoteAttnCommand(profile, "ws-relay")))...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, nil, err

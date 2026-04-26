@@ -33,7 +33,7 @@ func TestConnectViaSSHOnceReapsChildOnDialFailure(t *testing.T) {
 	const iterations = 8
 	for i := 0; i < iterations; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		ws, cmd, err := connectViaSSHOnce(ctx, "fake-target", "")
+		ws, cmd, err := connectViaSSHOnce(ctx, "fake-target", "", "")
 		cancel()
 		if err == nil {
 			// Unexpected success — clean up and fail.

@@ -141,7 +141,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '54';
+const PROTOCOL_VERSION = '55';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 const INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD = import.meta.env.VITE_UI_AUTOMATION === '1';
 
@@ -2576,7 +2576,7 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'set_setting', key, value }));
   }, [onSettingsUpdate]);
 
-  const sendAddEndpoint = useCallback((name: string, sshTarget: string): Promise<EndpointActionResult> => {
+  const sendAddEndpoint = useCallback((name: string, sshTarget: string, profile?: string): Promise<EndpointActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -2589,7 +2589,12 @@ export function useDaemonSocket({
       }
       const key = 'endpoint_action:add:pending';
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'add_endpoint', name, ssh_target: sshTarget }));
+      const payload: Record<string, unknown> = { cmd: 'add_endpoint', name, ssh_target: sshTarget };
+      const trimmed = (profile ?? '').trim();
+      if (trimmed !== '') {
+        payload.profile = trimmed;
+      }
+      ws.send(JSON.stringify(payload));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
@@ -2601,7 +2606,7 @@ export function useDaemonSocket({
 
   const sendUpdateEndpoint = useCallback((
     endpointId: string,
-    updates: { name?: string; ssh_target?: string; enabled?: boolean }
+    updates: { name?: string; ssh_target?: string; enabled?: boolean; profile?: string }
   ): Promise<EndpointActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;

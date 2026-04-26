@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -23,7 +24,16 @@ func (d *Daemon) handleAddEndpointWS(client *wsClient, msg *protocol.AddEndpoint
 		d.sendEndpointActionResult(client, "add", "", false, "endpoint manager unavailable")
 		return
 	}
-	record, err := d.hubManager.AddEndpoint(msg.Name, msg.SshTarget)
+	profile := strings.TrimSpace(protocol.Deref(msg.Profile))
+	if profile == "" {
+		profile = config.Profile()
+	}
+	canonicalProfile, err := config.NormalizeProfileName(profile)
+	if err != nil {
+		d.sendEndpointActionResult(client, "add", "", false, err.Error())
+		return
+	}
+	record, err := d.hubManager.AddEndpoint(msg.Name, msg.SshTarget, canonicalProfile)
 	if err != nil {
 		d.sendEndpointActionResult(client, "add", "", false, err.Error())
 		return
@@ -51,10 +61,17 @@ func (d *Daemon) handleUpdateEndpointWS(client *wsClient, msg *protocol.UpdateEn
 		return
 	}
 
+	if msg.Profile != nil {
+		if err := config.ValidateProfileName(*msg.Profile); err != nil {
+			d.sendEndpointActionResult(client, "update", msg.EndpointID, false, err.Error())
+			return
+		}
+	}
 	update := store.EndpointUpdate{
 		Name:      msg.Name,
 		SSHTarget: msg.SshTarget,
 		Enabled:   msg.Enabled,
+		Profile:   msg.Profile,
 	}
 	record, err := d.hubManager.UpdateEndpoint(msg.EndpointID, update)
 	if err != nil {

@@ -43,8 +43,8 @@ func NewBootstrapper(logf func(format string, args ...interface{})) *Bootstrappe
 	return &Bootstrapper{logf: logf}
 }
 
-func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget string) error {
-	platform, err := b.detectRemotePlatform(ctx, sshTarget)
+func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile string) error {
+	platform, err := b.detectRemotePlatform(ctx, sshTarget, profile)
 	if err != nil {
 		return fmt.Errorf("detect remote platform for %s: %w", sshTarget, err)
 	}
@@ -54,7 +54,7 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget string) 
 		return fmt.Errorf("determine local version: %w", err)
 	}
 
-	remoteVersion, err := b.remoteVersion(ctx, sshTarget)
+	remoteVersion, err := b.remoteVersion(ctx, sshTarget, profile)
 	if err != nil {
 		return fmt.Errorf("check remote version on %s: %w", sshTarget, err)
 	}
@@ -75,7 +75,7 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget string) 
 		if err != nil {
 			return fmt.Errorf("hash local binary for %s: %w", sshTarget, err)
 		}
-		remoteHash, err := b.remoteBinarySHA256(ctx, sshTarget)
+		remoteHash, err := b.remoteBinarySHA256(ctx, sshTarget, profile)
 		if err != nil {
 			return fmt.Errorf("hash remote binary on %s: %w", sshTarget, err)
 		}
@@ -86,13 +86,13 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget string) 
 	}
 
 	if shouldInstall {
-		if err := b.installRemoteBinary(ctx, sshTarget, localBinary); err != nil {
+		if err := b.installRemoteBinary(ctx, sshTarget, profile, localBinary); err != nil {
 			return fmt.Errorf("install attn on %s: %w", sshTarget, err)
 		}
 		binaryUpdated = true
 	}
 
-	if err := b.ensureRemoteDaemonRunning(ctx, sshTarget, binaryUpdated); err != nil {
+	if err := b.ensureRemoteDaemonRunning(ctx, sshTarget, profile, binaryUpdated); err != nil {
 		return fmt.Errorf("ensure remote daemon on %s: %w", sshTarget, err)
 	}
 	return nil
@@ -108,8 +108,8 @@ func shouldInstallRemoteBinary(localVersion, remoteVersion string, preferSourceB
 	return false
 }
 
-func (b *Bootstrapper) detectRemotePlatform(ctx context.Context, sshTarget string) (RemotePlatform, error) {
-	out, err := runSSH(ctx, sshTarget, "uname -sm")
+func (b *Bootstrapper) detectRemotePlatform(ctx context.Context, sshTarget, profile string) (RemotePlatform, error) {
+	out, err := runSSH(ctx, sshTarget, profile, "uname -sm")
 	if err != nil {
 		return RemotePlatform{}, err
 	}
@@ -131,7 +131,8 @@ func (b *Bootstrapper) detectRemotePlatform(ctx context.Context, sshTarget strin
 	}
 }
 
-func (b *Bootstrapper) remoteVersion(ctx context.Context, sshTarget string) (string, error) {
+func (b *Bootstrapper) remoteVersion(ctx context.Context, sshTarget, profile string) (string, error) {
+	binName := remoteBinaryName(profile)
 	script := fmt.Sprintf(`
 ATTN_BIN="${ATTN_REMOTE_ATTN_BIN:-$HOME/.local/bin/%s}"
 if [ ! -x "$ATTN_BIN" ] && [ -z "${ATTN_REMOTE_ATTN_BIN:-}" ]; then
@@ -142,8 +143,8 @@ if [ -z "$ATTN_BIN" ] || [ ! -x "$ATTN_BIN" ]; then
   exit 0
 fi
 "$ATTN_BIN" --version 2>/dev/null || printf NOT_FOUND
-`, config.BinaryName(), config.BinaryName())
-	out, err := runSSH(ctx, sshTarget, script)
+`, binName, binName)
+	out, err := runSSH(ctx, sshTarget, profile, script)
 	if err != nil {
 		return "", err
 	}
@@ -266,7 +267,8 @@ func fileSHA256(path string) (string, error) {
 	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
-func (b *Bootstrapper) remoteBinarySHA256(ctx context.Context, sshTarget string) (string, error) {
+func (b *Bootstrapper) remoteBinarySHA256(ctx context.Context, sshTarget, profile string) (string, error) {
+	binName := remoteBinaryName(profile)
 	script := fmt.Sprintf(`
 ATTN_BIN="${ATTN_REMOTE_ATTN_BIN:-$HOME/.local/bin/%s}"
 if [ ! -x "$ATTN_BIN" ] && [ -z "${ATTN_REMOTE_ATTN_BIN:-}" ]; then
@@ -285,8 +287,8 @@ if command -v shasum >/dev/null 2>&1; then
   exit 0
 fi
 printf NO_HASH_TOOL
-`, config.BinaryName(), config.BinaryName())
-	out, err := runSSH(ctx, sshTarget, script)
+`, binName, binName)
+	out, err := runSSH(ctx, sshTarget, profile, script)
 	if err != nil {
 		return "", err
 	}
@@ -387,10 +389,10 @@ func (b *Bootstrapper) buildBinaryFromSource(ctx context.Context, platform Remot
 	return nil
 }
 
-func resolveRemoteInstallPath(remoteHome, override string) string {
+func resolveRemoteInstallPath(remoteHome, override, profile string) string {
 	path := strings.TrimSpace(override)
 	if path == "" {
-		return filepath.Join(remoteHome, ".local", "bin", config.BinaryName())
+		return filepath.Join(remoteHome, ".local", "bin", remoteBinaryName(profile))
 	}
 	if strings.HasPrefix(path, "~/") {
 		return filepath.Join(remoteHome, path[2:])
@@ -398,15 +400,16 @@ func resolveRemoteInstallPath(remoteHome, override string) string {
 	return path
 }
 
-func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, localBinary string) error {
-	remoteHome, err := runSSH(ctx, sshTarget, `printf '%s' "$HOME"`)
+func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, profile, localBinary string) error {
+	remoteHome, err := runSSH(ctx, sshTarget, profile, `printf '%s' "$HOME"`)
 	if err != nil {
 		return err
 	}
-	remoteInstallPath := resolveRemoteInstallPath(strings.TrimSpace(remoteHome), os.Getenv("ATTN_REMOTE_ATTN_BIN"))
+	remoteInstallPath := resolveRemoteInstallPath(strings.TrimSpace(remoteHome), os.Getenv("ATTN_REMOTE_ATTN_BIN"), profile)
 	remoteInstallDir := filepath.Dir(remoteInstallPath)
 	remoteTmpPath := filepath.Join("/tmp", fmt.Sprintf("%s.%d.%d.tmp", filepath.Base(remoteInstallPath), os.Getpid(), time.Now().UnixNano()))
-	if _, err := runSSH(ctx, sshTarget, fmt.Sprintf("mkdir -p %s ~/.attn", shellQuote(remoteInstallDir))); err != nil {
+	attnDir := remoteAttnDirShell(profile)
+	if _, err := runSSH(ctx, sshTarget, profile, fmt.Sprintf("mkdir -p %s %s", shellQuote(remoteInstallDir), attnDir)); err != nil {
 		return err
 	}
 	file, err := os.Open(localBinary)
@@ -417,7 +420,7 @@ func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, local
 	cmd := exec.CommandContext(
 		ctx,
 		"ssh",
-		append(sshBaseArgs(sshTarget), remoteShellCommand(fmt.Sprintf("cat > %s", shellQuote(remoteTmpPath))))...,
+		append(sshBaseArgs(sshTarget), remoteShellCommand(profile, fmt.Sprintf("cat > %s", shellQuote(remoteTmpPath))))...,
 	)
 	cmd.Stdin = file
 	out, err := cmd.CombinedOutput()
@@ -427,6 +430,7 @@ func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, local
 	if probe, probeErr := runSSH(
 		ctx,
 		sshTarget,
+		profile,
 		fmt.Sprintf("if [ -f %s ]; then wc -c < %s; else printf MISSING; fi", shellQuote(remoteTmpPath), shellQuote(remoteTmpPath)),
 	); probeErr == nil {
 		b.logf("remote binary upload probe: target=%s tmp=%s result=%s", sshTarget, remoteTmpPath, strings.TrimSpace(probe))
@@ -434,6 +438,7 @@ func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, local
 	_, err = runSSH(
 		ctx,
 		sshTarget,
+		profile,
 		fmt.Sprintf(
 			"install -m 755 %s %s && rm -f %s",
 			shellQuote(remoteTmpPath),
@@ -444,15 +449,34 @@ func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, local
 	return err
 }
 
+// remoteAttnDirShell returns a shell expression that resolves to the
+// remote attn data dir for the given profile. The script picks the path up
+// from $ATTN_PROFILE (which remoteShellEnvScript exports), so it stays
+// self-contained when fed through `sh -lc`.
+func remoteAttnDirShell(profile string) string {
+	if strings.TrimSpace(profile) == "" {
+		return `"$HOME/.attn"`
+	}
+	// Even when we know the profile here, prefer reading $ATTN_PROFILE in the
+	// remote shell so the script and the env script stay consistent.
+	return `"$HOME/.attn-${ATTN_PROFILE}"`
+}
+
 func remoteSocketConfigScript() string {
 	return `
-config_path="${ATTN_CONFIG_PATH:-$HOME/.attn/config.json}"
+attn_profile="${ATTN_PROFILE:-}"
+if [ -n "$attn_profile" ]; then
+  attn_dir="$HOME/.attn-$attn_profile"
+else
+  attn_dir="$HOME/.attn"
+fi
+config_path="${ATTN_CONFIG_PATH:-$attn_dir/config.json}"
 socket_path="${ATTN_SOCKET_PATH:-}"
 if [ -z "$socket_path" ] && [ -f "$config_path" ]; then
   socket_path="$(sed -n 's/.*"socket_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$config_path" | head -n 1)"
 fi
 if [ -z "$socket_path" ]; then
-  socket_path="$HOME/.attn/attn.sock"
+  socket_path="$attn_dir/attn.sock"
 fi
 case "$socket_path" in
   "~/"*) socket_path="$HOME/${socket_path#~/}" ;;
@@ -482,11 +506,12 @@ type remoteDaemonState struct {
 	PID      string
 }
 
-func (b *Bootstrapper) probeRemoteDaemon(ctx context.Context, sshTarget string) (remoteDaemonState, error) {
-	script := remoteSocketConfigScript() + `
-listener_pid="$(ss -H -ltnp "( sport = :${ATTN_WS_PORT:-9849} )" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
+func (b *Bootstrapper) probeRemoteDaemon(ctx context.Context, sshTarget, profile string) (remoteDaemonState, error) {
+	port := config.WSPortForProfile(profile)
+	script := remoteSocketConfigScript() + fmt.Sprintf(`
+listener_pid="$(ss -H -ltnp "( sport = :${ATTN_WS_PORT:-%s} )" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
 if [ -n "$listener_pid" ]; then
-  printf 'running %s\n' "$listener_pid"
+  printf 'running %%s\n' "$listener_pid"
   exit 0
 fi
 if [ -S "$socket_path" ] && [ -f "$pid_path" ]; then
@@ -499,8 +524,8 @@ if [ -S "$socket_path" ] && [ -f "$pid_path" ]; then
   exit 0
 fi
 printf 'stopped\n'
-`
-	out, err := runSSH(ctx, sshTarget, script)
+`, port)
+	out, err := runSSH(ctx, sshTarget, profile, script)
 	if err != nil {
 		return remoteDaemonState{}, err
 	}
@@ -534,28 +559,28 @@ printf 'stopped\n'
 	}
 }
 
-func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget string, binaryUpdated bool) error {
-	state, err := b.probeRemoteDaemon(ctx, sshTarget)
+func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget, profile string, binaryUpdated bool) error {
+	state, err := b.probeRemoteDaemon(ctx, sshTarget, profile)
 	if err != nil {
 		return err
 	}
 
 	if state.Stale {
-		if _, err := runSSH(ctx, sshTarget, remoteSocketConfigScript()+`rm -f "$socket_path" "$pid_path"`); err != nil {
+		if _, err := runSSH(ctx, sshTarget, profile, remoteSocketConfigScript()+`rm -f "$socket_path" "$pid_path"`); err != nil {
 			return err
 		}
 		state = remoteDaemonState{}
 	}
 
 	if (state.Running || state.Starting) && binaryUpdated {
-		if err := b.restartRemoteDaemon(ctx, sshTarget, state.PID); err != nil {
+		if err := b.restartRemoteDaemon(ctx, sshTarget, profile, state.PID); err != nil {
 			return err
 		}
 		state = remoteDaemonState{}
 	}
 
 	if !state.Running && !state.Starting {
-		if err := b.startRemoteDaemon(ctx, sshTarget); err != nil {
+		if err := b.startRemoteDaemon(ctx, sshTarget, profile); err != nil {
 			return err
 		}
 	}
@@ -563,7 +588,7 @@ func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget 
 	deadline := time.Now().Add(remoteDaemonReadyTimeout)
 	for time.Now().Before(deadline) {
 		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		current, err := b.probeRemoteDaemon(probeCtx, sshTarget)
+		current, err := b.probeRemoteDaemon(probeCtx, sshTarget, profile)
 		cancel()
 		if err == nil && current.Running {
 			return nil
@@ -573,9 +598,13 @@ func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget 
 	return fmt.Errorf("daemon did not become ready")
 }
 
-func (b *Bootstrapper) startRemoteDaemon(ctx context.Context, sshTarget string) error {
-	launchScript := fmt.Sprintf(`
-mkdir -p ~/.attn
+// startRemoteDaemonScript returns the shell script that launches the remote
+// daemon for a given profile. Pure string for testability.
+func startRemoteDaemonScript(profile string) string {
+	binName := remoteBinaryName(profile)
+	attnDir := remoteAttnDirShell(profile)
+	return fmt.Sprintf(`
+mkdir -p %s
 ATTN_BIN="${ATTN_REMOTE_ATTN_BIN:-$HOME/.local/bin/%s}"
 if [ ! -x "$ATTN_BIN" ] && [ -z "${ATTN_REMOTE_ATTN_BIN:-}" ]; then
   ATTN_BIN="$(command -v %s 2>/dev/null || true)"
@@ -584,22 +613,26 @@ if [ -z "$ATTN_BIN" ] || [ ! -x "$ATTN_BIN" ]; then
   printf 'missing attn binary\n' >&2
   exit 127
 fi
-nohup setsid "$ATTN_BIN" daemon </dev/null >>~/.attn/daemon.log 2>&1 &
-`, config.BinaryName(), config.BinaryName())
+nohup setsid "$ATTN_BIN" daemon </dev/null >>%s/daemon.log 2>&1 &
+`, attnDir, binName, binName, attnDir)
+}
+
+func (b *Bootstrapper) startRemoteDaemon(ctx context.Context, sshTarget, profile string) error {
 	_, err := runSSH(
 		ctx,
 		sshTarget,
-		launchScript,
+		profile,
+		startRemoteDaemonScript(profile),
 	)
 	return err
 }
 
-func (b *Bootstrapper) StopRemoteDaemon(ctx context.Context, sshTarget string) error {
-	if !remoteHarnessCleanupEnabled() {
-		return nil
-	}
-	stopScript := remoteSocketConfigScript() + `
-listener_pid="$(ss -H -ltnp "( sport = :${ATTN_WS_PORT:-9849} )" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
+// stopRemoteDaemonScript returns the shell script that stops the remote daemon
+// for a given profile.
+func stopRemoteDaemonScript(profile string) string {
+	port := config.WSPortForProfile(profile)
+	return remoteSocketConfigScript() + fmt.Sprintf(`
+listener_pid="$(ss -H -ltnp "( sport = :${ATTN_WS_PORT:-%s} )" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
 pid_file_pid=""
 if [ -f "$pid_path" ]; then
   pid_file_pid="$(cat "$pid_path" 2>/dev/null || true)"
@@ -619,19 +652,25 @@ for pid in $seen_pids; do
   kill -9 "$pid" 2>/dev/null || true
 done
 rm -f "$socket_path" "$pid_path"
-`
-	_, err := runSSH(ctx, sshTarget, stopScript)
+`, port)
+}
+
+func (b *Bootstrapper) StopRemoteDaemon(ctx context.Context, sshTarget, profile string) error {
+	if !remoteHarnessCleanupEnabled() {
+		return nil
+	}
+	_, err := runSSH(ctx, sshTarget, profile, stopRemoteDaemonScript(profile))
 	return err
 }
 
-func (b *Bootstrapper) restartRemoteDaemon(ctx context.Context, sshTarget, pid string) error {
+func (b *Bootstrapper) restartRemoteDaemon(ctx context.Context, sshTarget, profile, pid string) error {
 	if strings.TrimSpace(pid) != "" {
-		_, _ = runSSH(ctx, sshTarget, fmt.Sprintf("kill %s 2>/dev/null || true", shellQuote(pid)))
+		_, _ = runSSH(ctx, sshTarget, profile, fmt.Sprintf("kill %s 2>/dev/null || true", shellQuote(pid)))
 		time.Sleep(500 * time.Millisecond)
-		_, _ = runSSH(ctx, sshTarget, fmt.Sprintf("kill -9 %s 2>/dev/null || true", shellQuote(pid)))
+		_, _ = runSSH(ctx, sshTarget, profile, fmt.Sprintf("kill -9 %s 2>/dev/null || true", shellQuote(pid)))
 	}
-	if _, err := runSSH(ctx, sshTarget, remoteSocketConfigScript()+`rm -f "$socket_path" "$pid_path"`); err != nil {
+	if _, err := runSSH(ctx, sshTarget, profile, remoteSocketConfigScript()+`rm -f "$socket_path" "$pid_path"`); err != nil {
 		return err
 	}
-	return b.startRemoteDaemon(ctx, sshTarget)
+	return b.startRemoteDaemon(ctx, sshTarget, profile)
 }
