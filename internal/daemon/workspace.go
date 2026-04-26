@@ -178,19 +178,22 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 
 // rollupWorkspaceStatus returns the workspace status that summarizes the
 // supplied session states. Higher-priority states win:
-// launching > working > waiting_input > pending_approval > idle > unknown.
+// working > waiting_input > pending_approval > idle > launching > unknown.
+// `launching` sits below `idle` on purpose — it carries less information than
+// any settled state, so as soon as one session reports a real state, that
+// one wins over a peer that's still booting.
 // An empty slice yields "unknown".
 func rollupWorkspaceStatus(sessionStates []protocol.SessionState) protocol.WorkspaceStatus {
 	if len(sessionStates) == 0 {
 		return protocol.WorkspaceStatusUnknown
 	}
 	priority := map[protocol.SessionState]int{
-		protocol.SessionStateLaunching:       6,
-		protocol.SessionStateWorking:         5,
-		protocol.SessionStateWaitingInput:    4,
-		protocol.SessionStatePendingApproval: 3,
-		protocol.SessionStateIdle:            2,
-		protocol.SessionStateUnknown:    1,
+		protocol.SessionStateWorking:         6,
+		protocol.SessionStateWaitingInput:    5,
+		protocol.SessionStatePendingApproval: 4,
+		protocol.SessionStateIdle:            3,
+		protocol.SessionStateLaunching:       2,
+		protocol.SessionStateUnknown:         1,
 	}
 	statusFor := map[protocol.SessionState]protocol.WorkspaceStatus{
 		protocol.SessionStateLaunching:       protocol.WorkspaceStatusLaunching,

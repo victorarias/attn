@@ -25,9 +25,9 @@ func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
 			want:   protocol.WorkspaceStatusWorking,
 		},
 		{
-			name:   "launching beats working",
-			states: []protocol.SessionState{protocol.SessionStateWorking, protocol.SessionStateLaunching},
-			want:   protocol.WorkspaceStatusLaunching,
+			name:   "working beats launching",
+			states: []protocol.SessionState{protocol.SessionStateLaunching, protocol.SessionStateWorking},
+			want:   protocol.WorkspaceStatusWorking,
 		},
 		{
 			name:   "working beats waiting_input",
@@ -45,14 +45,24 @@ func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
 			want:   protocol.WorkspaceStatusPendingApproval,
 		},
 		{
+			name:   "idle beats launching",
+			states: []protocol.SessionState{protocol.SessionStateLaunching, protocol.SessionStateIdle},
+			want:   protocol.WorkspaceStatusIdle,
+		},
+		{
+			name:   "launching beats unknown",
+			states: []protocol.SessionState{protocol.SessionStateUnknown, protocol.SessionStateLaunching},
+			want:   protocol.WorkspaceStatusLaunching,
+		},
+		{
 			name:   "all idle yields idle",
 			states: []protocol.SessionState{protocol.SessionStateIdle, protocol.SessionStateIdle},
 			want:   protocol.WorkspaceStatusIdle,
 		},
 		{
-			name:   "idle beats unknown",
-			states: []protocol.SessionState{protocol.SessionStateUnknown, protocol.SessionStateIdle},
-			want:   protocol.WorkspaceStatusIdle,
+			name:   "all launching yields launching",
+			states: []protocol.SessionState{protocol.SessionStateLaunching, protocol.SessionStateLaunching},
+			want:   protocol.WorkspaceStatusLaunching,
 		},
 	}
 	for _, tc := range cases {

@@ -31,7 +31,9 @@ enum SessionAgent {
 }
 
 // WorkspaceStatus is the rolled-up status of all sessions in a workspace.
-// Priority (highest first): launching > working > waiting_input > pending_approval > idle > unknown.
+// Priority (highest first): working > waiting_input > pending_approval > idle > launching > unknown.
+// `launching` sits below `idle` because it carries less information — any
+// session in a settled state out-prioritizes a peer that's still booting.
 enum WorkspaceStatus {
   launching,
   working,
