@@ -24,7 +24,7 @@ jobs:
         with:
           provider: openrouter
           api-key: ${{ secrets.OPEN_ROUTER_API_KEY }}
-          model: qwen/qwen3.6-plus
+          model: moonshotai/kimi-k2.6
           reasoning: xhigh
           max-files: 200
           debug: "true"

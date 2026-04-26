@@ -42,6 +42,42 @@ impl std::fmt::Display for SessionState {
     }
 }
 
+/// Rolled-up status of all sessions in a workspace. Mirrors the daemon's
+/// `WorkspaceStatus` enum (no `unknown` value — workspaces always have a
+/// directory and a registry entry, so the rollup always lands somewhere).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceStatus {
+    Launching,
+    Working,
+    WaitingInput,
+    PendingApproval,
+    Idle,
+}
+
+impl std::fmt::Display for WorkspaceStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Launching => write!(f, "launching"),
+            Self::Working => write!(f, "working"),
+            Self::WaitingInput => write!(f, "waiting_input"),
+            Self::PendingApproval => write!(f, "pending_approval"),
+            Self::Idle => write!(f, "idle"),
+        }
+    }
+}
+
+/// A workspace as the daemon broadcasts it: the directory + the rolled-up
+/// status of its member sessions. Panels and other UI state are local to
+/// the canvas client; only the wire-visible fields live here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    pub id: String,
+    pub title: String,
+    pub directory: String,
+    pub status: WorkspaceStatus,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionAgent {
@@ -77,6 +113,8 @@ pub struct Session {
     pub branch: Option<String>,
     #[serde(default)]
     pub endpoint_id: Option<String>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     #[serde(default)]
     pub is_worktree: Option<bool>,
     #[serde(default)]

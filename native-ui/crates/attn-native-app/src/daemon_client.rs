@@ -1,9 +1,16 @@
-use attn_protocol::{ServerEvent, Session, PROTOCOL_VERSION};
+use attn_protocol::{ServerEvent, Session, Workspace, PROTOCOL_VERSION};
 use futures_util::{SinkExt, StreamExt};
 use gpui::{AsyncApp, Context, EventEmitter, WeakEntity};
 use serde::Serialize;
 
-const DAEMON_WS_URL: &str = "ws://localhost:9849/ws";
+const DEFAULT_DAEMON_WS_URL: &str = "ws://localhost:9849/ws";
+
+/// WebSocket URL the daemon client connects to. Defaults to the prod port
+/// (9849); override with `ATTN_WS_URL=ws://localhost:29849/ws` to point at
+/// the dev daemon (`make dev`) during attn-on-attn testing.
+fn daemon_ws_url() -> String {
+    std::env::var("ATTN_WS_URL").unwrap_or_else(|_| DEFAULT_DAEMON_WS_URL.to_string())
+}
 
 /// Events emitted by DaemonClient to subscribers.
 #[derive(Debug, Clone)]
@@ -11,6 +18,13 @@ pub enum DaemonEvent {
     Connected,
     Disconnected,
     SessionsChanged,
+    /// A workspace appeared (or the InitialState batch arrived). Carries the
+    /// snapshot at registration time.
+    WorkspaceRegistered { workspace: Workspace },
+    /// A workspace was removed (cascade-closed by the daemon).
+    WorkspaceUnregistered { workspace_id: String },
+    /// A workspace's rolled-up status changed. Carries the fresh snapshot.
+    WorkspaceStateChanged { workspace: Workspace },
     /// Raw PTY output for a specific session. Delivered directly so terminal
     /// models can subscribe without triggering full workspace re-renders.
     PtyOutput { session_id: String, data: String, seq: i32 },
@@ -26,6 +40,7 @@ pub enum DaemonEvent {
 
 pub struct DaemonClient {
     sessions: Vec<Session>,
+    workspaces: Vec<Workspace>,
     connected: bool,
     error: Option<String>,
     /// Channel sender for outbound commands. None when not connected.
@@ -36,10 +51,11 @@ impl EventEmitter<DaemonEvent> for DaemonClient {}
 
 impl DaemonClient {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        cx.spawn(async |this: WeakEntity<DaemonClient>, cx: &mut AsyncApp| {
+        let url = daemon_ws_url();
+        cx.spawn(async move |this: WeakEntity<DaemonClient>, cx: &mut AsyncApp| {
             loop {
                 let connect_result =
-                    async_tungstenite::async_std::connect_async(DAEMON_WS_URL).await;
+                    async_tungstenite::async_std::connect_async(url.as_str()).await;
 
                 match connect_result {
                     Ok((ws_stream, _)) => {
@@ -122,7 +138,13 @@ impl DaemonClient {
         })
         .detach();
 
-        Self { sessions: Vec::new(), connected: false, error: None, cmd_tx: None }
+        Self {
+            sessions: Vec::new(),
+            workspaces: Vec::new(),
+            connected: false,
+            error: None,
+            cmd_tx: None,
+        }
     }
 
     /// Send a serializable command to the daemon. Silently drops if not connected.
@@ -145,6 +167,28 @@ impl DaemonClient {
                     }
                 }
                 self.sessions = msg.sessions;
+                // Workspaces are event-driven on the consumer side (add/remove
+                // events update sidebar + canvas state), so a fresh InitialState
+                // must emit removals for any workspace that disappeared during
+                // a disconnect — otherwise stale rows linger after the daemon
+                // restarts with fewer workspaces.
+                let new_ids: std::collections::HashSet<&str> =
+                    msg.workspaces.iter().map(|w| w.id.as_str()).collect();
+                for old in &self.workspaces {
+                    if !new_ids.contains(old.id.as_str()) {
+                        cx.emit(DaemonEvent::WorkspaceUnregistered {
+                            workspace_id: old.id.clone(),
+                        });
+                    }
+                }
+                self.workspaces = msg.workspaces;
+                // Replay every persisted workspace as a Registered event so
+                // sidebar/canvas subscribers can hydrate without special-casing
+                // the InitialState path. WorkspaceRegistered is idempotent on
+                // the consumer side (dedup'd by id).
+                for ws in self.workspaces.clone() {
+                    cx.emit(DaemonEvent::WorkspaceRegistered { workspace: ws });
+                }
                 cx.emit(DaemonEvent::SessionsChanged);
                 cx.notify();
             }
@@ -170,6 +214,30 @@ impl DaemonClient {
             ServerEvent::SessionsUpdated(msg) => {
                 self.sessions = msg.sessions;
                 cx.emit(DaemonEvent::SessionsChanged);
+                cx.notify();
+            }
+            ServerEvent::WorkspaceRegistered(msg) => {
+                let ws = msg.workspace;
+                if let Some(existing) = self.workspaces.iter_mut().find(|w| w.id == ws.id) {
+                    *existing = ws.clone();
+                } else {
+                    self.workspaces.push(ws.clone());
+                }
+                cx.emit(DaemonEvent::WorkspaceRegistered { workspace: ws });
+                cx.notify();
+            }
+            ServerEvent::WorkspaceUnregistered(msg) => {
+                let id = msg.workspace.id;
+                self.workspaces.retain(|w| w.id != id);
+                cx.emit(DaemonEvent::WorkspaceUnregistered { workspace_id: id });
+                cx.notify();
+            }
+            ServerEvent::WorkspaceStateChanged(msg) => {
+                let ws = msg.workspace;
+                if let Some(existing) = self.workspaces.iter_mut().find(|w| w.id == ws.id) {
+                    *existing = ws.clone();
+                }
+                cx.emit(DaemonEvent::WorkspaceStateChanged { workspace: ws });
                 cx.notify();
             }
             ServerEvent::AttachResult(msg) => {
@@ -208,6 +276,11 @@ impl DaemonClient {
 
     pub fn sessions(&self) -> &[Session] {
         &self.sessions
+    }
+
+    #[allow(dead_code)]
+    pub fn workspaces(&self) -> &[Workspace] {
+        &self.workspaces
     }
 
     #[allow(dead_code)]
