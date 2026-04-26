@@ -5,6 +5,7 @@
 ///
 /// Layout: sidebar pinned left at fixed width, canvas fills the rest.
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gpui::{
     div, prelude::*, rgb, App, Context, Entity, ParentElement, Render, SharedString, Window,
@@ -143,6 +144,15 @@ impl Render for Spike5App {
     }
 }
 
+/// Process-wide monotonically-increasing panel ID. Panels aren't keyed by id
+/// today (rendered by vec position), but reserving unique ids now keeps the
+/// door open for drag/lookup-by-id without a future rename pass.
+static NEXT_PANEL_ID: AtomicUsize = AtomicUsize::new(1);
+
+fn next_panel_id() -> usize {
+    NEXT_PANEL_ID.fetch_add(1, Ordering::Relaxed)
+}
+
 /// Two panels for every workspace as it appears: one Placeholder, one
 /// Terminal stub. Demonstrates the enum dispatching across distinct
 /// render paths without requiring real PTY wiring in this spike.
@@ -153,7 +163,7 @@ fn make_demo_panels(workspace_id: &SharedString, cx: &mut App) -> Vec<Panel> {
     let session_id = SharedString::from(format!("{workspace_id}-demo"));
     vec![
         Panel {
-            id: 1,
+            id: next_panel_id(),
             title: SharedString::from("Notes"),
             world_x: 60.0,
             world_y: 60.0,
@@ -162,7 +172,7 @@ fn make_demo_panels(workspace_id: &SharedString, cx: &mut App) -> Vec<Panel> {
             content: PanelContent::Placeholder(placeholder_view),
         },
         Panel {
-            id: 2,
+            id: next_panel_id(),
             title: SharedString::from("Agent"),
             world_x: 380.0,
             world_y: 60.0,

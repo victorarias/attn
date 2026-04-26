@@ -42,20 +42,16 @@ impl Sidebar {
         }
     }
 
-    /// Insert or replace a workspace handle. Called by `Spike5App` when
-    /// a new `WorkspaceRegistered` event arrives.
+    /// Add a workspace handle. Called by `Spike5App` on `WorkspaceRegistered`.
+    /// `Spike5App` guards duplicates upstream (same id → same `Entity<Workspace>`
+    /// reused), so this is a pure insert — re-inserting the same id is a no-op.
     pub fn upsert_workspace(&mut self, ws: Entity<Workspace>, cx: &mut Context<Self>) {
         let id = ws.read(cx).id.clone();
-        if let Some(slot) = self
-            .workspaces
-            .iter_mut()
-            .find(|existing| existing.read(cx).id == id)
-        {
-            *slot = ws.clone();
-        } else {
-            self.workspaces.push(ws.clone());
-            cx.observe(&ws, |_, _, cx| cx.notify()).detach();
+        if self.workspaces.iter().any(|existing| existing.read(cx).id == id) {
+            return;
         }
+        cx.observe(&ws, |_, _, cx| cx.notify()).detach();
+        self.workspaces.push(ws);
         cx.notify();
     }
 
