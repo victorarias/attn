@@ -167,6 +167,20 @@ impl DaemonClient {
                     }
                 }
                 self.sessions = msg.sessions;
+                // Workspaces are event-driven on the consumer side (add/remove
+                // events update sidebar + canvas state), so a fresh InitialState
+                // must emit removals for any workspace that disappeared during
+                // a disconnect — otherwise stale rows linger after the daemon
+                // restarts with fewer workspaces.
+                let new_ids: std::collections::HashSet<&str> =
+                    msg.workspaces.iter().map(|w| w.id.as_str()).collect();
+                for old in &self.workspaces {
+                    if !new_ids.contains(old.id.as_str()) {
+                        cx.emit(DaemonEvent::WorkspaceUnregistered {
+                            workspace_id: old.id.clone(),
+                        });
+                    }
+                }
                 self.workspaces = msg.workspaces;
                 // Replay every persisted workspace as a Registered event so
                 // sidebar/canvas subscribers can hydrate without special-casing
