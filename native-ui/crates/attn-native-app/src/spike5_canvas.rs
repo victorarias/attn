@@ -18,13 +18,11 @@ use gpui::{
 };
 
 use crate::canvas_view::{pf, GridElement, Viewport};
-use crate::daemon_client::DaemonClient;
-use crate::panel::{Panel, PanelContent};
+use crate::panel::{Panel, PanelContent, TITLE_HEIGHT};
 use crate::workspace::Workspace;
 
 // ── Layout constants ─────────────────────────────────────────────────────────
 
-const TITLE_HEIGHT: f32 = 24.0; // world-space units
 const HANDLE_SIZE: f32 = 8.0; // screen-space pixels (fixed, not scaled)
 const PANEL_MIN_W: f32 = 120.0; // world-space
 const PANEL_MIN_H: f32 = 80.0; // world-space
@@ -56,8 +54,6 @@ enum HitResult {
 }
 
 pub struct Spike5Canvas {
-    #[allow(dead_code)]
-    daemon: Entity<DaemonClient>,
     selected: Option<Entity<Workspace>>,
     /// Drop = unsubscribe. Replaced when selection changes so re-renders
     /// only fire for the workspace currently on screen.
@@ -65,7 +61,6 @@ pub struct Spike5Canvas {
     viewport: Viewport,
     drag_state: DragState,
     focused_panel: Option<usize>,
-    needs_focus_panel: Option<usize>,
     focus_handle: FocusHandle,
     /// Window-relative bounds of the canvas's root element, captured each
     /// frame via a `canvas()` prepaint callback. Mouse events arrive with
@@ -76,15 +71,13 @@ pub struct Spike5Canvas {
 }
 
 impl Spike5Canvas {
-    pub fn new(daemon: Entity<DaemonClient>, cx: &mut Context<Self>) -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
-            daemon,
             selected: None,
             _selected_subscription: None,
             viewport: Viewport::default(),
             drag_state: DragState::Idle,
             focused_panel: None,
-            needs_focus_panel: None,
             focus_handle: cx.focus_handle(),
             bounds: Rc::new(Cell::new(None)),
         }
@@ -365,15 +358,6 @@ impl Render for Spike5Canvas {
         let panels = selected.read(cx).panels.clone();
         if panels.is_empty() {
             return root.child(empty_state(SharedString::from("Workspace has no panels yet")));
-        }
-
-        // Apply pending focus request now that we have window access.
-        if let Some(fid) = self.needs_focus_panel.take() {
-            if let Some(panel) = panels.iter().find(|p| p.id == fid) {
-                if let PanelContent::Terminal { view, .. } = &panel.content {
-                    view.read(cx).focus_handle.clone().focus(window);
-                }
-            }
         }
 
         // Push content_size + zoom into every TerminalView so their next

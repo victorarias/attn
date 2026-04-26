@@ -323,6 +323,11 @@ impl TerminalView {
     }
 
     /// Set the canvas zoom factor used for rendering. Returns true if changed.
+    /// `#[allow(dead_code)]` is a per-binary artifact of the spike's
+    /// multi-bin layout — the method is used by `attn-spike4` and
+    /// `attn-spike5` but not by `attn-native`, and Rust dead-code
+    /// analysis runs per binary. A future lib.rs refactor would let us
+    /// drop this.
     #[allow(dead_code)]
     pub fn set_zoom(&mut self, zoom: f32) -> bool {
         let changed = (self.zoom - zoom).abs() >= 0.001;
@@ -334,6 +339,7 @@ impl TerminalView {
 
     /// Set the content area size (world-space units) used for terminal dimension
     /// computation. Returns true if the value changed by more than half a pixel.
+    /// See note on `set_zoom` re: `#[allow(dead_code)]`.
     #[allow(dead_code)]
     pub fn set_content_size(&mut self, w: f32, h: f32) -> bool {
         let changed = match self.content_size {

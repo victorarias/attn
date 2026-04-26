@@ -11,7 +11,7 @@ use attn_protocol::{AttachSessionMessage, Session};
 use gpui::{div, prelude::*, rgb, Context, Entity, ParentElement, Render, SharedString, Window};
 
 use crate::daemon_client::{DaemonClient, DaemonEvent};
-use crate::panel::{Panel, PanelContent};
+use crate::panel::{Panel, PanelContent, TITLE_HEIGHT};
 use crate::sidebar::Sidebar;
 use crate::spike5_canvas::Spike5Canvas;
 use crate::terminal_model::TerminalModel;
@@ -34,7 +34,7 @@ pub struct Spike5App {
 
 impl Spike5App {
     pub fn new(daemon: Entity<DaemonClient>, cx: &mut Context<Self>) -> Self {
-        let canvas = cx.new(|cx| Spike5Canvas::new(daemon.clone(), cx));
+        let canvas = cx.new(|cx| Spike5Canvas::new(cx));
         let canvas_for_select = canvas.clone();
         let app_handle = cx.entity().downgrade();
         let sidebar = cx.new(|cx| {
@@ -64,7 +64,17 @@ impl Spike5App {
             DaemonEvent::WorkspaceStateChanged { workspace } => {
                 this.apply_workspace_snapshot(workspace.clone(), cx);
             }
-            DaemonEvent::SessionsChanged | DaemonEvent::Connected => {
+            DaemonEvent::SessionsChanged => {
+                this.sync_terminal_panels(cx);
+            }
+            DaemonEvent::Connected => {
+                // Daemon tracks PTY attachments per client connection,
+                // so on a fresh socket every existing TerminalView is
+                // detached on the daemon side until we re-issue
+                // AttachSession. Without this, terminals go silent
+                // after a daemon restart and only recover on app
+                // restart.
+                this.reattach_existing_terminals(cx);
                 this.sync_terminal_panels(cx);
             }
             _ => {}
@@ -129,6 +139,21 @@ impl Spike5App {
             self.selected_id = None;
             self.canvas
                 .update(cx, |canvas, cx| canvas.set_selected(None, cx));
+        }
+    }
+
+    /// Walk every workspace's Terminal panels and re-issue
+    /// `AttachSession` for each. Called on `Connected` so existing
+    /// terminals resume receiving PtyOutput after a daemon restart or
+    /// any websocket reconnect.
+    fn reattach_existing_terminals(&self, cx: &mut Context<Self>) {
+        let daemon = self.daemon.read(cx);
+        for ws_entity in self.workspaces_by_id.values() {
+            for panel in ws_entity.read(cx).panels.iter() {
+                if let PanelContent::Terminal { session_id, .. } = &panel.content {
+                    daemon.send_cmd(&AttachSessionMessage::new(session_id.to_string()));
+                }
+            }
         }
     }
 
@@ -251,10 +276,6 @@ static NEXT_PANEL_ID: AtomicUsize = AtomicUsize::new(1);
 fn next_panel_id() -> usize {
     NEXT_PANEL_ID.fetch_add(1, Ordering::Relaxed)
 }
-
-/// Mirror of the canvas's title-bar height. Kept in this file so the
-/// initial content_size matches the canvas's per-frame value.
-const TITLE_HEIGHT: f32 = 24.0;
 
 fn panel_terminal_dims(world_w: f32, world_h: f32) -> (u16, u16) {
     use crate::terminal_view::{CHAR_WIDTH, ROW_HEIGHT};

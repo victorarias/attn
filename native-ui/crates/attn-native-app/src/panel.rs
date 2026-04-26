@@ -13,6 +13,11 @@ use gpui::{div, prelude::*, px, rgb, Context, Entity, ParentElement, Render, Sha
 
 use crate::terminal_view::TerminalView;
 
+/// World-space height of the panel title bar. Used by both the canvas
+/// (for hit testing + title-bar layout) and `Spike5App` (for initial
+/// `content_size` when a panel is created). Single source of truth.
+pub const TITLE_HEIGHT: f32 = 24.0;
+
 #[derive(Clone, Debug)]
 pub struct Panel {
     pub id: usize,
