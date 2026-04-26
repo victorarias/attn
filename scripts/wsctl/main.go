@@ -203,14 +203,18 @@ func rmSession(args []string) error {
 	if *id == "" {
 		return errors.New("--id is required")
 	}
+	// `unregister` SIGTERMs the agent process AND removes the session
+	// record from the daemon's store. `kill_session` only does the
+	// first half — if the agent is already dead, kill_session is a
+	// no-op and the session lingers as a ghost.
 	msg := map[string]any{
-		"cmd": "kill_session",
+		"cmd": "unregister",
 		"id":  *id,
 	}
 	if err := send(msg); err != nil {
 		return err
 	}
-	fmt.Printf("session killed: id=%s\n", *id)
+	fmt.Printf("session removed: id=%s\n", *id)
 	return nil
 }
 
