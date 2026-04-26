@@ -439,6 +439,7 @@ func (d *Daemon) Start() error {
 	if d.workspaces == nil {
 		d.workspaces = newWorkspaceRegistry()
 	}
+	d.loadWorkspacesFromStore()
 	if d.daemonInstanceID == "" {
 		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
 		if err != nil {

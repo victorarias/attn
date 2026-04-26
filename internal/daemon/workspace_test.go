@@ -368,3 +368,136 @@ func TestAssociateSessionWithWorkspace_StaleIDIsDropped(t *testing.T) {
 		t.Fatalf("expected no broadcast for stale workspace_id, got %d", len(events))
 	}
 }
+
+func TestRegisterWorkspace_PersistsToStoreAndUpsertsRecentLocation(t *testing.T) {
+	d := newDaemonForTest(t)
+	dir := t.TempDir() // Real path so GetRecentLocations doesn't filter it out.
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        "ws1",
+		Title:     "Workspace 1",
+		Directory: dir,
+	})
+
+	persisted := d.store.GetWorkspace("ws1")
+	if persisted == nil {
+		t.Fatal("workspace was not persisted to store")
+	}
+	if persisted.Title != "Workspace 1" || persisted.Directory != dir {
+		t.Fatalf("persisted workspace mismatch: %+v", persisted)
+	}
+
+	// Recent locations should include the workspace's directory.
+	found := false
+	for _, loc := range d.store.GetRecentLocations(50) {
+		if loc != nil && loc.Path == dir {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("workspace directory was not added to recent_locations")
+	}
+}
+
+func TestUnregisterWorkspace_CascadeClosesMemberSessions(t *testing.T) {
+	d := newDaemonForTest(t)
+	now := string(protocol.TimestampNow())
+
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws1", Title: "ws", Directory: "/repo",
+	})
+	for _, sid := range []string{"s1", "s2"} {
+		d.store.Add(&protocol.Session{
+			ID: sid, Label: sid, Agent: protocol.SessionAgentCodex, Directory: "/repo",
+			State: protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+		})
+		d.associateSessionWithWorkspace(sid, "ws1")
+	}
+
+	cap := captureBroadcasts(d)
+	d.handleUnregisterWorkspace(nil, &protocol.UnregisterWorkspaceMessage{
+		Cmd: protocol.CmdUnregisterWorkspace, ID: "ws1",
+	})
+
+	// Both sessions should be gone from the store.
+	if d.store.Get("s1") != nil || d.store.Get("s2") != nil {
+		t.Fatal("member sessions were not removed from the store")
+	}
+	// Workspace itself is gone from the store.
+	if d.store.GetWorkspace("ws1") != nil {
+		t.Fatal("workspace was not removed from the store")
+	}
+
+	// Broadcast order: two session_unregistered, then workspace_unregistered.
+	events := cap.snapshot()
+	if len(events) != 3 {
+		t.Fatalf("expected 3 broadcasts (2 session_unregistered + 1 workspace_unregistered), got %d: %+v", len(events), events)
+	}
+	for i, want := range []string{
+		protocol.EventSessionUnregistered,
+		protocol.EventSessionUnregistered,
+		protocol.EventWorkspaceUnregistered,
+	} {
+		if events[i].Event != want {
+			t.Fatalf("event[%d] = %q, want %q", i, events[i].Event, want)
+		}
+	}
+}
+
+func TestLoadWorkspacesFromStore_RebuildsRegistryAndReassociates(t *testing.T) {
+	d := newDaemonForTest(t)
+	now := string(protocol.TimestampNow())
+
+	// Seed the store directly, simulating state that was persisted before a
+	// daemon restart.
+	d.store.AddWorkspace(&protocol.Workspace{ID: "ws1", Title: "ws", Directory: "/repo"})
+	d.store.Add(&protocol.Session{
+		ID: "s1", Label: "s1", Agent: protocol.SessionAgentCodex, Directory: "/repo",
+		WorkspaceID: protocol.Ptr("ws1"),
+		State:       protocol.SessionStateWorking,
+		StateSince:  now, StateUpdatedAt: now, LastSeen: now,
+	})
+
+	// Fresh registry; load from the store.
+	d.workspaces = newWorkspaceRegistry()
+	d.loadWorkspacesFromStore()
+
+	// Registry should know about ws1, the session-to-workspace link, and the
+	// rollup status (working).
+	if got := d.workspaces.workspaceIDForSession("s1"); got != "ws1" {
+		t.Fatalf("association not reloaded: got %q, want ws1", got)
+	}
+	snap, ok := d.workspaces.snapshot("ws1")
+	if !ok {
+		t.Fatal("workspace not in registry after load")
+	}
+	if snap.Status != protocol.WorkspaceStatusWorking {
+		t.Fatalf("status after load = %q, want working", snap.Status)
+	}
+}
+
+func TestAssociateSessionWithWorkspace_PersistsToStore(t *testing.T) {
+	d := newDaemonForTest(t)
+	now := string(protocol.TimestampNow())
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: "ws1", Title: "ws", Directory: "/repo",
+	})
+	d.store.Add(&protocol.Session{
+		ID: "s1", Label: "s1", Agent: protocol.SessionAgentCodex, Directory: "/repo",
+		State: protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	d.associateSessionWithWorkspace("s1", "ws1")
+
+	got := d.store.Get("s1")
+	if got == nil || got.WorkspaceID == nil || *got.WorkspaceID != "ws1" {
+		t.Fatalf("workspace_id was not persisted on session: %+v", got)
+	}
+
+	// And the dissociate path clears it.
+	d.dissociateSessionFromWorkspace("s1")
+	got = d.store.Get("s1")
+	if got == nil || got.WorkspaceID != nil {
+		t.Fatalf("workspace_id was not cleared on dissociate: %+v", got)
+	}
+}

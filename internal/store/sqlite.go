@@ -287,6 +287,16 @@ var migrations = []migration{
 	)`},
 	{33, "drop unused wont_fix columns from review_comments", ""},
 	{34, "add profile to endpoints", "ALTER TABLE endpoints ADD COLUMN profile TEXT NOT NULL DEFAULT ''"},
+	{35, "create canvas-workspaces table and add workspace_id to sessions", `
+		CREATE TABLE IF NOT EXISTS workspaces (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			directory TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+		ALTER TABLE sessions ADD COLUMN workspace_id TEXT;
+		CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -392,6 +402,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 34 {
 			if err := applyMigration34(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 35 {
+			if err := applyMigration35(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -551,6 +566,30 @@ func applyMigration34(tx *sql.Tx) error {
 		return nil
 	}
 	if _, err := tx.Exec("ALTER TABLE endpoints ADD COLUMN profile TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyMigration35(tx *sql.Tx) error {
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS workspaces (
+		id TEXT PRIMARY KEY,
+		title TEXT NOT NULL,
+		directory TEXT NOT NULL,
+		created_at TEXT NOT NULL
+	)`); err != nil {
+		return err
+	}
+	hasWorkspaceID, err := columnExists(tx, "sessions", "workspace_id")
+	if err != nil {
+		return err
+	}
+	if !hasWorkspaceID {
+		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN workspace_id TEXT"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id)"); err != nil {
 		return err
 	}
 	return nil

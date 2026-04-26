@@ -47,6 +47,9 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 	if session.EndpointID != nil {
 		cloned.EndpointID = protocol.Ptr(protocol.Deref(session.EndpointID))
 	}
+	if session.WorkspaceID != nil {
+		cloned.WorkspaceID = protocol.Ptr(protocol.Deref(session.WorkspaceID))
+	}
 	if session.Branch != nil {
 		cloned.Branch = protocol.Ptr(protocol.Deref(session.Branch))
 	}
@@ -142,13 +145,14 @@ func (s *Store) Add(session *protocol.Session) {
 	session.Agent = protocol.SessionAgent(normalizedAgent)
 	_, err = s.db.Exec(`
 		INSERT OR REPLACE INTO sessions
-		(id, label, agent, directory, endpoint_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Label,
 		session.Agent,
 		session.Directory,
 		protocol.Deref(session.EndpointID),
+		protocol.Deref(session.WorkspaceID),
 		protocol.Deref(session.Branch),
 		boolToInt(protocol.Deref(session.IsWorktree)),
 		protocol.Deref(session.MainRepo),
@@ -178,16 +182,17 @@ func (s *Store) Get(id string) *protocol.Session {
 	var todosJSON string
 	var stateSince, stateUpdatedAt, lastSeen string
 	var muted, isWorktree, recoverable int
-	var endpointID, branch, mainRepo sql.NullString
+	var endpointID, workspaceID, branch, mainRepo sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, agent, directory, endpoint_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
 		&session.Agent,
 		&session.Directory,
 		&endpointID,
+		&workspaceID,
 		&branch,
 		&isWorktree,
 		&mainRepo,
@@ -205,6 +210,9 @@ func (s *Store) Get(id string) *protocol.Session {
 
 	if endpointID.Valid && endpointID.String != "" {
 		session.EndpointID = protocol.Ptr(endpointID.String)
+	}
+	if workspaceID.Valid && workspaceID.String != "" {
+		session.WorkspaceID = protocol.Ptr(workspaceID.String)
 	}
 	if branch.Valid && branch.String != "" {
 		session.Branch = protocol.Ptr(branch.String)
@@ -305,11 +313,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
 			FROM sessions ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
 			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
@@ -323,7 +331,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var todosJSON string
 		var stateSince, stateUpdatedAt, lastSeen string
 		var muted, isWorktree, recoverable int
-		var endpointID, branch, mainRepo sql.NullString
+		var endpointID, workspaceID, branch, mainRepo sql.NullString
 
 		err := rows.Scan(
 			&session.ID,
@@ -331,6 +339,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			&session.Agent,
 			&session.Directory,
 			&endpointID,
+			&workspaceID,
 			&branch,
 			&isWorktree,
 			&mainRepo,
@@ -348,6 +357,9 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 		if endpointID.Valid && endpointID.String != "" {
 			session.EndpointID = protocol.Ptr(endpointID.String)
+		}
+		if workspaceID.Valid && workspaceID.String != "" {
+			session.WorkspaceID = protocol.Ptr(workspaceID.String)
 		}
 		if branch.Valid && branch.String != "" {
 			session.Branch = protocol.Ptr(branch.String)

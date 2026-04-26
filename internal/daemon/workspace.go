@@ -3,13 +3,15 @@ package daemon
 import (
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// Workspace registry is intentionally in-memory only for the native-UI spike:
-// the canvas client re-registers its workspaces on every reconnect, so there's
-// no value in persisting the layout-side association across daemon restarts.
+// The in-memory registry is the runtime cache; the SQLite store is the source
+// of truth. Mutations write through to the store; the registry is rebuilt from
+// the store at daemon start. Status is NOT persisted — it's recomputed from
+// member sessions on every load and on every state change.
 
 type workspaceEntry struct {
 	id        string
@@ -272,6 +274,15 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 		d.workspaces = newWorkspaceRegistry()
 	}
 	snapshot, isNew := d.workspaces.register(id, title, directory)
+	d.store.AddWorkspace(&snapshot)
+	// Treat the workspace's directory like a session-spawn location, so canvas
+	// directories show up in the recent-locations picker alongside CLI-spawned
+	// session dirs.
+	label := title
+	if label == "" {
+		label = directory
+	}
+	d.store.UpsertRecentLocation(directory, label)
 	if !isNew {
 		// Re-register: pick up any new associations that occurred while it
 		// was registered, then publish a state-changed event so clients
@@ -290,6 +301,12 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 	})
 }
 
+// handleUnregisterWorkspace closes the workspace AND every session that
+// belongs to it. Sessions get a graceful SIGTERM through unregisterSession
+// (same path as the unix-socket "unregister" command), so transcripts flush
+// and PTYs drain. We broadcast session_unregistered for each closed session
+// before the workspace_unregistered, so clients can update their session
+// list before they discover the workspace is gone.
 func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.UnregisterWorkspaceMessage) {
 	id := strings.TrimSpace(msg.ID)
 	if id == "" {
@@ -299,14 +316,60 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	if d.workspaces == nil {
 		return
 	}
+
+	// Snapshot member sessions before tearing down — unregisterSession will
+	// mutate the in-memory association map, which would race the snapshot
+	// the registry hands out otherwise.
+	memberIDs := d.workspaces.sessionIDs(id)
+	for _, sid := range memberIDs {
+		closed := d.unregisterSession(sid, syscall.SIGTERM)
+		if closed != nil {
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event:   protocol.EventSessionUnregistered,
+				Session: d.sessionForBroadcast(closed),
+			})
+		}
+	}
+
 	snapshot, removed := d.workspaces.unregister(id)
 	if !removed {
 		return
 	}
+	d.store.RemoveWorkspace(id)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:     protocol.EventWorkspaceUnregistered,
 		Workspace: &snapshot,
 	})
+}
+
+// loadWorkspacesFromStore rebuilds the in-memory registry from SQLite at
+// daemon start. Order matters: we register every workspace first (so
+// associateSession has somewhere to land), then walk persisted sessions and
+// re-bind those that have a workspace_id. Status is recomputed last from the
+// loaded session states.
+func (d *Daemon) loadWorkspacesFromStore() {
+	if d.workspaces == nil {
+		d.workspaces = newWorkspaceRegistry()
+	}
+	for _, ws := range d.store.ListWorkspaces() {
+		if ws == nil {
+			continue
+		}
+		d.workspaces.register(ws.ID, ws.Title, ws.Directory)
+	}
+	for _, session := range d.store.List("") {
+		if session == nil {
+			continue
+		}
+		if wsID := protocol.Deref(session.WorkspaceID); wsID != "" {
+			d.workspaces.associateSession(session.ID, wsID)
+		}
+	}
+	// Seed each workspace's status from its members. No broadcast — clients
+	// get the current rollup via InitialState.
+	for _, ws := range d.workspaces.list() {
+		d.recomputeWorkspaceStatus(ws.ID)
+	}
 }
 
 // listWorkspaces returns a snapshot of the current workspaces for InitialState.
@@ -329,6 +392,7 @@ func (d *Daemon) associateSessionWithWorkspace(sessionID, workspaceID string) {
 		// Drop silently — broadcast nothing.
 		return
 	}
+	d.store.SetSessionWorkspaceID(sessionID, workspaceID)
 	if updated, changed := d.recomputeWorkspaceStatus(workspaceID); changed {
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:     protocol.EventWorkspaceStateChanged,
@@ -347,6 +411,7 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 	if workspaceID == "" {
 		return
 	}
+	d.store.SetSessionWorkspaceID(sessionID, "")
 	if updated, changed := d.recomputeWorkspaceStatus(workspaceID); changed {
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:     protocol.EventWorkspaceStateChanged,
