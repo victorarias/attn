@@ -534,6 +534,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Sessions:          d.mergedSessionsForBroadcast(),
 		Endpoints:         d.listEndpointInfos(),
 		SessionLayouts:    d.mergedSessionLayoutsForBroadcast(),
+		Workspaces:        d.listWorkspaces(),
 		Prs:               protocol.PRsToValues(d.store.ListPRs("")),
 		Repos:             protocol.RepoStatesToValues(d.store.ListRepoStates()),
 		Authors:           protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
@@ -807,6 +808,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleSessionLayoutFocusPane(client, msg.(*protocol.SessionLayoutFocusPaneMessage))
 	case protocol.CmdSessionLayoutRenamePane:
 		d.handleSessionLayoutRenamePane(client, msg.(*protocol.SessionLayoutRenamePaneMessage))
+	case protocol.CmdRegisterWorkspace:
+		d.handleRegisterWorkspace(client, msg.(*protocol.RegisterWorkspaceMessage))
+	case protocol.CmdUnregisterWorkspace:
+		d.handleUnregisterWorkspace(client, msg.(*protocol.UnregisterWorkspaceMessage))
 	default:
 		d.sendCommandError(client, cmd, "unsupported command")
 	}

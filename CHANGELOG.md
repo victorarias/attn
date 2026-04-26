@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-26]
+
+### Added
+- **Daemon Workspace Entity (Native Canvas-UI Plumbing)**: The daemon now tracks a top-level `Workspace` concept distinct from sessions — a directory + multiple agents + panels that the upcoming native canvas UI groups together. Two new WebSocket commands (`register_workspace`, `unregister_workspace`) and three new events (`workspace_registered`, `workspace_unregistered`, `workspace_state_changed`) cover the lifecycle. Each workspace carries a rolled-up status computed from its member sessions (priority: launching > working > waiting_input > pending_approval > idle > unknown), recomputed and broadcast whenever any owned session's state changes. Sessions gain an optional `workspace_id` field on broadcast payloads, populated from the `workspace_id` you can now pass on `spawn_session`. `initial_state` includes the current `workspaces` array so reconnecting clients see the live registry. Workspaces are intentionally in-memory only — the canvas client re-registers on every reconnect, so nothing persists across daemon restarts. The Tauri app ignores all of this (the new events fall through its event switch as no-ops); only the protocol version moves from 55 to 56, which forces the standard daemon/app version-mismatch reconnect when you next install.
+
+---
+
 ## [2026-04-25]
 
 ### Added
