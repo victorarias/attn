@@ -1,4 +1,4 @@
-use attn_protocol::{ServerEvent, Session, PROTOCOL_VERSION};
+use attn_protocol::{ServerEvent, Session, Workspace, PROTOCOL_VERSION};
 use futures_util::{SinkExt, StreamExt};
 use gpui::{AsyncApp, Context, EventEmitter, WeakEntity};
 use serde::Serialize;
@@ -11,6 +11,13 @@ pub enum DaemonEvent {
     Connected,
     Disconnected,
     SessionsChanged,
+    /// A workspace appeared (or the InitialState batch arrived). Carries the
+    /// snapshot at registration time.
+    WorkspaceRegistered { workspace: Workspace },
+    /// A workspace was removed (cascade-closed by the daemon).
+    WorkspaceUnregistered { workspace_id: String },
+    /// A workspace's rolled-up status changed. Carries the fresh snapshot.
+    WorkspaceStateChanged { workspace: Workspace },
     /// Raw PTY output for a specific session. Delivered directly so terminal
     /// models can subscribe without triggering full workspace re-renders.
     PtyOutput { session_id: String, data: String, seq: i32 },
@@ -26,6 +33,7 @@ pub enum DaemonEvent {
 
 pub struct DaemonClient {
     sessions: Vec<Session>,
+    workspaces: Vec<Workspace>,
     connected: bool,
     error: Option<String>,
     /// Channel sender for outbound commands. None when not connected.
@@ -122,7 +130,13 @@ impl DaemonClient {
         })
         .detach();
 
-        Self { sessions: Vec::new(), connected: false, error: None, cmd_tx: None }
+        Self {
+            sessions: Vec::new(),
+            workspaces: Vec::new(),
+            connected: false,
+            error: None,
+            cmd_tx: None,
+        }
     }
 
     /// Send a serializable command to the daemon. Silently drops if not connected.
@@ -145,6 +159,14 @@ impl DaemonClient {
                     }
                 }
                 self.sessions = msg.sessions;
+                self.workspaces = msg.workspaces;
+                // Replay every persisted workspace as a Registered event so
+                // sidebar/canvas subscribers can hydrate without special-casing
+                // the InitialState path. WorkspaceRegistered is idempotent on
+                // the consumer side (dedup'd by id).
+                for ws in self.workspaces.clone() {
+                    cx.emit(DaemonEvent::WorkspaceRegistered { workspace: ws });
+                }
                 cx.emit(DaemonEvent::SessionsChanged);
                 cx.notify();
             }
@@ -170,6 +192,30 @@ impl DaemonClient {
             ServerEvent::SessionsUpdated(msg) => {
                 self.sessions = msg.sessions;
                 cx.emit(DaemonEvent::SessionsChanged);
+                cx.notify();
+            }
+            ServerEvent::WorkspaceRegistered(msg) => {
+                let ws = msg.workspace;
+                if let Some(existing) = self.workspaces.iter_mut().find(|w| w.id == ws.id) {
+                    *existing = ws.clone();
+                } else {
+                    self.workspaces.push(ws.clone());
+                }
+                cx.emit(DaemonEvent::WorkspaceRegistered { workspace: ws });
+                cx.notify();
+            }
+            ServerEvent::WorkspaceUnregistered(msg) => {
+                let id = msg.workspace.id;
+                self.workspaces.retain(|w| w.id != id);
+                cx.emit(DaemonEvent::WorkspaceUnregistered { workspace_id: id });
+                cx.notify();
+            }
+            ServerEvent::WorkspaceStateChanged(msg) => {
+                let ws = msg.workspace;
+                if let Some(existing) = self.workspaces.iter_mut().find(|w| w.id == ws.id) {
+                    *existing = ws.clone();
+                }
+                cx.emit(DaemonEvent::WorkspaceStateChanged { workspace: ws });
                 cx.notify();
             }
             ServerEvent::AttachResult(msg) => {
@@ -208,6 +254,11 @@ impl DaemonClient {
 
     pub fn sessions(&self) -> &[Session] {
         &self.sessions
+    }
+
+    #[allow(dead_code)]
+    pub fn workspaces(&self) -> &[Workspace] {
+        &self.workspaces
     }
 
     #[allow(dead_code)]

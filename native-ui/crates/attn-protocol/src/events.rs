@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::types::{ReplaySegment, Session};
+use crate::types::{ReplaySegment, Session, Workspace};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InitialStateMessage {
@@ -11,6 +11,8 @@ pub struct InitialStateMessage {
     pub daemon_instance_id: Option<String>,
     #[serde(default)]
     pub sessions: Vec<Session>,
+    #[serde(default)]
+    pub workspaces: Vec<Workspace>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,6 +37,24 @@ pub struct SessionStateChangedMessage {
 pub struct SessionsUpdatedMessage {
     pub event: String,
     pub sessions: Vec<Session>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspaceRegisteredMessage {
+    pub event: String,
+    pub workspace: Workspace,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspaceUnregisteredMessage {
+    pub event: String,
+    pub workspace: Workspace,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspaceStateChangedMessage {
+    pub event: String,
+    pub workspace: Workspace,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -102,6 +122,9 @@ pub enum ServerEvent {
     SessionUnregistered(SessionUnregisteredMessage),
     SessionStateChanged(SessionStateChangedMessage),
     SessionsUpdated(SessionsUpdatedMessage),
+    WorkspaceRegistered(WorkspaceRegisteredMessage),
+    WorkspaceUnregistered(WorkspaceUnregisteredMessage),
+    WorkspaceStateChanged(WorkspaceStateChangedMessage),
     AttachResult(AttachResultMessage),
     PtyOutput(PtyOutputMessage),
     PtyDesync(PtyDesyncMessage),
@@ -133,6 +156,18 @@ impl ServerEvent {
             "sessions_updated" => {
                 let msg: SessionsUpdatedMessage = serde_json::from_str(data)?;
                 Ok(Self::SessionsUpdated(msg))
+            }
+            "workspace_registered" => {
+                let msg: WorkspaceRegisteredMessage = serde_json::from_str(data)?;
+                Ok(Self::WorkspaceRegistered(msg))
+            }
+            "workspace_unregistered" => {
+                let msg: WorkspaceUnregisteredMessage = serde_json::from_str(data)?;
+                Ok(Self::WorkspaceUnregistered(msg))
+            }
+            "workspace_state_changed" => {
+                let msg: WorkspaceStateChangedMessage = serde_json::from_str(data)?;
+                Ok(Self::WorkspaceStateChanged(msg))
             }
             "attach_result" => {
                 let msg: AttachResultMessage = serde_json::from_str(data)?;

@@ -15,6 +15,10 @@ path = "src/canvas_main.rs"
 name = "attn-spike4"
 path = "src/spike4_main.rs"
 
+[[bin]]
+name = "attn-spike5"
+path = "src/spike5_main.rs"
+
 [dependencies]
 attn-protocol = { path = "../attn-protocol" }
 gpui = "0.2"

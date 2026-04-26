@@ -65,3 +65,38 @@ impl PtyResizeMessage {
         Self { cmd: "pty_resize", id: session_id.into(), cols, rows }
     }
 }
+
+#[derive(Debug, Serialize)]
+pub struct RegisterWorkspaceMessage {
+    pub cmd: &'static str,
+    pub id: String,
+    pub title: String,
+    pub directory: String,
+}
+
+impl RegisterWorkspaceMessage {
+    pub fn new(
+        id: impl Into<String>,
+        title: impl Into<String>,
+        directory: impl Into<String>,
+    ) -> Self {
+        Self {
+            cmd: "register_workspace",
+            id: id.into(),
+            title: title.into(),
+            directory: directory.into(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct UnregisterWorkspaceMessage {
+    pub cmd: &'static str,
+    pub id: String,
+}
+
+impl UnregisterWorkspaceMessage {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self { cmd: "unregister_workspace", id: id.into() }
+    }
+}
