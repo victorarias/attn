@@ -890,6 +890,9 @@ type InitialStateMessage struct {
 
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty,omitzero"`
+
+	// Workspaces corresponds to the JSON schema field "workspaces".
+	Workspaces []Workspace `json:"workspaces,omitempty,omitzero"`
 }
 
 type InjectTestPRMessage struct {
@@ -1391,6 +1394,20 @@ type RegisterMessage struct {
 	Label *string `json:"label,omitempty,omitzero"`
 }
 
+type RegisterWorkspaceMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
 type RemoveEndpointMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1872,6 +1889,9 @@ type Session struct {
 
 	// Todos corresponds to the JSON schema field "todos".
 	Todos []string `json:"todos,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type SessionAgent string
@@ -2231,6 +2251,9 @@ type SpawnSessionMessage struct {
 	// Rows corresponds to the JSON schema field "rows".
 	Rows int `json:"rows"`
 
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+
 	// YoloMode corresponds to the JSON schema field "yolo_mode".
 	YoloMode *bool `json:"yolo_mode,omitempty,omitzero"`
 }
@@ -2305,6 +2328,14 @@ type TodosMessage struct {
 }
 
 type UnregisterMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
+type UnregisterWorkspaceMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
@@ -2540,8 +2571,60 @@ type WebSocketEvent struct {
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty,omitzero"`
 
+	// Workspace corresponds to the JSON schema field "workspace".
+	Workspace *Workspace `json:"workspace,omitempty,omitzero"`
+
+	// Workspaces corresponds to the JSON schema field "workspaces".
+	Workspaces []Workspace `json:"workspaces,omitempty,omitzero"`
+
 	// Worktrees corresponds to the JSON schema field "worktrees".
 	Worktrees []Worktree `json:"worktrees,omitempty,omitzero"`
+}
+
+type Workspace struct {
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status WorkspaceStatus `json:"status"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+type WorkspaceRegisteredMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Workspace corresponds to the JSON schema field "workspace".
+	Workspace Workspace `json:"workspace"`
+}
+
+type WorkspaceStateChangedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Workspace corresponds to the JSON schema field "workspace".
+	Workspace Workspace `json:"workspace"`
+}
+
+type WorkspaceStatus string
+
+const WorkspaceStatusIdle WorkspaceStatus = "idle"
+const WorkspaceStatusLaunching WorkspaceStatus = "launching"
+const WorkspaceStatusPendingApproval WorkspaceStatus = "pending_approval"
+const WorkspaceStatusWaitingInput WorkspaceStatus = "waiting_input"
+const WorkspaceStatusWorking WorkspaceStatus = "working"
+
+type WorkspaceUnregisteredMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Workspace corresponds to the JSON schema field "workspace".
+	Workspace Workspace `json:"workspace"`
 }
 
 type Worktree struct {

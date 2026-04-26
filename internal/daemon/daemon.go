@@ -127,6 +127,10 @@ type Daemon struct {
 
 	loginShellEnvMu sync.RWMutex
 	loginShellEnv   []string
+
+	// Native canvas-UI workspace registry. Ephemeral: workspaces are not
+	// persisted, the canvas client re-registers on every reconnect.
+	workspaces *workspaceRegistry
 }
 
 // addWarning adds a warning to be surfaced to the UI
@@ -330,6 +334,7 @@ func New(socketPath string) *Daemon {
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 		tailscale:        newTailscaleRuntime(),
+		workspaces:       newWorkspaceRegistry(),
 	}
 }
 
@@ -360,6 +365,7 @@ func NewForTesting(socketPath string) *Daemon {
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 		tailscale:        newTailscaleRuntime(),
+		workspaces:       newWorkspaceRegistry(),
 	}
 }
 
@@ -394,6 +400,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 		tailscale:        newTailscaleRuntime(),
+		workspaces:       newWorkspaceRegistry(),
 	}
 }
 
@@ -429,6 +436,10 @@ func (d *Daemon) Start() error {
 	if d.tailscale == nil {
 		d.tailscale = newTailscaleRuntime()
 	}
+	if d.workspaces == nil {
+		d.workspaces = newWorkspaceRegistry()
+	}
+	d.loadWorkspacesFromStore()
 	if d.daemonInstanceID == "" {
 		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
 		if err != nil {
@@ -1079,6 +1090,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 				Event:   protocol.EventSessionStateChanged,
 				Session: updated,
 			})
+			d.recomputeAndBroadcastWorkspaceForSession(info.ID)
 		}
 	} else {
 		d.handleSessionLayoutRuntimeExit(info.ID, info.ExitCode, info.Signal)
@@ -1184,6 +1196,7 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 		Event:   protocol.EventSessionStateChanged,
 		Session: updated,
 	})
+	d.recomputeAndBroadcastWorkspaceForSession(sessionID)
 }
 
 // initHTTPServer creates the HTTP server synchronously to avoid race with Stop().
@@ -1554,6 +1567,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		Session: d.sessionForBroadcast(session),
 	})
 	d.broadcastSessionLayout(session.ID)
+	d.recomputeAndBroadcastWorkspaceForSession(session.ID)
 }
 
 func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage) {
@@ -1566,6 +1580,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 			Event:   protocol.EventSessionUnregistered,
 			Session: d.sessionForBroadcast(session),
 		})
+		d.dissociateSessionFromWorkspace(session.ID)
 	}
 }
 
@@ -1590,6 +1605,7 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 			Event:   protocol.EventSessionStateChanged,
 			Session: session,
 		})
+		d.recomputeAndBroadcastWorkspaceForSession(msg.ID)
 	} else {
 		d.logf("handleState: session %s not found, no broadcast", msg.ID)
 	}
@@ -2061,6 +2077,7 @@ func (d *Daemon) sessionForBroadcast(session *protocol.Session) *protocol.Sessio
 	} else {
 		clone.NeedsReviewAfterLongRun = nil
 	}
+	d.decorateSessionWithWorkspace(clone)
 	return clone
 }
 
@@ -2131,6 +2148,7 @@ func (d *Daemon) broadcastSessionStateChanged(sessionID string) {
 		Event:   protocol.EventSessionStateChanged,
 		Session: decorated,
 	})
+	d.recomputeAndBroadcastWorkspaceForSession(sessionID)
 }
 
 func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
@@ -2149,6 +2167,7 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 			Event:   protocol.EventSessionStateChanged,
 			Session: session,
 		})
+		d.recomputeAndBroadcastWorkspaceForSession(sessionID)
 	}
 }
 
@@ -2171,6 +2190,7 @@ func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, u
 				Event:   protocol.EventSessionStateChanged,
 				Session: session,
 			})
+			d.recomputeAndBroadcastWorkspaceForSession(sessionID)
 		}
 	} else {
 		d.logf("state update discarded: session=%s state=%s (newer state exists)", sessionID, state)

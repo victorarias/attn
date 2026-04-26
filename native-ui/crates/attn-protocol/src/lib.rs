@@ -14,4 +14,4 @@ pub use types::*;
 
 /// Current protocol version — must match `ProtocolVersion` in
 /// `internal/protocol/constants.go`.
-pub const PROTOCOL_VERSION: &str = "54";
+pub const PROTOCOL_VERSION: &str = "56";

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "55"
+const ProtocolVersion = "56"
 
 // Commands
 const (
@@ -89,6 +89,8 @@ const (
 	CmdSessionLayoutClosePane   = "session_layout_close_pane"
 	CmdSessionLayoutFocusPane   = "session_layout_focus_pane"
 	CmdSessionLayoutRenamePane  = "session_layout_rename_pane"
+	CmdRegisterWorkspace        = "register_workspace"
+	CmdUnregisterWorkspace      = "unregister_workspace"
 )
 
 // WebSocket Events (daemon -> client)
@@ -96,6 +98,9 @@ const (
 	EventSessionRegistered          = "session_registered"
 	EventSessionUnregistered        = "session_unregistered"
 	EventSessionStateChanged        = "session_state_changed"
+	EventWorkspaceRegistered        = "workspace_registered"
+	EventWorkspaceUnregistered      = "workspace_unregistered"
+	EventWorkspaceStateChanged      = "workspace_state_changed"
 	EventSessionTodosUpdated        = "session_todos_updated"
 	EventSessionsUpdated            = "sessions_updated"
 	EventPRsUpdated                 = "prs_updated"
@@ -744,6 +749,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg SessionLayoutRenamePaneMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal session_layout_rename_pane: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdRegisterWorkspace:
+		var msg RegisterWorkspaceMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal register_workspace: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdUnregisterWorkspace:
+		var msg UnregisterWorkspaceMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal unregister_workspace: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

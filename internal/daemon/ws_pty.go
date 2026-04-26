@@ -442,6 +442,9 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 		d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
 		d.store.UpsertRecentLocation(cwd, label)
+		if workspaceID := strings.TrimSpace(protocol.Deref(msg.WorkspaceID)); workspaceID != "" {
+			d.associateSessionWithWorkspace(session.ID, workspaceID)
+		}
 		eventType := protocol.EventSessionRegistered
 		if existingSession != nil {
 			eventType = protocol.EventSessionStateChanged
@@ -451,6 +454,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			Session: d.sessionForBroadcast(session),
 		})
 		d.broadcastSessionLayout(session.ID)
+		d.recomputeAndBroadcastWorkspaceForSession(session.ID)
 	}
 
 	d.sendToClient(client, protocol.SpawnResultMessage{

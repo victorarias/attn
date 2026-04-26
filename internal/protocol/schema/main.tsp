@@ -30,6 +30,21 @@ enum SessionAgent {
   pi,
 }
 
+// WorkspaceStatus is the rolled-up status of all sessions in a workspace.
+// Priority (highest first): working > waiting_input > pending_approval > idle > launching.
+// `launching` sits below `idle` because it carries less information — any
+// session in a settled state out-prioritizes a peer that's still booting.
+// No `unknown` value: a workspace always has a directory and a registry
+// entry, so the rollup always has a meaningful answer (empty/all-unknown
+// member sessions roll up to `idle`).
+enum WorkspaceStatus {
+  launching,
+  working,
+  waiting_input,
+  pending_approval,
+  idle,
+}
+
 enum SessionLayoutPaneKind {
   main,
   shell,
@@ -100,6 +115,7 @@ model Session {
   agent: SessionAgent;
   directory: string;
   endpoint_id?: string;         // Optional: owning endpoint for remote/session-aware routing
+  workspace_id?: string;        // Optional: owning workspace if session was spawned within a workspace context
   branch?: string;              // Optional: might not be in git repo
   is_worktree?: boolean;        // Optional: false if not worktree
   main_repo?: string;           // Optional: only set if worktree
@@ -111,6 +127,15 @@ model Session {
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
   muted: boolean;               // Always has value (defaults false)
+}
+
+// Workspace is a directory + multiple agents (sessions) + panels of any type.
+// Status is rolled up from member sessions. Used by the native canvas UI sidebar.
+model Workspace {
+  id: string;
+  title: string;
+  directory: string;
+  status: WorkspaceStatus;
 }
 
 model PR {
@@ -636,6 +661,7 @@ model SpawnSessionMessage {
   id: string;
   cwd: string;
   endpoint_id?: string;
+  workspace_id?: string;    // Optional: owning workspace if spawned from a canvas-UI workspace
   agent: string;            // "claude", "codex", "copilot", "shell"
   cols: int32;
   rows: int32;
@@ -713,6 +739,18 @@ model SessionLayoutRenamePaneMessage {
   title: string;
 }
 
+model RegisterWorkspaceMessage {
+  cmd: "register_workspace";
+  id: string;
+  title: string;
+  directory: string;
+}
+
+model UnregisterWorkspaceMessage {
+  cmd: "unregister_workspace";
+  id: string;
+}
+
 // ============================================================================
 // Result/Event Messages (Daemon → Client)
 // ============================================================================
@@ -725,6 +763,7 @@ model InitialStateMessage {
   sessions?: Session[];
   endpoints?: EndpointInfo[];
   session_layouts?: SessionLayout[];
+  workspaces?: Workspace[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
@@ -763,6 +802,21 @@ model SessionUnregisteredMessage {
 model SessionStateChangedMessage {
   event: "session_state_changed";
   session: Session;
+}
+
+model WorkspaceRegisteredMessage {
+  event: "workspace_registered";
+  workspace: Workspace;
+}
+
+model WorkspaceUnregisteredMessage {
+  event: "workspace_unregistered";
+  workspace: Workspace;
+}
+
+model WorkspaceStateChangedMessage {
+  event: "workspace_state_changed";
+  workspace: Workspace;
 }
 
 model SessionTodosUpdatedMessage {
@@ -1262,6 +1316,8 @@ model WebSocketEvent {
   sessions?: Session[];
   session_layout?: SessionLayout;
   session_layouts?: SessionLayout[];
+  workspace?: Workspace;
+  workspaces?: Workspace[];
   prs?: PR[];
   repos?: RepoState[];
   authors?: AuthorState[];
@@ -1333,6 +1389,9 @@ alias DaemonEvent =
   | SessionRegisteredMessage
   | SessionUnregisteredMessage
   | SessionStateChangedMessage
+  | WorkspaceRegisteredMessage
+  | WorkspaceUnregisteredMessage
+  | WorkspaceStateChangedMessage
   | SessionTodosUpdatedMessage
   | SessionsUpdatedMessage
   | SessionLayoutMessage

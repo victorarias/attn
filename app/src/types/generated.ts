@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PathInspection, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionLayout, SessionLayoutActionResultMessage, SessionLayoutClosePaneMessage, SessionLayoutFocusPaneMessage, SessionLayoutGetMessage, SessionLayoutMessage, SessionLayoutPane, SessionLayoutPaneKind, SessionLayoutRenamePaneMessage, SessionLayoutRuntimeExitedMessage, SessionLayoutSplitDirection, SessionLayoutSplitPaneMessage, SessionLayoutUpdatedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PathInspection, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionLayout, SessionLayoutActionResultMessage, SessionLayoutClosePaneMessage, SessionLayoutFocusPaneMessage, SessionLayoutGetMessage, SessionLayoutMessage, SessionLayoutPane, SessionLayoutPaneKind, SessionLayoutRenamePaneMessage, SessionLayoutRuntimeExitedMessage, SessionLayoutSplitDirection, SessionLayoutSplitPaneMessage, SessionLayoutUpdatedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Workspace, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -103,6 +103,7 @@
 //   const refreshPRsMessage = Convert.toRefreshPRsMessage(json);
 //   const refreshPRsResultMessage = Convert.toRefreshPRsResultMessage(json);
 //   const registerMessage = Convert.toRegisterMessage(json);
+//   const registerWorkspaceMessage = Convert.toRegisterWorkspaceMessage(json);
 //   const removeEndpointMessage = Convert.toRemoveEndpointMessage(json);
 //   const replaySegment = Convert.toReplaySegment(json);
 //   const repoInfo = Convert.toRepoInfo(json);
@@ -161,11 +162,17 @@
 //   const subscribeGitStatusMessage = Convert.toSubscribeGitStatusMessage(json);
 //   const todosMessage = Convert.toTodosMessage(json);
 //   const unregisterMessage = Convert.toUnregisterMessage(json);
+//   const unregisterWorkspaceMessage = Convert.toUnregisterWorkspaceMessage(json);
 //   const unsubscribeGitStatusMessage = Convert.toUnsubscribeGitStatusMessage(json);
 //   const updateCommentMessage = Convert.toUpdateCommentMessage(json);
 //   const updateCommentResultMessage = Convert.toUpdateCommentResultMessage(json);
 //   const updateEndpointMessage = Convert.toUpdateEndpointMessage(json);
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
+//   const workspace = Convert.toWorkspace(json);
+//   const workspaceRegisteredMessage = Convert.toWorkspaceRegisteredMessage(json);
+//   const workspaceStateChangedMessage = Convert.toWorkspaceStateChangedMessage(json);
+//   const workspaceStatus = Convert.toWorkspaceStatus(json);
+//   const workspaceUnregisteredMessage = Convert.toWorkspaceUnregisteredMessage(json);
 //   const worktree = Convert.toWorktree(json);
 //   const worktreeCreatedEvent = Convert.toWorktreeCreatedEvent(json);
 //   const worktreeDeletedEvent = Convert.toWorktreeDeletedEvent(json);
@@ -367,6 +374,7 @@ export interface SessionElement {
     state_since:                  string;
     state_updated_at:             string;
     todos?:                       string[];
+    workspace_id?:                string;
     [property: string]: any;
 }
 
@@ -1074,6 +1082,7 @@ export interface InitialStateMessage {
     settings?:           { [key: string]: any };
     source_fingerprint?: string;
     warnings?:           WarningElement[];
+    workspaces?:         WorkspaceElement[];
     [property: string]: any;
 }
 
@@ -1114,6 +1123,22 @@ export interface WarningElement {
     code:    string;
     message: string;
     [property: string]: any;
+}
+
+export interface WorkspaceElement {
+    directory: string;
+    id:        string;
+    status:    WorkspaceStatus;
+    title:     string;
+    [property: string]: any;
+}
+
+export enum WorkspaceStatus {
+    Idle = "idle",
+    Launching = "launching",
+    PendingApproval = "pending_approval",
+    WaitingInput = "waiting_input",
+    Working = "working",
 }
 
 export interface InjectTestPRMessage {
@@ -1557,6 +1582,18 @@ export enum RegisterMessageCmd {
     Register = "register",
 }
 
+export interface RegisterWorkspaceMessage {
+    cmd:       RegisterWorkspaceMessageCmd;
+    directory: string;
+    id:        string;
+    title:     string;
+    [property: string]: any;
+}
+
+export enum RegisterWorkspaceMessageCmd {
+    RegisterWorkspace = "register_workspace",
+}
+
 export interface RemoveEndpointMessage {
     cmd:         RemoveEndpointMessageCmd;
     endpoint_id: string;
@@ -1880,6 +1917,7 @@ export interface Session {
     state_since:                  string;
     state_updated_at:             string;
     todos?:                       string[];
+    workspace_id?:                string;
     [property: string]: any;
 }
 
@@ -2167,6 +2205,7 @@ export interface SpawnSessionMessage {
     resume_picker?:      boolean;
     resume_session_id?:  string;
     rows:                number;
+    workspace_id?:       string;
     yolo_mode?:          boolean;
     [property: string]: any;
 }
@@ -2250,6 +2289,16 @@ export interface UnregisterMessage {
 
 export enum UnregisterMessageCmd {
     Unregister = "unregister",
+}
+
+export interface UnregisterWorkspaceMessage {
+    cmd: UnregisterWorkspaceMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum UnregisterWorkspaceMessageCmd {
+    UnregisterWorkspace = "unregister_workspace",
 }
 
 export interface UnsubscribeGitStatusMessage {
@@ -2357,8 +2406,48 @@ export interface WebSocketEvent {
     unstaged?:              StagedElement[];
     untracked?:             StagedElement[];
     warnings?:              WarningElement[];
+    workspace?:             WorkspaceElement;
+    workspaces?:            WorkspaceElement[];
     worktrees?:             WorktreeElement[];
     [property: string]: any;
+}
+
+export interface Workspace {
+    directory: string;
+    id:        string;
+    status:    WorkspaceStatus;
+    title:     string;
+    [property: string]: any;
+}
+
+export interface WorkspaceRegisteredMessage {
+    event:     WorkspaceRegisteredMessageEvent;
+    workspace: WorkspaceElement;
+    [property: string]: any;
+}
+
+export enum WorkspaceRegisteredMessageEvent {
+    WorkspaceRegistered = "workspace_registered",
+}
+
+export interface WorkspaceStateChangedMessage {
+    event:     WorkspaceStateChangedMessageEvent;
+    workspace: WorkspaceElement;
+    [property: string]: any;
+}
+
+export enum WorkspaceStateChangedMessageEvent {
+    WorkspaceStateChanged = "workspace_state_changed",
+}
+
+export interface WorkspaceUnregisteredMessage {
+    event:     WorkspaceUnregisteredMessageEvent;
+    workspace: WorkspaceElement;
+    [property: string]: any;
+}
+
+export enum WorkspaceUnregisteredMessageEvent {
+    WorkspaceUnregistered = "workspace_unregistered",
 }
 
 export interface Worktree {
@@ -3210,6 +3299,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("RegisterMessage")), null, 2);
     }
 
+    public static toRegisterWorkspaceMessage(json: string): RegisterWorkspaceMessage {
+        return cast(JSON.parse(json), r("RegisterWorkspaceMessage"));
+    }
+
+    public static registerWorkspaceMessageToJson(value: RegisterWorkspaceMessage): string {
+        return JSON.stringify(uncast(value, r("RegisterWorkspaceMessage")), null, 2);
+    }
+
     public static toRemoveEndpointMessage(json: string): RemoveEndpointMessage {
         return cast(JSON.parse(json), r("RemoveEndpointMessage"));
     }
@@ -3674,6 +3771,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("UnregisterMessage")), null, 2);
     }
 
+    public static toUnregisterWorkspaceMessage(json: string): UnregisterWorkspaceMessage {
+        return cast(JSON.parse(json), r("UnregisterWorkspaceMessage"));
+    }
+
+    public static unregisterWorkspaceMessageToJson(value: UnregisterWorkspaceMessage): string {
+        return JSON.stringify(uncast(value, r("UnregisterWorkspaceMessage")), null, 2);
+    }
+
     public static toUnsubscribeGitStatusMessage(json: string): UnsubscribeGitStatusMessage {
         return cast(JSON.parse(json), r("UnsubscribeGitStatusMessage"));
     }
@@ -3712,6 +3817,46 @@ export class Convert {
 
     public static webSocketEventToJson(value: WebSocketEvent): string {
         return JSON.stringify(uncast(value, r("WebSocketEvent")), null, 2);
+    }
+
+    public static toWorkspace(json: string): Workspace {
+        return cast(JSON.parse(json), r("Workspace"));
+    }
+
+    public static workspaceToJson(value: Workspace): string {
+        return JSON.stringify(uncast(value, r("Workspace")), null, 2);
+    }
+
+    public static toWorkspaceRegisteredMessage(json: string): WorkspaceRegisteredMessage {
+        return cast(JSON.parse(json), r("WorkspaceRegisteredMessage"));
+    }
+
+    public static workspaceRegisteredMessageToJson(value: WorkspaceRegisteredMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceRegisteredMessage")), null, 2);
+    }
+
+    public static toWorkspaceStateChangedMessage(json: string): WorkspaceStateChangedMessage {
+        return cast(JSON.parse(json), r("WorkspaceStateChangedMessage"));
+    }
+
+    public static workspaceStateChangedMessageToJson(value: WorkspaceStateChangedMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceStateChangedMessage")), null, 2);
+    }
+
+    public static toWorkspaceStatus(json: string): WorkspaceStatus {
+        return cast(JSON.parse(json), r("WorkspaceStatus"));
+    }
+
+    public static workspaceStatusToJson(value: WorkspaceStatus): string {
+        return JSON.stringify(uncast(value, r("WorkspaceStatus")), null, 2);
+    }
+
+    public static toWorkspaceUnregisteredMessage(json: string): WorkspaceUnregisteredMessage {
+        return cast(JSON.parse(json), r("WorkspaceUnregisteredMessage"));
+    }
+
+    public static workspaceUnregisteredMessageToJson(value: WorkspaceUnregisteredMessage): string {
+        return JSON.stringify(uncast(value, r("WorkspaceUnregisteredMessage")), null, 2);
     }
 
     public static toWorktree(json: string): Worktree {
@@ -4017,6 +4162,7 @@ const typeMap: any = {
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
     ], "any"),
     "BranchDiffFile": o([
         { json: "additions", js: "additions", typ: u(undefined, 0) },
@@ -4411,6 +4557,7 @@ const typeMap: any = {
         { json: "settings", js: "settings", typ: u(undefined, m("any")) },
         { json: "source_fingerprint", js: "source_fingerprint", typ: u(undefined, "") },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
+        { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("WorkspaceElement"))) },
     ], "any"),
     "RepoElement": o([
         { json: "collapsed", js: "collapsed", typ: true },
@@ -4433,6 +4580,12 @@ const typeMap: any = {
     "WarningElement": o([
         { json: "code", js: "code", typ: "" },
         { json: "message", js: "message", typ: "" },
+    ], "any"),
+    "WorkspaceElement": o([
+        { json: "directory", js: "directory", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "status", js: "status", typ: r("WorkspaceStatus") },
+        { json: "title", js: "title", typ: "" },
     ], "any"),
     "InjectTestPRMessage": o([
         { json: "cmd", js: "cmd", typ: r("InjectTestPRMessageCmd") },
@@ -4661,6 +4814,12 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "label", js: "label", typ: u(undefined, "") },
     ], "any"),
+    "RegisterWorkspaceMessage": o([
+        { json: "cmd", js: "cmd", typ: r("RegisterWorkspaceMessageCmd") },
+        { json: "directory", js: "directory", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
     "RemoveEndpointMessage": o([
         { json: "cmd", js: "cmd", typ: r("RemoveEndpointMessageCmd") },
         { json: "endpoint_id", js: "endpoint_id", typ: "" },
@@ -4884,6 +5043,7 @@ const typeMap: any = {
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
     ], "any"),
     "SessionExitedMessage": o([
         { json: "event", js: "event", typ: r("SessionExitedMessageEvent") },
@@ -5028,6 +5188,7 @@ const typeMap: any = {
         { json: "resume_picker", js: "resume_picker", typ: u(undefined, true) },
         { json: "resume_session_id", js: "resume_session_id", typ: u(undefined, "") },
         { json: "rows", js: "rows", typ: 0 },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
         { json: "yolo_mode", js: "yolo_mode", typ: u(undefined, true) },
     ], "any"),
     "StartReviewLoopMessage": o([
@@ -5063,6 +5224,10 @@ const typeMap: any = {
     ], "any"),
     "UnregisterMessage": o([
         { json: "cmd", js: "cmd", typ: r("UnregisterMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "UnregisterWorkspaceMessage": o([
+        { json: "cmd", js: "cmd", typ: r("UnregisterWorkspaceMessageCmd") },
         { json: "id", js: "id", typ: "" },
     ], "any"),
     "UnsubscribeGitStatusMessage": o([
@@ -5146,7 +5311,27 @@ const typeMap: any = {
         { json: "unstaged", js: "unstaged", typ: u(undefined, a(r("StagedElement"))) },
         { json: "untracked", js: "untracked", typ: u(undefined, a(r("StagedElement"))) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
+        { json: "workspace", js: "workspace", typ: u(undefined, r("WorkspaceElement")) },
+        { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("WorkspaceElement"))) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
+    ], "any"),
+    "Workspace": o([
+        { json: "directory", js: "directory", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "status", js: "status", typ: r("WorkspaceStatus") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "WorkspaceRegisteredMessage": o([
+        { json: "event", js: "event", typ: r("WorkspaceRegisteredMessageEvent") },
+        { json: "workspace", js: "workspace", typ: r("WorkspaceElement") },
+    ], "any"),
+    "WorkspaceStateChangedMessage": o([
+        { json: "event", js: "event", typ: r("WorkspaceStateChangedMessageEvent") },
+        { json: "workspace", js: "workspace", typ: r("WorkspaceElement") },
+    ], "any"),
+    "WorkspaceUnregisteredMessage": o([
+        { json: "event", js: "event", typ: r("WorkspaceUnregisteredMessageEvent") },
+        { json: "workspace", js: "workspace", typ: r("WorkspaceElement") },
     ], "any"),
     "Worktree": o([
         { json: "branch", js: "branch", typ: "" },
@@ -5357,6 +5542,13 @@ const typeMap: any = {
         "main",
         "shell",
     ],
+    "WorkspaceStatus": [
+        "idle",
+        "launching",
+        "pending_approval",
+        "waiting_input",
+        "working",
+    ],
     "InjectTestPRMessageCmd": [
         "inject_test_pr",
     ],
@@ -5458,6 +5650,9 @@ const typeMap: any = {
     ],
     "RegisterMessageCmd": [
         "register",
+    ],
+    "RegisterWorkspaceMessageCmd": [
+        "register_workspace",
     ],
     "RemoveEndpointMessageCmd": [
         "remove_endpoint",
@@ -5604,6 +5799,9 @@ const typeMap: any = {
     "UnregisterMessageCmd": [
         "unregister",
     ],
+    "UnregisterWorkspaceMessageCmd": [
+        "unregister_workspace",
+    ],
     "UnsubscribeGitStatusMessageCmd": [
         "unsubscribe_git_status",
     ],
@@ -5615,6 +5813,15 @@ const typeMap: any = {
     ],
     "UpdateEndpointMessageCmd": [
         "update_endpoint",
+    ],
+    "WorkspaceRegisteredMessageEvent": [
+        "workspace_registered",
+    ],
+    "WorkspaceStateChangedMessageEvent": [
+        "workspace_state_changed",
+    ],
+    "WorkspaceUnregisteredMessageEvent": [
+        "workspace_unregistered",
     ],
     "WorktreeCreatedEventEvent": [
         "worktree_created",
