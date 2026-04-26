@@ -370,7 +370,7 @@ export interface SessionElement {
     muted:                        boolean;
     needs_review_after_long_run?: boolean;
     recoverable?:                 boolean;
-    state:                        WorkspaceStatus;
+    state:                        SessionState;
     state_since:                  string;
     state_updated_at:             string;
     todos?:                       string[];
@@ -385,7 +385,7 @@ export enum SessionAgent {
     Pi = "pi",
 }
 
-export enum WorkspaceStatus {
+export enum SessionState {
     Idle = "idle",
     Launching = "launching",
     PendingApproval = "pending_approval",
@@ -1131,6 +1131,14 @@ export interface WorkspaceElement {
     status:    WorkspaceStatus;
     title:     string;
     [property: string]: any;
+}
+
+export enum WorkspaceStatus {
+    Idle = "idle",
+    Launching = "launching",
+    PendingApproval = "pending_approval",
+    WaitingInput = "waiting_input",
+    Working = "working",
 }
 
 export interface InjectTestPRMessage {
@@ -1905,7 +1913,7 @@ export interface Session {
     muted:                        boolean;
     needs_review_after_long_run?: boolean;
     recoverable?:                 boolean;
-    state:                        WorkspaceStatus;
+    state:                        SessionState;
     state_since:                  string;
     state_updated_at:             string;
     todos?:                       string[];
@@ -3603,12 +3611,12 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SessionRegisteredMessage")), null, 2);
     }
 
-    public static toSessionState(json: string): WorkspaceStatus {
-        return cast(JSON.parse(json), r("WorkspaceStatus"));
+    public static toSessionState(json: string): SessionState {
+        return cast(JSON.parse(json), r("SessionState"));
     }
 
-    public static sessionStateToJson(value: WorkspaceStatus): string {
-        return JSON.stringify(uncast(value, r("WorkspaceStatus")), null, 2);
+    public static sessionStateToJson(value: SessionState): string {
+        return JSON.stringify(uncast(value, r("SessionState")), null, 2);
     }
 
     public static toSessionStateChangedMessage(json: string): SessionStateChangedMessage {
@@ -4150,7 +4158,7 @@ const typeMap: any = {
         { json: "muted", js: "muted", typ: true },
         { json: "needs_review_after_long_run", js: "needs_review_after_long_run", typ: u(undefined, true) },
         { json: "recoverable", js: "recoverable", typ: u(undefined, true) },
-        { json: "state", js: "state", typ: r("WorkspaceStatus") },
+        { json: "state", js: "state", typ: r("SessionState") },
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
@@ -5031,7 +5039,7 @@ const typeMap: any = {
         { json: "muted", js: "muted", typ: true },
         { json: "needs_review_after_long_run", js: "needs_review_after_long_run", typ: u(undefined, true) },
         { json: "recoverable", js: "recoverable", typ: u(undefined, true) },
-        { json: "state", js: "state", typ: r("WorkspaceStatus") },
+        { json: "state", js: "state", typ: r("SessionState") },
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
@@ -5384,7 +5392,7 @@ const typeMap: any = {
         "copilot",
         "pi",
     ],
-    "WorkspaceStatus": [
+    "SessionState": [
         "idle",
         "launching",
         "pending_approval",
@@ -5533,6 +5541,13 @@ const typeMap: any = {
     "SessionLayoutPaneKind": [
         "main",
         "shell",
+    ],
+    "WorkspaceStatus": [
+        "idle",
+        "launching",
+        "pending_approval",
+        "waiting_input",
+        "working",
     ],
     "InjectTestPRMessageCmd": [
         "inject_test_pr",

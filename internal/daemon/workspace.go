@@ -47,7 +47,7 @@ func (r *workspaceRegistry) register(id, title, directory string) (protocol.Work
 	if !existed {
 		entry = &workspaceEntry{
 			id:         id,
-			status:     protocol.WorkspaceStatusUnknown,
+			status:     protocol.WorkspaceStatusIdle,
 			sessionIDs: make(map[string]struct{}),
 		}
 		r.workspaces[id] = entry
@@ -178,22 +178,20 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 
 // rollupWorkspaceStatus returns the workspace status that summarizes the
 // supplied session states. Higher-priority states win:
-// working > waiting_input > pending_approval > idle > launching > unknown.
+// working > waiting_input > pending_approval > idle > launching.
 // `launching` sits below `idle` on purpose — it carries less information than
 // any settled state, so as soon as one session reports a real state, that
-// one wins over a peer that's still booting.
-// An empty slice yields "unknown".
+// one wins over a peer that's still booting. There's no `unknown` workspace
+// status: an empty slice or sessions all in `unknown` fall through to `idle`,
+// since a workspace always has a directory and a registry entry, so the
+// rollup always has a meaningful answer.
 func rollupWorkspaceStatus(sessionStates []protocol.SessionState) protocol.WorkspaceStatus {
-	if len(sessionStates) == 0 {
-		return protocol.WorkspaceStatusUnknown
-	}
 	priority := map[protocol.SessionState]int{
-		protocol.SessionStateWorking:         6,
-		protocol.SessionStateWaitingInput:    5,
-		protocol.SessionStatePendingApproval: 4,
-		protocol.SessionStateIdle:            3,
-		protocol.SessionStateLaunching:       2,
-		protocol.SessionStateUnknown:         1,
+		protocol.SessionStateWorking:         5,
+		protocol.SessionStateWaitingInput:    4,
+		protocol.SessionStatePendingApproval: 3,
+		protocol.SessionStateIdle:            2,
+		protocol.SessionStateLaunching:       1,
 	}
 	statusFor := map[protocol.SessionState]protocol.WorkspaceStatus{
 		protocol.SessionStateLaunching:       protocol.WorkspaceStatusLaunching,
@@ -201,22 +199,19 @@ func rollupWorkspaceStatus(sessionStates []protocol.SessionState) protocol.Works
 		protocol.SessionStateWaitingInput:    protocol.WorkspaceStatusWaitingInput,
 		protocol.SessionStatePendingApproval: protocol.WorkspaceStatusPendingApproval,
 		protocol.SessionStateIdle:            protocol.WorkspaceStatusIdle,
-		protocol.SessionStateUnknown:    protocol.WorkspaceStatusUnknown,
 	}
 	bestPriority := 0
-	best := protocol.WorkspaceStatusUnknown
+	best := protocol.WorkspaceStatusIdle
 	for _, s := range sessionStates {
 		p, ok := priority[s]
 		if !ok {
-			p = priority[protocol.SessionStateUnknown]
+			// Unrecognised state (e.g. SessionStateUnknown) — skip; we
+			// fall back to `idle` if nothing scores higher.
+			continue
 		}
 		if p > bestPriority {
 			bestPriority = p
-			if status, ok := statusFor[s]; ok {
-				best = status
-			} else {
-				best = protocol.WorkspaceStatusUnknown
-			}
+			best = statusFor[s]
 		}
 	}
 	return best
@@ -435,4 +430,3 @@ func (d *Daemon) decorateSessionWithWorkspace(session *protocol.Session) {
 		session.WorkspaceID = nil
 	}
 }
-

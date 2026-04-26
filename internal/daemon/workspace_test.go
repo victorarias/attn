@@ -15,9 +15,9 @@ func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
 		want   protocol.WorkspaceStatus
 	}{
 		{
-			name:   "empty yields unknown",
+			name:   "empty yields idle",
 			states: nil,
-			want:   protocol.WorkspaceStatusUnknown,
+			want:   protocol.WorkspaceStatusIdle,
 		},
 		{
 			name:   "single working",
@@ -50,9 +50,14 @@ func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
 			want:   protocol.WorkspaceStatusIdle,
 		},
 		{
-			name:   "launching beats unknown",
+			name:   "launching beats unrecognised session_state_unknown",
 			states: []protocol.SessionState{protocol.SessionStateUnknown, protocol.SessionStateLaunching},
 			want:   protocol.WorkspaceStatusLaunching,
+		},
+		{
+			name:   "all session_state_unknown yields idle",
+			states: []protocol.SessionState{protocol.SessionStateUnknown, protocol.SessionStateUnknown},
+			want:   protocol.WorkspaceStatusIdle,
 		},
 		{
 			name:   "all idle yields idle",
@@ -84,8 +89,8 @@ func TestWorkspaceRegistry_RegisterUnregister(t *testing.T) {
 	if snapshot.ID != "ws1" || snapshot.Title != "Workspace 1" || snapshot.Directory != "/repo" {
 		t.Fatalf("unexpected snapshot: %+v", snapshot)
 	}
-	if snapshot.Status != protocol.WorkspaceStatusUnknown {
-		t.Fatalf("initial status = %q, want unknown", snapshot.Status)
+	if snapshot.Status != protocol.WorkspaceStatusIdle {
+		t.Fatalf("initial status = %q, want idle", snapshot.Status)
 	}
 
 	_, isNew = r.register("ws1", "Renamed", "/repo")
