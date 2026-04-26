@@ -3,7 +3,14 @@ use futures_util::{SinkExt, StreamExt};
 use gpui::{AsyncApp, Context, EventEmitter, WeakEntity};
 use serde::Serialize;
 
-const DAEMON_WS_URL: &str = "ws://localhost:9849/ws";
+const DEFAULT_DAEMON_WS_URL: &str = "ws://localhost:9849/ws";
+
+/// WebSocket URL the daemon client connects to. Defaults to the prod port
+/// (9849); override with `ATTN_WS_URL=ws://localhost:29849/ws` to point at
+/// the dev daemon (`make dev`) during attn-on-attn testing.
+fn daemon_ws_url() -> String {
+    std::env::var("ATTN_WS_URL").unwrap_or_else(|_| DEFAULT_DAEMON_WS_URL.to_string())
+}
 
 /// Events emitted by DaemonClient to subscribers.
 #[derive(Debug, Clone)]
@@ -44,10 +51,11 @@ impl EventEmitter<DaemonEvent> for DaemonClient {}
 
 impl DaemonClient {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        cx.spawn(async |this: WeakEntity<DaemonClient>, cx: &mut AsyncApp| {
+        let url = daemon_ws_url();
+        cx.spawn(async move |this: WeakEntity<DaemonClient>, cx: &mut AsyncApp| {
             loop {
                 let connect_result =
-                    async_tungstenite::async_std::connect_async(DAEMON_WS_URL).await;
+                    async_tungstenite::async_std::connect_async(url.as_str()).await;
 
                 match connect_result {
                     Ok((ws_stream, _)) => {
