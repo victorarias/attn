@@ -1,5 +1,6 @@
 /// Workspace canvas entry point — sidebar + pannable canvas with live
 /// terminal panels driven by the daemon. Run with: `cargo run --bin attn-spike5`.
+mod automation;
 mod canvas_view;
 mod daemon_client;
 mod panel;

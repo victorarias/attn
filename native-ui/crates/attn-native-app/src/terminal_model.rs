@@ -8,9 +8,11 @@ use alacritty_terminal::{
 };
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use gpui::{Context, Entity, EventEmitter};
+use serde_json::json;
 
 use attn_protocol::AttachResultMessage;
 
+use crate::automation::events;
 use crate::daemon_client::{DaemonClient, DaemonEvent};
 
 /// Emitted when the terminal screen content changes and needs to be repainted.
@@ -92,6 +94,18 @@ impl TerminalModel {
     }
 
     fn handle_attach_result(&mut self, msg: &AttachResultMessage, cx: &mut Context<Self>) {
+        events::record(
+            "terminal_attach_processed",
+            json!({
+                "session_id": self.session_id.as_str(),
+                "success": msg.success,
+                "has_snapshot": msg.screen_snapshot.is_some(),
+                "replay_segments": msg.replay_segments.as_ref().map(|s| s.len()).unwrap_or(0),
+                "last_seq": msg.last_seq,
+                "cols": msg.cols,
+                "rows": msg.rows,
+            }),
+        );
         if !msg.success {
             return;
         }
@@ -168,6 +182,34 @@ impl TerminalModel {
     pub fn cursor(&self) -> (usize, usize) {
         let point = self.term.grid().cursor.point;
         (point.column.0, point.line.0 as usize)
+    }
+
+    /// Plain-text snapshot of the current screen, one row per Vec entry.
+    /// Used by the automation `read_pane_text` action so scenarios can
+    /// assert that typed input survived the PTY round-trip. Trailing
+    /// space-only rows are kept (callers can trim) so callers see the
+    /// real screen geometry.
+    pub fn screen_text(&self) -> Vec<String> {
+        let grid = self.term.grid();
+        let lines = grid.screen_lines();
+        let cols = grid.columns();
+        let mut out = Vec::with_capacity(lines);
+        for row in 0..lines {
+            let line = Line(row as i32 - grid.display_offset() as i32);
+            let mut s = String::with_capacity(cols);
+            for col in 0..cols {
+                let cell: &Cell = &grid[line][Column(col)];
+                s.push(cell.c);
+            }
+            // Trailing spaces on a row are noise for substring matching;
+            // trim them but keep the row entry so row indices line up
+            // with what the user sees on screen.
+            while s.ends_with(' ') {
+                s.pop();
+            }
+            out.push(s);
+        }
+        out
     }
 
     /// Render a single row as a sequence of (character, fg_color, is_cursor) triples.

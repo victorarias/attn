@@ -141,9 +141,15 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '56';
+const PROTOCOL_VERSION = '57';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
-const INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD = import.meta.env.VITE_UI_AUTOMATION === '1';
+// Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
+// injects this global before any page script runs — see
+// `automation_init_script` in `app/src-tauri/src/lib.rs`. Falsy in
+// non-Tauri environments and prod builds without ATTN_AUTOMATION=1.
+const INCLUDE_ATTACH_REPLAY_DEBUG_PAYLOAD =
+  typeof window !== 'undefined' &&
+  (window as { __ATTN_AUTOMATION_ENABLED?: boolean }).__ATTN_AUTOMATION_ENABLED === true;
 
 interface PRActionResult {
   success: boolean;
@@ -383,10 +389,22 @@ interface UseDaemonSocketOptions {
   wsUrl?: string;
 }
 
+/**
+ * Sessions the Tauri sidebar should ignore. Shell-agent sessions exist
+ * on the wire because the native canvas app declares the
+ * `shell_as_session` capability, but in the Tauri app shells are utility
+ * terminals (Cmd+T), never sidebar entries. Filtering here keeps the
+ * Tauri app's behavior identical regardless of who else is connected.
+ */
+function isHiddenSidebarSession(session: DaemonSession): boolean {
+  return session.agent === 'shell';
+}
+
 function dedupeSessionsByID(sessions: DaemonSession[]): DaemonSession[] {
   const deduped: DaemonSession[] = [];
   const indexByID = new Map<string, number>();
   for (const session of sessions) {
+    if (isHiddenSidebarSession(session)) continue;
     const existingIndex = indexByID.get(session.id);
     if (existingIndex === undefined) {
       indexByID.set(session.id, deduped.length);
@@ -399,6 +417,7 @@ function dedupeSessionsByID(sessions: DaemonSession[]): DaemonSession[] {
 }
 
 function upsertSessionByID(sessions: DaemonSession[], session: DaemonSession): DaemonSession[] {
+  if (isHiddenSidebarSession(session)) return sessions;
   const index = sessions.findIndex((entry) => entry.id === session.id);
   if (index === -1) {
     return [...sessions, session];
@@ -865,6 +884,20 @@ export function useDaemonSocket({
         clearTimeout(circuitResetTimeoutRef.current);
         circuitResetTimeoutRef.current = null;
       }
+
+      // Identify ourselves first thing. The Tauri app declares no
+      // capabilities — it relies on the daemon's legacy defaults
+      // (shell PTYs from spawn_session are utility terminals, not
+      // sessions). Sending hello at all is still useful for daemon-side
+      // diagnostics (client kind/version in logs).
+      ws.send(
+        JSON.stringify({
+          cmd: 'client_hello',
+          client_kind: 'tauri-app',
+          version: `protocol-${PROTOCOL_VERSION}`,
+          capabilities: [],
+        }),
+      );
 
       if (gitStatusSubscriptionRef.current) {
         ws.send(JSON.stringify({ cmd: 'subscribe_git_status', directory: gitStatusSubscriptionRef.current }));

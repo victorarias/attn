@@ -10,10 +10,11 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "56"
+const ProtocolVersion = "57"
 
 // Commands
 const (
+	CmdClientHello              = "client_hello"
 	CmdRegister                 = "register"
 	CmdUnregister               = "unregister"
 	CmdState                    = "state"
@@ -170,6 +171,18 @@ const (
 	AgentShellValue = "shell"
 )
 
+// Client capabilities advertised in ClientHelloMessage.capabilities.
+// Daemon code checks these via wsClient.HasCapability so behavior can
+// diverge per client without name-keying on client_kind. Unknown
+// capability strings are silently ignored.
+const (
+	// CapabilityShellAsSession: when set, the daemon treats shell PTY
+	// spawns from this client as first-class sessions (store + broadcast)
+	// rather than fire-and-forget utility terminals. Declared by the
+	// native-canvas app; absent from the legacy Tauri app.
+	CapabilityShellAsSession = "shell_as_session"
+)
+
 // PR states (values for PR.State field, distinct from session states)
 const (
 	PRStateWaiting = "waiting" // PR needs attention
@@ -227,6 +240,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	// Parse based on command type
 	switch peek.Cmd {
+	case CmdClientHello:
+		var msg ClientHelloMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
 	case CmdRegister:
 		var msg RegisterMessage
 		if err := json.Unmarshal(data, &msg); err != nil {

@@ -715,7 +715,18 @@ pub fn run() {
             .output();
     }
 
+    // Webview-side gate for the UI automation bridge. Injected as an
+    // initialization script so React's `useUiAutomationBridge` sees it
+    // synchronously on first render — no Tauri command roundtrip, no
+    // race with `useEffect`. Reads the same runtime decision as the
+    // Rust-side server so both halves of the bridge agree.
+    let automation_init_script = format!(
+        "window.__ATTN_AUTOMATION_ENABLED = {};",
+        profile::automation_enabled()
+    );
+
     tauri::Builder::default()
+        .append_invoke_initialization_script(automation_init_script)
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

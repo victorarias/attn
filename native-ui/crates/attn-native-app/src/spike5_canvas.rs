@@ -17,6 +17,8 @@ use gpui::{
     Render, ScrollDelta, ScrollWheelEvent, SharedString, Subscription, Window,
 };
 
+use serde_json::{json, Value};
+
 use crate::canvas_view::{pf, GridElement, Viewport};
 use crate::panel::{Panel, PanelContent, TITLE_HEIGHT};
 use crate::workspace::Workspace;
@@ -91,6 +93,30 @@ impl Spike5Canvas {
             Some(b) => point(screen.x - b.origin.x, screen.y - b.origin.y),
             None => screen,
         }
+    }
+
+    /// JSON view used by the UI automation server. Captures viewport,
+    /// focus, and the canvas's window-relative bounds so test scripts
+    /// can translate world coordinates into screen pixels for OS-level
+    /// input.
+    pub fn automation_snapshot(&self) -> Value {
+        let bounds = self.bounds.get().map(|b| {
+            json!({
+                "x": pf(b.origin.x),
+                "y": pf(b.origin.y),
+                "width": pf(b.size.width),
+                "height": pf(b.size.height),
+            })
+        });
+        json!({
+            "viewport": {
+                "origin_x": self.viewport.origin.x,
+                "origin_y": self.viewport.origin.y,
+                "zoom": self.viewport.zoom,
+            },
+            "focused_panel_id": self.focused_panel,
+            "bounds": bounds,
+        })
     }
 
     pub fn set_selected(&mut self, ws: Option<Entity<Workspace>>, cx: &mut Context<Self>) {

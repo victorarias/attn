@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-ui-automation build-app-dev app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app build-app-dev app-screenshot scenario-native-canvas dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -95,7 +95,7 @@ run: install
 	@open $(APP_BUNDLE)
 	@echo "Launched $(APP_BUNDLE)"
 
-install: build-app-ui-automation
+install: build-app
 	@echo ">>> Installing PROD: $(APP_BUNDLE) (profile=default, port=9849)"
 	@mkdir -p ~/Applications
 	@# Quit a running instance first. macOS keeps the running image
@@ -197,26 +197,28 @@ endef
 build-app: build
 	$(call build_tauri_app,VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn,)
 
-build-app-ui-automation: build
-	$(call build_tauri_app,ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn,)
-
 # Dev build. Bakes ATTN_BUILD_PROFILE=dev into the Rust binary and
 # VITE_ATTN_BUILD_PROFILE=dev + VITE_DAEMON_PORT=29849 into the frontend
 # so the dev bundle can never accidentally point at the prod daemon.
-# UI automation is enabled by default (matching `make install` / the
-# prod install path) so real-app harness scenarios work against the
-# dev bundle too. Set ATTN_DEV_UI_AUTOMATION=0 to disable.
+# UI automation is gated at *runtime* now (see profile::automation_enabled
+# in app/src-tauri/src/profile.rs) — dev builds get it on by default
+# because the runtime sees ATTN_PROFILE=dev; prod builds get it off
+# unless the user sets ATTN_AUTOMATION=1.
 # Output: app/src-tauri/target/release/bundle/macos/attn-dev.app
-ATTN_DEV_UI_AUTOMATION ?= 1
 build-app-dev: build
-ifeq ($(ATTN_DEV_UI_AUTOMATION),1)
-	$(call build_tauri_app,ATTN_UI_AUTOMATION=1 VITE_UI_AUTOMATION=1 ATTN_BUILD_PROFILE=dev VITE_ATTN_BUILD_PROFILE=dev VITE_DAEMON_PORT=29849 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn-dev,--config src-tauri/tauri.dev.conf.json)
-else
 	$(call build_tauri_app,ATTN_BUILD_PROFILE=dev VITE_ATTN_BUILD_PROFILE=dev VITE_DAEMON_PORT=29849 VITE_INSTALL_CHANNEL=source VITE_ATTN_BUILD_VERSION='$(VERSION)' VITE_ATTN_SOURCE_FINGERPRINT='$(SOURCE_FINGERPRINT)' VITE_ATTN_GIT_COMMIT='$(GIT_COMMIT)' VITE_ATTN_BUILD_TIME='$(BUILD_TIME)',attn-dev,--config src-tauri/tauri.dev.conf.json)
-endif
 
 app-screenshot:
 	cd app && node scripts/real-app-harness/capture-app-screenshot.mjs $(if $(SCREENSHOT_PATH),--path "$(SCREENSHOT_PATH)",) $(APP_SCREENSHOT_FLAGS)
+
+# End-to-end scenario for the native canvas app driven through its UI
+# automation sidecar. Assumes a native binary is already running with
+# automation enabled — typically:
+#   ATTN_PROFILE=dev ATTN_WS_URL=ws://localhost:29849/ws \
+#     cargo run --manifest-path native-ui/Cargo.toml --bin attn-spike5
+# The script reads ATTN_PROFILE itself to find the matching manifest.
+scenario-native-canvas:
+	cd app && node scripts/real-app-harness/scenario-native-canvas.mjs
 
 # Ad-hoc sign the installed app binary so macOS doesn't SIGKILL it
 # when invoked as a CLI subprocess (e.g. Claude Code hooks)

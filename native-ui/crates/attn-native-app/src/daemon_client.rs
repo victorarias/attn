@@ -1,7 +1,13 @@
-use attn_protocol::{ServerEvent, Session, Workspace, PROTOCOL_VERSION};
+use attn_protocol::{
+    ClientHelloMessage, ServerEvent, Session, Workspace, CAPABILITY_SHELL_AS_SESSION,
+    PROTOCOL_VERSION,
+};
 use futures_util::{SinkExt, StreamExt};
 use gpui::{AsyncApp, Context, EventEmitter, WeakEntity};
 use serde::Serialize;
+use serde_json::json;
+
+use crate::automation::events;
 
 const DEFAULT_DAEMON_WS_URL: &str = "ws://localhost:9849/ws";
 
@@ -61,6 +67,21 @@ impl DaemonClient {
                     Ok((ws_stream, _)) => {
                         // Create a channel for outbound messages.
                         let (cmd_tx, cmd_rx) = async_channel::unbounded::<String>();
+
+                        // Identify ourselves before any other command. Daemon
+                        // gates per-client behavior on these capabilities;
+                        // shell_as_session is what makes spawned shells appear
+                        // as canvas panels (the Tauri app, which doesn't send
+                        // hello, retains the legacy "shell = utility terminal"
+                        // behavior).
+                        let hello = ClientHelloMessage::new(
+                            "native-canvas",
+                            env!("CARGO_PKG_VERSION"),
+                            vec![CAPABILITY_SHELL_AS_SESSION.to_string()],
+                        );
+                        if let Ok(text) = serde_json::to_string(&hello) {
+                            let _ = cmd_tx.try_send(text);
+                        }
 
                         let update_ok =
                             this.update(cx, |client: &mut DaemonClient, cx: &mut Context<DaemonClient>| {
@@ -155,6 +176,7 @@ impl DaemonClient {
     }
 
     fn handle_event(&mut self, event: ServerEvent, cx: &mut Context<Self>) {
+        record_inbound_event(&event);
         match event {
             ServerEvent::InitialState(msg) => {
                 if let Some(ref v) = msg.protocol_version {
@@ -292,4 +314,78 @@ impl DaemonClient {
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
+}
+
+/// Summarize an inbound `ServerEvent` and record it in the global event
+/// log. PtyOutput is excluded — at typical streaming rates it would
+/// dominate the ring buffer and crowd out lower-frequency events that are
+/// far more useful for diagnosing UI-level problems. Specific
+/// PTY-byte-count diagnosis can be added later as a separate higher-level
+/// event (e.g. "first output for session X received") if we need it.
+fn record_inbound_event(event: &ServerEvent) {
+    let payload = match event {
+        ServerEvent::InitialState(m) => json!({
+            "kind": "initial_state",
+            "session_count": m.sessions.len(),
+            "workspace_count": m.workspaces.len(),
+        }),
+        ServerEvent::SessionRegistered(m) => json!({
+            "kind": "session_registered",
+            "session_id": m.session.id.as_str(),
+            "workspace_id": m.session.workspace_id.as_deref(),
+            "agent": format!("{:?}", m.session.agent),
+        }),
+        ServerEvent::SessionUnregistered(m) => json!({
+            "kind": "session_unregistered",
+            "session_id": m.session.id.as_str(),
+        }),
+        ServerEvent::SessionStateChanged(m) => json!({
+            "kind": "session_state_changed",
+            "session_id": m.session.id.as_str(),
+            "state": format!("{:?}", m.session.state),
+        }),
+        ServerEvent::SessionsUpdated(m) => json!({
+            "kind": "sessions_updated",
+            "session_count": m.sessions.len(),
+        }),
+        ServerEvent::WorkspaceRegistered(m) => json!({
+            "kind": "workspace_registered",
+            "workspace_id": m.workspace.id.as_str(),
+            "title": m.workspace.title.as_str(),
+        }),
+        ServerEvent::WorkspaceUnregistered(m) => json!({
+            "kind": "workspace_unregistered",
+            "workspace_id": m.workspace.id.as_str(),
+        }),
+        ServerEvent::WorkspaceStateChanged(m) => json!({
+            "kind": "workspace_state_changed",
+            "workspace_id": m.workspace.id.as_str(),
+        }),
+        ServerEvent::AttachResult(m) => json!({
+            "kind": "attach_result",
+            "session_id": m.id.as_str(),
+            "success": m.success,
+            "has_snapshot": m.screen_snapshot.is_some(),
+            "replay_segments": m.replay_segments.as_ref().map(|s| s.len()).unwrap_or(0),
+            "last_seq": m.last_seq,
+        }),
+        ServerEvent::PtyDesync(m) => json!({
+            "kind": "pty_desync",
+            "session_id": m.id.as_str(),
+        }),
+        ServerEvent::PtyResized(m) => json!({
+            "kind": "pty_resized",
+            "session_id": m.id.as_str(),
+            "cols": m.cols,
+            "rows": m.rows,
+        }),
+        ServerEvent::SessionExited(m) => json!({
+            "kind": "session_exited",
+            "session_id": m.id.as_str(),
+            "exit_code": m.exit_code,
+        }),
+        ServerEvent::PtyOutput(_) => return,
+        ServerEvent::Unknown(name) => json!({"kind": "unknown", "event": name.as_str()}),
+    };
+    events::record("daemon_event", payload);
 }

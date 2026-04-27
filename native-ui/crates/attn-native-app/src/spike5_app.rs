@@ -6,10 +6,14 @@
 /// Layout: sidebar pinned left at fixed width, canvas fills the rest.
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use attn_protocol::{AttachSessionMessage, Session};
-use gpui::{div, prelude::*, rgb, Context, Entity, ParentElement, Render, SharedString, Window};
+use gpui::{div, prelude::*, rgb, App, Context, Entity, ParentElement, Render, SharedString, Window};
+use serde_json::{json, Value};
 
+use crate::automation;
+use crate::automation::events;
 use crate::daemon_client::{DaemonClient, DaemonEvent};
 use crate::panel::{Panel, PanelContent, TITLE_HEIGHT};
 use crate::sidebar::Sidebar;
@@ -30,23 +34,24 @@ pub struct Spike5App {
     sidebar: Entity<Sidebar>,
     canvas: Entity<Spike5Canvas>,
     selected_id: Option<SharedString>,
+    /// Live automation server handle. Drop deletes the manifest. `None`
+    /// when automation is disabled for this launch (default in prod) or
+    /// when bind/start failed — in which case we still want the app to
+    /// run, just without the test sidecar.
+    _automation: Option<automation::server::Handle>,
 }
 
 impl Spike5App {
     pub fn new(daemon: Entity<DaemonClient>, cx: &mut Context<Self>) -> Self {
         let canvas = cx.new(|cx| Spike5Canvas::new(cx));
-        let canvas_for_select = canvas.clone();
         let app_handle = cx.entity().downgrade();
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 Vec::new(),
                 move |id, _window, cx| {
                     let app_handle = app_handle.clone();
-                    let canvas = canvas_for_select.clone();
                     let _ = app_handle.update(cx, |app: &mut Spike5App, cx| {
-                        let ws = app.workspaces_by_id.get(&id).cloned();
-                        canvas.update(cx, |canvas, cx| canvas.set_selected(ws, cx));
-                        app.selected_id = Some(id);
+                        app.select_workspace(id, cx);
                     });
                 },
                 cx,
@@ -55,19 +60,36 @@ impl Spike5App {
 
         cx.subscribe(&daemon, |this, _client, event: &DaemonEvent, cx| match event {
             DaemonEvent::WorkspaceRegistered { workspace } => {
+                events::record(
+                    "workspace_registered_observed",
+                    json!({"workspace_id": workspace.id.as_str()}),
+                );
                 this.upsert_workspace(workspace.clone(), cx);
                 this.sync_terminal_panels(cx);
             }
             DaemonEvent::WorkspaceUnregistered { workspace_id } => {
+                events::record(
+                    "workspace_unregistered_observed",
+                    json!({"workspace_id": workspace_id.as_str()}),
+                );
                 this.remove_workspace(workspace_id.clone(), cx);
             }
             DaemonEvent::WorkspaceStateChanged { workspace } => {
+                events::record(
+                    "workspace_state_changed_observed",
+                    json!({"workspace_id": workspace.id.as_str()}),
+                );
                 this.apply_workspace_snapshot(workspace.clone(), cx);
             }
             DaemonEvent::SessionsChanged => {
+                events::record(
+                    "sessions_changed_observed",
+                    json!({"session_count": this.daemon.read(cx).sessions().len()}),
+                );
                 this.sync_terminal_panels(cx);
             }
             DaemonEvent::Connected => {
+                events::record("daemon_connected", json!({}));
                 // Daemon tracks PTY attachments per client connection,
                 // so on a fresh socket every existing TerminalView is
                 // detached on the daemon side until we re-issue
@@ -81,13 +103,90 @@ impl Spike5App {
         })
         .detach();
 
+        let automation_handle = if automation::automation_enabled() {
+            start_automation(cx)
+        } else {
+            None
+        };
+
         Self {
             daemon,
             workspaces_by_id: HashMap::new(),
             sidebar,
             canvas,
             selected_id: None,
+            _automation: automation_handle,
         }
+    }
+
+    /// Read-only handle to the daemon client, exposed so the automation
+    /// module can serialize wire-level workspace + session state without
+    /// cloning the lists out of `Spike5App`.
+    pub fn daemon(&self) -> &Entity<DaemonClient> {
+        &self.daemon
+    }
+
+    /// Lookup helper used by automation actions to target a specific
+    /// workspace by id without exposing the underlying map.
+    pub fn workspace(&self, id: &str) -> Option<Entity<Workspace>> {
+        self.workspaces_by_id
+            .get(&SharedString::from(id.to_string()))
+            .cloned()
+    }
+
+    /// Iterator over every live workspace handle. Used by automation
+    /// actions that need to scan panels across workspaces (e.g.
+    /// `read_pane_text` finding the terminal model for a given session).
+    pub fn workspaces(&self) -> impl Iterator<Item = &Entity<Workspace>> {
+        self.workspaces_by_id.values()
+    }
+
+    /// Switch the canvas + sidebar to the given workspace id. Shared by
+    /// the sidebar's click callback and the automation `select_workspace`
+    /// action so both paths produce identical state. No-op when `id`
+    /// doesn't match a known workspace.
+    pub fn select_workspace(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        let Some(ws) = self.workspaces_by_id.get(&id).cloned() else {
+            events::record(
+                "workspace_select_missed",
+                json!({"id": id.as_ref(), "reason": "unknown_id"}),
+            );
+            return;
+        };
+        events::record("workspace_selected", json!({"id": id.as_ref()}));
+        let canvas = self.canvas.clone();
+        canvas.update(cx, |canvas, cx| canvas.set_selected(Some(ws), cx));
+        self.selected_id = Some(id.clone());
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.set_selected(Some(id), cx));
+    }
+
+    /// Build a JSON snapshot of everything an external test script needs
+    /// to reason about: live wire state, the canvas's local UI state, and
+    /// which workspace is currently selected. Shape is the long-term
+    /// contract; new fields are added as automation needs grow.
+    pub fn automation_snapshot(&self, cx: &App) -> Value {
+        let daemon = self.daemon.read(cx);
+        let sessions = daemon.sessions();
+
+        let workspaces: Vec<Value> = self
+            .workspaces_by_id
+            .values()
+            .map(|ws| ws.read(cx).automation_snapshot())
+            .collect();
+
+        let canvas = self.canvas.read(cx).automation_snapshot();
+
+        json!({
+            "selected_workspace_id": self.selected_id.as_ref().map(|s| s.to_string()),
+            "workspaces": workspaces,
+            "sessions": serde_json::to_value(sessions).unwrap_or(Value::Null),
+            "canvas": canvas,
+            "daemon": {
+                "connected": daemon.connected(),
+                "error": daemon.error(),
+            },
+        })
     }
 
     fn upsert_workspace(&mut self, data: attn_protocol::Workspace, cx: &mut Context<Self>) {
@@ -167,15 +266,35 @@ impl Spike5App {
         let live_session_ids: std::collections::HashSet<&str> =
             sessions.iter().map(|s| s.id.as_str()).collect();
 
+        events::record(
+            "sync_terminal_panels_start",
+            json!({
+                "session_count": sessions.len(),
+                "workspace_count": self.workspaces_by_id.len(),
+            }),
+        );
+
         // Prune Terminal panels whose session is no longer alive on the
         // daemon. Dropping the panel drops the last handle to its
         // TerminalView, which detaches subscriptions for free.
         for ws_entity in self.workspaces_by_id.values().cloned().collect::<Vec<_>>() {
             ws_entity.update(cx, |ws, cx| {
+                let workspace_id = ws.id.to_string();
                 let before = ws.panels.len();
                 ws.panels.retain(|p| match &p.content {
                     PanelContent::Terminal { session_id, .. } => {
-                        live_session_ids.contains(session_id.as_ref())
+                        let alive = live_session_ids.contains(session_id.as_ref());
+                        if !alive {
+                            events::record(
+                                "panel_pruned",
+                                json!({
+                                    "workspace_id": workspace_id.as_str(),
+                                    "panel_id": p.id,
+                                    "session_id": session_id.as_ref(),
+                                }),
+                            );
+                        }
+                        alive
                     }
                     _ => true,
                 });
@@ -243,10 +362,21 @@ impl Spike5App {
                 width: TERMINAL_W,
                 height: TERMINAL_H,
                 content: PanelContent::Terminal {
-                    session_id: SharedString::from(session_id),
+                    session_id: SharedString::from(session_id.clone()),
                     view,
                 },
             };
+
+            let panel_id = panel.id;
+            events::record(
+                "panel_added",
+                json!({
+                    "workspace_id": ws_id,
+                    "panel_id": panel_id,
+                    "session_id": session_id.as_str(),
+                    "kind": "terminal",
+                }),
+            );
 
             ws_entity.update(cx, |ws, cx| {
                 ws.panels.push(panel);
@@ -282,4 +412,52 @@ fn panel_terminal_dims(world_w: f32, world_h: f32) -> (u16, u16) {
     let cols = ((world_w / CHAR_WIDTH) as u16).max(1);
     let rows = (((world_h - TITLE_HEIGHT) / ROW_HEIGHT) as u16).max(1);
     (cols, rows)
+}
+
+/// Bring up the UI automation TCP server + dispatch pump. Errors are
+/// logged but don't bubble up — automation is a dev/test affordance and
+/// shouldn't take down the app if (e.g.) the manifest dir is unwritable.
+fn start_automation(cx: &mut Context<Spike5App>) -> Option<automation::server::Handle> {
+    let listener = match automation::server::bind() {
+        Ok(l) => l,
+        Err(error) => {
+            eprintln!("[automation] bind failed: {error}");
+            return None;
+        }
+    };
+
+    let manifest_path = automation::manifest_path();
+    let (dispatcher, rx) = automation::actions::make_dispatcher();
+
+    // Spawn the wire-protocol layer onto GPUI's background executor. The
+    // executor is multi-threaded and `Send`, so the closure stored in
+    // the `Spawner` can hand futures to it from anywhere.
+    let bg = cx.background_executor().clone();
+    let spawner: automation::server::Spawner = Arc::new(move |fut| {
+        bg.spawn(fut).detach();
+    });
+
+    let handle = match automation::server::start(listener, manifest_path, dispatcher, spawner) {
+        Ok(h) => h,
+        Err(error) => {
+            eprintln!("[automation] start failed: {error}");
+            return None;
+        }
+    };
+
+    // Drive the foreground-side action pump on GPUI's main thread so
+    // handlers can read entity state. Detached: it loops until the
+    // dispatcher's channel closes (which happens when the server handle
+    // is dropped on app shutdown).
+    let app_handle = cx.entity().downgrade();
+    cx.spawn(async move |_, cx| {
+        automation::actions::pump_actions(rx, app_handle, cx.clone()).await;
+    })
+    .detach();
+
+    eprintln!(
+        "[automation] listening — manifest at {}",
+        handle.manifest_path().display()
+    );
+    Some(handle)
 }

@@ -28,6 +28,10 @@ enum SessionAgent {
   codex,
   copilot,
   pi,
+  // Shell agents are first-class sessions for clients that advertise the
+  // shell_as_session capability (the native canvas app); the Tauri app
+  // continues to filter them out of its sidebar.
+  shell,
 }
 
 // WorkspaceStatus is the rolled-up status of all sessions in a workspace.
@@ -279,6 +283,24 @@ model EndpointInfo {
 // ============================================================================
 // Command Messages (Client → Daemon)
 // ============================================================================
+
+// Sent first thing after a WebSocket connect so the daemon can serve
+// per-client behavior gated on capabilities. Clients that don't send a
+// hello are treated as the legacy default (no capabilities) for
+// backwards compatibility.
+//
+// Capabilities are open-ended strings — the daemon checks the ones it
+// recognizes; unknown capabilities are ignored. Currently defined:
+//   - "shell_as_session" — when the client spawns a shell PTY via
+//     spawn_session, the daemon treats it as a first-class session
+//     (added to the store, broadcast as session_registered) instead of
+//     a fire-and-forget utility terminal.
+model ClientHelloMessage {
+  cmd: "client_hello";
+  client_kind: string;          // e.g. "native-canvas", "tauri-app"
+  version: string;              // free-form, used for diagnostics
+  capabilities: string[];       // see capability docstrings above
+}
 
 model RegisterMessage {
   cmd: "register";

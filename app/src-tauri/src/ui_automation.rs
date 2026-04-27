@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Listener, LogicalPosition, LogicalSize, Manager, Runtime};
 
-pub const UI_AUTOMATION_ENABLED: bool = option_env!("ATTN_UI_AUTOMATION").is_some();
+use crate::profile;
 
 const REQUEST_EVENT: &str = "attn://ui-automation/request";
 const RESPONSE_EVENT: &str = "attn://ui-automation/response";
@@ -107,11 +107,26 @@ struct BridgeResponse {
 }
 
 fn generate_token() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("{:x}{:x}", std::process::id(), now)
+    // 32 random bytes from the OS RNG, hex-encoded. The previous
+    // pid+nanos scheme was predictable enough that anyone on the box
+    // could guess it and drive the bridge — local-only sockets soften
+    // the threat model, but the cost of doing this right is one dep.
+    let mut buf = [0u8; 32];
+    getrandom::getrandom(&mut buf).expect("OS RNG must be available");
+    let mut hex = String::with_capacity(buf.len() * 2);
+    for byte in buf {
+        hex.push(nibble(byte >> 4));
+        hex.push(nibble(byte & 0x0f));
+    }
+    hex
+}
+
+fn nibble(n: u8) -> char {
+    match n {
+        0..=9 => (b'0' + n) as char,
+        10..=15 => (b'a' + n - 10) as char,
+        _ => unreachable!(),
+    }
 }
 
 fn manifest_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
@@ -558,7 +573,7 @@ fn serve_connection<R: Runtime>(
 }
 
 pub fn maybe_start<R: Runtime>(app: &AppHandle<R>) {
-    if !UI_AUTOMATION_ENABLED {
+    if !profile::automation_enabled() {
         return;
     }
 
@@ -596,10 +611,9 @@ pub fn maybe_start<R: Runtime>(app: &AppHandle<R>) {
     append_log(
         app,
         &format!(
-            "server start pid={} port={} enabled={}",
+            "server start pid={} port={} enabled=true",
             std::process::id(),
             port,
-            UI_AUTOMATION_ENABLED
         ),
     );
 

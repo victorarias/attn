@@ -303,6 +303,13 @@ impl Focusable for TerminalView {
 }
 
 impl TerminalView {
+    /// Read-only handle to the underlying terminal model. Used by the
+    /// automation `read_pane_text` action to dump the visible grid for
+    /// scenario assertions.
+    pub fn model(&self) -> &Entity<TerminalModel> {
+        &self.terminal
+    }
+
     pub fn new(
         terminal: Entity<TerminalModel>,
         daemon: Entity<DaemonClient>,
