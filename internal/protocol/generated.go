@@ -1914,6 +1914,7 @@ const SessionAgentClaude SessionAgent = "claude"
 const SessionAgentCodex SessionAgent = "codex"
 const SessionAgentCopilot SessionAgent = "copilot"
 const SessionAgentPi SessionAgent = "pi"
+const SessionAgentShell SessionAgent = "shell"
 
 type SessionExitedMessage struct {
 	// Event corresponds to the JSON schema field "event".

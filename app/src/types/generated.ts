@@ -384,6 +384,7 @@ export enum SessionAgent {
     Codex = "codex",
     Copilot = "copilot",
     Pi = "pi",
+    Shell = "shell",
 }
 
 export enum SessionState {
@@ -5418,6 +5419,7 @@ const typeMap: any = {
         "codex",
         "copilot",
         "pi",
+        "shell",
     ],
     "SessionState": [
         "idle",

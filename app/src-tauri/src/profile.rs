@@ -99,7 +99,11 @@ fn decide_automation_enabled(automation: Option<&str>, profile: Option<&str>) ->
         // automation in CI.
         Some(_) => return false,
     }
-    profile.map(str::trim).map(|p| p.to_ascii_lowercase()).as_deref() == Some("dev")
+    profile
+        .map(str::trim)
+        .map(|p| p.to_ascii_lowercase())
+        .as_deref()
+        == Some("dev")
 }
 
 #[cfg(test)]

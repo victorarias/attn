@@ -28,6 +28,10 @@ enum SessionAgent {
   codex,
   copilot,
   pi,
+  // Shell agents are first-class sessions for clients that advertise the
+  // shell_as_session capability (the native canvas app); the Tauri app
+  // continues to filter them out of its sidebar.
+  shell,
 }
 
 // WorkspaceStatus is the rolled-up status of all sessions in a workspace.
