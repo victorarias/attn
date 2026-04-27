@@ -1939,7 +1939,14 @@ export function useUiAutomationBridge({
   handleAutomationRequestRef.current = handleAutomationRequest;
 
   useEffect(() => {
-    if (!isTauri() || import.meta.env.VITE_UI_AUTOMATION !== '1') {
+    // Gate flipped from compile-time `VITE_UI_AUTOMATION` to a runtime
+    // global injected by the Rust shell (`append_invoke_initialization_script`).
+    // The Rust-side decision lives in `app/src-tauri/src/profile.rs::automation_enabled`
+    // and applies the same rule as the native canvas app: explicit
+    // ATTN_AUTOMATION wins, otherwise dev profile defaults on.
+    const automationEnabled =
+      typeof window !== 'undefined' && (window as { __ATTN_AUTOMATION_ENABLED?: boolean }).__ATTN_AUTOMATION_ENABLED === true;
+    if (!isTauri() || !automationEnabled) {
       return;
     }
 

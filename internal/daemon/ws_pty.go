@@ -403,7 +403,13 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		return
 	}
 
-	if !isShell {
+	// Shell PTYs are utility terminals by default (Cmd+T in the Tauri
+	// app — fire-and-forget, not tracked as sessions). The native canvas
+	// app needs them as first-class sessions so the workspace can render
+	// each PTY as a panel; it opts in via the `shell_as_session`
+	// capability declared in client_hello.
+	registerAsSession := !isShell || client.HasCapability(protocol.CapabilityShellAsSession)
+	if registerAsSession {
 		d.clearLongRunTracking(msg.ID)
 		branchInfo, _ := git.GetBranchInfo(cwd)
 		nowStr := string(protocol.TimestampNow())

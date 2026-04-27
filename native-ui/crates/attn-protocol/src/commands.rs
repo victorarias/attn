@@ -14,6 +14,29 @@ impl QueryMessage {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ClientHelloMessage {
+    pub cmd: &'static str,
+    pub client_kind: String,
+    pub version: String,
+    pub capabilities: Vec<String>,
+}
+
+impl ClientHelloMessage {
+    pub fn new(
+        client_kind: impl Into<String>,
+        version: impl Into<String>,
+        capabilities: Vec<String>,
+    ) -> Self {
+        Self {
+            cmd: "client_hello",
+            client_kind: client_kind.into(),
+            version: version.into(),
+            capabilities,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 pub struct AttachSessionMessage {
     pub cmd: &'static str,
     pub id: String,

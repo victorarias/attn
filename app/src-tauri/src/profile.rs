@@ -70,3 +70,58 @@ pub fn bundle_identifier() -> &'static str {
         _ => "com.attn.manager",
     }
 }
+
+/// Decide whether the UI automation bridge should run this launch. Single
+/// rule shared with the native canvas app — keep it in sync with
+/// `native-ui/crates/attn-native-app/src/automation/profile.rs` and
+/// `app/scripts/real-app-harness/nativeHarnessProfile.mjs`.
+///
+///   - `ATTN_AUTOMATION=1`  → on
+///   - `ATTN_AUTOMATION=0`  → off
+///   - `ATTN_PROFILE=dev`   → on   (default for dev)
+///   - otherwise            → off  (default for prod / unset)
+///
+/// `apply_build_profile_env` must run first so a dev build that didn't
+/// inherit `ATTN_PROFILE=dev` from its parent process still sees the
+/// right profile name when this is consulted.
+pub fn automation_enabled() -> bool {
+    let automation = env::var("ATTN_AUTOMATION").ok();
+    let profile = env::var("ATTN_PROFILE").ok();
+    decide_automation_enabled(automation.as_deref(), profile.as_deref())
+}
+
+fn decide_automation_enabled(automation: Option<&str>, profile: Option<&str>) -> bool {
+    match automation.map(str::trim) {
+        Some("1") => return true,
+        Some("0") => return false,
+        Some("") | None => {}
+        // Strict-off on any other value so typos don't silently disable
+        // automation in CI.
+        Some(_) => return false,
+    }
+    profile.map(str::trim).map(|p| p.to_ascii_lowercase()).as_deref() == Some("dev")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automation_decision_rules() {
+        assert!(decide_automation_enabled(Some("1"), None));
+        assert!(decide_automation_enabled(Some("1"), Some("dev")));
+        assert!(!decide_automation_enabled(Some("0"), None));
+        assert!(!decide_automation_enabled(Some("0"), Some("dev")));
+        assert!(!decide_automation_enabled(Some("yes"), Some("dev")));
+        assert!(decide_automation_enabled(None, Some("dev")));
+        assert!(!decide_automation_enabled(None, Some("ci")));
+        assert!(!decide_automation_enabled(None, None));
+        assert!(decide_automation_enabled(Some(""), Some("dev")));
+        assert!(decide_automation_enabled(Some("  "), Some("dev")));
+        assert!(!decide_automation_enabled(Some("  "), None));
+        // Profile case-insensitive (Go side accepts only lowercase but
+        // mixed case here would mean the parent env wasn't normalized;
+        // handle defensively).
+        assert!(decide_automation_enabled(None, Some("DEV")));
+    }
+}

@@ -37,6 +37,14 @@ type wsClient struct {
 	pendingRemote   map[string]struct{}          // remote runtime IDs awaiting attach_result
 	attachMu        sync.Mutex
 
+	// Identity + capabilities declared via client_hello. Clients that
+	// never send hello have an empty capabilities map and are treated as
+	// the legacy default (matches the Tauri app's pre-hello behavior).
+	clientKind    string
+	clientVersion string
+	capabilities  map[string]struct{}
+	identityMu    sync.RWMutex
+
 	// Git status subscription state
 	gitStatusDir        string
 	gitStatusTicker     *time.Ticker
@@ -44,6 +52,30 @@ type wsClient struct {
 	gitStatusHash       string // hash of last sent status for dedup
 	gitStatusEndpointID string
 	gitStatusMu         sync.Mutex
+}
+
+// HasCapability reports whether the client advertised the given
+// capability via client_hello. False for clients that never sent hello.
+// Capability strings are arbitrary; see protocol.Capability* constants.
+func (c *wsClient) HasCapability(cap string) bool {
+	c.identityMu.RLock()
+	defer c.identityMu.RUnlock()
+	_, ok := c.capabilities[cap]
+	return ok
+}
+
+// setIdentity records the hello payload on the client. Idempotent —
+// later hellos overwrite earlier ones, which is the right behavior if a
+// client ever wants to re-declare (no current case, but cheap).
+func (c *wsClient) setIdentity(kind, version string, caps []string) {
+	c.identityMu.Lock()
+	defer c.identityMu.Unlock()
+	c.clientKind = kind
+	c.clientVersion = version
+	c.capabilities = make(map[string]struct{}, len(caps))
+	for _, cap := range caps {
+		c.capabilities[cap] = struct{}{}
+	}
 }
 
 func (c *wsClient) closeSendChannel() {
@@ -684,6 +716,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	}
 
 	switch cmd {
+	case protocol.CmdClientHello:
+		d.handleClientHello(client, msg.(*protocol.ClientHelloMessage))
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:

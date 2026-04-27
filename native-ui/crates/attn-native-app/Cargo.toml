@@ -30,3 +30,4 @@ smol = "2"
 alacritty_terminal = "0.26.0"
 base64 = "0.22"
 async-channel = "2"
+getrandom = { workspace = true }

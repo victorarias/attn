@@ -54,6 +54,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "dirs 5.0.1",
+ "getrandom 0.2.17",
  "libc",
  "regex",
  "serde",

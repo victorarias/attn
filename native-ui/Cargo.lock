@@ -473,6 +473,7 @@ dependencies = [
  "attn-protocol",
  "base64",
  "futures-util",
+ "getrandom 0.2.17",
  "gpui",
  "serde",
  "serde_json",

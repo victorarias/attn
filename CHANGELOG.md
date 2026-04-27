@@ -6,6 +6,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-28]
+
+### Added
+- **Native Canvas UI Test Automation Sidecar**: The native GPUI canvas app (`attn-spike5`) now exposes a TCP automation sidecar matching the Tauri app's bridge format, so external test scripts can drive both apps with the same client. Actions cover liveness (`ping`), full state inspection (`get_state`), session enumeration (`list_sessions`), window geometry (`get_window_geometry`), workspace selection (`select_workspace`), panel manipulation (`move_panel`), PTY input/inspection (`send_pty_input`, `read_pane_text`), and a structured event tap (`tail_events`) for cursor-based polling of in-process events when behavior needs verification beyond what get_state can show. The sidecar writes a discovery manifest at `~/Library/Application Support/com.attn.native[.<profile>]/debug/ui-automation.json` mirroring the Tauri layout but namespaced per profile. A `make scenario-native-canvas` target runs an end-to-end harness scenario that connects to the live binary and exercises the bridge.
+- **Client Capability Handshake**: New `client_hello` daemon command lets clients identify themselves and advertise capabilities at connection time. The native canvas app sends `shell_as_session` (treats shell agents as first-class workspace sessions); the Tauri app sends an empty capability set and continues to filter shell-as-session panels out of its sidebar. Lets the daemon serve different behaviors per client without making one client's mental model leak into the other. Protocol version bumped 56 → 57, which forces the standard daemon/app version-mismatch reconnect on next install.
+
+### Changed
+- **UI Automation Gating Is Now Runtime, Not Build-Time**: Both the Tauri app and the new native sidecar decide whether to run the automation bridge at startup based on `ATTN_AUTOMATION` (explicit `1`/`0`) and `ATTN_PROFILE` (defaults on for `dev`, off for prod). Previously the Tauri side was gated by `ATTN_UI_AUTOMATION` / `VITE_UI_AUTOMATION` baked in at compile time, which meant every `make install` shipped a build with the bridge always-on. The `make build-app-ui-automation` target is gone; both `make install` and `make dev` now build the same binary and the runtime decides. **Breaking**: anyone relying on automation against a prod source install must now launch with `ATTN_AUTOMATION=1` to enable it. The bridge token has also moved from a predictable pid+nanos string to 32 OS-random bytes hex-encoded.
+
+### Fixed
+- **Automation Server Now Echoes Wire ID On Malformed Requests**: When a request fails JSON deserialization the server now best-effort extracts the raw `id` field (string, number, or bool) and echoes it back on the error response. Previously a malformed request was answered with a synthetic `ui-automation-{counter}` id that no client could correlate, so a multiplexing client looking up its own id would never match the response and the request would hang silently until timeout.
+
+---
+
 ## [2026-04-26]
 
 ### Added

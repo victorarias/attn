@@ -304,6 +304,20 @@ type ClearWarningsMessage struct {
 	Cmd string `json:"cmd"`
 }
 
+type ClientHelloMessage struct {
+	// Capabilities corresponds to the JSON schema field "capabilities".
+	Capabilities []string `json:"capabilities"`
+
+	// ClientKind corresponds to the JSON schema field "client_kind".
+	ClientKind string `json:"client_kind"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version string `json:"version"`
+}
+
 type CollapseRepoMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`

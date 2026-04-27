@@ -4,8 +4,8 @@
 
 Spike plan. Prototypes to prove feasibility before building the real client.
 
-**Completed:** Spikes 1, 2, 3, 4 (`attn-native`, `attn-native`, `attn-canvas`, `attn-spike4`)
-**Next:** Spike 5 (Workspace Entity Model + Sidebar) — prerequisite: SessionLayout rename commit first
+**Completed:** Spikes 1, 2, 3, 4, 5 + canvas convergence + Spike 6 (UI Test Automation Sidecar)
+**Next:** Layer-2 automation actions (input dispatch, panel-targeted reads) as future spikes need them
 
 ## Why
 
@@ -379,6 +379,30 @@ Layer 3 — **macOS input driver** (reuse as-is):
 **Design decision**: Start with a minimal action set. Each subsequent spike adds the actions it needs for its own tests (e.g. Spike 4 adds `read_pane_text`, `focus_panel`). The automation server grows incrementally with the app.
 
 **Effort**: Small-Medium (1 day). The hard design work is already done in the Tauri app — this is a port of the server side to Rust, reuse of the client side as-is.
+
+#### Implementation notes (landed)
+
+What shipped vs. the plan above:
+
+- **Profiles instead of a separate flag**: Profiles arrived after the original plan was written. Automation is now gated at runtime via `ATTN_AUTOMATION` (explicit `1`/`0`) with a profile-aware default (`ATTN_PROFILE=dev` → on, prod → off). The `--automation` CLI flag from the plan was dropped — environment is the single decision surface for both apps. The same rule lives in three places that all need to agree:
+  - `native-ui/crates/attn-native-app/src/automation/profile.rs`
+  - `app/src-tauri/src/profile.rs::automation_enabled`
+  - `app/scripts/real-app-harness/nativeHarnessProfile.mjs`
+- **Bundle-id namespace**: native side uses `com.attn.native[.<profile>]` (e.g. `com.attn.native.dev`). There is no actual `.app` bundle yet; the namespace is just the manifest directory contract that matches what a future packaged build would use.
+- **Tauri side flipped from build-time to runtime gating**: the old `option_env!("ATTN_UI_AUTOMATION")` const + `VITE_UI_AUTOMATION` Vite env are gone. Rust decides `automation_enabled()` at startup and injects `window.__ATTN_AUTOMATION_ENABLED` via `append_invoke_initialization_script` so `useUiAutomationBridge` reads it synchronously on first render. **Breaking**: prod source installs that relied on automation always-on must now set `ATTN_AUTOMATION=1`.
+- **Token generation**: 32 random bytes from `getrandom` (OS RNG), hex-encoded — replaces the predictable pid+nanos scheme on both sides.
+- **Action set landed**: `ping`, `get_state`, `list_sessions`, `get_window_geometry`. Unknown actions return `{ ok: false, error: "unknown action: <name>" }` so future scripts get useful feedback.
+- **Server architecture**: tokio-style accept loop + per-connection task on GPUI's background executor; channel-bridged dispatcher hands action requests to a foreground pump (`automation::actions::pump_actions`) that runs handlers with `&mut AsyncApp` so they can `read_entity` / `update_window` safely. The per-action snapshot lives next to the data (`Spike5App::automation_snapshot`, `Workspace::automation_snapshot`, `Spike5Canvas::automation_snapshot`) — wire layer doesn't reach into entity internals.
+- **Test layers**: wire protocol + manifest paths + automation rule have unit tests (no GPUI). The integrated path is proven by `make native-automation-smoke`, which connects to a live binary, exercises every action, and asserts shape. No GPUI-runtime unit tests for action handlers — `Spike5App::new` requires a live daemon, mocking that is more plumbing than the spike justifies.
+
+#### Skipped for spike-ness (clearly labeled)
+
+These are not in the landed PR; future spikes can address them:
+
+- **Manifest cleanup on signal exit**: `Drop` on the `Handle` deletes the manifest, but Rust doesn't run `Drop` on SIGTERM/SIGKILL — the manifest stays on disk with stale port + pid until the next launch overwrites it. Same limitation as the Tauri side. Eventually-consistent and harmless because external clients re-read on each connection, but a clean SIGTERM handler would be cheap.
+- **Layer-2 input actions** (`type_pane_via_ui`, `click_pane`, `focus_panel`, `read_pane_text`, etc.): not implemented. The plan calls for adding these incrementally as future spikes need them. Layer 3 (OS-level input via `InputDriver.swift`) works against the native app now via `bundleIdentifierForNativeProfile()`.
+- **Frontend ready signal**: the Tauri side has a `ready` event the bridge waits for before accepting requests. The native side has no equivalent — actions can hit before GPUI has a window. In practice the smoke script just retries; if this becomes a real flake we'll add a ready beacon.
+- **Wired into `attn-native` (spike-1) binary**: only `attn-spike5` boots the sidecar today. The earlier spikes don't have the workspace state worth automating; revisit if any pre-spike-5 surface ever needs scenario coverage.
 
 ---
 
