@@ -4,15 +4,21 @@
 /// vanish on the wire.
 ///
 /// Layout: sidebar pinned left at fixed width, canvas fills the rest.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use attn_protocol::{AttachSessionMessage, Session};
-use gpui::{div, prelude::*, rgb, App, Context, Entity, ParentElement, Render, SharedString, Window};
+use attn_protocol::{
+    AttachSessionMessage, RegisterWorkspaceMessage, Session, UnregisterWorkspaceMessage,
+};
+use gpui::{
+    div, prelude::*, rgb, App, Context, Entity, ParentElement, PathPromptOptions, Render,
+    SharedString, Window,
+};
 use serde_json::{json, Value};
 
 use crate::automation;
+use crate::automation::actions::generate_workspace_id;
 use crate::automation::events;
 use crate::canvas::WorkspaceCanvas;
 use crate::daemon_client::{DaemonClient, DaemonEvent};
@@ -34,6 +40,7 @@ pub struct NativeApp {
     sidebar: Entity<Sidebar>,
     canvas: Entity<WorkspaceCanvas>,
     selected_id: Option<SharedString>,
+    pending_select_workspace_ids: HashSet<SharedString>,
     /// Live automation server handle. Drop deletes the manifest. `None`
     /// when automation is disabled for this launch (default in prod) or
     /// when bind/start failed — in which case we still want the app to
@@ -50,13 +57,27 @@ impl NativeApp {
     pub fn new(daemon: Entity<DaemonClient>, cx: &mut Context<Self>) -> Self {
         let canvas = cx.new(|cx| WorkspaceCanvas::new(cx));
         let app_handle = cx.entity().downgrade();
+        let app_handle_create = app_handle.clone();
+        let app_handle_destroy = app_handle.clone();
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 Vec::new(),
                 move |id, _window, cx| {
                     let app_handle = app_handle.clone();
                     let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
-                        app.select_workspace(id, cx);
+                        app.select_workspace_from_sidebar(id, cx);
+                    });
+                },
+                move |_window, cx| {
+                    let app_handle = app_handle_create.clone();
+                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
+                        app.prompt_and_register_workspace(cx);
+                    });
+                },
+                move |id, _window, cx| {
+                    let app_handle = app_handle_destroy.clone();
+                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
+                        app.unregister_workspace_by_id(id, cx);
                     });
                 },
                 cx,
@@ -70,6 +91,7 @@ impl NativeApp {
                     json!({"workspace_id": workspace.id.as_str()}),
                 );
                 this.upsert_workspace(workspace.clone(), cx);
+                this.select_workspace_if_pending(&workspace.id, cx);
                 this.sync_terminal_panels(cx);
             }
             DaemonEvent::WorkspaceUnregistered { workspace_id } => {
@@ -85,6 +107,7 @@ impl NativeApp {
                     json!({"workspace_id": workspace.id.as_str()}),
                 );
                 this.apply_workspace_snapshot(workspace.clone(), cx);
+                this.select_workspace_if_pending(&workspace.id, cx);
             }
             DaemonEvent::SessionsChanged => {
                 events::record(
@@ -120,6 +143,7 @@ impl NativeApp {
             sidebar,
             canvas,
             selected_id: None,
+            pending_select_workspace_ids: HashSet::new(),
             _automation: automation_handle,
             synthetic: Vec::new(),
         };
@@ -161,11 +185,98 @@ impl NativeApp {
         self.workspaces_by_id.values()
     }
 
+    /// Open the platform's directory picker. On selection, derive the
+    /// workspace title from the directory's basename and send
+    /// `register_workspace` to the daemon. The canvas + sidebar update
+    /// reactively when the daemon's `workspace_registered` broadcast lands
+    /// — same path the automation `create_workspace` action exercises.
+    /// User cancellation (no path picked) is silent.
+    pub fn prompt_and_register_workspace(&mut self, cx: &mut Context<Self>) {
+        events::record("workspace_create_prompt", json!({}));
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(SharedString::from("Pick a workspace directory")),
+        });
+        let app_handle = cx.entity().downgrade();
+        cx.spawn(async move |_, cx| {
+            let outcome = match receiver.await {
+                Ok(Ok(Some(paths))) if !paths.is_empty() => Some(paths[0].clone()),
+                Ok(Ok(_)) | Ok(Err(_)) | Err(_) => None,
+            };
+            let Some(path) = outcome else {
+                events::record("workspace_create_cancelled", json!({}));
+                return;
+            };
+            let directory = path.to_string_lossy().to_string();
+            let title = path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| directory.clone());
+            let id = generate_workspace_id();
+            let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
+                events::record(
+                    "workspace_create_submitted",
+                    json!({
+                        "id": id.as_str(),
+                        "directory": directory.as_str(),
+                    }),
+                );
+                app.register_workspace_and_select(id.clone(), title.clone(), directory.clone(), cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Register a workspace and select it once the daemon confirms it.
+    /// The daemon broadcast is still the source of truth for creating or
+    /// updating the local workspace entity.
+    pub fn register_workspace_and_select(
+        &mut self,
+        id: String,
+        title: String,
+        directory: String,
+        cx: &Context<Self>,
+    ) {
+        self.pending_select_workspace_ids
+            .insert(SharedString::from(id.clone()));
+        self.daemon
+            .read(cx)
+            .send_cmd(&RegisterWorkspaceMessage::new(id, title, directory));
+    }
+
+    /// Send `unregister_workspace` for the given id. Daemon cascades
+    /// (kills member sessions, broadcasts unregister), so the canvas +
+    /// sidebar update reactively. No confirmation dialog yet — see plan
+    /// doc M1.0; revisit when destroy gets a richer affordance.
+    pub fn unregister_workspace_by_id(&self, id: SharedString, cx: &Context<Self>) {
+        events::record("workspace_destroy_submitted", json!({"id": id.as_ref()}));
+        self.daemon
+            .read(cx)
+            .send_cmd(&UnregisterWorkspaceMessage::new(id.to_string()));
+    }
+
     /// Switch the canvas + sidebar to the given workspace id. Shared by
     /// the sidebar's click callback and the automation `select_workspace`
     /// action so both paths produce identical state. No-op when `id`
     /// doesn't match a known workspace.
     pub fn select_workspace(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        self.select_workspace_impl(id, true, cx);
+    }
+
+    /// Sidebar click handlers already hold a mutable lease on the
+    /// `Sidebar` entity, so this path must not re-enter `sidebar.update`.
+    fn select_workspace_from_sidebar(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        self.select_workspace_impl(id, false, cx);
+    }
+
+    fn select_workspace_impl(
+        &mut self,
+        id: SharedString,
+        sync_sidebar: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(ws) = self.workspaces_by_id.get(&id).cloned() else {
             events::record(
                 "workspace_select_missed",
@@ -177,8 +288,17 @@ impl NativeApp {
         let canvas = self.canvas.clone();
         canvas.update(cx, |canvas, cx| canvas.set_selected(Some(ws), cx));
         self.selected_id = Some(id.clone());
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.set_selected(Some(id), cx));
+        if sync_sidebar {
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.set_selected(Some(id), cx));
+        }
+    }
+
+    fn select_workspace_if_pending(&mut self, id: &str, cx: &mut Context<Self>) {
+        let id = SharedString::from(id.to_string());
+        if self.pending_select_workspace_ids.remove(&id) {
+            self.select_workspace(id, cx);
+        }
     }
 
     /// Build a JSON snapshot of everything an external test script needs

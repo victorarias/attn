@@ -20,6 +20,15 @@ pub struct Sidebar {
     /// at construction time so the app can swap the canvas's selected
     /// workspace handle.
     on_select: Box<dyn Fn(SharedString, &mut Window, &mut gpui::App) + 'static>,
+    /// Callback fired when the user clicks "+ New Workspace". Owns the
+    /// directory picker → daemon `register_workspace` flow on the app
+    /// side; the sidebar just dispatches.
+    on_create: Box<dyn Fn(&mut Window, &mut gpui::App) + 'static>,
+    /// Callback fired when the user clicks a row's "×" delete affordance.
+    /// Sends `unregister_workspace` for the given id. Daemon cascades to
+    /// member sessions, so callers don't need a separate session-cleanup
+    /// step.
+    on_destroy: Box<dyn Fn(SharedString, &mut Window, &mut gpui::App) + 'static>,
     focus_handle: FocusHandle,
 }
 
@@ -27,6 +36,8 @@ impl Sidebar {
     pub fn new(
         workspaces: Vec<Entity<Workspace>>,
         on_select: impl Fn(SharedString, &mut Window, &mut gpui::App) + 'static,
+        on_create: impl Fn(&mut Window, &mut gpui::App) + 'static,
+        on_destroy: impl Fn(SharedString, &mut Window, &mut gpui::App) + 'static,
         cx: &mut Context<Self>,
     ) -> Self {
         // Re-render this whole view when any member workspace updates.
@@ -38,6 +49,8 @@ impl Sidebar {
             workspaces,
             selected_id: None,
             on_select: Box::new(on_select),
+            on_create: Box::new(on_create),
+            on_destroy: Box::new(on_destroy),
             focus_handle: cx.focus_handle(),
         }
     }
@@ -89,13 +102,24 @@ impl Render for Sidebar {
                 let status = ws.status;
                 let selected = self.selected_id.as_ref() == Some(&id);
                 let click_id = id.clone();
-                row(id.clone(), title, status, selected)
+                let destroy_id = id.clone();
+                let row_div = workspace_row(title, status, selected)
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
                         let id = click_id.clone();
                         (this.on_select)(id.clone(), window, cx);
                         this.set_selected(Some(id), cx);
                     }))
-                    .into_any_element()
+                    .child(
+                        delete_button()
+                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
+                                // Stop the row's `on_select` from firing too —
+                                // clicking × shouldn't also select the
+                                // workspace it's about to delete.
+                                cx.stop_propagation();
+                                (this.on_destroy)(destroy_id.clone(), window, cx);
+                            })),
+                    );
+                row_div.into_any_element()
             })
             .collect();
 
@@ -116,12 +140,21 @@ impl Render for Sidebar {
                     .child(SharedString::from("WORKSPACES")),
             )
             .children(rows)
+            .child(
+                create_row().on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        (this.on_create)(window, cx);
+                    }),
+                ),
+            )
     }
 }
 
-/// One row. Pulled out so the click handler in `render` stays readable.
-fn row(
-    _id: SharedString,
+/// One workspace row. Title + status badge on the left. Caller appends
+/// the delete affordance — pulled out so the click handler in `render`
+/// stays readable.
+fn workspace_row(
     title: SharedString,
     status: WorkspaceStatus,
     selected: bool,
@@ -138,7 +171,38 @@ fn row(
         .text_color(rgb(0xe0e0eb))
         .text_size(px(13.))
         .child(status_badge(status))
-        .child(title)
+        .child(div().flex_1().child(title))
+}
+
+/// Trailing delete affordance on each row. Always visible (no hover gate
+/// yet — that's a follow-up once we have a hover-state pattern in this
+/// crate). Dim by default so the eye lands on titles, not crosses.
+fn delete_button() -> gpui::Div {
+    div()
+        .w(px(20.))
+        .h(px(20.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(rgb(0x6a6a78))
+        .text_size(px(14.))
+        .child(SharedString::from("×"))
+}
+
+/// "+ New Workspace" entry below the workspace list. Visually distinct
+/// from real workspaces so the eye reads it as an action, not a row to
+/// select.
+fn create_row() -> gpui::Div {
+    div()
+        .w_full()
+        .px_4()
+        .py_2()
+        .flex()
+        .items_center()
+        .gap_2()
+        .text_color(rgb(0x8a8a95))
+        .text_size(px(13.))
+        .child(SharedString::from("+ New Workspace"))
 }
 
 /// Coloured dot reflecting the workspace's rolled-up status. The colour

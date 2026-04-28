@@ -2,17 +2,23 @@
 /**
  * Behavioral scenario for the native canvas app driven through its UI
  * automation sidecar. Assumes the native binary is already running with
- * automation enabled (e.g. `ATTN_PROFILE=dev cargo run --bin attn-spike5`).
+ * automation enabled (e.g. `ATTN_PROFILE=dev cargo run --bin attn-native`).
  *
  * Coverage:
  *   - wire plumbing: manifest discovery, ping, token rejection, unknown
  *     actions, get_state shape, list_sessions consistency, window geom
  *   - mutate spatial state: move_panel + assert post-state
  *   - mutate selection: select_workspace happy path + bogus id error
+ *   - workspace lifecycle: create_workspace + destroy_workspace, asserting
+ *     both get_state convergence and the observation events that prove
+ *     the canvas sync path executed (not just the daemon ack)
  *   - end-to-end PTY: spawn an `agent=shell` session via the daemon WS,
- *     wait for it to attach as a canvas panel, send `echo HELLO-<uuid>`,
- *     poll read_pane_text until the marker appears, unregister the
- *     session, confirm cleanup
+ *     wait for it to attach as a canvas panel, exercise BOTH input
+ *     paths back-to-back — `send_pty_input` (direct daemon route) and
+ *     `type_into_panel` (through TerminalView::on_key_down so a
+ *     regression in focus or key encoding trips the second case but
+ *     not the first) — poll read_pane_text for the marker, unregister
+ *     the session, confirm cleanup
  *
  * Tearing down: every resource the scenario creates is unregistered in
  * `finally` blocks, even on assertion failure.
@@ -434,7 +440,6 @@ async function checkPtyRoundTrip(conn, daemon) {
     return;
   }
   const cwd = ws.directory || process.env.HOME || '/tmp';
-  const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
 
   // Capture the event cursor BEFORE spawning so we can prove (or refute)
   // that every step of the chain — daemon broadcast, app receipt, panel
@@ -448,7 +453,7 @@ async function checkPtyRoundTrip(conn, daemon) {
     // us assert on the actual UI transition rather than poll-until-state-
     // converges; on failure we'll dump every event since spawn so we can
     // see exactly where the chain stopped (daemon broadcast?
-    // Spike5App SessionsChanged? sync_terminal_panels?).
+    // NativeApp SessionsChanged? sync_terminal_panels?).
     try {
       await pollUntil(
         async () => {
@@ -469,44 +474,17 @@ async function checkPtyRoundTrip(conn, daemon) {
     }
     info(`  panel attached`);
 
-    // Capture another cursor so the type-and-echo step gets its own
-    // diagnostic window if it fails.
-    const cursorBeforeType = (await tailEvents(conn)).next_cursor;
-
-    // Type the marker. Newline triggers the shell to execute echo, so
-    // the marker shows up on the screen via shell echo.
-    const sent = await conn.request('send_pty_input', {
+    // Exercise both input paths back-to-back. send_pty_input bypasses
+    // GPUI entirely (constructs the wire message in the action handler);
+    // type_into_panel routes through TerminalView::on_key_down so a
+    // regression in focus, key encoding, or the keystroke→send_input
+    // chain trips this case but not the first.
+    await sendAndExpectMarker(conn, sessionId, 'send_pty_input', {
       session_id: sessionId,
-      text: `echo ${marker}\n`,
     });
-    if (!sent.ok) fail(`send_pty_input: ${sent.error}`);
-
-    // Poll read_pane_text until the marker is present somewhere.
-    try {
-      await pollUntil(
-        async () => {
-          const r = await conn.request('read_pane_text', { session_id: sessionId });
-          if (!r.ok) return false;
-          return r.result.text.includes(marker);
-        },
-        { timeoutMs: 5000, label: `marker ${marker} on screen` },
-      );
-    } catch (error) {
-      await dumpEventsSince(conn, cursorBeforeType, 'send_pty_input');
-      // Also dump the current screen text — the most likely failure mode
-      // is "input arrived but the shell hasn't echoed it back yet".
-      try {
-        const pane = await conn.request('read_pane_text', { session_id: sessionId });
-        if (pane.ok) {
-          console.error(`current screen rows:`);
-          for (const row of pane.result.rows.slice(-10)) {
-            console.error(`  ${JSON.stringify(row)}`);
-          }
-        }
-      } catch (_) {}
-      throw error;
-    }
-    info(`  ok (typed and echoed ${marker})`);
+    await sendAndExpectMarker(conn, sessionId, 'type_into_panel', {
+      session_id: sessionId,
+    });
   } finally {
     await daemon.unregisterSession(sessionId).catch(() => {});
     try {
@@ -521,6 +499,148 @@ async function checkPtyRoundTrip(conn, daemon) {
       info(`  cleanup ok (panel + session removed)`);
     } catch (cleanupError) {
       console.error(`WARNING: ${cleanupError.message}`);
+    }
+  }
+}
+
+/**
+ * Send `echo <marker>\n` via the named action and wait for the marker to
+ * appear on screen. Both `send_pty_input` and `type_into_panel` accept the
+ * same `{ session_id, text }` shape, so the only thing that varies between
+ * paths is the action name.
+ */
+async function sendAndExpectMarker(conn, sessionId, action, baseArgs) {
+  const marker = `MARK-${action}-${crypto.randomUUID().slice(0, 8)}`;
+  const cursorBefore = (await tailEvents(conn)).next_cursor;
+
+  const sent = await conn.request(action, {
+    ...baseArgs,
+    text: `echo ${marker}\n`,
+  });
+  if (!sent.ok) fail(`${action}: ${sent.error}`);
+
+  try {
+    await pollUntil(
+      async () => {
+        const r = await conn.request('read_pane_text', { session_id: sessionId });
+        if (!r.ok) return false;
+        return r.result.text.includes(marker);
+      },
+      { timeoutMs: 5000, label: `marker ${marker} on screen via ${action}` },
+    );
+  } catch (error) {
+    await dumpEventsSince(conn, cursorBefore, action);
+    // Also dump the current screen text — the most likely failure mode
+    // is "input arrived but the shell hasn't echoed it back yet".
+    try {
+      const pane = await conn.request('read_pane_text', { session_id: sessionId });
+      if (pane.ok) {
+        console.error(`current screen rows:`);
+        for (const row of pane.result.rows.slice(-10)) {
+          console.error(`  ${JSON.stringify(row)}`);
+        }
+      }
+    } catch (_) {}
+    throw error;
+  }
+  info(`  ok (${action}: typed and echoed ${marker})`);
+}
+
+/**
+ * Round-trip workspace registration through `create_workspace` /
+ * `destroy_workspace` against the live daemon. Asserts both that
+ * `get_state` reflects the new workspace (so the canvas observed the
+ * daemon broadcast) and that `tail_events` fired
+ * `workspace_registered_observed` / `workspace_unregistered_observed`
+ * (so the path through `NativeApp::DaemonEvent::WorkspaceRegistered`
+ * actually executed — not just the daemon ack).
+ */
+async function checkWorkspaceLifecycle(conn) {
+  const cursorBefore = (await tailEvents(conn)).next_cursor;
+
+  const directory = `/tmp/attn-scenario-ws-${crypto.randomUUID().slice(0, 8)}`;
+  const title = `Scenario WS ${new Date().toISOString().slice(11, 19)}`;
+  const created = await conn.request('create_workspace', { directory, title });
+  if (!created.ok) fail(`create_workspace: ${created.error}`);
+  const wsId = created.result.id;
+  if (typeof wsId !== 'string' || wsId.length < 16) {
+    fail(`create_workspace returned suspicious id: ${JSON.stringify(created.result)}`);
+  }
+  info(`  created workspace ${wsId.slice(0, 8)}…`);
+
+  let cleanupNeeded = true;
+  try {
+    // Wait for the workspace to land in get_state — proves the canvas
+    // observed the daemon's workspace_registered broadcast and updated
+    // its workspace map.
+    try {
+      await pollUntil(
+        async () => {
+          const s = await conn.request('get_state');
+          return (
+            s.ok &&
+            s.result.workspaces?.some((w) => w.id === wsId) &&
+            s.result.selected_workspace_id === wsId
+          );
+        },
+        {
+          timeoutMs: 5000,
+          intervalMs: 100,
+          label: `workspace ${wsId.slice(0, 8)} in get_state and selected`,
+        },
+      );
+    } catch (error) {
+      await dumpEventsSince(conn, cursorBefore, 'create_workspace');
+      throw error;
+    }
+
+    // Confirm the corresponding observation event fired. Catches the
+    // failure mode where get_state is right because of a fresh poll but
+    // the event-driven sync path silently broke.
+    const tail = await tailEvents(conn, cursorBefore);
+    const observed = tail.events.find(
+      (e) => e.category === 'workspace_registered_observed' && e.payload.workspace_id === wsId,
+    );
+    if (!observed) {
+      await dumpEventsSince(conn, cursorBefore, 'create_workspace');
+      fail(`no workspace_registered_observed event for ${wsId}`);
+    }
+    info(`  observed workspace_registered_observed for ${wsId.slice(0, 8)}…`);
+
+    // Tear down through the same wire surface and assert the inverse.
+    const cursorBeforeDestroy = (await tailEvents(conn)).next_cursor;
+    const destroyed = await conn.request('destroy_workspace', { id: wsId });
+    if (!destroyed.ok) fail(`destroy_workspace: ${destroyed.error}`);
+    cleanupNeeded = false;
+
+    try {
+      await pollUntil(
+        async () => {
+          const s = await conn.request('get_state');
+          return s.ok && !s.result.workspaces?.some((w) => w.id === wsId);
+        },
+        { timeoutMs: 5000, intervalMs: 100, label: `workspace ${wsId.slice(0, 8)} gone from get_state` },
+      );
+    } catch (error) {
+      await dumpEventsSince(conn, cursorBeforeDestroy, 'destroy_workspace');
+      throw error;
+    }
+
+    const tailAfter = await tailEvents(conn, cursorBeforeDestroy);
+    const unregistered = tailAfter.events.find(
+      (e) =>
+        e.category === 'workspace_unregistered_observed' && e.payload.workspace_id === wsId,
+    );
+    if (!unregistered) {
+      await dumpEventsSince(conn, cursorBeforeDestroy, 'destroy_workspace');
+      fail(`no workspace_unregistered_observed event for ${wsId}`);
+    }
+    info(`  ok (created ${wsId.slice(0, 8)}, observed both lifecycle events, destroyed)`);
+  } finally {
+    if (cleanupNeeded) {
+      // destroy_workspace is idempotent on the daemon, so a best-effort
+      // cleanup on assertion failure won't double-fault.
+      await conn.request('destroy_workspace', { id: wsId }).catch(() => {});
     }
   }
 }
@@ -551,6 +671,9 @@ async function main() {
 
     info(`\n[select_workspace]`);
     await checkSelectWorkspace(conn);
+
+    info(`\n[workspace lifecycle]`);
+    await checkWorkspaceLifecycle(conn);
 
     info(`\n[pty round-trip]`);
     await checkPtyRoundTrip(conn, daemon);
