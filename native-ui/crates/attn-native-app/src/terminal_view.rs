@@ -1,9 +1,9 @@
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use gpui::{
-    div, fill, point, prelude::*, px, rgb, size, App, Bounds, ElementId,
-    Font, GlobalElementId, Hsla, InspectorElementId, LayoutId, Pixels, Size, Style, TextRun,
-    Window, Context, Entity, FocusHandle, Focusable, KeyDownEvent, Keystroke,
+    div, fill, point, prelude::*, px, rgb, size, App, Bounds, Context, ElementId, Entity,
+    FocusHandle, Focusable, Font, GlobalElementId, Hsla, InspectorElementId, KeyDownEvent,
+    Keystroke, LayoutId, Pixels, Size, Style, TextRun, Window,
 };
 
 use attn_protocol::{PtyInputMessage, PtyResizeMessage};
@@ -145,13 +145,20 @@ impl Element for TerminalElement {
             underline: None,
             strikethrough: None,
         };
-        let shaped = window.text_system().shape_line("m".into(), font_size, &[run], None);
+        let shaped = window
+            .text_system()
+            .shape_line("m".into(), font_size, &[run], None);
         let cell_width = shaped.width;
         // Scale line height by the same zoom factor applied to the font size so
         // background quads and text baselines stay aligned.
         let line_height = px(ROW_HEIGHT * self.zoom);
 
-        TerminalPrepaint { cell_width, line_height, font, font_size }
+        TerminalPrepaint {
+            cell_width,
+            line_height,
+            font,
+            font_size,
+        }
     }
 
     fn paint(
@@ -164,7 +171,12 @@ impl Element for TerminalElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let TerminalPrepaint { cell_width, line_height, font, font_size } = prepaint;
+        let TerminalPrepaint {
+            cell_width,
+            line_height,
+            font,
+            font_size,
+        } = prepaint;
         let (cell_width, line_height, font_size) = (*cell_width, *line_height, *font_size);
         let origin = bounds.origin;
 
@@ -222,7 +234,11 @@ impl Element for TerminalElement {
                     continue;
                 }
 
-                let ch = if cell.ch == '\0' || cell.ch == '\u{FEFF}' { ' ' } else { cell.ch };
+                let ch = if cell.ch == '\0' || cell.ch == '\u{FEFF}' {
+                    ' '
+                } else {
+                    cell.ch
+                };
                 let fg = if cell.is_cursor {
                     COLOR_CURSOR_FG
                 } else if cell.flags.contains(Flags::INVERSE) {
@@ -318,15 +334,22 @@ impl TerminalView {
         let focus_handle = cx.focus_handle();
 
         // Re-render whenever terminal content changes.
-        cx.subscribe(&terminal, |_this, _term, event: &TerminalEvent, cx| {
-            match event {
+        cx.subscribe(
+            &terminal,
+            |_this, _term, event: &TerminalEvent, cx| match event {
                 TerminalEvent::DataReceived | TerminalEvent::Exited => cx.notify(),
                 TerminalEvent::Desync => cx.notify(),
-            }
-        })
+            },
+        )
         .detach();
 
-        Self { terminal, daemon, focus_handle, content_size: None, zoom: 1.0 }
+        Self {
+            terminal,
+            daemon,
+            focus_handle,
+            content_size: None,
+            zoom: 1.0,
+        }
     }
 
     /// Set the canvas zoom factor used for rendering. Returns true if changed.
@@ -388,7 +411,10 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let event = KeyDownEvent { keystroke, is_held: false };
+        let event = KeyDownEvent {
+            keystroke,
+            is_held: false,
+        };
         self.on_key_down(&event, window, cx);
     }
 }
@@ -398,7 +424,10 @@ impl Render for TerminalView {
         // Sync terminal size to the available content area.
         // When hosted inside a canvas panel, content_size overrides viewport size.
         let (new_cols, new_rows) = if let Some((w, h)) = self.content_size {
-            (((w / CHAR_WIDTH) as u16).max(1), ((h / ROW_HEIGHT) as u16).max(1))
+            (
+                ((w / CHAR_WIDTH) as u16).max(1),
+                ((h / ROW_HEIGHT) as u16).max(1),
+            )
         } else {
             let viewport = window.viewport_size();
             (
@@ -411,7 +440,8 @@ impl Render for TerminalView {
             (t.cols, t.rows, t.session_id.clone())
         };
         if new_cols != cur_cols || new_rows != cur_rows {
-            self.terminal.update(cx, |t, _| t.resize(new_cols, new_rows));
+            self.terminal
+                .update(cx, |t, _| t.resize(new_cols, new_rows));
             let _ = self
                 .daemon
                 .read(cx)
@@ -440,7 +470,11 @@ impl Render for TerminalView {
             .text_size(px(13. * zoom))
             .track_focus(&focus_handle)
             .on_key_down(cx.listener(Self::on_key_down))
-            .child(TerminalElement { cells: all_cells, cols, zoom })
+            .child(TerminalElement {
+                cells: all_cells,
+                cols,
+                zoom,
+            })
     }
 }
 
@@ -459,11 +493,9 @@ fn encode_key(event: &KeyDownEvent) -> String {
             match k.key.as_str() {
                 // These keys always use dedicated escape sequences regardless
                 // of what key_char says (e.g. macOS may return "\n" for Enter).
-                "enter" | "escape" | "tab" | "backspace" | "delete"
-                | "up" | "down" | "left" | "right"
-                | "home" | "end" | "pageup" | "pagedown"
-                | "f1" | "f2" | "f3" | "f4" | "f5" | "f6"
-                | "f7" | "f8" | "f9" | "f10" | "f11" | "f12" => {}
+                "enter" | "escape" | "tab" | "backspace" | "delete" | "up" | "down" | "left"
+                | "right" | "home" | "end" | "pageup" | "pagedown" | "f1" | "f2" | "f3" | "f4"
+                | "f5" | "f6" | "f7" | "f8" | "f9" | "f10" | "f11" | "f12" => {}
                 _ => return key_char.clone(),
             }
         }
@@ -474,11 +506,19 @@ fn encode_key(event: &KeyDownEvent) -> String {
         "enter" => {
             // Shift+Enter inserts a newline in apps using kitty keyboard
             // protocol (e.g. Claude Code). Plain Enter always submits (\r).
-            if shift { Some("\x1b[13;2u") } else { Some("\r") }
+            if shift {
+                Some("\x1b[13;2u")
+            } else {
+                Some("\r")
+            }
         }
         "escape" => Some("\x1b"),
         "tab" => {
-            if shift { Some("\x1b[Z") } else { Some("\t") }
+            if shift {
+                Some("\x1b[Z")
+            } else {
+                Some("\t")
+            }
         }
         "backspace" => Some("\x7f"),
         "delete" => Some("\x1b[3~"),
@@ -514,7 +554,7 @@ fn encode_key(event: &KeyDownEvent) -> String {
         let key = k.key.as_str();
         if key.len() == 1 {
             let c = key.chars().next().unwrap();
-            if ('a'..='z').contains(&c) {
+            if c.is_ascii_lowercase() {
                 // Ctrl+a = \x01, Ctrl+b = \x02, ..., Ctrl+z = \x1a
                 return String::from(char::from(c as u8 - b'a' + 1));
             }

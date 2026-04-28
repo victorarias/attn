@@ -26,22 +26,45 @@ pub enum DaemonEvent {
     SessionsChanged,
     /// A workspace appeared (or the InitialState batch arrived). Carries the
     /// snapshot at registration time.
-    WorkspaceRegistered { workspace: Workspace },
+    WorkspaceRegistered {
+        workspace: Workspace,
+    },
     /// A workspace was removed (cascade-closed by the daemon).
-    WorkspaceUnregistered { workspace_id: String },
+    WorkspaceUnregistered {
+        workspace_id: String,
+    },
     /// A workspace's rolled-up status changed. Carries the fresh snapshot.
-    WorkspaceStateChanged { workspace: Workspace },
+    WorkspaceStateChanged {
+        workspace: Workspace,
+    },
     /// Raw PTY output for a specific session. Delivered directly so terminal
     /// models can subscribe without triggering full workspace re-renders.
-    PtyOutput { session_id: String, data: String, seq: i32 },
+    PtyOutput {
+        session_id: String,
+        data: String,
+        seq: i32,
+    },
     /// Attach result for a session — contains screen snapshot and replay data.
-    AttachResult { session_id: String, msg: Box<attn_protocol::AttachResultMessage> },
+    AttachResult {
+        session_id: String,
+        msg: Box<attn_protocol::AttachResultMessage>,
+    },
     /// PTY desync: client should re-attach.
-    PtyDesync { session_id: String },
+    PtyDesync {
+        session_id: String,
+    },
     /// PTY was resized by another client.
-    PtyResized { session_id: String, cols: u16, rows: u16 },
+    PtyResized {
+        session_id: String,
+        cols: u16,
+        rows: u16,
+    },
     /// Session process exited.
-    SessionExited { session_id: String, #[allow(dead_code)] exit_code: i32 },
+    SessionExited {
+        session_id: String,
+        #[allow(dead_code)]
+        exit_code: i32,
+    },
 }
 
 pub struct DaemonClient {
@@ -101,9 +124,7 @@ impl DaemonClient {
                         smol::spawn(async move {
                             while let Ok(msg) = cmd_rx.recv().await {
                                 if write
-                                    .send(async_tungstenite::tungstenite::Message::Text(
-                                        msg.into(),
-                                    ))
+                                    .send(async_tungstenite::tungstenite::Message::Text(msg))
                                     .await
                                     .is_err()
                                 {
@@ -175,8 +196,8 @@ impl DaemonClient {
                 .clone()
                 .unwrap_or_else(|| "daemon websocket is not connected".to_string())
         })?;
-        let json = serde_json::to_string(msg)
-            .map_err(|e| format!("serialize daemon command: {e}"))?;
+        let json =
+            serde_json::to_string(msg).map_err(|e| format!("serialize daemon command: {e}"))?;
         tx.try_send(json)
             .map_err(|e| format!("queue daemon command: {e}"))
     }

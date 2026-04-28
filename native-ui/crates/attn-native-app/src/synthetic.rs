@@ -88,7 +88,12 @@ pub struct SyntheticSource {
 
 impl SyntheticSource {
     pub fn new(model: Entity<TerminalModel>, panel_idx: usize, bytes_per_tick: usize) -> Self {
-        Self { model, panel_idx, frame: 0, bytes_per_tick }
+        Self {
+            model,
+            panel_idx,
+            frame: 0,
+            bytes_per_tick,
+        }
     }
 
     pub fn tick<C: AppContext>(&mut self, cx: &mut C) {
@@ -111,7 +116,7 @@ fn make_chunk(panel_idx: usize, frame: u64, target_len: usize) -> Vec<u8> {
     // Every 60th frame, jump the cursor home and clear-to-end so the
     // parser handles cursor-position + erase-in-display, which a
     // pure-append stream wouldn't trigger.
-    if frame % 60 == 0 {
+    if frame.is_multiple_of(60) {
         buf.extend_from_slice(b"\x1b[H\x1b[J");
     }
 
@@ -153,7 +158,11 @@ mod tests {
         // The chunk includes a small ANSI envelope on top of the filler;
         // sanity-check that it's roughly the right size and ends with a
         // newline so panels actually scroll.
-        assert!(bytes.len() >= 80, "chunk smaller than target: {}", bytes.len());
+        assert!(
+            bytes.len() >= 80,
+            "chunk smaller than target: {}",
+            bytes.len()
+        );
         assert!(bytes.ends_with(b"\r\n"));
     }
 

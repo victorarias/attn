@@ -558,18 +558,40 @@ async function sendAndExpectMarker(conn, sessionId, action, baseArgs) {
 async function checkWorkspaceLifecycle(conn) {
   const cursorBefore = (await tailEvents(conn)).next_cursor;
 
-  const directory = `/tmp/attn-scenario-ws-${crypto.randomUUID().slice(0, 8)}`;
-  const title = `Scenario WS ${new Date().toISOString().slice(11, 19)}`;
-  const created = await conn.request('create_workspace', { directory, title });
-  if (!created.ok) fail(`create_workspace: ${created.error}`);
-  const wsId = created.result.id;
-  if (typeof wsId !== 'string' || wsId.length < 16) {
-    fail(`create_workspace returned suspicious id: ${JSON.stringify(created.result)}`);
-  }
-  info(`  created workspace ${wsId.slice(0, 8)}…`);
+  let fallbackId = null;
+  let wsId = null;
+  let cleanupNeeded = false;
+  let fallbackCleanupNeeded = false;
 
-  let cleanupNeeded = true;
   try {
+    const fallbackDirectory = `/tmp/attn-scenario-fallback-${crypto.randomUUID().slice(0, 8)}`;
+    const fallbackTitle = `000 Scenario Fallback ${new Date().toISOString().slice(11, 19)}`;
+    const fallback = await conn.request('create_workspace', {
+      directory: fallbackDirectory,
+      title: fallbackTitle,
+    });
+    if (!fallback.ok) fail(`create_workspace fallback: ${fallback.error}`);
+    fallbackId = fallback.result.id;
+    fallbackCleanupNeeded = true;
+
+    const directory = `/tmp/attn-scenario-ws-${crypto.randomUUID().slice(0, 8)}`;
+    const title = `Scenario WS ${new Date().toISOString().slice(11, 19)}`;
+    const created = await conn.request('create_workspace', { directory, title });
+    if (!created.ok) fail(`create_workspace: ${created.error}`);
+    wsId = created.result.id;
+    cleanupNeeded = true;
+    for (const [label, id] of [['fallback', fallbackId], ['target', wsId]]) {
+      if (typeof id !== 'string' || id.length < 16) {
+        fail(
+          `create_workspace returned suspicious ${label} id: ${JSON.stringify({
+            fallback,
+            created,
+          })}`,
+        );
+      }
+    }
+    info(`  created fallback ${fallbackId.slice(0, 8)}… and target ${wsId.slice(0, 8)}…`);
+
     // Wait for the workspace to land in get_state — proves the canvas
     // observed the daemon's workspace_registered broadcast and updated
     // its workspace map.
@@ -579,6 +601,7 @@ async function checkWorkspaceLifecycle(conn) {
           const s = await conn.request('get_state');
           return (
             s.ok &&
+            s.result.workspaces?.some((w) => w.id === fallbackId) &&
             s.result.workspaces?.some((w) => w.id === wsId) &&
             s.result.selected_workspace_id === wsId
           );
@@ -601,9 +624,13 @@ async function checkWorkspaceLifecycle(conn) {
     const observed = tail.events.find(
       (e) => e.category === 'workspace_registered_observed' && e.payload.workspace_id === wsId,
     );
-    if (!observed) {
+    const fallbackObserved = tail.events.find(
+      (e) =>
+        e.category === 'workspace_registered_observed' && e.payload.workspace_id === fallbackId,
+    );
+    if (!observed || !fallbackObserved) {
       await dumpEventsSince(conn, cursorBefore, 'create_workspace');
-      fail(`no workspace_registered_observed event for ${wsId}`);
+      fail(`missing workspace_registered_observed event for lifecycle workspaces`);
     }
     info(`  observed workspace_registered_observed for ${wsId.slice(0, 8)}…`);
 
@@ -617,9 +644,18 @@ async function checkWorkspaceLifecycle(conn) {
       await pollUntil(
         async () => {
           const s = await conn.request('get_state');
-          return s.ok && !s.result.workspaces?.some((w) => w.id === wsId);
+          return (
+            s.ok &&
+            !s.result.workspaces?.some((w) => w.id === wsId) &&
+            s.result.selected_workspace_id &&
+            s.result.selected_workspace_id !== wsId
+          );
         },
-        { timeoutMs: 5000, intervalMs: 100, label: `workspace ${wsId.slice(0, 8)} gone from get_state` },
+        {
+          timeoutMs: 5000,
+          intervalMs: 100,
+          label: `workspace ${wsId.slice(0, 8)} gone and selection restored`,
+        },
       );
     } catch (error) {
       await dumpEventsSince(conn, cursorBeforeDestroy, 'destroy_workspace');
@@ -635,12 +671,19 @@ async function checkWorkspaceLifecycle(conn) {
       await dumpEventsSince(conn, cursorBeforeDestroy, 'destroy_workspace');
       fail(`no workspace_unregistered_observed event for ${wsId}`);
     }
-    info(`  ok (created ${wsId.slice(0, 8)}, observed both lifecycle events, destroyed)`);
+    const fallbackDestroyed = await conn.request('destroy_workspace', { id: fallbackId });
+    if (!fallbackDestroyed.ok) fail(`destroy_workspace fallback: ${fallbackDestroyed.error}`);
+    fallbackCleanupNeeded = false;
+
+    info(`  ok (created ${wsId.slice(0, 8)}, restored selection after destroy, cleaned up)`);
   } finally {
-    if (cleanupNeeded) {
+    if (cleanupNeeded && wsId) {
       // destroy_workspace is idempotent on the daemon, so a best-effort
       // cleanup on assertion failure won't double-fault.
       await conn.request('destroy_workspace', { id: wsId }).catch(() => {});
+    }
+    if (fallbackCleanupNeeded && fallbackId) {
+      await conn.request('destroy_workspace', { id: fallbackId }).catch(() => {});
     }
   }
 }

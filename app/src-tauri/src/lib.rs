@@ -232,7 +232,7 @@ fn stop_running_daemon(socket_path: &Path) -> Result<(), String> {
     if !wait_for_daemon_shutdown(socket_path, Duration::from_secs(5)) {
         return Err("Timed out waiting for daemon to stop".into());
     }
-    let _ = std::fs::remove_file(&socket_path);
+    let _ = std::fs::remove_file(socket_path);
     Ok(())
 }
 

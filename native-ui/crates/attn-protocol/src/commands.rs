@@ -13,6 +13,12 @@ impl QueryMessage {
     }
 }
 
+impl Default for QueryMessage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ClientHelloMessage {
     pub cmd: &'static str,
@@ -46,7 +52,11 @@ pub struct AttachSessionMessage {
 
 impl AttachSessionMessage {
     pub fn new(session_id: impl Into<String>) -> Self {
-        Self { cmd: "attach_session", id: session_id.into(), attach_policy: None }
+        Self {
+            cmd: "attach_session",
+            id: session_id.into(),
+            attach_policy: None,
+        }
     }
 }
 
@@ -58,7 +68,10 @@ pub struct DetachSessionMessage {
 
 impl DetachSessionMessage {
     pub fn new(session_id: impl Into<String>) -> Self {
-        Self { cmd: "detach_session", id: session_id.into() }
+        Self {
+            cmd: "detach_session",
+            id: session_id.into(),
+        }
     }
 }
 
@@ -71,7 +84,11 @@ pub struct PtyInputMessage {
 
 impl PtyInputMessage {
     pub fn new(session_id: impl Into<String>, data: impl Into<String>) -> Self {
-        Self { cmd: "pty_input", id: session_id.into(), data: data.into() }
+        Self {
+            cmd: "pty_input",
+            id: session_id.into(),
+            data: data.into(),
+        }
     }
 }
 
@@ -85,7 +102,12 @@ pub struct PtyResizeMessage {
 
 impl PtyResizeMessage {
     pub fn new(session_id: impl Into<String>, cols: u16, rows: u16) -> Self {
-        Self { cmd: "pty_resize", id: session_id.into(), cols, rows }
+        Self {
+            cmd: "pty_resize",
+            id: session_id.into(),
+            cols,
+            rows,
+        }
     }
 }
 
@@ -120,6 +142,9 @@ pub struct UnregisterWorkspaceMessage {
 
 impl UnregisterWorkspaceMessage {
     pub fn new(id: impl Into<String>) -> Self {
-        Self { cmd: "unregister_workspace", id: id.into() }
+        Self {
+            cmd: "unregister_workspace",
+            id: id.into(),
+        }
     }
 }
