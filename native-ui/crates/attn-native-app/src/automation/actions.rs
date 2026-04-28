@@ -191,7 +191,7 @@ fn send_pty_input(
         // it's strictly equivalent and adds an indirection.
         app.daemon()
             .read(cx)
-            .send_cmd(&PtyInputMessage::new(session_id.clone(), text.clone()));
+            .send_cmd(&PtyInputMessage::new(session_id.clone(), text.clone()))?;
         Ok(json!({
             "session_id": session_id,
             "bytes_sent": text.len(),
@@ -204,11 +204,11 @@ fn send_pty_input(
 /// for deterministic test setups; otherwise we generate a UUIDv4-style
 /// hex id locally. Daemon enforces `directory` non-empty but does not
 /// validate filesystem existence — tests can use `/tmp/whatever` freely.
-/// Returns immediately after sending the wire message; observers (canvas,
-/// sidebar) react to the daemon's `workspace_registered` broadcast on
-/// their own schedule, so callers should poll `get_state` or `tail_events`
-/// for the post-condition rather than treating action success as
-/// "workspace is now in the UI".
+/// Fails if the daemon command cannot be queued for delivery. Observers
+/// (canvas, sidebar) still react to the daemon's `workspace_registered`
+/// broadcast on their own schedule, so callers should poll `get_state` or
+/// `tail_events` for the post-condition rather than treating action
+/// success as "workspace is now in the UI".
 fn create_workspace(
     app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
@@ -235,9 +235,9 @@ fn create_workspace(
 
     let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
     cx.update_entity(&app_entity, |app: &mut NativeApp, cx| {
-        app.register_workspace_and_select(id.clone(), title.clone(), directory.clone(), cx);
+        app.register_workspace_and_select(id.clone(), title.clone(), directory.clone(), cx)
     })
-    .map_err(|e| format!("update entity: {e}"))?;
+    .map_err(|e| format!("update entity: {e}"))??;
 
     Ok(json!({
         "id": id,
@@ -270,9 +270,9 @@ fn destroy_workspace(
     cx.read_entity(&app_entity, |app: &NativeApp, cx: &App| {
         app.daemon()
             .read(cx)
-            .send_cmd(&UnregisterWorkspaceMessage::new(id.clone()));
+            .send_cmd(&UnregisterWorkspaceMessage::new(id.clone()))
     })
-    .map_err(|e| format!("read entity: {e}"))?;
+    .map_err(|e| format!("read entity: {e}"))??;
 
     Ok(json!({ "id": id }))
 }

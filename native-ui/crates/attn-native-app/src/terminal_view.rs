@@ -362,7 +362,7 @@ impl TerminalView {
     fn send_input(&self, data: &str, cx: &mut Context<Self>) {
         let session_id = self.terminal.read(cx).session_id.clone();
         let msg = PtyInputMessage::new(session_id, data);
-        self.daemon.read(cx).send_cmd(&msg);
+        let _ = self.daemon.read(cx).send_cmd(&msg);
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -412,7 +412,10 @@ impl Render for TerminalView {
         };
         if new_cols != cur_cols || new_rows != cur_rows {
             self.terminal.update(cx, |t, _| t.resize(new_cols, new_rows));
-            self.daemon.read(cx).send_cmd(&PtyResizeMessage::new(session_id, new_cols, new_rows));
+            let _ = self
+                .daemon
+                .read(cx)
+                .send_cmd(&PtyResizeMessage::new(session_id, new_cols, new_rows));
         }
 
         let terminal = self.terminal.read(cx);

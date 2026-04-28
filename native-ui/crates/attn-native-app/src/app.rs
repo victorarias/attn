@@ -77,7 +77,16 @@ impl NativeApp {
                 move |id, _window, cx| {
                     let app_handle = app_handle_destroy.clone();
                     let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
-                        app.unregister_workspace_by_id(id, cx);
+                        let id_for_event = id.clone();
+                        if let Err(error) = app.unregister_workspace_by_id(id, cx) {
+                            events::record(
+                                "workspace_destroy_failed",
+                                json!({
+                                    "id": id_for_event.as_ref(),
+                                    "error": error,
+                                }),
+                            );
+                        }
                     });
                 },
                 cx,
@@ -216,14 +225,32 @@ impl NativeApp {
                 .unwrap_or_else(|| directory.clone());
             let id = generate_workspace_id();
             let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
-                events::record(
-                    "workspace_create_submitted",
-                    json!({
-                        "id": id.as_str(),
-                        "directory": directory.as_str(),
-                    }),
-                );
-                app.register_workspace_and_select(id.clone(), title.clone(), directory.clone(), cx);
+                match app.register_workspace_and_select(
+                    id.clone(),
+                    title.clone(),
+                    directory.clone(),
+                    cx,
+                ) {
+                    Ok(()) => {
+                        events::record(
+                            "workspace_create_submitted",
+                            json!({
+                                "id": id.as_str(),
+                                "directory": directory.as_str(),
+                            }),
+                        );
+                    }
+                    Err(error) => {
+                        events::record(
+                            "workspace_create_failed",
+                            json!({
+                                "id": id.as_str(),
+                                "directory": directory.as_str(),
+                                "error": error,
+                            }),
+                        );
+                    }
+                }
             });
         })
         .detach();
@@ -238,23 +265,30 @@ impl NativeApp {
         title: String,
         directory: String,
         cx: &Context<Self>,
-    ) {
-        self.pending_select_workspace_ids
-            .insert(SharedString::from(id.clone()));
+    ) -> Result<(), String> {
         self.daemon
             .read(cx)
-            .send_cmd(&RegisterWorkspaceMessage::new(id, title, directory));
+            .send_cmd(&RegisterWorkspaceMessage::new(id.clone(), title, directory))?;
+        self.pending_select_workspace_ids
+            .insert(SharedString::from(id));
+        Ok(())
     }
 
     /// Send `unregister_workspace` for the given id. Daemon cascades
     /// (kills member sessions, broadcasts unregister), so the canvas +
     /// sidebar update reactively. No confirmation dialog yet — see plan
     /// doc M1.0; revisit when destroy gets a richer affordance.
-    pub fn unregister_workspace_by_id(&self, id: SharedString, cx: &Context<Self>) {
-        events::record("workspace_destroy_submitted", json!({"id": id.as_ref()}));
+    pub fn unregister_workspace_by_id(
+        &self,
+        id: SharedString,
+        cx: &Context<Self>,
+    ) -> Result<(), String> {
+        let id_string = id.to_string();
         self.daemon
             .read(cx)
-            .send_cmd(&UnregisterWorkspaceMessage::new(id.to_string()));
+            .send_cmd(&UnregisterWorkspaceMessage::new(id_string.clone()))?;
+        events::record("workspace_destroy_submitted", json!({"id": id_string.as_str()}));
+        Ok(())
     }
 
     /// Switch the canvas + sidebar to the given workspace id. Shared by
@@ -390,7 +424,7 @@ impl NativeApp {
         for ws_entity in self.workspaces_by_id.values() {
             for panel in ws_entity.read(cx).panels.iter() {
                 if let PanelContent::Terminal { session_id, .. } = &panel.content {
-                    daemon.send_cmd(&AttachSessionMessage::new(session_id.to_string()));
+                    let _ = daemon.send_cmd(&AttachSessionMessage::new(session_id.to_string()));
                 }
             }
         }
@@ -498,7 +532,8 @@ impl NativeApp {
 
             // Send attach. The TerminalView's render path will emit the
             // initial PtyResize once it sees its first content_size.
-            self.daemon
+            let _ = self
+                .daemon
                 .read(cx)
                 .send_cmd(&AttachSessionMessage::new(session_id.clone()));
 

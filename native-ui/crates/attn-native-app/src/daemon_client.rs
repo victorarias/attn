@@ -168,11 +168,17 @@ impl DaemonClient {
         }
     }
 
-    /// Send a serializable command to the daemon. Silently drops if not connected.
-    pub fn send_cmd<T: Serialize>(&self, msg: &T) {
-        let Some(tx) = &self.cmd_tx else { return };
-        let Ok(json) = serde_json::to_string(msg) else { return };
-        let _ = tx.try_send(json);
+    /// Send a serializable command to the daemon.
+    pub fn send_cmd<T: Serialize>(&self, msg: &T) -> Result<(), String> {
+        let tx = self.cmd_tx.as_ref().ok_or_else(|| {
+            self.error
+                .clone()
+                .unwrap_or_else(|| "daemon websocket is not connected".to_string())
+        })?;
+        let json = serde_json::to_string(msg)
+            .map_err(|e| format!("serialize daemon command: {e}"))?;
+        tx.try_send(json)
+            .map_err(|e| format!("queue daemon command: {e}"))
     }
 
     fn handle_event(&mut self, event: ServerEvent, cx: &mut Context<Self>) {
