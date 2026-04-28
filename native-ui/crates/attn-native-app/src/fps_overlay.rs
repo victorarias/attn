@@ -1,0 +1,158 @@
+//! Always-on FPS / frame-time overlay for the perf spike.
+//!
+//! Records an `Instant` at the start of every render and reports two
+//! numbers from the recent window:
+//!   - `fps`     — number of recorded frames within the last 1 second.
+//!   - `avg_ms`  — mean inter-frame interval over the last few samples.
+//!
+//! GPUI 0.2 only paints when something calls `cx.notify()`, so these
+//! numbers reflect actual repaint activity, not a hypothetical refresh
+//! rate. For idle measurement the spike will need a deliberate ticker;
+//! while panels are streaming bytes, repaints come naturally.
+
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
+
+use gpui::{div, prelude::*, px, rgb, IntoElement, ParentElement};
+
+const WINDOW: Duration = Duration::from_secs(1);
+const MAX_SAMPLES: usize = 240;
+
+#[derive(Default)]
+pub struct FpsCounter {
+    samples: VecDeque<Instant>,
+    last: Readout,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Readout {
+    pub fps: f32,
+    pub avg_ms: f32,
+    pub last_ms: f32,
+}
+
+impl FpsCounter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record that a frame is being rendered right now and return the
+    /// latest readout. Must be called once per `Render::render` call.
+    pub fn record_frame(&mut self) -> Readout {
+        let now = Instant::now();
+        self.samples.push_back(now);
+
+        let cutoff = now - WINDOW;
+        while self
+            .samples
+            .front()
+            .map(|t| *t < cutoff)
+            .unwrap_or(false)
+        {
+            self.samples.pop_front();
+        }
+        while self.samples.len() > MAX_SAMPLES {
+            self.samples.pop_front();
+        }
+
+        let fps = self.samples.len() as f32;
+
+        let last_ms = match self.samples.len() {
+            0 | 1 => 0.0,
+            n => {
+                let prev = self.samples[n - 2];
+                (now - prev).as_secs_f32() * 1000.0
+            }
+        };
+
+        let avg_ms = if self.samples.len() >= 2 {
+            let span = now - *self.samples.front().unwrap();
+            let intervals = (self.samples.len() - 1) as f32;
+            (span.as_secs_f32() * 1000.0) / intervals
+        } else {
+            0.0
+        };
+
+        let readout = Readout { fps, avg_ms, last_ms };
+        self.last = readout;
+        readout
+    }
+
+    /// Last readout computed by `record_frame`. Returns the default
+    /// (zeroed) readout if no frames have been recorded yet. Used by the
+    /// automation snapshot so external scripts can read perf without
+    /// inducing a render.
+    pub fn last_readout(&self) -> Readout {
+        self.last
+    }
+
+    /// Drop all recorded samples. Useful when a context change (e.g.
+    /// zoom) makes prior samples non-representative of the new
+    /// steady-state.
+    pub fn reset(&mut self) {
+        self.samples.clear();
+        self.last = Readout::default();
+    }
+}
+
+/// Top-right overlay element. Cheap to render: a single absolutely
+/// positioned div with three short labels. Caller adds it as a child
+/// after the panels so it always paints on top.
+pub fn overlay(readout: Readout, panel_count: usize, zoom: f32) -> impl IntoElement {
+    let fps_line = format!("fps  {:>5.1}", readout.fps);
+    let avg_line = format!("avg  {:>5.2} ms", readout.avg_ms);
+    let last_line = format!("last {:>5.2} ms", readout.last_ms);
+    let context_line = format!("n={} z={:.2}", panel_count, zoom);
+
+    div()
+        .absolute()
+        .top(px(8.0))
+        .right(px(8.0))
+        .px(px(8.0))
+        .py(px(4.0))
+        .bg(rgb(0x000000))
+        .border_1()
+        .border_color(rgb(0x2a2a35))
+        .rounded(px(3.0))
+        .text_xs()
+        .text_color(rgb(0x8aff8a))
+        .child(div().child(fps_line))
+        .child(div().child(avg_line))
+        .child(div().child(last_line))
+        .child(div().text_color(rgb(0x8a8aff)).child(context_line))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread::sleep;
+
+    #[test]
+    fn empty_counter_reports_zero() {
+        let mut c = FpsCounter::new();
+        let r = c.record_frame();
+        assert_eq!(r.fps, 1.0);
+        assert_eq!(r.avg_ms, 0.0);
+        assert_eq!(r.last_ms, 0.0);
+    }
+
+    #[test]
+    fn two_samples_produce_inter_frame_interval() {
+        let mut c = FpsCounter::new();
+        c.record_frame();
+        sleep(Duration::from_millis(10));
+        let r = c.record_frame();
+        assert_eq!(r.fps, 2.0);
+        assert!(r.last_ms >= 9.0 && r.last_ms <= 30.0, "last_ms = {}", r.last_ms);
+        assert!(r.avg_ms >= 9.0 && r.avg_ms <= 30.0, "avg_ms = {}", r.avg_ms);
+    }
+
+    #[test]
+    fn samples_outside_window_are_dropped() {
+        let mut c = FpsCounter::new();
+        c.samples.push_back(Instant::now() - Duration::from_secs(5));
+        c.samples.push_back(Instant::now() - Duration::from_secs(2));
+        let r = c.record_frame();
+        assert_eq!(r.fps, 1.0, "old samples should be evicted");
+    }
+}

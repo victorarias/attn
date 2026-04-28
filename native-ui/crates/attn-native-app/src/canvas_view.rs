@@ -7,10 +7,9 @@
 /// world space; their sizes stay fixed in screen pixels (no scaling on zoom).
 /// All mouse handling lives on the root div with manual hit-testing.
 use gpui::{
-    div, fill, point, prelude::*, px, rgb, size, App, Bounds, ElementId, FocusHandle,
-    Focusable, GlobalElementId, InspectorElementId, LayoutId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, ScrollDelta, ScrollWheelEvent, SharedString, Size,
-    Style, Window, Context,
+    div, point, prelude::*, px, rgb, FocusHandle, Focusable, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, ScrollDelta, ScrollWheelEvent, SharedString, Window,
+    Context,
 };
 
 // ── Layout constants ─────────────────────────────────────────────────────────
@@ -20,12 +19,15 @@ const HANDLE_SIZE: f32 = 8.0;
 const PANEL_MIN_W: f32 = 80.0;
 const PANEL_MIN_H: f32 = 60.0;
 
-const GRID_SPACING: f32 = 50.0;
+/// World-space grid step. No longer rendered as visible dots
+/// (perf-spike 2026-04-28 found grid paint cost dominant at zoom-out
+/// and removed the visible grid). Kept as the constant snapping
+/// targets will use when implemented.
+pub const GRID_SPACING: f32 = 50.0;
 const ZOOM_MIN: f32 = 0.15;
 const ZOOM_MAX: f32 = 5.0;
 
 const CANVAS_BG: u32 = 0x1a1a1a;
-const GRID_DOT_COLOR: u32 = 0x333333;
 
 /// Extract the underlying f32 from a Pixels value.
 #[inline]
@@ -327,8 +329,7 @@ impl Render for WorkspaceCanvasView {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
-            .child(GridElement { viewport });
+            .on_scroll_wheel(cx.listener(Self::on_scroll_wheel));
 
         for panel in &self.panels {
             let sp = viewport.world_to_screen(point(panel.world_x, panel.world_y));
@@ -415,117 +416,6 @@ impl Render for WorkspaceCanvasView {
         }
 
         root
-    }
-}
-
-// ── Grid background element ───────────────────────────────────────────────────
-
-pub struct GridElement {
-    pub viewport: Viewport,
-}
-
-pub struct GridPrepaint {
-    pub bounds: Bounds<Pixels>,
-}
-
-impl Element for GridElement {
-    type RequestLayoutState = ();
-    type PrepaintState = GridPrepaint;
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, ()) {
-        let style = Style { size: Size::full(), ..Default::default() };
-        (window.request_layout(style, [], cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut (),
-        _window: &mut Window,
-        _cx: &mut App,
-    ) -> GridPrepaint {
-        GridPrepaint { bounds }
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        _bounds: Bounds<Pixels>,
-        _request_layout: &mut (),
-        prepaint: &mut GridPrepaint,
-        window: &mut Window,
-        _cx: &mut App,
-    ) {
-        let b = prepaint.bounds;
-        let vp = &self.viewport;
-
-        let grid_screen_spacing = GRID_SPACING * vp.zoom;
-
-        // Skip grid rendering when dots would be too dense (< 8px apart).
-        if grid_screen_spacing < 8.0 {
-            return;
-        }
-
-        let ox = pf(b.origin.x);
-        let oy = pf(b.origin.y);
-        let bw = pf(b.size.width);
-        let bh = pf(b.size.height);
-
-        // First grid world coordinate (snapped to GRID_SPACING) visible on screen.
-        let first_wx = (vp.origin.x / GRID_SPACING).floor() * GRID_SPACING;
-        let first_wy = (vp.origin.y / GRID_SPACING).floor() * GRID_SPACING;
-
-        // Convert to screen space.
-        let first_sx = ox + (first_wx - vp.origin.x) * vp.zoom;
-        let first_sy = oy + (first_wy - vp.origin.y) * vp.zoom;
-
-        let dot_r = if grid_screen_spacing > 25.0 { 1.5_f32 } else { 1.0_f32 };
-
-        let mut sx = first_sx;
-        while sx < ox + bw + grid_screen_spacing {
-            let mut sy = first_sy;
-            while sy < oy + bh + grid_screen_spacing {
-                if sx >= ox - dot_r
-                    && sy >= oy - dot_r
-                    && sx <= ox + bw + dot_r
-                    && sy <= oy + bh + dot_r
-                {
-                    window.paint_quad(fill(
-                        Bounds::new(
-                            point(px(sx - dot_r), px(sy - dot_r)),
-                            size(px(dot_r * 2.0), px(dot_r * 2.0)),
-                        ),
-                        rgb(GRID_DOT_COLOR),
-                    ));
-                }
-                sy += grid_screen_spacing;
-            }
-            sx += grid_screen_spacing;
-        }
-    }
-}
-
-impl IntoElement for GridElement {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
     }
 }
 

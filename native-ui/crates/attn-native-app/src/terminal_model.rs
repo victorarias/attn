@@ -163,6 +163,17 @@ impl TerminalModel {
         cx.notify();
     }
 
+    /// Feed raw bytes through the parser without going through the
+    /// daemon's PtyOutput pipeline. Used by the synthetic-load mode
+    /// in the perf spike so we can stress the render path with
+    /// deterministic input. Emits `DataReceived` and notifies.
+    #[allow(dead_code)] // only used by attn-spike5
+    pub fn feed_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
+        self.parser.advance(&mut self.term, bytes);
+        cx.emit(TerminalEvent::DataReceived);
+        cx.notify();
+    }
+
     /// Resize the terminal to new dimensions.
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
