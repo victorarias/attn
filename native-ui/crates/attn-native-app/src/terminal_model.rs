@@ -164,10 +164,10 @@ impl TerminalModel {
     }
 
     /// Feed raw bytes through the parser without going through the
-    /// daemon's PtyOutput pipeline. Used by the synthetic-load mode
-    /// in the perf spike so we can stress the render path with
+    /// daemon's PtyOutput pipeline. Used by the synthetic-load harness
+    /// (`crate::synthetic`) so we can stress the render path with
     /// deterministic input. Emits `DataReceived` and notifies.
-    #[allow(dead_code)] // only used by attn-spike5
+    #[allow(dead_code)] // only reachable via ATTN_NATIVE_SYNTHETIC_PANELS
     pub fn feed_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         self.parser.advance(&mut self.term, bytes);
         cx.emit(TerminalEvent::DataReceived);

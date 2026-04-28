@@ -1,5 +1,5 @@
 /// Fixed-width left rail. One row per workspace. Status badge in front of
-/// the title. Clicking a row asks the parent (`Spike5App`) to switch
+/// the title. Clicking a row asks the parent (`NativeApp`) to switch
 /// selection. The sidebar holds cloned `Entity<Workspace>` handles and
 /// observes each — when a workspace's status changes, only that row
 /// re-renders.
@@ -16,7 +16,7 @@ pub const SIDEBAR_WIDTH: f32 = 240.0;
 pub struct Sidebar {
     workspaces: Vec<Entity<Workspace>>,
     selected_id: Option<SharedString>,
-    /// Callback fired when the user clicks a row. Set up by `Spike5App`
+    /// Callback fired when the user clicks a row. Set up by `NativeApp`
     /// at construction time so the app can swap the canvas's selected
     /// workspace handle.
     on_select: Box<dyn Fn(SharedString, &mut Window, &mut gpui::App) + 'static>,
@@ -42,8 +42,8 @@ impl Sidebar {
         }
     }
 
-    /// Add a workspace handle. Called by `Spike5App` on `WorkspaceRegistered`.
-    /// `Spike5App` guards duplicates upstream (same id → same `Entity<Workspace>`
+    /// Add a workspace handle. Called by `NativeApp` on `WorkspaceRegistered`.
+    /// `NativeApp` guards duplicates upstream (same id → same `Entity<Workspace>`
     /// reused), so this is a pure insert — re-inserting the same id is a no-op.
     pub fn upsert_workspace(&mut self, ws: Entity<Workspace>, cx: &mut Context<Self>) {
         let id = ws.read(cx).id.clone();
