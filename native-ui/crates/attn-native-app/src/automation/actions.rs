@@ -85,6 +85,7 @@ async fn handle_action(
         "send_pty_input" => send_pty_input(app, cx, payload),
         "read_pane_text" => read_pane_text(app, cx, payload),
         "tail_events" => tail_events(payload),
+        "set_zoom" => set_zoom(app, cx, payload),
         _ => Err(format!("unknown action: {action}")),
     }
 }
@@ -257,6 +258,34 @@ fn tail_events(payload: Value) -> Result<Value, String> {
         .and_then(Value::as_u64)
         .unwrap_or(0);
     Ok(events::tail_events_response(cursor))
+}
+
+fn set_zoom(
+    app: &WeakEntity<Spike5App>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let zoom = payload
+        .get("zoom")
+        .and_then(Value::as_f64)
+        .ok_or("payload.zoom (number) is required")? as f32;
+    if !zoom.is_finite() || zoom <= 0.0 {
+        return Err(format!("zoom must be a positive finite number, got {zoom}"));
+    }
+    // Default true: a single set_zoom is a discrete perf measurement
+    // and should start from a clean window. The perf sweep that mimics
+    // scroll-wheel cadence passes `reset: false` so samples accumulate
+    // across many small steps.
+    let reset_fps = payload
+        .get("reset")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let entity = app.upgrade().ok_or("Spike5App entity dropped")?;
+    cx.update_entity(&entity, |app, cx| {
+        app.set_canvas_zoom(zoom, reset_fps, cx);
+        json!({ "zoom": zoom })
+    })
+    .map_err(|e| format!("update entity: {e}"))
 }
 
 fn get_window_geometry(cx: &mut AsyncApp) -> Result<Value, String> {

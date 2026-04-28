@@ -19,7 +19,8 @@ use gpui::{
 
 use serde_json::{json, Value};
 
-use crate::canvas_view::{pf, GridElement, Viewport};
+use crate::canvas_view::{pf, Viewport};
+use crate::fps_overlay::{self, FpsCounter};
 use crate::panel::{Panel, PanelContent, TITLE_HEIGHT};
 use crate::workspace::Workspace;
 
@@ -70,6 +71,8 @@ pub struct Spike5Canvas {
     /// must subtract this origin to land in canvas-local space. Without
     /// this, the sidebar's 240px width breaks every panel hit test.
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Always-on perf overlay. Records a sample on every render call.
+    fps: FpsCounter,
 }
 
 impl Spike5Canvas {
@@ -82,6 +85,7 @@ impl Spike5Canvas {
             focused_panel: None,
             focus_handle: cx.focus_handle(),
             bounds: Rc::new(Cell::new(None)),
+            fps: FpsCounter::new(),
         }
     }
 
@@ -96,9 +100,10 @@ impl Spike5Canvas {
     }
 
     /// JSON view used by the UI automation server. Captures viewport,
-    /// focus, and the canvas's window-relative bounds so test scripts
-    /// can translate world coordinates into screen pixels for OS-level
-    /// input.
+    /// focus, the canvas's window-relative bounds, and the latest perf
+    /// overlay readout so test scripts can translate world coordinates
+    /// into screen pixels for OS-level input and read frame timing
+    /// without inducing an extra render.
     pub fn automation_snapshot(&self) -> Value {
         let bounds = self.bounds.get().map(|b| {
             json!({
@@ -108,6 +113,7 @@ impl Spike5Canvas {
                 "height": pf(b.size.height),
             })
         });
+        let readout = self.fps.last_readout();
         json!({
             "viewport": {
                 "origin_x": self.viewport.origin.x,
@@ -116,7 +122,37 @@ impl Spike5Canvas {
             },
             "focused_panel_id": self.focused_panel,
             "bounds": bounds,
+            "fps": {
+                "fps": readout.fps,
+                "avg_ms": readout.avg_ms,
+                "last_ms": readout.last_ms,
+            },
         })
+    }
+
+    /// Set the canvas zoom level around the canvas center. When
+    /// `reset_fps` is true the FPS counter is cleared so post-change
+    /// samples aren't polluted by the previous zoom — the right thing
+    /// for a single-step measurement. For rapid synthetic sweeps that
+    /// mimic scroll-wheel cadence, callers pass `reset_fps=false` so
+    /// the readout reflects steady state during the sweep.
+    pub fn set_zoom_centered(
+        &mut self,
+        target_zoom: f32,
+        reset_fps: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let center = match self.bounds.get() {
+            Some(b) => point(b.origin.x + b.size.width / 2.0, b.origin.y + b.size.height / 2.0),
+            None => point(gpui::px(500.0), gpui::px(400.0)),
+        };
+        let local = self.local_pos(center);
+        let factor = target_zoom / self.viewport.zoom;
+        self.viewport = self.viewport.zoom_toward(local, factor);
+        if reset_fps {
+            self.fps.reset();
+        }
+        cx.notify();
     }
 
     pub fn set_selected(&mut self, ws: Option<Entity<Workspace>>, cx: &mut Context<Self>) {
@@ -348,6 +384,7 @@ impl Focusable for Spike5Canvas {
 
 impl Render for Spike5Canvas {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let readout = self.fps.record_frame();
         let viewport = self.viewport;
         let window_size = window.viewport_size();
         let ws_w = pf(window_size.width);
@@ -356,6 +393,10 @@ impl Render for Spike5Canvas {
         let focused_panel = self.focused_panel;
 
         let bounds_capture = self.bounds.clone();
+        // Grid dots intentionally omitted: snapping (when added) reads
+        // `GRID_SPACING` directly in code, no visible grid required.
+        // Removing the per-frame paint_quad-per-dot work keeps frame
+        // budget clear at every zoom level.
         let mut root = div()
             .size_full()
             .bg(rgb(0x0e0e14))
@@ -374,16 +415,19 @@ impl Render for Spike5Canvas {
                 )
                 .absolute()
                 .size_full(),
-            )
-            .child(GridElement { viewport });
+            );
 
         let Some(selected) = self.selected.clone() else {
-            return root.child(empty_state(SharedString::from("Select a workspace")));
+            return root
+                .child(empty_state(SharedString::from("Select a workspace")))
+                .child(fps_overlay::overlay(readout, 0, viewport.zoom));
         };
 
         let panels = selected.read(cx).panels.clone();
         if panels.is_empty() {
-            return root.child(empty_state(SharedString::from("Workspace has no panels yet")));
+            return root
+                .child(empty_state(SharedString::from("Workspace has no panels yet")))
+                .child(fps_overlay::overlay(readout, 0, viewport.zoom));
         }
 
         // Push content_size + zoom into every TerminalView so their next
@@ -454,7 +498,7 @@ impl Render for Spike5Canvas {
             root = root.child(panel_div);
         }
 
-        root
+        root.child(fps_overlay::overlay(readout, panels.len(), viewport.zoom))
     }
 }
 

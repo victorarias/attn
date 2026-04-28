@@ -3,10 +3,12 @@
 mod automation;
 mod canvas_view;
 mod daemon_client;
+mod fps_overlay;
 mod panel;
 mod sidebar;
 mod spike5_app;
 mod spike5_canvas;
+mod synthetic;
 mod terminal_model;
 mod terminal_view;
 mod workspace;

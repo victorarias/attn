@@ -16,7 +16,7 @@ use gpui::{
 
 use attn_protocol::{AttachSessionMessage, PtyResizeMessage};
 
-use crate::canvas_view::{GridElement, Viewport, pf};
+use crate::canvas_view::{Viewport, pf};
 use crate::daemon_client::{DaemonClient, DaemonEvent};
 use crate::terminal_model::TerminalModel;
 use crate::terminal_view::{TerminalView, CHAR_WIDTH, ROW_HEIGHT};
@@ -407,8 +407,7 @@ impl Render for TerminalCanvasView {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
-            .child(GridElement { viewport });
+            .on_scroll_wheel(cx.listener(Self::on_scroll_wheel));
 
         if self.panels.is_empty() {
             root = root.child(
