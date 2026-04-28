@@ -1,4 +1,4 @@
-//! Synthetic-load mode for the canvas perf spike.
+//! Synthetic-load mode for stressing the renderer without a daemon.
 //!
 //! Spawns a workspace of N panels driven by a deterministic byte stream
 //! pumped through alacritty's parser at a fixed cadence. The panels use
@@ -7,18 +7,18 @@
 //! honest: we're stress-testing the actual render pipeline, not a
 //! parallel one.
 //!
-//! Triggered at startup via env vars:
+//! Off by default. Triggered at startup via env vars:
 //!
-//!   ATTN_SPIKE5_SYNTHETIC_PANELS=N    # 1..256, default off
-//!   ATTN_SPIKE5_SYNTHETIC_TICK_MS=K   # default 16 (≈60 ticks/sec); 0 = no ticker (static panels)
-//!   ATTN_SPIKE5_SYNTHETIC_BYTES=B     # bytes per panel per tick, default 80
+//!   ATTN_NATIVE_SYNTHETIC_PANELS=N    # 1..256, default off
+//!   ATTN_NATIVE_SYNTHETIC_TICK_MS=K   # default 16 (≈60 ticks/sec); 0 = no ticker (static panels)
+//!   ATTN_NATIVE_SYNTHETIC_BYTES=B     # bytes per panel per tick, default 80
 //!
-//! When enabled, the spike skips waiting on the daemon for its initial
-//! workspace and immediately drives a "synthetic" workspace into view.
-//! Real daemon-backed workspaces still register normally if/when they
-//! arrive — synthetic mode just guarantees there's something to paint.
+//! Originally built for the 2026-04-28 canvas perf spike (see
+//! `docs/plans/2026-04-28-canvas-perf-spike.md`); kept as the long-term
+//! tool for any render-perf concern. Real daemon-backed workspaces
+//! still register normally alongside the synthetic one.
 //!
-//! Static mode (`ATTN_SPIKE5_SYNTHETIC_TICK_MS=0`): panels are created
+//! Static mode (`ATTN_NATIVE_SYNTHETIC_TICK_MS=0`): panels are created
 //! but no periodic ticker runs. The only thing causing renders is user
 //! input (scroll, drag, etc). Useful for isolating event-handler cost
 //! from byte-streaming cost when diagnosing scroll-wheel performance.
@@ -44,7 +44,7 @@ pub struct Config {
 
 /// Read env-driven config. Returns `None` when synthetic mode is off.
 pub fn config_from_env() -> Option<Config> {
-    let panels: usize = std::env::var("ATTN_SPIKE5_SYNTHETIC_PANELS")
+    let panels: usize = std::env::var("ATTN_NATIVE_SYNTHETIC_PANELS")
         .ok()?
         .trim()
         .parse()
@@ -54,7 +54,7 @@ pub fn config_from_env() -> Option<Config> {
     }
     let panels = panels.min(MAX_PANELS);
 
-    let tick_ms = std::env::var("ATTN_SPIKE5_SYNTHETIC_TICK_MS")
+    let tick_ms = std::env::var("ATTN_NATIVE_SYNTHETIC_TICK_MS")
         .ok()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .unwrap_or(DEFAULT_TICK_MS);
@@ -64,7 +64,7 @@ pub fn config_from_env() -> Option<Config> {
         Some(Duration::from_millis(tick_ms))
     };
 
-    let bytes_per_tick = std::env::var("ATTN_SPIKE5_SYNTHETIC_BYTES")
+    let bytes_per_tick = std::env::var("ATTN_NATIVE_SYNTHETIC_BYTES")
         .ok()
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .unwrap_or(DEFAULT_BYTES_PER_TICK)
@@ -141,9 +141,9 @@ mod tests {
         // Test isolation: only meaningful inside the per-test process,
         // so we just assert that an obviously-zero panels env returns
         // None.
-        std::env::set_var("ATTN_SPIKE5_SYNTHETIC_PANELS", "0");
+        std::env::set_var("ATTN_NATIVE_SYNTHETIC_PANELS", "0");
         let cfg = config_from_env();
-        std::env::remove_var("ATTN_SPIKE5_SYNTHETIC_PANELS");
+        std::env::remove_var("ATTN_NATIVE_SYNTHETIC_PANELS");
         assert!(cfg.is_none());
     }
 

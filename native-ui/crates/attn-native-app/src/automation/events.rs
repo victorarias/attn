@@ -30,10 +30,10 @@
 //!
 //! - `daemon_event` — payload `{kind, ...}` for every inbound wire event
 //!   from the daemon. Excludes `pty_output` (would dominate the buffer).
-//! - `sessions_changed_observed` — Spike5App reacted to a SessionsChanged
+//! - `sessions_changed_observed` — NativeApp reacted to a SessionsChanged
 //!   emit; carries the post-reaction session count.
 //! - `workspace_registered_observed`, `workspace_unregistered_observed`,
-//!   `workspace_state_changed_observed` — Spike5App processed the matching
+//!   `workspace_state_changed_observed` — NativeApp processed the matching
 //!   daemon event and updated its workspaces map.
 //! - `workspace_selected` — payload `{id}`. Sidebar click or automation.
 //! - `panel_added` — payload

@@ -43,7 +43,7 @@ impl Workspace {
 
     /// JSON view used by the UI automation server. Pulled into the
     /// workspace itself so the snapshot shape lives next to the data;
-    /// callers (`Spike5App::automation_snapshot`) just stitch them
+    /// callers (`NativeApp::automation_snapshot`) just stitch them
     /// together.
     pub fn automation_snapshot(&self) -> Value {
         let panels: Vec<Value> = self.panels.iter().map(panel_snapshot).collect();

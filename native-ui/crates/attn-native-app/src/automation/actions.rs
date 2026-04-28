@@ -12,10 +12,10 @@ use attn_protocol::PtyInputMessage;
 use gpui::{prelude::*, AnyView, App, AsyncApp, Entity, SharedString, WeakEntity, Window};
 use serde_json::{json, Value};
 
-use crate::canvas_view::pf;
+use crate::app::NativeApp;
 use crate::panel::PanelContent;
-use crate::spike5_app::Spike5App;
 use crate::terminal_model::TerminalModel;
+use crate::viewport::pf;
 
 use super::events;
 use super::server::Dispatcher;
@@ -57,7 +57,7 @@ pub fn make_dispatcher() -> (Dispatcher, Receiver<ActionRequest>) {
 /// (i.e. when the dispatcher is dropped on app shutdown).
 pub async fn pump_actions(
     rx: Receiver<ActionRequest>,
-    app: WeakEntity<Spike5App>,
+    app: WeakEntity<NativeApp>,
     mut cx: AsyncApp,
 ) {
     while let Ok(req) = rx.recv().await {
@@ -69,7 +69,7 @@ pub async fn pump_actions(
 async fn handle_action(
     action: &str,
     payload: Value,
-    app: &WeakEntity<Spike5App>,
+    app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
 ) -> Result<Value, String> {
     match action {
@@ -90,15 +90,15 @@ async fn handle_action(
     }
 }
 
-fn get_state(app: &WeakEntity<Spike5App>, cx: &mut AsyncApp) -> Result<Value, String> {
-    let entity = app.upgrade().ok_or("Spike5App entity dropped")?;
-    cx.read_entity(&entity, |app: &Spike5App, cx: &App| app.automation_snapshot(cx))
+fn get_state(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
+    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    cx.read_entity(&entity, |app: &NativeApp, cx: &App| app.automation_snapshot(cx))
         .map_err(|e| format!("read entity: {e}"))
 }
 
-fn list_sessions(app: &WeakEntity<Spike5App>, cx: &mut AsyncApp) -> Result<Value, String> {
-    let entity = app.upgrade().ok_or("Spike5App entity dropped")?;
-    cx.read_entity(&entity, |app: &Spike5App, cx: &App| {
+fn list_sessions(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
+    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    cx.read_entity(&entity, |app: &NativeApp, cx: &App| {
         let sessions = app.daemon().read(cx).sessions();
         serde_json::to_value(sessions).unwrap_or(Value::Null)
     })
@@ -106,7 +106,7 @@ fn list_sessions(app: &WeakEntity<Spike5App>, cx: &mut AsyncApp) -> Result<Value
 }
 
 fn select_workspace(
-    app: &WeakEntity<Spike5App>,
+    app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
     payload: Value,
 ) -> Result<Value, String> {
@@ -115,7 +115,7 @@ fn select_workspace(
         .and_then(Value::as_str)
         .ok_or("payload.id (string) is required")?
         .to_string();
-    let entity = app.upgrade().ok_or("Spike5App entity dropped")?;
+    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
     cx.update_entity(&entity, |app, cx| {
         if app.workspace(&id).is_none() {
             return Err(format!("unknown workspace id: {id}"));
@@ -127,7 +127,7 @@ fn select_workspace(
 }
 
 fn move_panel(
-    app: &WeakEntity<Spike5App>,
+    app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
     payload: Value,
 ) -> Result<Value, String> {
@@ -145,9 +145,9 @@ fn move_panel(
     let width = payload.get("width").and_then(Value::as_f64).map(|n| n as f32);
     let height = payload.get("height").and_then(Value::as_f64).map(|n| n as f32);
 
-    let app_entity = app.upgrade().ok_or("Spike5App entity dropped")?;
+    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
     let workspace = cx
-        .read_entity(&app_entity, |app: &Spike5App, _cx: &App| {
+        .read_entity(&app_entity, |app: &NativeApp, _cx: &App| {
             app.workspace(&workspace_id)
         })
         .map_err(|e| format!("read entity: {e}"))?
@@ -162,7 +162,7 @@ fn move_panel(
 }
 
 fn send_pty_input(
-    app: &WeakEntity<Spike5App>,
+    app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
     payload: Value,
 ) -> Result<Value, String> {
@@ -177,8 +177,8 @@ fn send_pty_input(
         .ok_or("payload.text (string) is required")?
         .to_string();
 
-    let app_entity = app.upgrade().ok_or("Spike5App entity dropped")?;
-    cx.read_entity(&app_entity, |app: &Spike5App, cx: &App| {
+    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    cx.read_entity(&app_entity, |app: &NativeApp, cx: &App| {
         if find_terminal_model(app, &session_id, cx).is_none() {
             return Err(format!("no terminal panel for session: {session_id}"));
         }
@@ -197,7 +197,7 @@ fn send_pty_input(
 }
 
 fn read_pane_text(
-    app: &WeakEntity<Spike5App>,
+    app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
     payload: Value,
 ) -> Result<Value, String> {
@@ -207,9 +207,9 @@ fn read_pane_text(
         .ok_or("payload.session_id (string) is required")?
         .to_string();
 
-    let app_entity = app.upgrade().ok_or("Spike5App entity dropped")?;
+    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
     let model = cx
-        .read_entity(&app_entity, |app: &Spike5App, cx: &App| {
+        .read_entity(&app_entity, |app: &NativeApp, cx: &App| {
             find_terminal_model(app, &session_id, cx)
         })
         .map_err(|e| format!("read entity: {e}"))?
@@ -232,7 +232,7 @@ fn read_pane_text(
 /// `session_id` and returns its model handle. None when no such panel
 /// exists in any workspace.
 fn find_terminal_model(
-    app: &Spike5App,
+    app: &NativeApp,
     session_id: &str,
     cx: &App,
 ) -> Option<Entity<TerminalModel>> {
@@ -261,7 +261,7 @@ fn tail_events(payload: Value) -> Result<Value, String> {
 }
 
 fn set_zoom(
-    app: &WeakEntity<Spike5App>,
+    app: &WeakEntity<NativeApp>,
     cx: &mut AsyncApp,
     payload: Value,
 ) -> Result<Value, String> {
@@ -273,14 +273,14 @@ fn set_zoom(
         return Err(format!("zoom must be a positive finite number, got {zoom}"));
     }
     // Default true: a single set_zoom is a discrete perf measurement
-    // and should start from a clean window. The perf sweep that mimics
-    // scroll-wheel cadence passes `reset: false` so samples accumulate
+    // and should start from a clean window. Sweeps that mimic
+    // scroll-wheel cadence pass `reset: false` so samples accumulate
     // across many small steps.
     let reset_fps = payload
         .get("reset")
         .and_then(Value::as_bool)
         .unwrap_or(true);
-    let entity = app.upgrade().ok_or("Spike5App entity dropped")?;
+    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
     cx.update_entity(&entity, |app, cx| {
         app.set_canvas_zoom(zoom, reset_fps, cx);
         json!({ "zoom": zoom })

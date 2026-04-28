@@ -1,14 +1,14 @@
-//! Always-on FPS / frame-time overlay for the perf spike.
+//! Opt-in FPS / frame-time overlay. Set `ATTN_NATIVE_FPS=1` to enable.
 //!
-//! Records an `Instant` at the start of every render and reports two
-//! numbers from the recent window:
+//! Records an `Instant` at the start of every render and reports:
 //!   - `fps`     — number of recorded frames within the last 1 second.
-//!   - `avg_ms`  — mean inter-frame interval over the last few samples.
+//!   - `avg_ms`  — mean inter-frame interval over the recent window.
+//!   - `last_ms` — most recent inter-frame interval.
 //!
 //! GPUI 0.2 only paints when something calls `cx.notify()`, so these
 //! numbers reflect actual repaint activity, not a hypothetical refresh
-//! rate. For idle measurement the spike will need a deliberate ticker;
-//! while panels are streaming bytes, repaints come naturally.
+//! rate. Built for the 2026-04-28 canvas perf spike; kept as the
+//! long-term render-perf affordance.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};

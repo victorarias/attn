@@ -1,7 +1,7 @@
-/// Workspace root view. Owns the live `Vec<Entity<Workspace>>` (the
-/// authoritative list, sidebar and canvas just hold cloned handles), and
-/// subscribes to `DaemonClient` to grow/shrink it as workspaces and
-/// sessions appear and vanish on the wire.
+/// Root view. Owns the live `Vec<Entity<Workspace>>` (the authoritative
+/// list — sidebar and canvas just hold cloned handles), and subscribes to
+/// `DaemonClient` to grow/shrink it as workspaces and sessions appear and
+/// vanish on the wire.
 ///
 /// Layout: sidebar pinned left at fixed width, canvas fills the rest.
 use std::collections::HashMap;
@@ -14,26 +14,25 @@ use serde_json::{json, Value};
 
 use crate::automation;
 use crate::automation::events;
+use crate::canvas::WorkspaceCanvas;
 use crate::daemon_client::{DaemonClient, DaemonEvent};
 use crate::panel::{Panel, PanelContent, TITLE_HEIGHT};
 use crate::sidebar::Sidebar;
-use crate::spike5_canvas::Spike5Canvas;
 use crate::synthetic::{self, SyntheticSource};
 use crate::terminal_model::TerminalModel;
 use crate::terminal_view::TerminalView;
 use crate::workspace::Workspace;
 
-/// Initial terminal panel size in world-space units. Roughly 380×240
-/// matches the spike-4 default and gives ~48 cols × ~12 rows once the
-/// title bar is subtracted.
+/// Initial terminal panel size in world-space units. ~380×240 gives
+/// ~48 cols × ~12 rows once the title bar is subtracted.
 const TERMINAL_W: f32 = 380.0;
 const TERMINAL_H: f32 = 240.0;
 
-pub struct Spike5App {
+pub struct NativeApp {
     daemon: Entity<DaemonClient>,
     workspaces_by_id: HashMap<SharedString, Entity<Workspace>>,
     sidebar: Entity<Sidebar>,
-    canvas: Entity<Spike5Canvas>,
+    canvas: Entity<WorkspaceCanvas>,
     selected_id: Option<SharedString>,
     /// Live automation server handle. Drop deletes the manifest. `None`
     /// when automation is disabled for this launch (default in prod) or
@@ -41,22 +40,22 @@ pub struct Spike5App {
     /// run, just without the test sidecar.
     _automation: Option<automation::server::Handle>,
     /// Synthetic-load sources, populated when
-    /// `ATTN_SPIKE5_SYNTHETIC_PANELS=N` is set at startup. Empty in
+    /// `ATTN_NATIVE_SYNTHETIC_PANELS=N` is set at startup. Empty in
     /// regular use. Each source pumps deterministic bytes into one
     /// terminal model on a periodic tick (see `synthetic` module).
     synthetic: Vec<SyntheticSource>,
 }
 
-impl Spike5App {
+impl NativeApp {
     pub fn new(daemon: Entity<DaemonClient>, cx: &mut Context<Self>) -> Self {
-        let canvas = cx.new(|cx| Spike5Canvas::new(cx));
+        let canvas = cx.new(|cx| WorkspaceCanvas::new(cx));
         let app_handle = cx.entity().downgrade();
         let sidebar = cx.new(|cx| {
             Sidebar::new(
                 Vec::new(),
                 move |id, _window, cx| {
                     let app_handle = app_handle.clone();
-                    let _ = app_handle.update(cx, |app: &mut Spike5App, cx| {
+                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
                         app.select_workspace(id, cx);
                     });
                 },
@@ -132,21 +131,19 @@ impl Spike5App {
         app
     }
 
-    /// Read-only handle to the daemon client, exposed so the automation
-    /// module can serialize wire-level workspace + session state without
-    /// cloning the lists out of `Spike5App`.
-    pub fn daemon(&self) -> &Entity<DaemonClient> {
-        &self.daemon
-    }
-
-    /// Apply a zoom level to the canvas (centered on the canvas
-    /// midpoint). Used by the automation `set_zoom` action so the
-    /// perf-spike scaling sweep can drive measurements headlessly.
-    /// `reset_fps=false` is for rapid synthetic sweeps that need the
-    /// counter to keep accumulating across many small steps.
+    /// Apply a zoom level to the canvas, centered on the canvas
+    /// midpoint. Used by the automation `set_zoom` action so headless
+    /// scripts can drive perf measurements at known zoom levels.
     pub fn set_canvas_zoom(&self, zoom: f32, reset_fps: bool, cx: &mut Context<Self>) {
         let canvas = self.canvas.clone();
         canvas.update(cx, |canvas, cx| canvas.set_zoom_centered(zoom, reset_fps, cx));
+    }
+
+    /// Read-only handle to the daemon client, exposed so the automation
+    /// module can serialize wire-level workspace + session state without
+    /// cloning the lists out of `NativeApp`.
+    pub fn daemon(&self) -> &Entity<DaemonClient> {
+        &self.daemon
     }
 
     /// Lookup helper used by automation actions to target a specific
@@ -210,110 +207,6 @@ impl Spike5App {
                 "error": daemon.error(),
             },
         })
-    }
-
-    /// Bring up a synthetic workspace + N panels driven by an internal
-    /// ticker. Used by the canvas perf spike to characterize rendering
-    /// scaling without depending on the daemon. Real daemon-backed
-    /// workspaces still register normally and appear alongside.
-    fn start_synthetic(&mut self, cfg: synthetic::Config, cx: &mut Context<Self>) {
-        let ws_id = "synthetic-load";
-        let ws_data = attn_protocol::Workspace {
-            id: ws_id.to_string(),
-            title: format!("Synthetic Load ({} panels)", cfg.panels),
-            directory: "/synthetic".to_string(),
-            status: attn_protocol::WorkspaceStatus::Working,
-        };
-        self.upsert_workspace(ws_data, cx);
-
-        let Some(ws_entity) = self
-            .workspaces_by_id
-            .get(&SharedString::from(ws_id.to_string()))
-            .cloned()
-        else {
-            return;
-        };
-
-        // Lay panels out in a square-ish grid with a fixed gap so the
-        // canvas isn't a stack of overlapping rects.
-        let cols = (cfg.panels as f32).sqrt().ceil() as usize;
-        let gap = 30.0_f32;
-
-        for i in 0..cfg.panels {
-            let row = i / cols;
-            let col = i % cols;
-            let world_x = 30.0 + col as f32 * (TERMINAL_W + gap);
-            let world_y = 50.0 + row as f32 * (TERMINAL_H + gap);
-
-            let session_id = format!("synthetic-{i:02}");
-            let label = format!("synthetic-{i:02}");
-
-            let (cterm, rterm) = panel_terminal_dims(TERMINAL_W, TERMINAL_H);
-            let daemon = self.daemon.clone();
-            let model = cx.new(|cx| TerminalModel::new(session_id.clone(), cterm, rterm, &daemon, cx));
-            let view = cx.new(|cx| {
-                let mut tv = TerminalView::new(model.clone(), daemon.clone(), cx);
-                tv.set_content_size(TERMINAL_W, (TERMINAL_H - TITLE_HEIGHT).max(0.0));
-                tv
-            });
-
-            let panel = Panel {
-                id: next_panel_id(),
-                title: SharedString::from(label),
-                world_x,
-                world_y,
-                width: TERMINAL_W,
-                height: TERMINAL_H,
-                content: PanelContent::Terminal {
-                    session_id: SharedString::from(session_id),
-                    view,
-                },
-            };
-
-            ws_entity.update(cx, |ws, cx| {
-                ws.panels.push(panel);
-                cx.notify();
-            });
-
-            self.synthetic
-                .push(SyntheticSource::new(model, i, cfg.bytes_per_tick));
-        }
-
-        // Ticker: pump every source on a fixed cadence. Detached — runs
-        // until app shutdown drops the WeakEntity. `None` means static
-        // mode: panels are created but never re-rendered until user
-        // input (used to isolate scroll-handler cost from byte-stream
-        // cost during perf diagnosis).
-        if let Some(tick) = cfg.tick {
-            let app_handle = cx.entity().downgrade();
-            cx.spawn(async move |_, cx| {
-                loop {
-                    smol::Timer::after(tick).await;
-                    let updated = app_handle.update(
-                        cx,
-                        |app: &mut Spike5App, app_cx: &mut Context<Spike5App>| {
-                            for src in &mut app.synthetic {
-                                src.tick(app_cx);
-                            }
-                        },
-                    );
-                    if updated.is_err() {
-                        // App was dropped — bail out so we don't spin.
-                        break;
-                    }
-                }
-            })
-            .detach();
-        }
-
-        eprintln!(
-            "[synthetic] {} panels, tick={}, bytes/tick={}",
-            cfg.panels,
-            cfg.tick
-                .map(|t| format!("{:?}", t))
-                .unwrap_or_else(|| "off (static)".into()),
-            cfg.bytes_per_tick
-        );
     }
 
     fn upsert_workspace(&mut self, data: attn_protocol::Workspace, cx: &mut Context<Self>) {
@@ -407,7 +300,7 @@ impl Spike5App {
         //
         // Synthetic-mode panels (session_id starts with "synthetic-")
         // are never tracked by the daemon, so they would always look
-        // "dead" here — protect them explicitly so the perf spike
+        // "dead" here — protect them explicitly so the synthetic
         // workspace survives daemon events.
         for ws_entity in self.workspaces_by_id.values().cloned().collect::<Vec<_>>() {
             ws_entity.update(cx, |ws, cx| {
@@ -519,9 +412,113 @@ impl Spike5App {
             });
         }
     }
+
+    /// Bring up a synthetic workspace + N panels driven by an internal
+    /// ticker. Used by the canvas perf harness to characterize rendering
+    /// scaling without depending on the daemon. Real daemon-backed
+    /// workspaces still register normally and appear alongside.
+    fn start_synthetic(&mut self, cfg: synthetic::Config, cx: &mut Context<Self>) {
+        let ws_id = "synthetic-load";
+        let ws_data = attn_protocol::Workspace {
+            id: ws_id.to_string(),
+            title: format!("Synthetic Load ({} panels)", cfg.panels),
+            directory: "/synthetic".to_string(),
+            status: attn_protocol::WorkspaceStatus::Working,
+        };
+        self.upsert_workspace(ws_data, cx);
+
+        let Some(ws_entity) = self
+            .workspaces_by_id
+            .get(&SharedString::from(ws_id.to_string()))
+            .cloned()
+        else {
+            return;
+        };
+
+        // Lay panels out in a square-ish grid with a fixed gap so the
+        // canvas isn't a stack of overlapping rects.
+        let cols = (cfg.panels as f32).sqrt().ceil() as usize;
+        let gap = 30.0_f32;
+
+        for i in 0..cfg.panels {
+            let row = i / cols;
+            let col = i % cols;
+            let world_x = 30.0 + col as f32 * (TERMINAL_W + gap);
+            let world_y = 50.0 + row as f32 * (TERMINAL_H + gap);
+
+            let session_id = format!("synthetic-{i:02}");
+            let label = format!("synthetic-{i:02}");
+
+            let (cterm, rterm) = panel_terminal_dims(TERMINAL_W, TERMINAL_H);
+            let daemon = self.daemon.clone();
+            let model = cx.new(|cx| TerminalModel::new(session_id.clone(), cterm, rterm, &daemon, cx));
+            let view = cx.new(|cx| {
+                let mut tv = TerminalView::new(model.clone(), daemon.clone(), cx);
+                tv.set_content_size(TERMINAL_W, (TERMINAL_H - TITLE_HEIGHT).max(0.0));
+                tv
+            });
+
+            let panel = Panel {
+                id: next_panel_id(),
+                title: SharedString::from(label),
+                world_x,
+                world_y,
+                width: TERMINAL_W,
+                height: TERMINAL_H,
+                content: PanelContent::Terminal {
+                    session_id: SharedString::from(session_id),
+                    view,
+                },
+            };
+
+            ws_entity.update(cx, |ws, cx| {
+                ws.panels.push(panel);
+                cx.notify();
+            });
+
+            self.synthetic
+                .push(SyntheticSource::new(model, i, cfg.bytes_per_tick));
+        }
+
+        // Ticker: pump every source on a fixed cadence. Detached — runs
+        // until app shutdown drops the WeakEntity. `None` means static
+        // mode: panels are created but never re-rendered until user
+        // input (used to isolate scroll-handler cost from byte-stream
+        // cost during perf diagnosis).
+        if let Some(tick) = cfg.tick {
+            let app_handle = cx.entity().downgrade();
+            cx.spawn(async move |_, cx| {
+                loop {
+                    smol::Timer::after(tick).await;
+                    let updated = app_handle.update(
+                        cx,
+                        |app: &mut NativeApp, app_cx: &mut Context<NativeApp>| {
+                            for src in &mut app.synthetic {
+                                src.tick(app_cx);
+                            }
+                        },
+                    );
+                    if updated.is_err() {
+                        // App was dropped — bail out so we don't spin.
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+
+        eprintln!(
+            "[synthetic] {} panels, tick={}, bytes/tick={}",
+            cfg.panels,
+            cfg.tick
+                .map(|t| format!("{:?}", t))
+                .unwrap_or_else(|| "off (static)".into()),
+            cfg.bytes_per_tick
+        );
+    }
 }
 
-impl Render for Spike5App {
+impl Render for NativeApp {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
@@ -552,7 +549,7 @@ fn panel_terminal_dims(world_w: f32, world_h: f32) -> (u16, u16) {
 /// Bring up the UI automation TCP server + dispatch pump. Errors are
 /// logged but don't bubble up — automation is a dev/test affordance and
 /// shouldn't take down the app if (e.g.) the manifest dir is unwritable.
-fn start_automation(cx: &mut Context<Spike5App>) -> Option<automation::server::Handle> {
+fn start_automation(cx: &mut Context<NativeApp>) -> Option<automation::server::Handle> {
     let listener = match automation::server::bind() {
         Ok(l) => l,
         Err(error) => {
