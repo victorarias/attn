@@ -85,6 +85,13 @@ pub enum SessionAgent {
     Codex,
     Copilot,
     Pi,
+    /// Shell agents are first-class sessions for clients that
+    /// advertise the `shell_as_session` capability (the native canvas
+    /// app). Must mirror the TypeSpec enum and the Go-side daemon —
+    /// without this variant, serde drops every event that contains a
+    /// shell session and the native client's session/workspace sync
+    /// stalls silently.
+    Shell,
 }
 
 impl std::fmt::Display for SessionAgent {
@@ -94,6 +101,7 @@ impl std::fmt::Display for SessionAgent {
             Self::Codex => write!(f, "codex"),
             Self::Copilot => write!(f, "copilot"),
             Self::Pi => write!(f, "pi"),
+            Self::Shell => write!(f, "shell"),
         }
     }
 }
