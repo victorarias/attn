@@ -3,7 +3,7 @@ use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use gpui::{
     div, fill, point, prelude::*, px, rgb, size, App, Bounds, ElementId,
     Font, GlobalElementId, Hsla, InspectorElementId, LayoutId, Pixels, Size, Style, TextRun,
-    Window, Context, Entity, FocusHandle, Focusable, KeyDownEvent,
+    Window, Context, Entity, FocusHandle, Focusable, KeyDownEvent, Keystroke,
 };
 
 use attn_protocol::{PtyInputMessage, PtyResizeMessage};
@@ -362,7 +362,7 @@ impl TerminalView {
     fn send_input(&self, data: &str, cx: &mut Context<Self>) {
         let session_id = self.terminal.read(cx).session_id.clone();
         let msg = PtyInputMessage::new(session_id, data);
-        self.daemon.read(cx).send_cmd(&msg);
+        let _ = self.daemon.read(cx).send_cmd(&msg);
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -373,6 +373,23 @@ impl TerminalView {
         if !seq.is_empty() {
             self.send_input(&seq, cx);
         }
+    }
+
+    /// Synthesize a keystroke from outside the GPUI event loop and run it
+    /// through the same path real keystrokes take. Used by the automation
+    /// `type_into_panel` action so test scripts exercise the full
+    /// focus → encode → send_input chain rather than bypassing it via
+    /// `send_pty_input`. Caller is responsible for focusing this view
+    /// first; an unfocused view drops the keystroke (matching production
+    /// behavior).
+    pub fn inject_keystroke(
+        &mut self,
+        keystroke: Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let event = KeyDownEvent { keystroke, is_held: false };
+        self.on_key_down(&event, window, cx);
     }
 }
 
@@ -395,7 +412,10 @@ impl Render for TerminalView {
         };
         if new_cols != cur_cols || new_rows != cur_rows {
             self.terminal.update(cx, |t, _| t.resize(new_cols, new_rows));
-            self.daemon.read(cx).send_cmd(&PtyResizeMessage::new(session_id, new_cols, new_rows));
+            let _ = self
+                .daemon
+                .read(cx)
+                .send_cmd(&PtyResizeMessage::new(session_id, new_cols, new_rows));
         }
 
         let terminal = self.terminal.read(cx);
