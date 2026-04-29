@@ -4,7 +4,7 @@ import {
   type ResizeDiagnostics,
 } from './terminalDebug';
 import type { TerminalPerfStartupSnapshot } from './terminalPerf';
-import { getScaledDimensions } from './terminalSizing';
+import { getScaledDimensions, type LayoutContext } from './terminalSizing';
 import {
   planObservedTerminalResize,
   planVisibilityFlush,
@@ -44,6 +44,25 @@ interface TerminalViewportLifecycleOptions {
     diagnostics?: ResizeDiagnostics | null,
   ) => void;
   onVisibilityChanged: (nowVisible: boolean, wasHidden: boolean) => void;
+  onReadyAttemptDiag?: (event: TerminalReadyAttemptDiagnostic) => void;
+  /**
+   * Returns the current layout context (window size + pane count) for the
+   * pane this lifecycle is bound to. Called fresh each measurement so it
+   * tracks live layout changes (window resize, sidebar collapse, splits).
+   * Return undefined to disable the layout-aware floor.
+   */
+  getLayoutContext?: () => LayoutContext | undefined;
+}
+
+export interface TerminalReadyAttemptDiagnostic {
+  phase: 'bail_retry' | 'bail_giveup';
+  attempt: number;
+  bailReason: 'dims_null' | 'zero_dims' | 'container_disconnected';
+  containerWidth: number;
+  containerHeight: number;
+  termCols: number;
+  termRows: number;
+  measured?: { cols: number; rows: number } | null;
 }
 
 export interface TerminalViewportLifecycle {
@@ -62,6 +81,8 @@ export function installTerminalViewportLifecycle({
   applyMeasuredTerminalGeometry,
   resizeTerminal,
   onVisibilityChanged,
+  onReadyAttemptDiag,
+  getLayoutContext,
 }: TerminalViewportLifecycleOptions): TerminalViewportLifecycle {
   let lastCols = term.cols;
   let lastRows = term.rows;
@@ -89,6 +110,11 @@ export function installTerminalViewportLifecycle({
   const MAX_READY_RETRIES = 20;
   const READY_RETRY_DELAY_MS = 50;
 
+  const measureContainerSize = () => ({
+    width: container.isConnected ? container.getBoundingClientRect().width : 0,
+    height: container.isConnected ? container.getBoundingClientRect().height : 0,
+  });
+
   const scheduleReadyAttempt = (attempt: number) => {
     if (readyFiredRef.current) {
       clearReadyRetryTimeout();
@@ -99,11 +125,22 @@ export function installTerminalViewportLifecycle({
       if (readyFiredRef.current) {
         return;
       }
+      const containerSize = measureContainerSize();
       if (!container.isConnected) {
         logTerminal('log', 'ready RAF bail: container disconnected', { attempt });
+        onReadyAttemptDiag?.({
+          phase: 'bail_giveup',
+          attempt,
+          bailReason: 'container_disconnected',
+          containerWidth: containerSize.width,
+          containerHeight: containerSize.height,
+          termCols: term.cols,
+          termRows: term.rows,
+          measured: null,
+        });
         return;
       }
-      const dims = getScaledDimensions(container, term, fontSizeRef.current);
+      const dims = getScaledDimensions(container, term, fontSizeRef.current, undefined, undefined, getLayoutContext?.());
       let bailReason: 'dims_null' | 'zero_dims' | null = null;
       if (!dims) {
         bailReason = 'dims_null';
@@ -111,7 +148,18 @@ export function installTerminalViewportLifecycle({
         bailReason = 'zero_dims';
       }
       if (bailReason) {
-        if (attempt + 1 >= MAX_READY_RETRIES) {
+        const isLast = attempt + 1 >= MAX_READY_RETRIES;
+        onReadyAttemptDiag?.({
+          phase: isLast ? 'bail_giveup' : 'bail_retry',
+          attempt,
+          bailReason,
+          containerWidth: containerSize.width,
+          containerHeight: containerSize.height,
+          termCols: term.cols,
+          termRows: term.rows,
+          measured: dims ? { cols: dims.cols, rows: dims.rows } : null,
+        });
+        if (isLast) {
           logTerminal('warn', 'ready RAF bail: giving up', {
             reason: bailReason,
             attempt,
@@ -185,7 +233,7 @@ export function installTerminalViewportLifecycle({
   };
 
   const handleResize = () => {
-    const dims = getScaledDimensions(container, term, fontSizeRef.current);
+    const dims = getScaledDimensions(container, term, fontSizeRef.current, undefined, undefined, getLayoutContext?.());
     if (!dims) {
       logTerminal('log', 'handleResize: no dimensions', {
         isVisible: visibleRef.current,
@@ -265,7 +313,7 @@ export function installTerminalViewportLifecycle({
       onVisibilityChanged(nowVisible, wasHidden);
 
       if (wasHidden && readyFiredRef.current) {
-        const dims = getScaledDimensions(container, term, fontSizeRef.current);
+        const dims = getScaledDimensions(container, term, fontSizeRef.current, undefined, undefined, getLayoutContext?.());
         if (dims) {
           latestX = dims.cols;
           latestY = dims.rows;
@@ -294,7 +342,7 @@ export function installTerminalViewportLifecycle({
     const newDpr = window.devicePixelRatio;
     if (newDpr !== currentDpr) {
       currentDpr = newDpr;
-      const dims = getScaledDimensions(container, term, fontSizeRef.current);
+      const dims = getScaledDimensions(container, term, fontSizeRef.current, undefined, undefined, getLayoutContext?.());
       if (dims) {
         resizeTerminal(term, dims.cols, dims.rows, 'dpr_change');
       }

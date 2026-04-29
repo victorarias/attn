@@ -1,13 +1,14 @@
 const TERMINAL_DEBUG_STORAGE_KEY = 'attn:terminal-debug';
 
-// Below these thresholds a grid is never a useful real measurement — it is
-// always either a transient layout state (display:none toggle, font-size
-// change, panel animation) or stale renderer cell dimensions reported during
-// a remount. `getScaledDimensions` treats results below these thresholds as
-// "not yet measured" and returns null so the existing retry / debounce paths
-// wait for real layout to settle instead of forwarding a broken size to the
-// PTY. Codex (and other inline-rendering TUIs) cannot recover from a SIGWINCH
-// at e.g. 10×6, so we reject at the source.
+// Codex (and other inline-rendering TUIs) cannot recover from a SIGWINCH at
+// e.g. 10×6 — their UI gets re-anchored at the small size and never recovers
+// when the pane grows back. Main panes (which run codex/claude) suppress
+// SIGWINCH below these dimensions at the resize-send point. Shell panes
+// don't have this fragility and a legitimately small zsh (e.g. 14 cols from
+// a 3-way split) renders fine, so this floor is main-pane-only.
+//
+// Transient layout-state filtering (panel animations, grid track resolving)
+// is handled separately by getScaledDimensions's layout-aware floor.
 export const MIN_USABLE_TERMINAL_COLS = 20;
 export const MIN_USABLE_TERMINAL_ROWS = 10;
 

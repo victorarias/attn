@@ -596,6 +596,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   paneKind: 'main',
                   isActivePane: activePaneId === MAIN_TERMINAL_PANE_ID,
                   isActiveSession,
+                  paneCount: paneIds.length,
                 }}
                 onInit={handleTerminalInit(MAIN_TERMINAL_PANE_ID)}
                 onReady={handleTerminalReady(MAIN_TERMINAL_PANE_ID)}
@@ -648,6 +649,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 paneKind: 'shell',
                 isActivePane: activePaneId === terminal.id,
                 isActiveSession,
+                paneCount: paneIds.length,
               }}
               onInit={handleTerminalInit(terminal.id)}
               onReady={handleTerminalReady(terminal.id)}
