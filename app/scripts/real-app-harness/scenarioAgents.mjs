@@ -31,11 +31,17 @@ export function preTrustClaudeFolder(folderPath) {
   const configPath = path.join(os.homedir(), '.claude.json');
 
   let config = {};
+  // Carry forward the existing file mode so we don't silently downgrade a
+  // `0600` config to whatever the umask gives us (default `0644`). Claude's
+  // config can hold account/session metadata, so widening read permission
+  // would be a real footgun. If the file is new, default to `0600`.
+  let fileMode = 0o600;
   try {
     const raw = fs.readFileSync(configPath, 'utf8');
     if (raw.trim()) {
       config = JSON.parse(raw);
     }
+    fileMode = fs.statSync(configPath).mode & 0o777;
   } catch (error) {
     if (error.code !== 'ENOENT') {
       throw error;
@@ -57,7 +63,7 @@ export function preTrustClaudeFolder(folderPath) {
   // Write atomically: writing through a temp file keeps the 90+KB user
   // config from being truncated if the harness is killed mid-write.
   const tmpPath = `${configPath}.harness-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), 'utf8');
+  fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), { encoding: 'utf8', mode: fileMode });
   fs.renameSync(tmpPath, configPath);
   return absoluteFolder;
 }
