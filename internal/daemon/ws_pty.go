@@ -59,10 +59,17 @@ func shouldPreferAgentRawReplay(session *protocol.Session) bool {
 	return agent == string(protocol.SessionAgentCodex)
 }
 
-func shouldIncludeAttachReplay(policy protocol.AttachPolicy) bool {
+func shouldIncludeAttachReplay(policy protocol.AttachPolicy, session *protocol.Session) bool {
 	switch policy {
 	case protocol.AttachPolicySameAppRemount, protocol.AttachPolicyFreshSpawn:
-		return false
+		// Codex's TUI emits terminal capability queries (CPR, DA, kitty
+		// keyboard, OSC 10) on startup and waits for the responses before it
+		// will draw anything. Bytes emitted between PTY spawn and xterm.js
+		// attach are lost when replay is omitted, so Codex hangs forever
+		// waiting for query responses that xterm never had a chance to
+		// produce. For Codex sessions we replay scrollback so xterm processes
+		// the queries and emits the responses Codex is waiting for.
+		return shouldPreferAgentRawReplay(session)
 	default:
 		return true
 	}
@@ -159,7 +166,7 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 		rawReplayDecision:   "default",
 	}
 
-	if !shouldIncludeAttachReplay(policy) {
+	if !shouldIncludeAttachReplay(policy, session) {
 		payload.scrollbackTruncated = false
 		payload.screenSnapshot = nil
 		payload.screenCols = 0

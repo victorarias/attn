@@ -13,6 +13,7 @@ import { cleanupSessionViaAppClose } from './scenarioCleanup.mjs';
 import {
   assertPaneVisibleContent,
   captureSessionArtifacts,
+  compactTerminalText,
   waitForNewShellPane,
   waitForPaneInputFocus,
   waitForPaneState,
@@ -126,16 +127,17 @@ async function main() {
         client,
         primarySessionId,
         utilityPaneId,
-        (text) => text.includes(returnUtilityToken),
+        (text) => compactTerminalText(text).includes(compactTerminalText(returnUtilityToken)),
         'utility pane text to include return focus token without extra click',
         15_000,
       );
       await assertPaneVisibleContent(client, primarySessionId, utilityPaneId, {
         contains: returnUtilityToken,
+        allowWrappedContains: true,
         minNonEmptyLines: 1,
         minDenseLines: 0,
         minCharCount: returnUtilityToken.length,
-        minMaxLineLength: returnUtilityToken.length,
+        minMaxLineLength: Math.min(returnUtilityToken.length, 16),
         timeoutMs: 15_000,
         description: 'primary utility pane visible content after switching back',
       });

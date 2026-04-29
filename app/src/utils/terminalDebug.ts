@@ -1,6 +1,15 @@
 const TERMINAL_DEBUG_STORAGE_KEY = 'attn:terminal-debug';
-const SUSPICIOUS_COLS_THRESHOLD = 20;
-const SUSPICIOUS_ROWS_THRESHOLD = 10;
+
+// Below these thresholds a grid is never a useful real measurement — it is
+// always either a transient layout state (display:none toggle, font-size
+// change, panel animation) or stale renderer cell dimensions reported during
+// a remount. `getScaledDimensions` treats results below these thresholds as
+// "not yet measured" and returns null so the existing retry / debounce paths
+// wait for real layout to settle instead of forwarding a broken size to the
+// PTY. Codex (and other inline-rendering TUIs) cannot recover from a SIGWINCH
+// at e.g. 10×6, so we reject at the source.
+export const MIN_USABLE_TERMINAL_COLS = 20;
+export const MIN_USABLE_TERMINAL_ROWS = 10;
 
 export function isTerminalDebugEnabled(): boolean {
   try {
@@ -11,7 +20,7 @@ export function isTerminalDebugEnabled(): boolean {
 }
 
 export function isSuspiciousTerminalSize(cols: number, rows: number): boolean {
-  return cols <= SUSPICIOUS_COLS_THRESHOLD || rows <= SUSPICIOUS_ROWS_THRESHOLD;
+  return cols <= MIN_USABLE_TERMINAL_COLS || rows <= MIN_USABLE_TERMINAL_ROWS;
 }
 
 // --- Resize diagnostics ---

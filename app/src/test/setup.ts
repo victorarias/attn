@@ -34,3 +34,36 @@ if (typeof window !== 'undefined') {
   unobserve: vi.fn(),
   disconnect: vi.fn(),
 })) as unknown as typeof ResizeObserver;
+
+// Node 22+ ships a built-in `localStorage` that shadows happy-dom's Storage
+// when vitest installs `window` onto globalThis. Node's stub is missing the
+// Storage methods unless --localstorage-file is set, which makes any test
+// that touches localStorage throw "removeItem is not a function". Install a
+// minimal Storage-compatible shim so the test environment matches the real
+// browser API regardless of node version.
+if (typeof window !== 'undefined') {
+  const ensureLocalStorage = () => {
+    const candidate = window.localStorage;
+    if (candidate && typeof candidate.getItem === 'function') {
+      return;
+    }
+    const data = new Map<string, string>();
+    const storage: Storage = {
+      get length() { return data.size; },
+      clear: () => data.clear(),
+      getItem: (key: string) => (data.has(key) ? data.get(key)! : null),
+      key: (index: number) => Array.from(data.keys())[index] ?? null,
+      removeItem: (key: string) => { data.delete(key); },
+      setItem: (key: string, value: string) => { data.set(key, String(value)); },
+    };
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get: () => storage,
+    });
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get: () => storage,
+    });
+  };
+  ensureLocalStorage();
+}

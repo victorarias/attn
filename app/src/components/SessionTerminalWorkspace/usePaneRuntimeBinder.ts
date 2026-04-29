@@ -110,6 +110,13 @@ export function usePaneRuntimeBinder(
   panes: PaneRuntimeSpec[],
   activePaneId: string,
   eventRouter: PaneRuntimeEventRouter,
+  // Optional gate: when supplied and the session is not active, terminal-driven
+  // resize events are dropped instead of scheduled. Inactive panes can be
+  // measured at transient sub-usable sizes during display:none toggles or
+  // panel animations; their PTY should keep its previous geometry until the
+  // user actually selects the session, at which point ResizeObserver fires
+  // again with a real measurement.
+  isActiveSessionRef?: { current: boolean },
 ): PaneRuntimeBinder {
   const paneByIdRef = useRef<Map<string, PaneRuntimeSpec>>(new Map());
   // Always-current snapshot of panes for use in child effects (which run
@@ -963,6 +970,21 @@ export function usePaneRuntimeBinder(
     if (!pane) {
       return;
     }
+    if (isActiveSessionRef && !isActiveSessionRef.current) {
+      recordPaneRuntimeDebugEvent({
+        scope: 'binder',
+        sessionId: pane.testSessionId,
+        paneId,
+        runtimeId: pane.runtimeId,
+        message: 'skip resize for inactive session',
+        details: {
+          cols,
+          rows,
+          reason: options?.reason ?? null,
+        },
+      });
+      return;
+    }
     recordPaneRuntimeDebugEvent({
       scope: 'binder',
       sessionId: pane.testSessionId,
@@ -979,7 +1001,7 @@ export function usePaneRuntimeBinder(
     if (xterm) {
       scheduleGeometrySync(paneId, xterm, cols, rows, 'resize', options);
     }
-  }, [getCurrentPane, scheduleGeometrySync]);
+  }, [getCurrentPane, isActiveSessionRef, scheduleGeometrySync]);
 
   const getTerminalHandle = useCallback(
     (paneId: string) => terminalHandlesRef.current.get(paneId),

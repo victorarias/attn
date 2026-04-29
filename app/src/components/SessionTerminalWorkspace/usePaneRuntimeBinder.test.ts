@@ -1041,4 +1041,58 @@ describe('usePaneRuntimeBinder', () => {
     xterm.__emitData('stale-input');
     expect(mockPtyWrite).not.toHaveBeenCalled();
   });
+
+  it('drops handleTerminalResize when isActiveSessionRef is false', async () => {
+    vi.useFakeTimers();
+    const bindings = new Map<string, PaneRuntimeEventBinding>();
+    const eventRouter = createMockEventRouter(bindings);
+    const isActiveSessionRef = { current: true };
+    const { result } = renderHook(() => usePaneRuntimeBinder([
+      {
+        paneId: 'pane-1',
+        runtimeId: 'runtime-1',
+        testSessionId: 'session-1',
+        getSpawnArgs: ({ cols, rows }) => ({
+          id: 'runtime-1',
+          cwd: '/tmp/repo',
+          cols,
+          rows,
+          shell: true,
+        }),
+      },
+    ], 'pane-1', eventRouter, isActiveSessionRef));
+
+    const xterm = createMockXterm();
+    await act(async () => {
+      result.current.handleTerminalReady('pane-1')(xterm as any);
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+
+    mockPtyResize.mockClear();
+
+    // Session goes inactive (e.g. user switches to another session). A
+    // transient layout measurement at this moment must NOT reach the PTY.
+    isActiveSessionRef.current = false;
+    await act(async () => {
+      result.current.handleTerminalResize('pane-1')(10, 6, { reason: 'resize_both' });
+      await vi.advanceTimersByTimeAsync(200);
+      await Promise.resolve();
+    });
+    expect(mockPtyResize).not.toHaveBeenCalled();
+
+    // When the session becomes active again, real resizes flow through.
+    isActiveSessionRef.current = true;
+    await act(async () => {
+      result.current.handleTerminalResize('pane-1')(140, 43, { reason: 'resize_both' });
+      await vi.advanceTimersByTimeAsync(200);
+      await Promise.resolve();
+    });
+    expect(mockPtyResize).toHaveBeenCalledWith({
+      id: 'runtime-1',
+      cols: 140,
+      rows: 43,
+      reason: 'resize_both',
+    });
+  });
 });

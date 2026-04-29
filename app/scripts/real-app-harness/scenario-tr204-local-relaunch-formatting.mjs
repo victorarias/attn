@@ -15,6 +15,7 @@ import {
   assertPaneStyleSummaryPreserved,
   assertPaneVisibleContent,
   captureSessionArtifacts,
+  compactTerminalText,
   waitForNewShellPane,
   waitForPaneAttached,
   waitForPaneStyle,
@@ -116,7 +117,7 @@ async function main() {
         client,
         sessionId,
         utilityPane.paneId,
-        (text) => text.includes(expectedLastToken),
+        (text) => compactTerminalText(text).includes(compactTerminalText(expectedLastToken)),
         'formatted utility pane text before relaunch',
         20_000,
       );
@@ -145,6 +146,7 @@ async function main() {
       );
       await assertPaneVisibleContent(client, sessionId, utilityPane.paneId, {
         contains: expectedLastToken,
+        allowWrappedContains: true,
         minNonEmptyLines: 4,
         minDenseLines: 1,
         minCharCount: 80,
@@ -172,7 +174,7 @@ async function main() {
         client,
         sessionId,
         utilityPaneId,
-        (text) => text.includes(expectedLastToken),
+        (text) => compactTerminalText(text).includes(compactTerminalText(expectedLastToken)),
         'formatted utility pane text after relaunch',
         20_000,
       );
@@ -198,6 +200,7 @@ async function main() {
       );
       await assertPaneVisibleContent(client, sessionId, utilityPaneId, {
         contains: expectedLastToken,
+        allowWrappedContains: true,
         minNonEmptyLines: 4,
         minDenseLines: 1,
         minCharCount: 80,

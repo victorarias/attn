@@ -1,5 +1,9 @@
 import type { Terminal as XTerm } from '@xterm/xterm';
-import type { ResizeDiagnostics } from './terminalDebug';
+import {
+  MIN_USABLE_TERMINAL_COLS,
+  MIN_USABLE_TERMINAL_ROWS,
+  type ResizeDiagnostics,
+} from './terminalDebug';
 
 export type ResolvedTheme = 'dark' | 'light';
 
@@ -202,6 +206,18 @@ export function getScaledDimensions(
     lineHeight,
   });
   if (!gridDimensions) {
+    return null;
+  }
+
+  // Reject sub-usable grids at the measurement source so transient layout
+  // states (display:none toggles during session switch, stale renderer cells
+  // mid font-change, panel animations) never produce a SIGWINCH at e.g. 10×6.
+  // Returning null lets the existing ResizeObserver retry / settle paths wait
+  // for real layout to settle. See terminalDebug.ts for threshold rationale.
+  if (
+    gridDimensions.cols <= MIN_USABLE_TERMINAL_COLS ||
+    gridDimensions.rows <= MIN_USABLE_TERMINAL_ROWS
+  ) {
     return null;
   }
 

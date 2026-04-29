@@ -170,7 +170,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       })),
     ]), [cwd, getMainPaneSpawnArgs, sessionEndpointId, sessionId, workspace.terminals]);
 
-    const binder = usePaneRuntimeBinder(runtimePanes, activePaneId, eventRouter);
+    const binder = usePaneRuntimeBinder(runtimePanes, activePaneId, eventRouter, isActiveSessionRef);
     const fitPane = binder.fitPane;
     const getPaneSize = binder.getPaneSize;
     const setTerminalHandle = binder.setTerminalHandle;
