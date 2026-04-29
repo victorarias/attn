@@ -75,7 +75,7 @@ pub fn extract_patterns(text: String) -> Vec<PatternMatch> {
     for cap in URL_REGEX.find_iter(&clean_text) {
         let value = cap.as_str().to_string();
         // Clean trailing punctuation that might have been captured
-        let value = value.trim_end_matches(|c| c == '.' || c == ',' || c == ';' || c == ':');
+        let value = value.trim_end_matches(['.', ',', ';', ':']);
         if !seen.contains(value) {
             seen.insert(value.to_string());
             matches.push(PatternMatch {

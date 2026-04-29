@@ -55,7 +55,7 @@ pub struct NativeApp {
 
 impl NativeApp {
     pub fn new(daemon: Entity<DaemonClient>, cx: &mut Context<Self>) -> Self {
-        let canvas = cx.new(|cx| WorkspaceCanvas::new(cx));
+        let canvas = cx.new(WorkspaceCanvas::new);
         let app_handle = cx.entity().downgrade();
         let app_handle_create = app_handle.clone();
         let app_handle_destroy = app_handle.clone();
@@ -76,68 +76,86 @@ impl NativeApp {
                 },
                 move |id, _window, cx| {
                     let app_handle = app_handle_destroy.clone();
-                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
-                        let id_for_event = id.clone();
-                        if let Err(error) = app.unregister_workspace_by_id(id, cx) {
+                    let id_for_event = id.clone();
+                    match app_handle.update(cx, |app: &mut NativeApp, cx| {
+                        app.unregister_workspace_by_id(id, cx)
+                    }) {
+                        Ok(Ok(())) => Ok(()),
+                        Ok(Err(error)) => {
                             events::record(
                                 "workspace_destroy_failed",
                                 json!({
                                     "id": id_for_event.as_ref(),
-                                    "error": error,
+                                    "error": error.as_str(),
                                 }),
                             );
+                            Err(error)
                         }
-                    });
+                        Err(error) => {
+                            let error = format!("update app: {error}");
+                            events::record(
+                                "workspace_destroy_failed",
+                                json!({
+                                    "id": id_for_event.as_ref(),
+                                    "error": error.as_str(),
+                                }),
+                            );
+                            Err(error)
+                        }
+                    }
                 },
                 cx,
             )
         });
 
-        cx.subscribe(&daemon, |this, _client, event: &DaemonEvent, cx| match event {
-            DaemonEvent::WorkspaceRegistered { workspace } => {
-                events::record(
-                    "workspace_registered_observed",
-                    json!({"workspace_id": workspace.id.as_str()}),
-                );
-                this.upsert_workspace(workspace.clone(), cx);
-                this.select_workspace_if_pending(&workspace.id, cx);
-                this.sync_terminal_panels(cx);
-            }
-            DaemonEvent::WorkspaceUnregistered { workspace_id } => {
-                events::record(
-                    "workspace_unregistered_observed",
-                    json!({"workspace_id": workspace_id.as_str()}),
-                );
-                this.remove_workspace(workspace_id.clone(), cx);
-            }
-            DaemonEvent::WorkspaceStateChanged { workspace } => {
-                events::record(
-                    "workspace_state_changed_observed",
-                    json!({"workspace_id": workspace.id.as_str()}),
-                );
-                this.apply_workspace_snapshot(workspace.clone(), cx);
-                this.select_workspace_if_pending(&workspace.id, cx);
-            }
-            DaemonEvent::SessionsChanged => {
-                events::record(
-                    "sessions_changed_observed",
-                    json!({"session_count": this.daemon.read(cx).sessions().len()}),
-                );
-                this.sync_terminal_panels(cx);
-            }
-            DaemonEvent::Connected => {
-                events::record("daemon_connected", json!({}));
-                // Daemon tracks PTY attachments per client connection,
-                // so on a fresh socket every existing TerminalView is
-                // detached on the daemon side until we re-issue
-                // AttachSession. Without this, terminals go silent
-                // after a daemon restart and only recover on app
-                // restart.
-                this.reattach_existing_terminals(cx);
-                this.sync_terminal_panels(cx);
-            }
-            _ => {}
-        })
+        cx.subscribe(
+            &daemon,
+            |this, _client, event: &DaemonEvent, cx| match event {
+                DaemonEvent::WorkspaceRegistered { workspace } => {
+                    events::record(
+                        "workspace_registered_observed",
+                        json!({"workspace_id": workspace.id.as_str()}),
+                    );
+                    this.upsert_workspace(workspace.clone(), cx);
+                    this.select_workspace_if_pending(&workspace.id, cx);
+                    this.sync_terminal_panels(cx);
+                }
+                DaemonEvent::WorkspaceUnregistered { workspace_id } => {
+                    events::record(
+                        "workspace_unregistered_observed",
+                        json!({"workspace_id": workspace_id.as_str()}),
+                    );
+                    this.remove_workspace(workspace_id.clone(), cx);
+                }
+                DaemonEvent::WorkspaceStateChanged { workspace } => {
+                    events::record(
+                        "workspace_state_changed_observed",
+                        json!({"workspace_id": workspace.id.as_str()}),
+                    );
+                    this.apply_workspace_snapshot(workspace.clone(), cx);
+                    this.select_workspace_if_pending(&workspace.id, cx);
+                }
+                DaemonEvent::SessionsChanged => {
+                    events::record(
+                        "sessions_changed_observed",
+                        json!({"session_count": this.daemon.read(cx).sessions().len()}),
+                    );
+                    this.sync_terminal_panels(cx);
+                }
+                DaemonEvent::Connected => {
+                    events::record("daemon_connected", json!({}));
+                    // Daemon tracks PTY attachments per client connection,
+                    // so on a fresh socket every existing TerminalView is
+                    // detached on the daemon side until we re-issue
+                    // AttachSession. Without this, terminals go silent
+                    // after a daemon restart and only recover on app
+                    // restart.
+                    this.reattach_existing_terminals(cx);
+                    this.sync_terminal_panels(cx);
+                }
+                _ => {}
+            },
+        )
         .detach();
 
         let automation_handle = if automation::automation_enabled() {
@@ -169,7 +187,9 @@ impl NativeApp {
     /// scripts can drive perf measurements at known zoom levels.
     pub fn set_canvas_zoom(&self, zoom: f32, reset_fps: bool, cx: &mut Context<Self>) {
         let canvas = self.canvas.clone();
-        canvas.update(cx, |canvas, cx| canvas.set_zoom_centered(zoom, reset_fps, cx));
+        canvas.update(cx, |canvas, cx| {
+            canvas.set_zoom_centered(zoom, reset_fps, cx)
+        });
     }
 
     /// Read-only handle to the daemon client, exposed so the automation
@@ -276,8 +296,7 @@ impl NativeApp {
 
     /// Send `unregister_workspace` for the given id. Daemon cascades
     /// (kills member sessions, broadcasts unregister), so the canvas +
-    /// sidebar update reactively. No confirmation dialog yet — see plan
-    /// doc M1.0; revisit when destroy gets a richer affordance.
+    /// sidebar update reactively once the daemon confirms removal.
     pub fn unregister_workspace_by_id(
         &self,
         id: SharedString,
@@ -287,7 +306,10 @@ impl NativeApp {
         self.daemon
             .read(cx)
             .send_cmd(&UnregisterWorkspaceMessage::new(id_string.clone()))?;
-        events::record("workspace_destroy_submitted", json!({"id": id_string.as_str()}));
+        events::record(
+            "workspace_destroy_submitted",
+            json!({"id": id_string.as_str()}),
+        );
         Ok(())
     }
 
@@ -371,8 +393,9 @@ impl NativeApp {
         }
         let entity = cx.new(|_| Workspace::new(data, Vec::new()));
         self.workspaces_by_id.insert(id.clone(), entity.clone());
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.upsert_workspace(entity.clone(), cx));
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.upsert_workspace(entity.clone(), cx)
+        });
 
         // First workspace to appear becomes the canvas's initial selection.
         if self.selected_id.is_none() {
@@ -384,11 +407,7 @@ impl NativeApp {
         }
     }
 
-    fn apply_workspace_snapshot(
-        &mut self,
-        data: attn_protocol::Workspace,
-        cx: &mut Context<Self>,
-    ) {
+    fn apply_workspace_snapshot(&mut self, data: attn_protocol::Workspace, cx: &mut Context<Self>) {
         let id = SharedString::from(data.id.clone());
         if let Some(existing) = self.workspaces_by_id.get(&id) {
             existing.update(cx, |ws, cx| ws.apply_snapshot(data, cx));
@@ -405,14 +424,38 @@ impl NativeApp {
         if self.workspaces_by_id.remove(&id).is_none() {
             return;
         }
+        self.pending_select_workspace_ids.remove(&id);
         let id_str = id.clone();
         self.sidebar
             .update(cx, |sidebar, cx| sidebar.remove_workspace(&id_str, cx));
         if self.selected_id.as_ref() == Some(&id) {
             self.selected_id = None;
-            self.canvas
-                .update(cx, |canvas, cx| canvas.set_selected(None, cx));
+            if let Some(next_id) = self.fallback_workspace_id(cx) {
+                events::record(
+                    "workspace_selected_after_destroy",
+                    json!({"destroyed_id": id.as_ref(), "selected_id": next_id.as_ref()}),
+                );
+                self.select_workspace(next_id, cx);
+            } else {
+                self.canvas
+                    .update(cx, |canvas, cx| canvas.set_selected(None, cx));
+                self.sidebar
+                    .update(cx, |sidebar, cx| sidebar.set_selected(None, cx));
+            }
         }
+    }
+
+    fn fallback_workspace_id(&self, cx: &App) -> Option<SharedString> {
+        let mut candidates: Vec<(String, String, SharedString)> = self
+            .workspaces_by_id
+            .values()
+            .map(|ws_entity| {
+                let ws = ws_entity.read(cx);
+                (ws.title.to_string(), ws.id.to_string(), ws.id.clone())
+            })
+            .collect();
+        candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        candidates.into_iter().next().map(|(_, _, id)| id)
     }
 
     /// Walk every workspace's Terminal panels and re-issue
@@ -495,10 +538,12 @@ impl NativeApp {
                 continue;
             };
 
-            let already_present = ws_entity.read(cx).panels.iter().any(|p| matches!(
-                &p.content,
-                PanelContent::Terminal { session_id, .. } if session_id.as_ref() == session.id
-            ));
+            let already_present = ws_entity.read(cx).panels.iter().any(|p| {
+                matches!(
+                    &p.content,
+                    PanelContent::Terminal { session_id, .. } if session_id.as_ref() == session.id
+                )
+            });
             if already_present {
                 continue;
             }
@@ -523,7 +568,8 @@ impl NativeApp {
             let (cols, rows) = panel_terminal_dims(TERMINAL_W, TERMINAL_H);
 
             let daemon = self.daemon.clone();
-            let model = cx.new(|cx| TerminalModel::new(session_id.clone(), cols, rows, &daemon, cx));
+            let model =
+                cx.new(|cx| TerminalModel::new(session_id.clone(), cols, rows, &daemon, cx));
             let view = cx.new(|cx| {
                 let mut tv = TerminalView::new(model, daemon.clone(), cx);
                 tv.set_content_size(TERMINAL_W, (TERMINAL_H - TITLE_HEIGHT).max(0.0));
@@ -606,7 +652,8 @@ impl NativeApp {
 
             let (cterm, rterm) = panel_terminal_dims(TERMINAL_W, TERMINAL_H);
             let daemon = self.daemon.clone();
-            let model = cx.new(|cx| TerminalModel::new(session_id.clone(), cterm, rterm, &daemon, cx));
+            let model =
+                cx.new(|cx| TerminalModel::new(session_id.clone(), cterm, rterm, &daemon, cx));
             let view = cx.new(|cx| {
                 let mut tv = TerminalView::new(model.clone(), daemon.clone(), cx);
                 tv.set_content_size(TERMINAL_W, (TERMINAL_H - TITLE_HEIGHT).max(0.0));

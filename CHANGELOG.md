@@ -6,6 +6,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-29]
+
+### Changed
+- **Smarter Commit Checks**: The pre-commit hook now chooses validation by staged file path and auto-formats staged Go, native Rust, and Tauri Rust files when safe. Native canvas changes run daemon checks plus native Rust format, clippy, and tests; Tauri changes run daemon checks plus Tauri Rust format, clippy, and tests; frontend, shell, and daemon-only changes stay scoped to their relevant suites.
+
+### Fixed
+- **Native Workspace Deletion Polish**: The native workspace sidebar now asks for an inline confirmation before deleting a workspace, keeps the row in a pending state while the daemon unregisters it, surfaces command-send failures in the sidebar, and automatically selects another workspace after the selected one is deleted.
+
+---
+
 ## [2026-04-28]
 
 ### Added

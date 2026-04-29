@@ -13,7 +13,10 @@ mod terminal_view;
 mod viewport;
 mod workspace;
 
-use gpui::{actions, px, size, App, AppContext, Application, Bounds, KeyBinding, WindowBounds, WindowOptions};
+use gpui::{
+    actions, px, size, App, AppContext, Application, Bounds, KeyBinding, WindowBounds,
+    WindowOptions,
+};
 
 use app::NativeApp;
 use daemon_client::DaemonClient;
@@ -33,7 +36,7 @@ fn main() {
                 ..Default::default()
             },
             |_window, cx| {
-                let daemon = cx.new(|cx| DaemonClient::new(cx));
+                let daemon = cx.new(DaemonClient::new);
                 cx.new(|cx| NativeApp::new(daemon, cx))
             },
         )
