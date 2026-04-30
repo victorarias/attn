@@ -1,17 +1,17 @@
 /// `Workspace` is the GPUI entity that wraps the daemon's wire-level
-/// `attn_protocol::Workspace` plus the canvas panels the user has placed
-/// inside it. Sidebar and canvas both hold cloned `Entity<Workspace>`
+/// `attn_protocol::Workspace` plus the live GPUI panel views for the
+/// daemon-owned panel geometry. Sidebar and canvas both hold cloned
+/// `Entity<Workspace>`
 /// handles and observe independently — `cx.notify()` re-renders both.
 ///
 /// Note the name collision: `attn_protocol::Workspace` is the wire data
 /// type, `crate::workspace::Workspace` is this GPUI entity. They're
-/// distinct on purpose — the entity owns extra UI-only state (panels)
-/// the daemon doesn't know or care about.
-use attn_protocol::{Workspace as ProtocolWorkspace, WorkspaceStatus};
+/// distinct on purpose — the entity owns live view handles, while
+/// durable panel geometry comes from the daemon snapshot.
+use attn_protocol::{Workspace as ProtocolWorkspace, WorkspacePanel, WorkspaceStatus};
 use gpui::{Context, EventEmitter, SharedString};
 use serde_json::{json, Value};
 
-use crate::adapters::automation::events;
 use crate::state::panel::Panel;
 
 /// Emitted when the workspace's wire-level data changes (rolled-up status,
@@ -25,6 +25,7 @@ pub struct Workspace {
     pub title: SharedString,
     pub directory: SharedString,
     pub status: WorkspaceStatus,
+    pub daemon_panels: Vec<WorkspacePanel>,
     pub panels: Vec<Panel>,
 }
 
@@ -37,6 +38,7 @@ impl Workspace {
             title: SharedString::from(data.title),
             directory: SharedString::from(data.directory),
             status: data.status,
+            daemon_panels: data.panels,
             panels,
         }
     }
@@ -56,63 +58,6 @@ impl Workspace {
         })
     }
 
-    /// Apply a partial update to a panel by id. Used by the automation
-    /// `move_panel` action. Returns the post-update panel snapshot when
-    /// the panel exists, `None` otherwise. Notifies subscribers when any
-    /// field actually changes so the canvas re-renders.
-    pub fn update_panel(
-        &mut self,
-        panel_id: usize,
-        world_x: Option<f32>,
-        world_y: Option<f32>,
-        width: Option<f32>,
-        height: Option<f32>,
-        cx: &mut Context<Self>,
-    ) -> Option<Value> {
-        let workspace_id = self.id.clone();
-        let panel = self.panels.iter_mut().find(|p| p.id == panel_id)?;
-        let mut changed = false;
-        if let Some(x) = world_x {
-            if (panel.world_x - x).abs() > f32::EPSILON {
-                panel.world_x = x;
-                changed = true;
-            }
-        }
-        if let Some(y) = world_y {
-            if (panel.world_y - y).abs() > f32::EPSILON {
-                panel.world_y = y;
-                changed = true;
-            }
-        }
-        if let Some(w) = width {
-            if (panel.width - w).abs() > f32::EPSILON {
-                panel.width = w;
-                changed = true;
-            }
-        }
-        if let Some(h) = height {
-            if (panel.height - h).abs() > f32::EPSILON {
-                panel.height = h;
-                changed = true;
-            }
-        }
-        if changed {
-            events::record(
-                "panel_updated",
-                json!({
-                    "workspace_id": workspace_id.as_ref(),
-                    "panel_id": panel.id,
-                    "world_x": panel.world_x,
-                    "world_y": panel.world_y,
-                    "width": panel.width,
-                    "height": panel.height,
-                }),
-            );
-            cx.notify();
-        }
-        Some(panel_snapshot(panel))
-    }
-
     /// Apply a fresh wire snapshot. Returns true if anything user-visible
     /// changed — caller decides whether to `cx.emit` + `cx.notify`.
     pub fn apply_snapshot(&mut self, data: ProtocolWorkspace, cx: &mut Context<Self>) {
@@ -129,6 +74,10 @@ impl Workspace {
             self.status = data.status;
             changed = true;
         }
+        if self.daemon_panels != data.panels {
+            self.daemon_panels = data.panels;
+            changed = true;
+        }
         if changed {
             cx.emit(WorkspaceUpdated);
             cx.notify();
@@ -139,6 +88,7 @@ impl Workspace {
 fn panel_snapshot(panel: &Panel) -> Value {
     json!({
         "id": panel.id,
+        "daemon_panel_id": panel.daemon_panel_id.to_string(),
         "kind": "terminal",
         "title": panel.title.to_string(),
         "session_id": panel.session_id.to_string(),

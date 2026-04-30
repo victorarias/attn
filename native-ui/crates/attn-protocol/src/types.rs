@@ -68,14 +68,27 @@ impl std::fmt::Display for WorkspaceStatus {
 }
 
 /// A workspace as the daemon broadcasts it: the directory + the rolled-up
-/// status of its member sessions. Panels and other UI state are local to
-/// the canvas client; only the wire-visible fields live here.
+/// status of its member sessions plus daemon-owned canvas panels.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
     pub id: String,
     pub title: String,
     pub directory: String,
     pub status: WorkspaceStatus,
+    #[serde(default)]
+    pub panels: Vec<WorkspacePanel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkspacePanel {
+    pub id: String,
+    pub session_id: String,
+    pub kind: String,
+    pub title: String,
+    pub world_x: f32,
+    pub world_y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

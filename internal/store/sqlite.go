@@ -297,6 +297,26 @@ var migrations = []migration{
 		ALTER TABLE sessions ADD COLUMN workspace_id TEXT;
 		CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id);
 	`},
+	{36, "create canvas workspace panels table", `
+		CREATE TABLE IF NOT EXISTS canvas_workspace_panels (
+			workspace_id TEXT NOT NULL,
+			panel_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			title TEXT NOT NULL,
+			world_x REAL NOT NULL,
+			world_y REAL NOT NULL,
+			width REAL NOT NULL,
+			height REAL NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, panel_id)
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_canvas_workspace_panels_session_id
+			ON canvas_workspace_panels(session_id);
+		CREATE INDEX IF NOT EXISTS idx_canvas_workspace_panels_workspace_id
+			ON canvas_workspace_panels(workspace_id);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

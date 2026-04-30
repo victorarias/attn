@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PathInspection, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionLayout, SessionLayoutActionResultMessage, SessionLayoutClosePaneMessage, SessionLayoutFocusPaneMessage, SessionLayoutGetMessage, SessionLayoutMessage, SessionLayoutPane, SessionLayoutPaneKind, SessionLayoutRenamePaneMessage, SessionLayoutRuntimeExitedMessage, SessionLayoutSplitDirection, SessionLayoutSplitPaneMessage, SessionLayoutUpdatedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, Workspace, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionLayout, SessionLayoutActionResultMessage, SessionLayoutClosePaneMessage, SessionLayoutFocusPaneMessage, SessionLayoutGetMessage, SessionLayoutMessage, SessionLayoutPane, SessionLayoutPaneKind, SessionLayoutRenamePaneMessage, SessionLayoutRuntimeExitedMessage, SessionLayoutSplitDirection, SessionLayoutSplitPaneMessage, SessionLayoutUpdatedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, UpdateWorkspacePanelGeometryMessage, WebSocketEvent, Workspace, WorkspacePanel, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -83,17 +83,17 @@
 //   const muteMessage = Convert.toMuteMessage(json);
 //   const mutePRMessage = Convert.toMutePRMessage(json);
 //   const muteRepoMessage = Convert.toMuteRepoMessage(json);
-//   const pathInspection = Convert.toPathInspection(json);
 //   const pR = Convert.toPR(json);
 //   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
 //   const pRRole = Convert.toPRRole(json);
-//   const pRsUpdatedMessage = Convert.toPRsUpdatedMessage(json);
 //   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
+//   const pRsUpdatedMessage = Convert.toPRsUpdatedMessage(json);
+//   const pathInspection = Convert.toPathInspection(json);
 //   const ptyDesyncMessage = Convert.toPtyDesyncMessage(json);
 //   const ptyInputMessage = Convert.toPtyInputMessage(json);
 //   const ptyOutputMessage = Convert.toPtyOutputMessage(json);
-//   const ptyResizedMessage = Convert.toPtyResizedMessage(json);
 //   const ptyResizeMessage = Convert.toPtyResizeMessage(json);
+//   const ptyResizedMessage = Convert.toPtyResizedMessage(json);
 //   const queryAuthorsMessage = Convert.toQueryAuthorsMessage(json);
 //   const queryMessage = Convert.toQueryMessage(json);
 //   const queryPRsMessage = Convert.toQueryPRsMessage(json);
@@ -145,10 +145,10 @@
 //   const sessionRegisteredMessage = Convert.toSessionRegisteredMessage(json);
 //   const sessionState = Convert.toSessionState(json);
 //   const sessionStateChangedMessage = Convert.toSessionStateChangedMessage(json);
-//   const sessionsUpdatedMessage = Convert.toSessionsUpdatedMessage(json);
 //   const sessionTodosUpdatedMessage = Convert.toSessionTodosUpdatedMessage(json);
 //   const sessionUnregisteredMessage = Convert.toSessionUnregisteredMessage(json);
 //   const sessionVisualizedMessage = Convert.toSessionVisualizedMessage(json);
+//   const sessionsUpdatedMessage = Convert.toSessionsUpdatedMessage(json);
 //   const setEndpointRemoteWebMessage = Convert.toSetEndpointRemoteWebMessage(json);
 //   const setReviewLoopIterationLimitMessage = Convert.toSetReviewLoopIterationLimitMessage(json);
 //   const setSessionResumeIDMessage = Convert.toSetSessionResumeIDMessage(json);
@@ -168,8 +168,10 @@
 //   const updateCommentMessage = Convert.toUpdateCommentMessage(json);
 //   const updateCommentResultMessage = Convert.toUpdateCommentResultMessage(json);
 //   const updateEndpointMessage = Convert.toUpdateEndpointMessage(json);
+//   const updateWorkspacePanelGeometryMessage = Convert.toUpdateWorkspacePanelGeometryMessage(json);
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
 //   const workspace = Convert.toWorkspace(json);
+//   const workspacePanel = Convert.toWorkspacePanel(json);
 //   const workspaceRegisteredMessage = Convert.toWorkspaceRegisteredMessage(json);
 //   const workspaceStateChangedMessage = Convert.toWorkspaceStateChangedMessage(json);
 //   const workspaceStatus = Convert.toWorkspaceStatus(json);
@@ -1142,8 +1144,21 @@ export interface WarningElement {
 export interface WorkspaceElement {
     directory: string;
     id:        string;
+    panels?:   PanelElement[];
     status:    WorkspaceStatus;
     title:     string;
+    [property: string]: any;
+}
+
+export interface PanelElement {
+    height:     number;
+    id:         string;
+    kind:       string;
+    session_id: string;
+    title:      string;
+    width:      number;
+    world_x:    number;
+    world_y:    number;
     [property: string]: any;
 }
 
@@ -1350,16 +1365,6 @@ export enum MuteRepoMessageCmd {
     MuteRepo = "mute_repo",
 }
 
-export interface PathInspection {
-    exists:        boolean;
-    home_path?:    string;
-    input_path:    string;
-    is_directory:  boolean;
-    repo_root?:    string;
-    resolved_path: string;
-    [property: string]: any;
-}
-
 export interface PR {
     approved_by_me:         boolean;
     author:                 string;
@@ -1403,6 +1408,16 @@ export enum PRActionResultMessageEvent {
     PRActionResult = "pr_action_result",
 }
 
+export interface PRVisitedMessage {
+    cmd: PRVisitedMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum PRVisitedMessageCmd {
+    PRVisited = "pr_visited",
+}
+
 export interface PRsUpdatedMessage {
     event: PRsUpdatedMessageEvent;
     prs?:  PRElement[];
@@ -1413,14 +1428,14 @@ export enum PRsUpdatedMessageEvent {
     PrsUpdated = "prs_updated",
 }
 
-export interface PRVisitedMessage {
-    cmd: PRVisitedMessageCmd;
-    id:  string;
+export interface PathInspection {
+    exists:        boolean;
+    home_path?:    string;
+    input_path:    string;
+    is_directory:  boolean;
+    repo_root?:    string;
+    resolved_path: string;
     [property: string]: any;
-}
-
-export enum PRVisitedMessageCmd {
-    PRVisited = "pr_visited",
 }
 
 export interface PtyDesyncMessage {
@@ -1458,18 +1473,6 @@ export enum PtyOutputMessageEvent {
     PtyOutput = "pty_output",
 }
 
-export interface PtyResizedMessage {
-    cols:  number;
-    event: PtyResizedMessageEvent;
-    id:    string;
-    rows:  number;
-    [property: string]: any;
-}
-
-export enum PtyResizedMessageEvent {
-    PtyResized = "pty_resized",
-}
-
 export interface PtyResizeMessage {
     cmd:  PtyResizeMessageCmd;
     cols: number;
@@ -1480,6 +1483,18 @@ export interface PtyResizeMessage {
 
 export enum PtyResizeMessageCmd {
     PtyResize = "pty_resize",
+}
+
+export interface PtyResizedMessage {
+    cols:  number;
+    event: PtyResizedMessageEvent;
+    id:    string;
+    rows:  number;
+    [property: string]: any;
+}
+
+export enum PtyResizedMessageEvent {
+    PtyResized = "pty_resized",
 }
 
 export interface QueryAuthorsMessage {
@@ -2093,16 +2108,6 @@ export enum SessionStateChangedMessageEvent {
     SessionStateChanged = "session_state_changed",
 }
 
-export interface SessionsUpdatedMessage {
-    event:     SessionsUpdatedMessageEvent;
-    sessions?: SessionElement[];
-    [property: string]: any;
-}
-
-export enum SessionsUpdatedMessageEvent {
-    SessionsUpdated = "sessions_updated",
-}
-
 export interface SessionTodosUpdatedMessage {
     event:   SessionTodosUpdatedMessageEvent;
     session: SessionElement;
@@ -2131,6 +2136,16 @@ export interface SessionVisualizedMessage {
 
 export enum SessionVisualizedMessageCmd {
     SessionVisualized = "session_visualized",
+}
+
+export interface SessionsUpdatedMessage {
+    event:     SessionsUpdatedMessageEvent;
+    sessions?: SessionElement[];
+    [property: string]: any;
+}
+
+export enum SessionsUpdatedMessageEvent {
+    SessionsUpdated = "sessions_updated",
 }
 
 export interface SetEndpointRemoteWebMessage {
@@ -2360,6 +2375,21 @@ export enum UpdateEndpointMessageCmd {
     UpdateEndpoint = "update_endpoint",
 }
 
+export interface UpdateWorkspacePanelGeometryMessage {
+    cmd:          UpdateWorkspacePanelGeometryMessageCmd;
+    height?:      number;
+    panel_id:     string;
+    width?:       number;
+    workspace_id: string;
+    world_x?:     number;
+    world_y?:     number;
+    [property: string]: any;
+}
+
+export enum UpdateWorkspacePanelGeometryMessageCmd {
+    UpdateWorkspacePanelGeometry = "update_workspace_panel_geometry",
+}
+
 export interface WebSocketEvent {
     action?:                string;
     authors?:               AuthorElement[];
@@ -2429,8 +2459,21 @@ export interface WebSocketEvent {
 export interface Workspace {
     directory: string;
     id:        string;
+    panels?:   PanelElement[];
     status:    WorkspaceStatus;
     title:     string;
+    [property: string]: any;
+}
+
+export interface WorkspacePanel {
+    height:     number;
+    id:         string;
+    kind:       string;
+    session_id: string;
+    title:      string;
+    width:      number;
+    world_x:    number;
+    world_y:    number;
     [property: string]: any;
 }
 
@@ -3153,14 +3196,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("MuteRepoMessage")), null, 2);
     }
 
-    public static toPathInspection(json: string): PathInspection {
-        return cast(JSON.parse(json), r("PathInspection"));
-    }
-
-    public static pathInspectionToJson(value: PathInspection): string {
-        return JSON.stringify(uncast(value, r("PathInspection")), null, 2);
-    }
-
     public static toPR(json: string): PR {
         return cast(JSON.parse(json), r("PR"));
     }
@@ -3185,6 +3220,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("PRRole")), null, 2);
     }
 
+    public static toPRVisitedMessage(json: string): PRVisitedMessage {
+        return cast(JSON.parse(json), r("PRVisitedMessage"));
+    }
+
+    public static pRVisitedMessageToJson(value: PRVisitedMessage): string {
+        return JSON.stringify(uncast(value, r("PRVisitedMessage")), null, 2);
+    }
+
     public static toPRsUpdatedMessage(json: string): PRsUpdatedMessage {
         return cast(JSON.parse(json), r("PRsUpdatedMessage"));
     }
@@ -3193,12 +3236,12 @@ export class Convert {
         return JSON.stringify(uncast(value, r("PRsUpdatedMessage")), null, 2);
     }
 
-    public static toPRVisitedMessage(json: string): PRVisitedMessage {
-        return cast(JSON.parse(json), r("PRVisitedMessage"));
+    public static toPathInspection(json: string): PathInspection {
+        return cast(JSON.parse(json), r("PathInspection"));
     }
 
-    public static pRVisitedMessageToJson(value: PRVisitedMessage): string {
-        return JSON.stringify(uncast(value, r("PRVisitedMessage")), null, 2);
+    public static pathInspectionToJson(value: PathInspection): string {
+        return JSON.stringify(uncast(value, r("PathInspection")), null, 2);
     }
 
     public static toPtyDesyncMessage(json: string): PtyDesyncMessage {
@@ -3225,20 +3268,20 @@ export class Convert {
         return JSON.stringify(uncast(value, r("PtyOutputMessage")), null, 2);
     }
 
-    public static toPtyResizedMessage(json: string): PtyResizedMessage {
-        return cast(JSON.parse(json), r("PtyResizedMessage"));
-    }
-
-    public static ptyResizedMessageToJson(value: PtyResizedMessage): string {
-        return JSON.stringify(uncast(value, r("PtyResizedMessage")), null, 2);
-    }
-
     public static toPtyResizeMessage(json: string): PtyResizeMessage {
         return cast(JSON.parse(json), r("PtyResizeMessage"));
     }
 
     public static ptyResizeMessageToJson(value: PtyResizeMessage): string {
         return JSON.stringify(uncast(value, r("PtyResizeMessage")), null, 2);
+    }
+
+    public static toPtyResizedMessage(json: string): PtyResizedMessage {
+        return cast(JSON.parse(json), r("PtyResizedMessage"));
+    }
+
+    public static ptyResizedMessageToJson(value: PtyResizedMessage): string {
+        return JSON.stringify(uncast(value, r("PtyResizedMessage")), null, 2);
     }
 
     public static toQueryAuthorsMessage(json: string): QueryAuthorsMessage {
@@ -3649,14 +3692,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SessionStateChangedMessage")), null, 2);
     }
 
-    public static toSessionsUpdatedMessage(json: string): SessionsUpdatedMessage {
-        return cast(JSON.parse(json), r("SessionsUpdatedMessage"));
-    }
-
-    public static sessionsUpdatedMessageToJson(value: SessionsUpdatedMessage): string {
-        return JSON.stringify(uncast(value, r("SessionsUpdatedMessage")), null, 2);
-    }
-
     public static toSessionTodosUpdatedMessage(json: string): SessionTodosUpdatedMessage {
         return cast(JSON.parse(json), r("SessionTodosUpdatedMessage"));
     }
@@ -3679,6 +3714,14 @@ export class Convert {
 
     public static sessionVisualizedMessageToJson(value: SessionVisualizedMessage): string {
         return JSON.stringify(uncast(value, r("SessionVisualizedMessage")), null, 2);
+    }
+
+    public static toSessionsUpdatedMessage(json: string): SessionsUpdatedMessage {
+        return cast(JSON.parse(json), r("SessionsUpdatedMessage"));
+    }
+
+    public static sessionsUpdatedMessageToJson(value: SessionsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("SessionsUpdatedMessage")), null, 2);
     }
 
     public static toSetEndpointRemoteWebMessage(json: string): SetEndpointRemoteWebMessage {
@@ -3833,6 +3876,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("UpdateEndpointMessage")), null, 2);
     }
 
+    public static toUpdateWorkspacePanelGeometryMessage(json: string): UpdateWorkspacePanelGeometryMessage {
+        return cast(JSON.parse(json), r("UpdateWorkspacePanelGeometryMessage"));
+    }
+
+    public static updateWorkspacePanelGeometryMessageToJson(value: UpdateWorkspacePanelGeometryMessage): string {
+        return JSON.stringify(uncast(value, r("UpdateWorkspacePanelGeometryMessage")), null, 2);
+    }
+
     public static toWebSocketEvent(json: string): WebSocketEvent {
         return cast(JSON.parse(json), r("WebSocketEvent"));
     }
@@ -3847,6 +3898,14 @@ export class Convert {
 
     public static workspaceToJson(value: Workspace): string {
         return JSON.stringify(uncast(value, r("Workspace")), null, 2);
+    }
+
+    public static toWorkspacePanel(json: string): WorkspacePanel {
+        return cast(JSON.parse(json), r("WorkspacePanel"));
+    }
+
+    public static workspacePanelToJson(value: WorkspacePanel): string {
+        return JSON.stringify(uncast(value, r("WorkspacePanel")), null, 2);
     }
 
     public static toWorkspaceRegisteredMessage(json: string): WorkspaceRegisteredMessage {
@@ -4612,8 +4671,19 @@ const typeMap: any = {
     "WorkspaceElement": o([
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
+        { json: "panels", js: "panels", typ: u(undefined, a(r("PanelElement"))) },
         { json: "status", js: "status", typ: r("WorkspaceStatus") },
         { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "PanelElement": o([
+        { json: "height", js: "height", typ: 3.14 },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "title", js: "title", typ: "" },
+        { json: "width", js: "width", typ: 3.14 },
+        { json: "world_x", js: "world_x", typ: 3.14 },
+        { json: "world_y", js: "world_y", typ: 3.14 },
     ], "any"),
     "InjectTestPRMessage": o([
         { json: "cmd", js: "cmd", typ: r("InjectTestPRMessageCmd") },
@@ -4706,14 +4776,6 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("MuteRepoMessageCmd") },
         { json: "repo", js: "repo", typ: "" },
     ], "any"),
-    "PathInspection": o([
-        { json: "exists", js: "exists", typ: true },
-        { json: "home_path", js: "home_path", typ: u(undefined, "") },
-        { json: "input_path", js: "input_path", typ: "" },
-        { json: "is_directory", js: "is_directory", typ: true },
-        { json: "repo_root", js: "repo_root", typ: u(undefined, "") },
-        { json: "resolved_path", js: "resolved_path", typ: "" },
-    ], "any"),
     "PR": o([
         { json: "approved_by_me", js: "approved_by_me", typ: true },
         { json: "author", js: "author", typ: "" },
@@ -4749,13 +4811,21 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "PRVisitedMessage": o([
+        { json: "cmd", js: "cmd", typ: r("PRVisitedMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
     "PRsUpdatedMessage": o([
         { json: "event", js: "event", typ: r("PRsUpdatedMessageEvent") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
     ], "any"),
-    "PRVisitedMessage": o([
-        { json: "cmd", js: "cmd", typ: r("PRVisitedMessageCmd") },
-        { json: "id", js: "id", typ: "" },
+    "PathInspection": o([
+        { json: "exists", js: "exists", typ: true },
+        { json: "home_path", js: "home_path", typ: u(undefined, "") },
+        { json: "input_path", js: "input_path", typ: "" },
+        { json: "is_directory", js: "is_directory", typ: true },
+        { json: "repo_root", js: "repo_root", typ: u(undefined, "") },
+        { json: "resolved_path", js: "resolved_path", typ: "" },
     ], "any"),
     "PtyDesyncMessage": o([
         { json: "event", js: "event", typ: r("PtyDesyncMessageEvent") },
@@ -4774,15 +4844,15 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "seq", js: "seq", typ: 0 },
     ], "any"),
-    "PtyResizedMessage": o([
-        { json: "cols", js: "cols", typ: 0 },
-        { json: "event", js: "event", typ: r("PtyResizedMessageEvent") },
-        { json: "id", js: "id", typ: "" },
-        { json: "rows", js: "rows", typ: 0 },
-    ], "any"),
     "PtyResizeMessage": o([
         { json: "cmd", js: "cmd", typ: r("PtyResizeMessageCmd") },
         { json: "cols", js: "cols", typ: 0 },
+        { json: "id", js: "id", typ: "" },
+        { json: "rows", js: "rows", typ: 0 },
+    ], "any"),
+    "PtyResizedMessage": o([
+        { json: "cols", js: "cols", typ: 0 },
+        { json: "event", js: "event", typ: r("PtyResizedMessageEvent") },
         { json: "id", js: "id", typ: "" },
         { json: "rows", js: "rows", typ: 0 },
     ], "any"),
@@ -5150,10 +5220,6 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("SessionStateChangedMessageEvent") },
         { json: "session", js: "session", typ: r("SessionElement") },
     ], "any"),
-    "SessionsUpdatedMessage": o([
-        { json: "event", js: "event", typ: r("SessionsUpdatedMessageEvent") },
-        { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
-    ], "any"),
     "SessionTodosUpdatedMessage": o([
         { json: "event", js: "event", typ: r("SessionTodosUpdatedMessageEvent") },
         { json: "session", js: "session", typ: r("SessionElement") },
@@ -5165,6 +5231,10 @@ const typeMap: any = {
     "SessionVisualizedMessage": o([
         { json: "cmd", js: "cmd", typ: r("SessionVisualizedMessageCmd") },
         { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "SessionsUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("SessionsUpdatedMessageEvent") },
+        { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
     ], "any"),
     "SetEndpointRemoteWebMessage": o([
         { json: "cmd", js: "cmd", typ: r("SetEndpointRemoteWebMessageCmd") },
@@ -5279,6 +5349,15 @@ const typeMap: any = {
         { json: "profile", js: "profile", typ: u(undefined, "") },
         { json: "ssh_target", js: "ssh_target", typ: u(undefined, "") },
     ], "any"),
+    "UpdateWorkspacePanelGeometryMessage": o([
+        { json: "cmd", js: "cmd", typ: r("UpdateWorkspacePanelGeometryMessageCmd") },
+        { json: "height", js: "height", typ: u(undefined, 3.14) },
+        { json: "panel_id", js: "panel_id", typ: "" },
+        { json: "width", js: "width", typ: u(undefined, 3.14) },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+        { json: "world_x", js: "world_x", typ: u(undefined, 3.14) },
+        { json: "world_y", js: "world_y", typ: u(undefined, 3.14) },
+    ], "any"),
     "WebSocketEvent": o([
         { json: "action", js: "action", typ: u(undefined, "") },
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
@@ -5346,8 +5425,19 @@ const typeMap: any = {
     "Workspace": o([
         { json: "directory", js: "directory", typ: "" },
         { json: "id", js: "id", typ: "" },
+        { json: "panels", js: "panels", typ: u(undefined, a(r("PanelElement"))) },
         { json: "status", js: "status", typ: r("WorkspaceStatus") },
         { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "WorkspacePanel": o([
+        { json: "height", js: "height", typ: 3.14 },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "title", js: "title", typ: "" },
+        { json: "width", js: "width", typ: 3.14 },
+        { json: "world_x", js: "world_x", typ: 3.14 },
+        { json: "world_y", js: "world_y", typ: 3.14 },
     ], "any"),
     "WorkspaceRegisteredMessage": o([
         { json: "event", js: "event", typ: r("WorkspaceRegisteredMessageEvent") },
@@ -5635,11 +5725,11 @@ const typeMap: any = {
     "PRActionResultMessageEvent": [
         "pr_action_result",
     ],
-    "PRsUpdatedMessageEvent": [
-        "prs_updated",
-    ],
     "PRVisitedMessageCmd": [
         "pr_visited",
+    ],
+    "PRsUpdatedMessageEvent": [
+        "prs_updated",
     ],
     "PtyDesyncMessageEvent": [
         "pty_desync",
@@ -5650,11 +5740,11 @@ const typeMap: any = {
     "PtyOutputMessageEvent": [
         "pty_output",
     ],
-    "PtyResizedMessageEvent": [
-        "pty_resized",
-    ],
     "PtyResizeMessageCmd": [
         "pty_resize",
+    ],
+    "PtyResizedMessageEvent": [
+        "pty_resized",
     ],
     "QueryAuthorsMessageCmd": [
         "query_authors",
@@ -5777,9 +5867,6 @@ const typeMap: any = {
     "SessionStateChangedMessageEvent": [
         "session_state_changed",
     ],
-    "SessionsUpdatedMessageEvent": [
-        "sessions_updated",
-    ],
     "SessionTodosUpdatedMessageEvent": [
         "session_todos_updated",
     ],
@@ -5788,6 +5875,9 @@ const typeMap: any = {
     ],
     "SessionVisualizedMessageCmd": [
         "session_visualized",
+    ],
+    "SessionsUpdatedMessageEvent": [
+        "sessions_updated",
     ],
     "SetEndpointRemoteWebMessageCmd": [
         "set_endpoint_remote_web",
@@ -5845,6 +5935,9 @@ const typeMap: any = {
     ],
     "UpdateEndpointMessageCmd": [
         "update_endpoint",
+    ],
+    "UpdateWorkspacePanelGeometryMessageCmd": [
+        "update_workspace_panel_geometry",
     ],
     "WorkspaceRegisteredMessageEvent": [
         "workspace_registered",

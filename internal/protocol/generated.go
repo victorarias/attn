@@ -2405,6 +2405,29 @@ type UpdateEndpointMessage struct {
 	SshTarget *string `json:"ssh_target,omitempty,omitzero"`
 }
 
+type UpdateWorkspacePanelGeometryMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Height corresponds to the JSON schema field "height".
+	Height *float64 `json:"height,omitempty,omitzero"`
+
+	// PanelID corresponds to the JSON schema field "panel_id".
+	PanelID string `json:"panel_id"`
+
+	// Width corresponds to the JSON schema field "width".
+	Width *float64 `json:"width,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+
+	// WorldX corresponds to the JSON schema field "world_x".
+	WorldX *float64 `json:"world_x,omitempty,omitzero"`
+
+	// WorldY corresponds to the JSON schema field "world_y".
+	WorldY *float64 `json:"world_y,omitempty,omitzero"`
+}
+
 type WebSocketEvent struct {
 	// Action corresponds to the JSON schema field "action".
 	Action *string `json:"action,omitempty,omitzero"`
@@ -2603,11 +2626,40 @@ type Workspace struct {
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 
+	// Panels corresponds to the JSON schema field "panels".
+	Panels []WorkspacePanel `json:"panels,omitempty,omitzero"`
+
 	// Status corresponds to the JSON schema field "status".
 	Status WorkspaceStatus `json:"status"`
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
+}
+
+type WorkspacePanel struct {
+	// Height corresponds to the JSON schema field "height".
+	Height float64 `json:"height"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+
+	// Width corresponds to the JSON schema field "width".
+	Width float64 `json:"width"`
+
+	// WorldX corresponds to the JSON schema field "world_x".
+	WorldX float64 `json:"world_x"`
+
+	// WorldY corresponds to the JSON schema field "world_y".
+	WorldY float64 `json:"world_y"`
 }
 
 type WorkspaceRegisteredMessage struct {

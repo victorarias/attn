@@ -32,6 +32,11 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdUnregister,
 		},
 		{
+			name:    "update workspace panel geometry message",
+			input:   `{"cmd":"update_workspace_panel_geometry","workspace_id":"ws1","panel_id":"p1","world_x":10,"height":240}`,
+			wantCmd: CmdUpdateWorkspacePanelGeometry,
+		},
+		{
 			name:    "clear warnings message",
 			input:   `{"cmd":"clear_warnings"}`,
 			wantCmd: CmdClearWarnings,

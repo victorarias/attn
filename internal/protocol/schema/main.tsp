@@ -140,6 +140,21 @@ model Workspace {
   title: string;
   directory: string;
   status: WorkspaceStatus;
+  panels?: WorkspacePanel[];
+}
+
+// A daemon-owned canvas panel inside a Workspace. The native app may keep
+// transient drag state while a gesture is active, but these fields are the
+// durable geometry restored after daemon/client restart.
+model WorkspacePanel {
+  id: string;
+  session_id: string;
+  kind: string; // currently "terminal"
+  title: string;
+  world_x: float64;
+  world_y: float64;
+  width: float64;
+  height: float64;
 }
 
 model PR {
@@ -771,6 +786,16 @@ model RegisterWorkspaceMessage {
 model UnregisterWorkspaceMessage {
   cmd: "unregister_workspace";
   id: string;
+}
+
+model UpdateWorkspacePanelGeometryMessage {
+  cmd: "update_workspace_panel_geometry";
+  workspace_id: string;
+  panel_id: string;
+  world_x?: float64;
+  world_y?: float64;
+  width?: float64;
+  height?: float64;
 }
 
 // ============================================================================

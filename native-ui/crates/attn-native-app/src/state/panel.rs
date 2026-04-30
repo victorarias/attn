@@ -13,6 +13,7 @@ pub const TITLE_HEIGHT: f32 = 24.0;
 #[derive(Clone, Debug)]
 pub struct Panel {
     pub id: usize,
+    pub daemon_panel_id: SharedString,
     pub title: SharedString,
     pub world_x: f32,
     pub world_y: f32,
