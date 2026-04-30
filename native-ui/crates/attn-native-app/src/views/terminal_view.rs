@@ -310,6 +310,10 @@ pub struct TerminalView {
     /// terminal scales visually with the panel. Cols/rows are not affected.
     /// Defaults to 1.0 (fullscreen / no canvas).
     zoom: f32,
+    /// Whether this terminal is allowed to turn keydown events into PTY
+    /// input. The canvas owns this gate so selected panels can be navigated
+    /// without a stale terminal focus handle still eating keystrokes.
+    input_enabled: bool,
 }
 
 impl Focusable for TerminalView {
@@ -349,6 +353,7 @@ impl TerminalView {
             focus_handle,
             content_size: None,
             zoom: 1.0,
+            input_enabled: true,
         }
     }
 
@@ -382,6 +387,16 @@ impl TerminalView {
         changed
     }
 
+    /// Set whether keyboard input should be forwarded to the PTY. Returns
+    /// true when the value changed so callers can request a repaint.
+    pub fn set_input_enabled(&mut self, enabled: bool) -> bool {
+        let changed = self.input_enabled != enabled;
+        if changed {
+            self.input_enabled = enabled;
+        }
+        changed
+    }
+
     fn send_input(&self, data: &str, cx: &mut Context<Self>) {
         let session_id = self.terminal.read(cx).session_id.clone();
         let msg = PtyInputMessage::new(session_id, data);
@@ -390,6 +405,9 @@ impl TerminalView {
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if !self.focus_handle.is_focused(window) {
+            return;
+        }
+        if !self.input_enabled {
             return;
         }
         let seq = encode_key(event);

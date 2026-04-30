@@ -12,13 +12,14 @@
  *   - workspace lifecycle: create_workspace + destroy_workspace, asserting
  *     both get_state convergence and the observation events that prove
  *     the canvas sync path executed (not just the daemon ack)
- *   - end-to-end PTY: spawn an `agent=shell` session via the daemon WS,
- *     wait for it to attach as a canvas panel, exercise BOTH input
+ *   - end-to-end PTY: spawn an `agent=shell` session through native
+ *     automation, wait for it to attach as a canvas panel, exercise BOTH input
  *     paths back-to-back — `send_pty_input` (direct daemon route) and
  *     `type_into_panel` (through TerminalView::on_key_down so a
  *     regression in focus or key encoding trips the second case but
- *     not the first) — poll read_pane_text for the marker, unregister
- *     the session, confirm cleanup
+ *     not the first), including the selected-vs-input-focused canvas
+ *     gate — poll read_pane_text for the marker, unregister the
+ *     session, confirm cleanup
  *
  * Tearing down: every resource the scenario creates is unregistered in
  * `finally` blocks, even on assertion failure.
@@ -27,7 +28,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import process from 'node:process';
-import WebSocket from 'ws';
 import {
   automationEnabledForNativeProfile,
   bundleIdentifierForNativeProfile,
@@ -38,9 +38,6 @@ import {
 const PROFILE = currentNativeProfile() || 'default';
 const MANIFEST_PATH = manifestPathForNativeProfile();
 const BUNDLE_ID = bundleIdentifierForNativeProfile();
-const DAEMON_WS_URL =
-  process.env.ATTN_WS_URL ||
-  (PROFILE === 'dev' ? 'ws://localhost:29849/ws' : 'ws://localhost:9849/ws');
 
 function fail(message) {
   console.error(`FAIL: ${message}`);
@@ -134,97 +131,6 @@ class NativeAutomationConnection {
 
   close() {
     if (this.socket) this.socket.end();
-  }
-}
-
-/**
- * Tiny daemon WS client for spawn_session / unregister. Kept minimal —
- * uses raw JSON commands matching what wsctl (Go dev helper) sends.
- */
-class DaemonWSClient {
-  constructor(url) {
-    this.url = url;
-    this.ws = null;
-    this.eventHandlers = new Set();
-    this.opened = false;
-  }
-
-  async connect() {
-    this.ws = new WebSocket(this.url);
-    await new Promise((resolve, reject) => {
-      this.ws.once('open', () => {
-        this.opened = true;
-        resolve();
-      });
-      this.ws.once('error', reject);
-    });
-    this.ws.on('message', (data) => {
-      let event;
-      try {
-        event = JSON.parse(data.toString());
-      } catch {
-        return;
-      }
-      for (const handler of this.eventHandlers) handler(event);
-    });
-    // Identify as a canvas-style client so the daemon registers shell
-    // sessions we spawn — same hello the native app sends.
-    this.ws.send(JSON.stringify({
-      cmd: 'client_hello',
-      client_kind: 'native-canvas-harness',
-      version: 'scenario-native-canvas',
-      capabilities: ['shell_as_session'],
-    }));
-  }
-
-  onEvent(handler) {
-    this.eventHandlers.add(handler);
-    return () => this.eventHandlers.delete(handler);
-  }
-
-  send(payload) {
-    return new Promise((resolve, reject) => {
-      this.ws.send(JSON.stringify(payload), (error) => {
-        if (error) reject(error);
-        else resolve();
-      });
-    });
-  }
-
-  async spawnShellSession({ workspaceId, cwd, cols = 80, rows = 24 }) {
-    const id = crypto.randomUUID();
-    const result = new Promise((resolveResult, rejectResult) => {
-      const off = this.onEvent((event) => {
-        if (event.event === 'spawn_result' && event.id === id) {
-          off();
-          if (event.success) resolveResult(id);
-          else rejectResult(new Error(`spawn rejected: ${event.error || 'unknown'}`));
-        }
-      });
-      setTimeout(() => {
-        off();
-        rejectResult(new Error(`spawn_session timed out for ${id}`));
-      }, 5000);
-    });
-    await this.send({
-      cmd: 'spawn_session',
-      id,
-      cwd,
-      workspace_id: workspaceId,
-      agent: 'shell',
-      label: 'scenario-shell',
-      cols,
-      rows,
-    });
-    return result;
-  }
-
-  async unregisterSession(id) {
-    await this.send({ cmd: 'unregister', id });
-  }
-
-  close() {
-    if (this.opened) this.ws.close();
   }
 }
 
@@ -432,21 +338,39 @@ async function checkSelectWorkspace(conn) {
   await conn.request('select_workspace', { id: current });
 }
 
-async function checkPtyRoundTrip(conn, daemon) {
+async function checkPtyRoundTrip(conn) {
   const state = await conn.request('get_state');
-  const ws = pickFirst(state, 'workspaces');
+  let ws = pickFirst(state, 'workspaces');
+  let createdWorkspaceId = null;
   if (!ws) {
-    info(`  skipped — no workspaces to host a shell`);
-    return;
+    const created = await conn.request('create_workspace', {
+      directory: process.cwd(),
+      title: `PTY Round Trip ${new Date().toISOString().slice(11, 19)}`,
+    });
+    if (!created.ok) fail(`create_workspace for pty round-trip: ${created.error}`);
+    createdWorkspaceId = created.result.id;
+    await pollUntil(
+      async () => {
+        const next = await conn.request('get_state');
+        return next.result.workspaces.find((candidate) => candidate.id === createdWorkspaceId);
+      },
+      { timeoutMs: 5000, intervalMs: 100, label: 'pty round-trip workspace in get_state' },
+    );
+    const nextState = await conn.request('get_state');
+    ws = nextState.result.workspaces.find((candidate) => candidate.id === createdWorkspaceId);
+    info(`  created temporary workspace ${createdWorkspaceId.slice(0, 8)}… for PTY round-trip`);
   }
-  const cwd = ws.directory || process.env.HOME || '/tmp';
-
   // Capture the event cursor BEFORE spawning so we can prove (or refute)
   // that every step of the chain — daemon broadcast, app receipt, panel
   // creation, attach result — happened during this scenario.
   const cursorBefore = (await tailEvents(conn)).next_cursor;
 
-  const sessionId = await daemon.spawnShellSession({ workspaceId: ws.id, cwd });
+  const spawned = await conn.request('spawn_session', {
+    workspace_id: ws.id,
+    agent: 'shell',
+  });
+  if (!spawned.ok) fail(`spawn_session for pty round-trip: ${spawned.error}`);
+  const sessionId = spawned.result.session_id;
   info(`  spawned shell session ${sessionId.slice(0, 8)}… (cursor=${cursorBefore})`);
   try {
     // Wait for the `panel_added` event with our session_id. Events let
@@ -482,11 +406,18 @@ async function checkPtyRoundTrip(conn, daemon) {
     await sendAndExpectMarker(conn, sessionId, 'send_pty_input', {
       session_id: sessionId,
     });
+    await focusPanel(conn, sessionId, false);
+    await expectCanvasPanelFocus(conn, sessionId, { inputFocus: false });
+    await sendAndExpectNoMarker(conn, sessionId, 'type_into_panel', {
+      session_id: sessionId,
+      focus: false,
+    });
     await sendAndExpectMarker(conn, sessionId, 'type_into_panel', {
       session_id: sessionId,
     });
+    await expectCanvasPanelFocus(conn, sessionId, { inputFocus: true });
   } finally {
-    await daemon.unregisterSession(sessionId).catch(() => {});
+    await conn.request('unregister_session', { session_id: sessionId }).catch(() => {});
     try {
       await pollUntil(
         async () => {
@@ -500,6 +431,52 @@ async function checkPtyRoundTrip(conn, daemon) {
     } catch (cleanupError) {
       console.error(`WARNING: ${cleanupError.message}`);
     }
+    if (createdWorkspaceId) {
+      const destroyed = await conn.request('destroy_workspace', { id: createdWorkspaceId });
+      if (!destroyed.ok) {
+        console.error(`WARNING: destroy_workspace ${createdWorkspaceId}: ${destroyed.error}`);
+      }
+      try {
+        await pollUntil(
+          async () => {
+            const s = await conn.request('get_state');
+            return !s.result.workspaces.some((workspace) => workspace.id === createdWorkspaceId);
+          },
+          { timeoutMs: 3000, intervalMs: 200, label: 'temporary pty workspace removal' },
+        );
+        info(`  temporary workspace cleanup ok`);
+      } catch (cleanupError) {
+        console.error(`WARNING: ${cleanupError.message}`);
+      }
+    }
+  }
+}
+
+async function focusPanel(conn, sessionId, inputFocus) {
+  const focused = await conn.request('focus_panel', {
+    session_id: sessionId,
+    input_focus: inputFocus,
+  });
+  if (!focused.ok) fail(`focus_panel: ${focused.error}`);
+  info(`  focus_panel ok (input_focus=${inputFocus})`);
+}
+
+async function expectCanvasPanelFocus(conn, sessionId, { inputFocus }) {
+  const state = await conn.request('get_state');
+  if (!state.ok) fail(`get_state: ${state.error}`);
+  const panel = state.result.workspaces
+    .flatMap((workspace) => workspace.panels || [])
+    .find((candidate) => candidate.session_id === sessionId);
+  if (!panel) fail(`panel for session ${sessionId} not found in get_state`);
+  const canvas = state.result.canvas;
+  if (canvas.selected_panel_id !== panel.id) {
+    fail(`selected_panel_id=${canvas.selected_panel_id}, expected ${panel.id}`);
+  }
+  const expectedInputPanel = inputFocus ? panel.id : null;
+  if (canvas.input_focused_panel_id !== expectedInputPanel) {
+    fail(
+      `input_focused_panel_id=${canvas.input_focused_panel_id}, expected ${expectedInputPanel}`,
+    );
   }
 }
 
@@ -544,6 +521,28 @@ async function sendAndExpectMarker(conn, sessionId, action, baseArgs) {
     throw error;
   }
   info(`  ok (${action}: typed and echoed ${marker})`);
+}
+
+/**
+ * Dispatch a marker through a path that should be blocked by canvas-level
+ * focus. We wait briefly and assert the marker never appears in the
+ * terminal buffer.
+ */
+async function sendAndExpectNoMarker(conn, sessionId, action, baseArgs) {
+  const marker = `MARK-BLOCKED-${action}-${crypto.randomUUID().slice(0, 8)}`;
+  const sent = await conn.request(action, {
+    ...baseArgs,
+    text: `echo ${marker}\n`,
+  });
+  if (!sent.ok) fail(`${action}: ${sent.error}`);
+
+  await delay(1000);
+  const r = await conn.request('read_pane_text', { session_id: sessionId });
+  if (!r.ok) fail(`read_pane_text after blocked ${action}: ${r.error}`);
+  if (r.result.text.includes(marker)) {
+    fail(`${action} leaked through canvas-level focus gate: ${marker}`);
+  }
+  info(`  ${action} blocked without input focus (${marker})`);
 }
 
 /**
@@ -692,11 +691,8 @@ async function checkWorkspaceLifecycle(conn) {
  * Round-trip a session through the new `spawn_session` and
  * `unregister_session` automation actions — the same wire path the
  * canvas's "+ Session" toolbar and the per-panel close button drive.
- * Different from `checkPtyRoundTrip`, which goes daemon-direct and
- * exists to prove the panel-mirroring path works regardless of who
- * issued the spawn. Here we exercise the action plumbing end to end so
- * a regression in `NativeApp::spawn_session_in_workspace`,
- * pending-spawn tracking, or `unregister` wiring is caught by CI.
+ * This isolates lifecycle plumbing from `checkPtyRoundTrip`, which
+ * exercises terminal input, focus routing, and visible output.
  */
 async function checkSessionLifecycle(conn) {
   // Always provision a fresh host workspace rather than trusting any
@@ -810,7 +806,6 @@ async function main() {
   info(`profile=${PROFILE} bundle=${BUNDLE_ID}`);
   info(`automationEnabledForProfile=${automationEnabledForNativeProfile()}`);
   info(`manifest=${MANIFEST_PATH}`);
-  info(`daemon=${DAEMON_WS_URL}`);
 
   const manifest = readManifest();
   info(`manifest ok: port=${manifest.port} pid=${manifest.pid}`);
@@ -818,10 +813,6 @@ async function main() {
   const conn = new NativeAutomationConnection(manifest.port, manifest.token);
   await conn.connect();
   info(`connected to 127.0.0.1:${manifest.port}`);
-
-  const daemon = new DaemonWSClient(DAEMON_WS_URL);
-  await daemon.connect();
-  info(`connected to daemon ws`);
 
   try {
     info(`\n[wire plumbing]`);
@@ -840,12 +831,11 @@ async function main() {
     await checkSessionLifecycle(conn);
 
     info(`\n[pty round-trip]`);
-    await checkPtyRoundTrip(conn, daemon);
+    await checkPtyRoundTrip(conn);
 
     info(`\nPASS`);
   } finally {
     conn.close();
-    daemon.close();
   }
 }
 

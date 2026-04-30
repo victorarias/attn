@@ -11,8 +11,9 @@ use std::rc::Rc;
 
 use gpui::{
     canvas, div, point, prelude::*, px, rgb, AnyElement, App, Bounds, Context, Entity, FocusHandle,
-    Focusable, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    Render, ScrollDelta, ScrollWheelEvent, SharedString, Subscription, Window,
+    Focusable, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Pixels, Render, ScrollDelta, ScrollWheelEvent, SharedString, Subscription,
+    Window,
 };
 
 /// Callback invoked when the user picks an agent from the canvas's
@@ -89,7 +90,8 @@ pub struct WorkspaceCanvas {
     _selected_subscription: Option<Subscription>,
     viewport: Viewport,
     drag_state: DragState,
-    focused_panel: Option<usize>,
+    selected_panel: Option<usize>,
+    input_focused_panel: Option<usize>,
     focus_handle: FocusHandle,
     /// Window-relative bounds of the canvas's root element, captured each
     /// frame via a `canvas()` prepaint callback. Mouse events arrive with
@@ -126,7 +128,8 @@ impl WorkspaceCanvas {
             _selected_subscription: None,
             viewport: Viewport::default(),
             drag_state: DragState::Idle,
-            focused_panel: None,
+            selected_panel: None,
+            input_focused_panel: None,
             focus_handle: cx.focus_handle(),
             bounds: Rc::new(Cell::new(None)),
             fps,
@@ -195,7 +198,11 @@ impl WorkspaceCanvas {
                 "origin_y": self.viewport.origin.y,
                 "zoom": self.viewport.zoom,
             },
-            "focused_panel_id": self.focused_panel,
+            // focused_panel_id is retained for older scripts; new callers
+            // should read selected_panel_id + input_focused_panel_id.
+            "focused_panel_id": self.input_focused_panel,
+            "selected_panel_id": self.selected_panel,
+            "input_focused_panel_id": self.input_focused_panel,
             "bounds": bounds,
             "fps": fps,
         })
@@ -205,8 +212,55 @@ impl WorkspaceCanvas {
         self._selected_subscription = ws.as_ref().map(|w| cx.observe(w, |_, _, cx| cx.notify()));
         self.selected = ws;
         self.drag_state = DragState::Idle;
-        self.focused_panel = None;
+        self.selected_panel = None;
+        self.input_focused_panel = None;
         cx.notify();
+    }
+
+    /// Select a panel by session id and optionally route keyboard input
+    /// into its terminal. Used by automation and NativeApp-level focus
+    /// commands so tests exercise the same canvas state as pointer input.
+    pub fn set_panel_focus_by_session(
+        &mut self,
+        session_id: &str,
+        input_focus: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let Some(ws) = self.selected.as_ref() else {
+            return Err("no selected workspace".to_string());
+        };
+        let panel = ws
+            .read(cx)
+            .panels
+            .iter()
+            .find(|panel| panel.session_id.as_ref() == session_id)
+            .cloned()
+            .ok_or_else(|| format!("no panel for session in selected workspace: {session_id}"))?;
+
+        self.select_panel(panel.id);
+        if input_focus {
+            self.focus_panel_input(&panel, window, cx);
+        } else {
+            self.release_input_focus(window);
+        }
+        cx.notify();
+        Ok(())
+    }
+
+    fn select_panel(&mut self, id: usize) {
+        self.selected_panel = Some(id);
+    }
+
+    fn release_input_focus(&mut self, window: &mut Window) {
+        self.input_focused_panel = None;
+        self.focus_handle.clone().focus(window);
+    }
+
+    fn focus_panel_input(&mut self, panel: &Panel, window: &mut Window, cx: &App) {
+        self.selected_panel = Some(panel.id);
+        self.input_focused_panel = Some(panel.id);
+        panel.view.read(cx).focus_handle.clone().focus(window);
     }
 
     /// Panel snapshot for hit testing and rendering. Cloning is cheap
@@ -280,13 +334,16 @@ impl WorkspaceCanvas {
         let pos = event.position;
         match hit {
             HitResult::TitleBar(id) => {
-                self.focused_panel = Some(id);
+                self.select_panel(id);
+                self.release_input_focus(window);
                 self.drag_state = DragState::DraggingPanel {
                     panel_id: id,
                     last_screen: pos,
                 };
             }
             HitResult::ResizeHandle(id, handle) => {
+                self.select_panel(id);
+                self.release_input_focus(window);
                 self.drag_state = DragState::ResizingPanel {
                     panel_id: id,
                     handle,
@@ -294,19 +351,50 @@ impl WorkspaceCanvas {
                 };
             }
             HitResult::PanelBody(id) => {
-                self.focused_panel = Some(id);
                 if let Some(ws) = self.selected.as_ref() {
-                    if let Some(panel) = ws.read(cx).panels.iter().find(|p| p.id == id) {
-                        panel.view.read(cx).focus_handle.clone().focus(window);
+                    let panel = ws.read(cx).panels.iter().find(|p| p.id == id).cloned();
+                    if let Some(panel) = panel {
+                        self.focus_panel_input(&panel, window, cx);
                     }
                 }
                 self.drag_state = DragState::Idle;
             }
             HitResult::Canvas => {
+                self.release_input_focus(window);
                 self.drag_state = DragState::PanningCanvas { last_screen: pos };
             }
         }
         cx.notify();
+    }
+
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event.keystroke.key.as_str() {
+            "escape" if self.input_focused_panel.is_some() => {
+                cx.stop_propagation();
+                self.release_input_focus(window);
+                cx.notify();
+            }
+            "enter" if self.focus_handle.is_focused(window) => {
+                let Some(selected_id) = self.selected_panel else {
+                    return;
+                };
+                let Some(ws) = self.selected.as_ref() else {
+                    return;
+                };
+                let panel = ws
+                    .read(cx)
+                    .panels
+                    .iter()
+                    .find(|panel| panel.id == selected_id)
+                    .cloned();
+                if let Some(panel) = panel {
+                    cx.stop_propagation();
+                    self.focus_panel_input(&panel, window, cx);
+                    cx.notify();
+                }
+            }
+            _ => {}
+        }
     }
 
     fn on_mouse_move(
@@ -476,7 +564,8 @@ impl Render for WorkspaceCanvas {
         let ws_w = pf(window_size.width);
         let ws_h = pf(window_size.height);
         let focus_handle = self.focus_handle.clone();
-        let focused_panel = self.focused_panel;
+        let selected_panel = self.selected_panel;
+        let input_focused_panel = self.input_focused_panel;
 
         let bounds_capture = self.bounds.clone();
         // Grid dots intentionally omitted: snapping (when added) reads
@@ -487,6 +576,8 @@ impl Render for WorkspaceCanvas {
             .size_full()
             .bg(rgb(0x0e0e14))
             .track_focus(&focus_handle)
+            .capture_key_down(cx.listener(Self::on_key_down))
+            .on_key_down(cx.listener(Self::on_key_down))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
@@ -520,10 +611,12 @@ impl Render for WorkspaceCanvas {
         for panel in &panels {
             let content_w = panel.width;
             let content_h = (panel.height - TITLE_HEIGHT).max(0.0);
+            let input_enabled = input_focused_panel == Some(panel.id);
             panel.view.update(cx, |tv, inner_cx| {
                 let size_changed = tv.set_content_size(content_w, content_h);
                 let zoom_changed = tv.set_zoom(zoom);
-                if size_changed || zoom_changed {
+                let input_changed = tv.set_input_enabled(input_enabled);
+                if size_changed || zoom_changed || input_changed {
                     inner_cx.notify();
                 }
             });
@@ -542,9 +635,12 @@ impl Render for WorkspaceCanvas {
                 continue;
             }
 
-            let is_focused = focused_panel == Some(panel.id);
-            let border_color = if is_focused {
+            let has_input_focus = input_focused_panel == Some(panel.id);
+            let is_selected = selected_panel == Some(panel.id);
+            let border_color = if has_input_focus {
                 rgb(0x4a9eff)
+            } else if is_selected {
+                rgb(0xc59b45)
             } else {
                 rgb(0x2a2a35)
             };
