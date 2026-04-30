@@ -17,7 +17,6 @@ use serde_json::{json, Value};
 
 use crate::app::NativeApp;
 use crate::domain::viewport::pf;
-use crate::state::panel::PanelContent;
 use crate::state::terminal_model::TerminalModel;
 use crate::views::terminal_view::TerminalView;
 
@@ -562,14 +561,8 @@ fn find_terminal_model(
 ) -> Option<Entity<TerminalModel>> {
     for ws in app.workspaces() {
         for panel in ws.read(cx).panels.iter() {
-            if let PanelContent::Terminal {
-                session_id: sid,
-                view,
-            } = &panel.content
-            {
-                if sid.as_ref() == session_id {
-                    return Some(view.read(cx).model().clone());
-                }
+            if panel.session_id.as_ref() == session_id {
+                return Some(panel.view.read(cx).model().clone());
             }
         }
     }
@@ -582,14 +575,8 @@ fn find_terminal_model(
 fn find_terminal_view(app: &NativeApp, session_id: &str, cx: &App) -> Option<Entity<TerminalView>> {
     for ws in app.workspaces() {
         for panel in ws.read(cx).panels.iter() {
-            if let PanelContent::Terminal {
-                session_id: sid,
-                view,
-            } = &panel.content
-            {
-                if sid.as_ref() == session_id {
-                    return Some(view.clone());
-                }
+            if panel.session_id.as_ref() == session_id {
+                return Some(panel.view.clone());
             }
         }
     }

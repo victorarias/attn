@@ -12,7 +12,7 @@ use gpui::{Context, EventEmitter, SharedString};
 use serde_json::{json, Value};
 
 use crate::adapters::automation::events;
-use crate::state::panel::{Panel, PanelContent};
+use crate::state::panel::Panel;
 
 /// Emitted when the workspace's wire-level data changes (rolled-up status,
 /// title, directory). Subscribers are the sidebar (status badge) and the
@@ -137,15 +137,11 @@ impl Workspace {
 }
 
 fn panel_snapshot(panel: &Panel) -> Value {
-    let (kind, session_id) = match &panel.content {
-        PanelContent::Terminal { session_id, .. } => ("terminal", Some(session_id.to_string())),
-        PanelContent::Placeholder(_) => ("placeholder", None),
-    };
     json!({
         "id": panel.id,
-        "kind": kind,
+        "kind": "terminal",
         "title": panel.title.to_string(),
-        "session_id": session_id,
+        "session_id": panel.session_id.to_string(),
         "world_x": panel.world_x,
         "world_y": panel.world_y,
         "width": panel.width,

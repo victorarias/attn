@@ -27,9 +27,8 @@ use super::protocol::{Request, Response};
 /// this function and awaits the resulting `Value` (or `String` error). The
 /// real implementation in `actions.rs` runs handlers on the GPUI main
 /// thread; tests can plug in a synchronous stub.
-pub type Dispatcher = Arc<
-    dyn Fn(String, Value) -> BoxFuture<'static, Result<Value, String>> + Send + Sync + 'static,
->;
+pub type Dispatcher =
+    Arc<dyn Fn(String, Value) -> BoxFuture<'static, Result<Value, String>> + Send + Sync + 'static>;
 
 /// How the server spawns its background tasks. Decouples the wire layer
 /// from a specific executor so production code can use GPUI's
@@ -196,7 +195,7 @@ async fn process_request(
             // Best-effort: pull `id` out of the malformed payload so the
             // client can still correlate the error to its request. A client
             // that sent `id: 7` (number) instead of `"7"` would otherwise
-            // get an error tagged with a synthetic id, never resolve its
+            // get an error tagged with a generated fallback id, never resolve its
             // pending Promise, and hang silently.
             let echoed_id = serde_json::from_str::<Value>(line)
                 .ok()
@@ -260,9 +259,7 @@ mod tests {
     use serde_json::json;
 
     fn echo_dispatcher() -> Dispatcher {
-        dispatcher_from_sync(|action, payload| {
-            Ok(json!({"action": action, "payload": payload}))
-        })
+        dispatcher_from_sync(|action, payload| Ok(json!({"action": action, "payload": payload})))
     }
 
     #[test]
@@ -280,15 +277,10 @@ mod tests {
 
     #[test]
     fn rejects_invalid_json() {
-        let response = smol::block_on(process_request(
-            "not json",
-            "good",
-            42,
-            echo_dispatcher(),
-        ));
+        let response = smol::block_on(process_request("not json", "good", 42, echo_dispatcher()));
         assert!(!response.ok);
         // Truly unparseable input has no recoverable id, so we fall back
-        // to the synthetic counter.
+        // to the generated counter.
         assert_eq!(response.id, "ui-automation-42");
         assert!(response
             .error
@@ -301,7 +293,7 @@ mod tests {
     fn echoes_id_when_type_mismatched() {
         // Numeric id — schema wants string. We still echo it back so the
         // client can correlate; without this it would hang waiting for a
-        // response keyed by "1" while the error went to a synthetic id.
+        // response keyed by "1" while the error went to a generated fallback id.
         let response = smol::block_on(process_request(
             r#"{"id":1,"token":"good","action":"ping"}"#,
             "good",
@@ -392,9 +384,8 @@ mod tests {
         // Send one request synchronously over a blocking TCP socket.
         use std::io::{BufRead, BufReader as StdBufReader, Write};
         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
-        let request = format!(
-            r#"{{"id":"abc","token":"{token}","action":"ping","payload":{{"k":"v"}}}}"#
-        );
+        let request =
+            format!(r#"{{"id":"abc","token":"{token}","action":"ping","payload":{{"k":"v"}}}}"#);
         stream.write_all(request.as_bytes()).unwrap();
         stream.write_all(b"\n").unwrap();
         stream.flush().unwrap();

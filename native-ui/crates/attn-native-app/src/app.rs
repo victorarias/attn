@@ -21,8 +21,7 @@ use crate::adapters::automation;
 use crate::adapters::automation::actions::generate_workspace_id;
 use crate::adapters::automation::events;
 use crate::adapters::daemon::{DaemonClient, DaemonEvent};
-use crate::adapters::synthetic::{self, SyntheticSource};
-use crate::state::panel::{Panel, PanelContent, TITLE_HEIGHT};
+use crate::state::panel::{Panel, TITLE_HEIGHT};
 use crate::state::session_registry::SessionRegistry;
 use crate::state::terminal_model::TerminalModel;
 use crate::state::workspace::Workspace;
@@ -55,11 +54,6 @@ pub struct NativeApp {
     /// when bind/start failed — in which case we still want the app to
     /// run, just without the test sidecar.
     _automation: Option<automation::server::Handle>,
-    /// Synthetic-load sources, populated when
-    /// `ATTN_NATIVE_SYNTHETIC_PANELS=N` is set at startup. Empty in
-    /// regular use. Each source pumps deterministic bytes into one
-    /// terminal model on a periodic tick (see `synthetic` module).
-    synthetic: Vec<SyntheticSource>,
 }
 
 impl NativeApp {
@@ -257,21 +251,14 @@ impl NativeApp {
             None
         };
 
-        let mut app = Self {
+        Self {
             daemon,
             registry: WorkspaceRegistry::new(),
             sessions: SessionRegistry::new(),
             sidebar,
             canvas,
             _automation: automation_handle,
-            synthetic: Vec::new(),
-        };
-
-        if let Some(cfg) = synthetic::config_from_env() {
-            app.start_synthetic(cfg, cx);
         }
-
-        app
     }
 
     /// Apply a zoom level to the canvas, centered on the canvas
@@ -386,8 +373,7 @@ impl NativeApp {
         self.daemon
             .read(cx)
             .send_cmd(&RegisterWorkspaceMessage::new(id.clone(), title, directory))?;
-        self.registry
-            .record_pending_select(SharedString::from(id));
+        self.registry.record_pending_select(SharedString::from(id));
         Ok(())
     }
 
@@ -591,19 +577,11 @@ impl NativeApp {
 
         let new_ids: std::collections::HashSet<String> =
             workspaces.iter().map(|w| w.id.clone()).collect();
-        // Synthetic workspaces (`synthetic-*`) are created locally by
-        // `start_synthetic` and never registered with the daemon — they
-        // would always look "stale" in this diff, so protect them
-        // explicitly. Same convention `sync_terminal_panels` uses for
-        // synthetic panels.
         let stale: Vec<String> = self
             .registry
             .workspaces()
             .filter_map(|ws_entity| {
                 let id = ws_entity.read(cx).id.to_string();
-                if id.starts_with("synthetic-") {
-                    return None;
-                }
                 (!new_ids.contains(&id)).then_some(id)
             })
             .collect();
@@ -692,9 +670,7 @@ impl NativeApp {
         let daemon = self.daemon.read(cx);
         for ws_entity in self.registry.workspaces() {
             for panel in ws_entity.read(cx).panels.iter() {
-                if let PanelContent::Terminal { session_id, .. } = &panel.content {
-                    let _ = daemon.send_cmd(&AttachSessionMessage::new(session_id.to_string()));
-                }
+                let _ = daemon.send_cmd(&AttachSessionMessage::new(panel.session_id.to_string()));
             }
         }
     }
@@ -718,34 +694,23 @@ impl NativeApp {
         // Prune Terminal panels whose session is no longer alive on the
         // daemon. Dropping the panel drops the last handle to its
         // TerminalView, which detaches subscriptions for free.
-        //
-        // Synthetic-mode panels (session_id starts with "synthetic-")
-        // are never tracked by the daemon, so they would always look
-        // "dead" here — protect them explicitly so the synthetic
-        // workspace survives daemon events.
         for ws_entity in self.registry.workspaces().cloned().collect::<Vec<_>>() {
             ws_entity.update(cx, |ws, cx| {
                 let workspace_id = ws.id.to_string();
                 let before = ws.panels.len();
-                ws.panels.retain(|p| match &p.content {
-                    PanelContent::Terminal { session_id, .. } => {
-                        if session_id.starts_with("synthetic-") {
-                            return true;
-                        }
-                        let alive = live_session_ids.contains(session_id.as_ref());
-                        if !alive {
-                            events::record(
-                                "panel_pruned",
-                                json!({
-                                    "workspace_id": workspace_id.as_str(),
-                                    "panel_id": p.id,
-                                    "session_id": session_id.as_ref(),
-                                }),
-                            );
-                        }
-                        alive
+                ws.panels.retain(|panel| {
+                    let alive = live_session_ids.contains(panel.session_id.as_ref());
+                    if !alive {
+                        events::record(
+                            "panel_pruned",
+                            json!({
+                                "workspace_id": workspace_id.as_str(),
+                                "panel_id": panel.id,
+                                "session_id": panel.session_id.as_ref(),
+                            }),
+                        );
                     }
-                    _ => true,
+                    alive
                 });
                 if ws.panels.len() != before {
                     cx.notify();
@@ -761,24 +726,18 @@ impl NativeApp {
                 continue;
             };
 
-            let already_present = ws_entity.read(cx).panels.iter().any(|p| {
-                matches!(
-                    &p.content,
-                    PanelContent::Terminal { session_id, .. } if session_id.as_ref() == session.id
-                )
-            });
+            let already_present = ws_entity
+                .read(cx)
+                .panels
+                .iter()
+                .any(|p| p.session_id.as_ref() == session.id);
             if already_present {
                 continue;
             }
 
             // Find a non-overlapping x position by counting existing
             // terminal panels in this workspace.
-            let existing = ws_entity
-                .read(cx)
-                .panels
-                .iter()
-                .filter(|p| matches!(p.content, PanelContent::Terminal { .. }))
-                .count();
+            let existing = ws_entity.read(cx).panels.len();
             let world_x = 30.0 + existing as f32 * (TERMINAL_W + 30.0);
             let world_y = 50.0;
 
@@ -813,10 +772,8 @@ impl NativeApp {
                 world_y,
                 width: TERMINAL_W,
                 height: TERMINAL_H,
-                content: PanelContent::Terminal {
-                    session_id: SharedString::from(session_id.clone()),
-                    view,
-                },
+                session_id: SharedString::from(session_id.clone()),
+                view,
             };
 
             let panel_id = panel.id;
@@ -835,107 +792,6 @@ impl NativeApp {
                 cx.notify();
             });
         }
-    }
-
-    /// Bring up a synthetic workspace + N panels driven by an internal
-    /// ticker. Used by the canvas perf harness to characterize rendering
-    /// scaling without depending on the daemon. Real daemon-backed
-    /// workspaces still register normally and appear alongside.
-    fn start_synthetic(&mut self, cfg: synthetic::Config, cx: &mut Context<Self>) {
-        let ws_id = "synthetic-load";
-        let ws_data = attn_protocol::Workspace {
-            id: ws_id.to_string(),
-            title: format!("Synthetic Load ({} panels)", cfg.panels),
-            directory: "/synthetic".to_string(),
-            status: attn_protocol::WorkspaceStatus::Working,
-        };
-        self.upsert_workspace(ws_data, cx);
-
-        let Some(ws_entity) = self.registry.workspace(ws_id) else {
-            return;
-        };
-
-        // Lay panels out in a square-ish grid with a fixed gap so the
-        // canvas isn't a stack of overlapping rects.
-        let cols = (cfg.panels as f32).sqrt().ceil() as usize;
-        let gap = 30.0_f32;
-
-        for i in 0..cfg.panels {
-            let row = i / cols;
-            let col = i % cols;
-            let world_x = 30.0 + col as f32 * (TERMINAL_W + gap);
-            let world_y = 50.0 + row as f32 * (TERMINAL_H + gap);
-
-            let session_id = format!("synthetic-{i:02}");
-            let label = format!("synthetic-{i:02}");
-
-            let (cterm, rterm) = panel_terminal_dims(TERMINAL_W, TERMINAL_H);
-            let daemon = self.daemon.clone();
-            let model =
-                cx.new(|cx| TerminalModel::new(session_id.clone(), cterm, rterm, &daemon, cx));
-            let view = cx.new(|cx| {
-                let mut tv = TerminalView::new(model.clone(), daemon.clone(), cx);
-                tv.set_content_size(TERMINAL_W, (TERMINAL_H - TITLE_HEIGHT).max(0.0));
-                tv
-            });
-
-            let panel = Panel {
-                id: next_panel_id(),
-                title: SharedString::from(label),
-                world_x,
-                world_y,
-                width: TERMINAL_W,
-                height: TERMINAL_H,
-                content: PanelContent::Terminal {
-                    session_id: SharedString::from(session_id),
-                    view,
-                },
-            };
-
-            ws_entity.update(cx, |ws, cx| {
-                ws.panels.push(panel);
-                cx.notify();
-            });
-
-            self.synthetic
-                .push(SyntheticSource::new(model, i, cfg.bytes_per_tick));
-        }
-
-        // Ticker: pump every source on a fixed cadence. Detached — runs
-        // until app shutdown drops the WeakEntity. `None` means static
-        // mode: panels are created but never re-rendered until user
-        // input (used to isolate scroll-handler cost from byte-stream
-        // cost during perf diagnosis).
-        if let Some(tick) = cfg.tick {
-            let app_handle = cx.entity().downgrade();
-            cx.spawn(async move |_, cx| {
-                loop {
-                    smol::Timer::after(tick).await;
-                    let updated = app_handle.update(
-                        cx,
-                        |app: &mut NativeApp, app_cx: &mut Context<NativeApp>| {
-                            for src in &mut app.synthetic {
-                                src.tick(app_cx);
-                            }
-                        },
-                    );
-                    if updated.is_err() {
-                        // App was dropped — bail out so we don't spin.
-                        break;
-                    }
-                }
-            })
-            .detach();
-        }
-
-        eprintln!(
-            "[synthetic] {} panels, tick={}, bytes/tick={}",
-            cfg.panels,
-            cfg.tick
-                .map(|t| format!("{:?}", t))
-                .unwrap_or_else(|| "off (static)".into()),
-            cfg.bytes_per_tick
-        );
     }
 }
 

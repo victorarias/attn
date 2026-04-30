@@ -9,7 +9,7 @@ The native app follows **MVVM with a hexagonal edge**. Four directories under
 
 | Directory   | Holds                                                                                  |
 |-------------|----------------------------------------------------------------------------------------|
-| `adapters/` | Everything that talks to the outside world (websocket, TCP sidecar, fake input).       |
+| `adapters/` | Everything that talks to the outside world (websocket, TCP sidecar).                   |
 | `state/`    | Long-lived observable application state. GPUI entities. The "ViewModels".              |
 | `views/`    | `Render` impls. Sidebar, canvas, terminal view, overlays.                              |
 | `domain/`   | Pure logic. No `Window`, `Context`, or entity types. Unit-testable without a window.   |

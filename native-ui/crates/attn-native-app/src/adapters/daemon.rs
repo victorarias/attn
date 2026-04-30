@@ -253,7 +253,9 @@ impl DaemonClient {
                 });
             }
             ServerEvent::SessionRegistered(msg) => {
-                cx.emit(DaemonEvent::SessionRegistered { session: msg.session });
+                cx.emit(DaemonEvent::SessionRegistered {
+                    session: msg.session,
+                });
             }
             ServerEvent::SessionUnregistered(msg) => {
                 cx.emit(DaemonEvent::SessionUnregistered {
@@ -261,7 +263,9 @@ impl DaemonClient {
                 });
             }
             ServerEvent::SessionStateChanged(msg) => {
-                cx.emit(DaemonEvent::SessionStateChanged { session: msg.session });
+                cx.emit(DaemonEvent::SessionStateChanged {
+                    session: msg.session,
+                });
             }
             ServerEvent::SessionsUpdated(msg) => {
                 cx.emit(DaemonEvent::SessionsReplaced {
