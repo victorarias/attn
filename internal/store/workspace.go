@@ -145,6 +145,20 @@ func (s *Store) SaveWorkspacePanel(workspaceID string, panel protocol.WorkspaceP
 		if s.canvasPanels == nil {
 			s.canvasPanels = make(map[string][]protocol.WorkspacePanel)
 		}
+		for existingWorkspaceID, existingPanels := range s.canvasPanels {
+			filtered := existingPanels[:0]
+			for _, existing := range existingPanels {
+				if existing.SessionID == panel.SessionID && (existingWorkspaceID != workspaceID || existing.ID != panel.ID) {
+					continue
+				}
+				filtered = append(filtered, existing)
+			}
+			if len(filtered) == 0 {
+				delete(s.canvasPanels, existingWorkspaceID)
+			} else {
+				s.canvasPanels[existingWorkspaceID] = filtered
+			}
+		}
 		panels := s.canvasPanels[workspaceID]
 		for i := range panels {
 			if panels[i].ID == panel.ID {
@@ -158,7 +172,24 @@ func (s *Store) SaveWorkspacePanel(workspaceID string, panel protocol.WorkspaceP
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("[store] SaveWorkspacePanel: failed to begin transaction for panel %s/%s: %v", workspaceID, panel.ID, err)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		DELETE FROM canvas_workspace_panels
+		WHERE session_id = ?
+		  AND NOT (workspace_id = ? AND panel_id = ?)`,
+		panel.SessionID, workspaceID, panel.ID,
+	); err != nil {
+		log.Printf("[store] SaveWorkspacePanel: failed to clear previous panel for session %s: %v", panel.SessionID, err)
+		return
+	}
+
+	if _, err := tx.Exec(`
 		INSERT INTO canvas_workspace_panels (
 			workspace_id, panel_id, session_id, kind, title,
 			world_x, world_y, width, height, created_at, updated_at
@@ -177,6 +208,10 @@ func (s *Store) SaveWorkspacePanel(workspaceID string, panel protocol.WorkspaceP
 		panel.WorldX, panel.WorldY, panel.Width, panel.Height, now, now,
 	); err != nil {
 		log.Printf("[store] SaveWorkspacePanel: failed to upsert panel %s/%s: %v", workspaceID, panel.ID, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("[store] SaveWorkspacePanel: failed to commit panel %s/%s: %v", workspaceID, panel.ID, err)
 	}
 }
 
