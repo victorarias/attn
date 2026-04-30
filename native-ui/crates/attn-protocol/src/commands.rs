@@ -149,6 +149,42 @@ impl UnregisterWorkspaceMessage {
     }
 }
 
+#[derive(Debug, Serialize)]
+pub struct UpdateWorkspacePanelGeometryMessage {
+    pub cmd: &'static str,
+    pub workspace_id: String,
+    pub panel_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub world_x: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub world_y: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<f32>,
+}
+
+impl UpdateWorkspacePanelGeometryMessage {
+    pub fn new(
+        workspace_id: impl Into<String>,
+        panel_id: impl Into<String>,
+        world_x: Option<f32>,
+        world_y: Option<f32>,
+        width: Option<f32>,
+        height: Option<f32>,
+    ) -> Self {
+        Self {
+            cmd: "update_workspace_panel_geometry",
+            workspace_id: workspace_id.into(),
+            panel_id: panel_id.into(),
+            world_x,
+            world_y,
+            width,
+            height,
+        }
+    }
+}
+
 /// Ask the daemon to spawn a new session inside an existing workspace.
 /// Mirrors `spawn_session` in `internal/protocol/schema/main.tsp`. Only the
 /// fields the native canvas needs are modelled — the legacy executable

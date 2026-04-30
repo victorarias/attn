@@ -174,12 +174,65 @@ fn move_panel(
         .map_err(|e| format!("read entity: {e}"))?
         .ok_or_else(|| format!("unknown workspace id: {workspace_id}"))?;
 
-    cx.update_entity(&workspace, |ws, cx| {
-        ws.update_panel(panel_id, world_x, world_y, width, height, cx)
-            .map(|panel| json!({ "panel": panel }))
-            .ok_or_else(|| format!("unknown panel id: {panel_id}"))
+    let (
+        daemon_panel_id,
+        session_id,
+        title,
+        target_world_x,
+        target_world_y,
+        target_width,
+        target_height,
+    ) = cx
+        .read_entity(&workspace, |ws, _cx| {
+            let existing = ws
+                .panels
+                .iter()
+                .find(|panel| panel.id == panel_id)
+                .ok_or_else(|| format!("unknown panel id: {panel_id}"))?;
+            let target_world_x = world_x.unwrap_or(existing.world_x);
+            let target_world_y = world_y.unwrap_or(existing.world_y);
+            let target_width = width.unwrap_or(existing.width);
+            let target_height = height.unwrap_or(existing.height);
+            Ok::<_, String>((
+                existing.daemon_panel_id.to_string(),
+                existing.session_id.to_string(),
+                existing.title.to_string(),
+                target_world_x,
+                target_world_y,
+                target_width,
+                target_height,
+            ))
+        })
+        .map_err(|e| format!("read workspace: {e}"))??;
+
+    let daemon_panel_id_for_send = daemon_panel_id.clone();
+    cx.read_entity(&app_entity, |app: &NativeApp, cx: &App| {
+        app.daemon()
+            .read(cx)
+            .send_cmd(&attn_protocol::UpdateWorkspacePanelGeometryMessage::new(
+                workspace_id.clone(),
+                daemon_panel_id_for_send,
+                Some(target_world_x),
+                Some(target_world_y),
+                Some(target_width),
+                Some(target_height),
+            ))
     })
-    .map_err(|e| format!("update entity: {e}"))?
+    .map_err(|e| format!("read entity: {e}"))??;
+
+    Ok(json!({
+        "panel": {
+            "id": panel_id,
+            "daemon_panel_id": daemon_panel_id,
+            "kind": "terminal",
+            "title": title,
+            "session_id": session_id,
+            "world_x": target_world_x,
+            "world_y": target_world_y,
+            "width": target_width,
+            "height": target_height,
+        }
+    }))
 }
 
 fn send_pty_input(

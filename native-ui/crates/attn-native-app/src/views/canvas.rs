@@ -28,6 +28,12 @@ pub type SpawnSessionHandler =
 /// is pruned by `sync_terminal_panels`.
 pub type CloseSessionHandler = dyn Fn(SharedString, &mut Window, &mut gpui::App) + 'static;
 
+/// Callback invoked when a drag/resize gesture ends. The canvas keeps
+/// transient geometry local while the pointer is moving, then commits the
+/// final daemon panel id + geometry to the app coordinator.
+pub type PanelGeometryCommitHandler =
+    dyn Fn(SharedString, SharedString, f32, f32, f32, f32, &mut Window, &mut gpui::App) + 'static;
+
 use serde_json::{json, Value};
 
 use crate::domain::viewport::{pf, Viewport};
@@ -99,6 +105,7 @@ pub struct WorkspaceCanvas {
     spawn_picker_open: bool,
     on_spawn: Box<SpawnSessionHandler>,
     on_close_session: Box<CloseSessionHandler>,
+    on_panel_geometry_commit: Box<PanelGeometryCommitHandler>,
 }
 
 impl WorkspaceCanvas {
@@ -106,6 +113,8 @@ impl WorkspaceCanvas {
         cx: &mut Context<Self>,
         on_spawn: impl Fn(SharedString, SharedString, &mut Window, &mut gpui::App) + 'static,
         on_close_session: impl Fn(SharedString, &mut Window, &mut gpui::App) + 'static,
+        on_panel_geometry_commit: impl Fn(SharedString, SharedString, f32, f32, f32, f32, &mut Window, &mut gpui::App)
+            + 'static,
     ) -> Self {
         let fps = if env_flag("ATTN_NATIVE_FPS") {
             Some(FpsCounter::new())
@@ -124,6 +133,7 @@ impl WorkspaceCanvas {
             spawn_picker_open: false,
             on_spawn: Box::new(on_spawn),
             on_close_session: Box::new(on_close_session),
+            on_panel_geometry_commit: Box::new(on_panel_geometry_commit),
         }
     }
 
@@ -366,7 +376,28 @@ impl WorkspaceCanvas {
         cx.notify();
     }
 
-    fn on_mouse_up(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, _event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(panel_id) = match &self.drag_state {
+            DragState::DraggingPanel { panel_id, .. }
+            | DragState::ResizingPanel { panel_id, .. } => Some(*panel_id),
+            _ => None,
+        } {
+            if let Some(ws) = self.selected.as_ref() {
+                let workspace_id = ws.read(cx).id.clone();
+                if let Some(panel) = ws.read(cx).panels.iter().find(|p| p.id == panel_id) {
+                    (self.on_panel_geometry_commit)(
+                        workspace_id,
+                        panel.daemon_panel_id.clone(),
+                        panel.world_x,
+                        panel.world_y,
+                        panel.width,
+                        panel.height,
+                        window,
+                        cx,
+                    );
+                }
+            }
+        }
         self.drag_state = DragState::Idle;
         cx.notify();
     }

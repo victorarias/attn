@@ -89,6 +89,7 @@ func TestInMemoryFallbackSupportsSessionWorkspaceAndState(t *testing.T) {
 	s := &Store{
 		sessions:        make(map[string]*protocol.Session),
 		workspaces:      make(map[string]sessionlayout.SessionLayout),
+		canvasPanels:    make(map[string][]protocol.WorkspacePanel),
 		recentLocations: make(map[string]*protocol.RecentLocation),
 	}
 

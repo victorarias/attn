@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use attn_protocol::{
     AttachSessionMessage, RegisterWorkspaceMessage, Session, SpawnSessionMessage,
-    UnregisterSessionMessage, UnregisterWorkspaceMessage, Workspace as ProtocolWorkspace,
+    UnregisterSessionMessage, UnregisterWorkspaceMessage, UpdateWorkspacePanelGeometryMessage,
+    Workspace as ProtocolWorkspace,
 };
 use gpui::{
     div, prelude::*, rgb, App, Context, Entity, ParentElement, PathPromptOptions, Render,
@@ -56,11 +57,21 @@ pub struct NativeApp {
     _automation: Option<automation::server::Handle>,
 }
 
+pub struct PanelGeometryUpdate {
+    pub workspace_id: SharedString,
+    pub panel_id: SharedString,
+    pub world_x: f32,
+    pub world_y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 impl NativeApp {
     pub fn new(daemon: Entity<DaemonClient>, cx: &mut Context<Self>) -> Self {
         let app_handle = cx.entity().downgrade();
         let app_handle_canvas_spawn = app_handle.clone();
         let app_handle_canvas_close = app_handle.clone();
+        let app_handle_canvas_geometry = app_handle.clone();
         let canvas = cx.new(|cx| {
             WorkspaceCanvas::new(
                 cx,
@@ -74,6 +85,22 @@ impl NativeApp {
                     let app_handle = app_handle_canvas_close.clone();
                     let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
                         app.unregister_session_by_id(session_id, cx);
+                    });
+                },
+                move |workspace_id, panel_id, world_x, world_y, width, height, _window, cx| {
+                    let app_handle = app_handle_canvas_geometry.clone();
+                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
+                        let _ = app.update_workspace_panel_geometry(
+                            PanelGeometryUpdate {
+                                workspace_id,
+                                panel_id,
+                                world_x,
+                                world_y,
+                                width,
+                                height,
+                            },
+                            cx,
+                        );
                     });
                 },
             )
@@ -168,6 +195,7 @@ impl NativeApp {
                     );
                     this.apply_workspace_snapshot(workspace.clone(), cx);
                     this.select_workspace_if_pending(&workspace.id, cx);
+                    this.sync_terminal_panels(cx);
                 }
                 DaemonEvent::SessionRegistered { session } => {
                     this.sessions.upsert(session.clone());
@@ -490,6 +518,54 @@ impl NativeApp {
         }
     }
 
+    /// Commit a panel's final drag/resize geometry to the daemon. The
+    /// canvas may already have applied this locally for pointer
+    /// responsiveness; the daemon snapshot remains the durable owner and
+    /// will reconcile the local panel on broadcast/reconnect.
+    pub fn update_workspace_panel_geometry(
+        &self,
+        update: PanelGeometryUpdate,
+        cx: &Context<Self>,
+    ) -> Result<(), String> {
+        let workspace_id_string = update.workspace_id.to_string();
+        let panel_id_string = update.panel_id.to_string();
+        let msg = UpdateWorkspacePanelGeometryMessage::new(
+            workspace_id_string.clone(),
+            panel_id_string.clone(),
+            Some(update.world_x),
+            Some(update.world_y),
+            Some(update.width),
+            Some(update.height),
+        );
+        match self.daemon.read(cx).send_cmd(&msg) {
+            Ok(()) => {
+                events::record(
+                    "panel_geometry_update_submitted",
+                    json!({
+                        "workspace_id": workspace_id_string,
+                        "panel_id": panel_id_string,
+                        "world_x": update.world_x,
+                        "world_y": update.world_y,
+                        "width": update.width,
+                        "height": update.height,
+                    }),
+                );
+                Ok(())
+            }
+            Err(error) => {
+                events::record(
+                    "panel_geometry_update_send_failed",
+                    json!({
+                        "workspace_id": update.workspace_id.as_ref(),
+                        "panel_id": update.panel_id.as_ref(),
+                        "error": error,
+                    }),
+                );
+                Err(error)
+            }
+        }
+    }
+
     /// Switch the canvas + sidebar to the given workspace id. Shared by
     /// the sidebar's click callback and the automation `select_workspace`
     /// action so both paths produce identical state. No-op when `id`
@@ -675,13 +751,16 @@ impl NativeApp {
         }
     }
 
-    /// Reconcile each workspace's Terminal panels with the daemon's
-    /// current session list: spawn panels for new sessions, drop panels
-    /// whose session has gone away. Idempotent.
+    /// Reconcile each workspace's Terminal panels with the daemon-owned
+    /// panel list. Sessions are only used to hydrate TerminalView state
+    /// for panels the daemon explicitly includes in the workspace
+    /// snapshot.
     fn sync_terminal_panels(&mut self, cx: &mut Context<Self>) {
         let sessions: Vec<Session> = self.sessions.snapshot();
-        let live_session_ids: std::collections::HashSet<&str> =
-            sessions.iter().map(|s| s.id.as_str()).collect();
+        let sessions_by_id: std::collections::HashMap<String, Session> = sessions
+            .iter()
+            .map(|session| (session.id.clone(), session.clone()))
+            .collect();
 
         events::record(
             "sync_terminal_panels_start",
@@ -691,21 +770,28 @@ impl NativeApp {
             }),
         );
 
-        // Prune Terminal panels whose session is no longer alive on the
-        // daemon. Dropping the panel drops the last handle to its
-        // TerminalView, which detaches subscriptions for free.
         for ws_entity in self.registry.workspaces().cloned().collect::<Vec<_>>() {
+            let desired_panels = ws_entity.read(cx).daemon_panels.clone();
+            let desired_ids: std::collections::HashSet<String> = desired_panels
+                .iter()
+                .filter(|panel| {
+                    panel.kind == "terminal" && sessions_by_id.contains_key(&panel.session_id)
+                })
+                .map(|panel| panel.id.clone())
+                .collect();
+
             ws_entity.update(cx, |ws, cx| {
                 let workspace_id = ws.id.to_string();
                 let before = ws.panels.len();
                 ws.panels.retain(|panel| {
-                    let alive = live_session_ids.contains(panel.session_id.as_ref());
+                    let alive = desired_ids.contains(panel.daemon_panel_id.as_ref());
                     if !alive {
                         events::record(
                             "panel_pruned",
                             json!({
                                 "workspace_id": workspace_id.as_str(),
                                 "panel_id": panel.id,
+                                "daemon_panel_id": panel.daemon_panel_id.as_ref(),
                                 "session_id": panel.session_id.as_ref(),
                             }),
                         );
@@ -716,81 +802,95 @@ impl NativeApp {
                     cx.notify();
                 }
             });
-        }
 
-        for session in sessions {
-            let Some(ws_id) = session.workspace_id.as_deref() else {
-                continue;
-            };
-            let Some(ws_entity) = self.registry.workspace(ws_id) else {
-                continue;
-            };
+            for daemon_panel in desired_panels {
+                if daemon_panel.kind != "terminal" {
+                    continue;
+                }
+                let Some(session) = sessions_by_id.get(&daemon_panel.session_id) else {
+                    continue;
+                };
 
-            let already_present = ws_entity
-                .read(cx)
-                .panels
-                .iter()
-                .any(|p| p.session_id.as_ref() == session.id);
-            if already_present {
-                continue;
+                let already_present = ws_entity
+                    .read(cx)
+                    .panels
+                    .iter()
+                    .any(|p| p.daemon_panel_id.as_ref() == daemon_panel.id);
+                if already_present {
+                    ws_entity.update(cx, |ws, cx| {
+                        if let Some(panel) = ws
+                            .panels
+                            .iter_mut()
+                            .find(|p| p.daemon_panel_id.as_ref() == daemon_panel.id)
+                        {
+                            panel.title = SharedString::from(daemon_panel.title.clone());
+                            panel.world_x = daemon_panel.world_x;
+                            panel.world_y = daemon_panel.world_y;
+                            panel.width = daemon_panel.width;
+                            panel.height = daemon_panel.height;
+                            cx.notify();
+                        }
+                    });
+                    continue;
+                }
+
+                let session_id = session.id.clone();
+                let label = if daemon_panel.title.is_empty() {
+                    session.label.clone()
+                } else {
+                    daemon_panel.title.clone()
+                };
+
+                let (cols, rows) = panel_terminal_dims(daemon_panel.width, daemon_panel.height);
+
+                let daemon = self.daemon.clone();
+                let model =
+                    cx.new(|cx| TerminalModel::new(session_id.clone(), cols, rows, &daemon, cx));
+                let view = cx.new(|cx| {
+                    let mut tv = TerminalView::new(model, daemon.clone(), cx);
+                    tv.set_content_size(
+                        daemon_panel.width,
+                        (daemon_panel.height - TITLE_HEIGHT).max(0.0),
+                    );
+                    tv
+                });
+
+                // Send attach. The TerminalView's render path will emit
+                // the initial PtyResize once it sees its first content_size.
+                let _ = self
+                    .daemon
+                    .read(cx)
+                    .send_cmd(&AttachSessionMessage::new(session_id.clone()));
+
+                let panel = Panel {
+                    id: next_panel_id(),
+                    daemon_panel_id: SharedString::from(daemon_panel.id.clone()),
+                    title: SharedString::from(label),
+                    world_x: daemon_panel.world_x,
+                    world_y: daemon_panel.world_y,
+                    width: daemon_panel.width,
+                    height: daemon_panel.height,
+                    session_id: SharedString::from(session_id.clone()),
+                    view,
+                };
+
+                let panel_id = panel.id;
+                events::record(
+                    "panel_added",
+                    json!({
+                        "workspace_id": ws_entity.read(cx).id.as_ref(),
+                        "panel_id": panel_id,
+                        "daemon_panel_id": daemon_panel.id.as_str(),
+                        "session_id": session_id.as_str(),
+                        "kind": "terminal",
+                    }),
+                );
+
+                ws_entity.update(cx, |ws, cx| {
+                    ws.panels.push(panel);
+                    cx.notify();
+                });
             }
-
-            // Find a non-overlapping x position by counting existing
-            // terminal panels in this workspace.
-            let existing = ws_entity.read(cx).panels.len();
-            let world_x = 30.0 + existing as f32 * (TERMINAL_W + 30.0);
-            let world_y = 50.0;
-
-            let session_id = session.id.clone();
-            let label = session.label.clone();
-
-            // Default cols/rows derived from world-space size; the
-            // canvas re-pushes content_size each frame so these will
-            // be corrected on first render if needed.
-            let (cols, rows) = panel_terminal_dims(TERMINAL_W, TERMINAL_H);
-
-            let daemon = self.daemon.clone();
-            let model =
-                cx.new(|cx| TerminalModel::new(session_id.clone(), cols, rows, &daemon, cx));
-            let view = cx.new(|cx| {
-                let mut tv = TerminalView::new(model, daemon.clone(), cx);
-                tv.set_content_size(TERMINAL_W, (TERMINAL_H - TITLE_HEIGHT).max(0.0));
-                tv
-            });
-
-            // Send attach. The TerminalView's render path will emit the
-            // initial PtyResize once it sees its first content_size.
-            let _ = self
-                .daemon
-                .read(cx)
-                .send_cmd(&AttachSessionMessage::new(session_id.clone()));
-
-            let panel = Panel {
-                id: next_panel_id(),
-                title: SharedString::from(label),
-                world_x,
-                world_y,
-                width: TERMINAL_W,
-                height: TERMINAL_H,
-                session_id: SharedString::from(session_id.clone()),
-                view,
-            };
-
-            let panel_id = panel.id;
-            events::record(
-                "panel_added",
-                json!({
-                    "workspace_id": ws_id,
-                    "panel_id": panel_id,
-                    "session_id": session_id.as_str(),
-                    "kind": "terminal",
-                }),
-            );
-
-            ws_entity.update(cx, |ws, cx| {
-                ws.panels.push(panel);
-                cx.notify();
-            });
         }
     }
 }

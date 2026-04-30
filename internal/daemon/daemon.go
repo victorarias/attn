@@ -128,8 +128,9 @@ type Daemon struct {
 	loginShellEnvMu sync.RWMutex
 	loginShellEnv   []string
 
-	// Native canvas-UI workspace registry. Ephemeral: workspaces are not
-	// persisted, the canvas client re-registers on every reconnect.
+	// Native canvas-UI workspace registry. Backed by the store for
+	// workspace identity, session membership, and daemon-owned panel
+	// geometry.
 	workspaces *workspaceRegistry
 }
 
