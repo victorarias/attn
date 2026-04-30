@@ -31,7 +31,7 @@ pub type CloseSessionHandler = dyn Fn(SharedString, &mut Window, &mut gpui::App)
 use serde_json::{json, Value};
 
 use crate::domain::viewport::{pf, Viewport};
-use crate::state::panel::{Panel, PanelContent, TITLE_HEIGHT};
+use crate::state::panel::{Panel, TITLE_HEIGHT};
 use crate::state::workspace::Workspace;
 use crate::views::fps_overlay::{self, FpsCounter};
 
@@ -287,9 +287,7 @@ impl WorkspaceCanvas {
                 self.focused_panel = Some(id);
                 if let Some(ws) = self.selected.as_ref() {
                     if let Some(panel) = ws.read(cx).panels.iter().find(|p| p.id == id) {
-                        if let PanelContent::Terminal { view, .. } = &panel.content {
-                            view.read(cx).focus_handle.clone().focus(window);
-                        }
+                        panel.view.read(cx).focus_handle.clone().focus(window);
                     }
                 }
                 self.drag_state = DragState::Idle;
@@ -489,17 +487,15 @@ impl Render for WorkspaceCanvas {
         // render syncs cell dims and emits PtyResize on actual change.
         let zoom = viewport.zoom;
         for panel in &panels {
-            if let PanelContent::Terminal { view, .. } = &panel.content {
-                let content_w = panel.width;
-                let content_h = (panel.height - TITLE_HEIGHT).max(0.0);
-                view.update(cx, |tv, inner_cx| {
-                    let size_changed = tv.set_content_size(content_w, content_h);
-                    let zoom_changed = tv.set_zoom(zoom);
-                    if size_changed || zoom_changed {
-                        inner_cx.notify();
-                    }
-                });
-            }
+            let content_w = panel.width;
+            let content_h = (panel.height - TITLE_HEIGHT).max(0.0);
+            panel.view.update(cx, |tv, inner_cx| {
+                let size_changed = tv.set_content_size(content_w, content_h);
+                let zoom_changed = tv.set_zoom(zoom);
+                if size_changed || zoom_changed {
+                    inner_cx.notify();
+                }
+            });
         }
 
         for panel in &panels {
@@ -523,15 +519,8 @@ impl Render for WorkspaceCanvas {
             };
             let content_h = (sh - title_h).max(0.0);
             let title = panel.title.clone();
-            let close_target = match &panel.content {
-                PanelContent::Terminal { session_id, .. } => Some(session_id.clone()),
-                PanelContent::Placeholder(_) => None,
-            };
 
-            let body: AnyElement = match &panel.content {
-                PanelContent::Placeholder(view) => view.clone().into_any_element(),
-                PanelContent::Terminal { view, .. } => view.clone().into_any_element(),
-            };
+            let body: AnyElement = panel.view.clone().into_any_element();
 
             let mut title_bar = div()
                 .w_full()
@@ -549,9 +538,7 @@ impl Render for WorkspaceCanvas {
                         .text_color(rgb(0xa0a0b0))
                         .child(title),
                 );
-            if let Some(session_id) = close_target {
-                title_bar = title_bar.child(panel_close_button(session_id, cx));
-            }
+            title_bar = title_bar.child(panel_close_button(panel.session_id.clone(), cx));
 
             let panel_div = div()
                 .absolute()

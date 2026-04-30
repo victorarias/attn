@@ -66,7 +66,9 @@ mod tests {
     fn token_is_64_hex_chars() {
         let t = generate_token();
         assert_eq!(t.len(), 64);
-        assert!(t.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+        assert!(t
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
     }
 
     #[test]
@@ -77,10 +79,7 @@ mod tests {
 
     #[test]
     fn write_then_read_roundtrips() {
-        let dir = std::env::temp_dir().join(format!(
-            "attn-automation-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("attn-automation-test-{}", std::process::id()));
         let path = dir.join("ui-automation.json");
         let _ = fs::remove_dir_all(&dir);
 

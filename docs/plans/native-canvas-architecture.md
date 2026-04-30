@@ -110,14 +110,13 @@ attn-native-app/
     daemon_client.rs        websocket I/O + DaemonEvent emitter
     terminal_model.rs       alacritty parser, PTY byte ingestion, screen state
     terminal_view.rs        custom GPUI Element, paint_quad-per-cell
-    panel.rs                Panel struct + PanelContent enum dispatch
+    panel.rs                terminal Panel struct
     canvas.rs               pan/zoom/drag/resize/hit-test on selected workspace
     viewport.rs             world ↔ screen transform, helpers
     workspace.rs            Entity<Workspace> — sidebar + canvas peer view
     sidebar.rs              workspace list with rollup status badges
     automation/             TCP automation sidecar (test harness)
     fps_overlay.rs          opt-in frame-time overlay (perf debugging)
-    synthetic.rs            opt-in synthetic-load harness (perf debugging)
 ```
 
 `canvas.rs` may grow into a `canvas/` directory once split-handling and
@@ -125,20 +124,14 @@ keyboard navigation arrive; for now a single file is enough.
 
 ### Perf debugging affordances
 
-`fps_overlay.rs` and `synthetic.rs` are dormant in normal use — they
-cost nothing unless explicitly turned on. They survive from the
-2026-04-28 perf spike not as artifacts of that investigation, but as
-the toolkit for the next one.
+`fps_overlay.rs` is dormant in normal use — it costs nothing unless
+explicitly turned on. It survives from the 2026-04-28 perf spike as a
+toolkit piece for the next one.
 
 - `ATTN_NATIVE_FPS=1` enables the FPS / frame-time overlay (top-right
   of the canvas). When on, `automation_snapshot` includes the latest
   readout so headless test scripts can read frame timing without
   inducing a render.
-- `ATTN_NATIVE_SYNTHETIC_PANELS=N` (1..256) creates a synthetic
-  workspace of `N` panels driven by a deterministic byte stream
-  through the real renderer. `ATTN_NATIVE_SYNTHETIC_TICK_MS=K`
-  controls cadence (0 = static, no ticker).
-  `ATTN_NATIVE_SYNTHETIC_BYTES=B` controls bytes per panel per tick.
 - The `set_zoom` automation action drives the canvas zoom
   programmatically; when the FPS overlay is on, it resets the counter
   for a clean measurement window.

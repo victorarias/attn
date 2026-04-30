@@ -1,12 +1,12 @@
 use alacritty_terminal::{
-    Term,
     event::VoidListener,
     grid::Dimensions,
     index::{Column, Line},
-    term::{Config as TermConfig, cell::Cell},
+    term::{cell::Cell, Config as TermConfig},
     vte::ansi::Processor as AnsiProcessor,
+    Term,
 };
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use gpui::{Context, Entity, EventEmitter};
 use serde_json::json;
 
@@ -62,23 +62,35 @@ impl TerminalModel {
         cx: &mut Context<Self>,
     ) -> Self {
         let session_id = session_id.into();
-        let size = TermSize { cols: cols as usize, lines: rows as usize };
+        let size = TermSize {
+            cols: cols as usize,
+            lines: rows as usize,
+        };
         let term = Term::new(TermConfig::default(), &size, VoidListener);
         let parser = AnsiProcessor::new();
 
         // Subscribe to daemon events so PTY output routes directly to this model.
-        cx.subscribe(daemon, |this: &mut TerminalModel, _entity, event: &DaemonEvent, cx| {
-            match event {
+        cx.subscribe(
+            daemon,
+            |this: &mut TerminalModel, _entity, event: &DaemonEvent, cx| match event {
                 DaemonEvent::AttachResult { session_id, msg } if *session_id == this.session_id => {
                     this.handle_attach_result(msg.as_ref(), cx);
                 }
-                DaemonEvent::PtyOutput { session_id, data, seq } if *session_id == this.session_id => {
+                DaemonEvent::PtyOutput {
+                    session_id,
+                    data,
+                    seq,
+                } if *session_id == this.session_id => {
                     this.handle_pty_output(data, *seq, cx);
                 }
                 DaemonEvent::PtyDesync { session_id } if *session_id == this.session_id => {
                     cx.emit(TerminalEvent::Desync);
                 }
-                DaemonEvent::PtyResized { session_id, cols, rows } if *session_id == this.session_id => {
+                DaemonEvent::PtyResized {
+                    session_id,
+                    cols,
+                    rows,
+                } if *session_id == this.session_id => {
                     this.resize(*cols, *rows);
                     cx.emit(TerminalEvent::DataReceived);
                 }
@@ -86,11 +98,18 @@ impl TerminalModel {
                     cx.emit(TerminalEvent::Exited);
                 }
                 _ => {}
-            }
-        })
+            },
+        )
         .detach();
 
-        Self { session_id, term, parser, last_seq: -1, cols, rows }
+        Self {
+            session_id,
+            term,
+            parser,
+            last_seq: -1,
+            cols,
+            rows,
+        }
     }
 
     fn handle_attach_result(&mut self, msg: &AttachResultMessage, cx: &mut Context<Self>) {
@@ -163,22 +182,14 @@ impl TerminalModel {
         cx.notify();
     }
 
-    /// Feed raw bytes through the parser without going through the
-    /// daemon's PtyOutput pipeline. Used by the synthetic-load harness
-    /// (`crate::synthetic`) so we can stress the render path with
-    /// deterministic input. Emits `DataReceived` and notifies.
-    #[allow(dead_code)] // only reachable via ATTN_NATIVE_SYNTHETIC_PANELS
-    pub fn feed_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        self.parser.advance(&mut self.term, bytes);
-        cx.emit(TerminalEvent::DataReceived);
-        cx.notify();
-    }
-
     /// Resize the terminal to new dimensions.
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
         self.rows = rows;
-        let size = TermSize { cols: cols as usize, lines: rows as usize };
+        let size = TermSize {
+            cols: cols as usize,
+            lines: rows as usize,
+        };
         self.term.resize(size);
     }
 

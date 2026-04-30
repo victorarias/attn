@@ -43,12 +43,7 @@ impl FpsCounter {
         self.samples.push_back(now);
 
         let cutoff = now - WINDOW;
-        while self
-            .samples
-            .front()
-            .map(|t| *t < cutoff)
-            .unwrap_or(false)
-        {
+        while self.samples.front().map(|t| *t < cutoff).unwrap_or(false) {
             self.samples.pop_front();
         }
         while self.samples.len() > MAX_SAMPLES {
@@ -73,7 +68,11 @@ impl FpsCounter {
             0.0
         };
 
-        let readout = Readout { fps, avg_ms, last_ms };
+        let readout = Readout {
+            fps,
+            avg_ms,
+            last_ms,
+        };
         self.last = readout;
         readout
     }
@@ -143,7 +142,11 @@ mod tests {
         sleep(Duration::from_millis(10));
         let r = c.record_frame();
         assert_eq!(r.fps, 2.0);
-        assert!(r.last_ms >= 9.0 && r.last_ms <= 30.0, "last_ms = {}", r.last_ms);
+        assert!(
+            r.last_ms >= 9.0 && r.last_ms <= 30.0,
+            "last_ms = {}",
+            r.last_ms
+        );
         assert!(r.avg_ms >= 9.0 && r.avg_ms <= 30.0, "avg_ms = {}", r.avg_ms);
     }
 

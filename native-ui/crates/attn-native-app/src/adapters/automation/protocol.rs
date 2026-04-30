@@ -52,21 +52,17 @@ mod tests {
 
     #[test]
     fn request_payload_optional() {
-        let parsed: Request = serde_json::from_str(
-            r#"{"id":"a","token":"t","action":"ping"}"#,
-        )
-        .unwrap();
+        let parsed: Request =
+            serde_json::from_str(r#"{"id":"a","token":"t","action":"ping"}"#).unwrap();
         assert_eq!(parsed.action, "ping");
         assert!(parsed.payload.is_none());
     }
 
     #[test]
     fn response_omits_unused_fields() {
-        let body = serde_json::to_string(&Response::ok(
-            "1".into(),
-            serde_json::json!({"pong": true}),
-        ))
-        .unwrap();
+        let body =
+            serde_json::to_string(&Response::ok("1".into(), serde_json::json!({"pong": true})))
+                .unwrap();
         assert!(body.contains("\"ok\":true"));
         assert!(body.contains("\"result\""));
         assert!(!body.contains("\"error\""));

@@ -30,7 +30,10 @@ pub struct Viewport {
 
 impl Default for Viewport {
     fn default() -> Self {
-        Viewport { origin: point(0.0_f32, 0.0_f32), zoom: 1.0 }
+        Viewport {
+            origin: point(0.0_f32, 0.0_f32),
+            zoom: 1.0,
+        }
     }
 }
 
@@ -43,7 +46,10 @@ impl Viewport {
     }
 
     pub fn screen_to_world(&self, screen: gpui::Point<Pixels>) -> gpui::Point<f32> {
-        point(pf(screen.x) / self.zoom + self.origin.x, pf(screen.y) / self.zoom + self.origin.y)
+        point(
+            pf(screen.x) / self.zoom + self.origin.x,
+            pf(screen.y) / self.zoom + self.origin.y,
+        )
     }
 
     /// Zoom toward a screen-space point, holding the world point under
