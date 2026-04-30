@@ -591,11 +591,19 @@ impl NativeApp {
 
         let new_ids: std::collections::HashSet<String> =
             workspaces.iter().map(|w| w.id.clone()).collect();
+        // Synthetic workspaces (`synthetic-*`) are created locally by
+        // `start_synthetic` and never registered with the daemon — they
+        // would always look "stale" in this diff, so protect them
+        // explicitly. Same convention `sync_terminal_panels` uses for
+        // synthetic panels.
         let stale: Vec<String> = self
             .registry
             .workspaces()
             .filter_map(|ws_entity| {
                 let id = ws_entity.read(cx).id.to_string();
+                if id.starts_with("synthetic-") {
+                    return None;
+                }
                 (!new_ids.contains(&id)).then_some(id)
             })
             .collect();
