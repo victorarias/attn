@@ -57,6 +57,18 @@ pub struct WorkspaceStateChangedMessage {
     pub workspace: Workspace,
 }
 
+/// Daemon ack for a `spawn_session` command. Carries success+error so the
+/// client can surface failures (invalid agent, executable missing, PTY
+/// spawn failure) without inferring them from "no session ever appeared".
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpawnResultMessage {
+    pub event: String,
+    pub id: String,
+    pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AttachResultMessage {
     pub event: String,
@@ -126,6 +138,7 @@ pub enum ServerEvent {
     WorkspaceUnregistered(WorkspaceUnregisteredMessage),
     WorkspaceStateChanged(WorkspaceStateChangedMessage),
     AttachResult(AttachResultMessage),
+    SpawnResult(SpawnResultMessage),
     PtyOutput(PtyOutputMessage),
     PtyDesync(PtyDesyncMessage),
     PtyResized(PtyResizedMessage),
@@ -172,6 +185,10 @@ impl ServerEvent {
             "attach_result" => {
                 let msg: AttachResultMessage = serde_json::from_str(data)?;
                 Ok(Self::AttachResult(msg))
+            }
+            "spawn_result" => {
+                let msg: SpawnResultMessage = serde_json::from_str(data)?;
+                Ok(Self::SpawnResult(msg))
             }
             "pty_output" => {
                 let msg: PtyOutputMessage = serde_json::from_str(data)?;

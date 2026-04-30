@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use attn_protocol::{
-    AttachSessionMessage, RegisterWorkspaceMessage, Session, UnregisterWorkspaceMessage,
+    AttachSessionMessage, RegisterWorkspaceMessage, Session, SpawnSessionMessage,
+    UnregisterSessionMessage, UnregisterWorkspaceMessage,
 };
 use gpui::{
     div, prelude::*, rgb, App, Context, Entity, ParentElement, PathPromptOptions, Render,
@@ -41,6 +42,11 @@ pub struct NativeApp {
     canvas: Entity<WorkspaceCanvas>,
     selected_id: Option<SharedString>,
     pending_select_workspace_ids: HashSet<SharedString>,
+    /// Spawns we've issued but the daemon hasn't acked yet. Keyed by
+    /// session id (the same one we sent on the wire). On `SpawnResult`
+    /// the entry is consumed and either dropped (success) or surfaced as
+    /// a failure event.
+    pending_spawns: HashMap<SharedString, PendingSpawn>,
     /// Live automation server handle. Drop deletes the manifest. `None`
     /// when automation is disabled for this launch (default in prod) or
     /// when bind/start failed — in which case we still want the app to
@@ -53,10 +59,37 @@ pub struct NativeApp {
     synthetic: Vec<SyntheticSource>,
 }
 
+/// In-flight spawn metadata. We track just enough to attribute a
+/// `SpawnResult` failure back to the workspace + agent the user selected
+/// when they triggered the spawn.
+#[derive(Debug, Clone)]
+struct PendingSpawn {
+    workspace_id: SharedString,
+    agent: SharedString,
+}
+
 impl NativeApp {
     pub fn new(daemon: Entity<DaemonClient>, cx: &mut Context<Self>) -> Self {
-        let canvas = cx.new(WorkspaceCanvas::new);
         let app_handle = cx.entity().downgrade();
+        let app_handle_canvas_spawn = app_handle.clone();
+        let app_handle_canvas_close = app_handle.clone();
+        let canvas = cx.new(|cx| {
+            WorkspaceCanvas::new(
+                cx,
+                move |workspace_id, agent, _window, cx| {
+                    let app_handle = app_handle_canvas_spawn.clone();
+                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
+                        let _ = app.spawn_session_in_workspace(workspace_id, agent, cx);
+                    });
+                },
+                move |session_id, _window, cx| {
+                    let app_handle = app_handle_canvas_close.clone();
+                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
+                        app.unregister_session_by_id(session_id, cx);
+                    });
+                },
+            )
+        });
         let app_handle_create = app_handle.clone();
         let app_handle_destroy = app_handle.clone();
         let sidebar = cx.new(|cx| {
@@ -142,6 +175,34 @@ impl NativeApp {
                     );
                     this.sync_terminal_panels(cx);
                 }
+                DaemonEvent::SpawnResult {
+                    session_id,
+                    success,
+                    error,
+                } => {
+                    let key = SharedString::from(session_id.clone());
+                    let pending = this.pending_spawns.remove(&key);
+                    if *success {
+                        events::record(
+                            "session_spawn_succeeded",
+                            json!({
+                                "session_id": session_id,
+                                "workspace_id": pending.as_ref().map(|p| p.workspace_id.as_ref()),
+                                "agent": pending.as_ref().map(|p| p.agent.as_ref()),
+                            }),
+                        );
+                    } else {
+                        events::record(
+                            "session_spawn_failed",
+                            json!({
+                                "session_id": session_id,
+                                "workspace_id": pending.as_ref().map(|p| p.workspace_id.as_ref()),
+                                "agent": pending.as_ref().map(|p| p.agent.as_ref()),
+                                "error": error.as_deref(),
+                            }),
+                        );
+                    }
+                }
                 DaemonEvent::Connected => {
                     events::record("daemon_connected", json!({}));
                     // Daemon tracks PTY attachments per client connection,
@@ -171,6 +232,7 @@ impl NativeApp {
             canvas,
             selected_id: None,
             pending_select_workspace_ids: HashSet::new(),
+            pending_spawns: HashMap::new(),
             _automation: automation_handle,
             synthetic: Vec::new(),
         };
@@ -311,6 +373,100 @@ impl NativeApp {
             json!({"id": id_string.as_str()}),
         );
         Ok(())
+    }
+
+    /// Spawn a new session inside `workspace_id`, using the workspace's
+    /// directory as the cwd and the canvas's default panel-derived
+    /// terminal dimensions. The daemon's `session_registered` broadcast
+    /// is the source of truth for the panel appearing — `sync_terminal_panels`
+    /// picks it up and adds the panel — so we don't optimistically push
+    /// anything into the canvas here. Returns the freshly generated session
+    /// id on successful queue, an error string on lookup or wire failure.
+    pub fn spawn_session_in_workspace(
+        &mut self,
+        workspace_id: SharedString,
+        agent: SharedString,
+        cx: &mut Context<Self>,
+    ) -> Result<SharedString, String> {
+        let Some(ws_entity) = self.workspaces_by_id.get(&workspace_id).cloned() else {
+            let known: Vec<String> = self
+                .workspaces_by_id
+                .keys()
+                .map(|s| s.to_string())
+                .collect();
+            events::record(
+                "session_spawn_missed",
+                json!({
+                    "workspace_id": workspace_id.as_ref(),
+                    "reason": "unknown_workspace",
+                    "known_workspace_ids": known,
+                }),
+            );
+            return Err(format!("unknown workspace id: {workspace_id}"));
+        };
+        let directory = ws_entity.read(cx).directory.to_string();
+        let session_id = automation::actions::generate_workspace_id();
+        let (cols, rows) = panel_terminal_dims(TERMINAL_W, TERMINAL_H);
+        let msg = SpawnSessionMessage::new(
+            session_id.clone(),
+            directory.clone(),
+            workspace_id.to_string(),
+            agent.to_string(),
+            cols,
+            rows,
+        );
+        if let Err(error) = self.daemon.read(cx).send_cmd(&msg) {
+            events::record(
+                "session_spawn_send_failed",
+                json!({
+                    "session_id": session_id,
+                    "workspace_id": workspace_id.as_ref(),
+                    "agent": agent.as_ref(),
+                    "error": error,
+                }),
+            );
+            return Err(format!("send spawn_session: {error}"));
+        }
+        let id_shared = SharedString::from(session_id.clone());
+        self.pending_spawns.insert(
+            id_shared.clone(),
+            PendingSpawn {
+                workspace_id: workspace_id.clone(),
+                agent: agent.clone(),
+            },
+        );
+        events::record(
+            "session_spawn_submitted",
+            json!({
+                "session_id": session_id,
+                "workspace_id": workspace_id.as_ref(),
+                "agent": agent.as_ref(),
+                "directory": directory,
+            }),
+        );
+        Ok(id_shared)
+    }
+
+    /// Tear down a session by sending `unregister`. The daemon SIGTERMs
+    /// the PTY, drops the session record, and broadcasts
+    /// `session_unregistered`; `sync_terminal_panels` prunes the panel.
+    pub fn unregister_session_by_id(&mut self, session_id: SharedString, cx: &Context<Self>) {
+        let id = session_id.to_string();
+        match self
+            .daemon
+            .read(cx)
+            .send_cmd(&UnregisterSessionMessage::new(id.clone()))
+        {
+            Ok(()) => {
+                events::record("session_unregister_submitted", json!({"session_id": id}));
+            }
+            Err(error) => {
+                events::record(
+                    "session_unregister_send_failed",
+                    json!({"session_id": id, "error": error}),
+                );
+            }
+        }
     }
 
     /// Switch the canvas + sidebar to the given workspace id. Shared by

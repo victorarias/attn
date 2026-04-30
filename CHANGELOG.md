@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-04-30]
+
+### Added
+- **Native Canvas Session Lifecycle**: The native canvas now spawns and tears down sessions inline. A "+ Session" pill at the top-left of the canvas expands to a Claude / Codex / Shell agent picker; clicking an agent spawns a new session in the selected workspace's directory and the panel appears on the canvas as soon as the daemon broadcasts it. Each panel's title bar gains an `x` close button that asks the daemon to unregister the session, after which the panel is pruned automatically. Spawn failures are recorded as structured events (`session_spawn_failed`) carrying the wire error so they're discoverable from the automation tail. Two new automation actions — `spawn_session` and `unregister_session` — let the test harness drive the same path as the UI; the canvas scenario covers them end to end.
+
+---
+
 ## [2026-04-29]
 
 ### Changed

@@ -148,3 +148,64 @@ impl UnregisterWorkspaceMessage {
         }
     }
 }
+
+/// Ask the daemon to spawn a new session inside an existing workspace.
+/// Mirrors `spawn_session` in `internal/protocol/schema/main.tsp`. Only the
+/// fields the native canvas needs are modelled — the legacy executable
+/// override fields are skipped (clients that need them can extend later).
+#[derive(Debug, Serialize)]
+pub struct SpawnSessionMessage {
+    pub cmd: &'static str,
+    pub id: String,
+    pub cwd: String,
+    pub workspace_id: String,
+    pub agent: String,
+    pub cols: u16,
+    pub rows: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl SpawnSessionMessage {
+    pub fn new(
+        id: impl Into<String>,
+        cwd: impl Into<String>,
+        workspace_id: impl Into<String>,
+        agent: impl Into<String>,
+        cols: u16,
+        rows: u16,
+    ) -> Self {
+        Self {
+            cmd: "spawn_session",
+            id: id.into(),
+            cwd: cwd.into(),
+            workspace_id: workspace_id.into(),
+            agent: agent.into(),
+            cols,
+            rows,
+            label: None,
+        }
+    }
+
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+}
+
+/// Tear down a session: SIGTERM the PTY, drop the daemon's session record,
+/// broadcast `session_unregistered`. Same wire shape the Tauri app uses.
+#[derive(Debug, Serialize)]
+pub struct UnregisterSessionMessage {
+    pub cmd: &'static str,
+    pub id: String,
+}
+
+impl UnregisterSessionMessage {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            cmd: "unregister",
+            id: id.into(),
+        }
+    }
+}

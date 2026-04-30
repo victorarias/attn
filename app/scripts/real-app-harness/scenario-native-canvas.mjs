@@ -688,6 +688,124 @@ async function checkWorkspaceLifecycle(conn) {
   }
 }
 
+/**
+ * Round-trip a session through the new `spawn_session` and
+ * `unregister_session` automation actions — the same wire path the
+ * canvas's "+ Session" toolbar and the per-panel close button drive.
+ * Different from `checkPtyRoundTrip`, which goes daemon-direct and
+ * exists to prove the panel-mirroring path works regardless of who
+ * issued the spawn. Here we exercise the action plumbing end to end so
+ * a regression in `NativeApp::spawn_session_in_workspace`,
+ * pending-spawn tracking, or `unregister` wiring is caught by CI.
+ */
+async function checkSessionLifecycle(conn) {
+  // Always provision a fresh host workspace rather than trusting any
+  // previously-selected one — earlier tests destroy workspaces without
+  // awaiting the daemon's broadcast, which can leave a stale
+  // selected_workspace_id pointing at a workspace that's already gone.
+  // Use an existing directory (HOME or /tmp): unlike workspace metadata
+  // (which the daemon never opens), the cwd flows through to the
+  // session's PTY spawn, and a non-existent path makes the worker stall.
+  const directory = process.env.HOME || '/tmp';
+  const created = await conn.request('create_workspace', {
+    directory,
+    title: `Scenario Session Host ${new Date().toISOString().slice(11, 19)}`,
+  });
+  if (!created.ok) fail(`create_workspace (session host): ${created.error}`);
+  const hostWorkspaceId = created.result.id;
+  await pollUntil(
+    async () => {
+      const s = await conn.request('get_state');
+      return s.ok && s.result.workspaces?.some((w) => w.id === hostWorkspaceId);
+    },
+    { timeoutMs: 5000, label: `host workspace ${hostWorkspaceId.slice(0, 8)} in get_state` },
+  );
+
+  const cursorBefore = (await tailEvents(conn)).next_cursor;
+  const spawned = await conn.request('spawn_session', {
+    workspace_id: hostWorkspaceId,
+    agent: 'shell',
+  });
+  if (!spawned.ok) fail(`spawn_session: ${spawned.error}`);
+  const sessionId = spawned.result.session_id;
+  if (typeof sessionId !== 'string' || sessionId.length < 16) {
+    fail(`spawn_session returned suspicious id: ${JSON.stringify(spawned)}`);
+  }
+  info(`  spawned session ${sessionId.slice(0, 8)}… via action`);
+
+  let panelCleanupNeeded = true;
+  try {
+    // Wait for the panel + the spawn-success ack. Both prove different
+    // things: panel_added → sessions_changed sync ran; spawn_result
+    // success → the daemon accepted the wire message.
+    try {
+      await pollUntil(
+        async () => {
+          const tail = await tailEvents(conn, cursorBefore);
+          const sawPanel = tail.events.some(
+            (e) => e.category === 'panel_added' && e.payload.session_id === sessionId,
+          );
+          const sawAck = tail.events.some(
+            (e) =>
+              e.category === 'session_spawn_succeeded' && e.payload.session_id === sessionId,
+          );
+          return sawPanel && sawAck;
+        },
+        { timeoutMs: 15000, intervalMs: 200, label: `panel + spawn ack for ${sessionId.slice(0, 8)}` },
+      );
+    } catch (error) {
+      await dumpEventsSince(conn, cursorBefore, 'spawn_session');
+      throw error;
+    }
+    info(`  panel + spawn ack observed`);
+
+    const cursorBeforeKill = (await tailEvents(conn)).next_cursor;
+    const killed = await conn.request('unregister_session', { session_id: sessionId });
+    if (!killed.ok) fail(`unregister_session: ${killed.error}`);
+
+    try {
+      await pollUntil(
+        async () => {
+          const s = await conn.request('get_state');
+          if (!s.ok) return false;
+          const ws = s.result.workspaces.find((w) => w.id === hostWorkspaceId);
+          return !ws?.panels?.some((p) => p.session_id === sessionId);
+        },
+        {
+          timeoutMs: 5000,
+          intervalMs: 200,
+          label: `panel ${sessionId.slice(0, 8)} pruned after unregister_session`,
+        },
+      );
+    } catch (error) {
+      await dumpEventsSince(conn, cursorBeforeKill, 'unregister_session');
+      throw error;
+    }
+    panelCleanupNeeded = false;
+    info(`  cleanup ok (panel + session removed via action)`);
+  } finally {
+    if (panelCleanupNeeded) {
+      // Best-effort fallback so a failed assertion doesn't leak the
+      // session into subsequent scenarios.
+      await conn.request('unregister_session', { session_id: sessionId }).catch(() => {});
+    }
+    // Block on the workspace actually disappearing — the action
+    // returns once the cmd is queued, but the broadcast that drops
+    // it from the canvas's workspaces_by_id may still be in flight.
+    // If we returned now, the next scenario's `pickFirst('workspaces')`
+    // could grab this stale workspace and race the daemon into spawning
+    // a session in a workspace that's about to vanish.
+    await conn.request('destroy_workspace', { id: hostWorkspaceId }).catch(() => {});
+    await pollUntil(
+      async () => {
+        const s = await conn.request('get_state');
+        return s.ok && !s.result.workspaces?.some((w) => w.id === hostWorkspaceId);
+      },
+      { timeoutMs: 5000, intervalMs: 100, label: `host workspace ${hostWorkspaceId.slice(0, 8)} drained` },
+    ).catch(() => {});
+  }
+}
+
 async function main() {
   info(`profile=${PROFILE} bundle=${BUNDLE_ID}`);
   info(`automationEnabledForProfile=${automationEnabledForNativeProfile()}`);
@@ -717,6 +835,9 @@ async function main() {
 
     info(`\n[workspace lifecycle]`);
     await checkWorkspaceLifecycle(conn);
+
+    info(`\n[session lifecycle via action]`);
+    await checkSessionLifecycle(conn);
 
     info(`\n[pty round-trip]`);
     await checkPtyRoundTrip(conn, daemon);
