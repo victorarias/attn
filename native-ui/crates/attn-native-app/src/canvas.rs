@@ -15,6 +15,19 @@ use gpui::{
     Render, ScrollDelta, ScrollWheelEvent, SharedString, Subscription, Window,
 };
 
+/// Callback invoked when the user picks an agent from the canvas's
+/// "+ Session" toolbar. The canvas only knows the selected workspace
+/// and the chosen agent label; resolving the cwd and minting a session
+/// id happen on the `NativeApp` side.
+pub type SpawnSessionHandler =
+    dyn Fn(SharedString, SharedString, &mut Window, &mut gpui::App) + 'static;
+
+/// Callback invoked when the user clicks a panel's close button. The
+/// canvas hands off the session id; `NativeApp` sends the daemon
+/// `unregister`, which cascades to `session_unregistered` and the panel
+/// is pruned by `sync_terminal_panels`.
+pub type CloseSessionHandler = dyn Fn(SharedString, &mut Window, &mut gpui::App) + 'static;
+
 use serde_json::{json, Value};
 
 use crate::fps_overlay::{self, FpsCounter};
@@ -41,9 +54,18 @@ enum ResizeHandle {
 #[derive(Clone, Debug)]
 enum DragState {
     Idle,
-    PanningCanvas { last_screen: gpui::Point<Pixels> },
-    DraggingPanel { panel_id: usize, last_screen: gpui::Point<Pixels> },
-    ResizingPanel { panel_id: usize, handle: ResizeHandle, last_screen: gpui::Point<Pixels> },
+    PanningCanvas {
+        last_screen: gpui::Point<Pixels>,
+    },
+    DraggingPanel {
+        panel_id: usize,
+        last_screen: gpui::Point<Pixels>,
+    },
+    ResizingPanel {
+        panel_id: usize,
+        handle: ResizeHandle,
+        last_screen: gpui::Point<Pixels>,
+    },
 }
 
 #[derive(Debug)]
@@ -72,10 +94,19 @@ pub struct WorkspaceCanvas {
     /// Frame-time overlay. `Some` only when `ATTN_NATIVE_FPS=1` was set
     /// at startup. Off by default — no record cost, no overlay paint.
     fps: Option<FpsCounter>,
+    /// True while the agent picker chip strip is expanded under the
+    /// "+ Session" pill. Click outside or pick an agent to dismiss.
+    spawn_picker_open: bool,
+    on_spawn: Box<SpawnSessionHandler>,
+    on_close_session: Box<CloseSessionHandler>,
 }
 
 impl WorkspaceCanvas {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        cx: &mut Context<Self>,
+        on_spawn: impl Fn(SharedString, SharedString, &mut Window, &mut gpui::App) + 'static,
+        on_close_session: impl Fn(SharedString, &mut Window, &mut gpui::App) + 'static,
+    ) -> Self {
         let fps = if env_flag("ATTN_NATIVE_FPS") {
             Some(FpsCounter::new())
         } else {
@@ -90,6 +121,9 @@ impl WorkspaceCanvas {
             focus_handle: cx.focus_handle(),
             bounds: Rc::new(Cell::new(None)),
             fps,
+            spawn_picker_open: false,
+            on_spawn: Box::new(on_spawn),
+            on_close_session: Box::new(on_close_session),
         }
     }
 
@@ -98,14 +132,12 @@ impl WorkspaceCanvas {
     /// scripts can drive perf measurements at known zoom levels.
     /// `reset_fps=true` clears the FPS counter (when enabled) so
     /// post-change samples reflect the new steady state.
-    pub fn set_zoom_centered(
-        &mut self,
-        target_zoom: f32,
-        reset_fps: bool,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn set_zoom_centered(&mut self, target_zoom: f32, reset_fps: bool, cx: &mut Context<Self>) {
         let center = match self.bounds.get() {
-            Some(b) => point(b.origin.x + b.size.width / 2.0, b.origin.y + b.size.height / 2.0),
+            Some(b) => point(
+                b.origin.x + b.size.width / 2.0,
+                b.origin.y + b.size.height / 2.0,
+            ),
             None => point(gpui::px(500.0), gpui::px(400.0)),
         };
         let local = self.local_pos(center);
@@ -187,7 +219,9 @@ impl WorkspaceCanvas {
 
         // Check panels in reverse so the topmost (last rendered) wins.
         for panel in panels.iter().rev() {
-            let sp = self.viewport.world_to_screen(point(panel.world_x, panel.world_y));
+            let sp = self
+                .viewport
+                .world_to_screen(point(panel.world_x, panel.world_y));
             let sx = pf(sp.x);
             let sy = pf(sp.y);
             let sw = panel.width * zoom;
@@ -237,11 +271,17 @@ impl WorkspaceCanvas {
         match hit {
             HitResult::TitleBar(id) => {
                 self.focused_panel = Some(id);
-                self.drag_state = DragState::DraggingPanel { panel_id: id, last_screen: pos };
+                self.drag_state = DragState::DraggingPanel {
+                    panel_id: id,
+                    last_screen: pos,
+                };
             }
             HitResult::ResizeHandle(id, handle) => {
-                self.drag_state =
-                    DragState::ResizingPanel { panel_id: id, handle, last_screen: pos };
+                self.drag_state = DragState::ResizingPanel {
+                    panel_id: id,
+                    handle,
+                    last_screen: pos,
+                };
             }
             HitResult::PanelBody(id) => {
                 self.focused_panel = Some(id);
@@ -281,7 +321,10 @@ impl WorkspaceCanvas {
                 self.drag_state = DragState::PanningCanvas { last_screen: pos };
             }
 
-            DragState::DraggingPanel { panel_id, last_screen } => {
+            DragState::DraggingPanel {
+                panel_id,
+                last_screen,
+            } => {
                 let dx = (pf(pos.x) - pf(last_screen.x)) / self.viewport.zoom;
                 let dy = (pf(pos.y) - pf(last_screen.y)) / self.viewport.zoom;
                 if let Some(ws) = self.selected.as_ref() {
@@ -293,10 +336,17 @@ impl WorkspaceCanvas {
                         }
                     });
                 }
-                self.drag_state = DragState::DraggingPanel { panel_id, last_screen: pos };
+                self.drag_state = DragState::DraggingPanel {
+                    panel_id,
+                    last_screen: pos,
+                };
             }
 
-            DragState::ResizingPanel { panel_id, handle, last_screen } => {
+            DragState::ResizingPanel {
+                panel_id,
+                handle,
+                last_screen,
+            } => {
                 // Screen delta → world delta so resize feels zoom-invariant.
                 let dx = (pf(pos.x) - pf(last_screen.x)) / self.viewport.zoom;
                 let dy = (pf(pos.y) - pf(last_screen.y)) / self.viewport.zoom;
@@ -308,19 +358,17 @@ impl WorkspaceCanvas {
                         }
                     });
                 }
-                self.drag_state =
-                    DragState::ResizingPanel { panel_id, handle, last_screen: pos };
+                self.drag_state = DragState::ResizingPanel {
+                    panel_id,
+                    handle,
+                    last_screen: pos,
+                };
             }
         }
         cx.notify();
     }
 
-    fn on_mouse_up(
-        &mut self,
-        _event: &MouseUpEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn on_mouse_up(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         self.drag_state = DragState::Idle;
         cx.notify();
     }
@@ -341,7 +389,9 @@ impl WorkspaceCanvas {
             // space so the focal point lands under the actual cursor and
             // not 240px to its right.
             let factor = if dy > 0.0 { 1.08 } else { 1.0 / 1.08 };
-            self.viewport = self.viewport.zoom_toward(self.local_pos(event.position), factor);
+            self.viewport = self
+                .viewport
+                .zoom_toward(self.local_pos(event.position), factor);
         } else {
             // Regular scroll → pan.
             self.viewport.origin.x -= dx / self.viewport.zoom;
@@ -432,14 +482,8 @@ impl Render for WorkspaceCanvas {
             return r;
         };
 
+        let workspace_id = selected.read(cx).id.clone();
         let panels = selected.read(cx).panels.clone();
-        if panels.is_empty() {
-            let mut r = root.child(empty_state(SharedString::from("Workspace has no panels yet")));
-            if let Some(readout) = readout {
-                r = r.child(fps_overlay::overlay(readout, 0, viewport.zoom));
-            }
-            return r;
-        }
 
         // Push content_size + zoom into every TerminalView so their next
         // render syncs cell dims and emits PtyResize on actual change.
@@ -472,14 +516,42 @@ impl Render for WorkspaceCanvas {
             }
 
             let is_focused = focused_panel == Some(panel.id);
-            let border_color = if is_focused { rgb(0x4a9eff) } else { rgb(0x2a2a35) };
+            let border_color = if is_focused {
+                rgb(0x4a9eff)
+            } else {
+                rgb(0x2a2a35)
+            };
             let content_h = (sh - title_h).max(0.0);
             let title = panel.title.clone();
+            let close_target = match &panel.content {
+                PanelContent::Terminal { session_id, .. } => Some(session_id.clone()),
+                PanelContent::Placeholder(_) => None,
+            };
 
             let body: AnyElement = match &panel.content {
                 PanelContent::Placeholder(view) => view.clone().into_any_element(),
                 PanelContent::Terminal { view, .. } => view.clone().into_any_element(),
             };
+
+            let mut title_bar = div()
+                .w_full()
+                .h(px(title_h))
+                .bg(rgb(0x252535))
+                .flex()
+                .items_center()
+                .pl(px(8.0))
+                .pr(px(4.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .truncate()
+                        .text_xs()
+                        .text_color(rgb(0xa0a0b0))
+                        .child(title),
+                );
+            if let Some(session_id) = close_target {
+                title_bar = title_bar.child(panel_close_button(session_id, cx));
+            }
 
             let panel_div = div()
                 .absolute()
@@ -490,17 +562,14 @@ impl Render for WorkspaceCanvas {
                 .bg(rgb(0x1c1c26))
                 .border_1()
                 .border_color(border_color)
+                .child(title_bar)
                 .child(
                     div()
                         .w_full()
-                        .h(px(title_h))
-                        .bg(rgb(0x252535))
-                        .flex()
-                        .items_center()
-                        .pl(px(8.0))
-                        .child(div().text_xs().text_color(rgb(0xa0a0b0)).child(title)),
+                        .h(px(content_h))
+                        .overflow_hidden()
+                        .child(body),
                 )
-                .child(div().w_full().h(px(content_h)).overflow_hidden().child(body))
                 .child(corner_handle(0.0, 0.0))
                 .child(corner_handle(sw - HANDLE_SIZE, 0.0))
                 .child(corner_handle(0.0, sh - HANDLE_SIZE))
@@ -509,11 +578,133 @@ impl Render for WorkspaceCanvas {
             root = root.child(panel_div);
         }
 
+        if panels.is_empty() {
+            root = root.child(empty_state(SharedString::from(
+                "Workspace has no panels yet — pick an agent above to start one",
+            )));
+        }
+
+        // Render the spawn toolbar last so it sits on top of panels and
+        // empty-state copy. Always visible when a workspace is selected so
+        // the entry point to dogfood is unmissable.
+        root = root.child(self.render_spawn_toolbar(workspace_id, cx));
+
         if let Some(readout) = readout {
             root = root.child(fps_overlay::overlay(readout, panels.len(), viewport.zoom));
         }
         root
     }
+}
+
+impl WorkspaceCanvas {
+    /// Top-left "+ Session" pill plus an inline agent picker (Claude /
+    /// Codex / Shell) that expands when the pill is clicked. All chips
+    /// stop propagation so clicks don't also pan the canvas underneath.
+    fn render_spawn_toolbar(
+        &self,
+        workspace_id: SharedString,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut row = div()
+            .absolute()
+            .top(px(12.0))
+            .left(px(12.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(6.0))
+            .child(spawn_pill(self.spawn_picker_open).on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.spawn_picker_open = !this.spawn_picker_open;
+                    cx.notify();
+                }),
+            ));
+
+        if self.spawn_picker_open {
+            for (label, agent_id) in SPAWNABLE_AGENTS {
+                let agent = SharedString::from(*agent_id);
+                let workspace_id = workspace_id.clone();
+                row = row.child(agent_chip(SharedString::from(*label)).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        let workspace_id = workspace_id.clone();
+                        let agent = agent.clone();
+                        this.spawn_picker_open = false;
+                        (this.on_spawn)(workspace_id, agent, window, cx);
+                        cx.notify();
+                    }),
+                ));
+            }
+        }
+
+        row.into_any_element()
+    }
+}
+
+/// Trailing close button rendered on each terminal panel's title bar.
+/// Shares the dim grey treatment of corner_handle / sidebar's delete `x`
+/// so the eye reads it as an affordance, not a primary action.
+fn panel_close_button(session_id: SharedString, cx: &mut Context<WorkspaceCanvas>) -> gpui::Div {
+    div()
+        .w(px(20.0))
+        .h(px(18.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(rgb(0x6a6a78))
+        .text_size(px(13.0))
+        .child(SharedString::from("x"))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, window, cx| {
+                // Stop propagation so the click doesn't also trigger the
+                // canvas's title-bar drag-start hit (which would mid-drag
+                // the panel we're about to remove).
+                cx.stop_propagation();
+                let id = session_id.clone();
+                (this.on_close_session)(id, window, cx);
+            }),
+        )
+}
+
+/// Static list of agents the canvas spawn toolbar offers. Strings on the
+/// right are the wire-level agent identifiers the daemon understands
+/// (`internal/protocol/schema/main.tsp` SessionAgent enum). Adding more
+/// is a one-line append once we have icons / labels for them.
+const SPAWNABLE_AGENTS: &[(&str, &str)] =
+    &[("Claude", "claude"), ("Codex", "codex"), ("Shell", "shell")];
+
+/// "+ Session" pill. Visually distinct from agent chips so it reads as
+/// the disclosure trigger, not one of the choices. Highlighted when the
+/// picker is expanded so it's clear which surface is active.
+fn spawn_pill(open: bool) -> gpui::Div {
+    let bg = if open { rgb(0x3a3a4a) } else { rgb(0x252535) };
+    let text = if open { rgb(0xf0f0f5) } else { rgb(0xc8c8d2) };
+    div()
+        .px(px(10.0))
+        .py(px(4.0))
+        .rounded(px(4.0))
+        .bg(bg)
+        .text_color(text)
+        .text_size(px(12.0))
+        .child(SharedString::from("+ Session"))
+}
+
+fn agent_chip(label: SharedString) -> gpui::Div {
+    div()
+        .px(px(8.0))
+        .py(px(4.0))
+        .rounded(px(4.0))
+        .bg(rgb(0x2c2c3a))
+        .border_1()
+        .border_color(rgb(0x3a3a4a))
+        .text_color(rgb(0xd8d8e2))
+        .text_size(px(12.0))
+        .child(label)
 }
 
 fn env_flag(name: &str) -> bool {

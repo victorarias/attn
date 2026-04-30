@@ -8,8 +8,11 @@
 use std::sync::Arc;
 
 use async_channel::{unbounded, Receiver, Sender};
-use attn_protocol::{PtyInputMessage, UnregisterWorkspaceMessage};
-use gpui::{prelude::*, AnyView, App, AsyncApp, Entity, Keystroke, Modifiers, SharedString, WeakEntity, Window};
+use attn_protocol::{PtyInputMessage, UnregisterSessionMessage, UnregisterWorkspaceMessage};
+use gpui::{
+    prelude::*, AnyView, App, AsyncApp, Entity, Keystroke, Modifiers, SharedString, WeakEntity,
+    Window,
+};
 use serde_json::{json, Value};
 
 use crate::app::NativeApp;
@@ -90,14 +93,18 @@ async fn handle_action(
         "set_zoom" => set_zoom(app, cx, payload),
         "create_workspace" => create_workspace(app, cx, payload),
         "destroy_workspace" => destroy_workspace(app, cx, payload),
+        "spawn_session" => spawn_session(app, cx, payload),
+        "unregister_session" => unregister_session(app, cx, payload),
         _ => Err(format!("unknown action: {action}")),
     }
 }
 
 fn get_state(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
     let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    cx.read_entity(&entity, |app: &NativeApp, cx: &App| app.automation_snapshot(cx))
-        .map_err(|e| format!("read entity: {e}"))
+    cx.read_entity(&entity, |app: &NativeApp, cx: &App| {
+        app.automation_snapshot(cx)
+    })
+    .map_err(|e| format!("read entity: {e}"))
 }
 
 fn list_sessions(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
@@ -144,10 +151,22 @@ fn move_panel(
         .get("panel_id")
         .and_then(Value::as_u64)
         .ok_or("payload.panel_id (number) is required")? as usize;
-    let world_x = payload.get("world_x").and_then(Value::as_f64).map(|n| n as f32);
-    let world_y = payload.get("world_y").and_then(Value::as_f64).map(|n| n as f32);
-    let width = payload.get("width").and_then(Value::as_f64).map(|n| n as f32);
-    let height = payload.get("height").and_then(Value::as_f64).map(|n| n as f32);
+    let world_x = payload
+        .get("world_x")
+        .and_then(Value::as_f64)
+        .map(|n| n as f32);
+    let world_y = payload
+        .get("world_y")
+        .and_then(Value::as_f64)
+        .map(|n| n as f32);
+    let width = payload
+        .get("width")
+        .and_then(Value::as_f64)
+        .map(|n| n as f32);
+    let height = payload
+        .get("height")
+        .and_then(Value::as_f64)
+        .map(|n| n as f32);
 
     let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
     let workspace = cx
@@ -277,6 +296,84 @@ fn destroy_workspace(
     Ok(json!({ "id": id }))
 }
 
+/// Spawn a new session inside an existing workspace through the same
+/// `NativeApp::spawn_session_in_workspace` path the canvas toolbar uses,
+/// so a regression in id generation, pending-spawn tracking, or wire
+/// shape trips this action just like it would in the UI. Caller may
+/// override `cwd` for tests that want to spawn outside the workspace's
+/// recorded directory; otherwise we fall back to the workspace's cwd
+/// (matching the toolbar's behaviour).
+fn spawn_session(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let workspace_id = payload
+        .get("workspace_id")
+        .and_then(Value::as_str)
+        .ok_or("payload.workspace_id (string) is required")?
+        .trim()
+        .to_string();
+    if workspace_id.is_empty() {
+        return Err("payload.workspace_id must be non-empty".to_string());
+    }
+    let agent = payload
+        .get("agent")
+        .and_then(Value::as_str)
+        .ok_or("payload.agent (string) is required")?
+        .trim()
+        .to_string();
+    if agent.is_empty() {
+        return Err("payload.agent must be non-empty".to_string());
+    }
+
+    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    let session_id = cx
+        .update_entity(&app_entity, |app: &mut NativeApp, cx| {
+            app.spawn_session_in_workspace(
+                SharedString::from(workspace_id.clone()),
+                SharedString::from(agent.clone()),
+                cx,
+            )
+        })
+        .map_err(|e| format!("update entity: {e}"))??;
+
+    Ok(json!({
+        "session_id": session_id.as_ref(),
+        "workspace_id": workspace_id,
+        "agent": agent,
+    }))
+}
+
+/// Tear down a session through the same daemon command the canvas's
+/// panel close button issues. Idempotent on the daemon — retrying after
+/// a missed response can't double-fault.
+fn unregister_session(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let session_id = payload
+        .get("session_id")
+        .and_then(Value::as_str)
+        .ok_or("payload.session_id (string) is required")?
+        .trim()
+        .to_string();
+    if session_id.is_empty() {
+        return Err("payload.session_id must be non-empty".to_string());
+    }
+
+    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    cx.read_entity(&app_entity, |app: &NativeApp, cx: &App| {
+        app.daemon()
+            .read(cx)
+            .send_cmd(&UnregisterSessionMessage::new(session_id.clone()))
+    })
+    .map_err(|e| format!("read entity: {e}"))??;
+
+    Ok(json!({ "session_id": session_id }))
+}
+
 /// UUIDv4-shaped hex id (`xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`) so
 /// generated workspace ids look like the daemon's CLI-generated ones in
 /// logs and the recent-locations table. Pulling in the `uuid` crate just
@@ -367,18 +464,21 @@ fn type_into_panel(
     let keystrokes = keystrokes_for_text(&text);
     let count = keystrokes.len();
 
-    cx.update_window(window, |_root: AnyView, window: &mut Window, app: &mut App| {
-        view.update(app, |view: &mut TerminalView, cx| {
-            // Focus first so the on_key_down handler accepts the
-            // keystroke. Mirrors what a real click would do before the
-            // user starts typing — we want the test to fail if focus
-            // routing is broken, not silently succeed.
-            view.focus_handle.clone().focus(window);
-            for keystroke in keystrokes {
-                view.inject_keystroke(keystroke, window, cx);
-            }
-        });
-    })
+    cx.update_window(
+        window,
+        |_root: AnyView, window: &mut Window, app: &mut App| {
+            view.update(app, |view: &mut TerminalView, cx| {
+                // Focus first so the on_key_down handler accepts the
+                // keystroke. Mirrors what a real click would do before the
+                // user starts typing — we want the test to fail if focus
+                // routing is broken, not silently succeed.
+                view.focus_handle.clone().focus(window);
+                for keystroke in keystrokes {
+                    view.inject_keystroke(keystroke, window, cx);
+                }
+            });
+        },
+    )
     .map_err(|e| format!("update window: {e}"))?;
 
     Ok(json!({
@@ -463,7 +563,11 @@ fn find_terminal_model(
 ) -> Option<Entity<TerminalModel>> {
     for ws in app.workspaces() {
         for panel in ws.read(cx).panels.iter() {
-            if let PanelContent::Terminal { session_id: sid, view } = &panel.content {
+            if let PanelContent::Terminal {
+                session_id: sid,
+                view,
+            } = &panel.content
+            {
                 if sid.as_ref() == session_id {
                     return Some(view.read(cx).model().clone());
                 }
@@ -476,14 +580,14 @@ fn find_terminal_model(
 /// Like `find_terminal_model` but returns the GPUI view entity. Needed by
 /// `type_into_panel` because keystroke dispatch happens on the view, not
 /// the model.
-fn find_terminal_view(
-    app: &NativeApp,
-    session_id: &str,
-    cx: &App,
-) -> Option<Entity<TerminalView>> {
+fn find_terminal_view(app: &NativeApp, session_id: &str, cx: &App) -> Option<Entity<TerminalView>> {
     for ws in app.workspaces() {
         for panel in ws.read(cx).panels.iter() {
-            if let PanelContent::Terminal { session_id: sid, view } = &panel.content {
+            if let PanelContent::Terminal {
+                session_id: sid,
+                view,
+            } = &panel.content
+            {
                 if sid.as_ref() == session_id {
                     return Some(view.clone());
                 }
@@ -498,10 +602,7 @@ fn find_terminal_view(
 /// access — the buffer is global — but routes through the action pump
 /// for protocol uniformity.
 fn tail_events(payload: Value) -> Result<Value, String> {
-    let cursor = payload
-        .get("since_id")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let cursor = payload.get("since_id").and_then(Value::as_u64).unwrap_or(0);
     Ok(events::tail_events_response(cursor))
 }
 
@@ -605,7 +706,10 @@ mod tests {
         }
         // Version + variant nibbles per RFC 4122.
         assert_eq!(bytes[14], b'4', "version nibble: {id}");
-        assert!(matches!(bytes[19], b'8' | b'9' | b'a' | b'b'), "variant nibble: {id}");
+        assert!(
+            matches!(bytes[19], b'8' | b'9' | b'a' | b'b'),
+            "variant nibble: {id}"
+        );
     }
 
     #[test]

@@ -65,6 +65,15 @@ pub enum DaemonEvent {
         #[allow(dead_code)]
         exit_code: i32,
     },
+    /// Daemon ack for a `spawn_session` we issued. `success=false` carries
+    /// `error` describing the failure (invalid agent, executable missing,
+    /// PTY spawn failure). The client surfaces this so spawns that go
+    /// nowhere don't fail silently.
+    SpawnResult {
+        session_id: String,
+        success: bool,
+        error: Option<String>,
+    },
 }
 
 pub struct DaemonClient {
@@ -319,6 +328,13 @@ impl DaemonClient {
                     exit_code: msg.exit_code,
                 });
             }
+            ServerEvent::SpawnResult(msg) => {
+                cx.emit(DaemonEvent::SpawnResult {
+                    session_id: msg.id,
+                    success: msg.success,
+                    error: msg.error,
+                });
+            }
             ServerEvent::Unknown(_) => {}
         }
     }
@@ -410,6 +426,12 @@ fn record_inbound_event(event: &ServerEvent) {
             "kind": "session_exited",
             "session_id": m.id.as_str(),
             "exit_code": m.exit_code,
+        }),
+        ServerEvent::SpawnResult(m) => json!({
+            "kind": "spawn_result",
+            "session_id": m.id.as_str(),
+            "success": m.success,
+            "error": m.error.as_deref(),
         }),
         ServerEvent::PtyOutput(_) => return,
         ServerEvent::Unknown(name) => json!({"kind": "unknown", "event": name.as_str()}),
