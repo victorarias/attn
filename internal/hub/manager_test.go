@@ -72,7 +72,6 @@ func TestManagerRemoteSessionsUpsertAndClear(t *testing.T) {
 		StateSince:     "2026-04-03T10:00:00Z",
 		StateUpdatedAt: "2026-04-03T10:00:00Z",
 		LastSeen:       "2026-04-03T10:00:00Z",
-		Todos:          []string{"one"},
 	})
 	if !changed || count != 1 {
 		t.Fatalf("upsertRemoteSession() = (%v, %d), want (true, 1)", changed, count)
@@ -86,7 +85,6 @@ func TestManagerRemoteSessionsUpsertAndClear(t *testing.T) {
 		StateSince:     "2026-04-03T10:05:00Z",
 		StateUpdatedAt: "2026-04-03T10:05:00Z",
 		LastSeen:       "2026-04-03T10:05:00Z",
-		Todos:          []string{"one", "two"},
 	})
 	if !changed || count != 1 {
 		t.Fatalf("upsertRemoteSession(update) = (%v, %d), want (true, 1)", changed, count)
@@ -98,9 +96,6 @@ func TestManagerRemoteSessionsUpsertAndClear(t *testing.T) {
 	}
 	if sessions[0].State != protocol.SessionStateIdle {
 		t.Fatalf("RemoteSessions()[0].State = %q, want %q", sessions[0].State, protocol.SessionStateIdle)
-	}
-	if len(sessions[0].Todos) != 2 {
-		t.Fatalf("RemoteSessions()[0].Todos len = %d, want 2", len(sessions[0].Todos))
 	}
 
 	if changed := manager.clearRemoteSessions(record.ID); !changed {

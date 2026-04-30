@@ -165,27 +165,6 @@ func TestStore_UpdateState(t *testing.T) {
 	}
 }
 
-func TestStore_UpdateTodos(t *testing.T) {
-	s := New()
-
-	s.Add(&protocol.Session{
-		ID:    "abc123",
-		Label: "test",
-		Todos: []string{},
-	})
-
-	todos := []string{"task 1", "task 2"}
-	s.UpdateTodos("abc123", todos)
-
-	got := s.Get("abc123")
-	if len(got.Todos) != 2 {
-		t.Errorf("Todos length = %d, want 2", len(got.Todos))
-	}
-	if got.Todos[0] != "task 1" {
-		t.Errorf("Todos[0] = %q, want %q", got.Todos[0], "task 1")
-	}
-}
-
 func TestStore_Touch(t *testing.T) {
 	s := New()
 

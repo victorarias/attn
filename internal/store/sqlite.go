@@ -19,7 +19,6 @@ CREATE TABLE IF NOT EXISTS sessions (
 	state TEXT NOT NULL DEFAULT 'idle',
 	state_since TEXT NOT NULL,
 	state_updated_at TEXT NOT NULL,
-	todos TEXT,
 	last_seen TEXT NOT NULL,
 	muted INTEGER NOT NULL DEFAULT 0
 );
@@ -317,6 +316,7 @@ var migrations = []migration{
 		CREATE INDEX IF NOT EXISTS idx_canvas_workspace_panels_workspace_id
 			ON canvas_workspace_panels(workspace_id);
 	`},
+	{37, "drop unused todos column from sessions", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -427,6 +427,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 35 {
 			if err := applyMigration35(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 37 {
+			if err := applyMigration37(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -586,6 +591,20 @@ func applyMigration34(tx *sql.Tx) error {
 		return nil
 	}
 	if _, err := tx.Exec("ALTER TABLE endpoints ADD COLUMN profile TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyMigration37(tx *sql.Tx) error {
+	exists, err := columnExists(tx, "sessions", "todos")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE sessions DROP COLUMN todos"); err != nil {
 		return err
 	}
 	return nil

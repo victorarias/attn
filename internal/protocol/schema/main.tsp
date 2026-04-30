@@ -128,7 +128,6 @@ model Session {
   state_updated_at: string;     // ISO timestamp, always set
   needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
   recoverable?: boolean;        // True when session can be recovered after daemon restart (agent has resumable conversation)
-  todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
   muted: boolean;               // Always has value (defaults false)
 }
@@ -346,12 +345,6 @@ model StopMessage {
   cmd: "stop";
   id: string;
   transcript_path: string;
-}
-
-model TodosMessage {
-  cmd: "todos";
-  id: string;
-  todos: string[];
 }
 
 model QueryMessage {
@@ -864,11 +857,6 @@ model WorkspaceUnregisteredMessage {
 model WorkspaceStateChangedMessage {
   event: "workspace_state_changed";
   workspace: Workspace;
-}
-
-model SessionTodosUpdatedMessage {
-  event: "session_todos_updated";
-  session: Session;
 }
 
 model SessionsUpdatedMessage {
@@ -1439,7 +1427,6 @@ alias DaemonEvent =
   | WorkspaceRegisteredMessage
   | WorkspaceUnregisteredMessage
   | WorkspaceStateChangedMessage
-  | SessionTodosUpdatedMessage
   | SessionsUpdatedMessage
   | SessionLayoutMessage
   | SessionLayoutUpdatedMessage

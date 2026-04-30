@@ -19,6 +19,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Removed
 - **Native Synthetic Load Harness**: Removed the local-only native canvas synthetic workspace and placeholder panel scaffolding, so native workspaces and terminal panels now come from daemon-backed state only.
+- **TodoWrite Tracking**: Attn no longer captures Claude Code's TodoWrite list as session metadata or uses pending todos as a signal for `waiting_input`. The hook (`PostToolUse[TodoWrite]`), the `_hook-todo` CLI dispatch, the `todos` daemon command and `session_todos_updated` event, the `todos` field on sessions, and the SQLite `sessions.todos` column are all gone; existing databases drop the column on next open. Classification now relies solely on transcript-driven and hook-driven signals, with richer Notification/PermissionRequest wiring landing in follow-ups. Protocol version bumped 58 → 59 so a stale daemon or client fails the version check instead of silently drifting.
 
 ---
 

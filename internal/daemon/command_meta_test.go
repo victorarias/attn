@@ -13,7 +13,6 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdState,
 		protocol.CmdSetSessionResumeID,
 		protocol.CmdStop,
-		protocol.CmdTodos,
 		protocol.CmdQuery,
 		protocol.CmdHeartbeat,
 		protocol.CmdSessionVisualized,

@@ -39,17 +39,8 @@ var (
 
 // hookInput represents the JSON input from Claude Code hooks
 type hookInput struct {
-	SessionID      string          `json:"session_id"`
-	TranscriptPath string          `json:"transcript_path"`
-	ToolInput      json.RawMessage `json:"tool_input"`
-}
-
-// todoWriteInput represents the tool_input for TodoWrite
-type todoWriteInput struct {
-	Todos []struct {
-		Content string `json:"content"`
-		Status  string `json:"status"`
-	} `json:"todos"`
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
 }
 
 func init() {
@@ -135,8 +126,6 @@ func main() {
 		runHookStop()
 	case "_hook-state":
 		runHookState()
-	case "_hook-todo":
-		runHookTodo()
 	default:
 		// Check if it's a flag (starts with -)
 		if len(os.Args[1]) > 0 && os.Args[1][0] == '-' {
@@ -813,48 +802,6 @@ func runHookState() {
 	syncSessionResumeID(c, sessionID, input.SessionID)
 	if err := c.UpdateState(sessionID, state); err != nil {
 		fmt.Fprintf(os.Stderr, "error updating state: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func runHookTodo() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "usage: attn _hook-todo <session_id>\n")
-		os.Exit(1)
-	}
-	sessionID := os.Args[2]
-
-	// Parse hook input from stdin
-	var input hookInput
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		return // Silently fail if no input
-	}
-	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
-	syncSessionResumeID(c, sessionID, input.SessionID)
-
-	// Parse tool_input to extract todos
-	var todoInput todoWriteInput
-	if err := json.Unmarshal(input.ToolInput, &todoInput); err != nil {
-		return // Silently fail if parse error
-	}
-
-	// Format todos with status markers
-	var todos []string
-	for _, t := range todoInput.Todos {
-		var marker string
-		switch t.Status {
-		case "completed":
-			marker = "[✓]"
-		case "in_progress":
-			marker = "[→]"
-		default:
-			marker = "[ ]"
-		}
-		todos = append(todos, fmt.Sprintf("%s %s", marker, t.Content))
-	}
-
-	if err := c.UpdateTodos(sessionID, todos); err != nil {
-		fmt.Fprintf(os.Stderr, "error updating todos: %v\n", err)
 		os.Exit(1)
 	}
 }

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "58"
+const ProtocolVersion = "59"
 
 // Commands
 const (
@@ -20,7 +20,6 @@ const (
 	CmdState                        = "state"
 	CmdSetSessionResumeID           = "set_session_resume_id"
 	CmdStop                         = "stop"
-	CmdTodos                        = "todos"
 	CmdQuery                        = "query"
 	CmdHeartbeat                    = "heartbeat"
 	CmdSessionVisualized            = "session_visualized"
@@ -103,7 +102,6 @@ const (
 	EventWorkspaceRegistered        = "workspace_registered"
 	EventWorkspaceUnregistered      = "workspace_unregistered"
 	EventWorkspaceStateChanged      = "workspace_state_changed"
-	EventSessionTodosUpdated        = "session_todos_updated"
 	EventSessionsUpdated            = "sessions_updated"
 	EventPRsUpdated                 = "prs_updated"
 	EventReposUpdated               = "repos_updated"
@@ -278,13 +276,6 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdStop:
 		var msg StopMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdTodos:
-		var msg TodosMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

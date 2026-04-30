@@ -1463,8 +1463,6 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSetSessionResumeID(conn, msg.(*protocol.SetSessionResumeIDMessage))
 	case protocol.CmdStop:
 		d.handleStop(conn, msg.(*protocol.StopMessage))
-	case protocol.CmdTodos:
-		d.handleTodos(conn, msg.(*protocol.TodosMessage))
 	case protocol.CmdStartReviewLoop:
 		d.handleStartReviewLoop(conn, msg.(*protocol.StartReviewLoopMessage))
 	case protocol.CmdStopReviewLoop:
@@ -1705,21 +1703,6 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		caps := agentdriver.EffectiveCapabilities(driver)
 		transcriptEnabled = caps.HasTranscript
 		classifierEnabled = caps.HasClassifier
-	}
-
-	// Check pending todos first (fast path)
-	// Todos are stored as "[✓] task" (completed), "[→] task" (in_progress), "[ ] task" (pending)
-	pendingCount := 0
-	for _, todo := range session.Todos {
-		if !strings.HasPrefix(todo, "[✓]") {
-			pendingCount++
-		}
-	}
-	d.logf("classifySessionState: session %s has %d total todos, %d pending", sessionID, len(session.Todos), pendingCount)
-	if pendingCount > 0 {
-		d.logf("classifySessionState: session %s has pending todos, setting waiting_input", sessionID)
-		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateWaitingInput, classificationStartTime)
-		return
 	}
 
 	if !transcriptEnabled {
@@ -2062,9 +2045,6 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 		return nil
 	}
 	clone := *session
-	if len(session.Todos) > 0 {
-		clone.Todos = append([]string(nil), session.Todos...)
-	}
 	return &clone
 }
 
@@ -2206,24 +2186,6 @@ func (d *Daemon) broadcastRateLimited(resource string, resetAt time.Time) {
 		RateLimitResource: protocol.Ptr(resource),
 		RateLimitResetAt:  protocol.Ptr(resetAtStr),
 	})
-}
-
-func (d *Daemon) handleTodos(conn net.Conn, msg *protocol.TodosMessage) {
-	d.store.UpdateTodos(msg.ID, msg.Todos)
-	d.store.Touch(msg.ID)
-	d.sendOK(conn)
-
-	// Broadcast to WebSocket clients
-	sessions := d.store.List("")
-	for _, s := range sessions {
-		if s.ID == msg.ID {
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:   protocol.EventSessionTodosUpdated,
-				Session: d.sessionForBroadcast(s),
-			})
-			break
-		}
-	}
 }
 
 func (d *Daemon) handleQuery(conn net.Conn, msg *protocol.QueryMessage) {
