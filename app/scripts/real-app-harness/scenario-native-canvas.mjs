@@ -340,7 +340,10 @@ async function checkSelectWorkspace(conn) {
 
 async function checkPtyRoundTrip(conn) {
   const state = await conn.request('get_state');
-  let ws = pickFirst(state, 'workspaces');
+  let ws = state.result.selected_workspace_id
+    ? state.result.workspaces.find((candidate) => candidate.id === state.result.selected_workspace_id)
+    : null;
+  ws ||= pickFirst(state, 'workspaces');
   let createdWorkspaceId = null;
   if (!ws) {
     const created = await conn.request('create_workspace', {
@@ -352,13 +355,30 @@ async function checkPtyRoundTrip(conn) {
     await pollUntil(
       async () => {
         const next = await conn.request('get_state');
-        return next.result.workspaces.find((candidate) => candidate.id === createdWorkspaceId);
+        return (
+          next.result.workspaces.find((candidate) => candidate.id === createdWorkspaceId) &&
+          next.result.selected_workspace_id === createdWorkspaceId
+        );
       },
-      { timeoutMs: 5000, intervalMs: 100, label: 'pty round-trip workspace in get_state' },
+      {
+        timeoutMs: 5000,
+        intervalMs: 100,
+        label: 'pty round-trip workspace in get_state and selected',
+      },
     );
     const nextState = await conn.request('get_state');
     ws = nextState.result.workspaces.find((candidate) => candidate.id === createdWorkspaceId);
     info(`  created temporary workspace ${createdWorkspaceId.slice(0, 8)}… for PTY round-trip`);
+  } else if (state.result.selected_workspace_id !== ws.id) {
+    const selected = await conn.request('select_workspace', { id: ws.id });
+    if (!selected.ok) fail(`select_workspace for pty round-trip: ${selected.error}`);
+    await pollUntil(
+      async () => {
+        const next = await conn.request('get_state');
+        return next.ok && next.result.selected_workspace_id === ws.id;
+      },
+      { timeoutMs: 5000, intervalMs: 100, label: 'pty round-trip workspace selected' },
+    );
   }
   // Capture the event cursor BEFORE spawning so we can prove (or refute)
   // that every step of the chain — daemon broadcast, app receipt, panel

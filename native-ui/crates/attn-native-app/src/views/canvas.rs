@@ -200,7 +200,7 @@ impl WorkspaceCanvas {
             },
             // focused_panel_id is retained for older scripts; new callers
             // should read selected_panel_id + input_focused_panel_id.
-            "focused_panel_id": self.input_focused_panel,
+            "focused_panel_id": self.selected_panel,
             "selected_panel_id": self.selected_panel,
             "input_focused_panel_id": self.input_focused_panel,
             "bounds": bounds,
