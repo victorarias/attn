@@ -299,6 +299,22 @@ impl NativeApp {
         });
     }
 
+    /// Select a canvas panel by session id. When `input_focus` is true,
+    /// keyboard input routes to the panel's terminal; otherwise the panel
+    /// is selected at the canvas level and keybindings stay with the canvas.
+    pub fn set_canvas_panel_focus_by_session(
+        &self,
+        session_id: &str,
+        input_focus: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let canvas = self.canvas.clone();
+        canvas.update(cx, |canvas, cx| {
+            canvas.set_panel_focus_by_session(session_id, input_focus, window, cx)
+        })
+    }
+
     /// Read-only handle to the daemon client, exposed so the automation
     /// module can serialize wire-level workspace + session state without
     /// cloning the lists out of `NativeApp`.

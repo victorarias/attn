@@ -84,6 +84,7 @@ async fn handle_action(
         "list_sessions" => list_sessions(app, cx),
         "get_window_geometry" => get_window_geometry(cx),
         "select_workspace" => select_workspace(app, cx, payload),
+        "focus_panel" => focus_panel(app, cx, payload),
         "move_panel" => move_panel(app, cx, payload),
         "send_pty_input" => send_pty_input(app, cx, payload),
         "type_into_panel" => type_into_panel(app, cx, payload),
@@ -96,6 +97,49 @@ async fn handle_action(
         "unregister_session" => unregister_session(app, cx, payload),
         _ => Err(format!("unknown action: {action}")),
     }
+}
+
+fn focus_panel(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let session_id = payload
+        .get("session_id")
+        .and_then(Value::as_str)
+        .ok_or("payload.session_id (string) is required")?
+        .to_string();
+    let input_focus = payload
+        .get("input_focus")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    let window = cx
+        .update(|app: &mut App| app.windows().into_iter().next())
+        .map_err(|e| format!("list windows: {e}"))?
+        .ok_or("no open windows")?;
+    let session_id_for_focus = session_id.clone();
+
+    cx.update_window(
+        window,
+        move |_root: AnyView, window: &mut Window, app: &mut App| {
+            app_entity.update(app, |native: &mut NativeApp, cx| {
+                native.set_canvas_panel_focus_by_session(
+                    &session_id_for_focus,
+                    input_focus,
+                    window,
+                    cx,
+                )
+            })
+        },
+    )
+    .map_err(|e| format!("update window: {e}"))??;
+
+    Ok(json!({
+        "session_id": session_id,
+        "input_focus": input_focus,
+    }))
 }
 
 fn get_state(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
@@ -498,6 +542,10 @@ fn type_into_panel(
         .and_then(Value::as_str)
         .ok_or("payload.text (string) is required")?
         .to_string();
+    let focus = payload
+        .get("focus")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
 
     let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
     let view = cx
@@ -514,27 +562,36 @@ fn type_into_panel(
 
     let keystrokes = keystrokes_for_text(&text);
     let count = keystrokes.len();
+    let session_id_for_focus = session_id.clone();
+    let app_entity_for_focus = app_entity.clone();
 
     cx.update_window(
         window,
-        |_root: AnyView, window: &mut Window, app: &mut App| {
+        move |_root: AnyView, window: &mut Window, app: &mut App| {
+            if focus {
+                app_entity_for_focus.update(app, |native: &mut NativeApp, cx| {
+                    native.set_canvas_panel_focus_by_session(
+                        &session_id_for_focus,
+                        true,
+                        window,
+                        cx,
+                    )
+                })?;
+            }
             view.update(app, |view: &mut TerminalView, cx| {
-                // Focus first so the on_key_down handler accepts the
-                // keystroke. Mirrors what a real click would do before the
-                // user starts typing — we want the test to fail if focus
-                // routing is broken, not silently succeed.
-                view.focus_handle.clone().focus(window);
                 for keystroke in keystrokes {
                     view.inject_keystroke(keystroke, window, cx);
                 }
             });
+            Ok::<_, String>(())
         },
     )
-    .map_err(|e| format!("update window: {e}"))?;
+    .map_err(|e| format!("update window: {e}"))??;
 
     Ok(json!({
         "session_id": session_id,
         "keystrokes": count,
+        "focused_first": focus,
     }))
 }
 
