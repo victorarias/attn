@@ -37,6 +37,7 @@ pub type PanelGeometryCommitHandler =
 
 use serde_json::{json, Value};
 
+use crate::domain::panel_navigation::{navigate_panel, NavigationDirection, PanelNavItem};
 use crate::domain::viewport::{pf, Viewport};
 use crate::state::panel::{Panel, TITLE_HEIGHT};
 use crate::state::workspace::Workspace;
@@ -47,6 +48,7 @@ use crate::views::fps_overlay::{self, FpsCounter};
 const HANDLE_SIZE: f32 = 8.0; // screen-space pixels (fixed, not scaled)
 const PANEL_MIN_W: f32 = 120.0; // world-space
 const PANEL_MIN_H: f32 = 80.0; // world-space
+const TITLE_SCREEN_MIN_H: f32 = 18.0; // screen-space; keeps title dragging usable when zoomed out
 
 // ── Drag/resize state ─────────────────────────────────────────────────────────
 
@@ -252,6 +254,23 @@ impl WorkspaceCanvas {
         self.selected_panel = Some(id);
     }
 
+    fn navigate_selected_panel(&mut self, direction: NavigationDirection, cx: &mut Context<Self>) {
+        let panels: Vec<PanelNavItem> = self
+            .panels_snapshot(cx)
+            .into_iter()
+            .map(|panel| PanelNavItem {
+                id: panel.id,
+                world_x: panel.world_x,
+                world_y: panel.world_y,
+                width: panel.width,
+                height: panel.height,
+            })
+            .collect();
+        if let Some(next_id) = navigate_panel(&panels, self.selected_panel, direction) {
+            self.selected_panel = Some(next_id);
+        }
+    }
+
     fn release_input_focus(&mut self, window: &mut Window) {
         self.input_focused_panel = None;
         self.focus_handle.clone().focus(window);
@@ -290,13 +309,20 @@ impl WorkspaceCanvas {
             let sy = pf(sp.y);
             let sw = panel.width * zoom;
             let sh = panel.height * zoom;
+            let title_h = title_screen_height(zoom);
 
             // Resize corner zones — fixed 8+2px hit area in screen space.
             let half = HANDLE_SIZE / 2.0 + 2.0;
-            if (mx - sx).abs() <= half && (my - sy).abs() <= half {
+            if top_resize_handles_enabled(zoom)
+                && (mx - sx).abs() <= half
+                && (my - sy).abs() <= half
+            {
                 return HitResult::ResizeHandle(panel.id, ResizeHandle::TopLeft);
             }
-            if (mx - (sx + sw)).abs() <= half && (my - sy).abs() <= half {
+            if top_resize_handles_enabled(zoom)
+                && (mx - (sx + sw)).abs() <= half
+                && (my - sy).abs() <= half
+            {
                 return HitResult::ResizeHandle(panel.id, ResizeHandle::TopRight);
             }
             if (mx - sx).abs() <= half && (my - (sy + sh)).abs() <= half {
@@ -307,7 +333,6 @@ impl WorkspaceCanvas {
             }
 
             if mx >= sx && mx <= sx + sw && my >= sy && my <= sy + sh {
-                let title_h = TITLE_HEIGHT * zoom;
                 if my <= sy + title_h {
                     return HitResult::TitleBar(panel.id);
                 }
@@ -372,6 +397,30 @@ impl WorkspaceCanvas {
             "escape" if self.input_focused_panel.is_some() => {
                 cx.stop_propagation();
                 self.release_input_focus(window);
+                cx.notify();
+            }
+            _ if self.input_focused_panel.is_some() => {}
+            "tab" if self.focus_handle.is_focused(window) => {
+                cx.stop_propagation();
+                if event.keystroke.modifiers.shift {
+                    self.navigate_selected_panel(NavigationDirection::Previous, cx);
+                } else {
+                    self.navigate_selected_panel(NavigationDirection::Next, cx);
+                }
+                cx.notify();
+            }
+            key @ ("up" | "down" | "left" | "right" | "h" | "j" | "k" | "l")
+                if self.focus_handle.is_focused(window) =>
+            {
+                cx.stop_propagation();
+                let direction = match key {
+                    "up" | "k" => NavigationDirection::Up,
+                    "down" | "j" => NavigationDirection::Down,
+                    "left" | "h" => NavigationDirection::Left,
+                    "right" | "l" => NavigationDirection::Right,
+                    _ => unreachable!(),
+                };
+                self.navigate_selected_panel(direction, cx);
                 cx.notify();
             }
             "enter" if self.focus_handle.is_focused(window) => {
@@ -547,6 +596,31 @@ fn apply_resize(p: &mut Panel, handle: ResizeHandle, dx: f32, dy: f32) {
     }
 }
 
+fn title_screen_height(zoom: f32) -> f32 {
+    (TITLE_HEIGHT * zoom).max(TITLE_SCREEN_MIN_H)
+}
+
+fn top_resize_handles_enabled(zoom: f32) -> bool {
+    TITLE_HEIGHT * zoom >= TITLE_SCREEN_MIN_H
+}
+
+fn reconcile_panel_focus(
+    selected_panel: &mut Option<usize>,
+    input_focused_panel: &mut Option<usize>,
+    panel_ids: impl IntoIterator<Item = usize>,
+) -> bool {
+    let panel_ids: std::collections::HashSet<usize> = panel_ids.into_iter().collect();
+    let mut cleared_input_focus = false;
+    if selected_panel.is_some_and(|id| !panel_ids.contains(&id)) {
+        *selected_panel = None;
+    }
+    if input_focused_panel.is_some_and(|id| !panel_ids.contains(&id)) {
+        *input_focused_panel = None;
+        cleared_input_focus = true;
+    }
+    cleared_input_focus
+}
+
 impl Focusable for WorkspaceCanvas {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -564,8 +638,6 @@ impl Render for WorkspaceCanvas {
         let ws_w = pf(window_size.width);
         let ws_h = pf(window_size.height);
         let focus_handle = self.focus_handle.clone();
-        let selected_panel = self.selected_panel;
-        let input_focused_panel = self.input_focused_panel;
 
         let bounds_capture = self.bounds.clone();
         // Grid dots intentionally omitted: snapping (when added) reads
@@ -604,6 +676,15 @@ impl Render for WorkspaceCanvas {
 
         let workspace_id = selected.read(cx).id.clone();
         let panels = selected.read(cx).panels.clone();
+        if reconcile_panel_focus(
+            &mut self.selected_panel,
+            &mut self.input_focused_panel,
+            panels.iter().map(|panel| panel.id),
+        ) {
+            self.focus_handle.clone().focus(window);
+        }
+        let selected_panel = self.selected_panel;
+        let input_focused_panel = self.input_focused_panel;
 
         // Push content_size + zoom into every TerminalView so their next
         // render syncs cell dims and emits PtyResize on actual change.
@@ -628,7 +709,7 @@ impl Render for WorkspaceCanvas {
             let sy = pf(sp.y);
             let sw = panel.width * viewport.zoom;
             let sh = panel.height * viewport.zoom;
-            let title_h = TITLE_HEIGHT * viewport.zoom;
+            let title_h = title_screen_height(viewport.zoom);
 
             // Viewport culling — skip fully off-screen panels.
             if sx + sw < 0.0 || sy + sh < 0.0 || sx > ws_w || sy > ws_h {
@@ -846,4 +927,45 @@ fn corner_handle(left: f32, top: f32) -> impl IntoElement {
         .h(px(HANDLE_SIZE))
         .bg(rgb(0x5a5a6a))
         .rounded(px(1.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_hit_area_has_screen_minimum_when_zoomed_out() {
+        assert_eq!(title_screen_height(0.25), TITLE_SCREEN_MIN_H);
+        assert!(!top_resize_handles_enabled(0.25));
+    }
+
+    #[test]
+    fn title_hit_area_scales_normally_when_zoomed_in() {
+        assert_eq!(title_screen_height(1.0), TITLE_HEIGHT);
+        assert!(top_resize_handles_enabled(1.0));
+    }
+
+    #[test]
+    fn reconcile_panel_focus_clears_removed_panel_ids() {
+        let mut selected = Some(7);
+        let mut input = Some(7);
+
+        let cleared_input = reconcile_panel_focus(&mut selected, &mut input, [1, 2, 3]);
+
+        assert!(cleared_input);
+        assert_eq!(selected, None);
+        assert_eq!(input, None);
+    }
+
+    #[test]
+    fn reconcile_panel_focus_preserves_live_panel_ids() {
+        let mut selected = Some(2);
+        let mut input = Some(2);
+
+        let cleared_input = reconcile_panel_focus(&mut selected, &mut input, [1, 2, 3]);
+
+        assert!(!cleared_input);
+        assert_eq!(selected, Some(2));
+        assert_eq!(input, Some(2));
+    }
 }
