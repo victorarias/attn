@@ -109,9 +109,8 @@ fn get_state(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, St
 
 fn list_sessions(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
     let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
-    cx.read_entity(&entity, |app: &NativeApp, cx: &App| {
-        let sessions = app.daemon().read(cx).sessions();
-        serde_json::to_value(sessions).unwrap_or(Value::Null)
+    cx.read_entity(&entity, |app: &NativeApp, _cx: &App| {
+        serde_json::to_value(app.sessions_snapshot()).unwrap_or(Value::Null)
     })
     .map_err(|e| format!("read entity: {e}"))
 }

@@ -19,13 +19,40 @@ fn daemon_ws_url() -> String {
 }
 
 /// Events emitted by DaemonClient to subscribers.
+///
+/// The adapter keeps no domain cache — events carry the wire payload, and
+/// state registries (`SessionRegistry`, `WorkspaceRegistry`) on
+/// `NativeApp` apply them. That keeps "what sessions/workspaces exist?"
+/// answerable in one place (state) instead of two (state + adapter).
 #[derive(Debug, Clone)]
 pub enum DaemonEvent {
     Connected,
     Disconnected,
-    SessionsChanged,
-    /// A workspace appeared (or the InitialState batch arrived). Carries the
-    /// snapshot at registration time.
+    /// First batch on a fresh connection. Both lists are authoritative —
+    /// the consumer should reset its registries to match (i.e. drop
+    /// anything not in the lists), so workspaces removed during a
+    /// disconnect don't linger.
+    InitialState {
+        sessions: Vec<Session>,
+        workspaces: Vec<Workspace>,
+    },
+    /// A session appeared (newly spawned or registered).
+    SessionRegistered {
+        session: Session,
+    },
+    /// A session was removed.
+    SessionUnregistered {
+        session_id: String,
+    },
+    /// A session's runtime state (state field, label, etc.) changed.
+    SessionStateChanged {
+        session: Session,
+    },
+    /// Bulk replace — the daemon's `sessions_updated` broadcast.
+    SessionsReplaced {
+        sessions: Vec<Session>,
+    },
+    /// A workspace appeared. Carries the snapshot at registration time.
     WorkspaceRegistered {
         workspace: Workspace,
     },
@@ -77,8 +104,6 @@ pub enum DaemonEvent {
 }
 
 pub struct DaemonClient {
-    sessions: Vec<Session>,
-    workspaces: Vec<Workspace>,
     connected: bool,
     error: Option<String>,
     /// Channel sender for outbound commands. None when not connected.
@@ -190,8 +215,6 @@ impl DaemonClient {
         .detach();
 
         Self {
-            sessions: Vec::new(),
-            workspaces: Vec::new(),
             connected: false,
             error: None,
             cmd_tx: None,
@@ -224,79 +247,41 @@ impl DaemonClient {
                         return;
                     }
                 }
-                self.sessions = msg.sessions;
-                // Workspaces are event-driven on the consumer side (add/remove
-                // events update sidebar + canvas state), so a fresh InitialState
-                // must emit removals for any workspace that disappeared during
-                // a disconnect — otherwise stale rows linger after the daemon
-                // restarts with fewer workspaces.
-                let new_ids: std::collections::HashSet<&str> =
-                    msg.workspaces.iter().map(|w| w.id.as_str()).collect();
-                for old in &self.workspaces {
-                    if !new_ids.contains(old.id.as_str()) {
-                        cx.emit(DaemonEvent::WorkspaceUnregistered {
-                            workspace_id: old.id.clone(),
-                        });
-                    }
-                }
-                self.workspaces = msg.workspaces;
-                // Replay every persisted workspace as a Registered event so
-                // sidebar/canvas subscribers can hydrate without special-casing
-                // the InitialState path. WorkspaceRegistered is idempotent on
-                // the consumer side (dedup'd by id).
-                for ws in self.workspaces.clone() {
-                    cx.emit(DaemonEvent::WorkspaceRegistered { workspace: ws });
-                }
-                cx.emit(DaemonEvent::SessionsChanged);
-                cx.notify();
+                cx.emit(DaemonEvent::InitialState {
+                    sessions: msg.sessions,
+                    workspaces: msg.workspaces,
+                });
             }
             ServerEvent::SessionRegistered(msg) => {
-                if !self.sessions.iter().any(|s| s.id == msg.session.id) {
-                    self.sessions.push(msg.session);
-                }
-                cx.emit(DaemonEvent::SessionsChanged);
-                cx.notify();
+                cx.emit(DaemonEvent::SessionRegistered { session: msg.session });
             }
             ServerEvent::SessionUnregistered(msg) => {
-                self.sessions.retain(|s| s.id != msg.session.id);
-                cx.emit(DaemonEvent::SessionsChanged);
-                cx.notify();
+                cx.emit(DaemonEvent::SessionUnregistered {
+                    session_id: msg.session.id,
+                });
             }
             ServerEvent::SessionStateChanged(msg) => {
-                if let Some(s) = self.sessions.iter_mut().find(|s| s.id == msg.session.id) {
-                    *s = msg.session;
-                }
-                cx.emit(DaemonEvent::SessionsChanged);
-                cx.notify();
+                cx.emit(DaemonEvent::SessionStateChanged { session: msg.session });
             }
             ServerEvent::SessionsUpdated(msg) => {
-                self.sessions = msg.sessions;
-                cx.emit(DaemonEvent::SessionsChanged);
-                cx.notify();
+                cx.emit(DaemonEvent::SessionsReplaced {
+                    sessions: msg.sessions,
+                });
             }
             ServerEvent::WorkspaceRegistered(msg) => {
-                let ws = msg.workspace;
-                if let Some(existing) = self.workspaces.iter_mut().find(|w| w.id == ws.id) {
-                    *existing = ws.clone();
-                } else {
-                    self.workspaces.push(ws.clone());
-                }
-                cx.emit(DaemonEvent::WorkspaceRegistered { workspace: ws });
-                cx.notify();
+                cx.emit(DaemonEvent::WorkspaceRegistered {
+                    workspace: msg.workspace,
+                });
             }
             ServerEvent::WorkspaceUnregistered(msg) => {
-                let id = msg.workspace.id;
-                self.workspaces.retain(|w| w.id != id);
-                cx.emit(DaemonEvent::WorkspaceUnregistered { workspace_id: id });
-                cx.notify();
+                cx.emit(DaemonEvent::WorkspaceUnregistered {
+                    workspace_id: msg.workspace.id,
+                });
             }
             ServerEvent::WorkspaceStateChanged(msg) => {
-                let ws = msg.workspace;
-                if let Some(existing) = self.workspaces.iter_mut().find(|w| w.id == ws.id) {
-                    *existing = ws.clone();
-                }
-                cx.emit(DaemonEvent::WorkspaceStateChanged { workspace: ws });
-                cx.notify();
+                cx.emit(DaemonEvent::WorkspaceStateChanged {
+                    workspace: msg.workspace,
+                });
             }
             ServerEvent::AttachResult(msg) => {
                 let session_id = msg.id.clone();
@@ -337,15 +322,6 @@ impl DaemonClient {
             }
             ServerEvent::Unknown(_) => {}
         }
-    }
-
-    pub fn sessions(&self) -> &[Session] {
-        &self.sessions
-    }
-
-    #[allow(dead_code)]
-    pub fn workspaces(&self) -> &[Workspace] {
-        &self.workspaces
     }
 
     #[allow(dead_code)]

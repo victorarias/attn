@@ -6,6 +6,7 @@
 //! them.
 
 pub mod panel;
+pub mod session_registry;
 pub mod terminal_model;
 pub mod workspace;
 pub mod workspace_registry;

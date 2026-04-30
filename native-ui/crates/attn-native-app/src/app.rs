@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use attn_protocol::{
     AttachSessionMessage, RegisterWorkspaceMessage, Session, SpawnSessionMessage,
-    UnregisterSessionMessage, UnregisterWorkspaceMessage,
+    UnregisterSessionMessage, UnregisterWorkspaceMessage, Workspace as ProtocolWorkspace,
 };
 use gpui::{
     div, prelude::*, rgb, App, Context, Entity, ParentElement, PathPromptOptions, Render,
@@ -23,6 +23,7 @@ use crate::adapters::automation::events;
 use crate::adapters::daemon::{DaemonClient, DaemonEvent};
 use crate::adapters::synthetic::{self, SyntheticSource};
 use crate::state::panel::{Panel, PanelContent, TITLE_HEIGHT};
+use crate::state::session_registry::SessionRegistry;
 use crate::state::terminal_model::TerminalModel;
 use crate::state::workspace::Workspace;
 use crate::state::workspace_registry::{PendingSpawn, UpsertOutcome, WorkspaceRegistry};
@@ -42,6 +43,11 @@ pub struct NativeApp {
     /// mutations go through here; `NativeApp` only fans changes out to
     /// the sidebar and canvas.
     registry: WorkspaceRegistry,
+    /// Authoritative session list. Populated from `DaemonEvent` and
+    /// consumed by `sync_terminal_panels` + the automation snapshot.
+    /// Lives here (state) instead of inside `DaemonClient` (adapter)
+    /// so the daemon stays a pure I/O adapter.
+    sessions: SessionRegistry,
     sidebar: Entity<Sidebar>,
     canvas: Entity<WorkspaceCanvas>,
     /// Live automation server handle. Drop deletes the manifest. `None`
@@ -132,6 +138,19 @@ impl NativeApp {
         cx.subscribe(
             &daemon,
             |this, _client, event: &DaemonEvent, cx| match event {
+                DaemonEvent::InitialState {
+                    sessions,
+                    workspaces,
+                } => {
+                    events::record(
+                        "initial_state_observed",
+                        json!({
+                            "session_count": sessions.len(),
+                            "workspace_count": workspaces.len(),
+                        }),
+                    );
+                    this.apply_initial_state(sessions.clone(), workspaces.clone(), cx);
+                }
                 DaemonEvent::WorkspaceRegistered { workspace } => {
                     events::record(
                         "workspace_registered_observed",
@@ -156,10 +175,35 @@ impl NativeApp {
                     this.apply_workspace_snapshot(workspace.clone(), cx);
                     this.select_workspace_if_pending(&workspace.id, cx);
                 }
-                DaemonEvent::SessionsChanged => {
+                DaemonEvent::SessionRegistered { session } => {
+                    this.sessions.upsert(session.clone());
                     events::record(
                         "sessions_changed_observed",
-                        json!({"session_count": this.daemon.read(cx).sessions().len()}),
+                        json!({"session_count": this.sessions.len()}),
+                    );
+                    this.sync_terminal_panels(cx);
+                }
+                DaemonEvent::SessionStateChanged { session } => {
+                    this.sessions.upsert(session.clone());
+                    events::record(
+                        "sessions_changed_observed",
+                        json!({"session_count": this.sessions.len()}),
+                    );
+                    this.sync_terminal_panels(cx);
+                }
+                DaemonEvent::SessionUnregistered { session_id } => {
+                    this.sessions.remove(session_id);
+                    events::record(
+                        "sessions_changed_observed",
+                        json!({"session_count": this.sessions.len()}),
+                    );
+                    this.sync_terminal_panels(cx);
+                }
+                DaemonEvent::SessionsReplaced { sessions } => {
+                    this.sessions.replace_all(sessions.clone());
+                    events::record(
+                        "sessions_changed_observed",
+                        json!({"session_count": this.sessions.len()}),
                     );
                     this.sync_terminal_panels(cx);
                 }
@@ -216,6 +260,7 @@ impl NativeApp {
         let mut app = Self {
             daemon,
             registry: WorkspaceRegistry::new(),
+            sessions: SessionRegistry::new(),
             sidebar,
             canvas,
             _automation: automation_handle,
@@ -257,6 +302,13 @@ impl NativeApp {
     /// `read_pane_text` finding the terminal model for a given session).
     pub fn workspaces(&self) -> impl Iterator<Item = &Entity<Workspace>> {
         self.registry.workspaces()
+    }
+
+    /// Snapshot of every live session. Used by the automation
+    /// `list_sessions` action and `automation_snapshot`. Reads from the
+    /// state registry, not the daemon adapter.
+    pub fn sessions_snapshot(&self) -> Vec<Session> {
+        self.sessions.snapshot()
     }
 
     /// Open the platform's directory picker. On selection, derive the
@@ -501,7 +553,6 @@ impl NativeApp {
     /// contract; new fields are added as automation needs grow.
     pub fn automation_snapshot(&self, cx: &App) -> Value {
         let daemon = self.daemon.read(cx);
-        let sessions = daemon.sessions();
 
         let workspaces: Vec<Value> = self
             .registry
@@ -514,13 +565,51 @@ impl NativeApp {
         json!({
             "selected_workspace_id": self.registry.selected_id().map(|s| s.to_string()),
             "workspaces": workspaces,
-            "sessions": serde_json::to_value(sessions).unwrap_or(Value::Null),
+            "sessions": serde_json::to_value(self.sessions.snapshot()).unwrap_or(Value::Null),
             "canvas": canvas,
             "daemon": {
                 "connected": daemon.connected(),
                 "error": daemon.error(),
             },
         })
+    }
+
+    /// Reset workspace and session registries to match a fresh
+    /// `InitialState` from the daemon. Workspaces missing from the new
+    /// list get the same removal fan-out a live `WorkspaceUnregistered`
+    /// would, so a daemon restart with fewer workspaces doesn't leave
+    /// stale rows in the sidebar. The diff used to live inside
+    /// `DaemonClient` (against its private `workspaces` cache) — moving
+    /// it here lets the adapter stay cache-free.
+    fn apply_initial_state(
+        &mut self,
+        sessions: Vec<Session>,
+        workspaces: Vec<ProtocolWorkspace>,
+        cx: &mut Context<Self>,
+    ) {
+        self.sessions.replace_all(sessions);
+
+        let new_ids: std::collections::HashSet<String> =
+            workspaces.iter().map(|w| w.id.clone()).collect();
+        let stale: Vec<String> = self
+            .registry
+            .workspaces()
+            .filter_map(|ws_entity| {
+                let id = ws_entity.read(cx).id.to_string();
+                (!new_ids.contains(&id)).then_some(id)
+            })
+            .collect();
+        for id in stale {
+            self.remove_workspace(id, cx);
+        }
+
+        for ws in workspaces {
+            let ws_id = ws.id.clone();
+            self.upsert_workspace(ws, cx);
+            self.select_workspace_if_pending(&ws_id, cx);
+        }
+
+        self.sync_terminal_panels(cx);
     }
 
     fn upsert_workspace(&mut self, data: attn_protocol::Workspace, cx: &mut Context<Self>) {
@@ -606,9 +695,7 @@ impl NativeApp {
     /// current session list: spawn panels for new sessions, drop panels
     /// whose session has gone away. Idempotent.
     fn sync_terminal_panels(&mut self, cx: &mut Context<Self>) {
-        // Snapshot sessions out of the daemon read borrow before we
-        // start mutating workspaces.
-        let sessions: Vec<Session> = self.daemon.read(cx).sessions().to_vec();
+        let sessions: Vec<Session> = self.sessions.snapshot();
         let live_session_ids: std::collections::HashSet<&str> =
             sessions.iter().map(|s| s.id.as_str()).collect();
 

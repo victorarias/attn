@@ -42,7 +42,12 @@ Dependencies point inward, with two pragmatic exceptions for GPUI's grain:
   events outward (`cx.emit(DaemonEvent::...)`) and expose command methods
   callers invoke.
 - **State** entities may subscribe to adapter events (`cx.subscribe(&adapter, ...)`)
-  and call adapter command methods. They never call into views.
+  and call adapter command methods. They never call into views. Domain
+  state (sessions, workspaces) lives in state registries on `NativeApp`,
+  not inside adapters — `DaemonClient` parses the wire and emits events,
+  but the canonical "what sessions exist?" lives in `SessionRegistry`.
+  Connection-meta state (`connected`, `error`) is the one thing adapters
+  legitimately own about themselves.
 - **Views** observe state and may hold adapter handles **only** for outbound
   commands (e.g. `TerminalView` sending `PtyInput`). Views never read cached
   state from an adapter — they read it from a state entity.
