@@ -1,6 +1,16 @@
 const TERMINAL_DEBUG_STORAGE_KEY = 'attn:terminal-debug';
-const SUSPICIOUS_COLS_THRESHOLD = 20;
-const SUSPICIOUS_ROWS_THRESHOLD = 10;
+
+// Codex (and other inline-rendering TUIs) cannot recover from a SIGWINCH at
+// e.g. 10×6 — their UI gets re-anchored at the small size and never recovers
+// when the pane grows back. Main panes (which run codex/claude) suppress
+// SIGWINCH below these dimensions at the resize-send point. Shell panes
+// don't have this fragility and a legitimately small zsh (e.g. 14 cols from
+// a 3-way split) renders fine, so this floor is main-pane-only.
+//
+// Transient layout-state filtering (panel animations, grid track resolving)
+// is handled separately by getScaledDimensions's layout-aware floor.
+export const MIN_USABLE_TERMINAL_COLS = 20;
+export const MIN_USABLE_TERMINAL_ROWS = 10;
 
 export function isTerminalDebugEnabled(): boolean {
   try {
@@ -11,7 +21,7 @@ export function isTerminalDebugEnabled(): boolean {
 }
 
 export function isSuspiciousTerminalSize(cols: number, rows: number): boolean {
-  return cols <= SUSPICIOUS_COLS_THRESHOLD || rows <= SUSPICIOUS_ROWS_THRESHOLD;
+  return cols <= MIN_USABLE_TERMINAL_COLS || rows <= MIN_USABLE_TERMINAL_ROWS;
 }
 
 // --- Resize diagnostics ---

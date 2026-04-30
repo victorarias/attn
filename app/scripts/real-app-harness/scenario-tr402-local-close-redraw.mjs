@@ -27,6 +27,7 @@ import {
 import {
   ensureClaudeMainPromptReady,
   ensureCodexMainPromptReady,
+  preTrustClaudeFolder,
   promptClaudeForStructuredBlock,
 } from './scenarioAgents.mjs';
 
@@ -212,6 +213,11 @@ async function main() {
     await runner.step('launch_app', async () => {
       await launchFreshAppAndConnect(client, observer);
     });
+
+    if (options.agent === 'claude') {
+      const trustedFolder = preTrustClaudeFolder(runner.sessionDir);
+      runner.log('claude:pre_trust_folder', { folder: trustedFolder });
+    }
 
     sessionId = await runner.step('create_local_session', async () => {
       return createSessionAndWaitForMain({

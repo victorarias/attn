@@ -117,6 +117,44 @@ describe('attachPlanning', () => {
     expect(plan.replayAllowedByPolicy).toBe(false);
   });
 
+  it('applies raw scrollback for Codex fresh_spawn so xterm can answer capability queries', () => {
+    const plan = classifyAttachReplay({
+      cols: 68,
+      rows: 35,
+      scrollback: 'raw',
+    }, createAttachRequestContext({ cols: 68, rows: 35, agent: 'codex' }, 'fresh_spawn'));
+
+    expect(plan.replayKind).toBe('scrollback');
+    expect(plan.replayApplied).toBe(true);
+    expect(plan.replaySkipped).toBe(false);
+    expect(plan.replayAllowedByPolicy).toBe(true);
+  });
+
+  it('applies segmented raw replay for Codex same_app_remount', () => {
+    const plan = classifyAttachReplay({
+      cols: 68,
+      rows: 35,
+      replay_segments: [{ cols: 68, rows: 35, data: 'codex-startup' }],
+    }, createAttachRequestContext({ cols: 68, rows: 35, agent: 'codex' }, 'same_app_remount'));
+
+    expect(plan.replayKind).toBe('scrollback');
+    expect(plan.replayApplied).toBe(true);
+    expect(plan.replaySkipped).toBe(false);
+    expect(plan.replayAllowedByPolicy).toBe(true);
+  });
+
+  it('still skips fresh_spawn replay for non-Codex agents', () => {
+    const plan = classifyAttachReplay({
+      cols: 68,
+      rows: 35,
+      scrollback: 'raw',
+    }, createAttachRequestContext({ cols: 68, rows: 35, agent: 'claude' }, 'fresh_spawn'));
+
+    expect(plan.replaySkipped).toBe(true);
+    expect(plan.replayApplied).toBe(false);
+    expect(plan.replayAllowedByPolicy).toBe(false);
+  });
+
   it('does not request PTY reconcile work for same-app remount attaches at matching geometry', () => {
     const plan = planAttachedRuntimeGeometry({
       cols: 58,

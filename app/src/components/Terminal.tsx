@@ -5,7 +5,15 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
-import { isSuspiciousTerminalSize, isTerminalDebugEnabled, recordResizeEvent, formatResizeLog, type ResizeDiagnostics } from '../utils/terminalDebug';
+import {
+  isSuspiciousTerminalSize,
+  isTerminalDebugEnabled,
+  MIN_USABLE_TERMINAL_COLS,
+  MIN_USABLE_TERMINAL_ROWS,
+  recordResizeEvent,
+  formatResizeLog,
+  type ResizeDiagnostics,
+} from '../utils/terminalDebug';
 import { activeElementSummary } from '../utils/paneRuntimeDebug';
 import { cleanTerminalLines, bufferSelectionToMarkdown } from '../utils/terminalMarkdown';
 import { registerTerminalPerfGetter } from '../utils/terminalPerf';
@@ -16,6 +24,7 @@ import {
   getScaledDimensions,
   getTerminalTheme,
   TERMINAL_SCROLLBACK_LINES,
+  type LayoutContext,
   type ResolvedTheme,
 } from '../utils/terminalSizing';
 import {
@@ -62,6 +71,17 @@ function elementSizeSnapshot(element: Element | null) {
   return {
     width: Math.round(rect.width),
     height: Math.round(rect.height),
+  };
+}
+
+function buildLayoutContext(paneCount: number | undefined): LayoutContext | undefined {
+  if (paneCount === undefined || paneCount <= 0) {
+    return undefined;
+  }
+  return {
+    windowWidth: window.innerWidth,
+    windowHeight: window.innerHeight,
+    paneCount,
   };
 }
 
@@ -117,6 +137,12 @@ interface TerminalProps {
     paneKind: 'main' | 'shell';
     isActivePane: boolean;
     isActiveSession: boolean;
+    /**
+     * Total panes currently rendered in this terminal's workspace. Used by
+     * the layout-aware floor in getScaledDimensions to reject transient
+     * layout-state measurements (e.g. mid-mount grid track resolving).
+     */
+    paneCount: number;
   };
   /** TUI apps (Ink) render their own cursor; hide xterm's after resize to prevent ghost cursor. */
   tuiCursor?: boolean;
@@ -405,6 +431,24 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
     // Helper to resize terminal and notify PTY
     const resizeTerminal = useCallback((term: XTerm, cols: number, rows: number, reason: string, diagnostics?: ResizeDiagnostics | null) => {
+      // Codex (and other inline-rendering TUIs) cannot recover from a SIGWINCH
+      // at e.g. 10×6 — their UI re-anchors at the small size and never recovers
+      // when the pane grows back. Skip the resize entirely for main panes
+      // (which run codex/claude); the pane stays at its previous size while
+      // the container is small, then snaps to the real size when it grows.
+      const paneKindForResize = runtimeLogMetaRef.current?.paneKind;
+      if (paneKindForResize === 'main' && (cols < MIN_USABLE_TERMINAL_COLS || rows < MIN_USABLE_TERMINAL_ROWS)) {
+        logTerminal('warn', 'Skipping sub-usable resize for main pane (codex protection)', {
+          reason,
+          nextCols: cols,
+          nextRows: rows,
+          prevCols: term.cols,
+          prevRows: term.rows,
+          minUsableCols: MIN_USABLE_TERMINAL_COLS,
+          minUsableRows: MIN_USABLE_TERMINAL_ROWS,
+        });
+        return;
+      }
       const suspiciousResize = isSuspiciousTerminalSize(cols, rows);
       if (suspiciousResize) {
         const container = containerRef.current;
@@ -479,7 +523,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         const container = containerRef.current;
         if (!term || !container) return;
 
-        const dims = getScaledDimensions(container, term, fontSizeRef.current);
+        const dims = getScaledDimensions(
+          container,
+          term,
+          fontSizeRef.current,
+          undefined,
+          undefined,
+          buildLayoutContext(runtimeLogMetaRef.current?.paneCount),
+        );
         if (!dims) {
           logTerminal('warn', 'fit() produced no dimensions', {
             fontSize: fontSizeRef.current,
@@ -607,7 +658,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             return;
           }
           requestAnimationFrame(() => {
-            const dims = getScaledDimensions(container, term, fontSizeRef.current);
+            const dims = getScaledDimensions(
+              container,
+              term,
+              fontSizeRef.current,
+              undefined,
+              undefined,
+              buildLayoutContext(runtimeLogMetaRef.current?.paneCount),
+            );
             if (dims) {
               resizeTerminal(term, dims.cols, dims.rows, 'webgl_context_loss');
             }
@@ -853,6 +911,30 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         getContainerDebugInfo,
         applyMeasuredTerminalGeometry,
         resizeTerminal,
+        getLayoutContext: () => buildLayoutContext(runtimeLogMetaRef.current?.paneCount),
+        onReadyAttemptDiag: (diag) => {
+          const meta = runtimeLogMetaRef.current;
+          if (!meta) return;
+          recordTerminalRuntimeLog({
+            category: 'terminal',
+            event: `terminal.ready_attempt.${diag.phase}`,
+            sessionId: meta.sessionId,
+            paneId: meta.paneId,
+            runtimeId: meta.runtimeId,
+            debugName: debugNameRef.current,
+            message: `ready RAF ${diag.phase}`,
+            details: {
+              paneKind: meta.paneKind,
+              attempt: diag.attempt,
+              bailReason: diag.bailReason,
+              containerWidth: diag.containerWidth,
+              containerHeight: diag.containerHeight,
+              termCols: diag.termCols,
+              termRows: diag.termRows,
+              measured: diag.measured,
+            },
+          });
+        },
         onVisibilityChanged: (nowVisible, wasHidden) => {
           const meta = runtimeLogMetaRef.current;
           if (meta && meta.isActiveSession && meta.isActivePane) {
@@ -939,7 +1021,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       appliedFontSizeRef.current = fontSize;
 
       // Recalculate dimensions with new font size
-      const dims = getScaledDimensions(container, term, fontSize);
+      const dims = getScaledDimensions(
+        container,
+        term,
+        fontSize,
+        undefined,
+        undefined,
+        buildLayoutContext(runtimeLogMetaRef.current?.paneCount),
+      );
       if (dims) {
         if (isSuspiciousTerminalSize(dims.cols, dims.rows)) {
           logTerminal('warn', 'fontSize resize produced suspicious dimensions', {

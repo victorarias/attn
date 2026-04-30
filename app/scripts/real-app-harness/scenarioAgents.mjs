@@ -1,7 +1,71 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { waitForPaneInputFocus, waitForPaneText, waitForPaneVisible } from './scenarioAssertions.mjs';
 
 function compact(text) {
   return text.replace(/\s+/g, '');
+}
+
+// Claude Code stores per-project state in ~/.claude.json under
+// `projects.<absolute-path>`. Pre-marking a folder as trusted before launch
+// skips the "Do you trust this folder?" gating, which is brittle to detect
+// (wording drifts across Claude releases) and slow to dismiss via type-and-
+// enter. The harness session dir is fresh per run, so writing this entry
+// can't shadow a real user-curated trust decision.
+export function preTrustClaudeFolder(folderPath) {
+  // Claude indexes projects by the realpath of cwd, so on macOS where the
+  // harness session dirs live under /var/folders/... (a symlink to
+  // /private/var/folders/...) we have to resolve symlinks before keying
+  // the config; otherwise our entry sits next to Claude's canonical entry
+  // and never gets read.
+  const resolvedFolder = path.resolve(folderPath);
+  const absoluteFolder = (() => {
+    try {
+      return fs.realpathSync(resolvedFolder);
+    } catch {
+      return resolvedFolder;
+    }
+  })();
+  const configPath = path.join(os.homedir(), '.claude.json');
+
+  let config = {};
+  // Carry forward the existing file mode so we don't silently downgrade a
+  // `0600` config to whatever the umask gives us (default `0644`). Claude's
+  // config can hold account/session metadata, so widening read permission
+  // would be a real footgun. If the file is new, default to `0600`.
+  let fileMode = 0o600;
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    if (raw.trim()) {
+      config = JSON.parse(raw);
+    }
+    fileMode = fs.statSync(configPath).mode & 0o777;
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  if (!config.projects || typeof config.projects !== 'object') {
+    config.projects = {};
+  }
+  const existing = config.projects[absoluteFolder] && typeof config.projects[absoluteFolder] === 'object'
+    ? config.projects[absoluteFolder]
+    : {};
+  config.projects[absoluteFolder] = {
+    ...existing,
+    hasTrustDialogAccepted: true,
+    hasCompletedProjectOnboarding: true,
+  };
+
+  // Write atomically: writing through a temp file keeps the 90+KB user
+  // config from being truncated if the harness is killed mid-write.
+  const tmpPath = `${configPath}.harness-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), { encoding: 'utf8', mode: fileMode });
+  fs.renameSync(tmpPath, configPath);
+  return absoluteFolder;
 }
 
 function hasTrustPrompt(text) {
