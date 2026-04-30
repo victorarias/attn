@@ -16,10 +16,10 @@ use gpui::{
 use serde_json::{json, Value};
 
 use crate::app::NativeApp;
-use crate::panel::PanelContent;
-use crate::terminal_model::TerminalModel;
-use crate::terminal_view::TerminalView;
-use crate::viewport::pf;
+use crate::domain::viewport::pf;
+use crate::state::panel::PanelContent;
+use crate::state::terminal_model::TerminalModel;
+use crate::views::terminal_view::TerminalView;
 
 use super::events;
 use super::server::Dispatcher;

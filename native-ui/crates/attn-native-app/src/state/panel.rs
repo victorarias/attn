@@ -11,7 +11,7 @@
 /// terminals).
 use gpui::{div, prelude::*, px, rgb, Context, Entity, ParentElement, Render, SharedString, Window};
 
-use crate::terminal_view::TerminalView;
+use crate::views::terminal_view::TerminalView;
 
 /// World-space height of the panel title bar. Used by both the canvas
 /// (for hit testing + title-bar layout) and `NativeApp` (for initial

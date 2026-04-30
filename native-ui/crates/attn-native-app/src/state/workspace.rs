@@ -11,8 +11,8 @@ use attn_protocol::{Workspace as ProtocolWorkspace, WorkspaceStatus};
 use gpui::{Context, EventEmitter, SharedString};
 use serde_json::{json, Value};
 
-use crate::automation::events;
-use crate::panel::{Panel, PanelContent};
+use crate::adapters::automation::events;
+use crate::state::panel::{Panel, PanelContent};
 
 /// Emitted when the workspace's wire-level data changes (rolled-up status,
 /// title, directory). Subscribers are the sidebar (status badge) and the

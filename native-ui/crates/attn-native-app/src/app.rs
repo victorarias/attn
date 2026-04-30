@@ -4,7 +4,6 @@
 /// vanish on the wire.
 ///
 /// Layout: sidebar pinned left at fixed width, canvas fills the rest.
-use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -18,17 +17,18 @@ use gpui::{
 };
 use serde_json::{json, Value};
 
-use crate::automation;
-use crate::automation::actions::generate_workspace_id;
-use crate::automation::events;
-use crate::canvas::WorkspaceCanvas;
-use crate::daemon_client::{DaemonClient, DaemonEvent};
-use crate::panel::{Panel, PanelContent, TITLE_HEIGHT};
-use crate::sidebar::Sidebar;
-use crate::synthetic::{self, SyntheticSource};
-use crate::terminal_model::TerminalModel;
-use crate::terminal_view::TerminalView;
-use crate::workspace::Workspace;
+use crate::adapters::automation;
+use crate::adapters::automation::actions::generate_workspace_id;
+use crate::adapters::automation::events;
+use crate::adapters::daemon::{DaemonClient, DaemonEvent};
+use crate::adapters::synthetic::{self, SyntheticSource};
+use crate::state::panel::{Panel, PanelContent, TITLE_HEIGHT};
+use crate::state::terminal_model::TerminalModel;
+use crate::state::workspace::Workspace;
+use crate::state::workspace_registry::{PendingSpawn, UpsertOutcome, WorkspaceRegistry};
+use crate::views::canvas::WorkspaceCanvas;
+use crate::views::sidebar::Sidebar;
+use crate::views::terminal_view::TerminalView;
 
 /// Initial terminal panel size in world-space units. ~380×240 gives
 /// ~48 cols × ~12 rows once the title bar is subtracted.
@@ -37,16 +37,13 @@ const TERMINAL_H: f32 = 240.0;
 
 pub struct NativeApp {
     daemon: Entity<DaemonClient>,
-    workspaces_by_id: HashMap<SharedString, Entity<Workspace>>,
+    /// Authoritative store for workspace entities, current selection,
+    /// and pending wire-acks (select, spawn). All workspace-data
+    /// mutations go through here; `NativeApp` only fans changes out to
+    /// the sidebar and canvas.
+    registry: WorkspaceRegistry,
     sidebar: Entity<Sidebar>,
     canvas: Entity<WorkspaceCanvas>,
-    selected_id: Option<SharedString>,
-    pending_select_workspace_ids: HashSet<SharedString>,
-    /// Spawns we've issued but the daemon hasn't acked yet. Keyed by
-    /// session id (the same one we sent on the wire). On `SpawnResult`
-    /// the entry is consumed and either dropped (success) or surfaced as
-    /// a failure event.
-    pending_spawns: HashMap<SharedString, PendingSpawn>,
     /// Live automation server handle. Drop deletes the manifest. `None`
     /// when automation is disabled for this launch (default in prod) or
     /// when bind/start failed — in which case we still want the app to
@@ -57,15 +54,6 @@ pub struct NativeApp {
     /// regular use. Each source pumps deterministic bytes into one
     /// terminal model on a periodic tick (see `synthetic` module).
     synthetic: Vec<SyntheticSource>,
-}
-
-/// In-flight spawn metadata. We track just enough to attribute a
-/// `SpawnResult` failure back to the workspace + agent the user selected
-/// when they triggered the spawn.
-#[derive(Debug, Clone)]
-struct PendingSpawn {
-    workspace_id: SharedString,
-    agent: SharedString,
 }
 
 impl NativeApp {
@@ -181,7 +169,7 @@ impl NativeApp {
                     error,
                 } => {
                     let key = SharedString::from(session_id.clone());
-                    let pending = this.pending_spawns.remove(&key);
+                    let pending = this.registry.take_pending_spawn(&key);
                     if *success {
                         events::record(
                             "session_spawn_succeeded",
@@ -227,12 +215,9 @@ impl NativeApp {
 
         let mut app = Self {
             daemon,
-            workspaces_by_id: HashMap::new(),
+            registry: WorkspaceRegistry::new(),
             sidebar,
             canvas,
-            selected_id: None,
-            pending_select_workspace_ids: HashSet::new(),
-            pending_spawns: HashMap::new(),
             _automation: automation_handle,
             synthetic: Vec::new(),
         };
@@ -264,16 +249,14 @@ impl NativeApp {
     /// Lookup helper used by automation actions to target a specific
     /// workspace by id without exposing the underlying map.
     pub fn workspace(&self, id: &str) -> Option<Entity<Workspace>> {
-        self.workspaces_by_id
-            .get(&SharedString::from(id.to_string()))
-            .cloned()
+        self.registry.workspace(id)
     }
 
     /// Iterator over every live workspace handle. Used by automation
     /// actions that need to scan panels across workspaces (e.g.
     /// `read_pane_text` finding the terminal model for a given session).
     pub fn workspaces(&self) -> impl Iterator<Item = &Entity<Workspace>> {
-        self.workspaces_by_id.values()
+        self.registry.workspaces()
     }
 
     /// Open the platform's directory picker. On selection, derive the
@@ -351,8 +334,8 @@ impl NativeApp {
         self.daemon
             .read(cx)
             .send_cmd(&RegisterWorkspaceMessage::new(id.clone(), title, directory))?;
-        self.pending_select_workspace_ids
-            .insert(SharedString::from(id));
+        self.registry
+            .record_pending_select(SharedString::from(id));
         Ok(())
     }
 
@@ -388,11 +371,11 @@ impl NativeApp {
         agent: SharedString,
         cx: &mut Context<Self>,
     ) -> Result<SharedString, String> {
-        let Some(ws_entity) = self.workspaces_by_id.get(&workspace_id).cloned() else {
+        let Some(ws_entity) = self.registry.workspace(workspace_id.as_ref()) else {
             let known: Vec<String> = self
-                .workspaces_by_id
-                .keys()
-                .map(|s| s.to_string())
+                .registry
+                .workspaces()
+                .map(|w| w.read(cx).id.to_string())
                 .collect();
             events::record(
                 "session_spawn_missed",
@@ -428,7 +411,7 @@ impl NativeApp {
             return Err(format!("send spawn_session: {error}"));
         }
         let id_shared = SharedString::from(session_id.clone());
-        self.pending_spawns.insert(
+        self.registry.record_pending_spawn(
             id_shared.clone(),
             PendingSpawn {
                 workspace_id: workspace_id.clone(),
@@ -489,7 +472,7 @@ impl NativeApp {
         sync_sidebar: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(ws) = self.workspaces_by_id.get(&id).cloned() else {
+        let Some(ws) = self.registry.workspace(id.as_ref()) else {
             events::record(
                 "workspace_select_missed",
                 json!({"id": id.as_ref(), "reason": "unknown_id"}),
@@ -499,7 +482,7 @@ impl NativeApp {
         events::record("workspace_selected", json!({"id": id.as_ref()}));
         let canvas = self.canvas.clone();
         canvas.update(cx, |canvas, cx| canvas.set_selected(Some(ws), cx));
-        self.selected_id = Some(id.clone());
+        self.registry.set_selected(Some(id.clone()));
         if sync_sidebar {
             self.sidebar
                 .update(cx, |sidebar, cx| sidebar.set_selected(Some(id), cx));
@@ -507,9 +490,8 @@ impl NativeApp {
     }
 
     fn select_workspace_if_pending(&mut self, id: &str, cx: &mut Context<Self>) {
-        let id = SharedString::from(id.to_string());
-        if self.pending_select_workspace_ids.remove(&id) {
-            self.select_workspace(id, cx);
+        if self.registry.take_pending_select(id) {
+            self.select_workspace(SharedString::from(id.to_string()), cx);
         }
     }
 
@@ -522,15 +504,15 @@ impl NativeApp {
         let sessions = daemon.sessions();
 
         let workspaces: Vec<Value> = self
-            .workspaces_by_id
-            .values()
+            .registry
+            .workspaces()
             .map(|ws| ws.read(cx).automation_snapshot())
             .collect();
 
         let canvas = self.canvas.read(cx).automation_snapshot();
 
         json!({
-            "selected_workspace_id": self.selected_id.as_ref().map(|s| s.to_string()),
+            "selected_workspace_id": self.registry.selected_id().map(|s| s.to_string()),
             "workspaces": workspaces,
             "sessions": serde_json::to_value(sessions).unwrap_or(Value::Null),
             "canvas": canvas,
@@ -543,19 +525,36 @@ impl NativeApp {
 
     fn upsert_workspace(&mut self, data: attn_protocol::Workspace, cx: &mut Context<Self>) {
         let id = SharedString::from(data.id.clone());
-        if let Some(existing) = self.workspaces_by_id.get(&id) {
-            existing.update(cx, |ws, cx| ws.apply_snapshot(data.clone(), cx));
-            return;
+        if let UpsertOutcome::NewlyInserted(entity) = self.registry.upsert(data, cx) {
+            self.on_new_workspace_entity(id, entity, cx);
         }
-        let entity = cx.new(|_| Workspace::new(data, Vec::new()));
-        self.workspaces_by_id.insert(id.clone(), entity.clone());
+    }
+
+    fn apply_workspace_snapshot(&mut self, data: attn_protocol::Workspace, cx: &mut Context<Self>) {
+        let id = SharedString::from(data.id.clone());
+        if let UpsertOutcome::NewlyInserted(entity) = self.registry.apply_snapshot(data, cx) {
+            // Snapshot for a workspace we hadn't seen — fan out the same
+            // way an explicit registration would (sidebar row +
+            // auto-select if first). Daemon ordering says this shouldn't
+            // happen but the cost of being defensive is two lines.
+            self.on_new_workspace_entity(id, entity, cx);
+        }
+    }
+
+    /// Sidebar + canvas fan-out when a workspace entity is newly known
+    /// to the registry. The first workspace to appear also becomes the
+    /// initial selection.
+    fn on_new_workspace_entity(
+        &mut self,
+        id: SharedString,
+        entity: Entity<Workspace>,
+        cx: &mut Context<Self>,
+    ) {
         self.sidebar.update(cx, |sidebar, cx| {
             sidebar.upsert_workspace(entity.clone(), cx)
         });
-
-        // First workspace to appear becomes the canvas's initial selection.
-        if self.selected_id.is_none() {
-            self.selected_id = Some(id.clone());
+        if self.registry.selected_id().is_none() {
+            self.registry.set_selected(Some(id.clone()));
             self.canvas
                 .update(cx, |canvas, cx| canvas.set_selected(Some(entity), cx));
             self.sidebar
@@ -563,30 +562,17 @@ impl NativeApp {
         }
     }
 
-    fn apply_workspace_snapshot(&mut self, data: attn_protocol::Workspace, cx: &mut Context<Self>) {
-        let id = SharedString::from(data.id.clone());
-        if let Some(existing) = self.workspaces_by_id.get(&id) {
-            existing.update(cx, |ws, cx| ws.apply_snapshot(data, cx));
-        } else {
-            // State change for a workspace we haven't seen — treat as a
-            // late registration. Daemon ordering says this shouldn't
-            // happen, but the cost of being defensive is one line.
-            self.upsert_workspace(data, cx);
-        }
-    }
-
     fn remove_workspace(&mut self, id: String, cx: &mut Context<Self>) {
         let id = SharedString::from(id);
-        if self.workspaces_by_id.remove(&id).is_none() {
+        if !self.registry.remove(&id) {
             return;
         }
-        self.pending_select_workspace_ids.remove(&id);
         let id_str = id.clone();
         self.sidebar
             .update(cx, |sidebar, cx| sidebar.remove_workspace(&id_str, cx));
-        if self.selected_id.as_ref() == Some(&id) {
-            self.selected_id = None;
-            if let Some(next_id) = self.fallback_workspace_id(cx) {
+        if self.registry.selected_id() == Some(&id) {
+            self.registry.set_selected(None);
+            if let Some(next_id) = self.registry.fallback_id(cx) {
                 events::record(
                     "workspace_selected_after_destroy",
                     json!({"destroyed_id": id.as_ref(), "selected_id": next_id.as_ref()}),
@@ -601,26 +587,13 @@ impl NativeApp {
         }
     }
 
-    fn fallback_workspace_id(&self, cx: &App) -> Option<SharedString> {
-        let mut candidates: Vec<(String, String, SharedString)> = self
-            .workspaces_by_id
-            .values()
-            .map(|ws_entity| {
-                let ws = ws_entity.read(cx);
-                (ws.title.to_string(), ws.id.to_string(), ws.id.clone())
-            })
-            .collect();
-        candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-        candidates.into_iter().next().map(|(_, _, id)| id)
-    }
-
     /// Walk every workspace's Terminal panels and re-issue
     /// `AttachSession` for each. Called on `Connected` so existing
     /// terminals resume receiving PtyOutput after a daemon restart or
     /// any websocket reconnect.
     fn reattach_existing_terminals(&self, cx: &mut Context<Self>) {
         let daemon = self.daemon.read(cx);
-        for ws_entity in self.workspaces_by_id.values() {
+        for ws_entity in self.registry.workspaces() {
             for panel in ws_entity.read(cx).panels.iter() {
                 if let PanelContent::Terminal { session_id, .. } = &panel.content {
                     let _ = daemon.send_cmd(&AttachSessionMessage::new(session_id.to_string()));
@@ -643,7 +616,7 @@ impl NativeApp {
             "sync_terminal_panels_start",
             json!({
                 "session_count": sessions.len(),
-                "workspace_count": self.workspaces_by_id.len(),
+                "workspace_count": self.registry.len(),
             }),
         );
 
@@ -655,7 +628,7 @@ impl NativeApp {
         // are never tracked by the daemon, so they would always look
         // "dead" here — protect them explicitly so the synthetic
         // workspace survives daemon events.
-        for ws_entity in self.workspaces_by_id.values().cloned().collect::<Vec<_>>() {
+        for ws_entity in self.registry.workspaces().cloned().collect::<Vec<_>>() {
             ws_entity.update(cx, |ws, cx| {
                 let workspace_id = ws.id.to_string();
                 let before = ws.panels.len();
@@ -689,8 +662,7 @@ impl NativeApp {
             let Some(ws_id) = session.workspace_id.as_deref() else {
                 continue;
             };
-            let key = SharedString::from(ws_id.to_string());
-            let Some(ws_entity) = self.workspaces_by_id.get(&key).cloned() else {
+            let Some(ws_entity) = self.registry.workspace(ws_id) else {
                 continue;
             };
 
@@ -784,11 +756,7 @@ impl NativeApp {
         };
         self.upsert_workspace(ws_data, cx);
 
-        let Some(ws_entity) = self
-            .workspaces_by_id
-            .get(&SharedString::from(ws_id.to_string()))
-            .cloned()
-        else {
+        let Some(ws_entity) = self.registry.workspace(ws_id) else {
             return;
         };
 
@@ -898,7 +866,7 @@ fn next_panel_id() -> usize {
 }
 
 fn panel_terminal_dims(world_w: f32, world_h: f32) -> (u16, u16) {
-    use crate::terminal_view::{CHAR_WIDTH, ROW_HEIGHT};
+    use crate::views::terminal_view::{CHAR_WIDTH, ROW_HEIGHT};
     let cols = ((world_w / CHAR_WIDTH) as u16).max(1);
     let rows = (((world_h - TITLE_HEIGHT) / ROW_HEIGHT) as u16).max(1);
     (cols, rows)

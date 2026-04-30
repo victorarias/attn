@@ -1,25 +1,21 @@
 /// Native canvas client entry point. Sidebar + pannable canvas with live
 /// terminal panels driven by the daemon.
+///
+/// Module layout follows MVVM with a hexagonal edge — see `AGENTS.md` at
+/// the `native-ui/` root for the conventions.
+mod adapters;
 mod app;
-mod automation;
-mod canvas;
-mod daemon_client;
-mod fps_overlay;
-mod panel;
-mod sidebar;
-mod synthetic;
-mod terminal_model;
-mod terminal_view;
-mod viewport;
-mod workspace;
+mod domain;
+mod state;
+mod views;
 
 use gpui::{
     actions, px, size, App, AppContext, Application, Bounds, KeyBinding, WindowBounds,
     WindowOptions,
 };
 
+use adapters::daemon::DaemonClient;
 use app::NativeApp;
-use daemon_client::DaemonClient;
 
 actions!(attn_native, [Quit]);
 

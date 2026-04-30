@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use gpui::{AppContext, Entity};
 
-use crate::terminal_model::TerminalModel;
+use crate::state::terminal_model::TerminalModel;
 
 const DEFAULT_TICK_MS: u64 = 16;
 const DEFAULT_BYTES_PER_TICK: usize = 80;

@@ -12,8 +12,8 @@ use serde_json::json;
 
 use attn_protocol::AttachResultMessage;
 
-use crate::automation::events;
-use crate::daemon_client::{DaemonClient, DaemonEvent};
+use crate::adapters::automation::events;
+use crate::adapters::daemon::{DaemonClient, DaemonEvent};
 
 /// Emitted when the terminal screen content changes and needs to be repainted.
 #[derive(Debug, Clone)]
