@@ -8,8 +8,8 @@ use gpui::{
 
 use attn_protocol::{PtyInputMessage, PtyResizeMessage};
 
-use crate::daemon_client::DaemonClient;
-use crate::terminal_model::{RenderedCell, TerminalEvent, TerminalModel};
+use crate::adapters::daemon::DaemonClient;
+use crate::state::terminal_model::{RenderedCell, TerminalEvent, TerminalModel};
 
 /// Approximate character cell dimensions for Source Code Pro at 13px.
 pub const CHAR_WIDTH: f32 = 7.8;

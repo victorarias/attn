@@ -9,7 +9,7 @@ use gpui::{
     Render, SharedString, Window,
 };
 
-use crate::workspace::Workspace;
+use crate::state::workspace::Workspace;
 
 pub const SIDEBAR_WIDTH: f32 = 240.0;
 

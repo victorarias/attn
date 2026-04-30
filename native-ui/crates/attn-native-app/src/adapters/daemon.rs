@@ -7,7 +7,7 @@ use gpui::{AsyncApp, Context, EventEmitter, WeakEntity};
 use serde::Serialize;
 use serde_json::json;
 
-use crate::automation::events;
+use crate::adapters::automation::events;
 
 const DEFAULT_DAEMON_WS_URL: &str = "ws://localhost:9849/ws";
 

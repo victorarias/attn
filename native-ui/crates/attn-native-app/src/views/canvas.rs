@@ -30,10 +30,10 @@ pub type CloseSessionHandler = dyn Fn(SharedString, &mut Window, &mut gpui::App)
 
 use serde_json::{json, Value};
 
-use crate::fps_overlay::{self, FpsCounter};
-use crate::panel::{Panel, PanelContent, TITLE_HEIGHT};
-use crate::viewport::{pf, Viewport};
-use crate::workspace::Workspace;
+use crate::domain::viewport::{pf, Viewport};
+use crate::state::panel::{Panel, PanelContent, TITLE_HEIGHT};
+use crate::state::workspace::Workspace;
+use crate::views::fps_overlay::{self, FpsCounter};
 
 // ── Layout constants ─────────────────────────────────────────────────────────
 

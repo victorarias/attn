@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Native Canvas Session Lifecycle**: The native canvas now spawns and tears down sessions inline. A "+ Session" pill at the top-left of the canvas expands to a Claude / Codex / Shell agent picker; clicking an agent spawns a new session in the selected workspace's directory and the panel appears on the canvas as soon as the daemon broadcasts it. Each panel's title bar gains an `x` close button that asks the daemon to unregister the session, after which the panel is pruned automatically. Spawn failures are recorded as structured events (`session_spawn_failed`) carrying the wire error so they're discoverable from the automation tail. Two new automation actions — `spawn_session` and `unregister_session` — let the test harness drive the same path as the UI; the canvas scenario covers them end to end.
 
+### Changed
+- **Native UI Architecture Conventions**: Reorganized the native canvas crate into four named layers — `adapters/` (websocket, automation sidecar, synthetic input), `state/` (workspaces, panels, terminal models, the new `WorkspaceRegistry`), `views/` (sidebar, canvas, terminal view, FPS overlay), and `domain/` (pure logic — viewport math). Conventions and decision rules are written down in `native-ui/AGENTS.md` (with `CLAUDE.md` symlinked) so future changes have an obvious home. Also extracted `WorkspaceRegistry` from `NativeApp`, pulling workspace ownership, selection, and pending wire-ack tracking out of the root view and giving `NativeApp` only the wiring job. No behavior changes — file moves + dependency reshape only.
+
 ---
 
 ## [2026-04-29]
