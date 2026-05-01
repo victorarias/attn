@@ -39,7 +39,10 @@ impl FpsCounter {
     /// Record that a frame is being rendered right now and return the
     /// latest readout. Must be called once per `Render::render` call.
     pub fn record_frame(&mut self) -> Readout {
-        let now = Instant::now();
+        self.record_sample_at(Instant::now())
+    }
+
+    fn record_sample_at(&mut self, now: Instant) -> Readout {
         self.samples.push_back(now);
 
         let cutoff = now - WINDOW;
@@ -124,12 +127,11 @@ pub fn overlay(readout: Readout, panel_count: usize, zoom: f32) -> impl IntoElem
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread::sleep;
 
     #[test]
     fn empty_counter_reports_zero() {
         let mut c = FpsCounter::new();
-        let r = c.record_frame();
+        let r = c.record_sample_at(Instant::now());
         assert_eq!(r.fps, 1.0);
         assert_eq!(r.avg_ms, 0.0);
         assert_eq!(r.last_ms, 0.0);
@@ -138,24 +140,21 @@ mod tests {
     #[test]
     fn two_samples_produce_inter_frame_interval() {
         let mut c = FpsCounter::new();
-        c.record_frame();
-        sleep(Duration::from_millis(10));
-        let r = c.record_frame();
+        let first = Instant::now();
+        c.record_sample_at(first);
+        let r = c.record_sample_at(first + Duration::from_millis(10));
         assert_eq!(r.fps, 2.0);
-        assert!(
-            r.last_ms >= 9.0 && r.last_ms <= 30.0,
-            "last_ms = {}",
-            r.last_ms
-        );
-        assert!(r.avg_ms >= 9.0 && r.avg_ms <= 30.0, "avg_ms = {}", r.avg_ms);
+        assert_eq!(r.last_ms, 10.0);
+        assert_eq!(r.avg_ms, 10.0);
     }
 
     #[test]
     fn samples_outside_window_are_dropped() {
         let mut c = FpsCounter::new();
-        c.samples.push_back(Instant::now() - Duration::from_secs(5));
-        c.samples.push_back(Instant::now() - Duration::from_secs(2));
-        let r = c.record_frame();
+        let now = Instant::now();
+        c.samples.push_back(now - Duration::from_secs(5));
+        c.samples.push_back(now - Duration::from_secs(2));
+        let r = c.record_sample_at(now);
         assert_eq!(r.fps, 1.0, "old samples should be evicted");
     }
 }
