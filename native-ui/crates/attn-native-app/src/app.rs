@@ -32,10 +32,10 @@ use crate::views::canvas::WorkspaceCanvas;
 use crate::views::sidebar::Sidebar;
 use crate::views::terminal_view::TerminalView;
 
-/// Initial terminal panel size in world-space units. ~720×480 gives
-/// ~92 cols × ~26 rows once the title bar is subtracted.
+/// Initial terminal panel size in world-space units. ~720×560 gives
+/// ~92 cols × ~31 rows once the title bar is subtracted.
 const TERMINAL_W: f32 = 720.0;
-const TERMINAL_H: f32 = 480.0;
+const TERMINAL_H: f32 = 560.0;
 
 pub struct NativeApp {
     daemon: Entity<DaemonClient>,
@@ -1030,7 +1030,7 @@ impl Render for NativeApp {
             .flex_row()
             .bg(rgb(0x0e0e14))
             .child(self.sidebar.clone())
-            .child(div().flex_1().child(self.canvas.clone()))
+            .child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
     }
 }
 

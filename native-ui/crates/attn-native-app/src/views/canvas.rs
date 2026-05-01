@@ -297,12 +297,8 @@ impl WorkspaceCanvas {
     }
 
     fn pan_viewport_with_keyboard(&mut self, key: &str) {
-        let (dx, dy) = match key {
-            "left" => (-KEYBOARD_PAN_STEP, 0.0),
-            "right" => (KEYBOARD_PAN_STEP, 0.0),
-            "up" => (0.0, -KEYBOARD_PAN_STEP),
-            "down" => (0.0, KEYBOARD_PAN_STEP),
-            _ => return,
+        let Some((dx, dy)) = keyboard_pan_delta(key) else {
+            return;
         };
         self.viewport = self.viewport.pan_view_by_screen_delta(dx, dy);
     }
@@ -445,7 +441,7 @@ impl WorkspaceCanvas {
                 }
                 cx.notify();
             }
-            key @ ("up" | "down" | "left" | "right")
+            key @ ("up" | "down" | "left" | "right" | "h" | "j" | "k" | "l")
                 if self.focus_handle.is_focused(window) && event.keystroke.modifiers.shift =>
             {
                 cx.stop_propagation();
@@ -664,6 +660,16 @@ fn reconcile_panel_focus(
     cleared_input_focus
 }
 
+fn keyboard_pan_delta(key: &str) -> Option<(f32, f32)> {
+    match key {
+        "left" | "h" => Some((-KEYBOARD_PAN_STEP, 0.0)),
+        "right" | "l" => Some((KEYBOARD_PAN_STEP, 0.0)),
+        "up" | "k" => Some((0.0, -KEYBOARD_PAN_STEP)),
+        "down" | "j" => Some((0.0, KEYBOARD_PAN_STEP)),
+        _ => None,
+    }
+}
+
 impl Focusable for WorkspaceCanvas {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -690,6 +696,7 @@ impl Render for WorkspaceCanvas {
         let mut root = div()
             .size_full()
             .bg(rgb(0x0e0e14))
+            .overflow_hidden()
             .track_focus(&focus_handle)
             .capture_key_down(cx.listener(Self::on_key_down))
             .on_key_down(cx.listener(Self::on_key_down))
@@ -1010,5 +1017,18 @@ mod tests {
         assert!(!cleared_input);
         assert_eq!(selected, Some(2));
         assert_eq!(input, Some(2));
+    }
+
+    #[test]
+    fn keyboard_pan_delta_supports_arrows_and_vim_keys() {
+        assert_eq!(keyboard_pan_delta("left"), Some((-KEYBOARD_PAN_STEP, 0.0)));
+        assert_eq!(keyboard_pan_delta("h"), Some((-KEYBOARD_PAN_STEP, 0.0)));
+        assert_eq!(keyboard_pan_delta("down"), Some((0.0, KEYBOARD_PAN_STEP)));
+        assert_eq!(keyboard_pan_delta("j"), Some((0.0, KEYBOARD_PAN_STEP)));
+        assert_eq!(keyboard_pan_delta("up"), Some((0.0, -KEYBOARD_PAN_STEP)));
+        assert_eq!(keyboard_pan_delta("k"), Some((0.0, -KEYBOARD_PAN_STEP)));
+        assert_eq!(keyboard_pan_delta("right"), Some((KEYBOARD_PAN_STEP, 0.0)));
+        assert_eq!(keyboard_pan_delta("l"), Some((KEYBOARD_PAN_STEP, 0.0)));
+        assert_eq!(keyboard_pan_delta("x"), None);
     }
 }
