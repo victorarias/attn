@@ -22,6 +22,7 @@ use crate::adapters::automation;
 use crate::adapters::automation::actions::generate_workspace_id;
 use crate::adapters::automation::events;
 use crate::adapters::daemon::{DaemonClient, DaemonEvent};
+use crate::domain::panel_placement::{place_panel, PanelPlacementItem, PanelSize, Rect};
 use crate::state::panel::{Panel, TITLE_HEIGHT};
 use crate::state::session_registry::SessionRegistry;
 use crate::state::terminal_model::TerminalModel;
@@ -31,10 +32,10 @@ use crate::views::canvas::WorkspaceCanvas;
 use crate::views::sidebar::Sidebar;
 use crate::views::terminal_view::TerminalView;
 
-/// Initial terminal panel size in world-space units. ~380×240 gives
-/// ~48 cols × ~12 rows once the title bar is subtracted.
-const TERMINAL_W: f32 = 380.0;
-const TERMINAL_H: f32 = 240.0;
+/// Initial terminal panel size in world-space units. ~720×480 gives
+/// ~92 cols × ~26 rows once the title bar is subtracted.
+const TERMINAL_W: f32 = 720.0;
+const TERMINAL_H: f32 = 480.0;
 
 pub struct NativeApp {
     daemon: Entity<DaemonClient>,
@@ -237,6 +238,9 @@ impl NativeApp {
                     let key = SharedString::from(session_id.clone());
                     let pending = this.registry.take_pending_spawn(&key);
                     if *success {
+                        if let Some(spawn) = pending.clone() {
+                            this.registry.mark_spawn_succeeded(key, spawn);
+                        }
                         events::record(
                             "session_spawn_succeeded",
                             json!({
@@ -582,6 +586,87 @@ impl NativeApp {
         }
     }
 
+    fn placement_for_new_panel(
+        &self,
+        ws_entity: &Entity<Workspace>,
+        cx: &Context<Self>,
+    ) -> Option<Rect> {
+        let ws = ws_entity.read(cx);
+        if self.registry.selected_id() != Some(&ws.id) {
+            return None;
+        }
+        let frame = self.canvas.read(cx).placement_frame();
+        let existing: Vec<PanelPlacementItem> = ws
+            .panels
+            .iter()
+            .map(|panel| PanelPlacementItem {
+                id: panel.id,
+                rect: Rect {
+                    x: panel.world_x,
+                    y: panel.world_y,
+                    width: panel.width,
+                    height: panel.height,
+                },
+            })
+            .collect();
+        Some(place_panel(
+            &existing,
+            frame.selected_panel,
+            frame.visible,
+            PanelSize {
+                width: TERMINAL_W,
+                height: TERMINAL_H,
+            },
+        ))
+    }
+
+    fn persist_initial_panel_placement(
+        &self,
+        workspace_id: SharedString,
+        panel_id: SharedString,
+        placement: Rect,
+        pending: &PendingSpawn,
+        session_id: &str,
+        cx: &Context<Self>,
+    ) {
+        let result = self
+            .daemon
+            .read(cx)
+            .send_cmd(&UpdateWorkspacePanelGeometryMessage::new(
+                workspace_id.to_string(),
+                panel_id.to_string(),
+                Some(placement.x),
+                Some(placement.y),
+                Some(placement.width),
+                Some(placement.height),
+            ));
+        match result {
+            Ok(()) => events::record(
+                "panel_initial_placement_submitted",
+                json!({
+                    "workspace_id": workspace_id.as_ref(),
+                    "panel_id": panel_id.as_ref(),
+                    "session_id": session_id,
+                    "agent": pending.agent.as_ref(),
+                    "world_x": placement.x,
+                    "world_y": placement.y,
+                    "width": placement.width,
+                    "height": placement.height,
+                }),
+            ),
+            Err(error) => events::record(
+                "panel_initial_placement_send_failed",
+                json!({
+                    "workspace_id": workspace_id.as_ref(),
+                    "panel_id": panel_id.as_ref(),
+                    "session_id": session_id,
+                    "agent": pending.agent.as_ref(),
+                    "error": error,
+                }),
+            ),
+        }
+    }
+
     /// Switch the canvas + sidebar to the given workspace id. Shared by
     /// the sidebar's click callback and the automation `select_workspace`
     /// action so both paths produce identical state. No-op when `id`
@@ -857,17 +942,43 @@ impl NativeApp {
                     daemon_panel.title.clone()
                 };
 
-                let (cols, rows) = panel_terminal_dims(daemon_panel.width, daemon_panel.height);
+                let session_key = SharedString::from(session_id.clone());
+                let mut world_x = daemon_panel.world_x;
+                let mut world_y = daemon_panel.world_y;
+                let mut width = daemon_panel.width;
+                let mut height = daemon_panel.height;
+                if let Some(pending) = self
+                    .registry
+                    .pending_spawn_for_panel_placement(&session_key)
+                    .filter(|pending| {
+                        pending.workspace_id.as_ref() == ws_entity.read(cx).id.as_ref()
+                    })
+                {
+                    if let Some(placement) = self.placement_for_new_panel(&ws_entity, cx) {
+                        world_x = placement.x;
+                        world_y = placement.y;
+                        width = placement.width;
+                        height = placement.height;
+                        self.persist_initial_panel_placement(
+                            ws_entity.read(cx).id.clone(),
+                            SharedString::from(daemon_panel.id.clone()),
+                            placement,
+                            &pending,
+                            &session_id,
+                            cx,
+                        );
+                    }
+                    self.registry.mark_panel_placed(session_key.clone());
+                }
+
+                let (cols, rows) = panel_terminal_dims(width, height);
 
                 let daemon = self.daemon.clone();
                 let model =
                     cx.new(|cx| TerminalModel::new(session_id.clone(), cols, rows, &daemon, cx));
                 let view = cx.new(|cx| {
                     let mut tv = TerminalView::new(model, daemon.clone(), cx);
-                    tv.set_content_size(
-                        daemon_panel.width,
-                        (daemon_panel.height - TITLE_HEIGHT).max(0.0),
-                    );
+                    tv.set_content_size(width, (height - TITLE_HEIGHT).max(0.0));
                     tv
                 });
 
@@ -882,10 +993,10 @@ impl NativeApp {
                     id: next_panel_id(),
                     daemon_panel_id: SharedString::from(daemon_panel.id.clone()),
                     title: SharedString::from(label),
-                    world_x: daemon_panel.world_x,
-                    world_y: daemon_panel.world_y,
-                    width: daemon_panel.width,
-                    height: daemon_panel.height,
+                    world_x,
+                    world_y,
+                    width,
+                    height,
                     session_id: SharedString::from(session_id.clone()),
                     view,
                 };

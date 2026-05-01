@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-01]
+
+### Changed
+- **Native Canvas Panel Placement**: New native-canvas sessions now use larger default terminal panels and place newly spawned panels in the visible canvas when space is available. When a panel is selected, new panels prefer clockwise slots around it before falling back to other visible space or the closest non-overlapping off-screen slot. `Shift+Arrow` now pans the canvas from the keyboard without changing panel selection.
+
+---
+
 ## [2026-04-30]
 
 ### Added

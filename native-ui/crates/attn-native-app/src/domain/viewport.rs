@@ -68,4 +68,31 @@ impl Viewport {
             ),
         }
     }
+
+    pub fn pan_view_by_screen_delta(&self, dx: f32, dy: f32) -> Viewport {
+        Viewport {
+            origin: point(
+                self.origin.x + dx / self.zoom,
+                self.origin.y + dy / self.zoom,
+            ),
+            zoom: self.zoom,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_pan_is_zoom_invariant_in_screen_space() {
+        let viewport = Viewport {
+            origin: point(10.0, 20.0),
+            zoom: 2.0,
+        };
+        let panned = viewport.pan_view_by_screen_delta(160.0, -80.0);
+        assert_eq!(panned.origin.x, 90.0);
+        assert_eq!(panned.origin.y, -20.0);
+        assert_eq!(panned.zoom, 2.0);
+    }
 }
