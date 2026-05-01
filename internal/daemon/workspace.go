@@ -239,7 +239,7 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 
 const (
 	defaultWorkspacePanelWidth  = 720.0
-	defaultWorkspacePanelHeight = 480.0
+	defaultWorkspacePanelHeight = 560.0
 	defaultWorkspacePanelX      = 30.0
 	defaultWorkspacePanelY      = 50.0
 	defaultWorkspacePanelGap    = 30.0
