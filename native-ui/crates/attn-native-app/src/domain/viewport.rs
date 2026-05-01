@@ -5,12 +5,6 @@
 /// position and extents follow zoom so the canvas feels like tldraw.
 use gpui::{point, px, Pixels};
 
-/// World-space grid step. The visible grid was removed after the perf
-/// spike (paint cost dominated at zoom-out); this constant survives as
-/// the snap-to target for future panel-drag snapping.
-#[allow(dead_code)] // unused until snapping lands; see docs/plans/2026-04-28-canvas-perf-spike.md
-pub const GRID_SPACING: f32 = 50.0;
-
 const ZOOM_MIN: f32 = 0.15;
 const ZOOM_MAX: f32 = 5.0;
 

@@ -124,3 +124,26 @@ jobs:
 
       - name: Cargo test
         run: cargo test
+
+  native-ui:
+    name: Native UI
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: native-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cargo fmt
+        run: cargo fmt --check
+
+      - name: Cargo test
+        run: cargo test --workspace
+
+      - name: Cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings

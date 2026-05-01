@@ -39,6 +39,9 @@ use serde_json::{json, Value};
 
 use crate::domain::panel_navigation::{navigate_panel, NavigationDirection, PanelNavItem};
 use crate::domain::panel_placement::Rect;
+use crate::domain::panel_snapping::{
+    snap_panel_move, snap_panel_resize, PanelRect, ResizeEdges, SnapAxis, SnapLine,
+};
 use crate::domain::viewport::{pf, Viewport, WorldRect};
 use crate::state::panel::{Panel, TITLE_HEIGHT};
 use crate::state::workspace::Workspace;
@@ -52,6 +55,7 @@ const PANEL_MIN_H: f32 = 80.0; // world-space
 const TITLE_SCREEN_MIN_H: f32 = 18.0; // screen-space; keeps title dragging usable when zoomed out
 const KEYBOARD_PAN_STEP: f32 = 160.0; // screen-space pixels
 const PANEL_FIT_MARGIN: f32 = 32.0; // screen-space pixels
+const SNAP_LOCK_SCREEN_THRESHOLD: f32 = 10.0; // screen-space pixels
 
 // ── Drag/resize state ─────────────────────────────────────────────────────────
 
@@ -71,12 +75,14 @@ enum DragState {
     },
     DraggingPanel {
         panel_id: usize,
-        last_screen: gpui::Point<Pixels>,
+        start_screen: gpui::Point<Pixels>,
+        start_rect: PanelRect,
     },
     ResizingPanel {
         panel_id: usize,
         handle: ResizeHandle,
-        last_screen: gpui::Point<Pixels>,
+        start_screen: gpui::Point<Pixels>,
+        start_rect: PanelRect,
     },
 }
 
@@ -104,6 +110,7 @@ pub struct WorkspaceCanvas {
     selected_panel: Option<usize>,
     input_focused_panel: Option<usize>,
     fullscreen_panel: Option<usize>,
+    snap_lines: Vec<SnapLine>,
     focus_handle: FocusHandle,
     /// Window-relative bounds of the canvas's root element, captured each
     /// frame via a `canvas()` prepaint callback. Mouse events arrive with
@@ -149,6 +156,7 @@ impl WorkspaceCanvas {
             selected_panel: None,
             input_focused_panel: None,
             fullscreen_panel: None,
+            snap_lines: Vec::new(),
             focus_handle: cx.focus_handle(),
             bounds: Rc::new(Cell::new(None)),
             fps,
@@ -252,6 +260,7 @@ impl WorkspaceCanvas {
         self.selected_panel = None;
         self.input_focused_panel = None;
         self.fullscreen_panel = None;
+        self.snap_lines.clear();
         cx.notify();
     }
 
@@ -334,6 +343,31 @@ impl WorkspaceCanvas {
             .iter()
             .find(|panel| panel.id == selected_id)
             .cloned()
+    }
+
+    fn panel_rect_by_id(&self, panel_id: usize, cx: &App) -> Option<PanelRect> {
+        self.selected
+            .as_ref()?
+            .read(cx)
+            .panels
+            .iter()
+            .find(|panel| panel.id == panel_id)
+            .map(panel_rect)
+    }
+
+    fn panel_snap_targets(&self, panel_id: usize, cx: &App) -> Vec<PanelRect> {
+        self.selected
+            .as_ref()
+            .map(|workspace| {
+                workspace
+                    .read(cx)
+                    .panels
+                    .iter()
+                    .filter(|panel| panel.id != panel_id)
+                    .map(panel_rect)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn fit_panel_to_viewport(&mut self, panel: &Panel) {
@@ -494,21 +528,28 @@ impl WorkspaceCanvas {
             HitResult::TitleBar(id) => {
                 self.select_panel(id);
                 self.release_input_focus(window);
-                self.drag_state = DragState::DraggingPanel {
-                    panel_id: id,
-                    last_screen: pos,
-                };
+                if let Some(start_rect) = self.panel_rect_by_id(id, cx) {
+                    self.drag_state = DragState::DraggingPanel {
+                        panel_id: id,
+                        start_screen: pos,
+                        start_rect,
+                    };
+                }
             }
             HitResult::ResizeHandle(id, handle) => {
                 self.select_panel(id);
                 self.release_input_focus(window);
-                self.drag_state = DragState::ResizingPanel {
-                    panel_id: id,
-                    handle,
-                    last_screen: pos,
-                };
+                if let Some(start_rect) = self.panel_rect_by_id(id, cx) {
+                    self.drag_state = DragState::ResizingPanel {
+                        panel_id: id,
+                        handle,
+                        start_screen: pos,
+                        start_rect,
+                    };
+                }
             }
             HitResult::PanelBody(id) => {
+                self.snap_lines.clear();
                 if let Some(ws) = self.selected.as_ref() {
                     let panel = ws.read(cx).panels.iter().find(|p| p.id == id).cloned();
                     if let Some(panel) = panel {
@@ -518,6 +559,7 @@ impl WorkspaceCanvas {
                 self.drag_state = DragState::Idle;
             }
             HitResult::Canvas => {
+                self.snap_lines.clear();
                 self.release_input_focus(window);
                 self.drag_state = DragState::PanningCanvas { last_screen: pos };
             }
@@ -609,6 +651,7 @@ impl WorkspaceCanvas {
             DragState::Idle => return,
 
             DragState::PanningCanvas { last_screen } => {
+                self.snap_lines.clear();
                 let dx = pf(pos.x) - pf(last_screen.x);
                 let dy = pf(pos.y) - pf(last_screen.y);
                 self.viewport.origin.x -= dx / self.viewport.zoom;
@@ -618,37 +661,59 @@ impl WorkspaceCanvas {
 
             DragState::DraggingPanel {
                 panel_id,
-                last_screen,
+                start_screen,
+                start_rect,
             } => {
-                let dx = (pf(pos.x) - pf(last_screen.x)) / self.viewport.zoom;
-                let dy = (pf(pos.y) - pf(last_screen.y)) / self.viewport.zoom;
+                let dx = (pf(pos.x) - pf(start_screen.x)) / self.viewport.zoom;
+                let dy = (pf(pos.y) - pf(start_screen.y)) / self.viewport.zoom;
+                let snap = snap_panel_move(
+                    PanelRect {
+                        x: start_rect.x + dx,
+                        y: start_rect.y + dy,
+                        ..start_rect
+                    },
+                    &self.panel_snap_targets(panel_id, cx),
+                    snap_threshold_world(self.viewport.zoom),
+                );
+                self.snap_lines = snap.lines.clone();
                 if let Some(ws) = self.selected.as_ref() {
                     ws.update(cx, |ws, cx| {
                         if let Some(p) = ws.panels.iter_mut().find(|p| p.id == panel_id) {
-                            p.world_x += dx;
-                            p.world_y += dy;
+                            set_panel_rect(p, snap.rect);
                             cx.notify();
                         }
                     });
                 }
                 self.drag_state = DragState::DraggingPanel {
                     panel_id,
-                    last_screen: pos,
+                    start_screen,
+                    start_rect,
                 };
             }
 
             DragState::ResizingPanel {
                 panel_id,
                 handle,
-                last_screen,
+                start_screen,
+                start_rect,
             } => {
                 // Screen delta → world delta so resize feels zoom-invariant.
-                let dx = (pf(pos.x) - pf(last_screen.x)) / self.viewport.zoom;
-                let dy = (pf(pos.y) - pf(last_screen.y)) / self.viewport.zoom;
+                let dx = (pf(pos.x) - pf(start_screen.x)) / self.viewport.zoom;
+                let dy = (pf(pos.y) - pf(start_screen.y)) / self.viewport.zoom;
+                let resized = apply_resize(start_rect, handle, dx, dy);
+                let snap = snap_panel_resize(
+                    resized,
+                    resize_edges(handle),
+                    &self.panel_snap_targets(panel_id, cx),
+                    PANEL_MIN_W,
+                    PANEL_MIN_H,
+                    snap_threshold_world(self.viewport.zoom),
+                );
+                self.snap_lines = snap.lines.clone();
                 if let Some(ws) = self.selected.as_ref() {
                     ws.update(cx, |ws, cx| {
                         if let Some(p) = ws.panels.iter_mut().find(|p| p.id == panel_id) {
-                            apply_resize(p, handle, dx, dy);
+                            set_panel_rect(p, snap.rect);
                             cx.notify();
                         }
                     });
@@ -656,7 +721,8 @@ impl WorkspaceCanvas {
                 self.drag_state = DragState::ResizingPanel {
                     panel_id,
                     handle,
-                    last_screen: pos,
+                    start_screen,
+                    start_rect,
                 };
             }
         }
@@ -686,6 +752,7 @@ impl WorkspaceCanvas {
             }
         }
         self.drag_state = DragState::Idle;
+        self.snap_lines.clear();
         cx.notify();
     }
 
@@ -717,33 +784,64 @@ impl WorkspaceCanvas {
     }
 }
 
-fn apply_resize(p: &mut Panel, handle: ResizeHandle, dx: f32, dy: f32) {
+fn panel_rect(panel: &Panel) -> PanelRect {
+    PanelRect {
+        x: panel.world_x,
+        y: panel.world_y,
+        width: panel.width,
+        height: panel.height,
+    }
+}
+
+fn set_panel_rect(panel: &mut Panel, rect: PanelRect) {
+    panel.world_x = rect.x;
+    panel.world_y = rect.y;
+    panel.width = rect.width;
+    panel.height = rect.height;
+}
+
+fn apply_resize(rect: PanelRect, handle: ResizeHandle, dx: f32, dy: f32) -> PanelRect {
+    let mut next = rect;
     match handle {
         ResizeHandle::TopLeft => {
-            let new_w = (p.width - dx).max(PANEL_MIN_W);
-            let new_h = (p.height - dy).max(PANEL_MIN_H);
-            p.world_x += p.width - new_w;
-            p.world_y += p.height - new_h;
-            p.width = new_w;
-            p.height = new_h;
+            let new_w = (next.width - dx).max(PANEL_MIN_W);
+            let new_h = (next.height - dy).max(PANEL_MIN_H);
+            next.x += next.width - new_w;
+            next.y += next.height - new_h;
+            next.width = new_w;
+            next.height = new_h;
         }
         ResizeHandle::TopRight => {
-            let new_h = (p.height - dy).max(PANEL_MIN_H);
-            p.world_y += p.height - new_h;
-            p.height = new_h;
-            p.width = (p.width + dx).max(PANEL_MIN_W);
+            let new_h = (next.height - dy).max(PANEL_MIN_H);
+            next.y += next.height - new_h;
+            next.height = new_h;
+            next.width = (next.width + dx).max(PANEL_MIN_W);
         }
         ResizeHandle::BottomLeft => {
-            let new_w = (p.width - dx).max(PANEL_MIN_W);
-            p.world_x += p.width - new_w;
-            p.width = new_w;
-            p.height = (p.height + dy).max(PANEL_MIN_H);
+            let new_w = (next.width - dx).max(PANEL_MIN_W);
+            next.x += next.width - new_w;
+            next.width = new_w;
+            next.height = (next.height + dy).max(PANEL_MIN_H);
         }
         ResizeHandle::BottomRight => {
-            p.width = (p.width + dx).max(PANEL_MIN_W);
-            p.height = (p.height + dy).max(PANEL_MIN_H);
+            next.width = (next.width + dx).max(PANEL_MIN_W);
+            next.height = (next.height + dy).max(PANEL_MIN_H);
         }
     }
+    next
+}
+
+fn resize_edges(handle: ResizeHandle) -> ResizeEdges {
+    match handle {
+        ResizeHandle::TopLeft => ResizeEdges::new(true, true, false, false),
+        ResizeHandle::TopRight => ResizeEdges::new(false, true, true, false),
+        ResizeHandle::BottomLeft => ResizeEdges::new(true, false, false, true),
+        ResizeHandle::BottomRight => ResizeEdges::new(false, false, true, true),
+    }
+}
+
+fn snap_threshold_world(zoom: f32) -> f32 {
+    SNAP_LOCK_SCREEN_THRESHOLD / zoom.max(0.001)
 }
 
 fn title_screen_height(zoom: f32) -> f32 {
@@ -800,10 +898,9 @@ impl Render for WorkspaceCanvas {
         let focus_handle = self.focus_handle.clone();
 
         let bounds_capture = self.bounds.clone();
-        // Grid dots intentionally omitted: snapping (when added) reads
-        // `viewport::GRID_SPACING` directly in code, no visible grid
-        // required. Removing the per-frame paint_quad-per-dot work keeps
-        // the frame budget clear at every zoom level.
+        // Grid dots intentionally omitted. Magnetic snapping uses nearby
+        // panel anchors and only paints short active guides during a
+        // gesture, keeping the frame budget clear at every zoom level.
         let mut root = div()
             .size_full()
             .bg(rgb(0x0e0e14))
@@ -1007,6 +1104,10 @@ impl Render for WorkspaceCanvas {
             )));
         }
 
+        for line in &self.snap_lines {
+            root = root.child(snap_guide(*line, viewport, ws_w, ws_h));
+        }
+
         // Render the spawn toolbar last so it sits on top of panels and
         // empty-state copy. Always visible when a workspace is selected so
         // the entry point to dogfood is unmissable.
@@ -1157,6 +1258,44 @@ fn corner_handle(left: f32, top: f32) -> impl IntoElement {
         .rounded(px(1.0))
 }
 
+fn snap_guide(
+    line: SnapLine,
+    viewport: Viewport,
+    screen_w: f32,
+    screen_h: f32,
+) -> impl IntoElement {
+    match line.axis {
+        SnapAxis::X => {
+            let screen_x = pf(viewport.world_to_screen(point(line.position, 0.0)).x).round();
+            let start_y = pf(viewport.world_to_screen(point(0.0, line.start)).y).round();
+            let end_y = pf(viewport.world_to_screen(point(0.0, line.end)).y).round();
+            let top = start_y.min(end_y).clamp(0.0, screen_h);
+            let bottom = start_y.max(end_y).clamp(0.0, screen_h);
+            div()
+                .absolute()
+                .left(px(screen_x))
+                .top(px(top))
+                .w(px(1.0))
+                .h(px((bottom - top).max(1.0)))
+                .bg(rgb(0xc59b45))
+        }
+        SnapAxis::Y => {
+            let screen_y = pf(viewport.world_to_screen(point(0.0, line.position)).y).round();
+            let start_x = pf(viewport.world_to_screen(point(line.start, 0.0)).x).round();
+            let end_x = pf(viewport.world_to_screen(point(line.end, 0.0)).x).round();
+            let left = start_x.min(end_x).clamp(0.0, screen_w);
+            let right = start_x.max(end_x).clamp(0.0, screen_w);
+            div()
+                .absolute()
+                .left(px(left))
+                .top(px(screen_y))
+                .w(px((right - left).max(1.0)))
+                .h(px(1.0))
+                .bg(rgb(0xc59b45))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1208,6 +1347,13 @@ mod tests {
         assert_eq!(keyboard_pan_delta("right"), Some((KEYBOARD_PAN_STEP, 0.0)));
         assert_eq!(keyboard_pan_delta("l"), Some((KEYBOARD_PAN_STEP, 0.0)));
         assert_eq!(keyboard_pan_delta("x"), None);
+    }
+
+    #[test]
+    fn snap_threshold_keeps_lock_zone_screen_sized() {
+        assert_eq!(snap_threshold_world(1.0), SNAP_LOCK_SCREEN_THRESHOLD);
+        assert_eq!(snap_threshold_world(0.5), SNAP_LOCK_SCREEN_THRESHOLD * 2.0);
+        assert_eq!(snap_threshold_world(2.0), SNAP_LOCK_SCREEN_THRESHOLD / 2.0);
     }
 
     #[test]

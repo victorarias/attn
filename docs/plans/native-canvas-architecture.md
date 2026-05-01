@@ -79,8 +79,8 @@ content's local state.
 The pannable, zoomable surface. A `Viewport { origin, zoom }` transforms
 world coordinates to screen coordinates and back. Panels are rendered as
 absolute-positioned elements; the canvas itself is an empty interaction
-target. No visible grid (snapping reads `GRID_SPACING` directly when
-implemented).
+target. No visible grid; snapping is magnetic against nearby panel
+edges/centers and paints only transient alignment guides.
 
 ### Focus model — two stages
 

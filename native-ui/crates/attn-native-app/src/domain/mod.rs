@@ -7,4 +7,5 @@
 
 pub mod panel_navigation;
 pub mod panel_placement;
+pub mod panel_snapping;
 pub mod viewport;
