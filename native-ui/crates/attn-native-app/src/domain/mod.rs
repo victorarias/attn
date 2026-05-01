@@ -5,4 +5,5 @@
 //! `Size`). Not allowed: `Entity`, `Context`, `Window`, `App`,
 //! `cx.subscribe`, `cx.notify`.
 
+pub mod panel_navigation;
 pub mod viewport;

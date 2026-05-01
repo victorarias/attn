@@ -275,14 +275,18 @@ async function checkMovePanel(conn) {
     fail(`move_panel returned wrong world_x: ${move.result.panel.world_x} vs ${targetX}`);
   }
 
-  // Cross-verify via get_state — proves the mutation actually landed in
-  // the entity, not just the action's response shape.
-  const after = await conn.request('get_state');
-  const wsAfter = after.result.workspaces.find((w) => w.id === ws.id);
-  const panelAfter = wsAfter.panels.find((p) => p.id === panel.id);
-  if (Math.abs(panelAfter.world_x - targetX) > 0.001) {
-    fail(`get_state didn't reflect move: world_x=${panelAfter.world_x} expected ${targetX}`);
-  }
+  // Cross-verify via get_state — proves the daemon broadcast landed back
+  // in the canvas entity, not just the action's response shape. The
+  // action only queues the websocket command, so convergence is async.
+  await pollUntil(
+    async () => {
+      const after = await conn.request('get_state');
+      const wsAfter = after.result.workspaces.find((w) => w.id === ws.id);
+      const panelAfter = wsAfter?.panels.find((p) => p.id === panel.id);
+      return panelAfter && Math.abs(panelAfter.world_x - targetX) <= 0.001;
+    },
+    { timeoutMs: 5000, intervalMs: 100, label: 'move_panel reflected in get_state' },
+  );
   info(`  ok (panel ${panel.id}: x ${panel.world_x.toFixed(1)} → ${targetX.toFixed(1)})`);
 
   // Move it back so re-runs are idempotent. Best-effort.
