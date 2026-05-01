@@ -28,6 +28,14 @@ pub struct Viewport {
     pub zoom: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct WorldRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 impl Default for Viewport {
     fn default() -> Self {
         Viewport {
@@ -78,6 +86,32 @@ impl Viewport {
             zoom: self.zoom,
         }
     }
+
+    pub fn fit_world_rect(
+        &self,
+        rect: WorldRect,
+        screen_width: f32,
+        screen_height: f32,
+        margin: f32,
+    ) -> Viewport {
+        if rect.width <= 0.0 || rect.height <= 0.0 || screen_width <= 0.0 || screen_height <= 0.0 {
+            return *self;
+        }
+        let available_width = (screen_width - margin * 2.0).max(1.0);
+        let available_height = (screen_height - margin * 2.0).max(1.0);
+        let zoom = (available_width / rect.width)
+            .min(available_height / rect.height)
+            .clamp(ZOOM_MIN, ZOOM_MAX);
+        let world_center_x = rect.x + rect.width / 2.0;
+        let world_center_y = rect.y + rect.height / 2.0;
+        Viewport {
+            origin: point(
+                world_center_x - screen_width / (2.0 * zoom),
+                world_center_y - screen_height / (2.0 * zoom),
+            ),
+            zoom,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -94,5 +128,24 @@ mod tests {
         assert_eq!(panned.origin.x, 90.0);
         assert_eq!(panned.origin.y, -20.0);
         assert_eq!(panned.zoom, 2.0);
+    }
+
+    #[test]
+    fn fit_world_rect_centers_rect_and_uses_limiting_axis() {
+        let viewport = Viewport::default();
+        let fitted = viewport.fit_world_rect(
+            WorldRect {
+                x: 100.0,
+                y: 120.0,
+                width: 500.0,
+                height: 200.0,
+            },
+            1000.0,
+            800.0,
+            32.0,
+        );
+        assert!((fitted.zoom - 1.872).abs() < 0.001);
+        assert!(((100.0 - fitted.origin.x) * fitted.zoom - 32.0).abs() < 0.001);
+        assert!(((120.0 - fitted.origin.y) * fitted.zoom - 212.8).abs() < 0.01);
     }
 }

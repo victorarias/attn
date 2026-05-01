@@ -39,7 +39,7 @@ use serde_json::{json, Value};
 
 use crate::domain::panel_navigation::{navigate_panel, NavigationDirection, PanelNavItem};
 use crate::domain::panel_placement::Rect;
-use crate::domain::viewport::{pf, Viewport};
+use crate::domain::viewport::{pf, Viewport, WorldRect};
 use crate::state::panel::{Panel, TITLE_HEIGHT};
 use crate::state::workspace::Workspace;
 use crate::views::fps_overlay::{self, FpsCounter};
@@ -51,6 +51,7 @@ const PANEL_MIN_W: f32 = 120.0; // world-space
 const PANEL_MIN_H: f32 = 80.0; // world-space
 const TITLE_SCREEN_MIN_H: f32 = 18.0; // screen-space; keeps title dragging usable when zoomed out
 const KEYBOARD_PAN_STEP: f32 = 160.0; // screen-space pixels
+const PANEL_FIT_MARGIN: f32 = 32.0; // screen-space pixels
 
 // ── Drag/resize state ─────────────────────────────────────────────────────────
 
@@ -87,6 +88,12 @@ enum HitResult {
     ResizeHandle(usize, ResizeHandle),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum FullscreenHitResult {
+    Body,
+    TitleBar,
+}
+
 pub struct WorkspaceCanvas {
     selected: Option<Entity<Workspace>>,
     /// Drop = unsubscribe. Replaced when selection changes so re-renders
@@ -96,6 +103,7 @@ pub struct WorkspaceCanvas {
     drag_state: DragState,
     selected_panel: Option<usize>,
     input_focused_panel: Option<usize>,
+    fullscreen_panel: Option<usize>,
     focus_handle: FocusHandle,
     /// Window-relative bounds of the canvas's root element, captured each
     /// frame via a `canvas()` prepaint callback. Mouse events arrive with
@@ -140,6 +148,7 @@ impl WorkspaceCanvas {
             drag_state: DragState::Idle,
             selected_panel: None,
             input_focused_panel: None,
+            fullscreen_panel: None,
             focus_handle: cx.focus_handle(),
             bounds: Rc::new(Cell::new(None)),
             fps,
@@ -230,6 +239,7 @@ impl WorkspaceCanvas {
             "focused_panel_id": self.selected_panel,
             "selected_panel_id": self.selected_panel,
             "input_focused_panel_id": self.input_focused_panel,
+            "fullscreen_panel_id": self.fullscreen_panel,
             "bounds": bounds,
             "fps": fps,
         })
@@ -241,7 +251,12 @@ impl WorkspaceCanvas {
         self.drag_state = DragState::Idle;
         self.selected_panel = None;
         self.input_focused_panel = None;
+        self.fullscreen_panel = None;
         cx.notify();
+    }
+
+    pub fn is_panel_fullscreen(&self) -> bool {
+        self.fullscreen_panel.is_some()
     }
 
     /// Select a panel by session id and optionally route keyboard input
@@ -301,6 +316,58 @@ impl WorkspaceCanvas {
             return;
         };
         self.viewport = self.viewport.pan_view_by_screen_delta(dx, dy);
+    }
+
+    fn canvas_screen_size(&self) -> (f32, f32) {
+        self.bounds
+            .get()
+            .map(|bounds| (pf(bounds.size.width), pf(bounds.size.height)))
+            .unwrap_or((1040.0, 760.0))
+    }
+
+    fn selected_panel_snapshot(&self, cx: &App) -> Option<Panel> {
+        let selected_id = self.selected_panel?;
+        self.selected
+            .as_ref()?
+            .read(cx)
+            .panels
+            .iter()
+            .find(|panel| panel.id == selected_id)
+            .cloned()
+    }
+
+    fn fit_panel_to_viewport(&mut self, panel: &Panel) {
+        let (screen_w, screen_h) = self.canvas_screen_size();
+        self.viewport = self.viewport.fit_world_rect(
+            WorldRect {
+                x: panel.world_x,
+                y: panel.world_y,
+                width: panel.width,
+                height: panel.height,
+            },
+            screen_w,
+            screen_h,
+            PANEL_FIT_MARGIN,
+        );
+    }
+
+    fn enter_selected_panel_input_and_fit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(panel) = self.selected_panel_snapshot(cx) {
+            self.fullscreen_panel = None;
+            self.fit_panel_to_viewport(&panel);
+            self.focus_panel_input(&panel, window, cx);
+        }
+    }
+
+    fn toggle_selected_panel_fullscreen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.fullscreen_panel.is_some() {
+            self.fullscreen_panel = None;
+            return;
+        }
+        if let Some(panel) = self.selected_panel_snapshot(cx) {
+            self.fullscreen_panel = Some(panel.id);
+            self.focus_panel_input(&panel, window, cx);
+        }
     }
 
     fn release_input_focus(&mut self, window: &mut Window) {
@@ -375,6 +442,14 @@ impl WorkspaceCanvas {
         HitResult::Canvas
     }
 
+    fn fullscreen_hit_test(screen_pos: gpui::Point<Pixels>) -> FullscreenHitResult {
+        if pf(screen_pos.y) <= TITLE_HEIGHT {
+            FullscreenHitResult::TitleBar
+        } else {
+            FullscreenHitResult::Body
+        }
+    }
+
     // ── Mouse handlers ────────────────────────────────────────────────────────
 
     fn on_mouse_down(
@@ -383,6 +458,32 @@ impl WorkspaceCanvas {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(fullscreen_id) = self.fullscreen_panel {
+            let panel = self.selected.as_ref().and_then(|ws| {
+                ws.read(cx)
+                    .panels
+                    .iter()
+                    .find(|panel| panel.id == fullscreen_id)
+                    .cloned()
+            });
+            if let Some(panel) = panel {
+                match Self::fullscreen_hit_test(self.local_pos(event.position)) {
+                    FullscreenHitResult::TitleBar => {
+                        self.select_panel(panel.id);
+                        self.release_input_focus(window);
+                    }
+                    FullscreenHitResult::Body => {
+                        self.focus_panel_input(&panel, window, cx);
+                    }
+                }
+                self.drag_state = DragState::Idle;
+                cx.notify();
+                return;
+            }
+            self.fullscreen_panel = None;
+            cx.notify();
+        }
+
         // hit_test takes canvas-local coords (panel screen positions are
         // computed from world*zoom with no canvas offset). DragState's
         // last_screen stays window-relative so it matches on_mouse_move,
@@ -426,6 +527,16 @@ impl WorkspaceCanvas {
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event.keystroke.key.as_str() {
+            "enter" if event.keystroke.modifiers.platform && event.keystroke.modifiers.shift => {
+                cx.stop_propagation();
+                self.toggle_selected_panel_fullscreen(window, cx);
+                cx.notify();
+            }
+            "enter" if event.keystroke.modifiers.platform => {
+                cx.stop_propagation();
+                self.enter_selected_panel_input_and_fit(window, cx);
+                cx.notify();
+            }
             "escape" if self.input_focused_panel.is_some() => {
                 cx.stop_propagation();
                 self.release_input_focus(window);
@@ -735,6 +846,73 @@ impl Render for WorkspaceCanvas {
         }
         let selected_panel = self.selected_panel;
         let input_focused_panel = self.input_focused_panel;
+        if self
+            .fullscreen_panel
+            .is_some_and(|id| !panels.iter().any(|panel| panel.id == id))
+        {
+            self.fullscreen_panel = None;
+            cx.notify();
+        }
+        let fullscreen_panel = self.fullscreen_panel;
+
+        if let Some(fullscreen_id) = fullscreen_panel {
+            if let Some(panel) = panels.iter().find(|panel| panel.id == fullscreen_id) {
+                let title_h = TITLE_HEIGHT;
+                let content_h = (ws_h - title_h).max(0.0);
+                let input_enabled = input_focused_panel == Some(panel.id);
+                panel.view.update(cx, |tv, inner_cx| {
+                    let size_changed = tv.set_content_size(ws_w, content_h);
+                    let zoom_changed = tv.set_zoom(1.0);
+                    let input_changed = tv.set_input_enabled(input_enabled);
+                    if size_changed || zoom_changed || input_changed {
+                        inner_cx.notify();
+                    }
+                });
+
+                let body: AnyElement = panel.view.clone().into_any_element();
+                let mut title_bar = div()
+                    .w_full()
+                    .h(px(title_h))
+                    .bg(rgb(0x252535))
+                    .flex()
+                    .items_center()
+                    .pl(px(8.0))
+                    .pr(px(4.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .truncate()
+                            .text_xs()
+                            .text_color(rgb(0xa0a0b0))
+                            .child(panel.title.clone()),
+                    );
+                title_bar = title_bar.child(panel_close_button(panel.session_id.clone(), cx));
+
+                root = root.child(
+                    div()
+                        .absolute()
+                        .left(px(0.0))
+                        .top(px(0.0))
+                        .w(px(ws_w))
+                        .h(px(ws_h))
+                        .bg(rgb(0x1c1c26))
+                        .border_1()
+                        .border_color(rgb(0x4a9eff))
+                        .child(title_bar)
+                        .child(
+                            div()
+                                .w_full()
+                                .h(px(content_h))
+                                .overflow_hidden()
+                                .child(body),
+                        ),
+                );
+                if let Some(readout) = readout {
+                    root = root.child(fps_overlay::overlay(readout, panels.len(), 1.0));
+                }
+                return root;
+            }
+        }
 
         // Push content_size + zoom into every TerminalView so their next
         // render syncs cell dims and emits PtyResize on actual change.
@@ -1030,5 +1208,17 @@ mod tests {
         assert_eq!(keyboard_pan_delta("right"), Some((KEYBOARD_PAN_STEP, 0.0)));
         assert_eq!(keyboard_pan_delta("l"), Some((KEYBOARD_PAN_STEP, 0.0)));
         assert_eq!(keyboard_pan_delta("x"), None);
+    }
+
+    #[test]
+    fn fullscreen_hit_test_treats_expanded_surface_as_panel() {
+        assert_eq!(
+            WorkspaceCanvas::fullscreen_hit_test(point(px(500.0), px(12.0))),
+            FullscreenHitResult::TitleBar,
+        );
+        assert_eq!(
+            WorkspaceCanvas::fullscreen_hit_test(point(px(500.0), px(320.0))),
+            FullscreenHitResult::Body,
+        );
     }
 }

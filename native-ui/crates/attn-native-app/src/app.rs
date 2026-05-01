@@ -14,7 +14,7 @@ use attn_protocol::{
 };
 use gpui::{
     div, prelude::*, rgb, App, Context, Entity, ParentElement, PathPromptOptions, Render,
-    SharedString, Window,
+    SharedString, Subscription, Window,
 };
 use serde_json::{json, Value};
 
@@ -51,6 +51,7 @@ pub struct NativeApp {
     sessions: SessionRegistry,
     sidebar: Entity<Sidebar>,
     canvas: Entity<WorkspaceCanvas>,
+    _canvas_subscription: Subscription,
     /// Live automation server handle. Drop deletes the manifest. `None`
     /// when automation is disabled for this launch (default in prod) or
     /// when bind/start failed — in which case we still want the app to
@@ -106,6 +107,7 @@ impl NativeApp {
                 },
             )
         });
+        let canvas_subscription = cx.observe(&canvas, |_, _, cx| cx.notify());
         let app_handle_create = app_handle.clone();
         let app_handle_destroy = app_handle.clone();
         let sidebar = cx.new(|cx| {
@@ -289,6 +291,7 @@ impl NativeApp {
             sessions: SessionRegistry::new(),
             sidebar,
             canvas,
+            _canvas_subscription: canvas_subscription,
             _automation: automation_handle,
         }
     }
@@ -1023,14 +1026,14 @@ impl NativeApp {
 }
 
 impl Render for NativeApp {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .flex()
-            .flex_row()
-            .bg(rgb(0x0e0e14))
-            .child(self.sidebar.clone())
-            .child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let root = div().size_full().flex().flex_row().bg(rgb(0x0e0e14));
+        if self.canvas.read(cx).is_panel_fullscreen() {
+            root.child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
+        } else {
+            root.child(self.sidebar.clone())
+                .child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
+        }
     }
 }
 

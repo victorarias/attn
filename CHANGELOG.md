@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-05-01]
 
 ### Changed
+- **Native Canvas Focus Modes**: `Cmd+Enter` now focuses the selected panel and fits the canvas viewport around it without changing panel geometry. `Cmd+Shift+Enter` toggles a temporary window-wide panel fullscreen mode that covers the sidebar without resizing or persisting the panel.
 - **Native Canvas Clipping And Keyboard Panning**: Zoomed native-canvas panels are now clipped to the canvas area instead of painting over the sidebar. `Shift+h/j/k/l` now pan the canvas alongside `Shift+Arrow`, and new native terminal panels are taller by default.
 - **Native Canvas Panel Placement**: New native-canvas sessions now use larger default terminal panels and place newly spawned panels in the visible canvas when space is available. When a panel is selected, new panels prefer clockwise slots around it before falling back to other visible space or the closest non-overlapping off-screen slot. `Shift+Arrow` now pans the canvas from the keyboard without changing panel selection.
 
