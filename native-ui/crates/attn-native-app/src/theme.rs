@@ -58,12 +58,24 @@ pub mod ink {
     /// `#2a3548` — firm structural border between major regions.
     pub const FIRM_HEX: u32 = 0x2a3548;
 
-    pub fn void() -> Rgba { rgb(VOID_HEX) }
-    pub fn midnight() -> Rgba { rgb(MIDNIGHT_HEX) }
-    pub fn nocturne() -> Rgba { rgb(NOCTURNE_HEX) }
-    pub fn shade() -> Rgba { rgb(SHADE_HEX) }
-    pub fn border() -> Rgba { rgb(BORDER_HEX) }
-    pub fn firm() -> Rgba { rgb(FIRM_HEX) }
+    pub fn void() -> Rgba {
+        rgb(VOID_HEX)
+    }
+    pub fn midnight() -> Rgba {
+        rgb(MIDNIGHT_HEX)
+    }
+    pub fn nocturne() -> Rgba {
+        rgb(NOCTURNE_HEX)
+    }
+    pub fn shade() -> Rgba {
+        rgb(SHADE_HEX)
+    }
+    pub fn border() -> Rgba {
+        rgb(BORDER_HEX)
+    }
+    pub fn firm() -> Rgba {
+        rgb(FIRM_HEX)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -87,11 +99,21 @@ pub mod moon {
     /// `#2f2c24` — disabled text. Almost the surface; reserved for "not for you".
     pub const CINDER_HEX: u32 = 0x2f2c24;
 
-    pub fn moonstone() -> Rgba { rgb(MOONSTONE_HEX) }
-    pub fn parchment() -> Rgba { rgb(PARCHMENT_HEX) }
-    pub fn bone() -> Rgba { rgb(BONE_HEX) }
-    pub fn ash() -> Rgba { rgb(ASH_HEX) }
-    pub fn cinder() -> Rgba { rgb(CINDER_HEX) }
+    pub fn moonstone() -> Rgba {
+        rgb(MOONSTONE_HEX)
+    }
+    pub fn parchment() -> Rgba {
+        rgb(PARCHMENT_HEX)
+    }
+    pub fn bone() -> Rgba {
+        rgb(BONE_HEX)
+    }
+    pub fn ash() -> Rgba {
+        rgb(ASH_HEX)
+    }
+    pub fn cinder() -> Rgba {
+        rgb(CINDER_HEX)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -116,11 +138,21 @@ pub mod sodium {
     /// `#ff8a3d @ 0.06α` — barely-there pre-selection / hover hint.
     pub const HUSH_HEX: u32 = 0xff8a3d0f;
 
-    pub fn vapor() -> Rgba { rgb(VAPOR_HEX) }
-    pub fn deep() -> Rgba { rgb(DEEP_HEX) }
-    pub fn soft() -> Rgba { rgba(SOFT_HEX) }
-    pub fn glow() -> Rgba { rgba(GLOW_HEX) }
-    pub fn hush() -> Rgba { rgba(HUSH_HEX) }
+    pub fn vapor() -> Rgba {
+        rgb(VAPOR_HEX)
+    }
+    pub fn deep() -> Rgba {
+        rgb(DEEP_HEX)
+    }
+    pub fn soft() -> Rgba {
+        rgba(SOFT_HEX)
+    }
+    pub fn glow() -> Rgba {
+        rgba(GLOW_HEX)
+    }
+    pub fn hush() -> Rgba {
+        rgba(HUSH_HEX)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -140,9 +172,15 @@ pub mod star {
     /// `#dde9ff` — Shell. A-type, Vega blue-white.
     pub const SHELL_HEX: u32 = 0xdde9ff;
 
-    pub fn claude() -> Rgba { rgb(CLAUDE_HEX) }
-    pub fn codex() -> Rgba { rgb(CODEX_HEX) }
-    pub fn shell() -> Rgba { rgb(SHELL_HEX) }
+    pub fn claude() -> Rgba {
+        rgb(CLAUDE_HEX)
+    }
+    pub fn codex() -> Rgba {
+        rgb(CODEX_HEX)
+    }
+    pub fn shell() -> Rgba {
+        rgb(SHELL_HEX)
+    }
 
     /// Resolve the star color for a wire-level agent identifier as it
     /// arrives from the daemon (`"claude"` / `"codex"` / `"shell"`).
@@ -185,13 +223,27 @@ pub mod state {
     /// `#ff4d5e` — `error` / connection lost. *amissum* (lost).
     pub const ERROR_HEX: u32 = 0xff4d5e;
 
-    pub fn launching() -> Rgba { rgb(LAUNCHING_HEX) }
-    pub fn working() -> Rgba { rgb(WORKING_HEX) }
-    pub fn waiting() -> Rgba { rgb(WAITING_HEX) }
-    pub fn approval() -> Rgba { rgb(APPROVAL_HEX) }
-    pub fn review() -> Rgba { rgb(REVIEW_HEX) }
-    pub fn idle() -> Rgba { rgb(IDLE_HEX) }
-    pub fn error() -> Rgba { rgb(ERROR_HEX) }
+    pub fn launching() -> Rgba {
+        rgb(LAUNCHING_HEX)
+    }
+    pub fn working() -> Rgba {
+        rgb(WORKING_HEX)
+    }
+    pub fn waiting() -> Rgba {
+        rgb(WAITING_HEX)
+    }
+    pub fn approval() -> Rgba {
+        rgb(APPROVAL_HEX)
+    }
+    pub fn review() -> Rgba {
+        rgb(REVIEW_HEX)
+    }
+    pub fn idle() -> Rgba {
+        rgb(IDLE_HEX)
+    }
+    pub fn error() -> Rgba {
+        rgb(ERROR_HEX)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -206,24 +258,34 @@ pub mod surface {
     use super::*;
 
     /// Background of an active / selected list row.
-    pub fn selected_row() -> Rgba { ink::shade() }
+    pub fn selected_row() -> Rgba {
+        ink::shade()
+    }
 
     /// Background of a row whose destructive action is in flight.
     /// Sits between `midnight` and `nocturne` so it reads as "removed
     /// from the active list, not yet gone".
-    pub fn pending_row() -> Rgba { rgb(0x0d1119) }
+    pub fn pending_row() -> Rgba {
+        rgb(0x0d1119)
+    }
 
     /// Background of a row whose destructive action awaits user
     /// confirmation. Tinted toward the error hue while staying dark
     /// enough to read text on top.
-    pub fn danger_row() -> Rgba { rgb(0x2a1518) }
+    pub fn danger_row() -> Rgba {
+        rgb(0x2a1518)
+    }
 
     /// Background of the "confirm destroy" affordance itself. A darker,
     /// muted error tone — emphatic but not screaming.
-    pub fn danger_emphasis_bg() -> Rgba { rgb(0x6e2a30) }
+    pub fn danger_emphasis_bg() -> Rgba {
+        rgb(0x6e2a30)
+    }
 
     /// Foreground of text on `danger_emphasis_bg()`.
-    pub fn danger_emphasis_fg() -> Rgba { rgb(0xffd3d6) }
+    pub fn danger_emphasis_fg() -> Rgba {
+        rgb(0xffd3d6)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -283,10 +345,18 @@ pub mod line {
     /// `moonstone @ 0.28α` — emphatic structural rule.
     pub const BOLD_HEX: u32 = 0xf0ede047;
 
-    pub fn weak() -> Rgba { rgba(WEAK_HEX) }
-    pub fn mild() -> Rgba { rgba(MILD_HEX) }
-    pub fn firm() -> Rgba { rgba(FIRM_HEX) }
-    pub fn bold() -> Rgba { rgba(BOLD_HEX) }
+    pub fn weak() -> Rgba {
+        rgba(WEAK_HEX)
+    }
+    pub fn mild() -> Rgba {
+        rgba(MILD_HEX)
+    }
+    pub fn firm() -> Rgba {
+        rgba(FIRM_HEX)
+    }
+    pub fn bold() -> Rgba {
+        rgba(BOLD_HEX)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -388,7 +458,7 @@ mod tests {
     /// quietly broken.
     #[test]
     fn halted_breath_is_faster_than_live() {
-        assert!(motion::BREATH_HALTED < motion::BREATH_LIVE);
+        const { assert!(motion::BREATH_HALTED < motion::BREATH_LIVE) };
     }
 
     /// Star colors are unique. A collision would mean two agents read

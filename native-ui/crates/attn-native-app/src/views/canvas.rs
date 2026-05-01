@@ -1217,9 +1217,21 @@ const SPAWNABLE_AGENTS: &[(&str, &str)] =
 /// the chrome warms toward the moonstone end of the type ramp so it
 /// reads as "engaged" rather than just "raised".
 fn spawn_pill(open: bool) -> gpui::Div {
-    let bg = if open { theme::ink::firm() } else { theme::ink::shade() };
-    let text = if open { theme::moon::moonstone() } else { theme::moon::parchment() };
-    let border = if open { theme::sodium::deep() } else { theme::line::mild() };
+    let bg = if open {
+        theme::ink::firm()
+    } else {
+        theme::ink::shade()
+    };
+    let text = if open {
+        theme::moon::moonstone()
+    } else {
+        theme::moon::parchment()
+    };
+    let border = if open {
+        theme::sodium::deep()
+    } else {
+        theme::line::mild()
+    };
     div()
         .px(px(theme::space::S2))
         .py(px(theme::space::S0))

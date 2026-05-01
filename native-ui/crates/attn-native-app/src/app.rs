@@ -13,13 +13,12 @@ use attn_protocol::{
     Workspace as ProtocolWorkspace,
 };
 use gpui::{
-    div, prelude::*, App, Context, Entity, ParentElement, PathPromptOptions, Render,
-    SharedString, Subscription, Window,
+    div, prelude::*, App, Context, Entity, ParentElement, PathPromptOptions, Render, SharedString,
+    Subscription, Window,
 };
 use serde_json::{json, Value};
 
 use crate::adapters::automation;
-use crate::theme;
 use crate::adapters::automation::actions::generate_workspace_id;
 use crate::adapters::automation::events;
 use crate::adapters::daemon::{DaemonClient, DaemonEvent};
@@ -29,6 +28,7 @@ use crate::state::session_registry::SessionRegistry;
 use crate::state::terminal_model::TerminalModel;
 use crate::state::workspace::Workspace;
 use crate::state::workspace_registry::{PendingSpawn, UpsertOutcome, WorkspaceRegistry};
+use crate::theme;
 use crate::views::canvas::WorkspaceCanvas;
 use crate::views::sidebar::Sidebar;
 use crate::views::terminal_view::TerminalView;
@@ -1028,7 +1028,11 @@ impl NativeApp {
 
 impl Render for NativeApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let root = div().size_full().flex().flex_row().bg(theme::ink::midnight());
+        let root = div()
+            .size_full()
+            .flex()
+            .flex_row()
+            .bg(theme::ink::midnight());
         if self.canvas.read(cx).is_panel_fullscreen() {
             root.child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
         } else {
