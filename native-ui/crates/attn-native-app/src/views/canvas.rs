@@ -10,7 +10,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
-    canvas, div, point, prelude::*, px, rgb, AnyElement, App, Bounds, Context, Entity, FocusHandle,
+    canvas, div, point, prelude::*, px, AnyElement, App, Bounds, Context, Entity, FocusHandle,
     Focusable, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, ScrollDelta, ScrollWheelEvent, SharedString, Subscription,
     Window,
@@ -45,6 +45,7 @@ use crate::domain::panel_snapping::{
 use crate::domain::viewport::{pf, Viewport, WorldRect};
 use crate::state::panel::{Panel, TITLE_HEIGHT};
 use crate::state::workspace::Workspace;
+use crate::theme;
 use crate::views::fps_overlay::{self, FpsCounter};
 
 // ── Layout constants ─────────────────────────────────────────────────────────
@@ -903,7 +904,7 @@ impl Render for WorkspaceCanvas {
         // gesture, keeping the frame budget clear at every zoom level.
         let mut root = div()
             .size_full()
-            .bg(rgb(0x0e0e14))
+            .bg(theme::ink::midnight())
             .overflow_hidden()
             .track_focus(&focus_handle)
             .capture_key_down(cx.listener(Self::on_key_down))
@@ -970,17 +971,19 @@ impl Render for WorkspaceCanvas {
                 let mut title_bar = div()
                     .w_full()
                     .h(px(title_h))
-                    .bg(rgb(0x252535))
+                    .bg(theme::ink::shade())
+                    .border_b_1()
+                    .border_color(theme::line::firm())
                     .flex()
                     .items_center()
-                    .pl(px(8.0))
-                    .pr(px(4.0))
+                    .pl(px(theme::space::S1))
+                    .pr(px(theme::space::S0))
                     .child(
                         div()
                             .flex_1()
                             .truncate()
                             .text_xs()
-                            .text_color(rgb(0xa0a0b0))
+                            .text_color(theme::moon::moonstone())
                             .child(panel.title.clone()),
                     );
                 title_bar = title_bar.child(panel_close_button(panel.session_id.clone(), cx));
@@ -992,9 +995,9 @@ impl Render for WorkspaceCanvas {
                         .top(px(0.0))
                         .w(px(ws_w))
                         .h(px(ws_h))
-                        .bg(rgb(0x1c1c26))
+                        .bg(theme::ink::nocturne())
                         .border_1()
-                        .border_color(rgb(0x4a9eff))
+                        .border_color(theme::sodium::vapor())
                         .child(title_bar)
                         .child(
                             div()
@@ -1043,12 +1046,16 @@ impl Render for WorkspaceCanvas {
 
             let has_input_focus = input_focused_panel == Some(panel.id);
             let is_selected = selected_panel == Some(panel.id);
+            // Focus reads as the canonical accent. Selected-but-not-focused
+            // is the deeper sodium so the eye still tracks "hot panel" but
+            // doesn't compete with the actively-typing one. Default border
+            // is the firm structural ink.
             let border_color = if has_input_focus {
-                rgb(0x4a9eff)
+                theme::sodium::vapor()
             } else if is_selected {
-                rgb(0xc59b45)
+                theme::sodium::deep()
             } else {
-                rgb(0x2a2a35)
+                theme::ink::firm()
             };
             let content_h = (sh - title_h).max(0.0);
             let title = panel.title.clone();
@@ -1058,17 +1065,19 @@ impl Render for WorkspaceCanvas {
             let mut title_bar = div()
                 .w_full()
                 .h(px(title_h))
-                .bg(rgb(0x252535))
+                .bg(theme::ink::shade())
+                .border_b_1()
+                .border_color(theme::line::firm())
                 .flex()
                 .items_center()
-                .pl(px(8.0))
-                .pr(px(4.0))
+                .pl(px(theme::space::S1))
+                .pr(px(theme::space::S0))
                 .child(
                     div()
                         .flex_1()
                         .truncate()
                         .text_xs()
-                        .text_color(rgb(0xa0a0b0))
+                        .text_color(theme::moon::moonstone())
                         .child(title),
                 );
             title_bar = title_bar.child(panel_close_button(panel.session_id.clone(), cx));
@@ -1079,7 +1088,7 @@ impl Render for WorkspaceCanvas {
                 .top(px(sy))
                 .w(px(sw))
                 .h(px(sh))
-                .bg(rgb(0x1c1c26))
+                .bg(theme::ink::nocturne())
                 .border_1()
                 .border_color(border_color)
                 .child(title_bar)
@@ -1179,7 +1188,7 @@ fn panel_close_button(session_id: SharedString, cx: &mut Context<WorkspaceCanvas
         .flex()
         .items_center()
         .justify_center()
-        .text_color(rgb(0x6a6a78))
+        .text_color(theme::moon::ash())
         .text_size(px(13.0))
         .child(SharedString::from("x"))
         .on_mouse_down(
@@ -1204,15 +1213,20 @@ const SPAWNABLE_AGENTS: &[(&str, &str)] =
 
 /// "+ Session" pill. Visually distinct from agent chips so it reads as
 /// the disclosure trigger, not one of the choices. Highlighted when the
-/// picker is expanded so it's clear which surface is active.
+/// picker is expanded so it's clear which surface is active. When open,
+/// the chrome warms toward the moonstone end of the type ramp so it
+/// reads as "engaged" rather than just "raised".
 fn spawn_pill(open: bool) -> gpui::Div {
-    let bg = if open { rgb(0x3a3a4a) } else { rgb(0x252535) };
-    let text = if open { rgb(0xf0f0f5) } else { rgb(0xc8c8d2) };
+    let bg = if open { theme::ink::firm() } else { theme::ink::shade() };
+    let text = if open { theme::moon::moonstone() } else { theme::moon::parchment() };
+    let border = if open { theme::sodium::deep() } else { theme::line::mild() };
     div()
-        .px(px(10.0))
-        .py(px(4.0))
-        .rounded(px(4.0))
+        .px(px(theme::space::S2))
+        .py(px(theme::space::S0))
+        .rounded(px(theme::radius::R0))
         .bg(bg)
+        .border_1()
+        .border_color(border)
         .text_color(text)
         .text_size(px(12.0))
         .child(SharedString::from("+ Session"))
@@ -1220,13 +1234,13 @@ fn spawn_pill(open: bool) -> gpui::Div {
 
 fn agent_chip(label: SharedString) -> gpui::Div {
     div()
-        .px(px(8.0))
-        .py(px(4.0))
-        .rounded(px(4.0))
-        .bg(rgb(0x2c2c3a))
+        .px(px(theme::space::S1))
+        .py(px(theme::space::S0))
+        .rounded(px(theme::radius::R0))
+        .bg(theme::ink::shade())
         .border_1()
-        .border_color(rgb(0x3a3a4a))
-        .text_color(rgb(0xd8d8e2))
+        .border_color(theme::line::mild())
+        .text_color(theme::moon::parchment())
         .text_size(px(12.0))
         .child(label)
 }
@@ -1242,7 +1256,7 @@ fn empty_state(label: SharedString) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .text_color(rgb(0x6a6a78))
+        .text_color(theme::moon::ash())
         .text_size(px(13.))
         .child(label)
 }
@@ -1254,7 +1268,7 @@ fn corner_handle(left: f32, top: f32) -> impl IntoElement {
         .top(px(top))
         .w(px(HANDLE_SIZE))
         .h(px(HANDLE_SIZE))
-        .bg(rgb(0x5a5a6a))
+        .bg(theme::moon::ash())
         .rounded(px(1.0))
 }
 
@@ -1277,7 +1291,7 @@ fn snap_guide(
                 .top(px(top))
                 .w(px(1.0))
                 .h(px((bottom - top).max(1.0)))
-                .bg(rgb(0xc59b45))
+                .bg(theme::sodium::vapor())
         }
         SnapAxis::Y => {
             let screen_y = pf(viewport.world_to_screen(point(0.0, line.position)).y).round();
@@ -1291,7 +1305,7 @@ fn snap_guide(
                 .top(px(screen_y))
                 .w(px((right - left).max(1.0)))
                 .h(px(1.0))
-                .bg(rgb(0xc59b45))
+                .bg(theme::sodium::vapor())
         }
     }
 }

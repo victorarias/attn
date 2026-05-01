@@ -13,12 +13,13 @@ use attn_protocol::{
     Workspace as ProtocolWorkspace,
 };
 use gpui::{
-    div, prelude::*, rgb, App, Context, Entity, ParentElement, PathPromptOptions, Render,
+    div, prelude::*, App, Context, Entity, ParentElement, PathPromptOptions, Render,
     SharedString, Subscription, Window,
 };
 use serde_json::{json, Value};
 
 use crate::adapters::automation;
+use crate::theme;
 use crate::adapters::automation::actions::generate_workspace_id;
 use crate::adapters::automation::events;
 use crate::adapters::daemon::{DaemonClient, DaemonEvent};
@@ -1027,7 +1028,7 @@ impl NativeApp {
 
 impl Render for NativeApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let root = div().size_full().flex().flex_row().bg(rgb(0x0e0e14));
+        let root = div().size_full().flex().flex_row().bg(theme::ink::midnight());
         if self.canvas.read(cx).is_panel_fullscreen() {
             root.child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
         } else {
