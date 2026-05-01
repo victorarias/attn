@@ -48,6 +48,11 @@ pub struct WorkspaceRegistry {
     /// session id (the same one we sent on the wire). Consumed on
     /// `SpawnResult` to attribute the outcome back to a workspace + agent.
     pending_spawns: HashMap<SharedString, PendingSpawn>,
+    /// Successful spawns whose daemon panel has not appeared locally yet.
+    /// Kept separate from `pending_spawns` because the workspace broadcast
+    /// and spawn result can arrive in either order on reconnect-heavy paths.
+    pending_panel_placements: HashMap<SharedString, PendingSpawn>,
+    placed_spawn_panels: HashSet<SharedString>,
 }
 
 impl WorkspaceRegistry {
@@ -164,5 +169,26 @@ impl WorkspaceRegistry {
 
     pub fn take_pending_spawn(&mut self, session_id: &SharedString) -> Option<PendingSpawn> {
         self.pending_spawns.remove(session_id)
+    }
+
+    pub fn mark_spawn_succeeded(&mut self, session_id: SharedString, spawn: PendingSpawn) {
+        if !self.placed_spawn_panels.contains(&session_id) {
+            self.pending_panel_placements.insert(session_id, spawn);
+        }
+    }
+
+    pub fn pending_spawn_for_panel_placement(
+        &self,
+        session_id: &SharedString,
+    ) -> Option<PendingSpawn> {
+        self.pending_panel_placements
+            .get(session_id)
+            .or_else(|| self.pending_spawns.get(session_id))
+            .cloned()
+    }
+
+    pub fn mark_panel_placed(&mut self, session_id: SharedString) {
+        self.pending_panel_placements.remove(&session_id);
+        self.placed_spawn_panels.insert(session_id);
     }
 }

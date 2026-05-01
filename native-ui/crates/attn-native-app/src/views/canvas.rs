@@ -38,6 +38,7 @@ pub type PanelGeometryCommitHandler =
 use serde_json::{json, Value};
 
 use crate::domain::panel_navigation::{navigate_panel, NavigationDirection, PanelNavItem};
+use crate::domain::panel_placement::Rect;
 use crate::domain::viewport::{pf, Viewport};
 use crate::state::panel::{Panel, TITLE_HEIGHT};
 use crate::state::workspace::Workspace;
@@ -49,6 +50,7 @@ const HANDLE_SIZE: f32 = 8.0; // screen-space pixels (fixed, not scaled)
 const PANEL_MIN_W: f32 = 120.0; // world-space
 const PANEL_MIN_H: f32 = 80.0; // world-space
 const TITLE_SCREEN_MIN_H: f32 = 18.0; // screen-space; keeps title dragging usable when zoomed out
+const KEYBOARD_PAN_STEP: f32 = 160.0; // screen-space pixels
 
 // ── Drag/resize state ─────────────────────────────────────────────────────────
 
@@ -112,6 +114,12 @@ pub struct WorkspaceCanvas {
     on_panel_geometry_commit: Box<PanelGeometryCommitHandler>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct PlacementFrame {
+    pub visible: Rect,
+    pub selected_panel: Option<usize>,
+}
+
 impl WorkspaceCanvas {
     pub fn new(
         cx: &mut Context<Self>,
@@ -164,6 +172,23 @@ impl WorkspaceCanvas {
             }
         }
         cx.notify();
+    }
+
+    pub fn placement_frame(&self) -> PlacementFrame {
+        let (width, height) = self
+            .bounds
+            .get()
+            .map(|bounds| (pf(bounds.size.width), pf(bounds.size.height)))
+            .unwrap_or((1040.0, 760.0));
+        PlacementFrame {
+            visible: Rect {
+                x: self.viewport.origin.x,
+                y: self.viewport.origin.y,
+                width: width / self.viewport.zoom,
+                height: height / self.viewport.zoom,
+            },
+            selected_panel: self.selected_panel,
+        }
     }
 
     /// Translate a window-relative position into canvas-local space using
@@ -269,6 +294,17 @@ impl WorkspaceCanvas {
         if let Some(next_id) = navigate_panel(&panels, self.selected_panel, direction) {
             self.selected_panel = Some(next_id);
         }
+    }
+
+    fn pan_viewport_with_keyboard(&mut self, key: &str) {
+        let (dx, dy) = match key {
+            "left" => (-KEYBOARD_PAN_STEP, 0.0),
+            "right" => (KEYBOARD_PAN_STEP, 0.0),
+            "up" => (0.0, -KEYBOARD_PAN_STEP),
+            "down" => (0.0, KEYBOARD_PAN_STEP),
+            _ => return,
+        };
+        self.viewport = self.viewport.pan_view_by_screen_delta(dx, dy);
     }
 
     fn release_input_focus(&mut self, window: &mut Window) {
@@ -407,6 +443,13 @@ impl WorkspaceCanvas {
                 } else {
                     self.navigate_selected_panel(NavigationDirection::Next, cx);
                 }
+                cx.notify();
+            }
+            key @ ("up" | "down" | "left" | "right")
+                if self.focus_handle.is_focused(window) && event.keystroke.modifiers.shift =>
+            {
+                cx.stop_propagation();
+                self.pan_viewport_with_keyboard(key);
                 cx.notify();
             }
             key @ ("up" | "down" | "left" | "right" | "h" | "j" | "k" | "l")

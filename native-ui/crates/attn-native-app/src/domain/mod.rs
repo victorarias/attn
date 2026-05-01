@@ -6,4 +6,5 @@
 //! `cx.subscribe`, `cx.notify`.
 
 pub mod panel_navigation;
+pub mod panel_placement;
 pub mod viewport;
