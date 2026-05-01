@@ -129,7 +129,6 @@ if has_changed '^internal/protocol/schema/'; then
 fi
 
 if has_changed '^app/src-tauri/'; then
-  run_daemon_checks=true
   run_tauri_checks=true
 fi
 
@@ -138,7 +137,6 @@ if has_frontend_files; then
 fi
 
 if has_changed '^(native-ui/|app/scripts/real-app-harness/scenario-native-canvas\.mjs$)'; then
-  run_daemon_checks=true
   run_native_checks=true
 fi
 

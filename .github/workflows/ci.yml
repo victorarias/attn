@@ -7,8 +7,58 @@ on:
     branches: [main]
 
 jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      daemon: ${{ steps.filter.outputs.daemon }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      tauri: ${{ steps.filter.outputs.tauri }}
+      native_ui: ${{ steps.filter.outputs.native_ui }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Classify changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            daemon:
+              - '**/*.go'
+              - 'cmd/**'
+              - 'internal/**'
+              - 'test/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Makefile'
+              - 'scripts/source-fingerprint.sh'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'app/src/**'
+              - 'app/e2e/**'
+              - 'app/test-harness/**'
+              - 'app/public/**'
+              - 'app/index.html'
+              - 'app/package.json'
+              - 'app/pnpm-lock.yaml'
+              - 'app/playwright.config.ts'
+              - 'app/tsconfig*.json'
+              - 'app/vite.config.ts'
+              - 'internal/protocol/schema/**'
+              - '.github/workflows/ci.yml'
+            tauri:
+              - 'app/src-tauri/**'
+              - '.github/workflows/ci.yml'
+            native_ui:
+              - 'native-ui/**'
+              - 'internal/protocol/schema/**'
+              - 'app/scripts/real-app-harness/scenario-native-canvas.mjs'
+              - '.github/workflows/ci.yml'
+
   backend:
     name: Daemon
+    needs: changes
+    if: needs.changes.outputs.daemon == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +84,8 @@ jobs:
 
   frontend:
     name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -83,6 +135,8 @@ jobs:
 
   rust:
     name: Tauri
+    needs: changes
+    if: needs.changes.outputs.tauri == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -127,6 +181,8 @@ jobs:
 
   native-ui:
     name: Native UI
+    needs: changes
+    if: needs.changes.outputs.native_ui == 'true'
     runs-on: macos-latest
     defaults:
       run:
