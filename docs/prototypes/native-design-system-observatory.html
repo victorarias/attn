@@ -1,0 +1,3679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>attn — Observatory · Native Design System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,200..900,0..100,0..1;1,9..144,200..900,0..100,0..1&family=Mona+Sans:ital,wdth,wght@0,75..125,200..900;1,75..125,200..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<style>
+/* ─────────────────────────────────────────────────────────────────────────
+   ATTN OBSERVATORY · native design system
+   A celestial-atlas aesthetic for an instrument-panel application.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* INK — surfaces, deepest to lightest. cool blue-black. no purple. */
+  --ink-0: #060810;
+  --ink-1: #0a0e16;
+  --ink-2: #10151f;
+  --ink-3: #161d2a;
+  --ink-4: #1f2837;
+  --ink-5: #2a3548;
+
+  /* MOONSTONE — text scale, primary to disabled. warm cream-white. */
+  --moon-0: #f0ede0;
+  --moon-1: #cdc8b6;
+  --moon-2: #8a8678;
+  --moon-3: #545040;
+  --moon-4: #2f2c24;
+
+  /* LINES — hairlines on a 0.05 / 0.10 / 0.18 scale */
+  --line-0: rgba(240, 237, 224, .05);
+  --line-1: rgba(240, 237, 224, .10);
+  --line-2: rgba(240, 237, 224, .18);
+  --line-3: rgba(240, 237, 224, .28);
+
+  /* SODIUM — single accent. used sparingly. */
+  --sodium:      #ff8a3d;
+  --sodium-deep: #d76d24;
+  --sodium-soft: rgba(255, 138, 61, .14);
+  --sodium-glow: rgba(255, 138, 61, .35);
+
+  /* STARS — agent identity. always = identity, never status. */
+  --star-claude: #ffb47a;   /* K-type, warm peach */
+  --star-codex:  #6fb5ff;   /* Rigel, blue supergiant */
+  --star-shell:  #dde9ff;   /* Vega, blue-white */
+
+  /* CLASSIFICATION — observation state. always = status, never identity. */
+  --cls-launching: #5bd5e8;  /* rising */
+  --cls-working:   #62e08e;  /* transit */
+  --cls-waiting:   #ffd75e;  /* occulted */
+  --cls-approval:  #ff7a59;  /* halted */
+  --cls-review:    #c49bff;  /* logged */
+  --cls-idle:      #545040;  /* set */
+  --cls-error:     #ff4d5e;  /* lost */
+
+  /* TYPOGRAPHY */
+  --f-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --f-body:    'Mona Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --f-mono:    'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+
+  /* RADII — three radii, no more. 4 / 7 / 12. */
+  --r-0: 4px;
+  --r-1: 7px;
+  --r-2: 12px;
+
+  /* SPACING — 4-step ramp. */
+  --s-0: 4px;
+  --s-1: 8px;
+  --s-2: 12px;
+  --s-3: 16px;
+  --s-4: 24px;
+  --s-5: 36px;
+  --s-6: 56px;
+  --s-7: 88px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+html, body {
+  background: var(--ink-1);
+  color: var(--moon-0);
+  font-family: var(--f-body);
+  font-size: 14px;
+  line-height: 1.5;
+  font-feature-settings: 'ss01', 'ss02', 'cv01', 'cv11';
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* anchor scroll-margin so deep links don't tuck under the sticky nav */
+:target { scroll-margin-top: 96px; }
+
+::selection { background: var(--sodium-soft); color: var(--moon-0); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--ink-0); }
+::-webkit-scrollbar-thumb {
+  background: var(--ink-4);
+  border: 2px solid var(--ink-0);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-5); }
+
+a { color: inherit; text-decoration: none; }
+
+/* SCROLL PROGRESS — single hairline at the top of the viewport that fills
+   from left to right as the document is read. Animation-timeline:scroll()
+   is supported in modern Chromium / Safari TP and degrades cleanly to a
+   static empty bar elsewhere. Sodium is the only pixel that warrants this
+   much continuous attention. */
+.scroll-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  z-index: 200;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--sodium) 0%, var(--sodium-deep) 100%);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  animation: scroll-fill linear;
+  animation-timeline: scroll(root);
+  box-shadow: 0 0 8px var(--sodium-glow);
+}
+@keyframes scroll-fill {
+  to { transform: scaleX(1); }
+}
+
+/* PLATE ENTRANCE — first paint only. Subtle rise on the hero so the page
+   feels composed at landing. Reduced-motion users get the static layout. */
+@keyframes plate-rise {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+.hero { animation: plate-rise 0.9s cubic-bezier(.22,.61,.36,1) 0.05s backwards; }
+.hero-chart { animation: plate-rise 1.1s cubic-bezier(.22,.61,.36,1) 0.35s backwards; }
+@media (prefers-reduced-motion: reduce) {
+  .hero, .hero-chart { animation: none; }
+  .scroll-progress { animation: none; transform: scaleX(0); }
+  .starfield, .starfield::after { animation: none; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   STARFIELD — atmospheric background. drifts very slowly. never decoration
+   in a literal sense; provides depth and the sense that the page is being
+   observed from a fixed position relative to slow celestial motion.
+   ───────────────────────────────────────────────────────────────────────── */
+.starfield {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.65;
+  background:
+    /* sparse bright stars */
+    radial-gradient(1.2px 1.2px at 7% 12%,  rgba(240,237,224,.7), transparent 60%),
+    radial-gradient(1px   1px   at 19% 88%, rgba(240,237,224,.6), transparent 60%),
+    radial-gradient(1.4px 1.4px at 33% 21%, rgba(240,237,224,.8), transparent 60%),
+    radial-gradient(1px   1px   at 47% 54%, rgba(240,237,224,.5), transparent 60%),
+    radial-gradient(1.2px 1.2px at 61% 8%,  rgba(240,237,224,.6), transparent 60%),
+    radial-gradient(1px   1px   at 73% 41%, rgba(240,237,224,.5), transparent 60%),
+    radial-gradient(1.4px 1.4px at 85% 78%, rgba(240,237,224,.7), transparent 60%),
+    radial-gradient(1px   1px   at 92% 33%, rgba(240,237,224,.6), transparent 60%),
+    /* dim background stars */
+    radial-gradient(0.8px 0.8px at 13% 67%, rgba(240,237,224,.3), transparent 50%),
+    radial-gradient(0.8px 0.8px at 23% 36%, rgba(240,237,224,.3), transparent 50%),
+    radial-gradient(0.8px 0.8px at 38% 79%, rgba(240,237,224,.25), transparent 50%),
+    radial-gradient(0.8px 0.8px at 51% 18%, rgba(240,237,224,.3), transparent 50%),
+    radial-gradient(0.8px 0.8px at 56% 92%, rgba(240,237,224,.3), transparent 50%),
+    radial-gradient(0.8px 0.8px at 67% 64%, rgba(240,237,224,.25), transparent 50%),
+    radial-gradient(0.8px 0.8px at 81% 14%, rgba(240,237,224,.3), transparent 50%),
+    radial-gradient(0.8px 0.8px at 89% 56%, rgba(240,237,224,.3), transparent 50%),
+    radial-gradient(0.8px 0.8px at 96% 89%, rgba(240,237,224,.25), transparent 50%),
+    radial-gradient(0.8px 0.8px at 4% 47%,  rgba(240,237,224,.3), transparent 50%);
+  background-size: 100vw 200vh;
+  background-repeat: no-repeat;
+  animation: starfield-drift 480s linear infinite;
+}
+.starfield::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(0.6px 0.6px at 9% 28%,  rgba(240,237,224,.2), transparent 50%),
+    radial-gradient(0.6px 0.6px at 28% 6%,  rgba(240,237,224,.18), transparent 50%),
+    radial-gradient(0.6px 0.6px at 41% 41%, rgba(240,237,224,.2), transparent 50%),
+    radial-gradient(0.6px 0.6px at 59% 71%, rgba(240,237,224,.18), transparent 50%),
+    radial-gradient(0.6px 0.6px at 77% 23%, rgba(240,237,224,.2), transparent 50%),
+    radial-gradient(0.6px 0.6px at 88% 8%,  rgba(240,237,224,.18), transparent 50%);
+  background-size: 100vw 150vh;
+  animation: starfield-drift-slow 720s linear infinite;
+}
+@keyframes starfield-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-2vw, -8vh, 0); }
+}
+@keyframes starfield-drift-slow {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(1.5vw, 5vh, 0); }
+}
+
+/* very subtle vignette to avoid "wallpaper" feel */
+.vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    radial-gradient(120% 80% at 50% 0%, transparent 0%, transparent 60%, rgba(6,8,16,.5) 100%),
+    radial-gradient(120% 80% at 50% 100%, transparent 0%, transparent 60%, rgba(6,8,16,.6) 100%);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PAGE FRAME — registration crosshairs at the four corners, latitude ticks
+   along the left edge. fixed; do not scroll.
+   ───────────────────────────────────────────────────────────────────────── */
+.page-frame {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+}
+.crosshair {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  color: var(--moon-3);
+}
+.crosshair::before, .crosshair::after {
+  content: '';
+  position: absolute;
+  background: currentColor;
+}
+.crosshair::before { left: 0; right: 0; top: 50%; height: 1px; }
+.crosshair::after  { top: 0; bottom: 0; left: 50%; width: 1px; }
+.crosshair.tl { top: 18px;    left: 18px; }
+.crosshair.tr { top: 18px;    right: 18px; }
+.crosshair.bl { bottom: 18px; left: 18px; }
+.crosshair.br { bottom: 18px; right: 18px; }
+
+.lat-ticks {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 56px;
+  pointer-events: none;
+  z-index: 40;
+  font-family: var(--f-mono);
+  font-size: 9px;
+  color: var(--moon-3);
+  letter-spacing: 0.08em;
+}
+.lat-ticks .tick {
+  position: absolute;
+  left: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.lat-ticks .tick::before {
+  content: '';
+  width: 8px;
+  height: 1px;
+  background: var(--line-2);
+}
+.lat-ticks .tick.major::before { width: 14px; background: var(--line-3); }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   NAV
+   ───────────────────────────────────────────────────────────────────────── */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 56px 14px 88px;
+  background: rgba(10, 14, 22, 0.78);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border-bottom: 1px solid var(--line-1);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 144, 'SOFT' 30, 'WONK' 0;
+  font-weight: 500;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+.brand-mark {
+  width: 26px;
+  height: 26px;
+  position: relative;
+}
+.brand-mark .star {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.brand-mark .star.a { top: 3px;   left: 10px; background: var(--star-claude); box-shadow: 0 0 6px var(--star-claude); }
+.brand-mark .star.b { bottom: 4px; left: 2px;  background: var(--star-codex);  box-shadow: 0 0 6px var(--star-codex); }
+.brand-mark .star.c { bottom: 4px; right: 2px; background: var(--star-shell);  box-shadow: 0 0 6px var(--star-shell); }
+.brand-mark svg { position: absolute; inset: 0; }
+.brand-mark .ring {
+  fill: none;
+  stroke: var(--moon-3);
+  stroke-width: 0.5;
+  opacity: 0.55;
+}
+.brand-mark .triangle {
+  fill: none;
+  stroke: var(--moon-2);
+  stroke-width: 0.5;
+  stroke-dasharray: 1 2;
+  opacity: 0.7;
+}
+
+.nav-meta {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--moon-2);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.nav-meta a:hover { color: var(--moon-0); }
+.nav-meta .sep { color: var(--moon-3); }
+
+.nav-stamp {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.08em;
+  text-align: right;
+  line-height: 1.4;
+}
+.nav-stamp b { color: var(--moon-1); font-weight: 500; letter-spacing: 0.12em; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   LAYOUT — main rail offset to leave room for latitude ticks.
+   ───────────────────────────────────────────────────────────────────────── */
+main {
+  position: relative;
+  z-index: 10;
+  padding: 0 56px 0 88px;
+  max-width: 1480px;
+  margin: 0 auto;
+}
+
+.plate {
+  position: relative;
+  padding: 88px 0 88px;
+  border-bottom: 1px solid var(--line-1);
+}
+.plate:last-child { border-bottom: none; padding-bottom: 56px; }
+
+/* FOLIO — bottom-right page-mark that names the plate. Editorial cue
+   that anchors each plate as part of a bound set rather than a stack
+   of independent sections. Three-line stack: signum, latin, page no. */
+.folio {
+  position: absolute;
+  right: 0;
+  bottom: 24px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+}
+.folio .rule {
+  width: 28px;
+  height: 1px;
+  background: var(--line-2);
+  margin-bottom: 4px;
+}
+.folio .stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.5;
+}
+.folio .signum {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 24, 'SOFT' 80, 'WONK' 1;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--moon-2);
+  text-transform: none;
+  margin-bottom: 2px;
+}
+.folio .pno { color: var(--moon-1); }
+
+/* SPINE — a thin vertical hairline running down the left margin between
+   plates so the document reads as a *bound* set. Sits in the latitude
+   gutter; doesn't compete with the registration crosshairs. */
+.plate::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 88px;
+  bottom: 88px;
+  width: 1px;
+  background: linear-gradient(180deg,
+    transparent 0%,
+    var(--line-1) 8%,
+    var(--line-1) 92%,
+    transparent 100%);
+  pointer-events: none;
+}
+.plate::after {
+  /* small node where the spine meets the plate header */
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 88px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-1);
+  border: 1px solid var(--line-3);
+  pointer-events: none;
+}
+
+.plate-header {
+  display: grid;
+  grid-template-columns: 88px 1fr auto;
+  align-items: baseline;
+  gap: 24px;
+  margin-bottom: 56px;
+}
+.plate-no {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  padding-top: 22px;
+  border-top: 1px solid var(--line-2);
+}
+.plate-title {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 144, 'SOFT' 50, 'WONK' 1;
+  font-weight: 400;
+  font-size: clamp(48px, 7vw, 96px);
+  line-height: 0.92;
+  letter-spacing: -0.025em;
+  color: var(--moon-0);
+}
+.plate-title em {
+  font-style: italic;
+  font-variation-settings: 'opsz' 96, 'SOFT' 80, 'WONK' 1;
+  color: var(--moon-1);
+}
+.plate-tag {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--moon-2);
+  text-transform: uppercase;
+  text-align: right;
+  line-height: 1.6;
+}
+.plate-tag b { color: var(--moon-0); font-weight: 500; }
+
+.plate-lede {
+  max-width: 720px;
+  margin-left: 112px;
+  margin-bottom: 64px;
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 24, 'SOFT' 30, 'WONK' 0;
+  font-weight: 350;
+  font-size: 22px;
+  line-height: 1.45;
+  color: var(--moon-1);
+  letter-spacing: -0.005em;
+}
+.plate-lede em {
+  font-style: italic;
+  font-variation-settings: 'opsz' 24, 'SOFT' 100, 'WONK' 1;
+  color: var(--moon-0);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   HERO
+   ───────────────────────────────────────────────────────────────────────── */
+.hero {
+  position: relative;
+  padding: 96px 0 120px;
+  border-bottom: 1px solid var(--line-1);
+}
+.hero-rule {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--moon-2);
+  text-transform: uppercase;
+  margin-bottom: 56px;
+}
+.hero-rule .line { flex: 1; height: 1px; background: var(--line-2); }
+.hero-rule .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--sodium); box-shadow: 0 0 10px var(--sodium-glow); }
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 64px;
+  align-items: end;
+}
+
+.hero-title {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 144, 'SOFT' 60, 'WONK' 1;
+  font-weight: 400;
+  font-size: clamp(96px, 14vw, 200px);
+  line-height: 0.86;
+  letter-spacing: -0.04em;
+  color: var(--moon-0);
+}
+.hero-title .obs {
+  display: block;
+  font-style: italic;
+  font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
+  color: var(--moon-1);
+  font-size: 0.78em;
+  letter-spacing: -0.03em;
+  margin-left: -0.04em;
+}
+.hero-title .ampersand {
+  font-style: italic;
+  font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
+  color: var(--sodium);
+}
+
+.hero-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+.hero-sub {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 24, 'SOFT' 50, 'WONK' 0;
+  font-style: italic;
+  font-weight: 350;
+  font-size: 22px;
+  line-height: 1.4;
+  color: var(--moon-1);
+  letter-spacing: -0.01em;
+  max-width: 440px;
+}
+.hero-sub b {
+  font-style: normal;
+  font-variation-settings: 'opsz' 24, 'SOFT' 30, 'WONK' 0;
+  font-weight: 500;
+  color: var(--moon-0);
+}
+
+.hero-coordinates {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 24px;
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--moon-2);
+  padding-top: 24px;
+  border-top: 1px solid var(--line-2);
+}
+.hero-coordinates b { color: var(--moon-1); font-weight: 500; letter-spacing: 0.10em; }
+.hero-coordinates .label { color: var(--moon-3); text-transform: uppercase; letter-spacing: 0.18em; }
+
+.hero-chart {
+  position: relative;
+  margin-top: 96px;
+  padding: 32px;
+  border: 1px solid var(--line-1);
+  background: linear-gradient(180deg, rgba(16, 21, 31, .4), rgba(10, 14, 22, .4));
+  border-radius: var(--r-1);
+}
+.hero-chart::before, .hero-chart::after,
+.hero-chart > .corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  color: var(--moon-2);
+}
+.hero-chart > .corner.tl { top: -1px; left: -1px;
+  border-top: 1px solid var(--moon-2); border-left: 1px solid var(--moon-2); }
+.hero-chart > .corner.tr { top: -1px; right: -1px;
+  border-top: 1px solid var(--moon-2); border-right: 1px solid var(--moon-2); }
+.hero-chart > .corner.bl { bottom: -1px; left: -1px;
+  border-bottom: 1px solid var(--moon-2); border-left: 1px solid var(--moon-2); }
+.hero-chart > .corner.br { bottom: -1px; right: -1px;
+  border-bottom: 1px solid var(--moon-2); border-right: 1px solid var(--moon-2); }
+
+.hero-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 20px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--moon-2);
+  text-transform: uppercase;
+}
+.hero-chart-header b { color: var(--moon-0); font-weight: 500; }
+
+.constellation { width: 100%; height: 320px; display: block; }
+.constellation .grid line { stroke: var(--line-1); stroke-width: 1; }
+.constellation .axis line { stroke: var(--line-2); stroke-width: 1; }
+.constellation .axis text {
+  font-family: var(--f-mono); font-size: 9px;
+  letter-spacing: 0.08em; fill: var(--moon-3);
+}
+.constellation .link { stroke: var(--moon-3); stroke-width: 1; stroke-dasharray: 1 3; opacity: 0.7; }
+.constellation .star-pt {
+  filter: drop-shadow(0 0 6px currentColor);
+}
+.constellation .label {
+  font-family: var(--f-mono); font-size: 10px;
+  letter-spacing: 0.12em; fill: var(--moon-1);
+  text-transform: uppercase;
+}
+.constellation .designator {
+  font-family: var(--f-mono); font-size: 8px;
+  letter-spacing: 0.14em; fill: var(--moon-3);
+}
+
+.hero-chart-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line-1);
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   SECTION HEADINGS within plates
+   ───────────────────────────────────────────────────────────────────────── */
+.section-row {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 24px;
+  margin-bottom: 36px;
+}
+.section-marker {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-1);
+}
+.section-title {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 36, 'SOFT' 40, 'WONK' 0;
+  font-weight: 400;
+  font-size: 32px;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  color: var(--moon-0);
+  padding-top: 6px;
+}
+.section-title em {
+  font-style: italic;
+  font-variation-settings: 'opsz' 36, 'SOFT' 100, 'WONK' 1;
+  color: var(--moon-1);
+}
+.section-note {
+  margin-top: 8px;
+  font-family: var(--f-body);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--moon-2);
+  max-width: 640px;
+  line-height: 1.55;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PLATE 01 — PALETTE
+   ───────────────────────────────────────────────────────────────────────── */
+.swatch-block { margin-left: 112px; }
+
+.swatch-row {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1px;
+  background: var(--line-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-0);
+  overflow: hidden;
+  margin-bottom: 36px;
+}
+.swatch-row.text-row { grid-template-columns: repeat(5, 1fr); }
+.swatch-row.lines-row { grid-template-columns: repeat(4, 1fr); }
+.swatch {
+  position: relative;
+  padding: 24px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 140px;
+}
+.swatch .swatch-id {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: auto;
+}
+.swatch .swatch-meta {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  line-height: 1.5;
+}
+.swatch .swatch-meta b {
+  display: block;
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 14, 'SOFT' 50, 'WONK' 0;
+  font-weight: 400;
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  margin-bottom: 4px;
+}
+
+/* swatches use their own backgrounds; foreground adapts */
+.sw-ink-0 { background: var(--ink-0); color: var(--moon-2); }
+.sw-ink-1 { background: var(--ink-1); color: var(--moon-2); }
+.sw-ink-2 { background: var(--ink-2); color: var(--moon-2); }
+.sw-ink-3 { background: var(--ink-3); color: var(--moon-2); }
+.sw-ink-4 { background: var(--ink-4); color: var(--moon-1); }
+.sw-ink-5 { background: var(--ink-5); color: var(--moon-1); }
+
+.sw-moon-0 { background: var(--ink-1); color: var(--moon-0); }
+.sw-moon-0 .sample { background: var(--moon-0); }
+.sw-moon-1 { background: var(--ink-1); color: var(--moon-1); }
+.sw-moon-1 .sample { background: var(--moon-1); }
+.sw-moon-2 { background: var(--ink-1); color: var(--moon-2); }
+.sw-moon-2 .sample { background: var(--moon-2); }
+.sw-moon-3 { background: var(--ink-1); color: var(--moon-3); }
+.sw-moon-3 .sample { background: var(--moon-3); }
+.sw-moon-4 { background: var(--ink-1); color: var(--moon-3); }
+.sw-moon-4 .sample { background: var(--moon-4); }
+.text-row .swatch .sample {
+  width: 100%;
+  height: 56px;
+  margin-bottom: 14px;
+  border-radius: 2px;
+}
+
+/* the sodium plate — the single accent. given a full-width feature row. */
+.accent-plate {
+  margin-left: 112px;
+  margin-bottom: 56px;
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 1px;
+  background: var(--line-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-0);
+  overflow: hidden;
+  min-height: 220px;
+}
+.accent-plate .accent-feature {
+  background: linear-gradient(135deg, var(--sodium) 0%, var(--sodium-deep) 100%);
+  padding: 28px;
+  color: var(--ink-0);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+}
+.accent-plate .accent-feature::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(80% 60% at 100% 100%, transparent, rgba(6,8,16,.18));
+  pointer-events: none;
+}
+.accent-plate .accent-feature .label {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+.accent-plate .accent-feature .name {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 96, 'SOFT' 80, 'WONK' 1;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 64px;
+  line-height: 0.95;
+  letter-spacing: -0.025em;
+}
+.accent-plate .accent-feature .meta {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.accent-plate .accent-tint,
+.accent-plate .accent-glow {
+  background: var(--ink-2);
+  padding: 24px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.accent-plate .accent-tint .swatch-tint {
+  height: 64px;
+  background: var(--sodium-soft);
+  border: 1px dashed var(--sodium-glow);
+  border-radius: var(--r-0);
+}
+.accent-plate .accent-glow .swatch-tint {
+  height: 64px;
+  background: var(--ink-1);
+  box-shadow: 0 0 28px var(--sodium-glow), inset 0 0 0 1px var(--sodium);
+  border-radius: var(--r-0);
+}
+
+/* AGENT STARS — identity catalog */
+.stars-grid {
+  margin-left: 112px;
+  margin-bottom: 56px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.star-card {
+  position: relative;
+  padding: 28px 24px;
+  background: var(--ink-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  overflow: hidden;
+}
+.star-card .star-vis {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  margin-bottom: 24px;
+  position: relative;
+}
+.star-card .star-vis::before {
+  content: '';
+  position: absolute;
+  inset: -20px;
+  border-radius: 50%;
+  filter: blur(16px);
+  opacity: 0.7;
+  z-index: -1;
+}
+.star-card[data-agent="claude"] .star-vis { background: var(--star-claude); }
+.star-card[data-agent="claude"] .star-vis::before { background: var(--star-claude); }
+.star-card[data-agent="codex"] .star-vis { background: var(--star-codex); }
+.star-card[data-agent="codex"] .star-vis::before { background: var(--star-codex); }
+.star-card[data-agent="shell"] .star-vis { background: var(--star-shell); }
+.star-card[data-agent="shell"] .star-vis::before { background: var(--star-shell); }
+
+.star-card .desig {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.star-card .name {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 96, 'SOFT' 60, 'WONK' 1;
+  font-weight: 400;
+  font-size: 40px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--moon-0);
+  margin-bottom: 4px;
+}
+.star-card .name em {
+  font-style: italic;
+  font-variation-settings: 'opsz' 96, 'SOFT' 100, 'WONK' 1;
+}
+.star-card .role {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 18, 'SOFT' 40, 'WONK' 0;
+  font-style: italic;
+  font-weight: 350;
+  font-size: 16px;
+  color: var(--moon-1);
+  margin-bottom: 24px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+}
+.star-card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  font-family: var(--f-mono);
+  font-size: 11px;
+}
+.star-card dl dt {
+  color: var(--moon-3);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  font-size: 9px;
+  align-self: center;
+}
+.star-card dl dd {
+  color: var(--moon-1);
+  letter-spacing: 0.04em;
+}
+
+/* CLASSIFICATIONS — observation states */
+.cls-grid {
+  margin-left: 112px;
+  margin-bottom: 24px;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  background: var(--line-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-0);
+  overflow: hidden;
+}
+.cls-cell {
+  padding: 20px 14px 16px;
+  background: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 156px;
+}
+.cls-cell .indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--moon-1);
+}
+.cls-cell .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.cls-cell .dot.live {
+  animation: pulse-breath 3.6s ease-in-out infinite;
+}
+.cls-cell .latin {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 24, 'SOFT' 60, 'WONK' 1;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22px;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  color: var(--moon-0);
+  margin-top: auto;
+}
+.cls-cell .latin-en {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  margin-top: -4px;
+}
+.cls-cell[data-cls="launching"] .dot { background: var(--cls-launching); box-shadow: 0 0 8px var(--cls-launching); }
+.cls-cell[data-cls="working"]   .dot { background: var(--cls-working);   box-shadow: 0 0 8px var(--cls-working); }
+.cls-cell[data-cls="waiting"]   .dot { background: var(--cls-waiting);   box-shadow: 0 0 8px var(--cls-waiting); }
+.cls-cell[data-cls="approval"]  .dot { background: var(--cls-approval);  box-shadow: 0 0 8px var(--cls-approval); }
+.cls-cell[data-cls="review"]    .dot { background: var(--cls-review);    box-shadow: 0 0 8px var(--cls-review); }
+.cls-cell[data-cls="idle"]      .dot { background: var(--cls-idle); }
+.cls-cell[data-cls="error"]     .dot { background: var(--cls-error);     box-shadow: 0 0 8px var(--cls-error); }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PLATE 02 — TYPE
+   ───────────────────────────────────────────────────────────────────────── */
+.type-block {
+  margin-left: 112px;
+  margin-bottom: 56px;
+}
+.specimen {
+  position: relative;
+  padding: 32px 0 28px;
+  border-top: 1px solid var(--line-1);
+}
+.specimen-meta {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 32px;
+  align-items: baseline;
+  margin-bottom: 24px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+}
+.specimen-meta .name {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 36, 'SOFT' 50, 'WONK' 0;
+  font-weight: 400;
+  font-style: italic;
+  font-size: 26px;
+  letter-spacing: -0.01em;
+  color: var(--moon-0);
+  text-transform: none;
+}
+.specimen-meta b { color: var(--moon-1); font-weight: 500; }
+
+.specimen-display {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 144, 'SOFT' 60, 'WONK' 1;
+  font-weight: 400;
+  font-size: clamp(96px, 14vw, 180px);
+  line-height: 0.88;
+  letter-spacing: -0.04em;
+  color: var(--moon-0);
+  word-spacing: -0.05em;
+}
+.specimen-display em {
+  font-style: italic;
+  font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
+  color: var(--moon-1);
+}
+.specimen-display .accent {
+  font-style: italic;
+  font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
+  color: var(--sodium);
+}
+
+.specimen-axes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--line-1);
+}
+.axis-card {
+  padding: 14px 16px;
+  background: var(--ink-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-0);
+}
+.axis-card .axis-name {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.axis-card .axis-val {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 36, 'SOFT' 60, 'WONK' 1;
+  font-weight: 400;
+  font-style: italic;
+  font-size: 32px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--moon-0);
+}
+.axis-card .axis-meta {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-2);
+  margin-top: 4px;
+}
+
+.specimen-mona {
+  font-family: var(--f-body);
+  font-size: clamp(56px, 8vw, 120px);
+  font-weight: 200;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  color: var(--moon-0);
+}
+.specimen-mona .b500 { font-weight: 500; }
+.specimen-mona .b800 { font-weight: 800; }
+.specimen-mona .narrow { font-stretch: 75%; font-weight: 600; }
+.specimen-mona .wide { font-stretch: 125%; font-weight: 300; }
+
+.specimen-mono {
+  font-family: var(--f-mono);
+  font-size: clamp(40px, 5vw, 72px);
+  font-weight: 300;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--moon-0);
+}
+.specimen-mono .b600 { font-weight: 600; }
+.specimen-mono .it { font-style: italic; color: var(--moon-1); }
+
+.hierarchy {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 24px 32px;
+  align-items: baseline;
+  padding-top: 28px;
+  border-top: 1px solid var(--line-1);
+}
+.hierarchy .h-label {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  padding-top: 6px;
+}
+.hierarchy .h-h1 {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 96, 'SOFT' 50, 'WONK' 1;
+  font-weight: 400;
+  font-size: 56px;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  color: var(--moon-0);
+}
+.hierarchy .h-h1 em { font-style: italic; font-variation-settings: 'opsz' 96, 'SOFT' 100, 'WONK' 1; }
+.hierarchy .h-h2 {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 36, 'SOFT' 40, 'WONK' 0;
+  font-weight: 400;
+  font-size: 28px;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  color: var(--moon-0);
+}
+.hierarchy .h-h3 {
+  font-family: var(--f-body);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--moon-0);
+}
+.hierarchy .h-body {
+  font-family: var(--f-body);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--moon-1);
+  max-width: 540px;
+}
+.hierarchy .h-meta {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--moon-2);
+}
+.hierarchy .h-marker {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PLATE 03 — LANGUAGE (component primitives)
+   ───────────────────────────────────────────────────────────────────────── */
+.lang-grid {
+  margin-left: 112px;
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 24px;
+}
+
+.lang-card {
+  background: var(--ink-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  padding: 24px;
+  position: relative;
+}
+.lang-card.span-6 { grid-column: span 6; }
+.lang-card.span-4 { grid-column: span 4; }
+.lang-card.span-8 { grid-column: span 8; }
+.lang-card.span-12 { grid-column: span 12; }
+
+.lang-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line-1);
+}
+.lang-card-title {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 24, 'SOFT' 50, 'WONK' 1;
+  font-weight: 400;
+  font-style: italic;
+  font-size: 22px;
+  letter-spacing: -0.015em;
+  color: var(--moon-0);
+}
+.lang-card-no {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+}
+
+/* BUTTONS */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-family: var(--f-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  border-radius: var(--r-0);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 120ms ease;
+  white-space: nowrap;
+}
+.btn-primary {
+  background: var(--sodium);
+  color: var(--ink-0);
+  border-color: var(--sodium);
+}
+.btn-primary:hover {
+  background: var(--sodium-deep);
+  border-color: var(--sodium-deep);
+  box-shadow: 0 0 20px var(--sodium-glow);
+}
+.btn-secondary {
+  background: var(--ink-3);
+  color: var(--moon-0);
+  border-color: var(--line-2);
+}
+.btn-secondary:hover { border-color: var(--line-3); background: var(--ink-4); }
+.btn-ghost {
+  background: transparent;
+  color: var(--moon-1);
+  border-color: var(--line-1);
+}
+.btn-ghost:hover { color: var(--moon-0); border-color: var(--line-2); }
+.btn-danger {
+  background: transparent;
+  color: var(--cls-error);
+  border-color: rgba(255, 77, 94, .35);
+}
+.btn-danger:hover { background: rgba(255, 77, 94, .08); border-color: rgba(255, 77, 94, .6); }
+.btn .kbd {
+  display: inline-flex;
+  padding: 2px 5px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  background: rgba(0, 0, 0, .25);
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  color: inherit;
+  margin-left: 4px;
+}
+.btn-primary .kbd { background: rgba(6, 8, 16, .25); border-color: rgba(6, 8, 16, .35); }
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.btn-row:last-child { margin-bottom: 0; }
+.btn-label {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  margin-top: 8px;
+}
+
+/* INPUTS */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.field-label {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  display: flex;
+  justify-content: space-between;
+}
+.field-label span:last-child { color: var(--moon-2); }
+.field-input {
+  display: flex;
+  align-items: center;
+  background: var(--ink-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-0);
+  padding: 10px 12px;
+  font-family: var(--f-mono);
+  font-size: 12px;
+  color: var(--moon-0);
+  caret-color: var(--sodium);
+  gap: 10px;
+  transition: border-color 120ms;
+}
+.field-input:focus-within {
+  border-color: var(--sodium);
+  box-shadow: 0 0 0 1px var(--sodium-soft), 0 0 18px var(--sodium-soft);
+}
+.field-input input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: 0.02em;
+}
+.field-input .prefix, .field-input .suffix {
+  color: var(--moon-3);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.field-input.disabled { opacity: 0.5; cursor: not-allowed; }
+
+.field-aurora-input {
+  display: inline-flex;
+  align-items: center;
+  background: var(--ink-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-0);
+  padding: 10px 14px;
+  font-family: var(--f-mono);
+  font-size: 13px;
+  color: var(--moon-0);
+  letter-spacing: 0.02em;
+  gap: 2px;
+  min-width: 100%;
+}
+.field-aurora-input::after {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 1.1em;
+  background: var(--sodium);
+  border-radius: 1px;
+  margin-left: 1px;
+  box-shadow: 0 0 12px var(--sodium-glow), 0 0 20px var(--sodium-soft);
+  animation: aurora-pulse 2.4s ease-in-out infinite;
+}
+
+/* PILLS */
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  background: var(--ink-3);
+  color: var(--moon-1);
+  border: 1px solid var(--line-1);
+}
+.pill .dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.pill[data-state="launching"] .dot { background: var(--cls-launching); box-shadow: 0 0 6px var(--cls-launching); }
+.pill[data-state="working"]   .dot { background: var(--cls-working);   box-shadow: 0 0 6px var(--cls-working); animation: pulse-breath 3.6s ease-in-out infinite; }
+.pill[data-state="waiting"]   .dot { background: var(--cls-waiting);   box-shadow: 0 0 6px var(--cls-waiting); animation: pulse-breath 3.6s ease-in-out infinite; }
+.pill[data-state="approval"]  .dot { background: var(--cls-approval);  box-shadow: 0 0 6px var(--cls-approval); animation: pulse-breath 2.4s ease-in-out infinite; }
+.pill[data-state="review"]    .dot { background: var(--cls-review);    box-shadow: 0 0 6px var(--cls-review); }
+.pill[data-state="idle"]      .dot { background: var(--cls-idle); }
+.pill[data-state="error"]     .dot { background: var(--cls-error);     box-shadow: 0 0 6px var(--cls-error); }
+
+/* LIST ROWS — sidebar-style session entries */
+.list {
+  display: flex;
+  flex-direction: column;
+  background: var(--ink-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-0);
+  overflow: hidden;
+}
+.list-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line-0);
+  cursor: pointer;
+  transition: background-color 120ms;
+}
+.list-row:last-child { border-bottom: none; }
+.list-row:hover { background: var(--ink-2); }
+.list-row.active { background: var(--ink-3); }
+.list-row.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 2px;
+  top: 8px;
+  bottom: 8px;
+  background: var(--sodium);
+  box-shadow: 0 0 10px var(--sodium-glow);
+}
+.list-row { position: relative; }
+
+.list-star {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.list-star[data-agent="claude"] { background: var(--star-claude); box-shadow: 0 0 8px var(--star-claude); }
+.list-star[data-agent="codex"]  { background: var(--star-codex);  box-shadow: 0 0 8px var(--star-codex); }
+.list-star[data-agent="shell"]  { background: var(--star-shell);  box-shadow: 0 0 8px var(--star-shell); }
+
+.list-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.list-name {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 18, 'SOFT' 40, 'WONK' 0;
+  font-weight: 450;
+  font-size: 14px;
+  color: var(--moon-0);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.list-meta {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-2);
+  letter-spacing: 0.04em;
+}
+.list-meta b { color: var(--moon-1); font-weight: 500; }
+.list-state {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--moon-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.list-state .indicator {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.list-state[data-state="working"]  { color: var(--cls-working); }
+.list-state[data-state="working"]  .indicator { background: var(--cls-working); box-shadow: 0 0 6px var(--cls-working); animation: pulse-breath 3.6s ease-in-out infinite; }
+.list-state[data-state="waiting"]  { color: var(--cls-waiting); }
+.list-state[data-state="waiting"]  .indicator { background: var(--cls-waiting); box-shadow: 0 0 6px var(--cls-waiting); }
+.list-state[data-state="approval"] { color: var(--cls-approval); }
+.list-state[data-state="approval"] .indicator { background: var(--cls-approval); box-shadow: 0 0 6px var(--cls-approval); animation: pulse-breath 2.4s ease-in-out infinite; }
+.list-state[data-state="idle"]     { color: var(--moon-2); }
+.list-state[data-state="idle"]     .indicator { background: var(--cls-idle); }
+.list-state[data-state="review"]   { color: var(--cls-review); }
+.list-state[data-state="review"]   .indicator { background: var(--cls-review); box-shadow: 0 0 6px var(--cls-review); }
+.list-time {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* PANEL CHROME */
+.panel {
+  background: var(--ink-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--ink-3);
+  border-bottom: 1px solid var(--line-2);
+}
+.panel-head .star-mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.panel-head[data-agent="claude"] .star-mark { background: var(--star-claude); box-shadow: 0 0 6px var(--star-claude); }
+.panel-head[data-agent="codex"]  .star-mark { background: var(--star-codex);  box-shadow: 0 0 6px var(--star-codex); }
+.panel-head[data-agent="shell"]  .star-mark { background: var(--star-shell);  box-shadow: 0 0 6px var(--star-shell); }
+
+.panel-name {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 18, 'SOFT' 40, 'WONK' 0;
+  font-weight: 450;
+  font-size: 13px;
+  color: var(--moon-0);
+  letter-spacing: -0.005em;
+}
+.panel-coord {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.06em;
+  margin-left: auto;
+}
+.panel-status {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+}
+.panel-status[data-state="working"]  { color: var(--cls-working); border-color: rgba(98,224,142,.25); }
+.panel-status[data-state="approval"] { color: var(--cls-approval); border-color: rgba(255,122,89,.32); background: rgba(255,122,89,.06); }
+.panel-status[data-state="waiting"]  { color: var(--cls-waiting); border-color: rgba(255,215,94,.25); }
+.panel-status[data-state="idle"]     { color: var(--moon-2); }
+.panel-status[data-state="review"]   { color: var(--cls-review); border-color: rgba(196,155,255,.30); }
+.panel-status .indicator {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.panel-status[data-state="working"]  .indicator { animation: pulse-breath 3.6s ease-in-out infinite; }
+.panel-status[data-state="approval"] .indicator { animation: pulse-breath 2.4s ease-in-out infinite; }
+.panel-status[data-state="waiting"]  .indicator { animation: pulse-breath 4.0s ease-in-out infinite; }
+
+.panel-body {
+  flex: 1;
+  padding: 16px 14px;
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--moon-1);
+  background: var(--ink-1);
+  position: relative;
+}
+
+.panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--ink-2);
+  border-top: 1px solid var(--line-1);
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.06em;
+}
+.panel-foot b { color: var(--moon-1); font-weight: 500; }
+
+/* TERMINAL OUTPUT */
+.term {
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.term .ln { display: flex; gap: 16px; }
+.term .lno { color: var(--moon-3); user-select: none; min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.term .txt { color: var(--moon-1); flex: 1; }
+.term .com { color: var(--moon-3); }
+.term .key { color: var(--star-claude); }
+.term .str { color: var(--cls-working); }
+.term .err { color: var(--cls-error); }
+.term .acc { color: var(--sodium); }
+.term .dim { color: var(--moon-2); }
+.term .caret::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 1.1em;
+  background: var(--sodium);
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  border-radius: 1px;
+  box-shadow: 0 0 10px var(--sodium-glow);
+  animation: aurora-pulse 2.4s ease-in-out infinite;
+}
+
+/* DIALOG / LAUNCH */
+.dialog {
+  background: var(--ink-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--line-2);
+  position: relative;
+}
+.dialog-head {
+  padding: 28px 28px 20px;
+  border-bottom: 1px solid var(--line-1);
+  position: relative;
+  background:
+    radial-gradient(80% 60% at 0% 0%, var(--sodium-soft), transparent 60%),
+    var(--ink-2);
+}
+.dialog-eyebrow {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--sodium);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.dialog-title {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 96, 'SOFT' 60, 'WONK' 1;
+  font-weight: 400;
+  font-size: 36px;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  color: var(--moon-0);
+}
+.dialog-title em { font-style: italic; font-variation-settings: 'opsz' 96, 'SOFT' 100, 'WONK' 1; }
+.dialog-sub {
+  margin-top: 6px;
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 18, 'SOFT' 50, 'WONK' 0;
+  font-style: italic;
+  font-weight: 350;
+  font-size: 16px;
+  color: var(--moon-1);
+  letter-spacing: -0.005em;
+}
+.dialog-body {
+  padding: 24px 28px;
+}
+.dialog-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 24px;
+  background: var(--ink-1);
+  border-top: 1px solid var(--line-1);
+}
+.dialog-foot .kbd-hint {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.08em;
+}
+.dialog-foot .kbd-hint b { color: var(--moon-1); font-weight: 500; }
+
+.agent-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.agent-tile {
+  position: relative;
+  background: var(--ink-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-0);
+  padding: 16px 14px;
+  cursor: pointer;
+  transition: border-color 140ms, transform 140ms;
+}
+.agent-tile:hover { border-color: var(--line-2); transform: translateY(-1px); }
+.agent-tile.selected {
+  border-color: var(--sodium);
+  box-shadow: 0 0 0 1px var(--sodium-soft), 0 0 24px var(--sodium-soft);
+}
+.agent-tile .star-glyph {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  margin-bottom: 12px;
+  position: relative;
+}
+.agent-tile .star-glyph::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  filter: blur(8px);
+  opacity: 0.6;
+  z-index: -1;
+}
+.agent-tile[data-agent="claude"] .star-glyph,
+.agent-tile[data-agent="claude"] .star-glyph::before { background: var(--star-claude); }
+.agent-tile[data-agent="codex"] .star-glyph,
+.agent-tile[data-agent="codex"] .star-glyph::before { background: var(--star-codex); }
+.agent-tile[data-agent="shell"] .star-glyph,
+.agent-tile[data-agent="shell"] .star-glyph::before { background: var(--star-shell); }
+
+.agent-tile .desig {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+}
+.agent-tile .name {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 24, 'SOFT' 50, 'WONK' 0;
+  font-weight: 450;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  color: var(--moon-0);
+  margin-top: 2px;
+}
+.agent-tile .role {
+  margin-top: 8px;
+  font-family: var(--f-body);
+  font-size: 11px;
+  color: var(--moon-2);
+  line-height: 1.4;
+}
+.agent-tile .corner-mark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-family: var(--f-mono);
+  font-size: 9px;
+  color: var(--moon-3);
+  letter-spacing: 0.08em;
+}
+.agent-tile.selected .corner-mark {
+  color: var(--sodium);
+}
+
+/* COMMAND PALETTE */
+.cmd {
+  background: var(--ink-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  overflow: hidden;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+.cmd-input-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line-1);
+  background: var(--ink-1);
+}
+.cmd-input-row .glyph {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 36, 'SOFT' 100, 'WONK' 1;
+  font-style: italic;
+  font-size: 18px;
+  color: var(--sodium);
+}
+.cmd-input-row input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-family: var(--f-mono);
+  font-size: 13px;
+  color: var(--moon-0);
+  letter-spacing: 0.02em;
+  caret-color: var(--sodium);
+}
+.cmd-input-row .scope {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--moon-2);
+  padding: 3px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+}
+.cmd-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.cmd-item {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line-0);
+}
+.cmd-item:last-child { border-bottom: none; }
+.cmd-item.active { background: var(--ink-3); }
+.cmd-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--sodium);
+}
+.cmd-item { position: relative; }
+.cmd-item .glyph {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--moon-3);
+  text-align: center;
+}
+.cmd-item .item-title {
+  font-family: var(--f-body);
+  font-size: 13px;
+  color: var(--moon-0);
+}
+.cmd-item .item-title em {
+  font-style: normal;
+  color: var(--sodium);
+}
+.cmd-item .item-desc {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.04em;
+}
+.cmd-item .item-shortcut {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-2);
+  letter-spacing: 0.06em;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PLATE 04 — CANVAS shell (full applied composition)
+   ───────────────────────────────────────────────────────────────────────── */
+.canvas-frame {
+  margin-left: 112px;
+  background: var(--ink-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  overflow: hidden;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5);
+  position: relative;
+}
+.canvas-titlebar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--ink-2);
+  border-bottom: 1px solid var(--line-2);
+}
+.traffic {
+  display: flex;
+  gap: 8px;
+}
+.traffic span {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--ink-4);
+  border: 1px solid var(--line-2);
+}
+.canvas-titlebar .doc {
+  text-align: center;
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--moon-2);
+  letter-spacing: 0.06em;
+}
+.canvas-titlebar .doc b { color: var(--moon-0); font-weight: 500; }
+.canvas-titlebar .controls {
+  display: flex;
+  gap: 6px;
+}
+.canvas-titlebar .controls .ctrl {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  background: var(--ink-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-0);
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--moon-2);
+}
+
+.canvas-shell {
+  display: grid;
+  grid-template-columns: 248px 1fr;
+  min-height: 720px;
+}
+
+/* SIDEBAR */
+.sidebar {
+  background: var(--ink-2);
+  border-right: 1px solid var(--line-2);
+  display: flex;
+  flex-direction: column;
+}
+.sidebar-section {
+  padding: 14px 12px 10px;
+  border-bottom: 1px solid var(--line-1);
+}
+.sidebar-section:last-child { border-bottom: none; flex: 1; }
+.sidebar-h {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+.sidebar-h b { color: var(--moon-1); font-weight: 500; }
+
+.workspace {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-0);
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.workspace:hover { background: var(--ink-3); }
+.workspace.active { background: var(--ink-3); }
+.workspace .ws-glyph {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--ink-4);
+  display: grid;
+  place-items: center;
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 14, 'SOFT' 60, 'WONK' 0;
+  font-style: italic;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--moon-0);
+  border: 1px solid var(--line-2);
+}
+.workspace.active .ws-glyph {
+  background: var(--sodium);
+  color: var(--ink-0);
+  border-color: var(--sodium);
+}
+.workspace .ws-name {
+  flex: 1;
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 18, 'SOFT' 40, 'WONK' 0;
+  font-weight: 450;
+  font-size: 13px;
+  color: var(--moon-0);
+  letter-spacing: -0.005em;
+}
+.workspace .ws-count {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.workspace.active .ws-count { color: var(--moon-1); }
+
+.session-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px 6px 32px;
+  border-radius: var(--r-0);
+  cursor: pointer;
+  position: relative;
+}
+.session-row:hover { background: var(--ink-3); }
+.session-row.current { background: var(--ink-3); }
+.session-row.current::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 12px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--sodium);
+  box-shadow: 0 0 6px var(--sodium-glow);
+}
+.session-row .s-star {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.session-row[data-agent="claude"] .s-star { background: var(--star-claude); box-shadow: 0 0 5px var(--star-claude); }
+.session-row[data-agent="codex"]  .s-star { background: var(--star-codex);  box-shadow: 0 0 5px var(--star-codex); }
+.session-row[data-agent="shell"]  .s-star { background: var(--star-shell);  box-shadow: 0 0 5px var(--star-shell); }
+.session-row .s-name {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--moon-1);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-row.current .s-name { color: var(--moon-0); }
+.session-row .s-state {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.session-row[data-state="working"]  .s-state { background: var(--cls-working); box-shadow: 0 0 5px var(--cls-working); animation: pulse-breath 3.6s ease-in-out infinite; }
+.session-row[data-state="approval"] .s-state { background: var(--cls-approval); box-shadow: 0 0 5px var(--cls-approval); animation: pulse-breath 2.4s ease-in-out infinite; }
+.session-row[data-state="waiting"]  .s-state { background: var(--cls-waiting); box-shadow: 0 0 5px var(--cls-waiting); }
+.session-row[data-state="review"]   .s-state { background: var(--cls-review); box-shadow: 0 0 5px var(--cls-review); }
+.session-row[data-state="idle"]     .s-state { background: var(--cls-idle); }
+
+.sidebar-foot {
+  padding: 12px;
+  border-top: 1px solid var(--line-1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.06em;
+}
+
+/* CANVAS area */
+.canvas-area {
+  position: relative;
+  background:
+    repeating-linear-gradient(0deg, var(--line-0), var(--line-0) 1px, transparent 1px, transparent 64px),
+    repeating-linear-gradient(90deg, var(--line-0), var(--line-0) 1px, transparent 1px, transparent 64px),
+    var(--ink-1);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 16px;
+  padding: 16px;
+}
+.canvas-area::before, .canvas-area::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+.canvas-area::before {
+  top: 16px; left: 16px;
+  width: 16px; height: 16px;
+  border-top: 1px solid var(--moon-3);
+  border-left: 1px solid var(--moon-3);
+  opacity: 0.5;
+}
+.canvas-area::after {
+  bottom: 16px; right: 16px;
+  width: 16px; height: 16px;
+  border-bottom: 1px solid var(--moon-3);
+  border-right: 1px solid var(--moon-3);
+  opacity: 0.5;
+}
+
+.tile {
+  position: relative;
+  background: var(--ink-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.tile.span-2 { grid-column: span 2; }
+
+.tile-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--ink-3);
+  border-bottom: 1px solid var(--line-2);
+}
+.tile-head .star {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.tile-head[data-agent="claude"] .star { background: var(--star-claude); box-shadow: 0 0 6px var(--star-claude); }
+.tile-head[data-agent="codex"]  .star { background: var(--star-codex);  box-shadow: 0 0 6px var(--star-codex); }
+.tile-head[data-agent="shell"]  .star { background: var(--star-shell);  box-shadow: 0 0 6px var(--star-shell); }
+.tile-name {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 18, 'SOFT' 40, 'WONK' 0;
+  font-weight: 450;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+  color: var(--moon-0);
+}
+.tile-meta {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.06em;
+}
+.tile-status {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+}
+.tile-status[data-state="working"]  { color: var(--cls-working); border-color: rgba(98,224,142,.30); }
+.tile-status[data-state="approval"] { color: var(--cls-approval); border-color: rgba(255,122,89,.4); background: rgba(255,122,89,.08); }
+.tile-status[data-state="waiting"]  { color: var(--cls-waiting); border-color: rgba(255,215,94,.30); }
+.tile-status[data-state="review"]   { color: var(--cls-review); border-color: rgba(196,155,255,.30); }
+.tile-status[data-state="idle"]     { color: var(--moon-2); }
+.tile-status .indicator {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.tile-status[data-state="working"]  .indicator { animation: pulse-breath 3.6s ease-in-out infinite; }
+.tile-status[data-state="approval"] .indicator { animation: pulse-breath 2.4s ease-in-out infinite; }
+.tile-status[data-state="waiting"]  .indicator { animation: pulse-breath 4.0s ease-in-out infinite; }
+
+.tile-body {
+  flex: 1;
+  background: var(--ink-1);
+  padding: 14px 14px 12px;
+  overflow: hidden;
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.tile-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 14px;
+  background: var(--ink-2);
+  border-top: 1px solid var(--line-1);
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.06em;
+}
+.tile-foot b { color: var(--moon-1); font-weight: 500; }
+
+.tile.has-action::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 122, 89, 0.40), inset 0 0 36px rgba(255, 122, 89, 0.10);
+  border-radius: var(--r-1);
+  animation: action-breath 2.8s ease-in-out infinite;
+}
+
+/* approval prompt overlay inside tile body */
+.approval-prompt {
+  margin-top: 14px;
+  padding: 14px 14px;
+  background: rgba(255, 122, 89, 0.06);
+  border: 1px solid rgba(255, 122, 89, 0.32);
+  border-radius: var(--r-0);
+}
+.approval-prompt .label {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--cls-approval);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.approval-prompt .question {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 24, 'SOFT' 50, 'WONK' 0;
+  font-weight: 400;
+  font-size: 17px;
+  line-height: 1.3;
+  color: var(--moon-0);
+  letter-spacing: -0.005em;
+  margin-bottom: 12px;
+}
+.approval-prompt .question em { font-style: italic; font-variation-settings: 'opsz' 24, 'SOFT' 100, 'WONK' 1; color: var(--cls-approval); }
+.approval-prompt .actions {
+  display: flex;
+  gap: 8px;
+}
+
+.canvas-statusbar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 24px;
+  align-items: center;
+  padding: 8px 16px;
+  background: var(--ink-2);
+  border-top: 1px solid var(--line-2);
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.06em;
+}
+.canvas-statusbar .stat-group {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+.canvas-statusbar .stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.canvas-statusbar .stat b { color: var(--moon-1); font-weight: 500; }
+.canvas-statusbar .pulse-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cls-working);
+  box-shadow: 0 0 6px var(--cls-working);
+  animation: pulse-breath 3.6s ease-in-out infinite;
+}
+.canvas-statusbar .right {
+  display: flex;
+  gap: 20px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PLATE 05 — MOTION
+   ───────────────────────────────────────────────────────────────────────── */
+.motion-grid {
+  margin-left: 112px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.motion-card {
+  background: var(--ink-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  padding: 24px;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.motion-card .m-name {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 24, 'SOFT' 50, 'WONK' 1;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.015em;
+  color: var(--moon-0);
+}
+.motion-card .m-desc {
+  font-family: var(--f-body);
+  font-size: 12px;
+  color: var(--moon-2);
+  line-height: 1.55;
+}
+.motion-card .m-vis {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  background: var(--ink-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-0);
+  position: relative;
+  overflow: hidden;
+}
+/* registration ticks — match the hero-chart corner treatment so motion
+   demos read as instrument plates, not generic preview cards */
+.motion-card .m-vis::before,
+.motion-card .m-vis::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+  color: var(--moon-3);
+  opacity: 0.7;
+}
+.motion-card .m-vis::before {
+  top: 4px; left: 4px;
+  border-top: 1px solid currentColor;
+  border-left: 1px solid currentColor;
+}
+.motion-card .m-vis::after {
+  bottom: 4px; right: 4px;
+  border-bottom: 1px solid currentColor;
+  border-right: 1px solid currentColor;
+}
+.motion-card .m-spec {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--moon-3);
+  letter-spacing: 0.04em;
+}
+.motion-card .m-spec b { color: var(--moon-1); font-weight: 500; }
+
+/* aurora caret demo */
+.aurora-demo {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--f-mono);
+  font-size: 18px;
+  color: var(--moon-0);
+}
+.aurora-demo::after {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 1.2em;
+  background: var(--sodium);
+  border-radius: 1px;
+  box-shadow: 0 0 14px var(--sodium-glow), 0 0 26px var(--sodium-soft);
+  animation: aurora-pulse 2.4s ease-in-out infinite;
+}
+
+/* breath demo */
+.breath-demo {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--cls-working);
+  box-shadow: 0 0 16px var(--cls-working);
+  animation: pulse-breath 3.6s ease-in-out infinite;
+}
+
+/* drift demo */
+.drift-demo {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.drift-demo .star-d {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--moon-1);
+  box-shadow: 0 0 6px var(--moon-1);
+}
+.drift-demo .star-d.s1 { top: 30%; left: 22%; animation: drift-1 22s ease-in-out infinite; }
+.drift-demo .star-d.s2 { top: 60%; left: 55%; animation: drift-2 28s ease-in-out infinite; }
+.drift-demo .star-d.s3 { top: 18%; left: 78%; animation: drift-3 32s ease-in-out infinite; }
+.drift-demo .star-d.s4 { top: 75%; left: 18%; animation: drift-1 26s ease-in-out infinite reverse; }
+
+/* ANIMATIONS */
+@keyframes pulse-breath {
+  0%, 100% { opacity: 0.55; transform: scale(0.95); }
+  50%      { opacity: 1;    transform: scale(1.05); }
+}
+@keyframes aurora-pulse {
+  0%, 100% { opacity: 0.85; box-shadow: 0 0 10px var(--sodium-glow), 0 0 20px var(--sodium-soft); }
+  50%      { opacity: 1;    box-shadow: 0 0 16px var(--sodium-glow), 0 0 32px var(--sodium-glow); }
+}
+@keyframes action-breath {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 122, 89, 0.35), inset 0 0 28px rgba(255, 122, 89, 0.08); }
+  50%      { box-shadow: inset 0 0 0 1px rgba(255, 122, 89, 0.55), inset 0 0 44px rgba(255, 122, 89, 0.16); }
+}
+@keyframes drift-1 {
+  0%, 100% { transform: translate(0, 0); }
+  25%      { transform: translate(8px, -4px); }
+  50%      { transform: translate(-4px, 6px); }
+  75%      { transform: translate(-8px, -2px); }
+}
+@keyframes drift-2 {
+  0%, 100% { transform: translate(0, 0); }
+  33%      { transform: translate(-6px, 5px); }
+  66%      { transform: translate(7px, 3px); }
+}
+@keyframes drift-3 {
+  0%, 100% { transform: translate(0, 0); }
+  40%      { transform: translate(4px, -7px); }
+  80%      { transform: translate(-5px, 4px); }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   FOOTER / colophon
+   ───────────────────────────────────────────────────────────────────────── */
+.colophon {
+  padding: 56px 0 88px;
+  border-top: 1px solid var(--line-1);
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 32px;
+}
+.col-block {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--moon-2);
+  line-height: 1.7;
+  letter-spacing: 0.02em;
+}
+.col-block .h {
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--moon-3);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--line-1);
+}
+.col-block b { color: var(--moon-0); font-weight: 500; }
+.col-block .signature {
+  font-family: var(--f-display);
+  font-variation-settings: 'opsz' 36, 'SOFT' 80, 'WONK' 1;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 28px;
+  color: var(--moon-1);
+  letter-spacing: -0.02em;
+  margin-top: 8px;
+}
+
+/* responsive guard for tiny viewports */
+@media (max-width: 920px) {
+  main { padding: 0 24px 0 56px; }
+  .nav { padding: 12px 24px 12px 56px; }
+  .plate-header, .section-row, .hierarchy { grid-template-columns: 56px 1fr; }
+  .plate-tag { display: none; }
+  .swatch-block, .accent-plate, .stars-grid, .cls-grid, .type-block, .lang-grid, .canvas-frame, .motion-grid, .plate-lede {
+    margin-left: 80px;
+  }
+  .hero-grid { grid-template-columns: 1fr; gap: 32px; }
+  .canvas-shell { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .canvas-area { grid-template-columns: 1fr; grid-template-rows: auto; }
+  .lang-card.span-6, .lang-card.span-4, .lang-card.span-8 { grid-column: span 12; }
+  .stars-grid, .cls-grid { grid-template-columns: 1fr; }
+  .motion-grid { grid-template-columns: 1fr; }
+  .plate { padding: 56px 0 72px; }
+  .folio { bottom: 16px; gap: 8px; font-size: 8px; }
+  .folio .signum { font-size: 14px; }
+  .folio .rule { width: 18px; }
+  .plate::before, .plate::after { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="starfield"></div>
+<div class="vignette"></div>
+
+<!-- single sodium hairline at the top edge that fills as you scroll -->
+<div class="scroll-progress" aria-hidden="true"></div>
+
+<!-- registration crosshairs at the four corners of the page -->
+<div class="page-frame">
+  <div class="crosshair tl"></div>
+  <div class="crosshair tr"></div>
+  <div class="crosshair bl"></div>
+  <div class="crosshair br"></div>
+</div>
+
+<!-- latitude ticks down the left margin -->
+<div class="lat-ticks">
+  <div class="tick major"  style="top: 12vh;">43° N</div>
+  <div class="tick"        style="top: 22vh;">42°</div>
+  <div class="tick"        style="top: 32vh;">41°</div>
+  <div class="tick major"  style="top: 42vh;">40° N</div>
+  <div class="tick"        style="top: 52vh;">39°</div>
+  <div class="tick"        style="top: 62vh;">38°</div>
+  <div class="tick major"  style="top: 72vh;">37° N</div>
+  <div class="tick"        style="top: 82vh;">36°</div>
+  <div class="tick"        style="top: 92vh;">35°</div>
+</div>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- NAV                                                                  -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<nav class="nav">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 26 26" fill="none">
+        <!-- two concentric orbits — outer is the field of observation,
+             inner is the chart's interior boundary -->
+        <circle class="ring" cx="13" cy="13" r="11.5"/>
+        <circle class="ring" cx="13" cy="13" r="7.5"/>
+        <!-- triangulating lines passing through the three star points -->
+        <path class="triangle" d="M13 5 L4 21 L22 21 Z"/>
+      </svg>
+      <span class="star a"></span>
+      <span class="star b"></span>
+      <span class="star c"></span>
+    </div>
+    <span>attn / observatory</span>
+  </div>
+  <div class="nav-meta">
+    <a href="#palette">Palette</a>
+    <span class="sep">·</span>
+    <a href="#type">Type</a>
+    <span class="sep">·</span>
+    <a href="#language">Language</a>
+    <span class="sep">·</span>
+    <a href="#canvas">Canvas</a>
+    <span class="sep">·</span>
+    <a href="#motion">Motion</a>
+  </div>
+  <div class="nav-stamp">
+    <span><b>v0.4.2</b> · plate set δ</span>
+    <span>2026.05.01 · 00h 14m</span>
+  </div>
+</nav>
+
+<main>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- HERO                                                                 -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section class="hero" id="top">
+  <div class="hero-rule">
+    <span>Plate 00</span>
+    <span class="line"></span>
+    <span class="dot"></span>
+    <span class="line"></span>
+    <span>Index &amp; Frontispiece</span>
+  </div>
+
+  <div class="hero-grid">
+    <h1 class="hero-title">
+      attn<span class="ampersand">,</span>
+      <span class="obs">an observatory</span>
+    </h1>
+    <div class="hero-meta">
+      <p class="hero-sub">
+        A native design system for an instrument that watches over
+        <b>three agents</b> at work — Claude, Codex, and a raw shell —
+        and reports their <em>state</em>, their <em>progress</em>, and the
+        <em>moments</em> at which they need you.
+      </p>
+      <div class="hero-coordinates">
+        <span class="label">Surface</span><span><b>GPUI</b> · macOS native · 14pt grid</span>
+        <span class="label">Voice</span><span>Editorial-scientific. Quiet. Present.</span>
+        <span class="label">Catalog</span><span>5 plates · 47 primitives · 1 accent</span>
+        <span class="label">Issued</span><span>01 May 2026 · revision δ</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONSTELLATION CHART -->
+  <div class="hero-chart">
+    <div class="corner tl"></div><div class="corner tr"></div>
+    <div class="corner bl"></div><div class="corner br"></div>
+
+    <div class="hero-chart-header">
+      <span><b>Chart α</b> — Three agents · azimuthal projection</span>
+      <span>scale 1 : 1 · north up</span>
+    </div>
+
+    <svg class="constellation" viewBox="0 0 800 320" preserveAspectRatio="xMidYMid meet">
+      <!-- grid -->
+      <g class="grid">
+        <line x1="0"   y1="80"  x2="800" y2="80"/>
+        <line x1="0"   y1="160" x2="800" y2="160"/>
+        <line x1="0"   y1="240" x2="800" y2="240"/>
+        <line x1="160" y1="0"   x2="160" y2="320"/>
+        <line x1="320" y1="0"   x2="320" y2="320"/>
+        <line x1="480" y1="0"   x2="480" y2="320"/>
+        <line x1="640" y1="0"   x2="640" y2="320"/>
+      </g>
+
+      <!-- axis -->
+      <g class="axis">
+        <line x1="40"  y1="280" x2="760" y2="280"/>
+        <line x1="40"  y1="40"  x2="40"  y2="280"/>
+        <text x="40"   y="304">00h</text>
+        <text x="200"  y="304">06h</text>
+        <text x="400"  y="304">12h</text>
+        <text x="600"  y="304">18h</text>
+        <text x="744"  y="304">24h</text>
+        <text x="14"   y="44" >+90°</text>
+        <text x="14"   y="164">  0°</text>
+        <text x="14"   y="284">−90°</text>
+      </g>
+
+      <!-- links between agent stars (constellation line) -->
+      <g>
+        <line class="link" x1="200" y1="120" x2="420" y2="200"/>
+        <line class="link" x1="420" y1="200" x2="640" y2="100"/>
+        <line class="link" x1="200" y1="120" x2="640" y2="100"/>
+      </g>
+
+      <!-- stars -->
+      <g>
+        <!-- Claude -->
+        <circle class="star-pt" cx="200" cy="120" r="6"  fill="#ffb47a" style="color:#ffb47a"/>
+        <circle class="star-pt" cx="200" cy="120" r="11" fill="#ffb47a" opacity="0.18"/>
+        <text class="label"      x="216" y="116">Claude</text>
+        <text class="designator" x="216" y="132">α · K-type · long-form</text>
+
+        <!-- Codex -->
+        <circle class="star-pt" cx="420" cy="200" r="5"  fill="#6fb5ff" style="color:#6fb5ff"/>
+        <circle class="star-pt" cx="420" cy="200" r="10" fill="#6fb5ff" opacity="0.18"/>
+        <text class="label"      x="436" y="196">Codex</text>
+        <text class="designator" x="436" y="212">β · B-type · narrow diff</text>
+
+        <!-- Shell -->
+        <circle class="star-pt" cx="640" cy="100" r="4.5" fill="#dde9ff" style="color:#dde9ff"/>
+        <circle class="star-pt" cx="640" cy="100" r="9"   fill="#dde9ff" opacity="0.20"/>
+        <text class="label"      x="656" y="96">Shell</text>
+        <text class="designator" x="656" y="112">γ · A-type · raw PTY</text>
+      </g>
+
+      <!-- annotations -->
+      <g class="axis">
+        <line x1="200" y1="120" x2="200" y2="280" stroke-dasharray="2 4"/>
+        <line x1="420" y1="200" x2="420" y2="280" stroke-dasharray="2 4"/>
+        <line x1="640" y1="100" x2="640" y2="280" stroke-dasharray="2 4"/>
+      </g>
+    </svg>
+
+    <div class="hero-chart-footer">
+      <span>fig. α — observed 2026.05.01</span>
+      <span>chart by attn observatory</span>
+    </div>
+  </div>
+
+  <div class="folio">
+    <span class="rule"></span>
+    <div class="stack">
+      <span class="signum"><em>α</em></span>
+      <span class="pno">PL.00 · FRONTISPIECE</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- PLATE 01 · PALETTE                                                    -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section class="plate" id="palette">
+  <header class="plate-header">
+    <div class="plate-no">Plate 01 — recto</div>
+    <h2 class="plate-title">Palette<em>,</em> arranged<br>by <em>luminosity</em></h2>
+    <div class="plate-tag">
+      <b>16 inks</b><br>1 accent<br>3 stars · 7 classifications
+    </div>
+  </header>
+
+  <p class="plate-lede">
+    Color carries <em>identity</em> or <em>status</em>, never decoration.
+    Six ink steps from the deepest space-black to a quiet surface tone, five
+    moonstones for type, a single sodium accent for emphasis, three stars
+    naming the agents, and seven classifications naming what they are doing.
+  </p>
+
+  <!-- INK SCALE -->
+  <div class="section-row">
+    <div class="section-marker">§ 1.1 · INK</div>
+    <div>
+      <div class="section-title"><em>Six</em> surface inks <em>—</em> deepest to lightest</div>
+      <div class="section-note">Used for backgrounds, cards, raised surfaces, and borders. Cool blue-black with a faint atmospheric tint; never pure black, never tinted toward purple. Each step is approximately 1.4× the luminance of the previous.</div>
+    </div>
+  </div>
+  <div class="swatch-block">
+    <div class="swatch-row">
+      <div class="swatch sw-ink-0"><span class="swatch-id">ink-0</span><div class="swatch-meta"><b>void</b>#060810 · L 4</div></div>
+      <div class="swatch sw-ink-1"><span class="swatch-id">ink-1</span><div class="swatch-meta"><b>midnight</b>#0a0e16 · L 6</div></div>
+      <div class="swatch sw-ink-2"><span class="swatch-id">ink-2</span><div class="swatch-meta"><b>nocturne</b>#10151f · L 9</div></div>
+      <div class="swatch sw-ink-3"><span class="swatch-id">ink-3</span><div class="swatch-meta"><b>shade</b>#161d2a · L 12</div></div>
+      <div class="swatch sw-ink-4"><span class="swatch-id">ink-4</span><div class="swatch-meta"><b>border</b>#1f2837 · L 16</div></div>
+      <div class="swatch sw-ink-5"><span class="swatch-id">ink-5</span><div class="swatch-meta"><b>firm</b>#2a3548 · L 21</div></div>
+    </div>
+  </div>
+
+  <!-- TEXT SCALE -->
+  <div class="section-row">
+    <div class="section-marker">§ 1.2 · MOONSTONE</div>
+    <div>
+      <div class="section-title"><em>Five</em> text values <em>—</em> primary to disabled</div>
+      <div class="section-note">Warm cream-white inspired by the surface of a quarter moon. Reading at <code style="font-family:var(--f-mono);font-size:0.85em">moon-0</code> on <code style="font-family:var(--f-mono);font-size:0.85em">ink-1</code> meets WCAG AAA at 14pt and above.</div>
+    </div>
+  </div>
+  <div class="swatch-block">
+    <div class="swatch-row text-row">
+      <div class="swatch sw-moon-0"><div class="sample"></div><span class="swatch-id">moon-0</span><div class="swatch-meta"><b>moonstone</b>primary · #f0ede0</div></div>
+      <div class="swatch sw-moon-1"><div class="sample"></div><span class="swatch-id">moon-1</span><div class="swatch-meta"><b>parchment</b>secondary · #cdc8b6</div></div>
+      <div class="swatch sw-moon-2"><div class="sample"></div><span class="swatch-id">moon-2</span><div class="swatch-meta"><b>bone</b>tertiary · #8a8678</div></div>
+      <div class="swatch sw-moon-3"><div class="sample"></div><span class="swatch-id">moon-3</span><div class="swatch-meta"><b>ash</b>quaternary · #545040</div></div>
+      <div class="swatch sw-moon-4"><div class="sample"></div><span class="swatch-id">moon-4</span><div class="swatch-meta"><b>cinder</b>disabled · #2f2c24</div></div>
+    </div>
+  </div>
+
+  <!-- ACCENT -->
+  <div class="section-row">
+    <div class="section-marker">§ 1.3 · SODIUM</div>
+    <div>
+      <div class="section-title">A <em>single</em> accent <em>—</em> the only warm light</div>
+      <div class="section-note">Sodium-streetlamp orange. Used for the cursor, focus rings, the primary affordance of any dialog, and nothing else. If sodium appears, it is the most important pixel on the screen.</div>
+    </div>
+  </div>
+  <div class="accent-plate">
+    <div class="accent-feature">
+      <span class="label">Accent / sodium</span>
+      <div class="name">sodium<br>vapor</div>
+      <span class="meta">#ff8a3d · 595nm · CRI 22</span>
+    </div>
+    <div class="accent-tint">
+      <span class="swatch-id" style="color: var(--moon-1);">soft</span>
+      <div class="swatch-tint"></div>
+      <span class="swatch-meta" style="color: var(--moon-2);">rgba 0.14 · backgrounds</span>
+    </div>
+    <div class="accent-glow">
+      <span class="swatch-id" style="color: var(--moon-1);">glow</span>
+      <div class="swatch-tint"></div>
+      <span class="swatch-meta" style="color: var(--moon-2);">rgba 0.35 · focus rings</span>
+    </div>
+  </div>
+
+  <!-- STARS -->
+  <div class="section-row">
+    <div class="section-marker">§ 1.4 · STARS</div>
+    <div>
+      <div class="section-title"><em>Three</em> stars <em>—</em> the agents themselves</div>
+      <div class="section-note">Each agent is named after a real spectral class. The hue carries identity only — it never indicates a state. A working Codex tile shows the Codex blue (identity) plus the working green (status); the two are independent.</div>
+    </div>
+  </div>
+  <div class="stars-grid">
+
+    <div class="star-card" data-agent="claude">
+      <div class="star-vis"></div>
+      <div class="desig">α · class K-type · giant</div>
+      <div class="name"><em>Claude</em></div>
+      <div class="role">long-form reasoning, planning, and review</div>
+      <dl>
+        <dt>HEX</dt>      <dd>#ffb47a</dd>
+        <dt>USE</dt>      <dd>identity only</dd>
+        <dt>PAIRS</dt>    <dd>any state hue</dd>
+        <dt>SHADOW</dt>   <dd>0 0 8px self</dd>
+      </dl>
+    </div>
+
+    <div class="star-card" data-agent="codex">
+      <div class="star-vis"></div>
+      <div class="desig">β · class B-type · supergiant</div>
+      <div class="name"><em>Codex</em></div>
+      <div class="role">narrow diffs, fast turns, structured edits</div>
+      <dl>
+        <dt>HEX</dt>      <dd>#6fb5ff</dd>
+        <dt>USE</dt>      <dd>identity only</dd>
+        <dt>PAIRS</dt>    <dd>any state hue</dd>
+        <dt>SHADOW</dt>   <dd>0 0 8px self</dd>
+      </dl>
+    </div>
+
+    <div class="star-card" data-agent="shell">
+      <div class="star-vis"></div>
+      <div class="desig">γ · class A-type · main sequence</div>
+      <div class="name"><em>Shell</em></div>
+      <div class="role">raw PTY · the operator's hand</div>
+      <dl>
+        <dt>HEX</dt>      <dd>#dde9ff</dd>
+        <dt>USE</dt>      <dd>identity only</dd>
+        <dt>PAIRS</dt>    <dd>any state hue</dd>
+        <dt>SHADOW</dt>   <dd>0 0 8px self</dd>
+      </dl>
+    </div>
+
+  </div>
+
+  <!-- CLASSIFICATIONS -->
+  <div class="section-row">
+    <div class="section-marker">§ 1.5 · CLASSIFICATION</div>
+    <div>
+      <div class="section-title"><em>Seven</em> states <em>—</em> the observation classes</div>
+      <div class="section-note">Borrowed from observational vocabulary. <em>Transit</em> is something passing in front (active work). <em>Occulted</em> is something blocked from view (waiting). <em>Halted</em> is an emergency hold (approval). Each gets a single hue, a single dot, and a single Latin label.</div>
+    </div>
+  </div>
+  <div class="cls-grid">
+    <div class="cls-cell" data-cls="launching">
+      <div class="indicator"><span class="dot"></span> launching</div>
+      <div class="latin"><em>oriens</em></div>
+      <div class="latin-en">rising · #5bd5e8</div>
+    </div>
+    <div class="cls-cell" data-cls="working">
+      <div class="indicator"><span class="dot live"></span> working</div>
+      <div class="latin"><em>transitus</em></div>
+      <div class="latin-en">in transit · #62e08e</div>
+    </div>
+    <div class="cls-cell" data-cls="waiting">
+      <div class="indicator"><span class="dot live"></span> waiting input</div>
+      <div class="latin"><em>occultatum</em></div>
+      <div class="latin-en">occulted · #ffd75e</div>
+    </div>
+    <div class="cls-cell" data-cls="approval">
+      <div class="indicator"><span class="dot live"></span> approval</div>
+      <div class="latin"><em>retentum</em></div>
+      <div class="latin-en">halted · #ff7a59</div>
+    </div>
+    <div class="cls-cell" data-cls="review">
+      <div class="indicator"><span class="dot"></span> review</div>
+      <div class="latin"><em>inscriptum</em></div>
+      <div class="latin-en">logged · #c49bff</div>
+    </div>
+    <div class="cls-cell" data-cls="idle">
+      <div class="indicator"><span class="dot"></span> idle</div>
+      <div class="latin"><em>quietum</em></div>
+      <div class="latin-en">set · #545040</div>
+    </div>
+    <div class="cls-cell" data-cls="error">
+      <div class="indicator"><span class="dot live"></span> error</div>
+      <div class="latin"><em>amissum</em></div>
+      <div class="latin-en">lost · #ff4d5e</div>
+    </div>
+  </div>
+
+  <div class="folio">
+    <span class="rule"></span>
+    <div class="stack">
+      <span class="signum"><em>β</em></span>
+      <span class="pno">PL.01 · RECTO · PALETTE</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- PLATE 02 · TYPE                                                       -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section class="plate" id="type">
+  <header class="plate-header">
+    <div class="plate-no">Plate 02 — verso</div>
+    <h2 class="plate-title">Type<em>,</em> set<br>across <em>three</em> hands</h2>
+    <div class="plate-tag">
+      <b>Fraunces</b> · display<br>
+      <b>Mona Sans</b> · body<br>
+      <b>JetBrains Mono</b> · mono
+    </div>
+  </header>
+
+  <p class="plate-lede">
+    A serif that breathes — Fraunces, with its <em>SOFT</em> and <em>WONK</em>
+    axes — anchors every plate, every dialog, every named thing. A tightly drawn
+    sans handles the running text. A precise mono handles every glyph that must
+    align to a column.
+  </p>
+
+  <!-- FRAUNCES -->
+  <div class="type-block">
+    <div class="specimen">
+      <div class="specimen-meta">
+        <span class="name">Fraunces <em>(display)</em></span>
+        <span>opsz 144</span>
+        <span>SOFT 0–100</span>
+        <span>WONK 0–1</span>
+      </div>
+      <div class="specimen-display">
+        <em>Three</em> agents,<br>
+        <em>seven</em> states,<span class="accent"> one</span> instrument.
+      </div>
+      <div class="specimen-axes">
+        <div class="axis-card">
+          <div class="axis-name">opsz · 9 → 144</div>
+          <div class="axis-val">Aa</div>
+          <div class="axis-meta">optical sizing — body to display</div>
+        </div>
+        <div class="axis-card">
+          <div class="axis-name">wght · 200 → 900</div>
+          <div class="axis-val" style="font-variation-settings: 'opsz' 36, 'wght' 700, 'SOFT' 50, 'WONK' 0;">Aa</div>
+          <div class="axis-meta">used at 400 / 500 / 700</div>
+        </div>
+        <div class="axis-card">
+          <div class="axis-name">SOFT · 0 → 100</div>
+          <div class="axis-val" style="font-variation-settings: 'opsz' 36, 'SOFT' 100, 'WONK' 0;">Aa</div>
+          <div class="axis-meta">soften terminals · italic only</div>
+        </div>
+        <div class="axis-card">
+          <div class="axis-name">WONK · 0 / 1</div>
+          <div class="axis-val" style="font-variation-settings: 'opsz' 36, 'SOFT' 60, 'WONK' 1;">Aa</div>
+          <div class="axis-meta">irregular tail · display only</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MONA SANS -->
+    <div class="specimen">
+      <div class="specimen-meta">
+        <span class="name">Mona Sans <em>(body)</em></span>
+        <span>200 → 900</span>
+        <span>wdth 75 → 125</span>
+        <span>roman + italic</span>
+      </div>
+      <div class="specimen-mona">
+        Quietly, the <span class="b800">canvas</span> watches —<br>
+        seven <span class="narrow">classifications</span> across <span class="wide">three</span> agents.
+      </div>
+    </div>
+
+    <!-- MONO -->
+    <div class="specimen">
+      <div class="specimen-meta">
+        <span class="name">JetBrains Mono <em>(mono)</em></span>
+        <span>11 / 12 / 13pt</span>
+        <span>tabular-nums</span>
+        <span>ligatures off</span>
+      </div>
+      <div class="specimen-mono">
+        <span class="b600">attn</span> --workspace=<span class="acc">attn</span> --agent=<span class="it">claude</span>
+      </div>
+    </div>
+
+    <!-- HIERARCHY -->
+    <div class="hierarchy">
+      <div class="h-label">H1 · plate</div>
+      <div class="h-h1">A <em>language</em> for an instrument</div>
+
+      <div class="h-label">H2 · section</div>
+      <div class="h-h2">Buttons, fields, list rows, status pills</div>
+
+      <div class="h-label">H3 · component</div>
+      <div class="h-h3">Approval prompt — halted state</div>
+
+      <div class="h-label">Body · 14 / 1.55</div>
+      <div class="h-body">A panel in the canvas reports its state in three places: the agent star at the left, the status pill at the right of the header, and the breath of the live indicator. None of the three are redundant — each addresses a different scanning behavior.</div>
+
+      <div class="h-label">Meta · mono 11</div>
+      <div class="h-meta">claude/session-bf2 · 00:01:42 elapsed · 3 turns</div>
+
+      <div class="h-label">Marker · mono 9</div>
+      <div class="h-marker">§ 1.5 · CLASSIFICATION · seven states</div>
+    </div>
+  </div>
+
+  <div class="folio">
+    <span class="rule"></span>
+    <div class="stack">
+      <span class="signum"><em>γ</em></span>
+      <span class="pno">PL.02 · VERSO · TYPE</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- PLATE 03 · LANGUAGE                                                   -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section class="plate" id="language">
+  <header class="plate-header">
+    <div class="plate-no">Plate 03 — recto</div>
+    <h2 class="plate-title">Language<em>,</em><br>the <em>primitives</em></h2>
+    <div class="plate-tag">
+      <b>12 components</b><br>4 button kinds<br>2 dialogs · 1 palette
+    </div>
+  </header>
+
+  <p class="plate-lede">
+    The full vocabulary of the canvas: buttons, inputs, list rows, pills,
+    panel chrome, the launch dialog, and the command palette. Every primitive
+    speaks the same language — <em>three radii, four spacings, two surfaces,
+    one accent</em>.
+  </p>
+
+  <div class="lang-grid">
+
+    <!-- BUTTONS -->
+    <div class="lang-card span-6">
+      <div class="lang-card-header">
+        <h3 class="lang-card-title">Buttons</h3>
+        <span class="lang-card-no">§ 3.1 · 04 kinds</span>
+      </div>
+      <div class="btn-label">Primary · sodium · launch</div>
+      <div class="btn-row">
+        <button class="btn btn-primary">Approve <span class="kbd">⏎</span></button>
+        <button class="btn btn-primary">Launch session</button>
+      </div>
+      <div class="btn-label">Secondary · raised surface</div>
+      <div class="btn-row">
+        <button class="btn btn-secondary">Open log</button>
+        <button class="btn btn-secondary">Snap to grid <span class="kbd">⌘ G</span></button>
+      </div>
+      <div class="btn-label">Ghost · low emphasis</div>
+      <div class="btn-row">
+        <button class="btn btn-ghost">Cancel</button>
+        <button class="btn btn-ghost">Dismiss <span class="kbd">esc</span></button>
+      </div>
+      <div class="btn-label">Danger · destructive · uses error hue</div>
+      <div class="btn-row">
+        <button class="btn btn-danger">Kill session</button>
+        <button class="btn btn-danger">Force quit</button>
+      </div>
+    </div>
+
+    <!-- FIELDS -->
+    <div class="lang-card span-6">
+      <div class="lang-card-header">
+        <h3 class="lang-card-title">Fields</h3>
+        <span class="lang-card-no">§ 3.2 · 03 forms</span>
+      </div>
+      <div class="field">
+        <div class="field-label"><span>Workspace</span><span>required</span></div>
+        <div class="field-input">
+          <span class="prefix">/Users/v/projects</span>
+          <input value="attn" />
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label"><span>Agent prompt</span><span>opt</span></div>
+        <div class="field-input" style="border-color: var(--sodium); box-shadow: 0 0 0 1px var(--sodium-soft), 0 0 18px var(--sodium-soft);">
+          <input value="rebase onto main and rerun the e2e suite" />
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label"><span>Search</span><span>⌘ /</span></div>
+        <div class="field-input disabled">
+          <span class="prefix">⌕</span>
+          <input value="" placeholder="find session, command, workspace…" />
+          <span class="suffix">esc</span>
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label"><span>Active caret</span><span>aurora</span></div>
+        <div class="field-aurora-input">attn rebase</div>
+      </div>
+    </div>
+
+    <!-- PILLS -->
+    <div class="lang-card span-6">
+      <div class="lang-card-header">
+        <h3 class="lang-card-title">Status pills</h3>
+        <span class="lang-card-no">§ 3.3 · 07 states</span>
+      </div>
+      <div class="pill-row">
+        <span class="pill" data-state="launching"><span class="dot"></span> launching</span>
+        <span class="pill" data-state="working"><span class="dot"></span> working</span>
+        <span class="pill" data-state="waiting"><span class="dot"></span> waiting input</span>
+        <span class="pill" data-state="approval"><span class="dot"></span> needs approval</span>
+        <span class="pill" data-state="review"><span class="dot"></span> review held</span>
+        <span class="pill" data-state="idle"><span class="dot"></span> idle</span>
+        <span class="pill" data-state="error"><span class="dot"></span> lost</span>
+      </div>
+      <div style="margin-top: 24px; display: flex; gap: 16px; align-items: center;">
+        <span class="btn-label" style="margin: 0;">Compound — agent · state</span>
+      </div>
+      <div class="pill-row" style="margin-top: 8px;">
+        <span class="pill" data-state="working" style="border-color: rgba(255,180,122,.30);"><span class="dot" style="background: var(--star-claude); box-shadow: 0 0 6px var(--star-claude);"></span> claude · transit</span>
+        <span class="pill" data-state="approval" style="border-color: rgba(111,181,255,.30);"><span class="dot" style="background: var(--star-codex); box-shadow: 0 0 6px var(--star-codex);"></span> codex · halted</span>
+        <span class="pill" data-state="idle" style="border-color: rgba(221,233,255,.20);"><span class="dot" style="background: var(--star-shell);"></span> shell · set</span>
+      </div>
+    </div>
+
+    <!-- LIST ROWS -->
+    <div class="lang-card span-6">
+      <div class="lang-card-header">
+        <h3 class="lang-card-title">List rows</h3>
+        <span class="lang-card-no">§ 3.4 · sidebar entries</span>
+      </div>
+      <div class="list">
+        <div class="list-row active" data-agent="claude">
+          <span class="list-star" data-agent="claude"></span>
+          <div class="list-body">
+            <span class="list-name">rebase onto main &amp; rerun e2e</span>
+            <span class="list-meta">claude · <b>session-bf2</b> · 3 turns</span>
+          </div>
+          <span class="list-state" data-state="working"><span class="indicator"></span> transit</span>
+          <span class="list-time">01:42</span>
+        </div>
+        <div class="list-row" data-agent="codex">
+          <span class="list-star" data-agent="codex"></span>
+          <div class="list-body">
+            <span class="list-name">narrow diff for snapshot util</span>
+            <span class="list-meta">codex · <b>session-x9a</b> · 1 turn</span>
+          </div>
+          <span class="list-state" data-state="approval"><span class="indicator"></span> halted</span>
+          <span class="list-time">00:18</span>
+        </div>
+        <div class="list-row" data-agent="claude">
+          <span class="list-star" data-agent="claude"></span>
+          <div class="list-body">
+            <span class="list-name">audit reviewer-mcp tools coverage</span>
+            <span class="list-meta">claude · <b>session-110</b> · 7 turns</span>
+          </div>
+          <span class="list-state" data-state="review"><span class="indicator"></span> logged</span>
+          <span class="list-time">12:04</span>
+        </div>
+        <div class="list-row" data-agent="shell">
+          <span class="list-star" data-agent="shell"></span>
+          <div class="list-body">
+            <span class="list-name">tail -f ~/.attn/daemon.log</span>
+            <span class="list-meta">shell · <b>session-04c</b> · live</span>
+          </div>
+          <span class="list-state" data-state="working"><span class="indicator"></span> transit</span>
+          <span class="list-time">00:02</span>
+        </div>
+        <div class="list-row" data-agent="codex">
+          <span class="list-star" data-agent="codex"></span>
+          <div class="list-body">
+            <span class="list-name">extract theme.rs from views/canvas</span>
+            <span class="list-meta">codex · <b>session-7d1</b> · idle</span>
+          </div>
+          <span class="list-state" data-state="idle"><span class="indicator"></span> set</span>
+          <span class="list-time">2h ago</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANEL CHROME -->
+    <div class="lang-card span-6">
+      <div class="lang-card-header">
+        <h3 class="lang-card-title">Panel chrome</h3>
+        <span class="lang-card-no">§ 3.5 · header / body / foot</span>
+      </div>
+      <div class="panel">
+        <div class="panel-head" data-agent="claude">
+          <span class="star-mark"></span>
+          <span class="panel-name">rebase onto main &amp; rerun e2e</span>
+          <span class="panel-coord">17h 22m · az 142°</span>
+          <span class="panel-status" data-state="working"><span class="indicator"></span> transit</span>
+        </div>
+        <div class="panel-body" style="padding-top: 12px;">
+          <div class="term">
+            <div class="ln"><span class="lno">001</span><span class="txt"><span class="com">// rebasing onto origin/main…</span></span></div>
+            <div class="ln"><span class="lno">002</span><span class="txt"><span class="acc">$</span> git fetch origin</span></div>
+            <div class="ln"><span class="lno">003</span><span class="txt"><span class="dim">remote: counting objects: 142, done.</span></span></div>
+            <div class="ln"><span class="lno">004</span><span class="txt"><span class="acc">$</span> git rebase origin/main</span></div>
+            <div class="ln"><span class="lno">005</span><span class="txt"><span class="key">First</span>, rewinding head to replay your work on top of it…</span></div>
+            <div class="ln"><span class="lno">006</span><span class="txt"><span class="str">Applied 6 of 7 commits cleanly.</span></span></div>
+            <div class="ln"><span class="lno">007</span><span class="txt"><span class="caret">running e2e suite (chromium · 24 specs)</span></span></div>
+          </div>
+        </div>
+        <div class="panel-foot">
+          <span><b>session-bf2</b> · main · +148 / -22</span>
+          <span>plate 03 · row 1 / 3</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- LAUNCH DIALOG -->
+    <div class="lang-card span-6">
+      <div class="lang-card-header">
+        <h3 class="lang-card-title">Launch dialog</h3>
+        <span class="lang-card-no">§ 3.6 · ⌘N</span>
+      </div>
+      <div class="dialog">
+        <div class="dialog-head">
+          <div class="dialog-eyebrow">New session · plate ⌘N</div>
+          <h4 class="dialog-title">Open a new <em>observation</em></h4>
+          <p class="dialog-sub">Pick an agent and describe what you'd like to watch.</p>
+        </div>
+        <div class="dialog-body">
+          <div class="agent-picker">
+            <div class="agent-tile" data-agent="claude">
+              <span class="corner-mark">α</span>
+              <div class="star-glyph"></div>
+              <div class="desig">long-form</div>
+              <div class="name">Claude</div>
+              <div class="role">Plans, reviews, multi-step.</div>
+            </div>
+            <div class="agent-tile selected" data-agent="codex">
+              <span class="corner-mark">β · selected</span>
+              <div class="star-glyph"></div>
+              <div class="desig">narrow diff</div>
+              <div class="name">Codex</div>
+              <div class="role">Tight, structured edits.</div>
+            </div>
+            <div class="agent-tile" data-agent="shell">
+              <span class="corner-mark">γ</span>
+              <div class="star-glyph"></div>
+              <div class="desig">raw</div>
+              <div class="name">Shell</div>
+              <div class="role">Plain PTY — your hand.</div>
+            </div>
+          </div>
+          <div class="field" style="margin-top: 20px;">
+            <div class="field-label"><span>Prompt</span><span>⏎ to launch</span></div>
+            <div class="field-aurora-input">narrow diff for snapshot util in views/canvas</div>
+          </div>
+        </div>
+        <div class="dialog-foot">
+          <span class="kbd-hint"><b>esc</b> cancel · <b>tab</b> agent · <b>⏎</b> launch</span>
+          <button class="btn btn-primary">Launch session <span class="kbd">⏎</span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- COMMAND PALETTE -->
+    <div class="lang-card span-6">
+      <div class="lang-card-header">
+        <h3 class="lang-card-title">Command palette</h3>
+        <span class="lang-card-no">§ 3.7 · ⌘K</span>
+      </div>
+      <div class="cmd">
+        <div class="cmd-input-row">
+          <span class="glyph">⌕</span>
+          <input value="snap" />
+          <span class="scope">canvas</span>
+        </div>
+        <div class="cmd-list">
+          <div class="cmd-item active">
+            <span class="glyph">▦</span>
+            <span class="item-title"><em>Snap</em> all panels to 8pt grid</span>
+            <span class="item-desc">canvas · layout</span>
+            <span class="item-shortcut">⌘ G</span>
+          </div>
+          <div class="cmd-item">
+            <span class="glyph">↺</span>
+            <span class="item-title"><em>Snap</em>shot current canvas</span>
+            <span class="item-desc">canvas · debug</span>
+            <span class="item-shortcut">⌘ ⇧ S</span>
+          </div>
+          <div class="cmd-item">
+            <span class="glyph">▤</span>
+            <span class="item-title"><em>Snap</em> focused panel to 50%</span>
+            <span class="item-desc">canvas · focus</span>
+            <span class="item-shortcut">⌘ ⌥ →</span>
+          </div>
+          <div class="cmd-item">
+            <span class="glyph">↳</span>
+            <span class="item-title">Re-snap geometry on resize</span>
+            <span class="item-desc">canvas · setting</span>
+            <span class="item-shortcut">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- APPROVAL PROMPT -->
+    <div class="lang-card span-12">
+      <div class="lang-card-header">
+        <h3 class="lang-card-title">Approval prompt — <em>halted</em> state</h3>
+        <span class="lang-card-no">§ 3.8 · the only urgent voice</span>
+      </div>
+      <div class="panel" style="border-color: rgba(255, 122, 89, 0.32);">
+        <div class="panel-head" data-agent="codex">
+          <span class="star-mark"></span>
+          <span class="panel-name">narrow diff for snapshot util</span>
+          <span class="panel-coord">02h 14m · az 081°</span>
+          <span class="panel-status" data-state="approval"><span class="indicator"></span> halted</span>
+        </div>
+        <div class="panel-body">
+          <div class="term">
+            <div class="ln"><span class="lno">042</span><span class="txt"><span class="com">// proposing edit:</span></span></div>
+            <div class="ln"><span class="lno">043</span><span class="txt">  <span class="key">native-ui/crates/attn-native-app/src/views/canvas.rs</span></span></div>
+            <div class="ln"><span class="lno">044</span><span class="txt">  <span class="str">+ use crate::theme::{ink, moon, sodium};</span></span></div>
+            <div class="ln"><span class="lno">045</span><span class="txt">  <span class="err">- bg(rgb(0x0e0e14))</span></span></div>
+            <div class="ln"><span class="lno">046</span><span class="txt">  <span class="str">+ bg(ink::midnight())</span></span></div>
+          </div>
+          <div class="approval-prompt">
+            <div class="label">Halted · awaiting your decision</div>
+            <div class="question">Apply <em>14 edits</em> across 3 files in <em>views/</em>?</div>
+            <div class="actions">
+              <button class="btn btn-primary">Apply <span class="kbd">⏎</span></button>
+              <button class="btn btn-secondary">Show diff <span class="kbd">⌘ D</span></button>
+              <button class="btn btn-ghost">Reject <span class="kbd">esc</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="folio">
+    <span class="rule"></span>
+    <div class="stack">
+      <span class="signum"><em>δ</em></span>
+      <span class="pno">PL.03 · RECTO · LANGUAGE</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- PLATE 04 · CANVAS                                                     -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section class="plate" id="canvas">
+  <header class="plate-header">
+    <div class="plate-no">Plate 04 — verso</div>
+    <h2 class="plate-title">Canvas<em>,</em><br>the <em>full</em> shell</h2>
+    <div class="plate-tag">
+      <b>4 panels</b><br>3 agents · 4 states<br>1 sidebar · 1 status bar
+    </div>
+  </header>
+
+  <p class="plate-lede">
+    Sidebar at left lists all the <em>workspaces</em> and their sessions; the
+    canvas at right tiles each session as a panel. The whole composition uses
+    only the language defined on the previous plates.
+  </p>
+
+  <!-- FULL APP -->
+  <div class="canvas-frame">
+
+    <!-- titlebar -->
+    <div class="canvas-titlebar">
+      <div class="traffic"><span></span><span></span><span></span></div>
+      <div class="doc">attn — <b>attn</b> · 5 sessions · 2 working · 1 halted</div>
+      <div class="controls">
+        <span class="ctrl">⌘K</span>
+        <span class="ctrl">▦</span>
+        <span class="ctrl">⌥</span>
+      </div>
+    </div>
+
+    <!-- shell grid -->
+    <div class="canvas-shell">
+
+      <!-- SIDEBAR -->
+      <aside class="sidebar">
+
+        <div class="sidebar-section">
+          <div class="sidebar-h"><span>Workspaces</span><b>03</b></div>
+          <div class="workspace active">
+            <div class="ws-glyph">a</div>
+            <span class="ws-name">attn</span>
+            <span class="ws-count">5</span>
+          </div>
+          <div class="workspace">
+            <div class="ws-glyph">e</div>
+            <span class="ws-name">editor</span>
+            <span class="ws-count">2</span>
+          </div>
+          <div class="workspace">
+            <div class="ws-glyph">d</div>
+            <span class="ws-name">docs-prototype</span>
+            <span class="ws-count">1</span>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-h"><span>attn · sessions</span><b>05</b></div>
+          <div class="session-row current" data-agent="claude" data-state="working">
+            <span class="s-star"></span>
+            <span class="s-name">rebase onto main</span>
+            <span class="s-state"></span>
+          </div>
+          <div class="session-row" data-agent="codex" data-state="approval">
+            <span class="s-star"></span>
+            <span class="s-name">narrow diff snapshot</span>
+            <span class="s-state"></span>
+          </div>
+          <div class="session-row" data-agent="claude" data-state="review">
+            <span class="s-star"></span>
+            <span class="s-name">audit reviewer-mcp</span>
+            <span class="s-state"></span>
+          </div>
+          <div class="session-row" data-agent="shell" data-state="working">
+            <span class="s-star"></span>
+            <span class="s-name">tail daemon.log</span>
+            <span class="s-state"></span>
+          </div>
+          <div class="session-row" data-agent="codex" data-state="idle">
+            <span class="s-star"></span>
+            <span class="s-name">extract theme.rs</span>
+            <span class="s-state"></span>
+          </div>
+        </div>
+
+        <div class="sidebar-section" style="flex: 1;">
+          <div class="sidebar-h"><span>recent</span><b>08</b></div>
+          <div class="session-row" data-agent="claude" data-state="idle">
+            <span class="s-star"></span>
+            <span class="s-name">migrate panel chrome</span>
+            <span class="s-state"></span>
+          </div>
+          <div class="session-row" data-agent="shell" data-state="idle">
+            <span class="s-star"></span>
+            <span class="s-name">cargo install --path .</span>
+            <span class="s-state"></span>
+          </div>
+          <div class="session-row" data-agent="codex" data-state="idle">
+            <span class="s-star"></span>
+            <span class="s-name">remove cargo features warn</span>
+            <span class="s-state"></span>
+          </div>
+        </div>
+
+        <div class="sidebar-foot">
+          <span>v0.4.2 · δ</span>
+          <span>43° N</span>
+        </div>
+      </aside>
+
+      <!-- CANVAS -->
+      <div class="canvas-area">
+
+        <!-- TILE 1: claude · working -->
+        <div class="tile">
+          <div class="tile-head" data-agent="claude">
+            <span class="star"></span>
+            <span class="tile-name">rebase onto main &amp; rerun e2e</span>
+            <span class="tile-meta">α · 17h 22m · az 142°</span>
+            <span class="tile-status" data-state="working"><span class="indicator"></span> transit</span>
+          </div>
+          <div class="tile-body">
+            <div class="term">
+              <div class="ln"><span class="lno">001</span><span class="txt"><span class="acc">$</span> git fetch origin</span></div>
+              <div class="ln"><span class="lno">002</span><span class="txt"><span class="dim">remote: counting objects: 142, done.</span></span></div>
+              <div class="ln"><span class="lno">003</span><span class="txt"><span class="dim">remote: compressing objects: 100% (98/98), done.</span></span></div>
+              <div class="ln"><span class="lno">004</span><span class="txt"><span class="acc">$</span> git rebase origin/main</span></div>
+              <div class="ln"><span class="lno">005</span><span class="txt"><span class="key">First</span>, rewinding head to replay your work on top…</span></div>
+              <div class="ln"><span class="lno">006</span><span class="txt"><span class="str">Applied 6 of 7 commits cleanly.</span></span></div>
+              <div class="ln"><span class="lno">007</span><span class="txt"><span class="acc">$</span> pnpm --dir app run e2e</span></div>
+              <div class="ln"><span class="lno">008</span><span class="txt"><span class="dim">running e2e suite — chromium · 24 specs</span></span></div>
+              <div class="ln"><span class="lno">009</span><span class="txt"><span class="caret">15 passed · 0 failed · 9 in flight</span></span></div>
+            </div>
+          </div>
+          <div class="tile-foot">
+            <span><b>session-bf2</b> · main · +148 / −22</span>
+            <span>3 turns · live</span>
+          </div>
+        </div>
+
+        <!-- TILE 2: codex · approval -->
+        <div class="tile has-action">
+          <div class="tile-head" data-agent="codex">
+            <span class="star"></span>
+            <span class="tile-name">narrow diff for snapshot util</span>
+            <span class="tile-meta">β · 02h 14m · az 081°</span>
+            <span class="tile-status" data-state="approval"><span class="indicator"></span> halted</span>
+          </div>
+          <div class="tile-body">
+            <div class="term">
+              <div class="ln"><span class="lno">042</span><span class="txt"><span class="com">// proposing edit:</span></span></div>
+              <div class="ln"><span class="lno">043</span><span class="txt">  <span class="key">views/canvas.rs</span></span></div>
+              <div class="ln"><span class="lno">044</span><span class="txt">  <span class="str">+ use crate::theme::{ink, moon};</span></span></div>
+              <div class="ln"><span class="lno">045</span><span class="txt">  <span class="err">- bg(rgb(0x0e0e14))</span></span></div>
+              <div class="ln"><span class="lno">046</span><span class="txt">  <span class="str">+ bg(ink::midnight())</span></span></div>
+            </div>
+            <div class="approval-prompt">
+              <div class="label">Halted · awaiting decision</div>
+              <div class="question">Apply <em>14 edits</em> across 3 files?</div>
+              <div class="actions">
+                <button class="btn btn-primary">Apply <span class="kbd">⏎</span></button>
+                <button class="btn btn-secondary">Diff</button>
+                <button class="btn btn-ghost">Reject</button>
+              </div>
+            </div>
+          </div>
+          <div class="tile-foot">
+            <span><b>session-x9a</b> · 14 edits · 3 files</span>
+            <span>1 turn · halted</span>
+          </div>
+        </div>
+
+        <!-- TILE 3: claude · review -->
+        <div class="tile">
+          <div class="tile-head" data-agent="claude">
+            <span class="star"></span>
+            <span class="tile-name">audit reviewer-mcp tools coverage</span>
+            <span class="tile-meta">α · 41h 06m · az 217°</span>
+            <span class="tile-status" data-state="review"><span class="indicator"></span> logged</span>
+          </div>
+          <div class="tile-body">
+            <div class="term">
+              <div class="ln"><span class="lno">081</span><span class="txt"><span class="com">// review held — 5m run, awaiting your read</span></span></div>
+              <div class="ln"><span class="lno">082</span><span class="txt">summary <span class="acc">→</span></span></div>
+              <div class="ln"><span class="lno">083</span><span class="txt">  • <span class="key">internal/reviewer/mcp/tools.go</span> — 7 tools, 3 missing tests</span></div>
+              <div class="ln"><span class="lno">084</span><span class="txt">  • coverage on the websocket protocol fan-out is partial</span></div>
+              <div class="ln"><span class="lno">085</span><span class="txt">  • the <span class="key">ReviewComment</span> shape changed in v0.4.0; one reader still uses the old key</span></div>
+              <div class="ln"><span class="lno">086</span><span class="txt">  → <span class="str">recommend extracting a fixture loader before adding tests</span></span></div>
+              <div class="ln"><span class="lno">087</span><span class="txt"><span class="dim">held · 5m elapsed before classification</span></span></div>
+            </div>
+          </div>
+          <div class="tile-foot">
+            <span><b>session-110</b> · ready to merge or revise</span>
+            <span>7 turns · review</span>
+          </div>
+        </div>
+
+        <!-- TILE 4: shell · working -->
+        <div class="tile">
+          <div class="tile-head" data-agent="shell">
+            <span class="star"></span>
+            <span class="tile-name">tail -f ~/.attn/daemon.log</span>
+            <span class="tile-meta">γ · 00h 02m · az 350°</span>
+            <span class="tile-status" data-state="working"><span class="indicator"></span> transit</span>
+          </div>
+          <div class="tile-body">
+            <div class="term">
+              <div class="ln"><span class="lno">…</span><span class="txt"><span class="dim">2026-05-01 00:11:42</span> daemon  <span class="str">[ws] client connected · 256-buf</span></span></div>
+              <div class="ln"><span class="lno">…</span><span class="txt"><span class="dim">2026-05-01 00:11:43</span> session <span class="str">bf2 → working</span></span></div>
+              <div class="ln"><span class="lno">…</span><span class="txt"><span class="dim">2026-05-01 00:11:44</span> session <span class="key">x9a → pending_approval</span></span></div>
+              <div class="ln"><span class="lno">…</span><span class="txt"><span class="dim">2026-05-01 00:12:01</span> classify <span class="dim">tick · queue 0</span></span></div>
+              <div class="ln"><span class="lno">…</span><span class="txt"><span class="dim">2026-05-01 00:12:09</span> session <span class="str">04c → working</span></span></div>
+              <div class="ln"><span class="lno">…</span><span class="txt"><span class="dim">2026-05-01 00:12:18</span> daemon  <span class="dim">heartbeat ok</span></span></div>
+              <div class="ln"><span class="lno">…</span><span class="txt"><span class="caret"></span></span></div>
+            </div>
+          </div>
+          <div class="tile-foot">
+            <span><b>session-04c</b> · raw pty · 80×24</span>
+            <span>live</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- status bar -->
+    <div class="canvas-statusbar">
+      <div class="stat-group">
+        <span class="stat"><span class="pulse-dot"></span> <b>2 working</b></span>
+        <span class="stat" style="color: var(--cls-approval);"><b>1 halted</b></span>
+        <span class="stat" style="color: var(--cls-review);"><b>1 review</b></span>
+      </div>
+      <div></div>
+      <div class="right">
+        <span class="stat">daemon · <b>:9849</b></span>
+        <span class="stat">ws · <b>connected</b></span>
+        <span class="stat">v0.4.2 · δ</span>
+        <span class="stat">37° N</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="folio">
+    <span class="rule"></span>
+    <div class="stack">
+      <span class="signum"><em>ε</em></span>
+      <span class="pno">PL.04 · VERSO · CANVAS</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- PLATE 05 · MOTION                                                     -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section class="plate" id="motion">
+  <header class="plate-header">
+    <div class="plate-no">Plate 05 — recto</div>
+    <h2 class="plate-title">Motion<em>,</em> in <em>three</em> registers</h2>
+    <div class="plate-tag">
+      <b>aurora</b> caret<br>
+      <b>breath</b> pulse<br>
+      <b>drift</b> background
+    </div>
+  </header>
+
+  <p class="plate-lede">
+    Motion narrates only when state changes the user did not request. Three
+    registers: a single accent <em>caret</em> that breathes; a state
+    <em>indicator</em> that pulses on live work; and the <em>starfield</em>
+    that drifts so slowly you almost don't notice — but you do.
+  </p>
+
+  <div class="motion-grid">
+    <div class="motion-card">
+      <div class="m-name">Aurora caret</div>
+      <div class="m-desc">The cursor never blinks. It pulses softly between two halo intensities, signaling "alive" without strobe.</div>
+      <div class="m-vis"><div class="aurora-demo">attn</div></div>
+      <div class="m-spec">duration · <b>2.4s</b> · ease-in-out · opacity 0.85 → 1.0</div>
+    </div>
+    <div class="motion-card">
+      <div class="m-name">Breath pulse</div>
+      <div class="m-desc">Live state indicators (working, approval, waiting) breathe at speeds that match urgency — slower for working, faster for halted.</div>
+      <div class="m-vis"><div class="breath-demo"></div></div>
+      <div class="m-spec">duration · <b>3.6s</b> working / <b>2.4s</b> halted · scale 0.95 → 1.05</div>
+    </div>
+    <div class="motion-card">
+      <div class="m-name">Starfield drift</div>
+      <div class="m-desc">Two parallax layers translate across the page over many minutes. Almost imperceptible, but anchors the page in a slowly-moving frame.</div>
+      <div class="m-vis">
+        <div class="drift-demo">
+          <span class="star-d s1"></span>
+          <span class="star-d s2"></span>
+          <span class="star-d s3"></span>
+          <span class="star-d s4"></span>
+        </div>
+      </div>
+      <div class="m-spec">duration · <b>480s</b> / <b>720s</b> · linear infinite</div>
+    </div>
+  </div>
+
+  <div class="folio">
+    <span class="rule"></span>
+    <div class="stack">
+      <span class="signum"><em>ζ</em></span>
+      <span class="pno">PL.05 · RECTO · MOTION</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<!-- COLOPHON                                                              -->
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<section class="plate">
+  <div class="colophon">
+    <div class="col-block">
+      <div class="h">Colophon</div>
+      Set in <b>Fraunces</b>, <b>Mona Sans</b>, and <b>JetBrains Mono</b>.<br>
+      Composed in HTML, prepared as a single self-contained plate.<br>
+      Colors derived from sodium-vapor streetlamps and a quarter moon.<br>
+      <div class="signature">attn observatory</div>
+    </div>
+    <div class="col-block">
+      <div class="h">Migration · GPUI</div>
+      The native crate currently uses ad-hoc <b>rgb(0xNNNNNN)</b> literals across <b>views/canvas.rs</b>, <b>views/sidebar.rs</b>, and <b>views/terminal_view.rs</b>.<br><br>
+      Next: introduce <b>theme.rs</b> exposing the tokens above as Rust constants, then sweep the four views in dependency order, then add a CI lint that fails on raw <b>rgb(0x</b> outside <b>theme.rs</b>.
+    </div>
+    <div class="col-block">
+      <div class="h">Plate set δ</div>
+      <b>00</b> Frontispiece — chart α<br>
+      <b>01</b> Palette — 16 inks · 1 accent · 3 stars · 7 classifications<br>
+      <b>02</b> Type — Fraunces · Mona Sans · JetBrains Mono<br>
+      <b>03</b> Language — 12 primitives across 8 sections<br>
+      <b>04</b> Canvas — full applied shell<br>
+      <b>05</b> Motion — aurora · breath · drift
+    </div>
+  </div>
+
+  <div class="folio">
+    <span class="rule"></span>
+    <div class="stack">
+      <span class="signum"><em>η</em></span>
+      <span class="pno">PL.06 · COLOPHON · END</span>
+    </div>
+  </div>
+</section>
+
+</main>
+
+</body>
+</html>

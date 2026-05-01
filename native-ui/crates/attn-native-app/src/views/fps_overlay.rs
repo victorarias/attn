@@ -13,7 +13,9 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use gpui::{div, prelude::*, px, rgb, IntoElement, ParentElement};
+use gpui::{div, prelude::*, px, IntoElement, ParentElement, SharedString};
+
+use crate::theme;
 
 const WINDOW: Duration = Duration::from_secs(1);
 const MAX_SAMPLES: usize = 240;
@@ -97,31 +99,76 @@ impl FpsCounter {
     }
 }
 
-/// Top-right overlay element. Cheap to render: a single absolutely
-/// positioned div with three short labels. Caller adds it as a child
-/// after the panels so it always paints on top.
+/// Top-right overlay element. Cheap to render: one absolutely positioned
+/// card with a small heading, three timing rows, and a context footer.
+/// Caller adds it as a child after the panels so it always paints on top.
+///
+/// Color discipline: only the live `fps` numeral takes the working-state
+/// hue (the overlay's whole reason for being is to report liveness).
+/// The rest of the rows — labels, timing values, context — sit in the
+/// muted moonstone scale so the eye lands on the one number that
+/// actually matters at a glance.
 pub fn overlay(readout: Readout, panel_count: usize, zoom: f32) -> impl IntoElement {
-    let fps_line = format!("fps  {:>5.1}", readout.fps);
-    let avg_line = format!("avg  {:>5.2} ms", readout.avg_ms);
-    let last_line = format!("last {:>5.2} ms", readout.last_ms);
-    let context_line = format!("n={} z={:.2}", panel_count, zoom);
+    let fps_value = format!("{:>5.1}", readout.fps);
+    let avg_value = format!("{:>5.2} ms", readout.avg_ms);
+    let last_value = format!("{:>5.2} ms", readout.last_ms);
+    let context_line = format!("n={} · z={:.2}", panel_count, zoom);
 
     div()
         .absolute()
-        .top(px(8.0))
-        .right(px(8.0))
-        .px(px(8.0))
-        .py(px(4.0))
-        .bg(rgb(0x000000))
+        .top(px(theme::space::S1))
+        .right(px(theme::space::S1))
+        .px(px(theme::space::S2))
+        .py(px(theme::space::S1))
+        .bg(theme::ink::void())
         .border_1()
-        .border_color(rgb(0x2a2a35))
-        .rounded(px(3.0))
+        .border_color(theme::line::firm())
+        .rounded(px(theme::radius::R0))
         .text_xs()
-        .text_color(rgb(0x8aff8a))
-        .child(div().child(fps_line))
-        .child(div().child(avg_line))
-        .child(div().child(last_line))
-        .child(div().text_color(rgb(0x8a8aff)).child(context_line))
+        .text_color(theme::moon::parchment())
+        .child(metric_header())
+        .child(metric_row(SharedString::from("fps"), fps_value, true))
+        .child(metric_row(SharedString::from("avg"), avg_value, false))
+        .child(metric_row(SharedString::from("last"), last_value, false))
+        .child(metric_footer(context_line))
+}
+
+/// Section heading — a quiet "FPS" label so the card identifies itself
+/// without taking visual weight from the live number below.
+fn metric_header() -> impl IntoElement {
+    div()
+        .pb(px(theme::space::S0))
+        .text_color(theme::moon::ash())
+        .child(SharedString::from("FPS"))
+}
+
+/// One label/value pair. The value is right-aligned via the format
+/// width; only the canonical `fps` row paints in the working hue so the
+/// rest of the card recedes.
+fn metric_row(label: SharedString, value: String, live: bool) -> impl IntoElement {
+    let value_color = if live {
+        theme::state::working()
+    } else {
+        theme::moon::parchment()
+    };
+    div()
+        .flex()
+        .gap(px(theme::space::S2))
+        .child(
+            div()
+                .min_w(px(28.0))
+                .text_color(theme::moon::bone())
+                .child(label),
+        )
+        .child(div().text_color(value_color).child(value))
+}
+
+/// Trailing context line — panel count and zoom in the quietest tone.
+fn metric_footer(line: String) -> impl IntoElement {
+    div()
+        .pt(px(theme::space::S0))
+        .text_color(theme::moon::ash())
+        .child(line)
 }
 
 #[cfg(test)]

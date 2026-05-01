@@ -7,6 +7,7 @@ mod adapters;
 mod app;
 mod domain;
 mod state;
+mod theme;
 mod views;
 
 use gpui::{

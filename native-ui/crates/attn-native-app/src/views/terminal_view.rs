@@ -10,16 +10,26 @@ use attn_protocol::{PtyInputMessage, PtyResizeMessage};
 
 use crate::adapters::daemon::DaemonClient;
 use crate::state::terminal_model::{RenderedCell, TerminalEvent, TerminalModel};
+use crate::theme;
 
 /// Approximate character cell dimensions for Source Code Pro at 13px.
 pub const CHAR_WIDTH: f32 = 7.8;
 pub const ROW_HEIGHT: f32 = 17.0;
 
-/// Default terminal colors (dark theme).
-const COLOR_BG: u32 = 0x1a1a1a;
-const COLOR_FG: u32 = 0xd4d4d4;
-const COLOR_CURSOR_BG: u32 = 0xd4d4d4;
-const COLOR_CURSOR_FG: u32 = 0x1a1a1a;
+/// Default terminal colors. The chrome side of the terminal pulls from
+/// the design-system tokens (panel body = `ink::midnight`, default text
+/// = `moon::parchment`, cursor = the sodium accent — the same caret
+/// language used everywhere else). The 16-entry ANSI palette below stays
+/// fixed so external tools that paint with ANSI escapes look the way
+/// their authors intended.
+const COLOR_BG: u32 = theme::ink::MIDNIGHT_HEX;
+const COLOR_FG: u32 = theme::moon::PARCHMENT_HEX;
+/// Cursor block uses the sodium accent — same caret language as every
+/// other input affordance in the app.
+const COLOR_CURSOR_BG: u32 = theme::sodium::VAPOR_HEX;
+/// Inverse: text under the cursor block reads as the deepest ink so the
+/// glyph stays legible on the bright sodium fill.
+const COLOR_CURSOR_FG: u32 = theme::ink::VOID_HEX;
 
 /// 16 standard ANSI colors (normal then bright).
 const ANSI_COLORS: [u32; 16] = [

@@ -5,11 +5,12 @@
 /// re-renders.
 use attn_protocol::WorkspaceStatus;
 use gpui::{
-    div, prelude::*, px, rgb, Context, Entity, FocusHandle, Focusable, MouseButton, ParentElement,
+    div, prelude::*, px, Context, Entity, FocusHandle, Focusable, MouseButton, ParentElement,
     Render, SharedString, Window,
 };
 
 use crate::state::workspace::Workspace;
+use crate::theme;
 
 pub const SIDEBAR_WIDTH: f32 = 240.0;
 
@@ -231,22 +232,16 @@ impl Render for Sidebar {
             })
             .collect();
 
+        let count = self.workspaces.len();
         div()
             .w(px(SIDEBAR_WIDTH))
             .h_full()
-            .bg(rgb(0x1a1a22))
+            .bg(theme::ink::nocturne())
             .border_r_1()
-            .border_color(rgb(0x2a2a35))
+            .border_color(theme::ink::firm())
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .px_4()
-                    .py_3()
-                    .text_color(rgb(0x8a8a95))
-                    .text_size(px(11.))
-                    .child(SharedString::from("WORKSPACES")),
-            )
+            .child(sidebar_header(count))
             .children(rows)
             .child(create_row().on_mouse_down(
                 MouseButton::Left,
@@ -257,9 +252,37 @@ impl Render for Sidebar {
     }
 }
 
+/// Section header at the top of the workspace rail. Mono label on the
+/// left, count on the right — pulls from the language defined in plate
+/// 04 (sidebar) of the design system.
+fn sidebar_header(count: usize) -> impl IntoElement {
+    div()
+        .w_full()
+        .px_4()
+        .pt_3()
+        .pb_2()
+        .flex()
+        .items_baseline()
+        .justify_between()
+        .text_color(theme::moon::bone())
+        .text_size(px(10.))
+        .child(SharedString::from("WORKSPACES"))
+        .child(
+            div()
+                .text_color(theme::moon::parchment())
+                .child(SharedString::from(format!("{:02}", count))),
+        )
+}
+
 /// One workspace row. Title + status badge on the left. Caller appends
 /// the delete affordance — pulled out so the click handler in `render`
 /// stays readable.
+///
+/// A 2px left-edge accent runs the height of every row, hue-keyed to the
+/// row's role: `sodium::vapor` when the row is the active workspace, the
+/// row's own background otherwise (so the layout stays static — no
+/// 2px-shift on selection). This is the same "selection mark" pattern
+/// used in plate 04 of the visual plates.
 fn workspace_row(
     title: SharedString,
     status: WorkspaceStatus,
@@ -268,27 +291,39 @@ fn workspace_row(
     destroying: bool,
 ) -> gpui::Div {
     let bg = if confirming_delete {
-        rgb(0x3a2428)
+        theme::surface::danger_row()
     } else if destroying {
-        rgb(0x24242e)
+        theme::surface::pending_row()
     } else if selected {
-        rgb(0x2a2a3a)
+        theme::surface::selected_row()
     } else {
-        rgb(0x1a1a22)
+        theme::ink::nocturne()
     };
     let title_color = if destroying {
-        rgb(0x8a8a95)
+        theme::moon::bone()
     } else {
-        rgb(0xe0e0eb)
+        theme::moon::moonstone()
+    };
+    let accent = if selected {
+        theme::sodium::vapor()
+    } else {
+        // Match the row's own background so the 2px reservation reads
+        // as nothing when the row isn't selected. Layout stays static.
+        bg
     };
     div()
         .w_full()
-        .px_4()
+        // pl_3p5 (14px) + border_l_2 (2px) = 16px to content, matching
+        // the right padding of the row even when the strip is on.
+        .pl_3p5()
+        .pr_4()
         .py_2()
         .flex()
         .items_center()
         .gap_2()
         .bg(bg)
+        .border_l_2()
+        .border_color(accent)
         .text_color(title_color)
         .text_size(px(13.))
         .child(status_badge(status))
@@ -307,7 +342,7 @@ fn delete_button(disabled: bool) -> gpui::Div {
         .flex()
         .items_center()
         .justify_center()
-        .text_color(rgb(0x6a6a78))
+        .text_color(theme::moon::ash())
         .text_size(px(14.))
         .child(SharedString::from(label))
 }
@@ -320,7 +355,7 @@ fn cancel_delete_button() -> gpui::Div {
         .flex()
         .items_center()
         .justify_center()
-        .text_color(rgb(0x9a9aa8))
+        .text_color(theme::moon::bone())
         .text_size(px(11.))
         .child(SharedString::from("Cancel"))
 }
@@ -333,9 +368,9 @@ fn confirm_delete_button() -> gpui::Div {
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgb(0x7a2f35))
+        .bg(theme::surface::danger_emphasis_bg())
         .rounded_sm()
-        .text_color(rgb(0xf0dadd))
+        .text_color(theme::surface::danger_emphasis_fg())
         .text_size(px(11.))
         .child(SharedString::from("Delete"))
 }
@@ -345,7 +380,7 @@ fn destroy_error_row(message: SharedString) -> gpui::Div {
         .w_full()
         .px_4()
         .pb_2()
-        .text_color(rgb(0xff8a8a))
+        .text_color(theme::state::error())
         .text_size(px(11.))
         .line_clamp(2)
         .child(message)
@@ -353,30 +388,56 @@ fn destroy_error_row(message: SharedString) -> gpui::Div {
 
 /// "+ New Workspace" entry below the workspace list. Visually distinct
 /// from real workspaces so the eye reads it as an action, not a row to
-/// select.
+/// select. A faint top divider separates the "live workspaces" stack
+/// from this "open new" affordance, matching the sidebar plate.
 fn create_row() -> gpui::Div {
     div()
         .w_full()
-        .px_4()
-        .py_2()
-        .flex()
-        .items_center()
-        .gap_2()
-        .text_color(rgb(0x8a8a95))
-        .text_size(px(13.))
-        .child(SharedString::from("+ New Workspace"))
+        .pt_2()
+        .border_t_1()
+        .border_color(theme::line::weak())
+        .child(
+            div()
+                .w_full()
+                // Match the workspace_row content offset: 14px + 2px =
+                // 16px. No accent strip so a transparent reservation is
+                // unnecessary; just inset to the column.
+                .pl_4()
+                .pr_4()
+                .py_2()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_color(theme::moon::ash())
+                .text_size(px(13.))
+                .child(create_glyph())
+                .child(SharedString::from("New Workspace")),
+        )
 }
 
-/// Coloured dot reflecting the workspace's rolled-up status. The colour
-/// vocabulary mirrors the Tauri sidebar's session badges so attn feels
-/// consistent across frontends.
+/// Leading "+" glyph for the create row. Sits in the column where status
+/// badges sit on workspace rows, so the eye reads "this row is doing
+/// the same job, but it's an action."
+fn create_glyph() -> gpui::Div {
+    div()
+        .w(px(8.))
+        .h(px(8.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(theme::moon::bone())
+        .text_size(px(12.))
+        .child(SharedString::from("+"))
+}
+
+/// Coloured dot reflecting the workspace's rolled-up status. Hue
+/// resolution lives in `theme::workspace_status_color` so the same
+/// classification reads identically across the sidebar, the canvas
+/// status pills, and any future surface.
 fn status_badge(status: WorkspaceStatus) -> impl IntoElement {
-    let color = match status {
-        WorkspaceStatus::Working => rgb(0x4caf50),         // green
-        WorkspaceStatus::WaitingInput => rgb(0xffc107),    // amber
-        WorkspaceStatus::PendingApproval => rgb(0xff9800), // orange
-        WorkspaceStatus::Idle => rgb(0x6a6a78),            // grey
-        WorkspaceStatus::Launching => rgb(0x2196f3),       // blue
-    };
-    div().w(px(8.)).h(px(8.)).rounded_full().bg(color)
+    div()
+        .w(px(8.))
+        .h(px(8.))
+        .rounded_full()
+        .bg(theme::workspace_status_color(status))
 }

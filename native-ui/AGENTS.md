@@ -80,6 +80,138 @@ view-only fields. Views are observed normally.
   enforced by the dependency direction: adapters push, state holds, views
   observe.
 
+## Design system — Observatory
+
+Every color, radius, and spacing the GPUI views render comes from
+`crates/attn-native-app/src/theme.rs`. The visual language is
+documented in plates at
+[`docs/prototypes/native-design-system-observatory.html`](../docs/prototypes/native-design-system-observatory.html)
+— open it to see how every primitive composes.
+
+The system is named *Observatory*. Agents are stars (Claude `α`, Codex
+`β`, Shell `γ`); states are observation classifications (`transitus`,
+`occultatum`, `retentum`, `inscriptum`, …); the canvas is the chart on
+which they're plotted. The metaphor stays out of identifier names —
+`theme::ink`, `theme::moon`, `theme::sodium` are about color roles, not
+astronomy — but the visual language earns its character from it.
+
+### Token vocabulary
+
+| Module            | Holds                                                          |
+|-------------------|----------------------------------------------------------------|
+| `theme::ink`      | Six surface inks, deepest (`void`) to lightest (`firm`).       |
+| `theme::moon`     | Five text values, primary (`moonstone`) to disabled (`cinder`).|
+| `theme::sodium`   | The single accent — `vapor`, `deep`, plus `soft` / `glow` / `hush` translucent tints. |
+| `theme::star`     | Three agent identities — `claude`, `codex`, `shell`.            |
+| `theme::state`    | Seven observation classifications — working, halted, etc.       |
+| `theme::surface`  | Composite tokens for row states (selected, danger, pending).   |
+| `theme::line`     | Four hairline opacities — `weak` (.05) → `bold` (.28), moonstone-tinted alpha. |
+| `theme::radius`   | Three radii — `R0` (4px), `R1` (7px), `R2` (12px).              |
+| `theme::space`    | Seven-step spacing ramp — `S0` (4px) through `S6` (56px).       |
+| `theme::motion`   | Duration tokens in seconds — `TIGHT`/`NORMAL`/`RELAXED` for UI; `BREATH_LIVE`/`BREATH_HALTED`/`AURORA` for ambient. |
+
+### Rules
+
+1. **Color is meaning.** Hue carries either *identity* (which agent) or
+   *status* (what state) — never decoration.
+2. **One accent.** Sodium-vapor orange (`theme::sodium::vapor`). If
+   sodium appears, it is the most important pixel on screen.
+3. **Three radii, no more.** `R0` / `R1` / `R2`. Anything else is a bug.
+4. **Six surface inks.** Cool blue-black. Never pure black, never
+   tinted toward purple.
+5. **Identity and status are independent.** A working Codex panel
+   shows the Codex blue (identity) plus the working green (status).
+   They never share a hue.
+
+Raw `rgb(0xNNNNNN)` and `rgba(0xNNNNNNNN)` literals are forbidden in
+`views/`, `app.rs`, and elsewhere outside `theme.rs`. The module's
+tests guard the load-bearing invariants:
+
+- idle visual weight ≡ dim metadata (`state::idle` ≡ `moon::ash`);
+- the sodium tints share the vapor hue (`soft` / `glow` / `hush` only
+  vary in alpha — there is no "second orange");
+- the hairline scale is monotone (`line::weak` < `mild` < `firm` < `bold`);
+- halted breath is faster than live breath (the urgent voice pulses
+  faster than the working one);
+- agent star hues are pairwise distinct;
+- state hues are pairwise distinct.
+
+### Working in views
+
+```rust
+use crate::theme;
+
+div()
+    .bg(theme::ink::nocturne())
+    .border_color(theme::line::firm())  // hairline (translucent)
+    .text_color(theme::moon::moonstone())
+    .rounded(px(theme::radius::R1))
+```
+
+`theme::ink::firm()` and `theme::line::firm()` are *both* legitimate
+border colors — they read differently. `ink::firm` is opaque cool
+blue-black (a structural region edge); `line::firm` is moonstone alpha
+that blends onto whatever ink it sits on (a hairline that feels of the
+warm palette). Use `line::*` for in-card dividers, faint chrome edges,
+and anything that should read as "barely there"; use `ink::firm` when
+you need the harder, region-defining contrast.
+
+For status indicators driven by a protocol enum, call the resolver
+helper rather than re-`match`ing in the view:
+
+```rust
+fn status_badge(status: WorkspaceStatus) -> impl IntoElement {
+    div().w(px(8.)).h(px(8.)).rounded_full()
+        .bg(theme::workspace_status_color(status))
+}
+```
+
+For agent identity from a wire-level identifier:
+
+```rust
+let star_color = theme::star::for_agent_id(&agent_id);  // "claude" → peach, etc
+```
+
+### Adding a token
+
+1. Add a `pub const FOO_HEX: u32 = 0x...;` to the right submodule of
+   `theme.rs`.
+2. Add a `pub fn foo() -> Rgba { rgb(FOO_HEX) }` next to it.
+3. Document what it means and where it gets used.
+
+That's it. No coordinator file, no enum to extend, no match arms to keep
+in sync. When a submodule grows past ~30 tokens, split `theme.rs` into a
+`theme/` directory with one file per submodule — the public API stays
+the same.
+
+### When tokens don't fit
+
+If a view needs a color that doesn't map cleanly to an existing token,
+pause and ask: *is this a missing primitive, or am I about to invent
+decoration?*
+
+- **Missing primitive** — add a token (e.g. a new `surface::*` for a
+  composite row state, a new `state::*` if the protocol grows a
+  classification). Update the visual plate so the prototype stays
+  authoritative.
+- **Decoration** — find an existing token. If you need a color to
+  "pop", you almost always want `sodium::vapor`, and the rule is that
+  it's already the most important pixel — putting it on something
+  ordinary devalues every other appearance of it.
+
+### Migration notes
+
+The migration from ad-hoc `rgb(0xNNNNNN)` literals is complete in
+`views/canvas.rs`, `views/sidebar.rs`, `views/terminal_view.rs`,
+`views/fps_overlay.rs`, and `app.rs`. New views should never reintroduce
+raw hex.
+
+The terminal's 16-entry ANSI palette in `views/terminal_view.rs` is
+intentionally **not** themed — external tools paint with ANSI escapes
+expecting standard colors, and overriding them would break user
+expectations. Only the chrome (panel bg, default fg, cursor) follows
+the design system.
+
 ## Learnings
 
 After completing a meaningful spike or feature, add to this file any decisions
