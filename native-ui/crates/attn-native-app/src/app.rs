@@ -14,7 +14,7 @@ use attn_protocol::{
 };
 use gpui::{
     div, prelude::*, App, Context, Entity, Focusable, ParentElement, Render, SharedString,
-    Subscription, Window,
+    Subscription, WeakEntity, Window,
 };
 use serde_json::{json, Value};
 
@@ -386,12 +386,7 @@ impl NativeApp {
                 },
                 daemon,
                 move |outcome, cx| {
-                    let app = app_handle_submit
-                        .upgrade()
-                        .ok_or_else(|| "NativeApp entity dropped".to_string())?;
-                    app.update(cx, |app: &mut NativeApp, cx| {
-                        app.handle_location_dialog_outcome(outcome, cx)
-                    })
+                    schedule_location_dialog_submit(app_handle_submit.clone(), outcome, cx)
                 },
                 move |cx| {
                     if let Some(app) = app_handle_close.upgrade() {
@@ -424,12 +419,7 @@ impl NativeApp {
                 LocationDialogMode::NewWorkspace { initial_directory },
                 daemon,
                 move |outcome, cx| {
-                    let app = app_handle_submit
-                        .upgrade()
-                        .ok_or_else(|| "NativeApp entity dropped".to_string())?;
-                    app.update(cx, |app: &mut NativeApp, cx| {
-                        app.handle_location_dialog_outcome(outcome, cx)
-                    })
+                    schedule_location_dialog_submit(app_handle_submit.clone(), outcome, cx)
                 },
                 move |cx| {
                     if let Some(app) = app_handle_close.upgrade() {
@@ -477,6 +467,12 @@ impl NativeApp {
             }
         }
         Ok(())
+    }
+
+    fn close_location_dialog_after_submit(&mut self, cx: &mut Context<Self>) {
+        self.location_dialog = None;
+        self.canvas_needs_refocus = true;
+        cx.notify();
     }
 
     /// Register a workspace and select it once the daemon confirms it.
@@ -1118,6 +1114,33 @@ impl NativeApp {
             }
         }
     }
+}
+
+fn schedule_location_dialog_submit(
+    app_handle: WeakEntity<NativeApp>,
+    outcome: LocationDialogOutcome,
+    cx: &mut App,
+) -> Result<(), String> {
+    if app_handle.upgrade().is_none() {
+        return Err("NativeApp entity dropped".to_string());
+    }
+
+    cx.defer(move |cx| {
+        let Some(app_handle) = app_handle.upgrade() else {
+            return;
+        };
+        app_handle.update(cx, |app: &mut NativeApp, cx| {
+            match app.handle_location_dialog_outcome(outcome, cx) {
+                Ok(()) => app.close_location_dialog_after_submit(cx),
+                Err(error) => {
+                    if let Some(dialog) = app.location_dialog.clone() {
+                        dialog.update(cx, |dialog, cx| dialog.set_error(error, cx));
+                    }
+                }
+            }
+        });
+    });
+    Ok(())
 }
 
 impl Render for NativeApp {

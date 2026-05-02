@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-02]
+
+### Fixed
+- **Native Location Dialog Crash**: Opening a new native-canvas session from the location dialog no longer crashes when the dialog submit is triggered by an asynchronous daemon path inspection or worktree result while the root app is already processing that daemon event.
+
+---
+
 ## [2026-05-01]
 
 ### Changed
