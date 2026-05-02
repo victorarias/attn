@@ -145,6 +145,12 @@ impl LocationDialog {
         }
     }
 
+    pub fn set_error(&mut self, error: String, cx: &mut Context<Self>) {
+        self.loading_label = None;
+        self.error = Some(SharedString::from(error));
+        cx.notify();
+    }
+
     fn next_request_id(&mut self, prefix: &str) -> String {
         self.request_seq += 1;
         format!("native-{prefix}-{}", self.request_seq)
@@ -349,13 +355,8 @@ impl LocationDialog {
             }
         };
 
-        match (self.on_submit)(outcome, cx) {
-            Ok(()) => {
-                (self.on_close)(cx);
-            }
-            Err(error) => {
-                self.error = Some(SharedString::from(error));
-            }
+        if let Err(error) = (self.on_submit)(outcome, cx) {
+            self.error = Some(SharedString::from(error));
         }
     }
 
