@@ -122,6 +122,7 @@ pub struct WorkspaceCanvas {
     pending_input_focus_session: Option<SharedString>,
     fullscreen_panel: Option<usize>,
     selection_animation_running: bool,
+    selection_animation_visible: bool,
     snap_lines: Vec<SnapLine>,
     focus_handle: FocusHandle,
     /// Window-relative bounds of the canvas's root element, captured each
@@ -176,6 +177,7 @@ impl WorkspaceCanvas {
             pending_input_focus_session: None,
             fullscreen_panel: None,
             selection_animation_running: false,
+            selection_animation_visible: false,
             snap_lines: Vec::new(),
             focus_handle: cx.focus_handle(),
             bounds: Rc::new(Cell::new(None)),
@@ -232,8 +234,9 @@ impl WorkspaceCanvas {
         self.selected_panel.is_some() && self.input_focused_panel != self.selected_panel
     }
 
-    fn ensure_selection_animation(&mut self, cx: &mut Context<Self>) {
-        if self.selection_animation_running || !self.has_selected_only_panel() {
+    fn ensure_selection_animation(&mut self, visible_selected_only: bool, cx: &mut Context<Self>) {
+        self.selection_animation_visible = visible_selected_only;
+        if self.selection_animation_running || !visible_selected_only {
             return;
         }
 
@@ -241,7 +244,7 @@ impl WorkspaceCanvas {
         cx.spawn(async move |this, cx| loop {
             smol::Timer::after(Duration::from_millis(SELECTION_GLINT_FRAME_MS)).await;
             let should_continue = this.update(cx, |canvas, cx| {
-                if canvas.has_selected_only_panel() {
+                if canvas.has_selected_only_panel() && canvas.selection_animation_visible {
                     cx.notify();
                     true
                 } else {
@@ -1063,7 +1066,6 @@ impl Render for WorkspaceCanvas {
         }
         let selected_panel = self.selected_panel;
         let input_focused_panel = self.input_focused_panel;
-        self.ensure_selection_animation(cx);
         if self
             .fullscreen_panel
             .is_some_and(|id| !panels.iter().any(|panel| panel.id == id))
@@ -1072,6 +1074,16 @@ impl Render for WorkspaceCanvas {
             cx.notify();
         }
         let fullscreen_panel = self.fullscreen_panel;
+        let visible_selected_only = visible_selected_only_panel(
+            &panels,
+            selected_panel,
+            input_focused_panel,
+            fullscreen_panel,
+            viewport,
+            ws_w,
+            ws_h,
+        );
+        self.ensure_selection_animation(visible_selected_only, cx);
 
         if let Some(fullscreen_id) = fullscreen_panel {
             if let Some(panel) = panels.iter().find(|panel| panel.id == fullscreen_id) {
@@ -1166,7 +1178,7 @@ impl Render for WorkspaceCanvas {
             let title_h = title_screen_height(viewport.zoom);
 
             // Viewport culling — skip fully off-screen panels.
-            if sx + sw < 0.0 || sy + sh < 0.0 || sx > ws_w || sy > ws_h {
+            if !screen_rect_visible(sx, sy, sw, sh, ws_w, ws_h) {
                 continue;
             }
 
@@ -1293,6 +1305,50 @@ fn panel_border_color(has_input_focus: bool, is_selected: bool) -> gpui::Rgba {
     }
 }
 
+fn visible_selected_only_panel(
+    panels: &[Panel],
+    selected_panel: Option<usize>,
+    input_focused_panel: Option<usize>,
+    fullscreen_panel: Option<usize>,
+    viewport: Viewport,
+    screen_w: f32,
+    screen_h: f32,
+) -> bool {
+    let Some(selected_id) = selected_panel else {
+        return false;
+    };
+    if input_focused_panel == Some(selected_id) {
+        return false;
+    }
+
+    if let Some(fullscreen_id) = fullscreen_panel {
+        return fullscreen_id == selected_id && panels.iter().any(|panel| panel.id == selected_id);
+    }
+
+    panels
+        .iter()
+        .find(|panel| panel.id == selected_id)
+        .is_some_and(|panel| panel_visible_on_screen(panel, viewport, screen_w, screen_h))
+}
+
+fn panel_visible_on_screen(
+    panel: &Panel,
+    viewport: Viewport,
+    screen_w: f32,
+    screen_h: f32,
+) -> bool {
+    let sp = viewport.world_to_screen(point(panel.world_x, panel.world_y));
+    let sx = pf(sp.x);
+    let sy = pf(sp.y);
+    let sw = panel.width * viewport.zoom;
+    let sh = panel.height * viewport.zoom;
+    screen_rect_visible(sx, sy, sw, sh, screen_w, screen_h)
+}
+
+fn screen_rect_visible(sx: f32, sy: f32, sw: f32, sh: f32, screen_w: f32, screen_h: f32) -> bool {
+    sx + sw >= 0.0 && sy + sh >= 0.0 && sx <= screen_w && sy <= screen_h
+}
+
 fn panel_shadow(has_input_focus: bool) -> Vec<BoxShadow> {
     if !has_input_focus {
         return Vec::new();
@@ -1377,7 +1433,7 @@ fn glint_segment(
         .top(px(y))
         .w(px(w))
         .h(px(h))
-        .rounded(px(2.0))
+        .rounded(px(theme::radius::R0))
         .bg(sodium_alpha(alpha))
         .shadow(vec![BoxShadow {
             color: sodium_alpha((alpha * 0.72).min(0.5)).into(),
@@ -1636,6 +1692,14 @@ mod tests {
     fn border_orbit_point_wraps_to_start() {
         let point = border_orbit_point(100.0, 50.0, border_perimeter(100.0, 50.0) + 10.0);
         assert_eq!((point.x, point.y, point.horizontal), (10.0, 0.0, true));
+    }
+
+    #[test]
+    fn screen_rect_visibility_matches_panel_culling_edges() {
+        assert!(screen_rect_visible(-20.0, 10.0, 20.0, 20.0, 100.0, 100.0));
+        assert!(screen_rect_visible(100.0, 10.0, 20.0, 20.0, 100.0, 100.0));
+        assert!(!screen_rect_visible(-21.0, 10.0, 20.0, 20.0, 100.0, 100.0));
+        assert!(!screen_rect_visible(101.0, 10.0, 20.0, 20.0, 100.0, 100.0));
     }
 
     #[test]
