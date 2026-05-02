@@ -572,7 +572,9 @@ impl Render for LocationDialog {
         self.focus(window);
         let (eyebrow, title) = match self.mode {
             LocationDialogMode::NewSession { .. } => ("New session", "Open a new observation"),
-            LocationDialogMode::NewWorkspace { .. } => ("New workspace", "Bind a working directory"),
+            LocationDialogMode::NewWorkspace { .. } => {
+                ("New workspace", "Bind a working directory")
+            }
         };
 
         let mut panel = div()
@@ -1445,10 +1447,7 @@ fn row_base(selected: bool) -> gpui::Div {
 }
 
 fn divider() -> gpui::Div {
-    div()
-        .h(px(1.0))
-        .w_full()
-        .bg(theme::line::weak())
+    div().h(px(1.0)).w_full().bg(theme::line::weak())
 }
 
 fn eyebrow(label: &str) -> gpui::Div {
