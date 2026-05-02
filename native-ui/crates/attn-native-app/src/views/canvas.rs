@@ -8,12 +8,13 @@
 /// PtyResize on its next render.
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use gpui::{
-    canvas, div, point, prelude::*, px, AnyElement, App, Bounds, Context, Entity, FocusHandle,
-    Focusable, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Render, ScrollDelta, ScrollWheelEvent, SharedString, Subscription,
-    Window,
+    canvas, div, point, prelude::*, px, AnyElement, App, Bounds, BoxShadow, Context, Entity,
+    FocusHandle, Focusable, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Pixels, Render, ScrollDelta, ScrollWheelEvent, SharedString,
+    Subscription, Window,
 };
 
 /// Callback invoked when the user picks an agent from the canvas's
@@ -62,6 +63,9 @@ const TITLE_SCREEN_MIN_H: f32 = 18.0; // screen-space; keeps title dragging usab
 const KEYBOARD_PAN_STEP: f32 = 160.0; // screen-space pixels
 const PANEL_FIT_MARGIN: f32 = 32.0; // screen-space pixels
 const SNAP_LOCK_SCREEN_THRESHOLD: f32 = 10.0; // screen-space pixels
+const SELECTION_GLINT_PERIOD_MS: u64 = 2_800;
+const SELECTION_GLINT_FRAME_MS: u64 = 33;
+const SELECTION_GLINT_SAMPLES: usize = 18;
 
 // ── Drag/resize state ─────────────────────────────────────────────────────────
 
@@ -117,6 +121,7 @@ pub struct WorkspaceCanvas {
     input_focused_panel: Option<usize>,
     pending_input_focus_session: Option<SharedString>,
     fullscreen_panel: Option<usize>,
+    selection_animation_running: bool,
     snap_lines: Vec<SnapLine>,
     focus_handle: FocusHandle,
     /// Window-relative bounds of the canvas's root element, captured each
@@ -170,6 +175,7 @@ impl WorkspaceCanvas {
             input_focused_panel: None,
             pending_input_focus_session: None,
             fullscreen_panel: None,
+            selection_animation_running: false,
             snap_lines: Vec::new(),
             focus_handle: cx.focus_handle(),
             bounds: Rc::new(Cell::new(None)),
@@ -220,6 +226,34 @@ impl WorkspaceCanvas {
             },
             selected_panel: self.selected_panel,
         }
+    }
+
+    fn has_selected_only_panel(&self) -> bool {
+        self.selected_panel.is_some() && self.input_focused_panel != self.selected_panel
+    }
+
+    fn ensure_selection_animation(&mut self, cx: &mut Context<Self>) {
+        if self.selection_animation_running || !self.has_selected_only_panel() {
+            return;
+        }
+
+        self.selection_animation_running = true;
+        cx.spawn(async move |this, cx| loop {
+            smol::Timer::after(Duration::from_millis(SELECTION_GLINT_FRAME_MS)).await;
+            let should_continue = this.update(cx, |canvas, cx| {
+                if canvas.has_selected_only_panel() {
+                    cx.notify();
+                    true
+                } else {
+                    canvas.selection_animation_running = false;
+                    false
+                }
+            });
+            if !matches!(should_continue, Ok(true)) {
+                break;
+            }
+        })
+        .detach();
     }
 
     /// Translate a window-relative position into canvas-local space using
@@ -1029,6 +1063,7 @@ impl Render for WorkspaceCanvas {
         }
         let selected_panel = self.selected_panel;
         let input_focused_panel = self.input_focused_panel;
+        self.ensure_selection_animation(cx);
         if self
             .fullscreen_panel
             .is_some_and(|id| !panels.iter().any(|panel| panel.id == id))
@@ -1043,6 +1078,8 @@ impl Render for WorkspaceCanvas {
                 let title_h = TITLE_HEIGHT;
                 let content_h = (ws_h - title_h).max(0.0);
                 let input_enabled = input_focused_panel == Some(panel.id);
+                let has_input_focus = input_focused_panel == Some(panel.id);
+                let is_selected = selected_panel == Some(panel.id);
                 panel.view.update(cx, |tv, inner_cx| {
                     let size_changed = tv.set_content_size(ws_w, content_h);
                     let zoom_changed = tv.set_zoom(1.0);
@@ -1073,25 +1110,29 @@ impl Render for WorkspaceCanvas {
                     );
                 title_bar = title_bar.child(panel_close_button(panel.session_id.clone(), cx));
 
-                root = root.child(
-                    div()
-                        .absolute()
-                        .left(px(0.0))
-                        .top(px(0.0))
-                        .w(px(ws_w))
-                        .h(px(ws_h))
-                        .bg(theme::ink::nocturne())
-                        .border_1()
-                        .border_color(theme::sodium::vapor())
-                        .child(title_bar)
-                        .child(
-                            div()
-                                .w_full()
-                                .h(px(content_h))
-                                .overflow_hidden()
-                                .child(body),
-                        ),
-                );
+                let mut panel_div = div()
+                    .absolute()
+                    .left(px(0.0))
+                    .top(px(0.0))
+                    .w(px(ws_w))
+                    .h(px(ws_h))
+                    .bg(theme::ink::nocturne())
+                    .border_1()
+                    .border_color(panel_border_color(has_input_focus, is_selected))
+                    .shadow(panel_shadow(has_input_focus))
+                    .child(title_bar)
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(content_h))
+                            .overflow_hidden()
+                            .child(body),
+                    );
+                if is_selected && !has_input_focus {
+                    panel_div = panel_div.child(selection_glint(ws_w, ws_h));
+                }
+
+                root = root.child(panel_div);
                 if let Some(readout) = readout {
                     root = root.child(fps_overlay::overlay(readout, panels.len(), 1.0));
                 }
@@ -1131,17 +1172,7 @@ impl Render for WorkspaceCanvas {
 
             let has_input_focus = input_focused_panel == Some(panel.id);
             let is_selected = selected_panel == Some(panel.id);
-            // Focus reads as the canonical accent. Selected-but-not-focused
-            // is the deeper sodium so the eye still tracks "hot panel" but
-            // doesn't compete with the actively-typing one. Default border
-            // is the firm structural ink.
-            let border_color = if has_input_focus {
-                theme::sodium::vapor()
-            } else if is_selected {
-                theme::sodium::deep()
-            } else {
-                theme::ink::firm()
-            };
+            let border_color = panel_border_color(has_input_focus, is_selected);
             let content_h = (sh - title_h).max(0.0);
             let title = panel.title.clone();
 
@@ -1167,7 +1198,7 @@ impl Render for WorkspaceCanvas {
                 );
             title_bar = title_bar.child(panel_close_button(panel.session_id.clone(), cx));
 
-            let panel_div = div()
+            let mut panel_div = div()
                 .absolute()
                 .left(px(sx))
                 .top(px(sy))
@@ -1176,6 +1207,7 @@ impl Render for WorkspaceCanvas {
                 .bg(theme::ink::nocturne())
                 .border_1()
                 .border_color(border_color)
+                .shadow(panel_shadow(has_input_focus))
                 .child(title_bar)
                 .child(
                     div()
@@ -1188,6 +1220,9 @@ impl Render for WorkspaceCanvas {
                 .child(corner_handle(sw - HANDLE_SIZE, 0.0))
                 .child(corner_handle(0.0, sh - HANDLE_SIZE))
                 .child(corner_handle(sw - HANDLE_SIZE, sh - HANDLE_SIZE));
+            if is_selected && !has_input_focus {
+                panel_div = panel_div.child(selection_glint(sw, sh));
+            }
 
             root = root.child(panel_div);
         }
@@ -1246,6 +1281,165 @@ impl WorkspaceCanvas {
         let workspace_id = ws.read(cx).id.clone();
         (self.on_spawn)(workspace_id, DEFAULT_SPAWN_AGENT.into(), window, cx);
     }
+}
+
+fn panel_border_color(has_input_focus: bool, is_selected: bool) -> gpui::Rgba {
+    if has_input_focus {
+        theme::sodium::vapor()
+    } else if is_selected {
+        theme::sodium::deep()
+    } else {
+        theme::ink::firm()
+    }
+}
+
+fn panel_shadow(has_input_focus: bool) -> Vec<BoxShadow> {
+    if !has_input_focus {
+        return Vec::new();
+    }
+
+    vec![
+        BoxShadow {
+            color: theme::sodium::soft().into(),
+            offset: point(px(0.0), px(0.0)),
+            blur_radius: px(0.0),
+            spread_radius: px(1.0),
+        },
+        BoxShadow {
+            color: theme::sodium::glow().into(),
+            offset: point(px(0.0), px(0.0)),
+            blur_radius: px(18.0),
+            spread_radius: px(-6.0),
+        },
+    ]
+}
+
+fn selection_glint(width: f32, height: f32) -> gpui::Div {
+    let phase = selection_glint_phase();
+    let width = width.max(1.0);
+    let height = height.max(1.0);
+    let perimeter = border_perimeter(width, height);
+    let mut overlay = div()
+        .absolute()
+        .left(px(0.0))
+        .top(px(0.0))
+        .w(px(width))
+        .h(px(height));
+
+    if perimeter <= 0.0 {
+        return overlay;
+    }
+
+    let head = phase * perimeter;
+    let trail = (perimeter * 0.2).clamp(96.0, 280.0);
+    for sample in 0..SELECTION_GLINT_SAMPLES {
+        let progress = sample as f32 / (SELECTION_GLINT_SAMPLES - 1) as f32;
+        let distance = (head - trail * progress).rem_euclid(perimeter);
+        let alpha = 0.72 * (1.0 - progress).powf(1.5);
+        overlay = overlay.child(glint_segment(
+            border_orbit_point(width, height, distance),
+            alpha,
+            width,
+            height,
+        ));
+    }
+
+    overlay
+}
+
+fn selection_glint_phase() -> f32 {
+    let elapsed_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    (elapsed_ms % SELECTION_GLINT_PERIOD_MS) as f32 / SELECTION_GLINT_PERIOD_MS as f32
+}
+
+fn glint_segment(
+    sample: BorderOrbitPoint,
+    alpha: f32,
+    panel_width: f32,
+    panel_height: f32,
+) -> gpui::Div {
+    let thickness = 3.0;
+    let length = 22.0;
+    let (w, h) = if sample.horizontal {
+        (length, thickness)
+    } else {
+        (thickness, length)
+    };
+    let x = (sample.x - w / 2.0).clamp(0.0, (panel_width - w).max(0.0));
+    let y = (sample.y - h / 2.0).clamp(0.0, (panel_height - h).max(0.0));
+
+    div()
+        .absolute()
+        .left(px(x))
+        .top(px(y))
+        .w(px(w))
+        .h(px(h))
+        .rounded(px(2.0))
+        .bg(sodium_alpha(alpha))
+        .shadow(vec![BoxShadow {
+            color: sodium_alpha((alpha * 0.72).min(0.5)).into(),
+            offset: point(px(0.0), px(0.0)),
+            blur_radius: px(10.0),
+            spread_radius: px(1.0),
+        }])
+}
+
+fn sodium_alpha(alpha: f32) -> gpui::Rgba {
+    let mut color = theme::sodium::vapor();
+    color.a = alpha.clamp(0.0, 1.0);
+    color
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BorderOrbitPoint {
+    x: f32,
+    y: f32,
+    horizontal: bool,
+}
+
+fn border_orbit_point(width: f32, height: f32, distance: f32) -> BorderOrbitPoint {
+    let perimeter = border_perimeter(width, height);
+    if perimeter <= 0.0 {
+        return BorderOrbitPoint {
+            x: 0.0,
+            y: 0.0,
+            horizontal: true,
+        };
+    }
+
+    let distance = distance.rem_euclid(perimeter);
+    if distance < width {
+        BorderOrbitPoint {
+            x: distance,
+            y: 0.0,
+            horizontal: true,
+        }
+    } else if distance < width + height {
+        BorderOrbitPoint {
+            x: width,
+            y: distance - width,
+            horizontal: false,
+        }
+    } else if distance < width * 2.0 + height {
+        BorderOrbitPoint {
+            x: width - (distance - width - height),
+            y: height,
+            horizontal: true,
+        }
+    } else {
+        BorderOrbitPoint {
+            x: 0.0,
+            y: height - (distance - width * 2.0 - height),
+            horizontal: false,
+        }
+    }
+}
+
+fn border_perimeter(width: f32, height: f32) -> f32 {
+    (width.max(0.0) + height.max(0.0)) * 2.0
 }
 
 /// Trailing close button rendered on each terminal panel's title bar.
@@ -1418,6 +1612,30 @@ mod tests {
         assert_eq!(snap_threshold_world(1.0), SNAP_LOCK_SCREEN_THRESHOLD);
         assert_eq!(snap_threshold_world(0.5), SNAP_LOCK_SCREEN_THRESHOLD * 2.0);
         assert_eq!(snap_threshold_world(2.0), SNAP_LOCK_SCREEN_THRESHOLD / 2.0);
+    }
+
+    #[test]
+    fn border_orbit_point_moves_clockwise_around_panel_edges() {
+        let width = 100.0;
+        let height = 50.0;
+
+        let top = border_orbit_point(width, height, 25.0);
+        assert_eq!((top.x, top.y, top.horizontal), (25.0, 0.0, true));
+
+        let right = border_orbit_point(width, height, 125.0);
+        assert_eq!((right.x, right.y, right.horizontal), (100.0, 25.0, false));
+
+        let bottom = border_orbit_point(width, height, 175.0);
+        assert_eq!((bottom.x, bottom.y, bottom.horizontal), (75.0, 50.0, true));
+
+        let left = border_orbit_point(width, height, 275.0);
+        assert_eq!((left.x, left.y, left.horizontal), (0.0, 25.0, false));
+    }
+
+    #[test]
+    fn border_orbit_point_wraps_to_start() {
+        let point = border_orbit_point(100.0, 50.0, border_perimeter(100.0, 50.0) + 10.0);
+        assert_eq!((point.x, point.y, point.horizontal), (10.0, 0.0, true));
     }
 
     #[test]

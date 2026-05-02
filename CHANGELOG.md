@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-05-02]
 
 ### Changed
+- **Native Canvas Focus Treatment**: Keyboard-focused panels now get the stronger sodium highlight ring and glow, while selected-but-not-focused panels use a quieter selected border with a small moving light around the edge so selection and typing focus read as distinct states.
 - **Native Canvas Shell Splits**: `Cmd+D` now opens a new Shell panel to the right of the selected native-canvas panel, and `Cmd+Shift+D` opens one below it. Split panels inherit the anchor panel's size, persist their daemon-owned geometry, and take input focus once attached.
 
 ### Fixed
