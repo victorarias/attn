@@ -420,6 +420,9 @@ impl TerminalView {
         if !self.input_enabled {
             return;
         }
+        if event.keystroke.modifiers.platform {
+            return;
+        }
         let seq = encode_key(event);
         if !seq.is_empty() {
             self.send_input(&seq, cx);

@@ -134,12 +134,10 @@ func (s *Store) Add(session *protocol.Session) {
 	if normalizedAgent == "" {
 		normalizedAgent = string(protocol.SessionAgentCodex)
 	}
-	if normalizedAgent == protocol.AgentShellValue {
-		normalizedAgent = string(protocol.SessionAgentCodex)
-	}
 	if normalizedAgent != string(protocol.SessionAgentClaude) &&
 		normalizedAgent != string(protocol.SessionAgentCodex) &&
-		normalizedAgent != string(protocol.SessionAgentCopilot) {
+		normalizedAgent != string(protocol.SessionAgentCopilot) &&
+		normalizedAgent != protocol.AgentShellValue {
 		if agentdriver.Get(normalizedAgent) == nil {
 			normalizedAgent = string(protocol.SessionAgentCodex)
 		}
