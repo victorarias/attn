@@ -57,6 +57,8 @@ pub mod ink {
     pub const BORDER_HEX: u32 = 0x1f2837;
     /// `#2a3548` — firm structural border between major regions.
     pub const FIRM_HEX: u32 = 0x2a3548;
+    /// `#060810 @ 0.72α` — modal scrim over the canvas.
+    pub const VEIL_HEX: u32 = 0x060810b8;
 
     pub fn void() -> Rgba {
         rgb(VOID_HEX)
@@ -75,6 +77,9 @@ pub mod ink {
     }
     pub fn firm() -> Rgba {
         rgb(FIRM_HEX)
+    }
+    pub fn veil() -> Rgba {
+        rgba(VEIL_HEX)
     }
 }
 

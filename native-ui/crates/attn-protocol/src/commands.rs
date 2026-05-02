@@ -164,6 +164,84 @@ pub struct UpdateWorkspacePanelGeometryMessage {
     pub height: Option<f32>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct BrowseDirectoryMessage {
+    pub cmd: &'static str,
+    pub input_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+impl BrowseDirectoryMessage {
+    pub fn new(input_path: impl Into<String>, request_id: impl Into<String>) -> Self {
+        Self {
+            cmd: "browse_directory",
+            input_path: input_path.into(),
+            request_id: Some(request_id.into()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct InspectPathMessage {
+    pub cmd: &'static str,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+impl InspectPathMessage {
+    pub fn new(path: impl Into<String>, request_id: impl Into<String>) -> Self {
+        Self {
+            cmd: "inspect_path",
+            path: path.into(),
+            request_id: Some(request_id.into()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct GetRepoInfoMessage {
+    pub cmd: &'static str,
+    pub repo: String,
+}
+
+impl GetRepoInfoMessage {
+    pub fn new(repo: impl Into<String>) -> Self {
+        Self {
+            cmd: "get_repo_info",
+            repo: repo.into(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateWorktreeMessage {
+    pub cmd: &'static str,
+    pub main_repo: String,
+    pub branch: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starting_from: Option<String>,
+}
+
+impl CreateWorktreeMessage {
+    pub fn new(
+        main_repo: impl Into<String>,
+        branch: impl Into<String>,
+        starting_from: impl Into<String>,
+    ) -> Self {
+        Self {
+            cmd: "create_worktree",
+            main_repo: main_repo.into(),
+            branch: branch.into(),
+            path: None,
+            starting_from: Some(starting_from.into()),
+        }
+    }
+}
+
 impl UpdateWorkspacePanelGeometryMessage {
     pub fn new(
         workspace_id: impl Into<String>,

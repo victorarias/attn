@@ -92,6 +92,68 @@ pub struct WorkspacePanel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DirectoryEntry {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PathInspection {
+    pub input_path: String,
+    pub resolved_path: String,
+    pub exists: bool,
+    pub is_directory: bool,
+    #[serde(default)]
+    pub repo_root: Option<String>,
+    #[serde(default)]
+    pub home_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Worktree {
+    pub path: String,
+    pub branch: String,
+    pub main_repo: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Branch {
+    pub name: String,
+    pub commit_hash: String,
+    pub commit_time: String,
+    pub is_current: bool,
+    pub is_worktree: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RepoInfo {
+    pub repo: String,
+    pub current_branch: String,
+    pub current_commit_hash: String,
+    pub current_commit_time: String,
+    pub default_branch: String,
+    // The daemon serializes nil Go slices as JSON `null` rather than
+    // `[]`, so plain `#[serde(default)]` is not enough — without
+    // `deserialize_with`, parsing fails with "invalid type: null,
+    // expected a sequence" and the location dialog hangs on
+    // "Reading repository". `null_or_vec` accepts either.
+    #[serde(default, deserialize_with = "null_or_vec")]
+    pub worktrees: Vec<Worktree>,
+    #[serde(default, deserialize_with = "null_or_vec")]
+    pub branches: Vec<Branch>,
+    #[serde(default)]
+    pub fetched_at: Option<String>,
+}
+
+fn null_or_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionAgent {
     Claude,
@@ -146,4 +208,43 @@ pub struct Session {
     pub recoverable: Option<bool>,
     #[serde(default)]
     pub todos: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The daemon emits Go `nil` slices as JSON `null`. Without the
+    /// `null_or_vec` deserializer, the location dialog's "Reading
+    /// repository" step hangs forever because the response can't be
+    /// parsed and the failure is silent.
+    #[test]
+    fn repo_info_accepts_null_collections() {
+        let json = r#"{
+            "repo":"/path",
+            "current_branch":"main",
+            "current_commit_hash":"abc",
+            "current_commit_time":"2024",
+            "default_branch":"main",
+            "worktrees":null,
+            "branches":null
+        }"#;
+        let info: RepoInfo = serde_json::from_str(json).expect("repo_info parses with nulls");
+        assert!(info.worktrees.is_empty());
+        assert!(info.branches.is_empty());
+    }
+
+    #[test]
+    fn repo_info_accepts_missing_collections() {
+        let json = r#"{
+            "repo":"/path",
+            "current_branch":"main",
+            "current_commit_hash":"abc",
+            "current_commit_time":"2024",
+            "default_branch":"main"
+        }"#;
+        let info: RepoInfo = serde_json::from_str(json).expect("repo_info parses without fields");
+        assert!(info.worktrees.is_empty());
+        assert!(info.branches.is_empty());
+    }
 }

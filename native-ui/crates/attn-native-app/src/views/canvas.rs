@@ -122,9 +122,6 @@ pub struct WorkspaceCanvas {
     /// Frame-time overlay. `Some` only when `ATTN_NATIVE_FPS=1` was set
     /// at startup. Off by default — no record cost, no overlay paint.
     fps: Option<FpsCounter>,
-    /// True while the agent picker chip strip is expanded under the
-    /// "+ Session" pill. Click outside or pick an agent to dismiss.
-    spawn_picker_open: bool,
     on_spawn: Box<SpawnSessionHandler>,
     on_close_session: Box<CloseSessionHandler>,
     on_panel_geometry_commit: Box<PanelGeometryCommitHandler>,
@@ -161,7 +158,6 @@ impl WorkspaceCanvas {
             focus_handle: cx.focus_handle(),
             bounds: Rc::new(Cell::new(None)),
             fps,
-            spawn_picker_open: false,
             on_spawn: Box::new(on_spawn),
             on_close_session: Box::new(on_close_session),
             on_panel_geometry_commit: Box::new(on_panel_geometry_commit),
@@ -570,6 +566,10 @@ impl WorkspaceCanvas {
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event.keystroke.key.as_str() {
+            "n" if event.keystroke.modifiers.platform => {
+                cx.stop_propagation();
+                self.open_session_dialog_for_selected(window, cx);
+            }
             "enter" if event.keystroke.modifiers.platform && event.keystroke.modifiers.shift => {
                 cx.stop_propagation();
                 self.toggle_selected_panel_fullscreen(window, cx);
@@ -1130,50 +1130,36 @@ impl Render for WorkspaceCanvas {
 }
 
 impl WorkspaceCanvas {
-    /// Top-left "+ Session" pill plus an inline agent picker (Claude /
-    /// Codex / Shell) that expands when the pill is clicked. All chips
-    /// stop propagation so clicks don't also pan the canvas underneath.
+    /// Top-left "+ Session" pill. Clicking it opens the location dialog
+    /// (with Claude pre-selected as the default agent); the dialog hosts
+    /// the actual agent picker, path entry, and worktree controls. The
+    /// click stops propagation so it doesn't also start a canvas pan.
     fn render_spawn_toolbar(
         &self,
         workspace_id: SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut row = div()
+        div()
             .absolute()
             .top(px(12.0))
             .left(px(12.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.0))
-            .child(spawn_pill(self.spawn_picker_open).on_mouse_down(
+            .child(spawn_pill().on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
+                cx.listener(move |this, _, window, cx| {
                     cx.stop_propagation();
-                    this.spawn_picker_open = !this.spawn_picker_open;
-                    cx.notify();
+                    let workspace_id = workspace_id.clone();
+                    (this.on_spawn)(workspace_id, DEFAULT_SPAWN_AGENT.into(), window, cx);
                 }),
-            ));
+            ))
+            .into_any_element()
+    }
 
-        if self.spawn_picker_open {
-            for (label, agent_id) in SPAWNABLE_AGENTS {
-                let agent = SharedString::from(*agent_id);
-                let workspace_id = workspace_id.clone();
-                row = row.child(agent_chip(SharedString::from(*label)).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        let workspace_id = workspace_id.clone();
-                        let agent = agent.clone();
-                        this.spawn_picker_open = false;
-                        (this.on_spawn)(workspace_id, agent, window, cx);
-                        cx.notify();
-                    }),
-                ));
-            }
-        }
-
-        row.into_any_element()
+    fn open_session_dialog_for_selected(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(ws) = self.selected.as_ref() else {
+            return;
+        };
+        let workspace_id = ws.read(cx).id.clone();
+        (self.on_spawn)(workspace_id, DEFAULT_SPAWN_AGENT.into(), window, cx);
     }
 }
 
@@ -1204,49 +1190,16 @@ fn panel_close_button(session_id: SharedString, cx: &mut Context<WorkspaceCanvas
         )
 }
 
-/// Static list of agents the canvas spawn toolbar offers. Strings on the
-/// right are the wire-level agent identifiers the daemon understands
-/// (`internal/protocol/schema/main.tsp` SessionAgent enum). Adding more
-/// is a one-line append once we have icons / labels for them.
-const SPAWNABLE_AGENTS: &[(&str, &str)] =
-    &[("Claude", "claude"), ("Codex", "codex"), ("Shell", "shell")];
+/// Default agent the "+ Session" pill and Cmd+N seed the location
+/// dialog with. The dialog itself lets the user pick a different agent
+/// before submitting, so this is just the initial focus.
+const DEFAULT_SPAWN_AGENT: &str = "claude";
 
-/// "+ Session" pill. Visually distinct from agent chips so it reads as
-/// the disclosure trigger, not one of the choices. Highlighted when the
-/// picker is expanded so it's clear which surface is active. When open,
-/// the chrome warms toward the moonstone end of the type ramp so it
-/// reads as "engaged" rather than just "raised".
-fn spawn_pill(open: bool) -> gpui::Div {
-    let bg = if open {
-        theme::ink::firm()
-    } else {
-        theme::ink::shade()
-    };
-    let text = if open {
-        theme::moon::moonstone()
-    } else {
-        theme::moon::parchment()
-    };
-    let border = if open {
-        theme::sodium::deep()
-    } else {
-        theme::line::mild()
-    };
+/// "+ Session" pill. Clicking opens the location dialog where the user
+/// picks an agent and a directory.
+fn spawn_pill() -> gpui::Div {
     div()
         .px(px(theme::space::S2))
-        .py(px(theme::space::S0))
-        .rounded(px(theme::radius::R0))
-        .bg(bg)
-        .border_1()
-        .border_color(border)
-        .text_color(text)
-        .text_size(px(12.0))
-        .child(SharedString::from("+ Session"))
-}
-
-fn agent_chip(label: SharedString) -> gpui::Div {
-    div()
-        .px(px(theme::space::S1))
         .py(px(theme::space::S0))
         .rounded(px(theme::radius::R0))
         .bg(theme::ink::shade())
@@ -1254,7 +1207,7 @@ fn agent_chip(label: SharedString) -> gpui::Div {
         .border_color(theme::line::mild())
         .text_color(theme::moon::parchment())
         .text_size(px(12.0))
-        .child(label)
+        .child(SharedString::from("+ Session"))
 }
 
 fn env_flag(name: &str) -> bool {

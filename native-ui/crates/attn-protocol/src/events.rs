@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::types::{ReplaySegment, Session, Workspace};
+use crate::types::{DirectoryEntry, PathInspection, ReplaySegment, RepoInfo, Session, Workspace};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InitialStateMessage {
@@ -123,6 +123,54 @@ pub struct SessionExitedMessage {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct BrowseDirectoryResultMessage {
+    pub event: String,
+    pub input_path: String,
+    pub directory: String,
+    #[serde(default)]
+    pub entries: Vec<DirectoryEntry>,
+    #[serde(default)]
+    pub request_id: Option<String>,
+    #[serde(default)]
+    pub home_path: Option<String>,
+    pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InspectPathResultMessage {
+    pub event: String,
+    #[serde(default)]
+    pub inspection: Option<PathInspection>,
+    #[serde(default)]
+    pub request_id: Option<String>,
+    pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GetRepoInfoResultMessage {
+    pub event: String,
+    #[serde(default)]
+    pub info: Option<RepoInfo>,
+    pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateWorktreeResultMessage {
+    pub event: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct EventPeek {
     event: String,
 }
@@ -143,6 +191,10 @@ pub enum ServerEvent {
     PtyDesync(PtyDesyncMessage),
     PtyResized(PtyResizedMessage),
     SessionExited(SessionExitedMessage),
+    BrowseDirectoryResult(BrowseDirectoryResultMessage),
+    InspectPathResult(InspectPathResultMessage),
+    GetRepoInfoResult(GetRepoInfoResultMessage),
+    CreateWorktreeResult(CreateWorktreeResultMessage),
     Unknown(String),
 }
 
@@ -205,6 +257,22 @@ impl ServerEvent {
             "session_exited" => {
                 let msg: SessionExitedMessage = serde_json::from_str(data)?;
                 Ok(Self::SessionExited(msg))
+            }
+            "browse_directory_result" => {
+                let msg: BrowseDirectoryResultMessage = serde_json::from_str(data)?;
+                Ok(Self::BrowseDirectoryResult(msg))
+            }
+            "inspect_path_result" => {
+                let msg: InspectPathResultMessage = serde_json::from_str(data)?;
+                Ok(Self::InspectPathResult(msg))
+            }
+            "get_repo_info_result" => {
+                let msg: GetRepoInfoResultMessage = serde_json::from_str(data)?;
+                Ok(Self::GetRepoInfoResult(msg))
+            }
+            "create_worktree_result" => {
+                let msg: CreateWorktreeResultMessage = serde_json::from_str(data)?;
+                Ok(Self::CreateWorktreeResult(msg))
             }
             other => Ok(Self::Unknown(other.to_string())),
         }

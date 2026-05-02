@@ -13,7 +13,7 @@ use attn_protocol::{
     Workspace as ProtocolWorkspace,
 };
 use gpui::{
-    div, prelude::*, App, Context, Entity, ParentElement, PathPromptOptions, Render, SharedString,
+    div, prelude::*, App, Context, Entity, Focusable, ParentElement, Render, SharedString,
     Subscription, Window,
 };
 use serde_json::{json, Value};
@@ -30,6 +30,7 @@ use crate::state::workspace::Workspace;
 use crate::state::workspace_registry::{PendingSpawn, UpsertOutcome, WorkspaceRegistry};
 use crate::theme;
 use crate::views::canvas::WorkspaceCanvas;
+use crate::views::location_dialog::{LocationDialog, LocationDialogMode, LocationDialogOutcome};
 use crate::views::sidebar::Sidebar;
 use crate::views::terminal_view::TerminalView;
 
@@ -52,6 +53,12 @@ pub struct NativeApp {
     sessions: SessionRegistry,
     sidebar: Entity<Sidebar>,
     canvas: Entity<WorkspaceCanvas>,
+    location_dialog: Option<Entity<LocationDialog>>,
+    /// True from the moment the location dialog closes until the next
+    /// render restores focus to the canvas. Without this hand-off, focus
+    /// stays on the dialog's dropped focus handle and global shortcuts
+    /// like Cmd+N stop firing because no element is receiving key events.
+    canvas_needs_refocus: bool,
     _canvas_subscription: Subscription,
     /// Live automation server handle. Drop deletes the manifest. `None`
     /// when automation is disabled for this launch (default in prod) or
@@ -81,7 +88,7 @@ impl NativeApp {
                 move |workspace_id, agent, _window, cx| {
                     let app_handle = app_handle_canvas_spawn.clone();
                     let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
-                        let _ = app.spawn_session_in_workspace(workspace_id, agent, cx);
+                        app.open_session_dialog(workspace_id, agent, cx);
                     });
                 },
                 move |session_id, _window, cx| {
@@ -123,7 +130,7 @@ impl NativeApp {
                 move |_window, cx| {
                     let app_handle = app_handle_create.clone();
                     let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
-                        app.prompt_and_register_workspace(cx);
+                        app.open_workspace_dialog(cx);
                     });
                 },
                 move |id, _window, cx| {
@@ -160,9 +167,9 @@ impl NativeApp {
             )
         });
 
-        cx.subscribe(
-            &daemon,
-            |this, _client, event: &DaemonEvent, cx| match event {
+        cx.subscribe(&daemon, |this, _client, event: &DaemonEvent, cx| {
+            this.forward_location_dialog_event(event, cx);
+            match event {
                 DaemonEvent::InitialState {
                     sessions,
                     workspaces,
@@ -276,8 +283,8 @@ impl NativeApp {
                     this.sync_terminal_panels(cx);
                 }
                 _ => {}
-            },
-        )
+            }
+        })
         .detach();
 
         let automation_handle = if automation::automation_enabled() {
@@ -292,6 +299,8 @@ impl NativeApp {
             sessions: SessionRegistry::new(),
             sidebar,
             canvas,
+            location_dialog: None,
+            canvas_needs_refocus: false,
             _canvas_subscription: canvas_subscription,
             _automation: automation_handle,
         }
@@ -350,66 +359,124 @@ impl NativeApp {
         self.sessions.snapshot()
     }
 
-    /// Open the platform's directory picker. On selection, derive the
-    /// workspace title from the directory's basename and send
-    /// `register_workspace` to the daemon. The canvas + sidebar update
-    /// reactively when the daemon's `workspace_registered` broadcast lands
-    /// — same path the automation `create_workspace` action exercises.
-    /// User cancellation (no path picked) is silent.
-    pub fn prompt_and_register_workspace(&mut self, cx: &mut Context<Self>) {
-        events::record("workspace_create_prompt", json!({}));
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(SharedString::from("Pick a workspace directory")),
-        });
+    fn open_session_dialog(
+        &mut self,
+        workspace_id: SharedString,
+        initial_agent: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ws) = self.registry.workspace(workspace_id.as_ref()) else {
+            events::record(
+                "session_dialog_open_failed",
+                json!({"workspace_id": workspace_id.as_ref(), "reason": "unknown_workspace"}),
+            );
+            return;
+        };
+        let initial_directory = ws.read(cx).directory.clone();
         let app_handle = cx.entity().downgrade();
-        cx.spawn(async move |_, cx| {
-            let outcome = match receiver.await {
-                Ok(Ok(Some(paths))) if !paths.is_empty() => Some(paths[0].clone()),
-                Ok(Ok(_)) | Ok(Err(_)) | Err(_) => None,
-            };
-            let Some(path) = outcome else {
-                events::record("workspace_create_cancelled", json!({}));
-                return;
-            };
-            let directory = path.to_string_lossy().to_string();
-            let title = path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| directory.clone());
-            let id = generate_workspace_id();
-            let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
-                match app.register_workspace_and_select(
-                    id.clone(),
-                    title.clone(),
-                    directory.clone(),
-                    cx,
-                ) {
-                    Ok(()) => {
-                        events::record(
-                            "workspace_create_submitted",
-                            json!({
-                                "id": id.as_str(),
-                                "directory": directory.as_str(),
-                            }),
-                        );
+        let app_handle_submit = app_handle.clone();
+        let app_handle_close = app_handle.clone();
+        let daemon = self.daemon.clone();
+        let dialog = cx.new(|cx| {
+            LocationDialog::new(
+                LocationDialogMode::NewSession {
+                    workspace_id: workspace_id.clone(),
+                    initial_directory,
+                    initial_agent,
+                },
+                daemon,
+                move |outcome, cx| {
+                    let app = app_handle_submit
+                        .upgrade()
+                        .ok_or_else(|| "NativeApp entity dropped".to_string())?;
+                    app.update(cx, |app: &mut NativeApp, cx| {
+                        app.handle_location_dialog_outcome(outcome, cx)
+                    })
+                },
+                move |cx| {
+                    if let Some(app) = app_handle_close.upgrade() {
+                        app.update(cx, |app: &mut NativeApp, cx| {
+                            app.location_dialog = None;
+                            app.canvas_needs_refocus = true;
+                            cx.notify();
+                        });
                     }
-                    Err(error) => {
-                        events::record(
-                            "workspace_create_failed",
-                            json!({
-                                "id": id.as_str(),
-                                "directory": directory.as_str(),
-                                "error": error,
-                            }),
-                        );
+                },
+                cx,
+            )
+        });
+        self.location_dialog = Some(dialog);
+        cx.notify();
+    }
+
+    fn open_workspace_dialog(&mut self, cx: &mut Context<Self>) {
+        let initial_directory = self
+            .registry
+            .selected_id()
+            .and_then(|id| self.registry.workspace(id.as_ref()))
+            .map(|ws| ws.read(cx).directory.clone());
+        let app_handle = cx.entity().downgrade();
+        let app_handle_submit = app_handle.clone();
+        let app_handle_close = app_handle.clone();
+        let daemon = self.daemon.clone();
+        let dialog = cx.new(|cx| {
+            LocationDialog::new(
+                LocationDialogMode::NewWorkspace { initial_directory },
+                daemon,
+                move |outcome, cx| {
+                    let app = app_handle_submit
+                        .upgrade()
+                        .ok_or_else(|| "NativeApp entity dropped".to_string())?;
+                    app.update(cx, |app: &mut NativeApp, cx| {
+                        app.handle_location_dialog_outcome(outcome, cx)
+                    })
+                },
+                move |cx| {
+                    if let Some(app) = app_handle_close.upgrade() {
+                        app.update(cx, |app: &mut NativeApp, cx| {
+                            app.location_dialog = None;
+                            app.canvas_needs_refocus = true;
+                            cx.notify();
+                        });
                     }
-                }
-            });
-        })
-        .detach();
+                },
+                cx,
+            )
+        });
+        self.location_dialog = Some(dialog);
+        cx.notify();
+    }
+
+    fn forward_location_dialog_event(&mut self, event: &DaemonEvent, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.location_dialog.clone() {
+            dialog.update(cx, |dialog, cx| dialog.handle_daemon_event(event, cx));
+        }
+    }
+
+    fn handle_location_dialog_outcome(
+        &mut self,
+        outcome: LocationDialogOutcome,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        match outcome {
+            LocationDialogOutcome::SpawnSession {
+                workspace_id,
+                directory,
+                agent,
+            } => {
+                self.spawn_session_in_workspace_at(workspace_id, directory, agent, cx)?;
+            }
+            LocationDialogOutcome::RegisterWorkspace { directory } => {
+                let title = directory_title(&directory);
+                let id = generate_workspace_id();
+                self.register_workspace_and_select(id.clone(), title, directory.clone(), cx)?;
+                events::record(
+                    "workspace_create_submitted",
+                    json!({"id": id.as_str(), "directory": directory.as_str()}),
+                );
+            }
+        }
+        Ok(())
     }
 
     /// Register a workspace and select it once the daemon confirms it.
@@ -478,6 +545,33 @@ impl NativeApp {
             return Err(format!("unknown workspace id: {workspace_id}"));
         };
         let directory = ws_entity.read(cx).directory.to_string();
+        self.spawn_session_in_workspace_at(workspace_id, directory, agent, cx)
+    }
+
+    fn spawn_session_in_workspace_at(
+        &mut self,
+        workspace_id: SharedString,
+        directory: String,
+        agent: SharedString,
+        cx: &mut Context<Self>,
+    ) -> Result<SharedString, String> {
+        let Some(ws_entity) = self.registry.workspace(workspace_id.as_ref()) else {
+            let known: Vec<String> = self
+                .registry
+                .workspaces()
+                .map(|w| w.read(cx).id.to_string())
+                .collect();
+            events::record(
+                "session_spawn_missed",
+                json!({
+                    "workspace_id": workspace_id.as_ref(),
+                    "reason": "unknown_workspace",
+                    "known_workspace_ids": known,
+                }),
+            );
+            return Err(format!("unknown workspace id: {workspace_id}"));
+        };
+        let _ = ws_entity;
         let session_id = automation::actions::generate_workspace_id();
         let (cols, rows) = panel_terminal_dims(TERMINAL_W, TERMINAL_H);
         let msg = SpawnSessionMessage::new(
@@ -1027,18 +1121,26 @@ impl NativeApp {
 }
 
 impl Render for NativeApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let root = div()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.canvas_needs_refocus && self.location_dialog.is_none() {
+            self.canvas_needs_refocus = false;
+            self.canvas.read(cx).focus_handle(cx).focus(window);
+        }
+        let mut root = div()
             .size_full()
             .flex()
             .flex_row()
             .bg(theme::ink::midnight());
-        if self.canvas.read(cx).is_panel_fullscreen() {
+        root = if self.canvas.read(cx).is_panel_fullscreen() {
             root.child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
         } else {
             root.child(self.sidebar.clone())
                 .child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
+        };
+        if let Some(dialog) = self.location_dialog.clone() {
+            root = root.child(dialog);
         }
+        root
     }
 }
 
@@ -1056,6 +1158,14 @@ fn panel_terminal_dims(world_w: f32, world_h: f32) -> (u16, u16) {
     let cols = ((world_w / CHAR_WIDTH) as u16).max(1);
     let rows = (((world_h - TITLE_HEIGHT) / ROW_HEIGHT) as u16).max(1);
     (cols, rows)
+}
+
+fn directory_title(directory: &str) -> String {
+    std::path::Path::new(directory)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| directory.to_string())
 }
 
 /// Bring up the UI automation TCP server + dispatch pump. Errors are
