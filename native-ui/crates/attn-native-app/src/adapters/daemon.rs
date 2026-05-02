@@ -1,6 +1,7 @@
 use attn_protocol::{
-    ClientHelloMessage, ServerEvent, Session, Workspace, CAPABILITY_SHELL_AS_SESSION,
-    PROTOCOL_VERSION,
+    BrowseDirectoryResultMessage, ClientHelloMessage, CreateWorktreeResultMessage,
+    GetRepoInfoResultMessage, InspectPathResultMessage, ServerEvent, Session, Workspace,
+    CAPABILITY_SHELL_AS_SESSION, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use gpui::{AsyncApp, Context, EventEmitter, WeakEntity};
@@ -101,6 +102,10 @@ pub enum DaemonEvent {
         success: bool,
         error: Option<String>,
     },
+    BrowseDirectoryResult(BrowseDirectoryResultMessage),
+    InspectPathResult(InspectPathResultMessage),
+    GetRepoInfoResult(GetRepoInfoResultMessage),
+    CreateWorktreeResult(CreateWorktreeResultMessage),
 }
 
 pub struct DaemonClient {
@@ -324,6 +329,18 @@ impl DaemonClient {
                     error: msg.error,
                 });
             }
+            ServerEvent::BrowseDirectoryResult(msg) => {
+                cx.emit(DaemonEvent::BrowseDirectoryResult(msg));
+            }
+            ServerEvent::InspectPathResult(msg) => {
+                cx.emit(DaemonEvent::InspectPathResult(msg));
+            }
+            ServerEvent::GetRepoInfoResult(msg) => {
+                cx.emit(DaemonEvent::GetRepoInfoResult(msg));
+            }
+            ServerEvent::CreateWorktreeResult(msg) => {
+                cx.emit(DaemonEvent::CreateWorktreeResult(msg));
+            }
             ServerEvent::Unknown(_) => {}
         }
     }
@@ -410,6 +427,33 @@ fn record_inbound_event(event: &ServerEvent) {
         ServerEvent::SpawnResult(m) => json!({
             "kind": "spawn_result",
             "session_id": m.id.as_str(),
+            "success": m.success,
+            "error": m.error.as_deref(),
+        }),
+        ServerEvent::BrowseDirectoryResult(m) => json!({
+            "kind": "browse_directory_result",
+            "request_id": m.request_id.as_deref(),
+            "input_path": m.input_path.as_str(),
+            "entry_count": m.entries.len(),
+            "success": m.success,
+            "error": m.error.as_deref(),
+        }),
+        ServerEvent::InspectPathResult(m) => json!({
+            "kind": "inspect_path_result",
+            "request_id": m.request_id.as_deref(),
+            "success": m.success,
+            "error": m.error.as_deref(),
+        }),
+        ServerEvent::GetRepoInfoResult(m) => json!({
+            "kind": "get_repo_info_result",
+            "repo": m.info.as_ref().map(|info| info.repo.as_str()),
+            "worktree_count": m.info.as_ref().map(|info| info.worktrees.len()).unwrap_or(0),
+            "success": m.success,
+            "error": m.error.as_deref(),
+        }),
+        ServerEvent::CreateWorktreeResult(m) => json!({
+            "kind": "create_worktree_result",
+            "path": m.path.as_deref(),
             "success": m.success,
             "error": m.error.as_deref(),
         }),

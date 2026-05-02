@@ -5,5 +5,6 @@
 
 pub mod canvas;
 pub mod fps_overlay;
+pub mod location_dialog;
 pub mod sidebar;
 pub mod terminal_view;
