@@ -29,6 +29,11 @@ pub type SpawnSessionHandler =
 /// is pruned by `sync_terminal_panels`.
 pub type CloseSessionHandler = dyn Fn(SharedString, &mut Window, &mut gpui::App) + 'static;
 
+/// Callback invoked when a keyboard split command asks for a new shell
+/// panel adjacent to the selected panel.
+pub type SplitShellHandler = dyn Fn(SharedString, SharedString, AdjacentPanelDirection, Rect, &mut Window, &mut gpui::App)
+    + 'static;
+
 /// Callback invoked when a drag/resize gesture ends. The canvas keeps
 /// transient geometry local while the pointer is moving, then commits the
 /// final daemon panel id + geometry to the app coordinator.
@@ -38,7 +43,7 @@ pub type PanelGeometryCommitHandler =
 use serde_json::{json, Value};
 
 use crate::domain::panel_navigation::{navigate_panel, NavigationDirection, PanelNavItem};
-use crate::domain::panel_placement::Rect;
+use crate::domain::panel_placement::{place_panel_adjacent, AdjacentPanelDirection, Rect};
 use crate::domain::panel_snapping::{
     snap_panel_move, snap_panel_resize, PanelRect, ResizeEdges, SnapAxis, SnapLine,
 };
@@ -110,6 +115,7 @@ pub struct WorkspaceCanvas {
     drag_state: DragState,
     selected_panel: Option<usize>,
     input_focused_panel: Option<usize>,
+    pending_input_focus_session: Option<SharedString>,
     fullscreen_panel: Option<usize>,
     snap_lines: Vec<SnapLine>,
     focus_handle: FocusHandle,
@@ -124,6 +130,7 @@ pub struct WorkspaceCanvas {
     fps: Option<FpsCounter>,
     on_spawn: Box<SpawnSessionHandler>,
     on_close_session: Box<CloseSessionHandler>,
+    on_split_shell: Box<SplitShellHandler>,
     on_panel_geometry_commit: Box<PanelGeometryCommitHandler>,
 }
 
@@ -138,6 +145,14 @@ impl WorkspaceCanvas {
         cx: &mut Context<Self>,
         on_spawn: impl Fn(SharedString, SharedString, &mut Window, &mut gpui::App) + 'static,
         on_close_session: impl Fn(SharedString, &mut Window, &mut gpui::App) + 'static,
+        on_split_shell: impl Fn(
+                SharedString,
+                SharedString,
+                AdjacentPanelDirection,
+                Rect,
+                &mut Window,
+                &mut gpui::App,
+            ) + 'static,
         on_panel_geometry_commit: impl Fn(SharedString, SharedString, f32, f32, f32, f32, &mut Window, &mut gpui::App)
             + 'static,
     ) -> Self {
@@ -153,6 +168,7 @@ impl WorkspaceCanvas {
             drag_state: DragState::Idle,
             selected_panel: None,
             input_focused_panel: None,
+            pending_input_focus_session: None,
             fullscreen_panel: None,
             snap_lines: Vec::new(),
             focus_handle: cx.focus_handle(),
@@ -160,6 +176,7 @@ impl WorkspaceCanvas {
             fps,
             on_spawn: Box::new(on_spawn),
             on_close_session: Box::new(on_close_session),
+            on_split_shell: Box::new(on_split_shell),
             on_panel_geometry_commit: Box::new(on_panel_geometry_commit),
         }
     }
@@ -256,6 +273,7 @@ impl WorkspaceCanvas {
         self.drag_state = DragState::Idle;
         self.selected_panel = None;
         self.input_focused_panel = None;
+        self.pending_input_focus_session = None;
         self.fullscreen_panel = None;
         self.snap_lines.clear();
         cx.notify();
@@ -263,6 +281,25 @@ impl WorkspaceCanvas {
 
     pub fn is_panel_fullscreen(&self) -> bool {
         self.fullscreen_panel.is_some()
+    }
+
+    pub fn focus_panel_by_session_on_next_render(
+        &mut self,
+        session_id: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(panel) = self.selected.as_ref().and_then(|ws| {
+            ws.read(cx)
+                .panels
+                .iter()
+                .find(|panel| panel.session_id.as_ref() == session_id.as_ref())
+                .cloned()
+        }) {
+            self.selected_panel = Some(panel.id);
+            self.input_focused_panel = Some(panel.id);
+        }
+        self.pending_input_focus_session = Some(session_id);
+        cx.notify();
     }
 
     /// Select a panel by session id and optionally route keyboard input
@@ -410,6 +447,37 @@ impl WorkspaceCanvas {
         self.selected_panel = Some(panel.id);
         self.input_focused_panel = Some(panel.id);
         panel.view.read(cx).focus_handle.clone().focus(window);
+    }
+
+    fn split_shell_for_selected(
+        &self,
+        direction: AdjacentPanelDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ws) = self.selected.as_ref() else {
+            return;
+        };
+        let Some(panel) = self.selected_panel_snapshot(cx) else {
+            return;
+        };
+        let workspace_id = ws.read(cx).id.clone();
+        let anchor_session_id = panel.session_id.clone();
+        let anchor = Rect {
+            x: panel.world_x,
+            y: panel.world_y,
+            width: panel.width,
+            height: panel.height,
+        };
+        let placement = place_panel_adjacent(anchor, direction);
+        (self.on_split_shell)(
+            workspace_id,
+            anchor_session_id,
+            direction,
+            placement,
+            window,
+            cx,
+        );
     }
 
     /// Panel snapshot for hit testing and rendering. Cloning is cheap
@@ -569,6 +637,14 @@ impl WorkspaceCanvas {
             "n" if event.keystroke.modifiers.platform => {
                 cx.stop_propagation();
                 self.open_session_dialog_for_selected(window, cx);
+            }
+            "d" if event.keystroke.modifiers.platform && event.keystroke.modifiers.shift => {
+                cx.stop_propagation();
+                self.split_shell_for_selected(AdjacentPanelDirection::Bottom, window, cx);
+            }
+            "d" if event.keystroke.modifiers.platform => {
+                cx.stop_propagation();
+                self.split_shell_for_selected(AdjacentPanelDirection::Right, window, cx);
             }
             "enter" if event.keystroke.modifiers.platform && event.keystroke.modifiers.shift => {
                 cx.stop_propagation();
@@ -941,6 +1017,15 @@ impl Render for WorkspaceCanvas {
             panels.iter().map(|panel| panel.id),
         ) {
             self.focus_handle.clone().focus(window);
+        }
+        if let Some(session_id) = self.pending_input_focus_session.clone() {
+            if let Some(panel) = panels
+                .iter()
+                .find(|panel| panel.session_id.as_ref() == session_id.as_ref())
+            {
+                self.focus_panel_input(panel, window, cx);
+                self.pending_input_focus_session = None;
+            }
         }
         let selected_panel = self.selected_panel;
         let input_focused_panel = self.input_focused_panel;

@@ -16,6 +16,7 @@ use attn_protocol::Workspace as ProtocolWorkspace;
 use gpui::{App, AppContext, Context, Entity, SharedString};
 
 use crate::app::NativeApp;
+use crate::domain::panel_placement::Rect;
 use crate::state::workspace::Workspace;
 
 /// In-flight spawn metadata. We track just enough to attribute a
@@ -25,6 +26,8 @@ use crate::state::workspace::Workspace;
 pub struct PendingSpawn {
     pub workspace_id: SharedString,
     pub agent: SharedString,
+    pub initial_placement: Option<Rect>,
+    pub focus_after_spawn: bool,
 }
 
 /// Outcome of an `upsert` — distinguishes "we just learned about this

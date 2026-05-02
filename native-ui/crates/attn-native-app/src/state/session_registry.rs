@@ -30,6 +30,12 @@ impl SessionRegistry {
         self.sessions_by_id.values().cloned().collect()
     }
 
+    pub fn get(&self, id: &str) -> Option<Session> {
+        self.sessions_by_id
+            .get(&SharedString::from(id.to_string()))
+            .cloned()
+    }
+
     /// Insert or update a session by id.
     pub fn upsert(&mut self, session: Session) {
         let id = SharedString::from(session.id.clone());

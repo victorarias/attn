@@ -20,6 +20,9 @@
  *     not the first), including the selected-vs-input-focused canvas
  *     gate — poll read_pane_text for the marker, unregister the
  *     session, confirm cleanup
+ *   - native shell splits: create a selected shell panel, split right
+ *     and bottom, assert both new panels are shell sessions placed
+ *     adjacent to the anchor
  *
  * Tearing down: every resource the scenario creates is unregistered in
  * `finally` blocks, even on assertion failure.
@@ -504,6 +507,200 @@ async function expectCanvasPanelFocus(conn, sessionId, { inputFocus }) {
   }
 }
 
+async function checkNativeShellSplits(conn) {
+  const directory = process.env.HOME || '/tmp';
+  const anchorDirectory = '/tmp';
+  if (directory === anchorDirectory) {
+    info(`  skipped cwd-difference assertion because workspace cwd is already ${anchorDirectory}`);
+  }
+  const created = await conn.request('create_workspace', {
+    directory,
+    title: `Scenario Split Host ${new Date().toISOString().slice(11, 19)}`,
+  });
+  if (!created.ok) fail(`create_workspace (split host): ${created.error}`);
+  const workspaceId = created.result.id;
+
+  try {
+    await pollUntil(
+      async () => {
+        const s = await conn.request('get_state');
+        return s.ok && s.result.selected_workspace_id === workspaceId;
+      },
+      { timeoutMs: 5000, label: `split host ${workspaceId.slice(0, 8)} selected` },
+    );
+
+    const spawned = await conn.request('spawn_session', {
+      workspace_id: workspaceId,
+      agent: 'shell',
+      cwd: anchorDirectory,
+    });
+    if (!spawned.ok) fail(`spawn_session split anchor: ${spawned.error}`);
+    const anchorSessionId = spawned.result.session_id;
+    const anchorPanel = await waitForPanel(conn, workspaceId, anchorSessionId, 'split anchor panel');
+
+    const anchorRect = {
+      world_x: 120,
+      world_y: 90,
+      width: 420,
+      height: 300,
+    };
+    const moved = await conn.request('move_panel', {
+      workspace_id: workspaceId,
+      panel_id: anchorPanel.id,
+      ...anchorRect,
+    });
+    if (!moved.ok) fail(`move_panel split anchor: ${moved.error}`);
+    await pollUntil(
+      async () => {
+        const panel = await getPanel(conn, workspaceId, anchorSessionId);
+        return panel && panelApproxEquals(panel, anchorRect);
+      },
+      { timeoutMs: 5000, intervalMs: 100, label: 'split anchor geometry persisted' },
+    );
+
+    const cursorBeforeRight = (await tailEvents(conn)).next_cursor;
+    const right = await conn.request('split_shell', {
+      session_id: anchorSessionId,
+      direction: 'right',
+    });
+    if (!right.ok) fail(`split_shell right: ${right.error}`);
+    const rightSessionId = right.result.session_id;
+    const rightExpected = {
+      world_x: anchorRect.world_x + anchorRect.width + 32,
+      world_y: anchorRect.world_y,
+      width: anchorRect.width,
+      height: anchorRect.height,
+    };
+    await waitForPanelGeometry(
+      conn,
+      workspaceId,
+      rightSessionId,
+      rightExpected,
+      cursorBeforeRight,
+      'right split',
+    );
+    await expectSessionAgent(conn, rightSessionId, 'shell');
+    await expectSessionDirectory(conn, rightSessionId, anchorDirectory);
+    await waitForCanvasPanelFocus(conn, rightSessionId, { inputFocus: true });
+
+    const cursorBeforeBottom = (await tailEvents(conn)).next_cursor;
+    const bottom = await conn.request('split_shell', {
+      session_id: anchorSessionId,
+      direction: 'bottom',
+    });
+    if (!bottom.ok) fail(`split_shell bottom: ${bottom.error}`);
+    const bottomSessionId = bottom.result.session_id;
+    const bottomExpected = {
+      world_x: anchorRect.world_x,
+      world_y: anchorRect.world_y + anchorRect.height + 32,
+      width: anchorRect.width,
+      height: anchorRect.height,
+    };
+    await waitForPanelGeometry(
+      conn,
+      workspaceId,
+      bottomSessionId,
+      bottomExpected,
+      cursorBeforeBottom,
+      'bottom split',
+    );
+    await expectSessionAgent(conn, bottomSessionId, 'shell');
+    await expectSessionDirectory(conn, bottomSessionId, anchorDirectory);
+    await waitForCanvasPanelFocus(conn, bottomSessionId, { inputFocus: true });
+
+    info(`  ok (right and bottom shell splits placed adjacent to anchor cwd)`);
+  } finally {
+    await conn.request('destroy_workspace', { id: workspaceId }).catch(() => {});
+    await pollUntil(
+      async () => {
+        const s = await conn.request('get_state');
+        return s.ok && !s.result.workspaces?.some((w) => w.id === workspaceId);
+      },
+      { timeoutMs: 5000, intervalMs: 100, label: `split host ${workspaceId.slice(0, 8)} drained` },
+    ).catch(() => {});
+  }
+}
+
+async function waitForPanel(conn, workspaceId, sessionId, label) {
+  return await pollUntil(
+    async () => getPanel(conn, workspaceId, sessionId),
+    { timeoutMs: 15000, intervalMs: 200, label },
+  );
+}
+
+async function waitForPanelGeometry(conn, workspaceId, sessionId, expected, cursor, label) {
+  try {
+    return await pollUntil(
+      async () => {
+        const panel = await getPanel(conn, workspaceId, sessionId);
+        return panel && panelApproxEquals(panel, expected) ? panel : false;
+      },
+      { timeoutMs: 15000, intervalMs: 200, label },
+    );
+  } catch (error) {
+    await dumpEventsSince(conn, cursor, label);
+    throw error;
+  }
+}
+
+async function getPanel(conn, workspaceId, sessionId) {
+  const state = await conn.request('get_state');
+  if (!state.ok) return null;
+  const workspace = state.result.workspaces?.find((w) => w.id === workspaceId);
+  return workspace?.panels?.find((panel) => panel.session_id === sessionId) || null;
+}
+
+function panelApproxEquals(panel, expected) {
+  return (
+    nearlyEqual(panel.world_x, expected.world_x) &&
+    nearlyEqual(panel.world_y, expected.world_y) &&
+    nearlyEqual(panel.width, expected.width) &&
+    nearlyEqual(panel.height, expected.height)
+  );
+}
+
+function nearlyEqual(actual, expected) {
+  return Math.abs(actual - expected) <= 0.5;
+}
+
+async function expectSessionAgent(conn, sessionId, agent) {
+  const state = await conn.request('get_state');
+  if (!state.ok) fail(`get_state: ${state.error}`);
+  const session = state.result.sessions?.find((candidate) => candidate.id === sessionId);
+  if (!session) fail(`session ${sessionId} not found in get_state`);
+  if (session.agent !== agent) fail(`session ${sessionId} agent=${session.agent}, expected ${agent}`);
+}
+
+async function expectSessionDirectory(conn, sessionId, directory) {
+  const state = await conn.request('get_state');
+  if (!state.ok) fail(`get_state: ${state.error}`);
+  const session = state.result.sessions?.find((candidate) => candidate.id === sessionId);
+  if (!session) fail(`session ${sessionId} not found in get_state`);
+  if (session.directory !== directory) {
+    fail(`session ${sessionId} directory=${session.directory}, expected ${directory}`);
+  }
+}
+
+async function waitForCanvasPanelFocus(conn, sessionId, { inputFocus }) {
+  await pollUntil(
+    async () => {
+      const state = await conn.request('get_state');
+      if (!state.ok) return false;
+      const panel = state.result.workspaces
+        .flatMap((workspace) => workspace.panels || [])
+        .find((candidate) => candidate.session_id === sessionId);
+      if (!panel) return false;
+      const canvas = state.result.canvas;
+      const expectedInputPanel = inputFocus ? panel.id : null;
+      return (
+        canvas.selected_panel_id === panel.id &&
+        canvas.input_focused_panel_id === expectedInputPanel
+      );
+    },
+    { timeoutMs: 5000, intervalMs: 100, label: `canvas focus for ${sessionId.slice(0, 8)}` },
+  );
+}
+
 /**
  * Send `echo <marker>\n` via the named action and wait for the marker to
  * appear on screen. Both `send_pty_input` and `type_into_panel` accept the
@@ -853,6 +1050,9 @@ async function main() {
 
     info(`\n[session lifecycle via action]`);
     await checkSessionLifecycle(conn);
+
+    info(`\n[native shell splits]`);
+    await checkNativeShellSplits(conn);
 
     info(`\n[pty round-trip]`);
     await checkPtyRoundTrip(conn);

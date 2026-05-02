@@ -22,7 +22,9 @@ use crate::adapters::automation;
 use crate::adapters::automation::actions::generate_workspace_id;
 use crate::adapters::automation::events;
 use crate::adapters::daemon::{DaemonClient, DaemonEvent};
-use crate::domain::panel_placement::{place_panel, PanelPlacementItem, PanelSize, Rect};
+use crate::domain::panel_placement::{
+    place_panel, AdjacentPanelDirection, PanelPlacementItem, PanelSize, Rect,
+};
 use crate::state::panel::{Panel, TITLE_HEIGHT};
 use crate::state::session_registry::SessionRegistry;
 use crate::state::terminal_model::TerminalModel;
@@ -81,6 +83,7 @@ impl NativeApp {
         let app_handle = cx.entity().downgrade();
         let app_handle_canvas_spawn = app_handle.clone();
         let app_handle_canvas_close = app_handle.clone();
+        let app_handle_canvas_split = app_handle.clone();
         let app_handle_canvas_geometry = app_handle.clone();
         let canvas = cx.new(|cx| {
             WorkspaceCanvas::new(
@@ -95,6 +98,18 @@ impl NativeApp {
                     let app_handle = app_handle_canvas_close.clone();
                     let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
                         app.unregister_session_by_id(session_id, cx);
+                    });
+                },
+                move |workspace_id, anchor_session_id, direction, placement, _window, cx| {
+                    let app_handle = app_handle_canvas_split.clone();
+                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
+                        let _ = app.spawn_shell_split_in_workspace(
+                            workspace_id,
+                            anchor_session_id,
+                            direction,
+                            placement,
+                            cx,
+                        );
                     });
                 },
                 move |workspace_id, panel_id, world_x, world_y, width, height, _window, cx| {
@@ -544,11 +559,73 @@ impl NativeApp {
         self.spawn_session_in_workspace_at(workspace_id, directory, agent, cx)
     }
 
-    fn spawn_session_in_workspace_at(
+    pub fn spawn_shell_split_in_workspace(
+        &mut self,
+        workspace_id: SharedString,
+        anchor_session_id: SharedString,
+        direction: AdjacentPanelDirection,
+        placement: Rect,
+        cx: &mut Context<Self>,
+    ) -> Result<SharedString, String> {
+        let Some(anchor_session) = self.sessions.get(anchor_session_id.as_ref()) else {
+            events::record(
+                "shell_split_failed",
+                json!({
+                    "workspace_id": workspace_id.as_ref(),
+                    "anchor_session_id": anchor_session_id.as_ref(),
+                    "reason": "unknown_anchor_session",
+                }),
+            );
+            return Err(format!("unknown anchor session: {anchor_session_id}"));
+        };
+        let directory = anchor_session.directory.clone();
+        events::record(
+            "shell_split_submitted",
+            json!({
+                "workspace_id": workspace_id.as_ref(),
+                "anchor_session_id": anchor_session_id.as_ref(),
+                "direction": adjacent_direction_name(direction),
+                "directory": directory.as_str(),
+                "world_x": placement.x,
+                "world_y": placement.y,
+                "width": placement.width,
+                "height": placement.height,
+            }),
+        );
+        self.spawn_session_in_workspace_at_with_initial_placement(
+            workspace_id,
+            directory,
+            SharedString::from("shell"),
+            Some(placement),
+            true,
+            cx,
+        )
+    }
+
+    pub fn spawn_session_in_workspace_at(
         &mut self,
         workspace_id: SharedString,
         directory: String,
         agent: SharedString,
+        cx: &mut Context<Self>,
+    ) -> Result<SharedString, String> {
+        self.spawn_session_in_workspace_at_with_initial_placement(
+            workspace_id,
+            directory,
+            agent,
+            None,
+            false,
+            cx,
+        )
+    }
+
+    fn spawn_session_in_workspace_at_with_initial_placement(
+        &mut self,
+        workspace_id: SharedString,
+        directory: String,
+        agent: SharedString,
+        initial_placement: Option<Rect>,
+        focus_after_spawn: bool,
         cx: &mut Context<Self>,
     ) -> Result<SharedString, String> {
         let Some(ws_entity) = self.registry.workspace(workspace_id.as_ref()) else {
@@ -569,7 +646,10 @@ impl NativeApp {
         };
         let _ = ws_entity;
         let session_id = automation::actions::generate_workspace_id();
-        let (cols, rows) = panel_terminal_dims(TERMINAL_W, TERMINAL_H);
+        let (terminal_w, terminal_h) = initial_placement
+            .map(|placement| (placement.width, placement.height))
+            .unwrap_or((TERMINAL_W, TERMINAL_H));
+        let (cols, rows) = panel_terminal_dims(terminal_w, terminal_h);
         let msg = SpawnSessionMessage::new(
             session_id.clone(),
             directory.clone(),
@@ -596,6 +676,8 @@ impl NativeApp {
             PendingSpawn {
                 workspace_id: workspace_id.clone(),
                 agent: agent.clone(),
+                initial_placement,
+                focus_after_spawn,
             },
         );
         events::record(
@@ -605,6 +687,12 @@ impl NativeApp {
                 "workspace_id": workspace_id.as_ref(),
                 "agent": agent.as_ref(),
                 "directory": directory,
+                "initial_placement": initial_placement.map(|placement| json!({
+                    "world_x": placement.x,
+                    "world_y": placement.y,
+                    "width": placement.width,
+                    "height": placement.height,
+                })),
             }),
         );
         Ok(id_shared)
@@ -1041,6 +1129,7 @@ impl NativeApp {
                 let mut world_y = daemon_panel.world_y;
                 let mut width = daemon_panel.width;
                 let mut height = daemon_panel.height;
+                let mut focus_after_spawn = false;
                 if let Some(pending) = self
                     .registry
                     .pending_spawn_for_panel_placement(&session_key)
@@ -1048,7 +1137,10 @@ impl NativeApp {
                         pending.workspace_id.as_ref() == ws_entity.read(cx).id.as_ref()
                     })
                 {
-                    if let Some(placement) = self.placement_for_new_panel(&ws_entity, cx) {
+                    if let Some(placement) = pending
+                        .initial_placement
+                        .or_else(|| self.placement_for_new_panel(&ws_entity, cx))
+                    {
                         world_x = placement.x;
                         world_y = placement.y;
                         width = placement.width;
@@ -1062,6 +1154,7 @@ impl NativeApp {
                             cx,
                         );
                     }
+                    focus_after_spawn = pending.focus_after_spawn;
                     self.registry.mark_panel_placed(session_key.clone());
                 }
 
@@ -1111,6 +1204,14 @@ impl NativeApp {
                     ws.panels.push(panel);
                     cx.notify();
                 });
+                if focus_after_spawn {
+                    self.canvas.update(cx, |canvas, cx| {
+                        canvas.focus_panel_by_session_on_next_render(
+                            SharedString::from(session_id),
+                            cx,
+                        )
+                    });
+                }
             }
         }
     }
@@ -1189,6 +1290,13 @@ fn directory_title(directory: &str) -> String {
         .map(|s| s.to_string_lossy().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| directory.to_string())
+}
+
+fn adjacent_direction_name(direction: AdjacentPanelDirection) -> &'static str {
+    match direction {
+        AdjacentPanelDirection::Right => "right",
+        AdjacentPanelDirection::Bottom => "bottom",
+    }
 }
 
 /// Bring up the UI automation TCP server + dispatch pump. Errors are

@@ -57,6 +57,30 @@ func TestStore_AddAndGet_PreservesAgent(t *testing.T) {
 	}
 }
 
+func TestStore_AddAndGet_PreservesShellAgent(t *testing.T) {
+	s := New()
+
+	session := &protocol.Session{
+		ID:         "shell123",
+		Label:      "shell-session",
+		Agent:      protocol.SessionAgentShell,
+		Directory:  "/home/user/project",
+		State:      protocol.SessionStateWorking,
+		StateSince: protocol.TimestampNow().String(),
+		LastSeen:   protocol.TimestampNow().String(),
+	}
+
+	s.Add(session)
+
+	got := s.Get("shell123")
+	if got == nil {
+		t.Fatal("expected session, got nil")
+	}
+	if got.Agent != protocol.SessionAgentShell {
+		t.Errorf("Agent = %q, want %q", got.Agent, protocol.SessionAgentShell)
+	}
+}
+
 func TestStore_AddAndGet_PreservesEndpointID(t *testing.T) {
 	s := New()
 

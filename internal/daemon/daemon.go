@@ -1017,7 +1017,7 @@ func normalizeStoredSessionAgent(agent string, fallback protocol.SessionAgent) p
 		return protocol.NormalizeSessionAgent(fallback, protocol.SessionAgentCodex)
 	}
 	if normalized == protocol.AgentShellValue {
-		return protocol.SessionAgentCodex
+		return protocol.SessionAgentShell
 	}
 	if agentdriver.Get(normalized) != nil {
 		return protocol.SessionAgent(normalized)

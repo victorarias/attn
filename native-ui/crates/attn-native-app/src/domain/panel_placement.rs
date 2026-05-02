@@ -42,6 +42,12 @@ pub struct PanelSize {
     pub height: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdjacentPanelDirection {
+    Right,
+    Bottom,
+}
+
 const GAP: f32 = 32.0;
 const VISIBLE_MARGIN: f32 = 32.0;
 const MIN_VISIBLE_WIDTH: f32 = 420.0;
@@ -73,6 +79,23 @@ pub fn place_panel(
     }
 
     first_panel_rect(visible, size)
+}
+
+pub fn place_panel_adjacent(anchor: Rect, direction: AdjacentPanelDirection) -> Rect {
+    match direction {
+        AdjacentPanelDirection::Right => Rect {
+            x: anchor.right() + GAP,
+            y: anchor.y,
+            width: anchor.width,
+            height: anchor.height,
+        },
+        AdjacentPanelDirection::Bottom => Rect {
+            x: anchor.x,
+            y: anchor.bottom() + GAP,
+            width: anchor.width,
+            height: anchor.height,
+        },
+    }
 }
 
 fn size_for_visible_rect(default_size: PanelSize, visible: Rect) -> PanelSize {
@@ -423,5 +446,45 @@ mod tests {
         assert_eq!(placed.height, 356.0);
         assert_eq!(placed.x, 132.0);
         assert_eq!(placed.y, 232.0);
+    }
+
+    #[test]
+    fn adjacent_right_preserves_anchor_size() {
+        let anchor = Rect {
+            x: 100.0,
+            y: 200.0,
+            width: 640.0,
+            height: 420.0,
+        };
+
+        assert_eq!(
+            place_panel_adjacent(anchor, AdjacentPanelDirection::Right),
+            Rect {
+                x: 772.0,
+                y: 200.0,
+                width: 640.0,
+                height: 420.0,
+            }
+        );
+    }
+
+    #[test]
+    fn adjacent_bottom_preserves_anchor_size() {
+        let anchor = Rect {
+            x: 100.0,
+            y: 200.0,
+            width: 640.0,
+            height: 420.0,
+        };
+
+        assert_eq!(
+            place_panel_adjacent(anchor, AdjacentPanelDirection::Bottom),
+            Rect {
+                x: 100.0,
+                y: 652.0,
+                width: 640.0,
+                height: 420.0,
+            }
+        );
     }
 }

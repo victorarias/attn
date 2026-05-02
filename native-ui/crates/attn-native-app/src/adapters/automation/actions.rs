@@ -16,6 +16,7 @@ use gpui::{
 use serde_json::{json, Value};
 
 use crate::app::NativeApp;
+use crate::domain::panel_placement::{place_panel_adjacent, AdjacentPanelDirection, Rect};
 use crate::domain::viewport::pf;
 use crate::state::terminal_model::TerminalModel;
 use crate::views::terminal_view::TerminalView;
@@ -94,6 +95,7 @@ async fn handle_action(
         "create_workspace" => create_workspace(app, cx, payload),
         "destroy_workspace" => destroy_workspace(app, cx, payload),
         "spawn_session" => spawn_session(app, cx, payload),
+        "split_shell" => split_shell(app, cx, payload),
         "unregister_session" => unregister_session(app, cx, payload),
         _ => Err(format!("unknown action: {action}")),
     }
@@ -421,15 +423,27 @@ fn spawn_session(
     if agent.is_empty() {
         return Err("payload.agent must be non-empty".to_string());
     }
+    let cwd = payload
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
 
     let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
     let session_id = cx
-        .update_entity(&app_entity, |app: &mut NativeApp, cx| {
-            app.spawn_session_in_workspace(
+        .update_entity(&app_entity, |app: &mut NativeApp, cx| match cwd.clone() {
+            Some(directory) => app.spawn_session_in_workspace_at(
+                SharedString::from(workspace_id.clone()),
+                directory,
+                SharedString::from(agent.clone()),
+                cx,
+            ),
+            None => app.spawn_session_in_workspace(
                 SharedString::from(workspace_id.clone()),
                 SharedString::from(agent.clone()),
                 cx,
-            )
+            ),
         })
         .map_err(|e| format!("update entity: {e}"))??;
 
@@ -437,6 +451,81 @@ fn spawn_session(
         "session_id": session_id.as_ref(),
         "workspace_id": workspace_id,
         "agent": agent,
+        "cwd": cwd,
+    }))
+}
+
+fn split_shell(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let session_id = payload
+        .get("session_id")
+        .and_then(Value::as_str)
+        .ok_or("payload.session_id (string) is required")?
+        .trim()
+        .to_string();
+    if session_id.is_empty() {
+        return Err("payload.session_id must be non-empty".to_string());
+    }
+    let direction = parse_adjacent_direction(
+        payload
+            .get("direction")
+            .and_then(Value::as_str)
+            .unwrap_or("right"),
+    )?;
+
+    let app_entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    let (workspace_id, placement) = cx
+        .read_entity(&app_entity, |app: &NativeApp, cx: &App| {
+            for ws in app.workspaces() {
+                let ws = ws.read(cx);
+                if let Some(panel) = ws
+                    .panels
+                    .iter()
+                    .find(|panel| panel.session_id.as_ref() == session_id.as_str())
+                {
+                    let anchor = Rect {
+                        x: panel.world_x,
+                        y: panel.world_y,
+                        width: panel.width,
+                        height: panel.height,
+                    };
+                    return Ok::<_, String>((
+                        ws.id.clone(),
+                        place_panel_adjacent(anchor, direction),
+                    ));
+                }
+            }
+            Err(format!("no terminal panel for session: {session_id}"))
+        })
+        .map_err(|e| format!("read entity: {e}"))??;
+
+    let spawned = cx
+        .update_entity(&app_entity, |app: &mut NativeApp, cx| {
+            app.spawn_shell_split_in_workspace(
+                workspace_id.clone(),
+                SharedString::from(session_id.clone()),
+                direction,
+                placement,
+                cx,
+            )
+        })
+        .map_err(|e| format!("update entity: {e}"))??;
+
+    Ok(json!({
+        "session_id": spawned.as_ref(),
+        "workspace_id": workspace_id.as_ref(),
+        "anchor_session_id": session_id.as_str(),
+        "agent": "shell",
+        "direction": adjacent_direction_name(direction),
+        "placement": {
+            "world_x": placement.x,
+            "world_y": placement.y,
+            "width": placement.width,
+            "height": placement.height,
+        },
     }))
 }
 
@@ -579,6 +668,9 @@ fn type_into_panel(
                 })?;
             }
             view.update(app, |view: &mut TerminalView, cx| {
+                if focus && view.set_input_enabled(true) {
+                    cx.notify();
+                }
                 for keystroke in keystrokes {
                     view.inject_keystroke(keystroke, window, cx);
                 }
@@ -753,6 +845,21 @@ fn get_window_geometry(cx: &mut AsyncApp) -> Result<Value, String> {
     .map_err(|e| format!("update window: {e}"))
 }
 
+fn parse_adjacent_direction(value: &str) -> Result<AdjacentPanelDirection, String> {
+    match value.trim() {
+        "right" => Ok(AdjacentPanelDirection::Right),
+        "bottom" | "down" => Ok(AdjacentPanelDirection::Bottom),
+        other => Err(format!("unsupported direction: {other}")),
+    }
+}
+
+fn adjacent_direction_name(direction: AdjacentPanelDirection) -> &'static str {
+    match direction {
+        AdjacentPanelDirection::Right => "right",
+        AdjacentPanelDirection::Bottom => "bottom",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -813,5 +920,22 @@ mod tests {
         // Two consecutive calls should never collide; if they do the test
         // fails fast rather than leaking duplicate ids into the daemon.
         assert_ne!(generate_workspace_id(), generate_workspace_id());
+    }
+
+    #[test]
+    fn parse_adjacent_direction_accepts_right_and_bottom() {
+        assert_eq!(
+            parse_adjacent_direction("right").unwrap(),
+            AdjacentPanelDirection::Right
+        );
+        assert_eq!(
+            parse_adjacent_direction("bottom").unwrap(),
+            AdjacentPanelDirection::Bottom
+        );
+        assert_eq!(
+            parse_adjacent_direction("down").unwrap(),
+            AdjacentPanelDirection::Bottom
+        );
+        assert!(parse_adjacent_direction("left").is_err());
     }
 }
