@@ -1,6 +1,7 @@
 /// Panels are the canvas's spatial terminal objects. Each carries
 /// world-space position + size and the terminal view that handles rendering,
 /// focus, resize, and PTY input.
+use attn_protocol::SessionState;
 use gpui::{Entity, SharedString};
 
 use crate::views::terminal_view::TerminalView;
@@ -20,5 +21,7 @@ pub struct Panel {
     pub width: f32,
     pub height: f32,
     pub session_id: SharedString,
+    pub session_state: SessionState,
+    pub needs_review_after_long_run: bool,
     pub view: Entity<TerminalView>,
 }

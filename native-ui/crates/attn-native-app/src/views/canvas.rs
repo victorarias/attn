@@ -43,6 +43,8 @@ pub type PanelGeometryCommitHandler =
 
 use serde_json::{json, Value};
 
+use attn_protocol::SessionState;
+
 use crate::domain::panel_navigation::{navigate_panel, NavigationDirection, PanelNavItem};
 use crate::domain::panel_placement::{
     place_panel_adjacent_avoiding, AdjacentPanelDirection, PanelPlacementItem, Rect,
@@ -1181,25 +1183,7 @@ impl Render for WorkspaceCanvas {
                 });
 
                 let body: AnyElement = panel.view.clone().into_any_element();
-                let mut title_bar = div()
-                    .w_full()
-                    .h(px(title_h))
-                    .bg(theme::ink::shade())
-                    .border_b_1()
-                    .border_color(theme::line::firm())
-                    .flex()
-                    .items_center()
-                    .pl(px(theme::space::S1))
-                    .pr(px(theme::space::S0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .truncate()
-                            .text_xs()
-                            .text_color(theme::moon::moonstone())
-                            .child(panel.title.clone()),
-                    );
-                title_bar = title_bar.child(panel_close_button(panel.session_id.clone(), cx));
+                let title_bar = panel_title_bar(panel, title_h, false, cx);
 
                 let mut panel_div = div()
                     .absolute()
@@ -1265,29 +1249,9 @@ impl Render for WorkspaceCanvas {
             let is_selected = selected_panel == Some(panel.id);
             let border_color = panel_border_color(has_input_focus, is_selected);
             let content_h = (sh - title_h).max(0.0);
-            let title = panel.title.clone();
-
             let body: AnyElement = panel.view.clone().into_any_element();
 
-            let mut title_bar = div()
-                .w_full()
-                .h(px(title_h))
-                .bg(theme::ink::shade())
-                .border_b_1()
-                .border_color(theme::line::firm())
-                .flex()
-                .items_center()
-                .pl(px(theme::space::S1))
-                .pr(px(theme::space::S0))
-                .child(
-                    div()
-                        .flex_1()
-                        .truncate()
-                        .text_xs()
-                        .text_color(theme::moon::moonstone())
-                        .child(title),
-                );
-            title_bar = title_bar.child(panel_close_button(panel.session_id.clone(), cx));
+            let title_bar = panel_title_bar(panel, title_h, sw < 220.0, cx);
 
             let mut panel_div = div()
                 .absolute()
@@ -1447,6 +1411,118 @@ fn panel_shadow(has_input_focus: bool) -> Vec<BoxShadow> {
             spread_radius: px(-6.0),
         },
     ]
+}
+
+fn panel_title_bar(
+    panel: &Panel,
+    title_h: f32,
+    compact_status: bool,
+    cx: &mut Context<WorkspaceCanvas>,
+) -> gpui::Div {
+    div()
+        .w_full()
+        .h(px(title_h))
+        .bg(theme::ink::shade())
+        .border_b_1()
+        .border_color(theme::line::firm())
+        .flex()
+        .items_center()
+        .gap(px(theme::space::S1))
+        .pl(px(theme::space::S1))
+        .pr(px(theme::space::S0))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .truncate()
+                .text_xs()
+                .text_color(theme::moon::moonstone())
+                .child(panel.title.clone()),
+        )
+        .child(panel_status_pill(panel, compact_status))
+        .child(panel_close_button(panel.session_id.clone(), cx))
+}
+
+fn panel_status_pill(panel: &Panel, compact: bool) -> gpui::Div {
+    let color = panel_status_color(panel);
+    let mut pill = div()
+        .h(px(16.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap(px(5.0))
+        .px(px(if compact { 5.0 } else { 6.0 }))
+        .rounded(px(theme::radius::R0))
+        .border_1()
+        .border_color(with_alpha(color, 0.32))
+        .bg(with_alpha(color, 0.10))
+        .child(
+            div()
+                .w(px(6.0))
+                .h(px(6.0))
+                .rounded_full()
+                .bg(color)
+                .shadow(status_dot_shadow(color, panel.session_state)),
+        );
+
+    if !compact {
+        pill = pill.child(
+            div()
+                .text_size(px(10.0))
+                .text_color(theme::moon::bone())
+                .child(SharedString::from(panel_status_label(panel))),
+        );
+    }
+
+    pill
+}
+
+fn panel_status_color(panel: &Panel) -> gpui::Rgba {
+    if panel.needs_review_after_long_run {
+        theme::state::review()
+    } else {
+        theme::session_state_color(panel.session_state)
+    }
+}
+
+fn panel_status_label(panel: &Panel) -> &'static str {
+    if panel.needs_review_after_long_run {
+        "review"
+    } else {
+        session_state_label(panel.session_state)
+    }
+}
+
+fn session_state_label(state: SessionState) -> &'static str {
+    match state {
+        SessionState::Launching => "launching",
+        SessionState::Working => "working",
+        SessionState::WaitingInput => "waiting",
+        SessionState::Idle => "idle",
+        SessionState::PendingApproval => "approval",
+        SessionState::Unknown => "unknown",
+    }
+}
+
+fn status_dot_shadow(color: gpui::Rgba, state: SessionState) -> Vec<BoxShadow> {
+    if !matches!(
+        state,
+        SessionState::Working | SessionState::WaitingInput | SessionState::PendingApproval
+    ) {
+        return Vec::new();
+    }
+
+    vec![BoxShadow {
+        color: with_alpha(color, 0.34).into(),
+        offset: point(px(0.0), px(0.0)),
+        blur_radius: px(8.0),
+        spread_radius: px(1.0),
+    }]
+}
+
+fn with_alpha(mut color: gpui::Rgba, alpha: f32) -> gpui::Rgba {
+    color.a = alpha.clamp(0.0, 1.0);
+    color
 }
 
 fn selection_glint(width: f32, height: f32) -> gpui::Div {
