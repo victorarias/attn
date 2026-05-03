@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-05-03]
 
+### Added
+- **Native Canvas Trackpad Zoom**: The native canvas now responds to trackpad pinch/magnify gestures and precise control-scroll zoom, keeping the cursor's world point anchored while zooming.
+
 ### Fixed
 - **Native Canvas Shell Splits**: `Cmd+D` and `Cmd+Shift+D` now skip over already-occupied adjacent panels instead of opening a new Shell panel on top of an existing neighbor.
 
