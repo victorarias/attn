@@ -98,6 +98,43 @@ pub fn place_panel_adjacent(anchor: Rect, direction: AdjacentPanelDirection) -> 
     }
 }
 
+pub fn place_panel_adjacent_avoiding(
+    anchor: Rect,
+    direction: AdjacentPanelDirection,
+    existing: &[PanelPlacementItem],
+) -> Rect {
+    let mut candidate = place_panel_adjacent(anchor, direction);
+
+    for _ in 0..existing.len() {
+        let Some(blocking_edge) = blocking_edge_in_direction(&candidate, direction, existing)
+        else {
+            break;
+        };
+
+        match direction {
+            AdjacentPanelDirection::Right => candidate.x = blocking_edge + GAP,
+            AdjacentPanelDirection::Bottom => candidate.y = blocking_edge + GAP,
+        }
+    }
+
+    candidate
+}
+
+fn blocking_edge_in_direction(
+    candidate: &Rect,
+    direction: AdjacentPanelDirection,
+    existing: &[PanelPlacementItem],
+) -> Option<f32> {
+    existing
+        .iter()
+        .filter(|item| candidate.overlaps(&item.rect))
+        .map(|item| match direction {
+            AdjacentPanelDirection::Right => item.rect.right(),
+            AdjacentPanelDirection::Bottom => item.rect.bottom(),
+        })
+        .reduce(f32::max)
+}
+
 fn size_for_visible_rect(default_size: PanelSize, visible: Rect) -> PanelSize {
     let available_width = visible.width - VISIBLE_MARGIN * 2.0;
     let available_height = visible.height - VISIBLE_MARGIN * 2.0;
@@ -484,6 +521,79 @@ mod tests {
                 y: 652.0,
                 width: 640.0,
                 height: 420.0,
+            }
+        );
+    }
+
+    #[test]
+    fn adjacent_right_skips_occupied_neighbors_in_row() {
+        let existing = [
+            item(1, 0.0, 120.0, 320.0, 240.0),
+            item(2, 352.0, 120.0, 320.0, 240.0),
+            item(3, 704.0, 120.0, 320.0, 240.0),
+        ];
+
+        assert_eq!(
+            place_panel_adjacent_avoiding(
+                existing[1].rect,
+                AdjacentPanelDirection::Right,
+                &existing,
+            ),
+            Rect {
+                x: 1056.0,
+                y: 120.0,
+                width: 320.0,
+                height: 240.0,
+            }
+        );
+    }
+
+    #[test]
+    fn adjacent_bottom_skips_occupied_neighbors_in_column() {
+        let existing = [
+            item(1, 120.0, 0.0, 320.0, 240.0),
+            item(2, 120.0, 272.0, 320.0, 240.0),
+            item(3, 120.0, 544.0, 320.0, 240.0),
+        ];
+
+        assert_eq!(
+            place_panel_adjacent_avoiding(
+                existing[1].rect,
+                AdjacentPanelDirection::Bottom,
+                &existing,
+            ),
+            Rect {
+                x: 120.0,
+                y: 816.0,
+                width: 320.0,
+                height: 240.0,
+            }
+        );
+    }
+
+    #[test]
+    fn adjacent_right_ignores_vertically_separate_panels() {
+        let anchor = Rect {
+            x: 352.0,
+            y: 120.0,
+            width: 320.0,
+            height: 240.0,
+        };
+        let existing = [
+            PanelPlacementItem {
+                id: 1,
+                rect: anchor,
+            },
+            item(2, 704.0, 520.0, 320.0, 240.0),
+        ];
+
+        assert_eq!(
+            place_panel_adjacent_avoiding(anchor, AdjacentPanelDirection::Right, &existing),
+            Rect {
+                x: 704.0,
+                y: 120.0,
+                width: 320.0,
+                height: 240.0,
             }
         );
     }

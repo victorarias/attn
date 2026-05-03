@@ -16,7 +16,9 @@ use gpui::{
 use serde_json::{json, Value};
 
 use crate::app::NativeApp;
-use crate::domain::panel_placement::{place_panel_adjacent, AdjacentPanelDirection, Rect};
+use crate::domain::panel_placement::{
+    place_panel_adjacent_avoiding, AdjacentPanelDirection, PanelPlacementItem, Rect,
+};
 use crate::domain::viewport::pf;
 use crate::state::terminal_model::TerminalModel;
 use crate::views::terminal_view::TerminalView;
@@ -492,9 +494,22 @@ fn split_shell(
                         width: panel.width,
                         height: panel.height,
                     };
+                    let existing = ws
+                        .panels
+                        .iter()
+                        .map(|panel| PanelPlacementItem {
+                            id: panel.id,
+                            rect: Rect {
+                                x: panel.world_x,
+                                y: panel.world_y,
+                                width: panel.width,
+                                height: panel.height,
+                            },
+                        })
+                        .collect::<Vec<_>>();
                     return Ok::<_, String>((
                         ws.id.clone(),
-                        place_panel_adjacent(anchor, direction),
+                        place_panel_adjacent_avoiding(anchor, direction, &existing),
                     ));
                 }
             }
