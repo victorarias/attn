@@ -37,6 +37,7 @@ use crate::views::location_dialog::{LocationDialog, LocationDialogMode, Location
 use crate::views::settings_page::SettingsPage;
 use crate::views::sidebar::Sidebar;
 use crate::views::terminal_view::TerminalView;
+use crate::{OpenSettings, ToggleSidebar};
 
 /// Initial terminal panel size in world-space units. ~720×560 gives
 /// ~92 cols × ~31 rows once the title bar is subtracted.
@@ -563,9 +564,27 @@ impl NativeApp {
         cx.notify();
     }
 
-    fn open_settings_page_from_app(&mut self, cx: &mut Context<Self>) {
+    pub fn open_settings_page_from_app(&mut self, cx: &mut Context<Self>) {
         let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
         self.open_settings_page(sidebar_collapsed, cx);
+    }
+
+    fn open_settings_action(
+        &mut self,
+        _: &OpenSettings,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_settings_page_from_app(cx);
+    }
+
+    fn toggle_sidebar_action(
+        &mut self,
+        _: &ToggleSidebar,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_sidebar_collapsed(cx);
     }
 
     fn forward_location_dialog_event(&mut self, event: &DaemonEvent, cx: &mut Context<Self>) {
@@ -1380,7 +1399,9 @@ impl Render for NativeApp {
             .size_full()
             .flex()
             .flex_row()
-            .bg(theme::ink::midnight());
+            .bg(theme::ink::midnight())
+            .on_action(cx.listener(Self::open_settings_action))
+            .on_action(cx.listener(Self::toggle_sidebar_action));
         root = if self.canvas.read(cx).is_panel_fullscreen() {
             root.child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
         } else {

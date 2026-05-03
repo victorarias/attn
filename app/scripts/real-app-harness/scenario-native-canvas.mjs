@@ -271,6 +271,21 @@ async function checkPlumbing(conn, manifest) {
   }
   const closedShortcutSettings = await conn.request('click_settings_close');
   if (!closedShortcutSettings.ok) fail(`click_settings_close after Cmd+,: ${closedShortcutSettings.error}`);
+  const unfocusedShortcutSettings = await conn.request('press_window_cmd_comma_without_view_focus');
+  if (!unfocusedShortcutSettings.ok) {
+    fail(`press_window_cmd_comma_without_view_focus: ${unfocusedShortcutSettings.error}`);
+  }
+  const unfocusedShortcutSettingsState = await conn.request('get_state');
+  if (!unfocusedShortcutSettingsState.ok) {
+    fail(`get_state after press_window_cmd_comma_without_view_focus: ${unfocusedShortcutSettingsState.error}`);
+  }
+  if (unfocusedShortcutSettingsState.result.settings_open !== true) {
+    fail(`Cmd+, did not open settings without view focus: ${JSON.stringify(unfocusedShortcutSettingsState.result)}`);
+  }
+  const closedUnfocusedShortcutSettings = await conn.request('click_settings_close');
+  if (!closedUnfocusedShortcutSettings.ok) {
+    fail(`click_settings_close after unfocused Cmd+,: ${closedUnfocusedShortcutSettings.error}`);
+  }
   const list = await conn.request('list_sessions');
   if (!list.ok) fail(`list_sessions: ${list.error}`);
   if (list.result.length !== state.result.sessions.length) {

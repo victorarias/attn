@@ -18,11 +18,15 @@ use gpui::{
 use adapters::daemon::DaemonClient;
 use app::NativeApp;
 
-actions!(attn_native, [Quit]);
+actions!(attn_native, [Quit, OpenSettings, ToggleSidebar]);
 
 fn main() {
     Application::new().run(|cx: &mut App| {
-        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.bind_keys([
+            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("cmd-,", OpenSettings, None),
+            KeyBinding::new("cmd-b", ToggleSidebar, None),
+        ]);
         cx.on_action::<Quit>(|_, cx| cx.quit());
         let _ = cx.on_window_closed(|cx| cx.quit());
 

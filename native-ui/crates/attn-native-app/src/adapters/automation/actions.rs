@@ -99,6 +99,9 @@ async fn handle_action(
         "click_settings_sidebar_mode" => click_settings_sidebar_mode(app, cx),
         "click_settings_close" => click_settings_close(app, cx),
         "press_canvas_cmd_comma" => press_canvas_cmd_comma(app, cx),
+        "press_window_cmd_comma_without_view_focus" => {
+            press_window_cmd_comma_without_view_focus(cx)
+        }
         "create_workspace" => create_workspace(app, cx, payload),
         "destroy_workspace" => destroy_workspace(app, cx, payload),
         "spawn_session" => spawn_session(app, cx, payload),
@@ -140,6 +143,34 @@ fn press_canvas_cmd_comma(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Res
     .map_err(|e| format!("update window: {e}"))?;
 
     Ok(json!({ "shortcut": "cmd+," }))
+}
+
+fn press_window_cmd_comma_without_view_focus(cx: &mut AsyncApp) -> Result<Value, String> {
+    let window = cx
+        .update(|app: &mut App| app.windows().into_iter().next())
+        .map_err(|e| format!("list windows: {e}"))?
+        .ok_or("no open windows")?;
+
+    cx.update_window(
+        window,
+        move |_root: AnyView, window: &mut Window, app: &mut App| {
+            window.blur();
+            window.dispatch_keystroke(
+                Keystroke {
+                    key: ",".into(),
+                    modifiers: Modifiers {
+                        platform: true,
+                        ..Modifiers::default()
+                    },
+                    key_char: None,
+                },
+                app,
+            );
+        },
+    )
+    .map_err(|e| format!("update window: {e}"))?;
+
+    Ok(json!({ "shortcut": "cmd+,", "view_focus": false }))
 }
 
 fn click_sidebar_settings(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
