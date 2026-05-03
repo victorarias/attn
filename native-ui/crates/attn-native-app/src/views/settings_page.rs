@@ -1682,7 +1682,7 @@ fn settings_caret() -> gpui::Div {
     div()
         .w(px(6.0))
         .h(px(15.0))
-        .rounded(px(1.0))
+        .rounded(px(theme::radius::R0))
         .bg(theme::sodium::vapor())
 }
 
