@@ -34,7 +34,7 @@ use crate::state::workspace_registry::{PendingSpawn, UpsertOutcome, WorkspaceReg
 use crate::theme;
 use crate::views::canvas::WorkspaceCanvas;
 use crate::views::location_dialog::{LocationDialog, LocationDialogMode, LocationDialogOutcome};
-use crate::views::settings_page::SettingsPage;
+use crate::views::settings_page::{SettingsPage, SettingsPageState};
 use crate::views::sidebar::Sidebar;
 use crate::views::terminal_view::TerminalView;
 use crate::{OpenSettings, ToggleSidebar};
@@ -60,6 +60,7 @@ pub struct NativeApp {
     canvas: Entity<WorkspaceCanvas>,
     location_dialog: Option<Entity<LocationDialog>>,
     settings_page: Option<Entity<SettingsPage>>,
+    settings_state: SettingsPageState,
     /// True from the moment the location dialog closes until the next
     /// render restores focus to the canvas. Without this hand-off, focus
     /// stays on the dialog's dropped focus handle and global shortcuts
@@ -218,6 +219,11 @@ impl NativeApp {
                 DaemonEvent::InitialState {
                     sessions,
                     workspaces,
+                    endpoints,
+                    prs,
+                    repos,
+                    authors,
+                    settings,
                 } => {
                     events::record(
                         "initial_state_observed",
@@ -226,7 +232,67 @@ impl NativeApp {
                             "workspace_count": workspaces.len(),
                         }),
                     );
+                    this.settings_state = SettingsPageState::from_wire(
+                        settings.clone(),
+                        endpoints.clone(),
+                        prs.clone(),
+                        repos.clone(),
+                        authors.clone(),
+                    );
+                    this.sync_settings_page_state(cx);
                     this.apply_initial_state(sessions.clone(), workspaces.clone(), cx);
+                }
+                DaemonEvent::SettingsUpdated {
+                    settings,
+                    changed_key,
+                    success,
+                    error,
+                } => {
+                    this.settings_state.settings = settings.clone();
+                    if let Some(page) = this.settings_page.clone() {
+                        let changed_key = changed_key.clone();
+                        let error = error.clone();
+                        page.update(cx, |page, cx| {
+                            page.apply_settings_update(
+                                settings.clone(),
+                                changed_key,
+                                *success,
+                                error,
+                                cx,
+                            )
+                        });
+                    }
+                }
+                DaemonEvent::EndpointsUpdated { endpoints } => {
+                    this.settings_state.endpoints = endpoints.clone();
+                    if let Some(page) = this.settings_page.clone() {
+                        page.update(cx, |page, cx| page.apply_endpoints(endpoints.clone(), cx));
+                    }
+                }
+                DaemonEvent::EndpointStatusChanged { endpoint } => {
+                    upsert_endpoint(&mut this.settings_state.endpoints, endpoint.clone());
+                    if let Some(page) = this.settings_page.clone() {
+                        let endpoints = this.settings_state.endpoints.clone();
+                        page.update(cx, |page, cx| page.apply_endpoints(endpoints, cx));
+                    }
+                }
+                DaemonEvent::ReposUpdated { repos } => {
+                    this.settings_state.repos = repos.clone();
+                    if let Some(page) = this.settings_page.clone() {
+                        page.update(cx, |page, cx| page.apply_repos(repos.clone(), cx));
+                    }
+                }
+                DaemonEvent::AuthorsUpdated { authors } => {
+                    this.settings_state.authors = authors.clone();
+                    if let Some(page) = this.settings_page.clone() {
+                        page.update(cx, |page, cx| page.apply_authors(authors.clone(), cx));
+                    }
+                }
+                DaemonEvent::PRsUpdated { prs } => {
+                    this.settings_state.set_prs(prs);
+                    if let Some(page) = this.settings_page.clone() {
+                        page.update(cx, |page, cx| page.apply_prs(prs.clone(), cx));
+                    }
                 }
                 DaemonEvent::WorkspaceRegistered { workspace } => {
                     events::record(
@@ -360,6 +426,7 @@ impl NativeApp {
             canvas,
             location_dialog: None,
             settings_page: None,
+            settings_state: SettingsPageState::default(),
             canvas_needs_refocus: false,
             _canvas_subscription: canvas_subscription,
             _automation: automation_handle,
@@ -455,6 +522,13 @@ impl NativeApp {
         self.settings_page.clone()
     }
 
+    fn sync_settings_page_state(&mut self, cx: &mut Context<Self>) {
+        if let Some(page) = self.settings_page.clone() {
+            let state = self.settings_state.clone();
+            page.update(cx, |page, cx| page.apply_state(state, cx));
+        }
+    }
+
     fn open_session_dialog(
         &mut self,
         workspace_id: SharedString,
@@ -539,6 +613,8 @@ impl NativeApp {
         let app_handle_toggle = app_handle.clone();
         let settings_page = cx.new(|cx| {
             SettingsPage::new(
+                self.daemon.clone(),
+                self.settings_state.clone(),
                 sidebar_collapsed,
                 move |_window, cx| {
                     if let Some(app) = app_handle_close.upgrade() {
@@ -1446,6 +1522,17 @@ fn adjacent_direction_name(direction: AdjacentPanelDirection) -> &'static str {
     match direction {
         AdjacentPanelDirection::Right => "right",
         AdjacentPanelDirection::Bottom => "bottom",
+    }
+}
+
+fn upsert_endpoint(
+    endpoints: &mut Vec<attn_protocol::EndpointInfo>,
+    next: attn_protocol::EndpointInfo,
+) {
+    if let Some(existing) = endpoints.iter_mut().find(|endpoint| endpoint.id == next.id) {
+        *existing = next;
+    } else {
+        endpoints.push(next);
     }
 }
 

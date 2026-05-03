@@ -1,6 +1,9 @@
 use serde::Deserialize;
 
-use crate::types::{DirectoryEntry, PathInspection, ReplaySegment, RepoInfo, Session, Workspace};
+use crate::types::{
+    AuthorState, DirectoryEntry, EndpointInfo, PathInspection, PullRequestSummary, ReplaySegment,
+    RepoInfo, RepoState, Session, SettingsMap, Workspace,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InitialStateMessage {
@@ -13,6 +16,63 @@ pub struct InitialStateMessage {
     pub sessions: Vec<Session>,
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
+    #[serde(default)]
+    pub endpoints: Vec<EndpointInfo>,
+    #[serde(default)]
+    pub prs: Vec<PullRequestSummary>,
+    #[serde(default)]
+    pub repos: Vec<RepoState>,
+    #[serde(default)]
+    pub authors: Vec<AuthorState>,
+    #[serde(default)]
+    pub settings: SettingsMap,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsUpdatedMessage {
+    pub event: String,
+    #[serde(default)]
+    pub settings: SettingsMap,
+    #[serde(default)]
+    pub changed_key: Option<String>,
+    #[serde(default)]
+    pub success: Option<bool>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EndpointsUpdatedMessage {
+    pub event: String,
+    #[serde(default)]
+    pub endpoints: Vec<EndpointInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EndpointStatusChangedMessage {
+    pub event: String,
+    pub endpoint: EndpointInfo,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReposUpdatedMessage {
+    pub event: String,
+    #[serde(default)]
+    pub repos: Vec<RepoState>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthorsUpdatedMessage {
+    pub event: String,
+    #[serde(default)]
+    pub authors: Vec<AuthorState>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PRsUpdatedMessage {
+    pub event: String,
+    #[serde(default)]
+    pub prs: Vec<PullRequestSummary>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -178,6 +238,12 @@ struct EventPeek {
 #[derive(Debug, Clone)]
 pub enum ServerEvent {
     InitialState(InitialStateMessage),
+    SettingsUpdated(SettingsUpdatedMessage),
+    EndpointsUpdated(EndpointsUpdatedMessage),
+    EndpointStatusChanged(EndpointStatusChangedMessage),
+    ReposUpdated(ReposUpdatedMessage),
+    AuthorsUpdated(AuthorsUpdatedMessage),
+    PRsUpdated(PRsUpdatedMessage),
     SessionRegistered(SessionRegisteredMessage),
     SessionUnregistered(SessionUnregisteredMessage),
     SessionStateChanged(SessionStateChangedMessage),
@@ -205,6 +271,30 @@ impl ServerEvent {
             "initial_state" => {
                 let msg: InitialStateMessage = serde_json::from_str(data)?;
                 Ok(Self::InitialState(msg))
+            }
+            "settings_updated" => {
+                let msg: SettingsUpdatedMessage = serde_json::from_str(data)?;
+                Ok(Self::SettingsUpdated(msg))
+            }
+            "endpoints_updated" => {
+                let msg: EndpointsUpdatedMessage = serde_json::from_str(data)?;
+                Ok(Self::EndpointsUpdated(msg))
+            }
+            "endpoint_status_changed" => {
+                let msg: EndpointStatusChangedMessage = serde_json::from_str(data)?;
+                Ok(Self::EndpointStatusChanged(msg))
+            }
+            "repos_updated" => {
+                let msg: ReposUpdatedMessage = serde_json::from_str(data)?;
+                Ok(Self::ReposUpdated(msg))
+            }
+            "authors_updated" => {
+                let msg: AuthorsUpdatedMessage = serde_json::from_str(data)?;
+                Ok(Self::AuthorsUpdated(msg))
+            }
+            "prs_updated" => {
+                let msg: PRsUpdatedMessage = serde_json::from_str(data)?;
+                Ok(Self::PRsUpdated(msg))
             }
             "session_registered" => {
                 let msg: SessionRegisteredMessage = serde_json::from_str(data)?;

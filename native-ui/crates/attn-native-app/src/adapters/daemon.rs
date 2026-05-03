@@ -1,7 +1,7 @@
 use attn_protocol::{
-    BrowseDirectoryResultMessage, ClientHelloMessage, CreateWorktreeResultMessage,
-    GetRepoInfoResultMessage, InspectPathResultMessage, ServerEvent, Session, Workspace,
-    CAPABILITY_SHELL_AS_SESSION, PROTOCOL_VERSION,
+    BrowseDirectoryResultMessage, ClientHelloMessage, CreateWorktreeResultMessage, EndpointInfo,
+    GetRepoInfoResultMessage, InspectPathResultMessage, PullRequestSummary, RepoState, ServerEvent,
+    Session, SettingsMap, Workspace, CAPABILITY_SHELL_AS_SESSION, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use gpui::{AsyncApp, Context, EventEmitter, WeakEntity};
@@ -36,6 +36,32 @@ pub enum DaemonEvent {
     InitialState {
         sessions: Vec<Session>,
         workspaces: Vec<Workspace>,
+        endpoints: Vec<EndpointInfo>,
+        prs: Vec<PullRequestSummary>,
+        repos: Vec<RepoState>,
+        authors: Vec<attn_protocol::AuthorState>,
+        settings: SettingsMap,
+    },
+    SettingsUpdated {
+        settings: SettingsMap,
+        changed_key: Option<String>,
+        success: Option<bool>,
+        error: Option<String>,
+    },
+    EndpointsUpdated {
+        endpoints: Vec<EndpointInfo>,
+    },
+    EndpointStatusChanged {
+        endpoint: EndpointInfo,
+    },
+    ReposUpdated {
+        repos: Vec<RepoState>,
+    },
+    AuthorsUpdated {
+        authors: Vec<attn_protocol::AuthorState>,
+    },
+    PRsUpdated {
+        prs: Vec<PullRequestSummary>,
     },
     /// A session appeared (newly spawned or registered).
     SessionRegistered {
@@ -255,7 +281,41 @@ impl DaemonClient {
                 cx.emit(DaemonEvent::InitialState {
                     sessions: msg.sessions,
                     workspaces: msg.workspaces,
+                    endpoints: msg.endpoints,
+                    prs: msg.prs,
+                    repos: msg.repos,
+                    authors: msg.authors,
+                    settings: msg.settings,
                 });
+            }
+            ServerEvent::SettingsUpdated(msg) => {
+                cx.emit(DaemonEvent::SettingsUpdated {
+                    settings: msg.settings,
+                    changed_key: msg.changed_key,
+                    success: msg.success,
+                    error: msg.error,
+                });
+            }
+            ServerEvent::EndpointsUpdated(msg) => {
+                cx.emit(DaemonEvent::EndpointsUpdated {
+                    endpoints: msg.endpoints,
+                });
+            }
+            ServerEvent::EndpointStatusChanged(msg) => {
+                cx.emit(DaemonEvent::EndpointStatusChanged {
+                    endpoint: msg.endpoint,
+                });
+            }
+            ServerEvent::ReposUpdated(msg) => {
+                cx.emit(DaemonEvent::ReposUpdated { repos: msg.repos });
+            }
+            ServerEvent::AuthorsUpdated(msg) => {
+                cx.emit(DaemonEvent::AuthorsUpdated {
+                    authors: msg.authors,
+                });
+            }
+            ServerEvent::PRsUpdated(msg) => {
+                cx.emit(DaemonEvent::PRsUpdated { prs: msg.prs });
             }
             ServerEvent::SessionRegistered(msg) => {
                 cx.emit(DaemonEvent::SessionRegistered {
@@ -368,6 +428,36 @@ fn record_inbound_event(event: &ServerEvent) {
             "kind": "initial_state",
             "session_count": m.sessions.len(),
             "workspace_count": m.workspaces.len(),
+            "endpoint_count": m.endpoints.len(),
+            "settings_count": m.settings.len(),
+        }),
+        ServerEvent::SettingsUpdated(m) => json!({
+            "kind": "settings_updated",
+            "settings_count": m.settings.len(),
+            "changed_key": m.changed_key.as_deref(),
+            "success": m.success,
+            "error": m.error.as_deref(),
+        }),
+        ServerEvent::EndpointsUpdated(m) => json!({
+            "kind": "endpoints_updated",
+            "endpoint_count": m.endpoints.len(),
+        }),
+        ServerEvent::EndpointStatusChanged(m) => json!({
+            "kind": "endpoint_status_changed",
+            "endpoint_id": m.endpoint.id.as_str(),
+            "status": m.endpoint.status.as_str(),
+        }),
+        ServerEvent::ReposUpdated(m) => json!({
+            "kind": "repos_updated",
+            "repo_count": m.repos.len(),
+        }),
+        ServerEvent::AuthorsUpdated(m) => json!({
+            "kind": "authors_updated",
+            "author_count": m.authors.len(),
+        }),
+        ServerEvent::PRsUpdated(m) => json!({
+            "kind": "prs_updated",
+            "pr_count": m.prs.len(),
         }),
         ServerEvent::SessionRegistered(m) => json!({
             "kind": "session_registered",

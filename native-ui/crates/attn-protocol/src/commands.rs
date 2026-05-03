@@ -7,6 +7,178 @@ pub struct QueryMessage {
     pub cmd: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+pub struct GetSettingsMessage {
+    pub cmd: &'static str,
+}
+
+impl GetSettingsMessage {
+    pub fn new() -> Self {
+        Self {
+            cmd: "get_settings",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListEndpointsMessage {
+    pub cmd: &'static str,
+}
+
+impl ListEndpointsMessage {
+    pub fn new() -> Self {
+        Self {
+            cmd: "list_endpoints",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetSettingMessage {
+    pub cmd: &'static str,
+    pub key: String,
+    pub value: String,
+}
+
+impl SetSettingMessage {
+    pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            cmd: "set_setting",
+            key: key.into(),
+            value: value.into(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpdateEndpointMessage {
+    pub cmd: &'static str,
+    pub endpoint_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddEndpointMessage {
+    pub cmd: &'static str,
+    pub name: String,
+    pub ssh_target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+}
+
+impl AddEndpointMessage {
+    pub fn new(
+        name: impl Into<String>,
+        ssh_target: impl Into<String>,
+        profile: impl Into<String>,
+    ) -> Self {
+        let profile = profile.into();
+        Self {
+            cmd: "add_endpoint",
+            name: name.into(),
+            ssh_target: ssh_target.into(),
+            profile: (!profile.trim().is_empty()).then_some(profile),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct RemoveEndpointMessage {
+    pub cmd: &'static str,
+    pub endpoint_id: String,
+}
+
+impl RemoveEndpointMessage {
+    pub fn new(endpoint_id: impl Into<String>) -> Self {
+        Self {
+            cmd: "remove_endpoint",
+            endpoint_id: endpoint_id.into(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct BootstrapEndpointMessage {
+    pub cmd: &'static str,
+    pub endpoint_id: String,
+}
+
+impl BootstrapEndpointMessage {
+    pub fn new(endpoint_id: impl Into<String>) -> Self {
+        Self {
+            cmd: "bootstrap_endpoint",
+            endpoint_id: endpoint_id.into(),
+        }
+    }
+}
+
+impl UpdateEndpointMessage {
+    pub fn enabled(endpoint_id: impl Into<String>, enabled: bool) -> Self {
+        Self {
+            cmd: "update_endpoint",
+            endpoint_id: endpoint_id.into(),
+            name: None,
+            ssh_target: None,
+            enabled: Some(enabled),
+            profile: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetEndpointRemoteWebMessage {
+    pub cmd: &'static str,
+    pub endpoint_id: String,
+    pub enabled: bool,
+}
+
+impl SetEndpointRemoteWebMessage {
+    pub fn new(endpoint_id: impl Into<String>, enabled: bool) -> Self {
+        Self {
+            cmd: "set_endpoint_remote_web",
+            endpoint_id: endpoint_id.into(),
+            enabled,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ToggleRepoMuteMessage {
+    pub cmd: &'static str,
+    pub repo: String,
+}
+
+impl ToggleRepoMuteMessage {
+    pub fn new(repo: impl Into<String>) -> Self {
+        Self {
+            cmd: "mute_repo",
+            repo: repo.into(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ToggleAuthorMuteMessage {
+    pub cmd: &'static str,
+    pub author: String,
+}
+
+impl ToggleAuthorMuteMessage {
+    pub fn new(author: impl Into<String>) -> Self {
+        Self {
+            cmd: "mute_author",
+            author: author.into(),
+        }
+    }
+}
+
 impl QueryMessage {
     pub fn new() -> Self {
         Self { cmd: "query" }

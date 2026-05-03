@@ -246,6 +246,15 @@ async function checkPlumbing(conn, manifest) {
   if (settingsOpenState.result.settings_open !== true) {
     fail(`settings dialog did not open from sidebar click: ${JSON.stringify(settingsOpenState.result)}`);
   }
+  for (const section of ['general', 'agents', 'review', 'network', 'filters', 'system']) {
+    const selectedSection = await conn.request('click_settings_section', { section });
+    if (!selectedSection.ok) fail(`click_settings_section ${section}: ${selectedSection.error}`);
+    if (selectedSection.result.section !== section) {
+      fail(`click_settings_section ${section} returned wrong section: ${JSON.stringify(selectedSection)}`);
+    }
+  }
+  const selectedGeneral = await conn.request('click_settings_section', { section: 'general' });
+  if (!selectedGeneral.ok) fail(`click_settings_section general restore: ${selectedGeneral.error}`);
   const clickedSidebarMode = await conn.request('click_settings_sidebar_mode');
   if (!clickedSidebarMode.ok) fail(`click_settings_sidebar_mode: ${clickedSidebarMode.error}`);
   const settingsToggledState = await conn.request('get_state');
