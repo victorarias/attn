@@ -34,8 +34,10 @@ use crate::state::workspace_registry::{PendingSpawn, UpsertOutcome, WorkspaceReg
 use crate::theme;
 use crate::views::canvas::WorkspaceCanvas;
 use crate::views::location_dialog::{LocationDialog, LocationDialogMode, LocationDialogOutcome};
+use crate::views::settings_page::SettingsPage;
 use crate::views::sidebar::Sidebar;
 use crate::views::terminal_view::TerminalView;
+use crate::{OpenSettings, ToggleSidebar};
 
 /// Initial terminal panel size in world-space units. ~720×560 gives
 /// ~92 cols × ~31 rows once the title bar is subtracted.
@@ -57,6 +59,7 @@ pub struct NativeApp {
     sidebar: Entity<Sidebar>,
     canvas: Entity<WorkspaceCanvas>,
     location_dialog: Option<Entity<LocationDialog>>,
+    settings_page: Option<Entity<SettingsPage>>,
     /// True from the moment the location dialog closes until the next
     /// render restores focus to the canvas. Without this hand-off, focus
     /// stays on the dialog's dropped focus handle and global shortcuts
@@ -89,6 +92,8 @@ impl NativeApp {
         let app_handle_canvas_close = app_handle.clone();
         let app_handle_canvas_split = app_handle.clone();
         let app_handle_canvas_geometry = app_handle.clone();
+        let app_handle_canvas_sidebar = app_handle.clone();
+        let app_handle_canvas_settings = app_handle.clone();
         let (trackpad_tx, trackpad_rx) = async_channel::unbounded();
         let trackpad_zoom = trackpad_zoom::install(trackpad_tx);
         let canvas = cx.new(|cx| {
@@ -134,10 +139,23 @@ impl NativeApp {
                         );
                     });
                 },
+                move |_window, cx| {
+                    let app_handle = app_handle_canvas_sidebar.clone();
+                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
+                        app.toggle_sidebar_collapsed(cx);
+                    });
+                },
+                move |_window, cx| {
+                    let app_handle = app_handle_canvas_settings.clone();
+                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
+                        app.open_settings_page_from_app(cx);
+                    });
+                },
             )
         });
         let canvas_subscription = cx.observe(&canvas, |_, _, cx| cx.notify());
         let app_handle_create = app_handle.clone();
+        let app_handle_settings = app_handle.clone();
         let app_handle_destroy = app_handle.clone();
         let sidebar = cx.new(|cx| {
             Sidebar::new(
@@ -152,6 +170,12 @@ impl NativeApp {
                     let app_handle = app_handle_create.clone();
                     let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
                         app.open_workspace_dialog(cx);
+                    });
+                },
+                move |sidebar_collapsed, _window, cx| {
+                    let app_handle = app_handle_settings.clone();
+                    let _ = app_handle.update(cx, |app: &mut NativeApp, cx| {
+                        app.open_settings_page(sidebar_collapsed, cx);
                     });
                 },
                 move |id, _window, cx| {
@@ -335,6 +359,7 @@ impl NativeApp {
             sidebar,
             canvas,
             location_dialog: None,
+            settings_page: None,
             canvas_needs_refocus: false,
             _canvas_subscription: canvas_subscription,
             _automation: automation_handle,
@@ -348,6 +373,21 @@ impl NativeApp {
         self.canvas.update(cx, |canvas, cx| {
             canvas.zoom_at_window_position(position, factor, cx);
         });
+    }
+
+    pub fn set_sidebar_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) -> bool {
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.set_collapsed(collapsed, cx));
+        cx.notify();
+        collapsed
+    }
+
+    pub fn toggle_sidebar_collapsed(&mut self, cx: &mut Context<Self>) -> bool {
+        let collapsed = self
+            .sidebar
+            .update(cx, |sidebar, cx| sidebar.toggle_collapsed(cx));
+        cx.notify();
+        collapsed
     }
 
     /// Apply a zoom level to the canvas, centered on the canvas
@@ -401,6 +441,18 @@ impl NativeApp {
     /// state registry, not the daemon adapter.
     pub fn sessions_snapshot(&self) -> Vec<Session> {
         self.sessions.snapshot()
+    }
+
+    pub fn sidebar_entity(&self) -> Entity<Sidebar> {
+        self.sidebar.clone()
+    }
+
+    pub fn canvas_entity(&self) -> Entity<WorkspaceCanvas> {
+        self.canvas.clone()
+    }
+
+    pub fn settings_page_entity(&self) -> Option<Entity<SettingsPage>> {
+        self.settings_page.clone()
     }
 
     fn open_session_dialog(
@@ -479,6 +531,60 @@ impl NativeApp {
         });
         self.location_dialog = Some(dialog);
         cx.notify();
+    }
+
+    fn open_settings_page(&mut self, sidebar_collapsed: bool, cx: &mut Context<Self>) {
+        let app_handle = cx.entity().downgrade();
+        let app_handle_close = app_handle.clone();
+        let app_handle_toggle = app_handle.clone();
+        let settings_page = cx.new(|cx| {
+            SettingsPage::new(
+                sidebar_collapsed,
+                move |_window, cx| {
+                    if let Some(app) = app_handle_close.upgrade() {
+                        app.update(cx, |app: &mut NativeApp, cx| {
+                            app.settings_page = None;
+                            app.canvas_needs_refocus = true;
+                            cx.notify();
+                        });
+                    }
+                },
+                move |_window, cx| {
+                    app_handle_toggle
+                        .update(cx, |app: &mut NativeApp, cx| {
+                            let collapsed = !app.sidebar.read(cx).is_collapsed();
+                            app.set_sidebar_collapsed(collapsed, cx)
+                        })
+                        .unwrap_or(sidebar_collapsed)
+                },
+                cx,
+            )
+        });
+        self.settings_page = Some(settings_page);
+        cx.notify();
+    }
+
+    pub fn open_settings_page_from_app(&mut self, cx: &mut Context<Self>) {
+        let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
+        self.open_settings_page(sidebar_collapsed, cx);
+    }
+
+    fn open_settings_action(
+        &mut self,
+        _: &OpenSettings,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_settings_page_from_app(cx);
+    }
+
+    fn toggle_sidebar_action(
+        &mut self,
+        _: &ToggleSidebar,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_sidebar_collapsed(cx);
     }
 
     fn forward_location_dialog_event(&mut self, event: &DaemonEvent, cx: &mut Context<Self>) {
@@ -935,12 +1041,15 @@ impl NativeApp {
             .collect();
 
         let canvas = self.canvas.read(cx).automation_snapshot();
+        let sidebar = self.sidebar.read(cx).automation_snapshot();
 
         json!({
             "selected_workspace_id": self.registry.selected_id().map(|s| s.to_string()),
             "workspaces": workspaces,
             "sessions": serde_json::to_value(self.sessions.snapshot()).unwrap_or(Value::Null),
             "canvas": canvas,
+            "sidebar": sidebar,
+            "settings_open": self.settings_page.is_some(),
             "daemon": {
                 "connected": daemon.connected(),
                 "error": daemon.error(),
@@ -1290,7 +1399,9 @@ impl Render for NativeApp {
             .size_full()
             .flex()
             .flex_row()
-            .bg(theme::ink::midnight());
+            .bg(theme::ink::midnight())
+            .on_action(cx.listener(Self::open_settings_action))
+            .on_action(cx.listener(Self::toggle_sidebar_action));
         root = if self.canvas.read(cx).is_panel_fullscreen() {
             root.child(div().flex_1().overflow_hidden().child(self.canvas.clone()))
         } else {
@@ -1299,6 +1410,9 @@ impl Render for NativeApp {
         };
         if let Some(dialog) = self.location_dialog.clone() {
             root = root.child(dialog);
+        }
+        if let Some(settings_page) = self.settings_page.clone() {
+            root = root.child(settings_page);
         }
         root
     }
