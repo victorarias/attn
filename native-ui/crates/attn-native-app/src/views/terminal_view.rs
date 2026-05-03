@@ -403,13 +403,20 @@ impl Render for TerminalView {
             let t = self.terminal.read(cx);
             (t.cols, t.rows, t.session_id.clone())
         };
+        let cell_width_px = (CHAR_WIDTH * self.zoom).round().max(1.0) as u32;
+        let cell_height_px = (ROW_HEIGHT * self.zoom).round().max(1.0) as u32;
         if new_cols != cur_cols || new_rows != cur_rows {
-            self.terminal
-                .update(cx, |t, _| t.resize(new_cols, new_rows));
+            self.terminal.update(cx, |t, _| {
+                t.resize(new_cols, new_rows, cell_width_px, cell_height_px)
+            });
             let _ = self
                 .daemon
                 .read(cx)
                 .send_cmd(&PtyResizeMessage::new(session_id, new_cols, new_rows));
+        } else {
+            self.terminal.update(cx, |t, _| {
+                t.resize(new_cols, new_rows, cell_width_px, cell_height_px)
+            });
         }
 
         let terminal = self.terminal.read(cx);

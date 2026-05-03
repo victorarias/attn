@@ -24,6 +24,8 @@ pub enum TerminalEvent {
 
 const COLOR_BG: u32 = theme::ink::MIDNIGHT_HEX;
 const COLOR_FG: u32 = theme::moon::PARCHMENT_HEX;
+const DEFAULT_CELL_WIDTH_PX: u32 = 8;
+const DEFAULT_CELL_HEIGHT_PX: u32 = 17;
 
 /// Holds the terminal emulation state for a single session.
 pub struct TerminalModel {
@@ -34,6 +36,8 @@ pub struct TerminalModel {
     cell_iterator: CellIterator<'static>,
     rendered_rows: Vec<Vec<RenderedCell>>,
     cursor: (usize, usize),
+    cell_width_px: u32,
+    cell_height_px: u32,
     last_seq: i32,
     pub cols: u16,
     pub rows: u16,
@@ -82,7 +86,7 @@ impl TerminalModel {
                     cols,
                     rows,
                 } if *session_id == this.session_id => {
-                    this.resize(*cols, *rows);
+                    this.resize(*cols, *rows, this.cell_width_px, this.cell_height_px);
                     cx.emit(TerminalEvent::DataReceived);
                 }
                 DaemonEvent::SessionExited { session_id, .. } if *session_id == this.session_id => {
@@ -101,6 +105,8 @@ impl TerminalModel {
             cell_iterator,
             rendered_rows: Vec::new(),
             cursor: (0, 0),
+            cell_width_px: DEFAULT_CELL_WIDTH_PX,
+            cell_height_px: DEFAULT_CELL_HEIGHT_PX,
             last_seq: -1,
             cols,
             rows,
@@ -128,7 +134,7 @@ impl TerminalModel {
         // Apply daemon-reported dimensions if provided.
         if let (Some(cols), Some(rows)) = (msg.cols, msg.rows) {
             if cols != self.cols || rows != self.rows {
-                self.resize(cols, rows);
+                self.resize(cols, rows, self.cell_width_px, self.cell_height_px);
             }
         }
 
@@ -147,7 +153,7 @@ impl TerminalModel {
                 let seg_cols = seg.cols as u16;
                 let seg_rows = seg.rows as u16;
                 if seg_cols != self.cols || seg_rows != self.rows {
-                    self.resize(seg_cols, seg_rows);
+                    self.resize(seg_cols, seg_rows, self.cell_width_px, self.cell_height_px);
                 }
                 if let Ok(bytes) = BASE64.decode(&seg.data) {
                     self.terminal.vt_write(&bytes);
@@ -182,10 +188,24 @@ impl TerminalModel {
     }
 
     /// Resize the terminal to new dimensions.
-    pub fn resize(&mut self, cols: u16, rows: u16) {
+    pub fn resize(&mut self, cols: u16, rows: u16, cell_width_px: u32, cell_height_px: u32) {
+        let cell_width_px = cell_width_px.max(1);
+        let cell_height_px = cell_height_px.max(1);
+        if self.cols == cols
+            && self.rows == rows
+            && self.cell_width_px == cell_width_px
+            && self.cell_height_px == cell_height_px
+        {
+            return;
+        }
+
         self.cols = cols;
         self.rows = rows;
-        let _ = self.terminal.resize(cols, rows, 8, 17);
+        self.cell_width_px = cell_width_px;
+        self.cell_height_px = cell_height_px;
+        let _ = self
+            .terminal
+            .resize(cols, rows, self.cell_width_px, self.cell_height_px);
         self.refresh_render_rows();
     }
 
