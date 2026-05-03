@@ -15,7 +15,7 @@ serde_json = { workspace = true }
 futures-util = { workspace = true }
 async-tungstenite = { version = "0.28", features = ["async-std-runtime"] }
 smol = "2"
-alacritty_terminal = "0.26.0"
+libghostty-vt = { git = "https://github.com/Uzaaft/libghostty-rs.git", rev = "5ac47e9eb166add2c00c432bc65c279133629712", default-features = false, features = ["link-static"] }
 base64 = "0.22"
 async-channel = "2"
 getrandom = { workspace = true }

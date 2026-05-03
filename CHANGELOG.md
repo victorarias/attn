@@ -15,6 +15,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Native Canvas Panel Status**: Native canvas panel headers now show each session's live state, including working, waiting for input, approval-needed, idle, and long-run review status.
 
 ### Changed
+- **Native Terminal Engine**: Native canvas terminals now use Ghostty's `libghostty-vt` terminal emulator for VT parsing, screen state, cursor position, wide-cell handling, and ANSI color resolution while keeping the existing daemon PTY transport.
 - **Native Sidebar Collapse**: The native workspace sidebar can now collapse with `Cmd+B`, keeping workspace status colors visible in the narrow rail while freeing canvas space.
 
 ### Fixed
