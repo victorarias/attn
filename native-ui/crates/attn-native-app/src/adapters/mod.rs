@@ -4,3 +4,4 @@
 
 pub mod automation;
 pub mod daemon;
+pub mod trackpad_zoom;

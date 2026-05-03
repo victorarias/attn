@@ -13,8 +13,8 @@ use attn_protocol::{
     Workspace as ProtocolWorkspace,
 };
 use gpui::{
-    div, prelude::*, App, Context, Entity, Focusable, ParentElement, Render, SharedString,
-    Subscription, WeakEntity, Window,
+    div, point, prelude::*, px, App, Context, Entity, Focusable, ParentElement, Render,
+    SharedString, Subscription, WeakEntity, Window,
 };
 use serde_json::{json, Value};
 
@@ -22,6 +22,7 @@ use crate::adapters::automation;
 use crate::adapters::automation::actions::generate_workspace_id;
 use crate::adapters::automation::events;
 use crate::adapters::daemon::{DaemonClient, DaemonEvent};
+use crate::adapters::trackpad_zoom::{self, TrackpadZoomEvent};
 use crate::domain::panel_placement::{
     place_panel, AdjacentPanelDirection, PanelPlacementItem, PanelSize, Rect,
 };
@@ -67,6 +68,9 @@ pub struct NativeApp {
     /// when bind/start failed — in which case we still want the app to
     /// run, just without the test sidecar.
     _automation: Option<automation::server::Handle>,
+    /// Native macOS magnify gesture bridge. GPUI 0.2 does not surface this
+    /// event type, so the adapter forwards it into the canvas explicitly.
+    _trackpad_zoom: Option<trackpad_zoom::Handle>,
 }
 
 pub struct PanelGeometryUpdate {
@@ -85,6 +89,8 @@ impl NativeApp {
         let app_handle_canvas_close = app_handle.clone();
         let app_handle_canvas_split = app_handle.clone();
         let app_handle_canvas_geometry = app_handle.clone();
+        let (trackpad_tx, trackpad_rx) = async_channel::unbounded();
+        let trackpad_zoom = trackpad_zoom::install(trackpad_tx);
         let canvas = cx.new(|cx| {
             WorkspaceCanvas::new(
                 cx,
@@ -307,6 +313,20 @@ impl NativeApp {
         } else {
             None
         };
+        let weak_app = cx.weak_entity();
+        let mut async_cx = cx.to_async();
+        cx.foreground_executor()
+            .spawn(async move {
+                while let Ok(event) = trackpad_rx.recv().await {
+                    let Some(app) = weak_app.upgrade() else {
+                        break;
+                    };
+                    let _ = app.update(&mut async_cx, |app: &mut NativeApp, cx| {
+                        app.handle_trackpad_zoom(event, cx);
+                    });
+                }
+            })
+            .detach();
 
         Self {
             daemon,
@@ -318,7 +338,16 @@ impl NativeApp {
             canvas_needs_refocus: false,
             _canvas_subscription: canvas_subscription,
             _automation: automation_handle,
+            _trackpad_zoom: trackpad_zoom,
         }
+    }
+
+    fn handle_trackpad_zoom(&mut self, event: TrackpadZoomEvent, cx: &mut Context<Self>) {
+        let position = point(px(event.window_x), px(event.window_y));
+        let factor = crate::views::canvas::magnify_zoom_factor(event.magnification);
+        self.canvas.update(cx, |canvas, cx| {
+            canvas.zoom_at_window_position(position, factor, cx);
+        });
     }
 
     /// Apply a zoom level to the canvas, centered on the canvas

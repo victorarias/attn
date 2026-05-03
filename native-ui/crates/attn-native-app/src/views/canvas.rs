@@ -68,6 +68,10 @@ const SNAP_LOCK_SCREEN_THRESHOLD: f32 = 10.0; // screen-space pixels
 const SELECTION_GLINT_PERIOD_MS: u64 = 2_800;
 const SELECTION_GLINT_FRAME_MS: u64 = 33;
 const SELECTION_GLINT_SAMPLES: usize = 18;
+const WHEEL_ZOOM_STEP: f32 = 1.08;
+const PRECISE_SCROLL_ZOOM_SPEED: f32 = 0.01;
+const MAGNIFY_ZOOM_MIN_FACTOR: f32 = 0.75;
+const MAGNIFY_ZOOM_MAX_FACTOR: f32 = 4.0 / 3.0;
 
 // ── Drag/resize state ─────────────────────────────────────────────────────────
 
@@ -213,6 +217,36 @@ impl WorkspaceCanvas {
             }
         }
         cx.notify();
+    }
+
+    /// Apply a native trackpad magnification delta at a window-space point.
+    /// GPUI 0.2 does not surface AppKit magnify events, so the macOS adapter
+    /// forwards only the normalized gesture data here.
+    pub fn zoom_at_window_position(
+        &mut self,
+        window_position: gpui::Point<Pixels>,
+        factor: f32,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !factor.is_finite() || factor <= 0.0 {
+            return false;
+        }
+        let Some(bounds) = self.bounds.get() else {
+            return false;
+        };
+        if !bounds.contains(&window_position) {
+            return false;
+        }
+
+        let before = self.viewport.zoom;
+        self.viewport = self
+            .viewport
+            .zoom_toward(self.local_pos(window_position), factor);
+        let changed = (self.viewport.zoom - before).abs() >= 0.001;
+        if changed {
+            cx.notify();
+        }
+        changed
     }
 
     pub fn placement_frame(&self) -> PlacementFrame {
@@ -897,11 +931,11 @@ impl WorkspaceCanvas {
             ScrollDelta::Lines(p) => (p.x * 20.0, p.y * 20.0),
         };
 
-        if event.modifiers.platform {
+        if event.modifiers.platform || (event.modifiers.control && event.delta.precise()) {
             // Cmd+scroll → zoom toward cursor. Translate to canvas-local
             // space so the focal point lands under the actual cursor and
             // not 240px to its right.
-            let factor = if dy > 0.0 { 1.08 } else { 1.0 / 1.08 };
+            let factor = scroll_zoom_factor(dy, event.delta.precise());
             self.viewport = self
                 .viewport
                 .zoom_toward(self.local_pos(event.position), factor);
@@ -911,6 +945,23 @@ impl WorkspaceCanvas {
             self.viewport.origin.y -= dy / self.viewport.zoom;
         }
         cx.notify();
+    }
+}
+
+pub fn magnify_zoom_factor(magnification: f32) -> f32 {
+    if !magnification.is_finite() {
+        return 1.0;
+    }
+    (1.0 + magnification).clamp(MAGNIFY_ZOOM_MIN_FACTOR, MAGNIFY_ZOOM_MAX_FACTOR)
+}
+
+fn scroll_zoom_factor(dy: f32, precise: bool) -> f32 {
+    if precise {
+        (dy * PRECISE_SCROLL_ZOOM_SPEED).exp()
+    } else if dy > 0.0 {
+        WHEEL_ZOOM_STEP
+    } else {
+        1.0 / WHEEL_ZOOM_STEP
     }
 }
 
@@ -1696,6 +1747,28 @@ mod tests {
         assert_eq!(snap_threshold_world(1.0), SNAP_LOCK_SCREEN_THRESHOLD);
         assert_eq!(snap_threshold_world(0.5), SNAP_LOCK_SCREEN_THRESHOLD * 2.0);
         assert_eq!(snap_threshold_world(2.0), SNAP_LOCK_SCREEN_THRESHOLD / 2.0);
+    }
+
+    #[test]
+    fn wheel_zoom_uses_discrete_step_for_mouse_wheel() {
+        assert_eq!(scroll_zoom_factor(1.0, false), WHEEL_ZOOM_STEP);
+        assert_eq!(scroll_zoom_factor(-1.0, false), 1.0 / WHEEL_ZOOM_STEP);
+    }
+
+    #[test]
+    fn precise_scroll_zoom_scales_with_trackpad_delta() {
+        assert!(scroll_zoom_factor(12.0, true) > scroll_zoom_factor(4.0, true));
+        assert!(scroll_zoom_factor(12.0, true) > 1.0);
+        assert!(scroll_zoom_factor(-12.0, true) < 1.0);
+    }
+
+    #[test]
+    fn magnify_zoom_factor_tracks_native_delta_and_clamps_extremes() {
+        assert_eq!(magnify_zoom_factor(0.10), 1.10);
+        assert_eq!(magnify_zoom_factor(-0.10), 0.90);
+        assert_eq!(magnify_zoom_factor(-2.0), MAGNIFY_ZOOM_MIN_FACTOR);
+        assert_eq!(magnify_zoom_factor(2.0), MAGNIFY_ZOOM_MAX_FACTOR);
+        assert_eq!(magnify_zoom_factor(f32::NAN), 1.0);
     }
 
     #[test]
