@@ -224,16 +224,60 @@ async function checkPlumbing(conn, manifest) {
 
   const state = await conn.request('get_state');
   if (!state.ok) fail(`get_state: ${state.error}`);
-  for (const field of ['workspaces', 'sessions', 'canvas', 'daemon', 'selected_workspace_id']) {
+  for (const field of ['workspaces', 'sessions', 'canvas', 'sidebar', 'settings_open', 'daemon', 'selected_workspace_id']) {
     if (!(field in state.result)) fail(`get_state missing field: ${field}`);
   }
+  if (state.result.sidebar.collapsed !== false || state.result.sidebar.width !== 240) {
+    fail(`initial sidebar state wrong: ${JSON.stringify(state.result.sidebar)}`);
+  }
+  const collapsed = await conn.request('set_sidebar_collapsed', { collapsed: true });
+  if (!collapsed.ok) fail(`set_sidebar_collapsed true: ${collapsed.error}`);
+  const collapsedState = await conn.request('get_state');
+  if (!collapsedState.ok) fail(`get_state after sidebar collapse: ${collapsedState.error}`);
+  if (collapsedState.result.sidebar.collapsed !== true || collapsedState.result.sidebar.width !== 52) {
+    fail(`collapsed sidebar state wrong: ${JSON.stringify(collapsedState.result.sidebar)}`);
+  }
+  const expanded = await conn.request('set_sidebar_collapsed', { collapsed: false });
+  if (!expanded.ok) fail(`set_sidebar_collapsed false: ${expanded.error}`);
+  const openedSettings = await conn.request('click_sidebar_settings');
+  if (!openedSettings.ok) fail(`click_sidebar_settings: ${openedSettings.error}`);
+  const settingsOpenState = await conn.request('get_state');
+  if (!settingsOpenState.ok) fail(`get_state after click_sidebar_settings: ${settingsOpenState.error}`);
+  if (settingsOpenState.result.settings_open !== true) {
+    fail(`settings dialog did not open from sidebar click: ${JSON.stringify(settingsOpenState.result)}`);
+  }
+  const clickedSidebarMode = await conn.request('click_settings_sidebar_mode');
+  if (!clickedSidebarMode.ok) fail(`click_settings_sidebar_mode: ${clickedSidebarMode.error}`);
+  const settingsToggledState = await conn.request('get_state');
+  if (!settingsToggledState.ok) fail(`get_state after click_settings_sidebar_mode: ${settingsToggledState.error}`);
+  if (settingsToggledState.result.sidebar.collapsed !== true) {
+    fail(`settings sidebar mode click did not collapse sidebar: ${JSON.stringify(settingsToggledState.result.sidebar)}`);
+  }
+  const closedSettings = await conn.request('click_settings_close');
+  if (!closedSettings.ok) fail(`click_settings_close: ${closedSettings.error}`);
+  const settingsClosedState = await conn.request('get_state');
+  if (!settingsClosedState.ok) fail(`get_state after click_settings_close: ${settingsClosedState.error}`);
+  if (settingsClosedState.result.settings_open !== false) {
+    fail(`settings dialog did not close from close click: ${JSON.stringify(settingsClosedState.result)}`);
+  }
+  const expandedAfterSettings = await conn.request('set_sidebar_collapsed', { collapsed: false });
+  if (!expandedAfterSettings.ok) fail(`set_sidebar_collapsed after settings click-through: ${expandedAfterSettings.error}`);
+  const shortcutSettings = await conn.request('press_canvas_cmd_comma');
+  if (!shortcutSettings.ok) fail(`press_canvas_cmd_comma: ${shortcutSettings.error}`);
+  const shortcutSettingsState = await conn.request('get_state');
+  if (!shortcutSettingsState.ok) fail(`get_state after press_canvas_cmd_comma: ${shortcutSettingsState.error}`);
+  if (shortcutSettingsState.result.settings_open !== true) {
+    fail(`Cmd+, did not open settings: ${JSON.stringify(shortcutSettingsState.result)}`);
+  }
+  const closedShortcutSettings = await conn.request('click_settings_close');
+  if (!closedShortcutSettings.ok) fail(`click_settings_close after Cmd+,: ${closedShortcutSettings.error}`);
   const list = await conn.request('list_sessions');
   if (!list.ok) fail(`list_sessions: ${list.error}`);
   if (list.result.length !== state.result.sessions.length) {
     fail(`list_sessions/get_state.sessions length mismatch`);
   }
   info(
-    `  state shape ok (workspaces=${state.result.workspaces.length} sessions=${state.result.sessions.length})`,
+    `  state shape ok (workspaces=${state.result.workspaces.length} sessions=${state.result.sessions.length}, sidebar toggles + settings click-through + Cmd+,)`,
   );
 
   // tail_events sanity: shape is right and cursor advances. Other tests

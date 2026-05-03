@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use gpui::{
     canvas, div, point, prelude::*, px, AnyElement, App, Bounds, BoxShadow, Context, Entity,
-    FocusHandle, Focusable, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    FocusHandle, Focusable, KeyDownEvent, Keystroke, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, ParentElement, Pixels, Render, ScrollDelta, ScrollWheelEvent, SharedString,
     Subscription, Window,
 };
@@ -40,6 +40,10 @@ pub type SplitShellHandler = dyn Fn(SharedString, SharedString, AdjacentPanelDir
 /// final daemon panel id + geometry to the app coordinator.
 pub type PanelGeometryCommitHandler =
     dyn Fn(SharedString, SharedString, f32, f32, f32, f32, &mut Window, &mut gpui::App) + 'static;
+
+/// Callback invoked by global canvas shortcuts that affect app chrome.
+pub type ToggleSidebarHandler = dyn Fn(&mut Window, &mut gpui::App) + 'static;
+pub type OpenSettingsHandler = dyn Fn(&mut Window, &mut gpui::App) + 'static;
 
 use serde_json::{json, Value};
 
@@ -146,6 +150,8 @@ pub struct WorkspaceCanvas {
     on_close_session: Box<CloseSessionHandler>,
     on_split_shell: Box<SplitShellHandler>,
     on_panel_geometry_commit: Box<PanelGeometryCommitHandler>,
+    on_toggle_sidebar: Box<ToggleSidebarHandler>,
+    on_open_settings: Box<OpenSettingsHandler>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -169,6 +175,8 @@ impl WorkspaceCanvas {
             ) + 'static,
         on_panel_geometry_commit: impl Fn(SharedString, SharedString, f32, f32, f32, f32, &mut Window, &mut gpui::App)
             + 'static,
+        on_toggle_sidebar: impl Fn(&mut Window, &mut gpui::App) + 'static,
+        on_open_settings: impl Fn(&mut Window, &mut gpui::App) + 'static,
     ) -> Self {
         let fps = if env_flag("ATTN_NATIVE_FPS") {
             Some(FpsCounter::new())
@@ -194,6 +202,8 @@ impl WorkspaceCanvas {
             on_close_session: Box::new(on_close_session),
             on_split_shell: Box::new(on_split_shell),
             on_panel_geometry_commit: Box::new(on_panel_geometry_commit),
+            on_toggle_sidebar: Box::new(on_toggle_sidebar),
+            on_open_settings: Box::new(on_open_settings),
         }
     }
 
@@ -735,6 +745,14 @@ impl WorkspaceCanvas {
                 cx.stop_propagation();
                 self.split_shell_for_selected(AdjacentPanelDirection::Right, window, cx);
             }
+            "b" if event.keystroke.modifiers.platform => {
+                cx.stop_propagation();
+                (self.on_toggle_sidebar)(window, cx);
+            }
+            "," if event.keystroke.modifiers.platform => {
+                cx.stop_propagation();
+                (self.on_open_settings)(window, cx);
+            }
             "enter" if event.keystroke.modifiers.platform && event.keystroke.modifiers.shift => {
                 cx.stop_propagation();
                 self.toggle_selected_panel_fullscreen(window, cx);
@@ -917,9 +935,23 @@ impl WorkspaceCanvas {
                 }
             }
         }
+
         self.drag_state = DragState::Idle;
         self.snap_lines.clear();
         cx.notify();
+    }
+
+    pub fn inject_keystroke(
+        &mut self,
+        keystroke: Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let event = KeyDownEvent {
+            keystroke,
+            is_held: false,
+        };
+        self.on_key_down(&event, window, cx);
     }
 
     fn on_scroll_wheel(

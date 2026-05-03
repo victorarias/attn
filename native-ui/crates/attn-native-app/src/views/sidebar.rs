@@ -13,9 +13,11 @@ use crate::state::workspace::Workspace;
 use crate::theme;
 
 pub const SIDEBAR_WIDTH: f32 = 240.0;
+pub const SIDEBAR_COLLAPSED_WIDTH: f32 = 52.0;
 
 type SelectHandler = dyn Fn(SharedString, &mut Window, &mut gpui::App) + 'static;
 type CreateHandler = dyn Fn(&mut Window, &mut gpui::App) + 'static;
+type SettingsHandler = dyn Fn(bool, &mut Window, &mut gpui::App) + 'static;
 type DestroyHandler =
     dyn Fn(SharedString, &mut Window, &mut gpui::App) -> Result<(), String> + 'static;
 
@@ -30,11 +32,15 @@ pub struct Sidebar {
     /// directory picker → daemon `register_workspace` flow on the app
     /// side; the sidebar just dispatches.
     on_create: Box<CreateHandler>,
+    /// Callback fired by the bottom cog. `NativeApp` owns the settings
+    /// surface; the sidebar only exposes the affordance.
+    on_open_settings: Box<SettingsHandler>,
     /// Callback fired after the user confirms a row's delete affordance.
     /// Sends `unregister_workspace` for the given id. Daemon cascades to
     /// member sessions, so callers don't need a separate session-cleanup
     /// step.
     on_destroy: Box<DestroyHandler>,
+    collapsed: bool,
     confirm_destroy_id: Option<SharedString>,
     destroying_id: Option<SharedString>,
     destroy_error: Option<(SharedString, SharedString)>,
@@ -46,6 +52,7 @@ impl Sidebar {
         workspaces: Vec<Entity<Workspace>>,
         on_select: impl Fn(SharedString, &mut Window, &mut gpui::App) + 'static,
         on_create: impl Fn(&mut Window, &mut gpui::App) + 'static,
+        on_open_settings: impl Fn(bool, &mut Window, &mut gpui::App) + 'static,
         on_destroy: impl Fn(SharedString, &mut Window, &mut gpui::App) -> Result<(), String> + 'static,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -59,7 +66,9 @@ impl Sidebar {
             selected_id: None,
             on_select: Box::new(on_select),
             on_create: Box::new(on_create),
+            on_open_settings: Box::new(on_open_settings),
             on_destroy: Box::new(on_destroy),
+            collapsed: false,
             confirm_destroy_id: None,
             destroying_id: None,
             destroy_error: None,
@@ -98,6 +107,42 @@ impl Sidebar {
             self.selected_id = id;
             cx.notify();
         }
+    }
+
+    pub fn is_collapsed(&self) -> bool {
+        self.collapsed
+    }
+
+    pub fn set_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        if self.collapsed != collapsed {
+            self.collapsed = collapsed;
+            if collapsed {
+                self.confirm_destroy_id = None;
+                self.destroy_error = None;
+            }
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_collapsed(&mut self, cx: &mut Context<Self>) -> bool {
+        let collapsed = !self.collapsed;
+        self.set_collapsed(collapsed, cx);
+        collapsed
+    }
+
+    pub fn automation_snapshot(&self) -> serde_json::Value {
+        serde_json::json!({
+            "collapsed": self.collapsed,
+            "width": if self.collapsed {
+                SIDEBAR_COLLAPSED_WIDTH
+            } else {
+                SIDEBAR_WIDTH
+            },
+        })
+    }
+
+    pub fn click_settings_for_automation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        (self.on_open_settings)(self.collapsed, window, cx);
     }
 
     fn clear_destroy_state_for(&mut self, id: &str) {
@@ -150,24 +195,31 @@ impl Render for Sidebar {
                     }
                 });
                 let click_id = id.clone();
-                let mut row_div = workspace_row(title, status, selected, confirming, destroying)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            let id = click_id.clone();
-                            let cleared_destroy_state =
-                                this.confirm_destroy_id.is_some() || this.destroy_error.is_some();
-                            this.confirm_destroy_id = None;
-                            this.destroy_error = None;
-                            (this.on_select)(id.clone(), window, cx);
-                            this.set_selected(Some(id), cx);
-                            if cleared_destroy_state {
-                                cx.notify();
-                            }
-                        }),
-                    );
+                let mut row_div = if self.collapsed {
+                    workspace_row_collapsed(status, selected, confirming, destroying)
+                } else {
+                    workspace_row(title, status, selected, confirming, destroying)
+                }
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        let id = click_id.clone();
+                        let cleared_destroy_state =
+                            this.confirm_destroy_id.is_some() || this.destroy_error.is_some();
+                        this.confirm_destroy_id = None;
+                        this.destroy_error = None;
+                        (this.on_select)(id.clone(), window, cx);
+                        this.set_selected(Some(id), cx);
+                        if cleared_destroy_state {
+                            cx.notify();
+                        }
+                    }),
+                );
 
-                if confirming {
+                if self.collapsed {
+                    // Destructive actions stay in the expanded rail where
+                    // the confirm/cancel copy has room to be explicit.
+                } else if confirming {
                     let cancel_id = id.clone();
                     let confirm_id = id.clone();
                     row_div = row_div
@@ -233,44 +285,124 @@ impl Render for Sidebar {
             .collect();
 
         let count = self.workspaces.len();
-        div()
-            .w(px(SIDEBAR_WIDTH))
+        let width = if self.collapsed {
+            SIDEBAR_COLLAPSED_WIDTH
+        } else {
+            SIDEBAR_WIDTH
+        };
+        let root = div()
+            .w(px(width))
             .h_full()
             .bg(theme::ink::nocturne())
             .border_r_1()
             .border_color(theme::ink::firm())
             .flex()
             .flex_col()
-            .child(sidebar_header(count))
-            .children(rows)
-            .child(create_row().on_mouse_down(
+            .child(sidebar_header(count, self.collapsed).on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    (this.on_create)(window, cx);
+                cx.listener(|this, _, _, cx| {
+                    this.toggle_collapsed(cx);
                 }),
             ))
+            .child(div().flex_1().flex().flex_col().children(rows));
+
+        let create = create_row(self.collapsed).on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, window, cx| {
+                (this.on_create)(window, cx);
+            }),
+        );
+        let settings = settings_button(self.collapsed).on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, window, cx| {
+                (this.on_open_settings)(this.collapsed, window, cx);
+            }),
+        );
+
+        if self.collapsed {
+            root.child(
+                div()
+                    .w_full()
+                    .pb_3()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .border_t_1()
+                    .border_color(theme::line::weak())
+                    .child(create)
+                    .child(settings),
+            )
+        } else {
+            root.child(create).child(
+                div()
+                    .w_full()
+                    .px_3()
+                    .py_3()
+                    .border_t_1()
+                    .border_color(theme::line::weak())
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .child(settings),
+            )
+        }
     }
 }
 
-/// Section header at the top of the workspace rail. Mono label on the
-/// left, count on the right — pulls from the language defined in plate
-/// 04 (sidebar) of the design system.
-fn sidebar_header(count: usize) -> impl IntoElement {
+/// Section header at the top of the workspace rail. Expanded mode shows
+/// the ledger label and count; collapsed mode becomes a compact toggle
+/// cap so the narrow rail still has a clear affordance.
+fn sidebar_header(count: usize, collapsed: bool) -> gpui::Div {
+    if collapsed {
+        return div()
+            .w_full()
+            .h(px(42.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .border_b_1()
+            .border_color(theme::line::weak())
+            .text_color(theme::moon::bone())
+            .text_size(px(16.0))
+            .child(SharedString::from(">"));
+    }
+
     div()
         .w_full()
         .px_4()
         .pt_3()
         .pb_2()
         .flex()
-        .items_baseline()
+        .items_center()
         .justify_between()
         .text_color(theme::moon::bone())
         .text_size(px(10.))
-        .child(SharedString::from("WORKSPACES"))
         .child(
             div()
-                .text_color(theme::moon::parchment())
-                .child(SharedString::from(format!("{:02}", count))),
+                .flex()
+                .items_baseline()
+                .gap_2()
+                .child(SharedString::from("WORKSPACES"))
+                .child(
+                    div()
+                        .text_color(theme::moon::parchment())
+                        .child(SharedString::from(format!("{:02}", count))),
+                ),
+        )
+        .child(
+            div()
+                .w(px(24.0))
+                .h(px(24.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(theme::radius::R0))
+                .border_1()
+                .border_color(theme::line::mild())
+                .text_color(theme::moon::bone())
+                .text_size(px(13.0))
+                .child(SharedString::from("<")),
         )
 }
 
@@ -328,6 +460,49 @@ fn workspace_row(
         .text_size(px(13.))
         .child(status_badge(status))
         .child(div().flex_1().truncate().child(title))
+}
+
+fn workspace_row_collapsed(
+    status: WorkspaceStatus,
+    selected: bool,
+    confirming_delete: bool,
+    destroying: bool,
+) -> gpui::Div {
+    let bg = if confirming_delete {
+        theme::surface::danger_row()
+    } else if destroying {
+        theme::surface::pending_row()
+    } else if selected {
+        theme::surface::selected_row()
+    } else {
+        theme::ink::nocturne()
+    };
+    let accent = if selected { theme::sodium::vapor() } else { bg };
+    div()
+        .w_full()
+        .h(px(34.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(bg)
+        .border_l_2()
+        .border_color(accent)
+        .child(
+            div()
+                .w(px(16.0))
+                .h(px(16.0))
+                .rounded_full()
+                .border_1()
+                .border_color(if selected {
+                    theme::sodium::deep()
+                } else {
+                    theme::line::mild()
+                })
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(status_badge(status)),
+        )
 }
 
 /// Trailing delete affordance on each row. Always visible (no hover gate
@@ -390,7 +565,11 @@ fn destroy_error_row(message: SharedString) -> gpui::Div {
 /// from real workspaces so the eye reads it as an action, not a row to
 /// select. A faint top divider separates the "live workspaces" stack
 /// from this "open new" affordance, matching the sidebar plate.
-fn create_row() -> gpui::Div {
+fn create_row(collapsed: bool) -> gpui::Div {
+    if collapsed {
+        return icon_button("+");
+    }
+
     div()
         .w_full()
         .pt_2()
@@ -413,6 +592,42 @@ fn create_row() -> gpui::Div {
                 .child(create_glyph())
                 .child(SharedString::from("New Workspace")),
         )
+}
+
+fn settings_button(collapsed: bool) -> gpui::Div {
+    if collapsed {
+        icon_button("⚙")
+    } else {
+        div()
+            .w(px(28.0))
+            .h(px(28.0))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(theme::radius::R0))
+            .border_1()
+            .border_color(theme::line::mild())
+            .text_color(theme::moon::bone())
+            .text_size(px(15.0))
+            .child(SharedString::from("⚙"))
+    }
+}
+
+fn icon_button(label: &'static str) -> gpui::Div {
+    div()
+        .w(px(32.0))
+        .h(px(32.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(theme::radius::R1))
+        .border_1()
+        .border_color(theme::line::mild())
+        .text_color(theme::moon::bone())
+        .text_size(px(16.0))
+        .child(SharedString::from(label))
 }
 
 /// Leading "+" glyph for the create row. Sits in the column where status

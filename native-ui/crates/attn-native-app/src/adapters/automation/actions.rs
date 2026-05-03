@@ -94,6 +94,11 @@ async fn handle_action(
         "read_pane_text" => read_pane_text(app, cx, payload),
         "tail_events" => tail_events(payload),
         "set_zoom" => set_zoom(app, cx, payload),
+        "set_sidebar_collapsed" => set_sidebar_collapsed(app, cx, payload),
+        "click_sidebar_settings" => click_sidebar_settings(app, cx),
+        "click_settings_sidebar_mode" => click_settings_sidebar_mode(app, cx),
+        "click_settings_close" => click_settings_close(app, cx),
+        "press_canvas_cmd_comma" => press_canvas_cmd_comma(app, cx),
         "create_workspace" => create_workspace(app, cx, payload),
         "destroy_workspace" => destroy_workspace(app, cx, payload),
         "spawn_session" => spawn_session(app, cx, payload),
@@ -101,6 +106,136 @@ async fn handle_action(
         "unregister_session" => unregister_session(app, cx, payload),
         _ => Err(format!("unknown action: {action}")),
     }
+}
+
+fn press_canvas_cmd_comma(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
+    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    let canvas = cx
+        .read_entity(&entity, |app: &NativeApp, _cx: &App| app.canvas_entity())
+        .map_err(|e| format!("read entity: {e}"))?;
+    let window = cx
+        .update(|app: &mut App| app.windows().into_iter().next())
+        .map_err(|e| format!("list windows: {e}"))?
+        .ok_or("no open windows")?;
+
+    cx.update_window(
+        window,
+        move |_root: AnyView, window: &mut Window, app: &mut App| {
+            canvas.update(app, |canvas, cx| {
+                canvas.inject_keystroke(
+                    Keystroke {
+                        key: ",".into(),
+                        modifiers: Modifiers {
+                            platform: true,
+                            ..Modifiers::default()
+                        },
+                        key_char: None,
+                    },
+                    window,
+                    cx,
+                );
+            });
+        },
+    )
+    .map_err(|e| format!("update window: {e}"))?;
+
+    Ok(json!({ "shortcut": "cmd+," }))
+}
+
+fn click_sidebar_settings(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
+    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    let sidebar = cx
+        .read_entity(&entity, |app: &NativeApp, _cx: &App| app.sidebar_entity())
+        .map_err(|e| format!("read entity: {e}"))?;
+    let window = cx
+        .update(|app: &mut App| app.windows().into_iter().next())
+        .map_err(|e| format!("list windows: {e}"))?
+        .ok_or("no open windows")?;
+
+    cx.update_window(
+        window,
+        move |_root: AnyView, window: &mut Window, app: &mut App| {
+            sidebar.update(app, |sidebar, cx| {
+                sidebar.click_settings_for_automation(window, cx);
+            });
+        },
+    )
+    .map_err(|e| format!("update window: {e}"))?;
+
+    Ok(json!({ "settings_open": true }))
+}
+
+fn click_settings_sidebar_mode(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+) -> Result<Value, String> {
+    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    let settings_page = cx
+        .read_entity(&entity, |app: &NativeApp, _cx: &App| {
+            app.settings_page_entity()
+        })
+        .map_err(|e| format!("read entity: {e}"))?
+        .ok_or("settings page is not open")?;
+    let window = cx
+        .update(|app: &mut App| app.windows().into_iter().next())
+        .map_err(|e| format!("list windows: {e}"))?
+        .ok_or("no open windows")?;
+
+    cx.update_window(
+        window,
+        move |_root: AnyView, window: &mut Window, app: &mut App| {
+            settings_page.update(app, |settings, cx| {
+                settings.click_sidebar_mode_for_automation(window, cx);
+            });
+        },
+    )
+    .map_err(|e| format!("update window: {e}"))?;
+
+    Ok(json!({ "clicked": "settings_sidebar_mode" }))
+}
+
+fn click_settings_close(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {
+    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    let settings_page = cx
+        .read_entity(&entity, |app: &NativeApp, _cx: &App| {
+            app.settings_page_entity()
+        })
+        .map_err(|e| format!("read entity: {e}"))?
+        .ok_or("settings page is not open")?;
+    let window = cx
+        .update(|app: &mut App| app.windows().into_iter().next())
+        .map_err(|e| format!("list windows: {e}"))?
+        .ok_or("no open windows")?;
+
+    cx.update_window(
+        window,
+        move |_root: AnyView, window: &mut Window, app: &mut App| {
+            settings_page.update(app, |settings, cx| {
+                settings.click_close_for_automation(window, cx);
+            });
+        },
+    )
+    .map_err(|e| format!("update window: {e}"))?;
+
+    Ok(json!({ "settings_open": false }))
+}
+
+fn set_sidebar_collapsed(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let collapsed = payload
+        .get("collapsed")
+        .and_then(Value::as_bool)
+        .ok_or("payload.collapsed (bool) is required")?;
+    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    cx.update_entity(&entity, |app, cx| {
+        app.set_sidebar_collapsed(collapsed, cx);
+    })
+    .map_err(|e| format!("update entity: {e}"))?;
+
+    Ok(json!({ "collapsed": collapsed }))
 }
 
 fn focus_panel(

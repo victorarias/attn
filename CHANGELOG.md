@@ -9,8 +9,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-05-03]
 
 ### Added
+- **Native Sidebar Settings Entry**: The native workspace sidebar now has a bottom settings cog and `Cmd+,` shortcut that open a native Settings surface with a sidebar display control.
 - **Native Canvas Trackpad Zoom**: The native canvas now responds to trackpad pinch/magnify gestures and precise control-scroll zoom, keeping the cursor's world point anchored while zooming.
 - **Native Canvas Panel Status**: Native canvas panel headers now show each session's live state, including working, waiting for input, approval-needed, idle, and long-run review status.
+
+### Changed
+- **Native Sidebar Collapse**: The native workspace sidebar can now collapse with `Cmd+B`, keeping workspace status colors visible in the narrow rail while freeing canvas space.
 
 ### Fixed
 - **Native Canvas Shell Splits**: `Cmd+D` and `Cmd+Shift+D` now skip over already-occupied adjacent panels instead of opening a new Shell panel on top of an existing neighbor.
