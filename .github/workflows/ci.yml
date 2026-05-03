@@ -195,6 +195,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.3'
+
       - name: Set up Zig
         uses: mlugg/setup-zig@v2
         with:
