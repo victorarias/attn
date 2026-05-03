@@ -933,6 +933,34 @@ async function checkWorkspaceLifecycle(conn) {
   }
 }
 
+function assertPanelMirrorsSessionState(state, sessionId) {
+  const session = state.sessions?.find((item) => item.id === sessionId);
+  if (!session) fail(`session ${sessionId} missing from get_state`);
+
+  const panel = state.workspaces
+    ?.flatMap((workspace) => workspace.panels || [])
+    .find((item) => item.session_id === sessionId);
+  if (!panel) fail(`panel for session ${sessionId} missing from get_state`);
+
+  if (panel.session_state !== session.state) {
+    fail(
+      `panel/session state mismatch for ${sessionId}: panel=${panel.session_state} session=${session.state}`,
+    );
+  }
+  if (typeof panel.needs_review_after_long_run !== 'boolean') {
+    fail(`panel missing boolean needs_review_after_long_run: ${JSON.stringify(panel)}`);
+  }
+
+  const expectedNeedsReview = Boolean(session.needs_review_after_long_run);
+  if (panel.needs_review_after_long_run !== expectedNeedsReview) {
+    fail(
+      `panel/session review flag mismatch for ${sessionId}: panel=${panel.needs_review_after_long_run} session=${expectedNeedsReview}`,
+    );
+  }
+
+  return panel;
+}
+
 /**
  * Round-trip a session through the new `spawn_session` and
  * `unregister_session` automation actions — the same wire path the
@@ -1000,6 +1028,11 @@ async function checkSessionLifecycle(conn) {
       throw error;
     }
     info(`  panel + spawn ack observed`);
+
+    const stateAfterSpawn = await conn.request('get_state');
+    if (!stateAfterSpawn.ok) fail(`get_state after spawn_session: ${stateAfterSpawn.error}`);
+    const panel = assertPanelMirrorsSessionState(stateAfterSpawn.result, sessionId);
+    info(`  panel status snapshot ok (${panel.session_state})`);
 
     const cursorBeforeKill = (await tailEvents(conn)).next_cursor;
     const killed = await conn.request('unregister_session', { session_id: sessionId });

@@ -96,5 +96,7 @@ fn panel_snapshot(panel: &Panel) -> Value {
         "world_y": panel.world_y,
         "width": panel.width,
         "height": panel.height,
+        "session_state": panel.session_state.to_string(),
+        "needs_review_after_long_run": panel.needs_review_after_long_run,
     })
 }

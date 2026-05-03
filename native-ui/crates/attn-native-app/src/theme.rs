@@ -412,6 +412,21 @@ pub fn workspace_status_color(status: attn_protocol::WorkspaceStatus) -> Rgba {
     }
 }
 
+/// Resolve the classification hue for a `SessionState`. `unknown` is
+/// deliberately error-coloured because it means the daemon/client cannot
+/// classify where keyboard attention belongs.
+pub fn session_state_color(status: attn_protocol::SessionState) -> Rgba {
+    use attn_protocol::SessionState;
+    match status {
+        SessionState::Launching => state::launching(),
+        SessionState::Working => state::working(),
+        SessionState::WaitingInput => state::waiting(),
+        SessionState::PendingApproval => state::approval(),
+        SessionState::Idle => state::idle(),
+        SessionState::Unknown => state::error(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,5 +506,26 @@ mod tests {
                 assert_ne!(a, b, "state hue collision: {:#08x} vs {:#08x}", a, b);
             }
         }
+    }
+
+    #[test]
+    fn session_state_mapping_covers_every_wire_state() {
+        use attn_protocol::SessionState;
+
+        assert_eq!(
+            session_state_color(SessionState::Launching),
+            state::launching()
+        );
+        assert_eq!(session_state_color(SessionState::Working), state::working());
+        assert_eq!(
+            session_state_color(SessionState::WaitingInput),
+            state::waiting()
+        );
+        assert_eq!(
+            session_state_color(SessionState::PendingApproval),
+            state::approval()
+        );
+        assert_eq!(session_state_color(SessionState::Idle), state::idle());
+        assert_eq!(session_state_color(SessionState::Unknown), state::error());
     }
 }

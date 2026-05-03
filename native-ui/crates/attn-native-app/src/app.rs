@@ -1140,6 +1140,9 @@ impl NativeApp {
                             panel.world_y = daemon_panel.world_y;
                             panel.width = daemon_panel.width;
                             panel.height = daemon_panel.height;
+                            panel.session_state = session.state;
+                            panel.needs_review_after_long_run =
+                                session.needs_review_after_long_run.unwrap_or(false);
                             cx.notify();
                         }
                     });
@@ -1214,6 +1217,10 @@ impl NativeApp {
                     width,
                     height,
                     session_id: SharedString::from(session_id.clone()),
+                    session_state: session.state,
+                    needs_review_after_long_run: session
+                        .needs_review_after_long_run
+                        .unwrap_or(false),
                     view,
                 };
 
