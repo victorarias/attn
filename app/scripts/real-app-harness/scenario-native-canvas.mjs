@@ -583,6 +583,31 @@ async function checkNativeShellSplits(conn) {
     await expectSessionDirectory(conn, rightSessionId, anchorDirectory);
     await waitForCanvasPanelFocus(conn, rightSessionId, { inputFocus: true });
 
+    const cursorBeforeSecondRight = (await tailEvents(conn)).next_cursor;
+    const secondRight = await conn.request('split_shell', {
+      session_id: anchorSessionId,
+      direction: 'right',
+    });
+    if (!secondRight.ok) fail(`split_shell second right: ${secondRight.error}`);
+    const secondRightSessionId = secondRight.result.session_id;
+    const secondRightExpected = {
+      world_x: anchorRect.world_x + (anchorRect.width + 32) * 2,
+      world_y: anchorRect.world_y,
+      width: anchorRect.width,
+      height: anchorRect.height,
+    };
+    await waitForPanelGeometry(
+      conn,
+      workspaceId,
+      secondRightSessionId,
+      secondRightExpected,
+      cursorBeforeSecondRight,
+      'second right split skips occupied neighbor',
+    );
+    await expectSessionAgent(conn, secondRightSessionId, 'shell');
+    await expectSessionDirectory(conn, secondRightSessionId, anchorDirectory);
+    await waitForCanvasPanelFocus(conn, secondRightSessionId, { inputFocus: true });
+
     const cursorBeforeBottom = (await tailEvents(conn)).next_cursor;
     const bottom = await conn.request('split_shell', {
       session_id: anchorSessionId,
@@ -608,7 +633,7 @@ async function checkNativeShellSplits(conn) {
     await expectSessionDirectory(conn, bottomSessionId, anchorDirectory);
     await waitForCanvasPanelFocus(conn, bottomSessionId, { inputFocus: true });
 
-    info(`  ok (right and bottom shell splits placed adjacent to anchor cwd)`);
+    info(`  ok (right and bottom shell splits placed adjacent to anchor cwd without overlap)`);
   } finally {
     await conn.request('destroy_workspace', { id: workspaceId }).catch(() => {});
     await pollUntil(

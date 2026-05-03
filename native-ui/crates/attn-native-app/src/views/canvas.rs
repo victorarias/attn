@@ -44,7 +44,9 @@ pub type PanelGeometryCommitHandler =
 use serde_json::{json, Value};
 
 use crate::domain::panel_navigation::{navigate_panel, NavigationDirection, PanelNavItem};
-use crate::domain::panel_placement::{place_panel_adjacent, AdjacentPanelDirection, Rect};
+use crate::domain::panel_placement::{
+    place_panel_adjacent_avoiding, AdjacentPanelDirection, PanelPlacementItem, Rect,
+};
 use crate::domain::panel_snapping::{
     snap_panel_move, snap_panel_resize, PanelRect, ResizeEdges, SnapAxis, SnapLine,
 };
@@ -495,18 +497,32 @@ impl WorkspaceCanvas {
         let Some(ws) = self.selected.as_ref() else {
             return;
         };
-        let Some(panel) = self.selected_panel_snapshot(cx) else {
-            return;
+        let (workspace_id, anchor_session_id, placement) = {
+            let ws = ws.read(cx);
+            let Some(panel) = self
+                .selected_panel
+                .and_then(|id| ws.panels.iter().find(|panel| panel.id == id))
+                .cloned()
+            else {
+                return;
+            };
+            let anchor = Rect {
+                x: panel.world_x,
+                y: panel.world_y,
+                width: panel.width,
+                height: panel.height,
+            };
+            let existing = ws
+                .panels
+                .iter()
+                .map(panel_placement_item)
+                .collect::<Vec<_>>();
+            (
+                ws.id.clone(),
+                panel.session_id.clone(),
+                place_panel_adjacent_avoiding(anchor, direction, &existing),
+            )
         };
-        let workspace_id = ws.read(cx).id.clone();
-        let anchor_session_id = panel.session_id.clone();
-        let anchor = Rect {
-            x: panel.world_x,
-            y: panel.world_y,
-            width: panel.width,
-            height: panel.height,
-        };
-        let placement = place_panel_adjacent(anchor, direction);
         (self.on_split_shell)(
             workspace_id,
             anchor_session_id,
@@ -904,6 +920,18 @@ fn panel_rect(panel: &Panel) -> PanelRect {
         y: panel.world_y,
         width: panel.width,
         height: panel.height,
+    }
+}
+
+fn panel_placement_item(panel: &Panel) -> PanelPlacementItem {
+    PanelPlacementItem {
+        id: panel.id,
+        rect: Rect {
+            x: panel.world_x,
+            y: panel.world_y,
+            width: panel.width,
+            height: panel.height,
+        },
     }
 }
 

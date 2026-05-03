@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-03]
+
+### Fixed
+- **Native Canvas Shell Splits**: `Cmd+D` and `Cmd+Shift+D` now skip over already-occupied adjacent panels instead of opening a new Shell panel on top of an existing neighbor.
+
+---
+
 ## [2026-05-02]
 
 ### Changed
