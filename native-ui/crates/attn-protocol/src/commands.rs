@@ -20,6 +20,12 @@ impl GetSettingsMessage {
     }
 }
 
+impl Default for GetSettingsMessage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ListEndpointsMessage {
     pub cmd: &'static str,
@@ -30,6 +36,12 @@ impl ListEndpointsMessage {
         Self {
             cmd: "list_endpoints",
         }
+    }
+}
+
+impl Default for ListEndpointsMessage {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
