@@ -1,5 +1,3 @@
-use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use gpui::{
     div, fill, point, prelude::*, px, rgb, size, App, Bounds, Context, ElementId, Entity,
     FocusHandle, Focusable, Font, GlobalElementId, Hsla, InspectorElementId, KeyDownEvent,
@@ -19,9 +17,8 @@ pub const ROW_HEIGHT: f32 = 17.0;
 /// Default terminal colors. The chrome side of the terminal pulls from
 /// the design-system tokens (panel body = `ink::midnight`, default text
 /// = `moon::parchment`, cursor = the sodium accent — the same caret
-/// language used everywhere else). The 16-entry ANSI palette below stays
-/// fixed so external tools that paint with ANSI escapes look the way
-/// their authors intended.
+/// language used everywhere else). ANSI color resolution now comes from
+/// libghostty's render state.
 const COLOR_BG: u32 = theme::ink::MIDNIGHT_HEX;
 const COLOR_FG: u32 = theme::moon::PARCHMENT_HEX;
 /// Cursor block uses the sodium accent — same caret language as every
@@ -30,64 +27,6 @@ const COLOR_CURSOR_BG: u32 = theme::sodium::VAPOR_HEX;
 /// Inverse: text under the cursor block reads as the deepest ink so the
 /// glyph stays legible on the bright sodium fill.
 const COLOR_CURSOR_FG: u32 = theme::ink::VOID_HEX;
-
-/// 16 standard ANSI colors (normal then bright).
-const ANSI_COLORS: [u32; 16] = [
-    0x2e3436, // Black
-    0xcc0000, // Red
-    0x4e9a06, // Green
-    0xc4a000, // Yellow/Brown
-    0x3465a4, // Blue
-    0x75507b, // Magenta
-    0x06989a, // Cyan
-    0xd3d7cf, // White
-    0x555753, // Bright Black
-    0xef2929, // Bright Red
-    0x8ae234, // Bright Green
-    0xfce94f, // Bright Yellow
-    0x729fcf, // Bright Blue
-    0xad7fa8, // Bright Magenta
-    0x34e2e2, // Bright Cyan
-    0xeeeeec, // Bright White
-];
-
-fn resolve_color(color: &Color, default_color: u32) -> u32 {
-    match color {
-        Color::Named(NamedColor::Foreground) => COLOR_FG,
-        Color::Named(NamedColor::Background) => COLOR_BG,
-        Color::Named(c) => {
-            let idx = *c as usize;
-            if idx < ANSI_COLORS.len() {
-                ANSI_COLORS[idx]
-            } else {
-                default_color
-            }
-        }
-        Color::Indexed(idx) => {
-            let i = *idx as usize;
-            if i < 16 {
-                ANSI_COLORS[i]
-            } else if (16..232).contains(&i) {
-                // 6×6×6 color cube
-                let i = i - 16;
-                let b = (i % 6) as u32;
-                let g = ((i / 6) % 6) as u32;
-                let r = ((i / 36) % 6) as u32;
-                let c = |v: u32| if v == 0 { 0 } else { 55 + v * 40 };
-                (c(r) << 16) | (c(g) << 8) | c(b)
-            } else if i < 256 {
-                // Grayscale ramp
-                let v = ((i - 232) as u32) * 10 + 8;
-                (v << 16) | (v << 8) | v
-            } else {
-                default_color
-            }
-        }
-        Color::Spec(rgb_val) => {
-            ((rgb_val.r as u32) << 16) | ((rgb_val.g as u32) << 8) | (rgb_val.b as u32)
-        }
-    }
-}
 
 /// Canvas-based terminal element. Paints background quads and shaped text
 /// directly onto the GPUI scene rather than relying on div layout.
@@ -194,17 +133,15 @@ impl Element for TerminalElement {
         for (row_idx, row) in self.cells.iter().enumerate() {
             let y = origin.y + line_height * row_idx as f32;
             for (col_idx, cell) in row.iter().enumerate() {
-                // SPACER cells are covered by the preceding WIDE_CHAR cell.
-                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                // Spacer cells are covered by the paired wide cell.
+                if cell.is_spacer {
                     continue;
                 }
 
                 let bg = if cell.is_cursor {
                     COLOR_CURSOR_BG
-                } else if cell.flags.contains(Flags::INVERSE) {
-                    resolve_color(&cell.fg, COLOR_FG)
                 } else {
-                    resolve_color(&cell.bg, COLOR_BG)
+                    cell.bg
                 };
 
                 if bg == COLOR_BG {
@@ -212,7 +149,7 @@ impl Element for TerminalElement {
                 }
 
                 // Wide characters occupy two cell columns.
-                let bg_width = if cell.flags.contains(Flags::WIDE_CHAR) {
+                let bg_width = if cell.is_wide {
                     cell_width * 2.0
                 } else {
                     cell_width
@@ -237,24 +174,20 @@ impl Element for TerminalElement {
             let mut first_cell = true;
 
             for cell in row.iter() {
-                // SPACER cells have no character to render; skip them from the
-                // text string. Because WIDE_CHAR naturally advances 2× cell_width,
-                // the column positions remain correct without a placeholder.
-                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                // Spacer cells have no character to render.
+                if cell.is_spacer {
                     continue;
                 }
 
-                let ch = if cell.ch == '\0' || cell.ch == '\u{FEFF}' {
-                    ' '
+                let cell_text = if cell.text.is_empty() {
+                    " "
                 } else {
-                    cell.ch
+                    cell.text.as_str()
                 };
                 let fg = if cell.is_cursor {
                     COLOR_CURSOR_FG
-                } else if cell.flags.contains(Flags::INVERSE) {
-                    resolve_color(&cell.bg, COLOR_BG)
                 } else {
-                    resolve_color(&cell.fg, COLOR_FG)
+                    cell.fg
                 };
 
                 if first_cell {
@@ -275,8 +208,8 @@ impl Element for TerminalElement {
                     run_len = 0;
                 }
 
-                text.push(ch);
-                run_len += ch.len_utf8();
+                text.push_str(cell_text);
+                run_len += cell_text.len();
             }
 
             if run_len > 0 {
@@ -470,13 +403,20 @@ impl Render for TerminalView {
             let t = self.terminal.read(cx);
             (t.cols, t.rows, t.session_id.clone())
         };
+        let cell_width_px = (CHAR_WIDTH * self.zoom).round().max(1.0) as u32;
+        let cell_height_px = (ROW_HEIGHT * self.zoom).round().max(1.0) as u32;
         if new_cols != cur_cols || new_rows != cur_rows {
-            self.terminal
-                .update(cx, |t, _| t.resize(new_cols, new_rows));
+            self.terminal.update(cx, |t, _| {
+                t.resize(new_cols, new_rows, cell_width_px, cell_height_px)
+            });
             let _ = self
                 .daemon
                 .read(cx)
                 .send_cmd(&PtyResizeMessage::new(session_id, new_cols, new_rows));
+        } else {
+            self.terminal.update(cx, |t, _| {
+                t.resize(new_cols, new_rows, cell_width_px, cell_height_px)
+            });
         }
 
         let terminal = self.terminal.read(cx);
