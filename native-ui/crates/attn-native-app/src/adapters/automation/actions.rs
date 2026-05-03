@@ -97,6 +97,7 @@ async fn handle_action(
         "set_sidebar_collapsed" => set_sidebar_collapsed(app, cx, payload),
         "click_sidebar_settings" => click_sidebar_settings(app, cx),
         "click_settings_sidebar_mode" => click_settings_sidebar_mode(app, cx),
+        "click_settings_section" => click_settings_section(app, cx, payload),
         "click_settings_close" => click_settings_close(app, cx),
         "press_canvas_cmd_comma" => press_canvas_cmd_comma(app, cx),
         "press_window_cmd_comma_without_view_focus" => {
@@ -223,6 +224,32 @@ fn click_settings_sidebar_mode(
     .map_err(|e| format!("update window: {e}"))?;
 
     Ok(json!({ "clicked": "settings_sidebar_mode" }))
+}
+
+fn click_settings_section(
+    app: &WeakEntity<NativeApp>,
+    cx: &mut AsyncApp,
+    payload: Value,
+) -> Result<Value, String> {
+    let section = payload
+        .get("section")
+        .and_then(Value::as_str)
+        .ok_or("section is required")?
+        .to_string();
+    let entity = app.upgrade().ok_or("NativeApp entity dropped")?;
+    let settings_page = cx
+        .read_entity(&entity, |app: &NativeApp, _cx: &App| {
+            app.settings_page_entity()
+        })
+        .map_err(|e| format!("read entity: {e}"))?
+        .ok_or("settings page is not open")?;
+
+    cx.update_entity(&settings_page, |settings, cx| {
+        settings.select_section_for_automation(section.as_str(), cx)
+    })
+    .map_err(|e| format!("update settings page: {e}"))??;
+
+    Ok(json!({ "section": section }))
 }
 
 fn click_settings_close(app: &WeakEntity<NativeApp>, cx: &mut AsyncApp) -> Result<Value, String> {

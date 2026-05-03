@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+pub type SettingsMap = HashMap<String, String>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -89,6 +92,69 @@ pub struct WorkspacePanel {
     pub world_y: f32,
     pub width: f32,
     pub height: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EndpointCapabilities {
+    pub protocol_version: String,
+    #[serde(default, deserialize_with = "null_or_vec")]
+    pub agents_available: Vec<String>,
+    #[serde(default)]
+    pub projects_directory: Option<String>,
+    #[serde(default)]
+    pub pty_backend_mode: Option<String>,
+    #[serde(default)]
+    pub daemon_instance_id: Option<String>,
+    #[serde(default)]
+    pub tailscale_enabled: Option<bool>,
+    #[serde(default)]
+    pub tailscale_status: Option<String>,
+    #[serde(default)]
+    pub tailscale_url: Option<String>,
+    #[serde(default)]
+    pub tailscale_domain: Option<String>,
+    #[serde(default)]
+    pub tailscale_auth_url: Option<String>,
+    #[serde(default)]
+    pub tailscale_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EndpointInfo {
+    pub id: String,
+    pub name: String,
+    pub ssh_target: String,
+    pub status: String,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default)]
+    pub status_message: Option<String>,
+    #[serde(default)]
+    pub session_count: Option<i32>,
+    #[serde(default)]
+    pub capabilities: Option<EndpointCapabilities>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RepoState {
+    pub repo: String,
+    pub muted: bool,
+    #[serde(default)]
+    pub collapsed: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthorState {
+    pub author: String,
+    pub muted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PullRequestSummary {
+    #[serde(default)]
+    pub host: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

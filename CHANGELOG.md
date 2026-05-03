@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-05-03]
 
 ### Added
+- **Native Settings Parity**: The native Settings window now mirrors the Tauri settings surface with sections for appearance, projects, agents, review-loop models and prompts, mobile web, remote endpoints, GitHub hosts, muted filters, PTY backend state, and native sidebar controls.
 - **Native Sidebar Settings Entry**: The native workspace sidebar now has a bottom settings cog and `Cmd+,` shortcut that open a native Settings surface with a sidebar display control.
 - **Native Canvas Trackpad Zoom**: The native canvas now responds to trackpad pinch/magnify gestures and precise control-scroll zoom, keeping the cursor's world point anchored while zooming.
 - **Native Canvas Panel Status**: Native canvas panel headers now show each session's live state, including working, waiting for input, approval-needed, idle, and long-run review status.
