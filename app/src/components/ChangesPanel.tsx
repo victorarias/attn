@@ -7,6 +7,8 @@ interface ChangesPanelProps {
   branchDiffFiles: BranchDiffFile[];
   branchDiffBaseRef?: string;
   branchDiffError?: string | null;
+  branchDiffLoading?: boolean;
+  branchDiffRefreshing?: boolean;
   selectedFile: string | null;
   onFileSelect: (path: string, staged: boolean) => void;
   onOpenDiffClick?: () => void;
@@ -107,6 +109,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   branchDiffFiles,
   branchDiffBaseRef,
   branchDiffError,
+  branchDiffLoading = false,
+  branchDiffRefreshing = false,
   selectedFile,
   onFileSelect,
   onOpenDiffClick,
@@ -117,7 +121,9 @@ export const ChangesPanel = memo(function ChangesPanel({
 
     return { files: branchDiffFiles.length, additions, deletions };
   }, [branchDiffFiles]);
-  const isLoading = !branchDiffError && totalStats.files === 0;
+  const hasFiles = totalStats.files > 0;
+  const isInitialLoading = branchDiffLoading && !hasFiles && !branchDiffError;
+  const showInlineWarning = Boolean(branchDiffError && hasFiles);
 
   // Memoize tree building to avoid rebuilding on every render
   const branchTree = useMemo(() => buildTree(branchDiffFiles), [branchDiffFiles]);
@@ -183,7 +189,13 @@ export const ChangesPanel = memo(function ChangesPanel({
       <div className="changes-header">
         <span className="changes-title">Changes</span>
         <div className="changes-header-actions">
-          {totalStats.files > 0 && onOpenDiffClick && (
+          {branchDiffRefreshing && hasFiles && (
+            <span className="changes-refreshing" role="status" aria-label="Refreshing">Refreshing</span>
+          )}
+          {showInlineWarning && (
+            <span className="changes-warning" role="status" aria-label="Stale" title={branchDiffError || undefined}>Stale</span>
+          )}
+          {hasFiles && onOpenDiffClick && (
             <button className="review-btn" onClick={onOpenDiffClick} title="Open diff detail">
               Open Diff
             </button>
@@ -201,9 +213,14 @@ export const ChangesPanel = memo(function ChangesPanel({
       )}
 
       <div className="changes-body">
-        {branchDiffError ? (
+        {showInlineWarning && (
+          <div className="changes-inline-warning">
+            Could not refresh changes. Showing last result.
+          </div>
+        )}
+        {branchDiffError && !hasFiles ? (
           <div className="changes-error">{branchDiffError}</div>
-        ) : isLoading ? (
+        ) : isInitialLoading ? (
           <div className="changes-loading">
             <div className="loading-header" />
             {Array.from({ length: 5 }).map((_, index) => (
