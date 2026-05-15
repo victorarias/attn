@@ -19,14 +19,13 @@ use crate::adapters::daemon::DaemonClient;
 use crate::theme;
 
 const AGENTS: [&str; 4] = ["claude", "codex", "copilot", "pi"];
-const CAPS: [&str; 8] = [
+const CAPS: [&str; 7] = [
     "hooks",
     "transcript",
     "transcript_watcher",
     "classifier",
     "state_detector",
     "resume",
-    "fork",
     "yolo",
 ];
 
