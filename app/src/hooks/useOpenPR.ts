@@ -17,9 +17,23 @@ export interface OpenPRError {
   message?: string;
 }
 
+export type OpenPRProgressStep =
+  | 'fetching_pr_details'
+  | 'ensuring_repo'
+  | 'creating_worktree'
+  | 'starting_session';
+
+export interface OpenPRProgress {
+  step: OpenPRProgressStep;
+}
+
 export type OpenPRResult =
   | { success: true; sessionId: string; worktreePath: string; pr: DaemonPR }
   | { success: false; error: OpenPRError };
+
+export interface OpenPROptions {
+  onProgress?: (progress: OpenPRProgress) => void;
+}
 
 export interface UseOpenPRDeps {
   settings: DaemonSettings;
@@ -39,7 +53,7 @@ export function useOpenPR({
   sendCreateWorktreeFromBranch,
   createSession,
 }: UseOpenPRDeps) {
-  return useCallback(async (pr: DaemonPR, agent?: SessionAgent): Promise<OpenPRResult> => {
+  return useCallback(async (pr: DaemonPR, agent?: SessionAgent, options: OpenPROptions = {}): Promise<OpenPRResult> => {
     const projectsDir = settings.projects_directory;
     if (!projectsDir) {
       return { success: false, error: { kind: 'missing_projects_directory' } };
@@ -47,6 +61,7 @@ export function useOpenPR({
 
     let prWithBranch = pr;
     if (!prWithBranch.head_branch) {
+      options.onProgress?.({ step: 'fetching_pr_details' });
       let detailsResult: { success: boolean; prs?: DaemonPR[]; error?: string };
       try {
         detailsResult = await sendFetchPRDetails(pr.id);
@@ -83,6 +98,7 @@ export function useOpenPR({
     const cloneUrl = `https://${pr.host}/${pr.repo}.git`;
 
     // Ensure repo exists (clone if needed) and fetch remotes
+    options.onProgress?.({ step: 'ensuring_repo' });
     let ensureResult: { success: boolean; cloned?: boolean; error?: string };
     try {
       ensureResult = await sendEnsureRepo(localRepoPath, cloneUrl);
@@ -98,6 +114,7 @@ export function useOpenPR({
     }
 
     const remoteBranch = `origin/${prWithBranch.head_branch}`;
+    options.onProgress?.({ step: 'creating_worktree' });
     let worktreeResult: { success: boolean; path?: string; error?: string };
     try {
       worktreeResult = await sendCreateWorktreeFromBranch(localRepoPath, remoteBranch);
@@ -113,6 +130,7 @@ export function useOpenPR({
     }
 
     const label = `${repoName}#${pr.number}`;
+    options.onProgress?.({ step: 'starting_session' });
     let sessionId: string;
     try {
       sessionId = await createSession(label, worktreeResult.path, undefined, agent);

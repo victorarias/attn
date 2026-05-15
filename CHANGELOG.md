@@ -12,6 +12,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Large Repository Git Operations**: Git worktree, status, diff, fetch, clone, and repository metadata operations now use shared long-running command handling with slow-command daemon logging. UI waits for these operations are much longer, and background git polling is less aggressive so giant monorepos are less likely to look failed while Git is still working.
 - **Changes Panel Refreshes**: The Changes panel now keeps the last successful diff visible while background refreshes run or fail, using small stale/refresh indicators instead of replacing existing results with loading placeholders.
 - **New Session Repository Picker**: The location picker now shows inline progress while inspecting paths, loading repository options, refreshing repo metadata, creating worktrees, and deleting worktrees so slow git operations do not leave the dialog looking frozen.
+- **Opening Pull Requests**: Opening a PR in a new worktree now shows launcher-level progress while attn fetches PR details, syncs the local repository, creates the worktree, and starts the session.
 
 ---
 

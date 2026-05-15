@@ -1,0 +1,129 @@
+.open-pr-launcher {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 8000;
+  width: min(520px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  padding: 14px 16px 12px;
+  border: 1px solid rgba(255, 107, 53, 0.26);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(26, 26, 29, 0.96) 0%, rgba(13, 13, 15, 0.98) 100%);
+  box-shadow:
+    0 18px 46px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 0 32px rgba(255, 107, 53, 0.08);
+  color: var(--color-text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+}
+
+.open-pr-launcher-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.open-pr-launcher-kicker {
+  color: #ff6b35;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.open-pr-launcher-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.open-pr-launcher-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+}
+
+.open-pr-launcher-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: #ffb391;
+  font-size: var(--font-size-sm);
+}
+
+.open-pr-launcher-pulse,
+.open-pr-launcher-step-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff6b35;
+  flex: 0 0 auto;
+}
+
+.open-pr-launcher-pulse {
+  box-shadow: 0 0 0 0 rgba(255, 107, 53, 0.35);
+  animation: open-pr-launcher-pulse 1.15s ease-out infinite;
+}
+
+@keyframes open-pr-launcher-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0.35); }
+  100% { box-shadow: 0 0 0 8px rgba(255, 107, 53, 0); }
+}
+
+.open-pr-launcher-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.open-pr-launcher-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.open-pr-launcher-step span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open-pr-launcher-step.done {
+  color: var(--color-text-tertiary);
+}
+
+.open-pr-launcher-step.active {
+  color: #ffb391;
+}
+
+.open-pr-launcher-step.pending .open-pr-launcher-step-dot {
+  background: var(--color-border-hover);
+}
+
+.open-pr-launcher-step.done .open-pr-launcher-step-dot {
+  background: #ff6b35;
+  opacity: 0.7;
+}
+
+@media (max-width: 560px) {
+  .open-pr-launcher {
+    bottom: 14px;
+  }
+
+  .open-pr-launcher-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

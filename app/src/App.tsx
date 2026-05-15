@@ -14,6 +14,7 @@ import { CloseSessionPrompt } from './components/CloseSessionPrompt';
 import { ChangesPanel } from './components/ChangesPanel';
 import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { SessionReviewLoopBar } from './components/SessionReviewLoopBar';
+import { OpenPRLauncherProgress } from './components/OpenPRLauncherProgress';
 import { RightDock } from './components/RightDock';
 import { SessionTerminalWorkspace } from './components/SessionTerminalWorkspace';
 import { ThumbsModal } from './components/ThumbsModal';
@@ -33,7 +34,7 @@ import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useUIScale } from './hooks/useUIScale';
 import { useTheme } from './hooks/useTheme';
-import { useOpenPR } from './hooks/useOpenPR';
+import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
 import {
   getAgentAvailability,
@@ -103,6 +104,12 @@ function toneForDockPanel(status?: string): 'default' | 'idle' | 'running' | 'aw
       return 'default';
   }
 }
+
+type OpenPRLauncherJob = {
+  id: number;
+  pr: DaemonPR;
+  progress: OpenPRProgress;
+};
 
 function App() {
   // Settings state (must be declared before useDaemonSocket to pass as callback)
@@ -532,6 +539,8 @@ sendFetchPRDetails,
   setReviewLoopStateForSession,
   clearGitStatus,
 }: AppContentProps) {
+  const [openPRLauncherJob, setOpenPRLauncherJob] = useState<OpenPRLauncherJob | null>(null);
+  const openPRLauncherIdRef = useRef(0);
   const {
     connect,
     sessions,
@@ -1421,7 +1430,26 @@ sendFetchPRDetails,
       }
       const configuredDefaultAgent = normalizeSessionAgent(settings.new_session_agent, 'claude');
       const defaultAgent = resolvePreferredAgent(configuredDefaultAgent, agentAvailability, 'codex');
-      const result = await openPR(pr, defaultAgent);
+      const launcherId = openPRLauncherIdRef.current + 1;
+      openPRLauncherIdRef.current = launcherId;
+      const isActiveLauncher = () => openPRLauncherIdRef.current === launcherId;
+      const updateLauncherProgress = (progress: OpenPRProgress) => {
+        setOpenPRLauncherJob((current) => current?.id === launcherId ? { ...current, progress } : current);
+      };
+
+      setOpenPRLauncherJob({
+        id: launcherId,
+        pr,
+        progress: { step: pr.head_branch ? 'ensuring_repo' : 'fetching_pr_details' },
+      });
+      const result = await openPR(pr, defaultAgent, { onProgress: updateLauncherProgress }).finally(() => {
+        if (isActiveLauncher()) {
+          setOpenPRLauncherJob(null);
+        }
+      });
+      if (!isActiveLauncher()) {
+        return;
+      }
       if (result.success) {
         console.log(`[App] Worktree created at ${result.worktreePath}`);
         return;
@@ -1935,6 +1963,14 @@ sendFetchPRDetails,
             ×
           </button>
         </div>
+      )}
+      {openPRLauncherJob && (
+        <OpenPRLauncherProgress
+          repo={openPRLauncherJob.pr.repo}
+          number={openPRLauncherJob.pr.number}
+          title={openPRLauncherJob.pr.title}
+          step={openPRLauncherJob.progress.step}
+        />
       )}
       {/* Dashboard - always rendered, shown/hidden via z-index */}
       <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
