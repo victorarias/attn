@@ -540,6 +540,7 @@ export function LocationPicker({
         }
         onError?.(result.error || 'Failed to load repo options');
         setPickerOperation(null);
+        launchSelection(resolvedPath);
         return;
       }
 
