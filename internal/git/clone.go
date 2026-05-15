@@ -22,7 +22,7 @@ func Clone(cloneURL, targetPath string) error {
 		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
 
-	if out, err := runGitCombined(OpNetwork, "", "clone", cloneURL, targetPath); err != nil {
+	if out, err := runGitCombined(OpClone, "", "clone", cloneURL, targetPath); err != nil {
 		return fmt.Errorf("git clone failed: %s", string(out))
 	}
 

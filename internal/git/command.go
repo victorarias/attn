@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os/exec"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ const (
 	OpDiff     Operation = "diff"
 	OpWorktree Operation = "worktree"
 	OpNetwork  Operation = "network"
+	OpClone    Operation = "clone"
 )
 
 const slowGitLogThreshold = 2 * time.Second
@@ -52,6 +54,8 @@ func defaultTimeout(op Operation) time.Duration {
 		return 10 * time.Minute
 	case OpWorktree, OpNetwork:
 		return 30 * time.Minute
+	case OpClone:
+		return 60 * time.Minute
 	default:
 		return 2 * time.Minute
 	}
@@ -123,7 +127,7 @@ func runGitCommand(op Operation, dir string, stdin io.Reader, combined bool, arg
 	logGitCommand(op, dir, args, duration, ctx.Err())
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return out, fmt.Errorf("git %s timed out after %s: git %s", op, timeout, strings.Join(args, " "))
+		return out, fmt.Errorf("git %s timed out after %s: git %s", op, timeout, strings.Join(redactGitArgs(args), " "))
 	}
 	return out, err
 }
@@ -142,5 +146,35 @@ func logGitCommand(op Operation, dir string, args []string, duration time.Durati
 	if errors.Is(ctxErr, context.DeadlineExceeded) {
 		status = "timeout"
 	}
-	fn("git command %s: op=%s duration=%s dir=%s args=%q", status, op, duration.Round(time.Millisecond), dir, args)
+	fn("git command %s: op=%s duration=%s dir=%s args=%q", status, op, duration.Round(time.Millisecond), dir, redactGitArgs(args))
+}
+
+func redactGitArgs(args []string) []string {
+	redacted := make([]string, len(args))
+	for i, arg := range args {
+		redacted[i] = redactGitArg(arg)
+	}
+	return redacted
+}
+
+func redactGitArg(arg string) string {
+	parsed, err := url.Parse(arg)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return arg
+	}
+	switch parsed.Scheme {
+	case "http", "https", "ssh":
+	default:
+		return arg
+	}
+	if parsed.User != nil {
+		parsed.User = url.User("REDACTED")
+	}
+	if parsed.RawQuery != "" {
+		parsed.RawQuery = "REDACTED"
+	}
+	if parsed.Fragment != "" {
+		parsed.Fragment = "REDACTED"
+	}
+	return parsed.String()
 }

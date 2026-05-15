@@ -46,7 +46,10 @@ func walkUntrackedDir(repoDir, dirPath string) []protocol.GitFileChange {
 
 	// Use git check-ignore to filter out ignored files
 	// Pass all paths at once for efficiency
-	ignoredOutput, _ := attngit.OutputWithStdin(attngit.OpStatus, repoDir, strings.NewReader(strings.Join(filePaths, "\n")), "check-ignore", "--stdin")
+	ignoredOutput, err := attngit.OutputWithStdin(attngit.OpStatus, repoDir, strings.NewReader(strings.Join(filePaths, "\n")), "check-ignore", "--stdin")
+	if err != nil && len(ignoredOutput) == 0 && strings.Contains(err.Error(), "timed out") {
+		return files
+	}
 
 	// Build a set of ignored paths
 	ignoredSet := make(map[string]bool)

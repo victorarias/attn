@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,5 +52,40 @@ func TestRunGitOutputLogsSlowCommand(t *testing.T) {
 	}
 	if len(logs) == 0 {
 		t.Fatal("expected slow command log")
+	}
+}
+
+func TestRunGitOutputRedactsCredentialURLsInLogsAndTimeouts(t *testing.T) {
+	secretURL := "https://user:super-secret-token@example.com/acme/repo.git?token=also-secret#frag"
+
+	fakeBin := t.TempDir()
+	fakeGit := filepath.Join(fakeBin, "git")
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nexec sleep 5\n"), 0755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cleanup := setTimeoutForTesting(OpClone, 25*time.Millisecond)
+	defer cleanup()
+
+	var logs []string
+	SetLogFunc(func(format string, args ...interface{}) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	})
+	defer SetLogFunc(nil)
+
+	_, err := runGitOutput(OpClone, t.TempDir(), "clone", secretURL, "/tmp/repo")
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+
+	combined := strings.Join(append(logs, err.Error()), "\n")
+	for _, forbidden := range []string{"super-secret-token", "also-secret", "user:"} {
+		if strings.Contains(combined, forbidden) {
+			t.Fatalf("secret %q leaked in log/error output:\n%s", forbidden, combined)
+		}
+	}
+	if !strings.Contains(combined, "https://REDACTED@example.com/acme/repo.git") {
+		t.Fatalf("redacted URL missing from log/error output:\n%s", combined)
 	}
 }
