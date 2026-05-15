@@ -120,6 +120,9 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const [newWorktreeName, setNewWorktreeName] = useState('');
   const [startingBranch, setStartingBranch] = useState<'current' | 'default'>('current');
   const [pendingDeletePath, setPendingDeletePath] = useState<string | null>(null);
+  const [creatingWorktree, setCreatingWorktree] = useState(false);
+  const [deletingPath, setDeletingPath] = useState<string | null>(null);
+  const isBusy = creatingWorktree || deletingPath !== null;
 
   // Sub-state Escape handling via the stack so LIFO order is preserved.
   // pendingDeletePath and showNewWorktree are pushed above LocationPicker's handler.
@@ -187,18 +190,27 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   }, [destinationItems, onSelectedPathChange]);
 
   const openNewWorktree = useCallback(() => {
+    if (isBusy) {
+      return;
+    }
     setPendingDeletePath(null);
     setFocusIndex(createWorktreeIndex);
     setShowNewWorktree(true);
-  }, [createWorktreeIndex]);
+  }, [createWorktreeIndex, isBusy]);
 
   const beginDeleteWorktree = useCallback((path: string) => {
+    if (isBusy) {
+      return;
+    }
     setShowNewWorktree(false);
     setNewWorktreeName('');
     setPendingDeletePath(path);
-  }, []);
+  }, [isBusy]);
 
   const handleActivate = useCallback((index: number) => {
+    if (isBusy) {
+      return;
+    }
     if (index < destinationItems.length) {
       const item = destinationItems[index];
       onSelectedPathChange(item.path);
@@ -210,30 +222,40 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
       return;
     }
     openNewWorktree();
-  }, [destinationItems, onSelectMainRepo, onSelectWorktree, onSelectedPathChange, openNewWorktree]);
+  }, [destinationItems, isBusy, onSelectMainRepo, onSelectWorktree, onSelectedPathChange, openNewWorktree]);
 
   const executeDelete = useCallback(async () => {
-    if (!pendingDeletePath || !onDeleteWorktree) {
+    if (!pendingDeletePath || !onDeleteWorktree || deletingPath) {
       return;
     }
 
+    const pathToDelete = pendingDeletePath;
     const deletedIndex = destinationItems.findIndex((item) => item.path === pendingDeletePath);
     const survivingItems = destinationItems.filter((item) => item.path !== pendingDeletePath);
     const nextSelectedPath = survivingItems[Math.min(deletedIndex, survivingItems.length - 1)]?.path || repoInfo.repo;
 
     try {
-      await onDeleteWorktree(pendingDeletePath);
+      setDeletingPath(pathToDelete);
+      setPendingDeletePath(null);
+      await onDeleteWorktree(pathToDelete);
       onSelectedPathChange(nextSelectedPath);
       setFocusIndex(Math.min(deletedIndex, survivingItems.length - 1));
     } catch (err) {
       console.error('Delete failed:', err);
       onError?.(err instanceof Error ? err.message : 'Delete failed');
     } finally {
+      setDeletingPath(null);
       setPendingDeletePath(null);
     }
-  }, [destinationItems, onDeleteWorktree, onError, onSelectedPathChange, pendingDeletePath, repoInfo.repo]);
+  }, [deletingPath, destinationItems, onDeleteWorktree, onError, onSelectedPathChange, pendingDeletePath, repoInfo.repo]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isBusy) {
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+
     if (pendingDeletePath) {
       e.stopPropagation();
       if (e.key === 'y' || e.key === 'Y') {
@@ -259,7 +281,15 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
         const startFrom = startingBranch === 'current'
           ? selectedDestination?.branch || repoInfo.currentBranch
           : `origin/${repoInfo.defaultBranch}`;
-        void onCreateWorktree(newWorktreeName.trim(), startFrom);
+        setCreatingWorktree(true);
+        void onCreateWorktree(newWorktreeName.trim(), startFrom)
+          .catch((err) => {
+            console.error('Create worktree failed:', err);
+            onError?.(err instanceof Error ? err.message : 'Create worktree failed');
+          })
+          .finally(() => {
+            setCreatingWorktree(false);
+          });
         e.preventDefault();
       } else if (e.key === 'Tab') {
         setStartingBranch((prev) => prev === 'current' ? 'default' : 'current');
@@ -336,9 +366,11 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     executeDelete,
     focusedDestination,
     handleActivate,
+    isBusy,
     newWorktreeName,
     onBack,
     onCreateWorktree,
+    onError,
     onRefresh,
     openNewWorktree,
     pendingDeletePath,
@@ -352,6 +384,17 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const renderDestination = (itemIndex: number, item: DestinationItem) => {
     const isSelected = committedDestinationIndex === itemIndex;
     const isDeleting = pendingDeletePath === item.path;
+    const isDeleteRunning = deletingPath === item.path;
+
+    if (isDeleteRunning) {
+      return (
+        <div className="repo-option-item selected operation-running" role="status" aria-label={`Deleting ${baseName(item.path)}`}>
+          <span className="repo-option-icon operation-spinner" aria-hidden="true" />
+          <span className="repo-option-name">Deleting {baseName(item.path)}</span>
+          <span className="repo-option-detail">Removing worktree and refreshing repo options</span>
+        </div>
+      );
+    }
 
     if (isDeleting) {
       return (
@@ -386,6 +429,12 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
       onKeyDown={handleKeyDown}
     >
       <div className="repo-options-content">
+        {refreshing && (
+          <div className="repo-operation-banner" role="status" aria-label="Refreshing repo options">
+            <span className="repo-operation-dot" aria-hidden="true" />
+            <span>Refreshing repo options</span>
+          </div>
+        )}
         <div className="repo-options-destinations">
           <div className="repo-section-header">DESTINATIONS</div>
           <div
@@ -414,6 +463,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
                   placeholder="Branch name..."
                   value={newWorktreeName}
                   onChange={(e) => setNewWorktreeName(e.target.value)}
+                  disabled={creatingWorktree}
                   autoFocus
                   autoCorrect="off"
                   autoCapitalize="off"
@@ -444,8 +494,15 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
                   Start from origin/{repoInfo.defaultBranch}
                 </label>
               </div>
-              <div className="new-worktree-hint">
-                Press Enter to create • Tab to toggle • Esc to cancel
+              <div className={`new-worktree-hint ${creatingWorktree ? 'operation-running' : ''}`}>
+                {creatingWorktree ? (
+                  <>
+                    <span className="repo-operation-dot" aria-hidden="true" />
+                    Creating worktree...
+                  </>
+                ) : (
+                  'Press Enter to create • Tab to toggle • Esc to cancel'
+                )}
               </div>
             </div>
           ) : (
@@ -455,6 +512,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
               data-option-index={createWorktreeIndex}
               data-option-kind="new-worktree"
               onClick={openNewWorktree}
+              aria-disabled={isBusy}
             >
               <span className="repo-option-icon icon-blue">+</span>
               <span className="repo-option-name">Create worktree...</span>

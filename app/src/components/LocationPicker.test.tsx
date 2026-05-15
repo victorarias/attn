@@ -821,6 +821,118 @@ describe('LocationPicker', () => {
     expect(screen.queryByTestId('repo-options')).not.toBeInTheDocument();
   });
 
+  it('shows inline path inspection progress while a path submission is pending', async () => {
+    const inspectGate = deferred<Awaited<ReturnType<NonNullable<LocationPickerProps['onInspectPath']>>>>();
+    const onInspectPath = vi.fn(() => inspectGate.promise);
+    const { onSelect } = renderPicker({ onInspectPath });
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '~/projects/exsin' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByRole('status', { name: 'Inspecting path' })).toBeInTheDocument();
+
+    inspectGate.resolve({
+      success: true,
+      inspection: {
+        input_path: '~/projects/exsin',
+        resolved_path: '/home/remote/projects/exsin',
+        home_path: '/home/remote',
+        exists: true,
+        is_directory: true,
+      },
+    });
+
+    await waitFor(() => {
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin', 'claude', undefined, false);
+    });
+  });
+
+  it('clears path inspection progress when inspection fails', async () => {
+    const onInspectPath = vi.fn(async () => ({
+      success: true,
+      inspection: {
+        input_path: '~/missing',
+        resolved_path: '/home/remote/missing',
+        home_path: '/home/remote',
+        exists: false,
+        is_directory: false,
+      },
+    }));
+    const onError = vi.fn();
+    renderPicker({ onInspectPath, onError });
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '~/missing' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(onError).toHaveBeenCalledWith('Directory not found: ~/missing');
+    });
+    expect(screen.queryByRole('status', { name: 'Inspecting path' })).not.toBeInTheDocument();
+  });
+
+  it('shows repo-options progress after path inspection finds a git repo', async () => {
+    const repoInfoGate = deferred<Awaited<ReturnType<NonNullable<LocationPickerProps['onGetRepoInfo']>>>>();
+    const onInspectPath = vi.fn(async () => ({
+      success: true,
+      inspection: {
+        input_path: '~/projects/exsin',
+        resolved_path: '/home/remote/projects/exsin',
+        home_path: '/home/remote',
+        exists: true,
+        is_directory: true,
+        repo_root: '/home/remote/projects/exsin',
+      },
+    }));
+    const onGetRepoInfo = vi.fn(() => repoInfoGate.promise);
+    renderPicker({ onInspectPath, onGetRepoInfo });
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '~/projects/exsin' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByRole('status', { name: 'Loading repo options' })).toBeInTheDocument();
+
+    repoInfoGate.resolve({
+      success: true,
+      info: buildRepoInfo(),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repo-options')).toBeInTheDocument();
+    });
+  });
+
+  it('falls back to launching the selected path when repo options fail to load', async () => {
+    const onInspectPath = vi.fn(async () => ({
+      success: true,
+      inspection: {
+        input_path: '~/projects/exsin',
+        resolved_path: '/home/remote/projects/exsin',
+        home_path: '/home/remote',
+        exists: true,
+        is_directory: true,
+        repo_root: '/home/remote/projects/exsin',
+      },
+    }));
+    const onGetRepoInfo = vi.fn(async () => ({
+      success: false,
+      error: 'unborn HEAD',
+    }));
+    const onError = vi.fn();
+    const { onSelect } = renderPicker({ onInspectPath, onGetRepoInfo, onError });
+
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '~/projects/exsin' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(onError).toHaveBeenCalledWith('unborn HEAD');
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin', 'claude', undefined, false);
+    });
+  });
+
   it('suppresses stale inspect errors after the picker state has changed', async () => {
     const inspectGate = deferred<Awaited<ReturnType<NonNullable<LocationPickerProps['onInspectPath']>>>>();
     const onInspectPath = vi.fn(() => inspectGate.promise);
