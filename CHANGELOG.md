@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-15]
+
+### Changed
+- **Large Repository Git Operations**: Git worktree, status, diff, fetch, clone, and repository metadata operations now use shared long-running command handling with slow-command daemon logging. UI waits for these operations are much longer, and background git polling is less aggressive so giant monorepos are less likely to look failed while Git is still working.
+
+---
+
 ## [2026-05-03]
 
 ### Added

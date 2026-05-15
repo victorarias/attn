@@ -4,7 +4,6 @@ package git
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -44,9 +43,7 @@ func ExpandPath(path string) string {
 // Uses: git branch --format='%(refname:short)'
 func ListBranches(repoDir string) ([]string, error) {
 	// Get all local branches
-	cmd := exec.Command("git", "branch", "--format=%(refname:short)")
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, repoDir, "branch", "--format=%(refname:short)")
 	if err != nil {
 		return nil, fmt.Errorf("git branch failed: %w", err)
 	}
@@ -87,9 +84,7 @@ func ListBranchesWithCommits(repoDir string) ([]BranchWithCommit, error) {
 
 	// Get all local branches with commit info
 	// Format: refname:short | committerdate:iso-strict | objectname:short
-	cmd := exec.Command("git", "branch", "--format=%(refname:short)|%(committerdate:iso-strict)|%(objectname:short)")
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, repoDir, "branch", "--format=%(refname:short)|%(committerdate:iso-strict)|%(objectname:short)")
 	if err != nil {
 		return nil, fmt.Errorf("git branch failed: %w", err)
 	}
@@ -143,9 +138,7 @@ func DeleteBranch(repoDir, branch string, force bool) error {
 		flag = "-D"
 	}
 
-	cmd := exec.Command("git", "branch", flag, branch)
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpMetadata, repoDir, "branch", flag, branch); err != nil {
 		return fmt.Errorf("git branch %s failed: %s", flag, out)
 	}
 	return nil
@@ -154,9 +147,7 @@ func DeleteBranch(repoDir, branch string, force bool) error {
 // SwitchBranch switches the repository to a different branch.
 // Uses: git checkout <branch>
 func SwitchBranch(repoDir, branch string) error {
-	cmd := exec.Command("git", "checkout", branch)
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpWorktree, repoDir, "checkout", branch); err != nil {
 		return fmt.Errorf("git checkout failed: %s", out)
 	}
 	return nil
@@ -165,9 +156,7 @@ func SwitchBranch(repoDir, branch string) error {
 // CreateBranch creates a new branch from the current HEAD.
 // Uses: git branch <name>
 func CreateBranch(repoDir, branch string) error {
-	cmd := exec.Command("git", "branch", branch)
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpMetadata, repoDir, "branch", branch); err != nil {
 		return fmt.Errorf("git branch failed: %s", out)
 	}
 	return nil
@@ -175,9 +164,7 @@ func CreateBranch(repoDir, branch string) error {
 
 // GetCurrentBranch returns the current branch name for the repository.
 func GetCurrentBranch(repoDir string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse failed: %w", err)
 	}
@@ -186,13 +173,11 @@ func GetCurrentBranch(repoDir string) (string, error) {
 
 // ListRemotes returns the configured remote names for the repository.
 func ListRemotes(repoDir string) ([]string, error) {
-	cmd := exec.Command("git", "remote")
 	resolvedDir, err := ResolveRepoDir(repoDir)
 	if err != nil {
 		return nil, err
 	}
-	cmd.Dir = resolvedDir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, resolvedDir, "remote")
 	if err != nil {
 		return nil, fmt.Errorf("git remote failed: %w", err)
 	}
@@ -208,13 +193,11 @@ func ListRemotes(repoDir string) ([]string, error) {
 // FetchRemoteBranch fetches a single branch from a remote.
 // remote should be e.g. "origin", branch should be e.g. "main".
 func FetchRemoteBranch(repoDir, remote, branch string) error {
-	cmd := exec.Command("git", "fetch", remote, branch)
 	resolvedDir, err := ResolveRepoDir(repoDir)
 	if err != nil {
 		return err
 	}
-	cmd.Dir = resolvedDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpNetwork, resolvedDir, "fetch", remote, branch); err != nil {
 		outStr := strings.TrimSpace(string(out))
 		if outStr == "" {
 			return fmt.Errorf("git fetch failed: %w", err)
@@ -226,13 +209,11 @@ func FetchRemoteBranch(repoDir, remote, branch string) error {
 
 // FetchRemotes fetches all remotes with prune.
 func FetchRemotes(repoDir string) error {
-	cmd := exec.Command("git", "fetch", "--all", "--prune")
 	resolvedDir, err := ResolveRepoDir(repoDir)
 	if err != nil {
 		return err
 	}
-	cmd.Dir = resolvedDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpNetwork, resolvedDir, "fetch", "--all", "--prune"); err != nil {
 		outStr := strings.TrimSpace(string(out))
 		if outStr == "" {
 			return fmt.Errorf("git fetch failed: %w", err)
@@ -245,9 +226,7 @@ func FetchRemotes(repoDir string) error {
 // ListRemoteBranches returns remote branches not checked out locally.
 func ListRemoteBranches(repoDir string) ([]string, error) {
 	// Get remote branches
-	cmd := exec.Command("git", "branch", "-r", "--format=%(refname:short)")
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, repoDir, "branch", "-r", "--format=%(refname:short)")
 	if err != nil {
 		return nil, fmt.Errorf("git branch -r failed: %w", err)
 	}
@@ -258,9 +237,7 @@ func ListRemoteBranches(repoDir string) ([]string, error) {
 	}
 
 	// Get local branches
-	localCmd := exec.Command("git", "branch", "--format=%(refname:short)")
-	localCmd.Dir = repoDir
-	localOut, err := localCmd.Output()
+	localOut, err := runGitOutput(OpMetadata, repoDir, "branch", "--format=%(refname:short)")
 	if err != nil {
 		return nil, fmt.Errorf("git branch failed: %w", err)
 	}
@@ -292,16 +269,12 @@ func ListRemoteBranches(repoDir string) ([]string, error) {
 // CheckoutBranch checks out a branch, creating tracking branch if needed.
 func CheckoutBranch(repoDir, branch string) error {
 	// First try simple checkout
-	cmd := exec.Command("git", "checkout", branch)
-	cmd.Dir = repoDir
-	if _, err := cmd.CombinedOutput(); err == nil {
+	if _, err := runGitCombined(OpWorktree, repoDir, "checkout", branch); err == nil {
 		return nil
 	}
 
 	// If that failed, try creating tracking branch from origin
-	cmd = exec.Command("git", "checkout", "-b", branch, "origin/"+branch)
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpWorktree, repoDir, "checkout", "-b", branch, "origin/"+branch); err != nil {
 		return fmt.Errorf("git checkout failed: %s", out)
 	}
 	return nil
@@ -309,9 +282,7 @@ func CheckoutBranch(repoDir, branch string) error {
 
 // GetHeadCommitInfo returns the short hash and ISO timestamp of HEAD
 func GetHeadCommitInfo(repoDir string) (hash string, time string) {
-	cmd := exec.Command("git", "log", "-1", "--format=%h|%cI")
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, repoDir, "log", "-1", "--format=%h|%cI")
 	if err != nil {
 		return "", ""
 	}
@@ -325,9 +296,7 @@ func GetHeadCommitInfo(repoDir string) (hash string, time string) {
 // GetDefaultBranch returns the default branch name (main, master, etc).
 func GetDefaultBranch(repoDir string) (string, error) {
 	// Try to get from remote HEAD
-	cmd := exec.Command("git", "symbolic-ref", "refs/remotes/origin/HEAD")
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, repoDir, "symbolic-ref", "refs/remotes/origin/HEAD")
 	if err == nil {
 		// Format: refs/remotes/origin/main
 		ref := strings.TrimSpace(string(out))
@@ -339,9 +308,7 @@ func GetDefaultBranch(repoDir string) (string, error) {
 
 	// Fallback: check if main or master exists
 	for _, branch := range []string{"main", "master"} {
-		cmd := exec.Command("git", "rev-parse", "--verify", branch)
-		cmd.Dir = repoDir
-		if err := cmd.Run(); err == nil {
+		if err := runGitNoOutput(OpMetadata, repoDir, "rev-parse", "--verify", branch); err == nil {
 			return branch, nil
 		}
 	}

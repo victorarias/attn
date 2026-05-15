@@ -4,7 +4,6 @@ package git
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -19,13 +18,9 @@ type WorktreeEntry struct {
 // Runs prune first to clean up any stale worktree entries
 func ListWorktrees(repoDir string) ([]WorktreeEntry, error) {
 	// Prune stale worktrees first to ensure clean listing
-	pruneCmd := exec.Command("git", "worktree", "prune")
-	pruneCmd.Dir = repoDir
-	_ = pruneCmd.Run() // Best effort - don't fail if prune fails
+	_ = runGitNoOutput(OpWorktree, repoDir, "worktree", "prune") // Best effort - don't fail if prune fails
 
-	cmd := exec.Command("git", "worktree", "list", "--porcelain")
-	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpWorktree, repoDir, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
@@ -53,9 +48,7 @@ func ListWorktrees(repoDir string) ([]WorktreeEntry, error) {
 
 // CreateWorktree creates a new worktree with a new branch
 func CreateWorktree(repoDir, branch, path string) error {
-	cmd := exec.Command("git", "worktree", "add", "-b", branch, CanonicalizePath(path))
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpWorktree, repoDir, "worktree", "add", "-b", branch, CanonicalizePath(path)); err != nil {
 		return fmt.Errorf("git worktree add failed: %s", out)
 	}
 	return nil
@@ -67,9 +60,7 @@ func CreateWorktreeFromPoint(repoDir, branch, path, startingFrom string) error {
 	if startingFrom != "" {
 		args = append(args, startingFrom)
 	}
-	cmd := exec.Command("git", args...)
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpWorktree, repoDir, args...); err != nil {
 		return fmt.Errorf("git worktree add failed: %s", out)
 	}
 	return nil
@@ -77,13 +68,11 @@ func CreateWorktreeFromPoint(repoDir, branch, path, startingFrom string) error {
 
 // CreateWorktreeFromBranch creates a worktree from an existing branch
 func CreateWorktreeFromBranch(repoDir, branch, path string) error {
-	cmd := exec.Command("git", "worktree", "add", ExpandPath(path), branch)
 	resolvedDir, err := ResolveRepoDir(repoDir)
 	if err != nil {
 		return err
 	}
-	cmd.Dir = resolvedDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpWorktree, resolvedDir, "worktree", "add", ExpandPath(path), branch); err != nil {
 		return fmt.Errorf("git worktree add failed: %s", out)
 	}
 	return nil
@@ -100,13 +89,11 @@ func CreateWorktreeFromRemoteBranch(repoDir, remoteBranch, path string) (string,
 	}
 
 	// git worktree add <path> -b <local-branch> <remote-branch>
-	cmd := exec.Command("git", "worktree", "add", ExpandPath(path), "-b", localBranch, remoteBranch)
 	resolvedDir, err := ResolveRepoDir(repoDir)
 	if err != nil {
 		return "", err
 	}
-	cmd.Dir = resolvedDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpWorktree, resolvedDir, "worktree", "add", ExpandPath(path), "-b", localBranch, remoteBranch); err != nil {
 		return "", fmt.Errorf("git worktree add failed: %s", out)
 	}
 	return localBranch, nil
@@ -120,26 +107,20 @@ func DeleteWorktree(repoDir, path string) error {
 	// Check if directory exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		// Directory doesn't exist - prune stale worktree entries
-		cmd := exec.Command("git", "worktree", "prune")
-		cmd.Dir = repoDir
-		if out, err := cmd.CombinedOutput(); err != nil {
+		if out, err := runGitCombined(OpWorktree, repoDir, "worktree", "prune"); err != nil {
 			return fmt.Errorf("git worktree prune failed: %s", out)
 		}
 		return nil
 	}
 
 	// Directory exists - remove normally
-	cmd := exec.Command("git", "worktree", "remove", path)
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpWorktree, repoDir, "worktree", "remove", path); err != nil {
 		return fmt.Errorf("git worktree remove failed: %s", out)
 	}
 
 	// Always prune after removal to ensure git metadata is fully cleaned
 	// This prevents the worktree from reappearing in subsequent list operations
-	pruneCmd := exec.Command("git", "worktree", "prune")
-	pruneCmd.Dir = repoDir
-	_ = pruneCmd.Run() // Best effort - don't fail if prune fails
+	_ = runGitNoOutput(OpWorktree, repoDir, "worktree", "prune") // Best effort - don't fail if prune fails
 
 	return nil
 }

@@ -3,7 +3,6 @@ package git
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -23,9 +22,7 @@ func Clone(cloneURL, targetPath string) error {
 		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
 
-	// Clone the repo
-	cmd := exec.Command("git", "clone", cloneURL, targetPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCombined(OpNetwork, "", "clone", cloneURL, targetPath); err != nil {
 		return fmt.Errorf("git clone failed: %s", string(out))
 	}
 

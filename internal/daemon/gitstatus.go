@@ -5,11 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -46,10 +46,7 @@ func walkUntrackedDir(repoDir, dirPath string) []protocol.GitFileChange {
 
 	// Use git check-ignore to filter out ignored files
 	// Pass all paths at once for efficiency
-	cmd := exec.Command("git", append([]string{"check-ignore", "--stdin"}, []string{}...)...)
-	cmd.Dir = repoDir
-	cmd.Stdin = strings.NewReader(strings.Join(filePaths, "\n"))
-	ignoredOutput, _ := cmd.Output()
+	ignoredOutput, _ := attngit.OutputWithStdin(attngit.OpStatus, repoDir, strings.NewReader(strings.Join(filePaths, "\n")), "check-ignore", "--stdin")
 
 	// Build a set of ignored paths
 	ignoredSet := make(map[string]bool)
@@ -178,9 +175,7 @@ func getGitStatus(dir string) (*protocol.GitStatusUpdateMessage, error) {
 	// --untracked-files=all expands brand-new untracked directories into
 	// their individual files; the default collapses each into a single
 	// "?? dir/" line which hides everything inside.
-	statusCmd := exec.Command("git", "status", "--porcelain", "-z", "--untracked-files=all")
-	statusCmd.Dir = dir
-	statusOutput, err := statusCmd.Output()
+	statusOutput, err := attngit.Output(attngit.OpStatus, dir, "status", "--porcelain", "-z", "--untracked-files=all")
 	if err != nil {
 		return &protocol.GitStatusUpdateMessage{
 			Event:     protocol.EventGitStatusUpdate,
@@ -193,9 +188,7 @@ func getGitStatus(dir string) (*protocol.GitStatusUpdateMessage, error) {
 
 	// Get numstat for unstaged changes
 	if len(unstaged) > 0 {
-		numstatCmd := exec.Command("git", "diff", "--numstat")
-		numstatCmd.Dir = dir
-		numstatOutput, _ := numstatCmd.Output()
+		numstatOutput, _ := attngit.Output(attngit.OpDiff, dir, "diff", "--numstat")
 		stats := parseGitDiffNumstat(string(numstatOutput))
 
 		for i := range unstaged {
@@ -208,9 +201,7 @@ func getGitStatus(dir string) (*protocol.GitStatusUpdateMessage, error) {
 
 	// Get numstat for staged changes
 	if len(staged) > 0 {
-		numstatCmd := exec.Command("git", "diff", "--numstat", "--cached")
-		numstatCmd.Dir = dir
-		numstatOutput, _ := numstatCmd.Output()
+		numstatOutput, _ := attngit.Output(attngit.OpDiff, dir, "diff", "--numstat", "--cached")
 		stats := parseGitDiffNumstat(string(numstatOutput))
 
 		for i := range staged {

@@ -3,7 +3,6 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -49,25 +48,19 @@ func GetBranchInfo(dir string) (*BranchInfo, error) {
 }
 
 func isGitRepo(dir string) bool {
-	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, dir, "rev-parse", "--is-inside-work-tree")
 	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
 func getCurrentBranch(dir string) (string, error) {
 	// Try symbolic-ref first (works for normal branches)
-	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, dir, "symbolic-ref", "--short", "HEAD")
 	if err == nil {
 		return strings.TrimSpace(string(out)), nil
 	}
 
 	// Fallback to rev-parse for detached HEAD (returns short SHA)
-	cmd = exec.Command("git", "rev-parse", "--short", "HEAD")
-	cmd.Dir = dir
-	out, err = cmd.Output()
+	out, err = runGitOutput(OpMetadata, dir, "rev-parse", "--short", "HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -76,9 +69,7 @@ func getCurrentBranch(dir string) (string, error) {
 
 // GetRepoRoot returns the worktree root for dir when it is inside a git worktree.
 func GetRepoRoot(dir string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", err
 	}
@@ -114,9 +105,7 @@ func ResolvePickerRepoTarget(dir string) (repoRoot string, ok bool, err error) {
 
 // GetHeadCommit returns the full SHA of the HEAD commit
 func GetHeadCommit(dir string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, dir, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -125,9 +114,7 @@ func GetHeadCommit(dir string) (string, error) {
 
 func getWorktreeInfo(dir string) (mainRepo string, isWorktree bool) {
 	// Get the git dir
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, dir, "rev-parse", "--git-dir")
 	if err != nil {
 		return "", false
 	}

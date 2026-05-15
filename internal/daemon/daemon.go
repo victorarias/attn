@@ -62,6 +62,7 @@ type longRunSession struct {
 const (
 	longRunReviewThreshold = 5 * time.Minute
 	forcedStopSuppressTTL  = 30 * time.Second
+	branchMonitorInterval  = 15 * time.Second
 
 	startupRecoveryRetryMax       = 2
 	startupRecoveryRetryDelay     = 500 * time.Millisecond
@@ -271,6 +272,9 @@ func New(socketPath string) *Daemon {
 
 	// Wire up classifier logger to daemon logger
 	classifier.SetLogger(func(format string, args ...interface{}) {
+		logger.Infof(format, args...)
+	})
+	git.SetLogFunc(func(format string, args ...interface{}) {
 		logger.Infof(format, args...)
 	})
 
@@ -2832,12 +2836,12 @@ func (d *Daemon) fetchPRDetailsImmediate(prID string) {
 
 // monitorBranches polls git branch info for all sessions every 5 seconds
 func (d *Daemon) monitorBranches() {
-	d.log("Branch monitoring started (5s interval)")
+	d.logf("Branch monitoring started (%s interval)", branchMonitorInterval)
 
 	// Initial check
 	d.checkAllBranches()
 
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(branchMonitorInterval)
 	defer ticker.Stop()
 
 	for {
