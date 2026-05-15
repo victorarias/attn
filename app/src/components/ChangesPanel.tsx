@@ -7,6 +7,7 @@ interface ChangesPanelProps {
   branchDiffFiles: BranchDiffFile[];
   branchDiffBaseRef?: string;
   branchDiffError?: string | null;
+  branchDiffLoaded?: boolean;
   branchDiffLoading?: boolean;
   branchDiffRefreshing?: boolean;
   selectedFile: string | null;
@@ -109,6 +110,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   branchDiffFiles,
   branchDiffBaseRef,
   branchDiffError,
+  branchDiffLoaded = false,
   branchDiffLoading = false,
   branchDiffRefreshing = false,
   selectedFile,
@@ -121,9 +123,10 @@ export const ChangesPanel = memo(function ChangesPanel({
 
     return { files: branchDiffFiles.length, additions, deletions };
   }, [branchDiffFiles]);
+  const hasLoadedResult = branchDiffLoaded;
   const hasFiles = totalStats.files > 0;
-  const isInitialLoading = branchDiffLoading && !hasFiles && !branchDiffError;
-  const showInlineWarning = Boolean(branchDiffError && hasFiles);
+  const isInitialLoading = branchDiffLoading && !hasLoadedResult && !branchDiffError;
+  const showInlineWarning = Boolean(branchDiffError && hasLoadedResult);
 
   // Memoize tree building to avoid rebuilding on every render
   const branchTree = useMemo(() => buildTree(branchDiffFiles), [branchDiffFiles]);
@@ -189,7 +192,7 @@ export const ChangesPanel = memo(function ChangesPanel({
       <div className="changes-header">
         <span className="changes-title">Changes</span>
         <div className="changes-header-actions">
-          {branchDiffRefreshing && hasFiles && (
+          {branchDiffRefreshing && hasLoadedResult && (
             <span className="changes-refreshing" role="status" aria-label="Refreshing">Refreshing</span>
           )}
           {showInlineWarning && (
@@ -218,7 +221,7 @@ export const ChangesPanel = memo(function ChangesPanel({
             Could not refresh changes. Showing last result.
           </div>
         )}
-        {branchDiffError && !hasFiles ? (
+        {branchDiffError && !hasLoadedResult ? (
           <div className="changes-error">{branchDiffError}</div>
         ) : isInitialLoading ? (
           <div className="changes-loading">

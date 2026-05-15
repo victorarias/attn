@@ -29,7 +29,7 @@ describe('ChangesPanel', () => {
   });
 
   it('shows no changes after an empty successful load', () => {
-    renderPanel({ branchDiffLoading: false });
+    renderPanel({ branchDiffLoaded: true, branchDiffLoading: false });
 
     expect(screen.getByText('No changes')).toBeInTheDocument();
     expect(document.querySelector('.changes-loading')).not.toBeInTheDocument();
@@ -39,6 +39,7 @@ describe('ChangesPanel', () => {
     renderPanel({
       branchDiffFiles: changedFiles,
       branchDiffBaseRef: 'origin/main',
+      branchDiffLoaded: true,
       branchDiffRefreshing: true,
     });
 
@@ -52,9 +53,22 @@ describe('ChangesPanel', () => {
     renderPanel({
       branchDiffFiles: changedFiles,
       branchDiffError: 'Get branch diff files timed out',
+      branchDiffLoaded: true,
     });
 
     expect(screen.getByTitle('app/src/App.tsx')).toBeInTheDocument();
+    expect(screen.getByText('Could not refresh changes. Showing last result.')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Stale' })).toBeInTheDocument();
+    expect(screen.queryByText('Get branch diff files timed out')).not.toBeInTheDocument();
+  });
+
+  it('keeps the empty no-changes state visible when refresh fails after data loaded', () => {
+    renderPanel({
+      branchDiffError: 'Get branch diff files timed out',
+      branchDiffLoaded: true,
+    });
+
+    expect(screen.getByText('No changes')).toBeInTheDocument();
     expect(screen.getByText('Could not refresh changes. Showing last result.')).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Stale' })).toBeInTheDocument();
     expect(screen.queryByText('Get branch diff files timed out')).not.toBeInTheDocument();

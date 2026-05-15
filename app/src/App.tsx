@@ -579,6 +579,7 @@ sendFetchPRDetails,
   const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
   const [branchDiffBaseRef, setBranchDiffBaseRef] = useState('');
   const [branchDiffError, setBranchDiffError] = useState<string | null>(null);
+  const [branchDiffLoaded, setBranchDiffLoaded] = useState(false);
   const [branchDiffLoading, setBranchDiffLoading] = useState(false);
   const [branchDiffRefreshing, setBranchDiffRefreshing] = useState(false);
 
@@ -1605,10 +1606,12 @@ sendFetchPRDetails,
         setBranchDiffBaseRef(result.base_ref);
         setBranchDiffError(null);
         branchDiffLoadedRef.current = true;
+        setBranchDiffLoaded(true);
       } else {
         if (!branchDiffLoadedRef.current) {
           setBranchDiffFiles([]);
           setBranchDiffBaseRef(result.base_ref || '');
+          setBranchDiffLoaded(false);
         }
         setBranchDiffError(result.error || 'Failed to load branch diff');
       }
@@ -1617,6 +1620,7 @@ sendFetchPRDetails,
       if (!branchDiffLoadedRef.current) {
         setBranchDiffFiles([]);
         setBranchDiffBaseRef('');
+        setBranchDiffLoaded(false);
       }
       setBranchDiffError(err instanceof Error ? err.message : 'Failed to load branch diff');
     } finally {
@@ -1630,6 +1634,7 @@ sendFetchPRDetails,
   useEffect(() => {
     branchDiffRequestId.current += 1;
     branchDiffLoadedRef.current = false;
+    setBranchDiffLoaded(false);
     setBranchDiffFiles([]);
     setBranchDiffBaseRef('');
     setBranchDiffError(null);
@@ -1640,6 +1645,7 @@ sendFetchPRDetails,
   useEffect(() => {
     if (view !== 'session' || !activeRepoDaemonSession?.directory) {
       branchDiffLoadedRef.current = false;
+      setBranchDiffLoaded(false);
       setBranchDiffFiles([]);
       setBranchDiffBaseRef('');
       setBranchDiffError(null);
@@ -2041,6 +2047,7 @@ sendFetchPRDetails,
                   branchDiffFiles={branchDiffFiles}
                   branchDiffBaseRef={branchDiffBaseRef}
                   branchDiffError={branchDiffError}
+                  branchDiffLoaded={branchDiffLoaded}
                   branchDiffLoading={branchDiffLoading}
                   branchDiffRefreshing={branchDiffRefreshing}
                   selectedFile={null}
