@@ -10,6 +10,7 @@ const mockSendUnregisterSession = vi.fn();
 const mockUseKeyboardShortcuts = vi.fn();
 const mockSendWorkspaceClosePane = vi.fn(async () => ({ success: true }));
 const mockCloseSession = vi.fn();
+const mockOpenPR = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/plugin-deep-link', () => ({
   onOpenUrl: vi.fn(async () => () => {}),
@@ -41,7 +42,34 @@ vi.mock('./components/Sidebar', () => ({
   ),
 }));
 
-vi.mock('./components/Dashboard', () => ({ Dashboard: () => null }));
+vi.mock('./components/Dashboard', () => ({
+  Dashboard: ({ onOpenPR }: { onOpenPR?: (pr: Record<string, unknown>) => void }) => (
+    <button
+      data-testid="open-pr"
+      onClick={() => onOpenPR?.({
+        approved_by_me: false,
+        author: 'octo',
+        details_fetched: true,
+        has_new_changes: false,
+        head_branch: 'feature/slow-pr',
+        host: 'github.com',
+        id: 'pr-1',
+        last_polled: '2026-05-16T00:00:00Z',
+        last_updated: '2026-05-16T00:00:00Z',
+        muted: false,
+        number: 42,
+        reason: 'review_requested',
+        repo: 'acme/widgets',
+        role: 'reviewer',
+        state: 'open',
+        title: 'Make widgets faster',
+        url: 'https://github.com/acme/widgets/pull/42',
+      })}
+    >
+      Open PR
+    </button>
+  ),
+}));
 vi.mock('./components/AttentionDrawer', () => ({ AttentionDrawer: () => null }));
 vi.mock('./components/LocationPicker', () => ({ LocationPicker: () => null }));
 vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
@@ -83,12 +111,7 @@ vi.mock('./hooks/useUIScale', () => ({
 }));
 
 vi.mock('./hooks/useOpenPR', () => ({
-  useOpenPR: () =>
-    vi.fn(async () => ({
-      success: true,
-      worktreePath: '/tmp/wt',
-      sessionId: 's1',
-    })),
+  useOpenPR: () => mockOpenPR,
 }));
 
 vi.mock('./hooks/usePRsNeedingAttention', () => ({
@@ -113,6 +136,11 @@ describe('worktree cleanup prompt', () => {
     vi.clearAllMocks();
     localStorage.clear();
     vi.useRealTimers();
+    mockOpenPR.mockResolvedValue({
+      success: true,
+      worktreePath: '/tmp/wt',
+      sessionId: 's1',
+    });
     mockSendWorkspaceClosePane.mockResolvedValue({ success: true });
 
     mockUseSessionStore.mockReturnValue({
@@ -340,6 +368,64 @@ describe('worktree cleanup prompt', () => {
     });
 
     expect(sendSessionVisualized).toHaveBeenCalledWith('remote-1');
+  });
+
+  it('only lets the active PR launcher request update or clear progress', async () => {
+    const progressHandlers: Array<(progress: { step: string }) => void> = [];
+    const resolvers: Array<(result: { success: true; worktreePath: string; sessionId: string }) => void> = [];
+
+    mockUseSessionStore.mockReturnValue({
+      sessions: [],
+      activeSessionId: null,
+      connect: vi.fn(async () => {}),
+      connected: true,
+      launcherConfig: { executables: {} },
+      createSession: vi.fn(async () => 's1'),
+      closeSession: mockCloseSession,
+      setActiveSession: vi.fn(),
+      takeSessionSpawnArgs: vi.fn(() => null),
+      reloadSession: vi.fn(async () => {}),
+      setForkParams: vi.fn(),
+      setLauncherConfig: vi.fn(),
+      syncFromDaemonSessions: vi.fn(),
+      syncFromDaemonWorkspaces: vi.fn(),
+    });
+
+    mockOpenPR.mockImplementation((_pr, _agent, options) => new Promise((resolve) => {
+      progressHandlers.push(options.onProgress);
+      resolvers.push(resolve);
+    }));
+
+    render(<App />);
+
+    await userEvent.click(screen.getByTestId('open-pr'));
+    expect(screen.getByRole('status')).toHaveTextContent('Ensuring local repository');
+
+    await userEvent.click(screen.getByTestId('open-pr'));
+
+    act(() => {
+      progressHandlers[0]({ step: 'creating_worktree' });
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Ensuring local repository');
+
+    act(() => {
+      progressHandlers[1]({ step: 'starting_session' });
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Starting session');
+
+    await act(async () => {
+      resolvers[0]({ success: true, worktreePath: '/tmp/first', sessionId: 's1' });
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Starting session');
+
+    await act(async () => {
+      resolvers[1]({ success: true, worktreePath: '/tmp/second', sessionId: 's2' });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
   });
 
   it('prompts before closing a split session from the main pane with Cmd+W', async () => {
