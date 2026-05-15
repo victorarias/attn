@@ -67,7 +67,7 @@ interface LocationPickerProps {
   onBrowseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>;
   onInspectPath?: (path: string, endpointId?: string) => Promise<InspectPathResult>;
   onGetRepoInfo?: (mainRepo: string, endpointId?: string) => Promise<{ success: boolean; info?: BackendRepoInfo; error?: string }>;
-  onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string, endpointId?: string) => Promise<{ success: boolean; path?: string }>;
+  onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string, endpointId?: string) => Promise<{ success: boolean; path?: string; error?: string }>;
   onDeleteWorktree?: (path: string, endpointId?: string) => Promise<{ success: boolean; error?: string }>;
   onError?: (message: string) => void;
   projectsDirectory?: string;
@@ -183,6 +183,7 @@ export function LocationPicker({
   const [repoRootPath, setRepoRootPath] = useState<string | null>(null);
   const [repoInfo, setRepoInfo] = useState<RepoInfo | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [pickerOperation, setPickerOperation] = useState<string | null>(null);
   const [hasSelectedSinceTab, setHasSelectedSinceTab] = useState(true);
   const requestGenerationRef = useRef(0);
 
@@ -352,6 +353,7 @@ export function LocationPicker({
     setRepoRootPath(null);
     setRepoInfo(null);
     setRefreshing(false);
+    setPickerOperation(null);
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -468,6 +470,7 @@ export function LocationPicker({
     setHighlightedItemKey(null);
     setSelectedPath('');
     setHasSelectedSinceTab(true);
+    setPickerOperation(null);
   }, [inputValue, invalidateRequestGeneration]);
 
   const handleTabComplete = useCallback((nextPath: string) => {
@@ -479,6 +482,7 @@ export function LocationPicker({
     setHighlightedItemKey(null);
     setSelectedPath('');
     setHasSelectedSinceTab(false);
+    setPickerOperation(null);
   }, [inputValue, invalidateRequestGeneration]);
 
   const handlePathSelect = useCallback((path: string) => {
@@ -500,6 +504,7 @@ export function LocationPicker({
       return;
     }
     const requestGeneration = beginRequestGeneration();
+    setPickerOperation('Inspecting path');
 
     try {
       const inspected = await onInspectPath(sanitizedPath, selectedEndpointId);
@@ -508,6 +513,7 @@ export function LocationPicker({
       }
       const inspection = inspected.inspection;
       if (!inspection?.exists || !inspection.is_directory) {
+        setPickerOperation(null);
         onError?.(`Directory not found: ${sanitizedPath}`);
         return;
       }
@@ -520,6 +526,7 @@ export function LocationPicker({
       setSelectedPathFromPhysical(resolvedPath);
       const repoRoot = inspection.repo_root;
       if (repoRoot && onGetRepoInfo) {
+        setPickerOperation('Loading repo options');
         const result = await onGetRepoInfo(repoRoot, selectedEndpointId);
         if (!isRequestCurrent(requestGeneration)) {
           return;
@@ -528,19 +535,25 @@ export function LocationPicker({
           setMode('repo-options');
           setRepoRootPath(repoRoot);
           setRepoInfo(toChooserRepoInfo(result.info));
+          setPickerOperation(null);
           return;
         }
+        onError?.(result.error || 'Failed to load repo options');
+        setPickerOperation(null);
+        return;
       }
 
       if (!isRequestCurrent(requestGeneration)) {
         return;
       }
+      setPickerOperation(null);
       launchSelection(resolvedPath);
     } catch (err) {
       if (!isRequestCurrent(requestGeneration)) {
         return;
       }
       console.log('[LocationPicker] inspect path error:', err);
+      setPickerOperation(null);
       onError?.(err instanceof Error ? err.message : String(err));
     }
   }, [
@@ -589,6 +602,7 @@ export function LocationPicker({
     setRepoInfo(null);
     setRecentLocations([]);
     setRefreshing(false);
+    setPickerOperation(null);
   }, [homePath, invalidateRequestGeneration, selectableTargets, selectedTarget.id, setSetting, yoloMode, yoloSettingKey, yoloSupported]);
 
   const handlePathInputSubmit = useCallback(() => {
@@ -635,6 +649,8 @@ export function LocationPicker({
       if (result.success && result.path) {
         setSelectedPathFromPhysical(result.path);
         launchSelection(result.path);
+      } else {
+        onError?.(result.error || 'Failed to create worktree');
       }
     } catch (err) {
       if (!isRequestCurrent(requestGeneration)) {
@@ -682,6 +698,7 @@ export function LocationPicker({
     setRepoRootPath(null);
     setRepoInfo(null);
     setRefreshing(false);
+    setPickerOperation(null);
   }, [invalidateRequestGeneration]);
 
   const movePathSelection = useCallback((direction: 'up' | 'down') => {
@@ -868,6 +885,13 @@ export function LocationPicker({
                   <span className="picker-breadcrumb-path" data-testid="location-picker-breadcrumb-path">{currentDir}</span>
                 </div>
               )}
+              {pickerOperation && (
+                <div className="picker-operation" role="status" aria-label={pickerOperation}>
+                  <span className="picker-operation-pulse" aria-hidden="true" />
+                  <span>{pickerOperation}</span>
+                  {selectedPath && <span className="picker-operation-path">{toDisplayPath(selectedPath, homePath)}</span>}
+                </div>
+              )}
             </div>
 
             <div className="picker-results">
@@ -949,11 +973,16 @@ export function LocationPicker({
             onCreateWorktree={handleCreateWorktree}
             onDeleteWorktree={onDeleteWorktree ? async (path) => {
               const requestGeneration = requestGenerationRef.current;
-              await onDeleteWorktree(path, selectedEndpointId);
+              const deleteResult = await onDeleteWorktree(path, selectedEndpointId);
+              if (!deleteResult.success) {
+                throw new Error(deleteResult.error || 'Failed to delete worktree');
+              }
               if (repoRootPath && onGetRepoInfo) {
                 const result = await onGetRepoInfo(repoRootPath, selectedEndpointId);
                 if (isRequestCurrent(requestGeneration) && result.success && result.info) {
                   setRepoInfo(toChooserRepoInfo(result.info));
+                } else if (isRequestCurrent(requestGeneration) && !result.success) {
+                  throw new Error(result.error || 'Failed to refresh repo options');
                 }
               }
             } : undefined}

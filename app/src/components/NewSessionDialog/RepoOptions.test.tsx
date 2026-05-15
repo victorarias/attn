@@ -12,6 +12,16 @@ const repoInfo = {
   worktrees: [{ path: '/tmp/repo--feature', branch: 'feature' }],
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('RepoOptions', () => {
   it('selects the main repo when the row is clicked', () => {
     const onSelectMainRepo = vi.fn();
@@ -217,5 +227,86 @@ describe('RepoOptions', () => {
 
     expect(screen.queryByText(/Delete repo--feature/)).not.toBeInTheDocument();
     expect(screen.getByTestId('repo-new-worktree-form')).toBeInTheDocument();
+  });
+
+  it('keeps destinations visible while repo info is refreshing', () => {
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={vi.fn(async () => {})}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+        refreshing
+      />,
+    );
+
+    expect(screen.getByRole('status', { name: 'Refreshing repo options' })).toBeInTheDocument();
+    expect(screen.getByTestId('repo-option-0')).toBeInTheDocument();
+    expect(screen.getByTestId('repo-option-1')).toBeInTheDocument();
+  });
+
+  it('shows form-local progress while creating a worktree', async () => {
+    const createGate = deferred<void>();
+    const onCreateWorktree = vi.fn(() => createGate.promise);
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('repo-option-2'));
+    fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feature-2' } });
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    expect(screen.getByText('Creating worktree...')).toBeInTheDocument();
+    expect(screen.getByTestId('repo-new-worktree-input')).toBeDisabled();
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+    expect(onCreateWorktree).toHaveBeenCalledTimes(1);
+
+    createGate.resolve();
+    await waitFor(() => {
+      expect(screen.getByTestId('repo-new-worktree-input')).not.toBeDisabled();
+    });
+  });
+
+  it('shows row-local progress while deleting a worktree', async () => {
+    const deleteGate = deferred<void>();
+    const onDeleteWorktree = vi.fn(() => deleteGate.promise);
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo--feature"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={vi.fn(async () => {})}
+        onDeleteWorktree={onDeleteWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'D' });
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'y' });
+
+    expect(await screen.findByRole('status', { name: 'Deleting repo--feature' })).toBeInTheDocument();
+    expect(screen.queryByText(/Delete repo--feature/)).not.toBeInTheDocument();
+
+    deleteGate.resolve();
+    await waitFor(() => {
+      expect(screen.queryByRole('status', { name: 'Deleting repo--feature' })).not.toBeInTheDocument();
+    });
   });
 });
