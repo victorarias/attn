@@ -8,7 +8,7 @@
 
 Replace the current pattern of integrating coding agents via in-tree Go drivers (`internal/agent/claude.go`, `codex.go`, `copilot.go`, and the previously proposed `pi.go`) with an out-of-process plugin system.
 
-A third party can write a plugin in TypeScript (Bun runtime), point attn at it via `attn plugin install <git-url>`, and their agent works end-to-end — state reporting, classification, resume/fork, session metadata — without touching attn's Go code.
+A third party can write a plugin in TypeScript (Bun runtime), point attn at it via `attn plugin install <git-url>`, and their agent works end-to-end — state reporting, classification, resume, session metadata — without touching attn's Go code.
 
 ### Goals
 

@@ -2245,9 +2245,6 @@ type SpawnSessionMessage struct {
 	// Executable corresponds to the JSON schema field "executable".
 	Executable *string `json:"executable,omitempty,omitzero"`
 
-	// ForkSession corresponds to the JSON schema field "fork_session".
-	ForkSession *bool `json:"fork_session,omitempty,omitzero"`
-
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 

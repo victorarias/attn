@@ -15,7 +15,6 @@ interface KeyboardShortcutsConfig {
   onNextSession: () => void;
   onToggleSidebar?: () => void;
   onRefreshPRs?: () => void;
-  onForkSession?: () => void;
   onToggleDiffPanel?: () => void;
   onToggleReviewLoopPanel?: () => void;
   onToggleDiffDetailPanel?: () => void;
@@ -40,7 +39,6 @@ export function useKeyboardShortcuts({
   onNextSession,
   onToggleSidebar,
   onRefreshPRs,
-  onForkSession,
   onToggleDiffPanel,
   onToggleReviewLoopPanel,
   onToggleDiffDetailPanel,
@@ -62,7 +60,6 @@ export function useKeyboardShortcuts({
   useShortcut('session.jumpToWaiting', onJumpToWaiting, enabled);
   useShortcut('session.toggleSidebar', onToggleSidebar ?? (() => {}), enabled && !!onToggleSidebar);
   useShortcut('session.refreshPRs', onRefreshPRs ?? (() => {}), enabled && !!onRefreshPRs);
-  useShortcut('session.fork', onForkSession ?? (() => {}), enabled && !!onForkSession);
   useShortcut('dock.diff', onToggleDiffPanel ?? (() => {}), enabled && !!onToggleDiffPanel);
   useShortcut('dock.reviewLoop', onToggleReviewLoopPanel ?? (() => {}), enabled && !!onToggleReviewLoopPanel);
   useShortcut('dock.diffDetail', onToggleDiffDetailPanel ?? (() => {}), enabled && !!onToggleDiffDetailPanel);

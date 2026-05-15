@@ -9,7 +9,7 @@ Pi is no longer an in-tree Go driver. It becomes the first consumer of attn's ne
 - State event → attn state mapping (§State flow table)
 - Classifier hint pattern (who runs the classifier, with which model)
 - Session ID tie via `session_start` + `attn.link` custom entry
-- Edge cases: `--no-session`, resume/fork, ephemeral crashes
+- Edge cases: `--no-session`, resume, ephemeral crashes
 - Explicit non-goals: no `pending_approval`, no yolo, no permission gate, no transcript watcher, no PTY state detector
 - extension.ts sketch (§F)
 
@@ -31,7 +31,7 @@ Pi is no longer an in-tree Go driver. It becomes the first consumer of attn's ne
 
 Integrate [`pi`](https://github.com/badlogic/pi-mono) (`npm install -g @mariozechner/pi-coding-agent`) as a first-class agent in attn, alongside claude/codex/copilot. The current `internal/agent/pi.go` is a minimal stub that only spawns the binary and passes args through; everything downstream (protocol enum, settings keys, `LocationPicker`, pty manager, hub manager) is already scaffolded for pi but no state detection or lifecycle features are wired up.
 
-Goal: codex-parity baseline (resume, fork, classifier, session metadata) using a custom attn-owned **pi extension** as the primary state source instead of transcript watching or PTY heuristics. Pi's extension API is richer than Claude Code hooks — it surfaces `session_start`, `input`, `before_agent_start`, `agent_start`/`end`, `turn_start`/`end`, `tool_call` (blockable), `tool_result`, `session_shutdown` — which makes it the cleanest place to hang reliable state detection.
+Goal: codex-parity baseline (resume, classifier, session metadata) using a custom attn-owned **pi extension** as the primary state source instead of transcript watching or PTY heuristics. Pi's extension API is richer than Claude Code hooks — it surfaces `session_start`, `input`, `before_agent_start`, `agent_start`/`end`, `turn_start`/`end`, `tool_call` (blockable), `tool_result`, `session_shutdown` — which makes it the cleanest place to hang reliable state detection.
 
 ## Why an extension, not transcripts or PTY heuristics
 
@@ -110,7 +110,7 @@ The daemon stores `pi_session_file` + `pi_session_id` on the attn session record
 
 Edge cases:
 - `--no-session`: `getSessionFile()` is `undefined`; daemon knows there's no disk file to read.
-- `/resume` or `/fork`: `session_start` fires again with `reason: "resume" | "fork"` and a new session file; the link is re-sent.
+- `/resume`: `session_start` fires again with `reason: "resume"` and a new session file; the link is re-sent.
 - Ephemeral / crash before link: attn side just has no `pi_session_file` until (or unless) the extension ever connects.
 
 ## Wire protocol
@@ -143,22 +143,21 @@ If any of these becomes desirable later, each is a standalone follow-up with its
 
 ### Phase 1 — Launch plumbing (no state yet)
 
-**Goal:** pi sessions launched by attn gain resume, fork, and `--continue` pass-through. Attn still shows `launching → unknown`, but the session is usable with resume semantics matching codex/copilot.
+**Goal:** pi sessions launched by attn gain resume and `--continue` pass-through. Attn still shows `launching → unknown`, but the session is usable with resume semantics matching codex/copilot.
 
 **Changes:**
 
 - `internal/agent/pi.go`
-  - `BuildCommand`: translate `SpawnOpts.{ResumeSessionID, ResumePicker, ForkSession}` into pi's native flags:
-    - `ResumeSessionID != ""` → `--session <path>` (if we have a full file path) or `--fork <partial-uuid>` for fork-from-id. Verify which is right per pi's semantics before committing.
+  - `BuildCommand`: translate `SpawnOpts.{ResumeSessionID, ResumePicker}` into pi's native flags:
+    - `ResumeSessionID != ""` → `--session <path>` once attn can resolve the stored ID to a pi session file path.
     - `ResumePicker` → `--resume`
-    - `ForkSession && ResumeSessionID != ""` → `--fork <path-or-uuid>`
     - Pass `--continue` for a "continue most recent" UX if attn has an equivalent.
-  - `Capabilities`: `HasResume: true`, `HasFork: true`. Everything else stays `false`.
+  - `Capabilities`: `HasResume: true`. Everything else stays `false`.
 - `internal/agent/driver_test.go`
-  - Replace `TestBuiltInPiDriver_MinimalCapabilities` with a resume/fork-aware assertion.
-  - Add `TestPiDriver_BuildCommand_Resume`, `TestPiDriver_BuildCommand_Fork`, `TestPiDriver_BuildCommand_Passthrough`.
+  - Replace `TestBuiltInPiDriver_MinimalCapabilities` with a resume-aware assertion.
+  - Add `TestPiDriver_BuildCommand_Resume`, `TestPiDriver_BuildCommand_Passthrough`.
 
-**Deliverable:** `attn -s foo` + resume picker + fork work end-to-end. No regressions in attn UI state behavior.
+**Deliverable:** `attn -s foo` + resume picker work end-to-end. No regressions in attn UI state behavior.
 
 ### Phase 2 — Attn pi extension + state reporting
 
@@ -237,7 +236,7 @@ Explicitly not in Phase 4: yolo mode, approval state, permission gates, transcri
 1. **`ATTN_SOCKET_PATH` plumbing.** Is it already injected for non-claude drivers, or does `Pi.BuildEnv` need to add it? Claude hooks rely on the settings.json rather than env, so it may not be there for codex/copilot either. Resolve by reading `internal/pty/manager.go` env setup at the start of Phase 2.
 2. **Existing stop-event struct.** Can it carry `classifier_hint` as an optional field without a protocol version bump? Resolve by reading `internal/protocol` + `internal/daemon` stop handling in Phase 2 step 0.
 3. **Classifier prompt.** Start with Codex's prompt verbatim. If classification quality suffers, revisit with a pi-specific prompt in a follow-up.
-4. **Resume vs fork argument mapping.** Verify exactly how attn's `SpawnOpts.ResumeSessionID` values look today (full path vs uuid vs partial uuid) and map them onto pi's `--session` / `--fork` / `--resume` semantics. Settle this before writing `BuildCommand` in Phase 1.
+4. **Resume argument mapping.** Verify exactly how attn's `SpawnOpts.ResumeSessionID` values look today (full path vs uuid vs partial uuid) and map them onto pi's `--session` / `--resume` semantics. Settle this before writing `BuildCommand` in Phase 1.
 
 ## Suggested kick-off order
 
@@ -330,7 +329,7 @@ func (p *Pi) BuildCommand(opts SpawnOpts) *exec.Cmd {
     if path, err := ensureAttnPiExtensionStaged(); err == nil {
         args = append(args, "-e", path)
     }
-    // ...resume/fork args (see §C)...
+    // ...resume args (see §C)...
     args = append(args, opts.AgentArgs...)
     return exec.Command(opts.Executable, args...)
 }
@@ -350,7 +349,7 @@ func (p *Pi) BuildEnv(opts SpawnOpts) []string {
 
 **No SpawnOpts changes, no daemon changes, no singleton.**
 
-### C. Resume/fork flag mapping — semantic mismatch and Phase 1 scope
+### C. Resume flag mapping — semantic mismatch and Phase 1 scope
 
 Pi's native session flags are fundamentally different from codex/copilot:
 
@@ -359,9 +358,8 @@ Pi's native session flags are fundamentally different from codex/copilot:
 | New session                   | `--session-id <id>`      | (none)               | (none)               | (none)                               |
 | Resume picker (interactive)   | `-r`                     | `resume`             | `--resume`           | `--resume`                           |
 | Resume specific by ID         | `-r <id>`                | `resume <id>`        | `--resume <id>`      | **`--session <path>`** (path, not id)|
-| Fork specific by ID           | `-r <id> --fork-session` | (not supported)      | (not supported)      | `--fork <path-or-partial-uuid>`      |
 
-**The mismatch:** attn's `SpawnOpts.ResumeSessionID` carries whatever the downstream agent's native session identifier is — for codex/copilot/claude that's a UUID. Pi's `--session` wants a filesystem path, not a UUID. Pi's `--fork` accepts either a path or a partial UUID, which is one convenient escape hatch.
+**The mismatch:** attn's `SpawnOpts.ResumeSessionID` carries whatever the downstream agent's native session identifier is — for codex/copilot/claude that's a UUID. Pi's `--session` wants a filesystem path, not a UUID.
 
 Looking at how the wrapper populates `ResumeSessionID`: `cmd/attn/main.go:535` sets it from `parsed.resumeID` which comes from CLI arg parsing (`--resume <id>`). For attn-internal recovery flows, the daemon's `SetResumeSessionID` / `GetResumeSessionID` store methods persist whatever id the driver asked to keep.
 
@@ -371,7 +369,6 @@ Looking at how the wrapper populates `ResumeSessionID`: `cmd/attn/main.go:535` s
 |------------------------|----------------------------------------------------------------|
 | New pi session         | Yes — no resume flags, default pi behavior                     |
 | `--resume` picker      | Yes — `ResumePicker → --resume`                                |
-| Fork-by-id             | Yes — `ForkSession && ResumeSessionID != "" → --fork <id>` (partial UUID works per pi docs) |
 | Resume-by-id in place  | **No** — requires a file path we don't yet have. Defer to Phase 2b. |
 
 Phase 1's `BuildCommand`:
@@ -382,9 +379,6 @@ func (p *Pi) BuildCommand(opts SpawnOpts) *exec.Cmd {
     // (extension staging handled in §B)
 
     switch {
-    case opts.ForkSession && opts.ResumeSessionID != "":
-        // Partial UUID works per pi docs; full path also works.
-        args = append(args, "--fork", opts.ResumeSessionID)
     case opts.ResumePicker:
         args = append(args, "--resume")
     case opts.ResumeSessionID != "":
@@ -401,7 +395,7 @@ func (p *Pi) BuildCommand(opts SpawnOpts) *exec.Cmd {
 }
 ```
 
-**Capabilities for Phase 1:** `HasResume: true` (picker works), `HasFork: true` (via partial UUID). Leaving `HasResume: true` is slightly dishonest because resume-by-id doesn't work in place — but the picker is resume UX and it *does* work. If this is uncomfortable, gate the capability on `HasFork` alone and leave `HasResume: false` until Phase 2b.
+**Capabilities for Phase 1:** `HasResume: true` (picker works). Leaving `HasResume: true` is slightly dishonest because resume-by-id doesn't work in place — but the picker is resume UX and it *does* work.
 
 **Phase 2b — resume-by-id lift (added after Phase 2):**
 
@@ -787,4 +781,3 @@ export default function (pi: ExtensionAPI): void {
 - **Protocol test**: `PiSessionLinkedMessage` round-trip parse in `internal/protocol` tests.
 - **Daemon test**: stop message with `text` and `classifier_hint` bypasses transcript extraction and hits `ClassifierProviderWithHint`. Use a fake Pi driver that records hint/text seen.
 - **Extension integration test (deferred)**: spawn a real `pi --print --no-session --no-tools --model <stub> 'hi'` with `-e <staged>` and a test unix socket server. Assert the expected sequence of JSON messages lands on the server. Skip if pi isn't installed in CI; run locally.
-

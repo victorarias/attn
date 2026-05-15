@@ -40,7 +40,6 @@ func (c *Codex) Capabilities() Capabilities {
 		HasClassifier:        true,
 		HasStateDetector:     true,
 		HasResume:            true,
-		HasFork:              false,
 		HasYolo:              true,
 	}
 }

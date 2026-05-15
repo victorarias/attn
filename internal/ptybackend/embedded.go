@@ -43,7 +43,6 @@ func (b *EmbeddedBackend) Spawn(_ context.Context, opts SpawnOptions) error {
 		Rows:              opts.Rows,
 		ResumeSessionID:   opts.ResumeSessionID,
 		ResumePicker:      opts.ResumePicker,
-		ForkSession:       opts.ForkSession,
 		YoloMode:          opts.YoloMode,
 		Executable:        opts.Executable,
 		ClaudeExecutable:  opts.ClaudeExecutable,

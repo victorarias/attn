@@ -141,7 +141,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '58';
+const PROTOCOL_VERSION = '59';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -1998,7 +1998,6 @@ export function useDaemonSocket({
         ...(args.label && { label: args.label }),
         ...(args.resume_session_id && { resume_session_id: args.resume_session_id }),
         ...(args.resume_picker && { resume_picker: args.resume_picker }),
-        ...(args.fork_session && { fork_session: args.fork_session }),
         ...(args.yolo_mode && { yolo_mode: args.yolo_mode }),
         ...(args.executable && { executable: args.executable }),
         ...(args.claude_executable && { claude_executable: args.claude_executable }),

@@ -42,7 +42,6 @@ export const SHORTCUTS = {
   'session.jumpToWaiting': { key: 'j', meta: true },
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
   'session.refreshPRs': { key: 'r', meta: true },
-  'session.fork': { key: 'f', meta: true, shift: true },
 
   // Dock panels
   'dock.diff': { key: 'g', meta: true, shift: true },

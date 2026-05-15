@@ -18,7 +18,6 @@ import { OpenPRLauncherProgress } from './components/OpenPRLauncherProgress';
 import { RightDock } from './components/RightDock';
 import { SessionTerminalWorkspace } from './components/SessionTerminalWorkspace';
 import { ThumbsModal } from './components/ThumbsModal';
-import { ForkDialog } from './components/ForkDialog';
 import { SettingsModal } from './components/SettingsModal';
 import { CopyToast, useCopyToast } from './components/CopyToast';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
@@ -550,7 +549,6 @@ sendFetchPRDetails,
     setActiveSession,
     takeSessionSpawnArgs,
     reloadSession,
-    setForkParams,
     setLauncherConfig,
     syncFromDaemonSessions,
     syncFromDaemonWorkspaces,
@@ -1133,16 +1131,6 @@ sendFetchPRDetails,
     };
   }, [activeSessionId, getReviewLoopState, setReviewLoopStateForSession]);
 
-  // Fork dialog state
-  const [forkDialogOpen, setForkDialogOpen] = useState(false);
-  const [forkTargetSession, setForkTargetSession] = useState<{
-    id: string;
-    label: string;
-    cwd: string;
-    daemonSessionId: string;
-    agent: SessionAgent;
-  } | null>(null);
-  const [forkError, setForkError] = useState<string | null>(null);
   const [utilityFocusRequestToken, setUtilityFocusRequestToken] = useState(0);
 
   // No auto-creation - user clicks "+" to start a session
@@ -1204,85 +1192,6 @@ sendFetchPRDetails,
   const handleThumbsCopy = useCallback((_value: string) => {
     showCopyToast('Copied to clipboard');
   }, [showCopyToast]);
-
-  // Fork session handlers
-  const handleOpenForkDialog = useCallback(() => {
-    if (!activeSessionId) return;
-    const localSession = sessions.find((s) => s.id === activeSessionId);
-    if (!localSession) return;
-    const daemonSession = daemonSessions.find((ds) => ds.id === localSession.id);
-    if (!daemonSession) return;
-    if (daemonSession.endpoint_id) {
-      showError('Forking remote sessions is not implemented yet.');
-      return;
-    }
-
-    setForkTargetSession({
-      id: localSession.id,
-      label: localSession.label,
-      cwd: localSession.cwd,
-      daemonSessionId: daemonSession.id,
-      agent: localSession.agent,
-    });
-    setForkError(null);
-    setForkDialogOpen(true);
-  }, [activeSessionId, daemonSessions, sessions, showError]);
-
-  const handleForkConfirm = useCallback(async (name: string, createWorktree: boolean) => {
-    if (!forkTargetSession) return;
-
-    setForkError(null);
-    let worktreePath: string | null = null;
-
-    try {
-      let targetCwd = forkTargetSession.cwd;
-
-      // Create worktree if requested
-      if (createWorktree) {
-        const branchName = `fork/${name}`;
-        const result = await sendCreateWorktree(
-          forkTargetSession.cwd,
-          branchName
-        );
-        if (!result.success) {
-          // Show error in dialog, don't close - user can retry or uncheck worktree
-          setForkError(`Failed to create worktree: ${result.error || 'Unknown error'}`);
-          return;
-        }
-        targetCwd = result.path!;
-        worktreePath = result.path!;
-      }
-
-      // Pre-generate session ID so we can set fork params before the pane binder asks for spawn args.
-      const sessionId = crypto.randomUUID();
-
-      // Store fork params BEFORE creating session to avoid race condition
-      setForkParams(sessionId, forkTargetSession.daemonSessionId);
-
-      // Create the forked session with the pre-generated ID
-      await createSession(name, targetCwd, sessionId, forkTargetSession.agent);
-
-      setForkDialogOpen(false);
-      setForkTargetSession(null);
-      setForkError(null);
-
-    } catch (err) {
-      console.error('[App] Fork failed:', err);
-      // Clean up worktree if it was created but downstream steps failed
-      if (worktreePath) {
-        sendDeleteWorktree(worktreePath).catch((e) =>
-          console.error('[App] Failed to cleanup worktree:', e)
-        );
-      }
-      setForkError(err instanceof Error ? err.message : 'Fork failed');
-    }
-  }, [createSession, forkTargetSession, sendCreateWorktree, sendDeleteWorktree, setForkParams]);
-
-  const handleForkClose = useCallback(() => {
-    setForkDialogOpen(false);
-    setForkTargetSession(null);
-    setForkError(null);
-  }, []);
 
   const handleCloseSession = useCallback(
     async (id: string) => {
@@ -1918,12 +1827,11 @@ sendFetchPRDetails,
     },
     onToggleAttentionPanel: () => toggleDockPanel('attention'),
     onQuickFind: view === 'session' ? handleOpenQuickFind : undefined,
-    onForkSession: view === 'session' && !activeRemoteSession ? handleOpenForkDialog : undefined,
     onOpenSettings: useCallback(() => setSettingsOpen(prev => !prev), []),
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
-    enabled: !locationPickerOpen && !thumbsOpen && !forkDialogOpen,
+    enabled: !locationPickerOpen && !thumbsOpen,
   });
 
   return (
@@ -2202,14 +2110,6 @@ sendFetchPRDetails,
       />
       <CopyToast message={copyMessage} onDone={clearCopyToast} />
       <ErrorToast message={errorMessage} onDone={clearError} />
-      <ForkDialog
-        isOpen={forkDialogOpen}
-        sessionLabel={forkTargetSession?.label || ''}
-        existingLabels={sessions.map(s => s.label)}
-        error={forkError}
-        onClose={handleForkClose}
-        onFork={handleForkConfirm}
-      />
       <SettingsModal
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}

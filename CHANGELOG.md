@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-16]
+
+### Removed
+- **Session Forking**: Removed the local Fork Session dialog, its keyboard shortcut, and the `fork_session` spawn path so attn no longer exposes or forwards session-fork launches.
+
+---
+
 ## [2026-05-15]
 
 ### Changed
@@ -497,7 +504,6 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Protocol Handshake Version Drift**: Frontend WebSocket protocol constant now matches daemon protocol `32`, preventing immediate disconnects after upgrading.
 - **Classifier Capability Enforcement**: Stop-time classification now honors per-agent `classifier` capability toggles and skips LLM classification when disabled.
-- **Direct Launch Resume Flag Parsing**: `attn --resume --fork-session` now correctly opens resume picker mode while preserving `--fork-session` instead of mis-parsing the flag as a resume ID.
 - **Dead Agent Driver Abstractions**: Remove unused transcript-handler and state-detector provider interfaces from the driver layer to reduce indirection and avoid stale integration paths.
 - **Agent Isolation Cleanup**: Remove legacy transcript helper wrappers in `cmd/attn/main.go` and remove daemon-side hardcoded transcript discovery/bootstrap fallbacks so transcript behavior now comes from drivers.
 - **Executable Override Injection**: PTY spawn now avoids forcing default `ATTN_*_EXECUTABLE` env vars, preserving login-shell/env-based executable selection unless an explicit override is set.

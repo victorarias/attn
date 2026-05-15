@@ -105,15 +105,13 @@ describe('sessions store', () => {
     });
   });
 
-  it('takeSessionSpawnArgs consumes pending fork params once and applies launcher overrides', async () => {
+  it('takeSessionSpawnArgs applies launcher overrides', async () => {
     const sessionId = await useSessionStore.getState().createSession('Spawn Test', '/tmp/workspace', 'sess-spawn', 'claude', 'ep-1', true);
     useSessionStore.getState().setLauncherConfig({
       executables: { claude: '/opt/bin/claude-custom' },
     });
-    useSessionStore.getState().setForkParams(sessionId, 'resume-123');
 
     const first = useSessionStore.getState().takeSessionSpawnArgs(sessionId, 120, 40);
-    const second = useSessionStore.getState().takeSessionSpawnArgs(sessionId, 120, 40);
 
     expect(first).toMatchObject({
       id: sessionId,
@@ -125,14 +123,8 @@ describe('sessions store', () => {
       agent: 'claude',
       executable: '/opt/bin/claude-custom',
       claude_executable: '/opt/bin/claude-custom',
-      resume_session_id: 'resume-123',
-      fork_session: true,
-      yolo_mode: true,
-    });
-    expect(second).toMatchObject({
-      id: sessionId,
       resume_session_id: null,
-      fork_session: null,
+      yolo_mode: true,
     });
   });
 

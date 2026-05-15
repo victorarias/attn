@@ -69,7 +69,6 @@ export async function spawnPtyRuntime(
           ...args,
           resume_session_id: args.id,
           resume_picker: null,
-          fork_session: null,
         };
         operations.logClaudeResumeRecovery?.({
           id: args.id,

@@ -76,7 +76,6 @@ type Config struct {
 
 	ResumeSessionID string
 	ResumePicker    bool
-	ForkSession     bool
 	YoloMode        bool
 
 	Executable string
@@ -242,7 +241,6 @@ func (r *Runtime) run(ctx context.Context) error {
 		Rows:              r.cfg.Rows,
 		ResumeSessionID:   r.cfg.ResumeSessionID,
 		ResumePicker:      r.cfg.ResumePicker,
-		ForkSession:       r.cfg.ForkSession,
 		YoloMode:          r.cfg.YoloMode,
 		Executable:        r.cfg.Executable,
 		ClaudeExecutable:  r.cfg.ClaudeExecutable,

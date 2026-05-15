@@ -39,7 +39,6 @@ func (c *Copilot) Capabilities() Capabilities {
 		HasClassifier:        true,
 		HasStateDetector:     true,
 		HasResume:            true,
-		HasFork:              false,
 		HasYolo:              true,
 	}
 }
