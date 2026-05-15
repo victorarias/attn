@@ -579,6 +579,9 @@ sendFetchPRDetails,
   const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
   const [branchDiffBaseRef, setBranchDiffBaseRef] = useState('');
   const [branchDiffError, setBranchDiffError] = useState<string | null>(null);
+  const [branchDiffLoaded, setBranchDiffLoaded] = useState(false);
+  const [branchDiffLoading, setBranchDiffLoading] = useState(false);
+  const [branchDiffRefreshing, setBranchDiffRefreshing] = useState(false);
 
   // Worktree cleanup prompt state
   const [closedWorktree, setClosedWorktree] = useState<{ path: string; branch?: string } | null>(null);
@@ -1588,8 +1591,12 @@ sendFetchPRDetails,
   }, [activeRepoDaemonSession?.directory, sendGetFileDiff]);
 
   const branchDiffRequestId = useRef(0);
+  const branchDiffLoadedRef = useRef(false);
   const refreshBranchDiff = useCallback(async (directory: string) => {
     const requestId = ++branchDiffRequestId.current;
+    const hadLoadedBranchDiff = branchDiffLoadedRef.current;
+    setBranchDiffLoading(!hadLoadedBranchDiff);
+    setBranchDiffRefreshing(hadLoadedBranchDiff);
     setBranchDiffError(null);
     try {
       const result = await sendGetBranchDiffFiles(directory);
@@ -1597,31 +1604,53 @@ sendFetchPRDetails,
       if (result.success) {
         setBranchDiffFiles(result.files);
         setBranchDiffBaseRef(result.base_ref);
+        setBranchDiffError(null);
+        branchDiffLoadedRef.current = true;
+        setBranchDiffLoaded(true);
       } else {
-        setBranchDiffFiles([]);
-        setBranchDiffBaseRef(result.base_ref || '');
+        if (!branchDiffLoadedRef.current) {
+          setBranchDiffFiles([]);
+          setBranchDiffBaseRef(result.base_ref || '');
+          setBranchDiffLoaded(false);
+        }
         setBranchDiffError(result.error || 'Failed to load branch diff');
       }
     } catch (err) {
       if (requestId !== branchDiffRequestId.current) return;
-      setBranchDiffFiles([]);
-      setBranchDiffBaseRef('');
+      if (!branchDiffLoadedRef.current) {
+        setBranchDiffFiles([]);
+        setBranchDiffBaseRef('');
+        setBranchDiffLoaded(false);
+      }
       setBranchDiffError(err instanceof Error ? err.message : 'Failed to load branch diff');
+    } finally {
+      if (requestId === branchDiffRequestId.current) {
+        setBranchDiffLoading(false);
+        setBranchDiffRefreshing(false);
+      }
     }
   }, [sendGetBranchDiffFiles]);
 
   useEffect(() => {
     branchDiffRequestId.current += 1;
+    branchDiffLoadedRef.current = false;
+    setBranchDiffLoaded(false);
     setBranchDiffFiles([]);
     setBranchDiffBaseRef('');
     setBranchDiffError(null);
+    setBranchDiffLoading(false);
+    setBranchDiffRefreshing(false);
   }, [activeRepoDaemonSession?.directory]);
 
   useEffect(() => {
     if (view !== 'session' || !activeRepoDaemonSession?.directory) {
+      branchDiffLoadedRef.current = false;
+      setBranchDiffLoaded(false);
       setBranchDiffFiles([]);
       setBranchDiffBaseRef('');
       setBranchDiffError(null);
+      setBranchDiffLoading(false);
+      setBranchDiffRefreshing(false);
       return;
     }
 
@@ -2018,6 +2047,9 @@ sendFetchPRDetails,
                   branchDiffFiles={branchDiffFiles}
                   branchDiffBaseRef={branchDiffBaseRef}
                   branchDiffError={branchDiffError}
+                  branchDiffLoaded={branchDiffLoaded}
+                  branchDiffLoading={branchDiffLoading}
+                  branchDiffRefreshing={branchDiffRefreshing}
                   selectedFile={null}
                   onFileSelect={handleFileSelect}
                   onOpenDiffClick={handleOpenDiffDetailPanel}

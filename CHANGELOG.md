@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Large Repository Git Operations**: Git worktree, status, diff, fetch, clone, and repository metadata operations now use shared long-running command handling with slow-command daemon logging. UI waits for these operations are much longer, and background git polling is less aggressive so giant monorepos are less likely to look failed while Git is still working.
+- **Changes Panel Refreshes**: The Changes panel now keeps the last successful diff visible while background refreshes run or fail, using small stale/refresh indicators instead of replacing existing results with loading placeholders.
 
 ---
 
