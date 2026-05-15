@@ -1477,7 +1477,6 @@ export function useDaemonSocket({
             break;
 
           case 'session_state_changed':
-          case 'session_todos_updated':
             if (data.session) {
               sessionsRef.current = upsertSessionByID(sessionsRef.current, data.session);
               onSessionsUpdate(sessionsRef.current);

@@ -309,46 +309,6 @@ func TestClient_Unregister(t *testing.T) {
 	}
 }
 
-func TestClient_UpdateTodos(t *testing.T) {
-	tmpDir := t.TempDir()
-	sockPath := filepath.Join(tmpDir, "test.sock")
-
-	listener, err := net.Listen("unix", sockPath)
-	if err != nil {
-		t.Fatalf("listen error: %v", err)
-	}
-	defer listener.Close()
-
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-
-		buf := make([]byte, 4096)
-		n, _ := conn.Read(buf)
-
-		cmd, msg, err := protocol.ParseMessage(buf[:n])
-		if err != nil || cmd != protocol.CmdTodos {
-			return
-		}
-		todos := msg.(*protocol.TodosMessage)
-		if todos.ID != "sess-123" || len(todos.Todos) != 2 {
-			return
-		}
-
-		resp := protocol.Response{Ok: true}
-		json.NewEncoder(conn).Encode(resp)
-	}()
-
-	c := New(sockPath)
-	err = c.UpdateTodos("sess-123", []string{"todo1", "todo2"})
-	if err != nil {
-		t.Fatalf("UpdateTodos error: %v", err)
-	}
-}
-
 func TestClient_Heartbeat(t *testing.T) {
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")

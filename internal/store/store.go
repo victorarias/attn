@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"log"
 	"os"
 	"sort"
@@ -66,9 +65,6 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 		value := protocol.Deref(session.Recoverable)
 		cloned.Recoverable = protocol.Ptr(value)
 	}
-	if session.Todos != nil {
-		cloned.Todos = append([]string(nil), session.Todos...)
-	}
 	return &cloned
 }
 
@@ -126,10 +122,6 @@ func (s *Store) Add(session *protocol.Session) {
 		return
 	}
 
-	todosJSON, err := json.Marshal(session.Todos)
-	if err != nil {
-		log.Printf("[store] Add: failed to marshal todos for session %s: %v", session.ID, err)
-	}
 	normalizedAgent := strings.TrimSpace(strings.ToLower(string(session.Agent)))
 	if normalizedAgent == "" {
 		normalizedAgent = string(protocol.SessionAgentCodex)
@@ -143,10 +135,10 @@ func (s *Store) Add(session *protocol.Session) {
 		}
 	}
 	session.Agent = protocol.SessionAgent(normalizedAgent)
-	_, err = s.db.Exec(`
+	_, err := s.db.Exec(`
 		INSERT OR REPLACE INTO sessions
-		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_seen, muted, recoverable)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Label,
 		session.Agent,
@@ -159,7 +151,6 @@ func (s *Store) Add(session *protocol.Session) {
 		string(session.State),
 		session.StateSince,
 		session.StateUpdatedAt,
-		string(todosJSON),
 		session.LastSeen,
 		boolToInt(session.Muted),
 		boolToInt(protocol.Deref(session.Recoverable)),
@@ -179,13 +170,12 @@ func (s *Store) Get(id string) *protocol.Session {
 	}
 
 	var session protocol.Session
-	var todosJSON string
 	var stateSince, stateUpdatedAt, lastSeen string
 	var muted, isWorktree, recoverable int
 	var endpointID, workspaceID, branch, mainRepo sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_seen, muted, recoverable
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
@@ -199,7 +189,6 @@ func (s *Store) Get(id string) *protocol.Session {
 		&session.State,
 		&stateSince,
 		&stateUpdatedAt,
-		&todosJSON,
 		&lastSeen,
 		&muted,
 		&recoverable,
@@ -229,11 +218,6 @@ func (s *Store) Get(id string) *protocol.Session {
 	session.Muted = muted == 1
 	if recoverable == 1 {
 		session.Recoverable = protocol.Ptr(true)
-	}
-	if todosJSON != "" && todosJSON != "null" {
-		if err := json.Unmarshal([]byte(todosJSON), &session.Todos); err != nil {
-			log.Printf("[store] Get: failed to unmarshal todos for session %s: %v", id, err)
-		}
 	}
 
 	return &session
@@ -333,11 +317,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_seen, muted, recoverable
 			FROM sessions ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, muted, recoverable
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_seen, muted, recoverable
 			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
@@ -348,7 +332,6 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 	var result []*protocol.Session
 	for rows.Next() {
 		var session protocol.Session
-		var todosJSON string
 		var stateSince, stateUpdatedAt, lastSeen string
 		var muted, isWorktree, recoverable int
 		var endpointID, workspaceID, branch, mainRepo sql.NullString
@@ -366,7 +349,6 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			&session.State,
 			&stateSince,
 			&stateUpdatedAt,
-			&todosJSON,
 			&lastSeen,
 			&muted,
 			&recoverable,
@@ -396,11 +378,6 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		session.Muted = muted == 1
 		if recoverable == 1 {
 			session.Recoverable = protocol.Ptr(true)
-		}
-		if todosJSON != "" && todosJSON != "null" {
-			if err := json.Unmarshal([]byte(todosJSON), &session.Todos); err != nil {
-				log.Printf("[store] List: failed to unmarshal todos for session %s: %v", session.ID, err)
-			}
 		}
 
 		result = append(result, &session)
@@ -548,29 +525,6 @@ func (s *Store) UpdateStateWithTimestamp(id, state string, updatedAt time.Time) 
 	_, err = s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
 		state, ts, ts, id)
 	return err == nil
-}
-
-// UpdateTodos updates a session's todo list
-func (s *Store) UpdateTodos(id string, todos []string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.db == nil {
-		if session := s.sessions[id]; session != nil {
-			session.Todos = append([]string(nil), todos...)
-		}
-		return
-	}
-
-	todosJSON, err := json.Marshal(todos)
-	if err != nil {
-		log.Printf("[store] UpdateTodos: failed to marshal todos for session %s: %v", id, err)
-		return
-	}
-	_, err = s.db.Exec("UPDATE sessions SET todos = ? WHERE id = ?", string(todosJSON), id)
-	if err != nil {
-		log.Printf("[store] UpdateTodos: failed for session %s: %v", id, err)
-	}
 }
 
 // UpdateBranch updates a session's branch information

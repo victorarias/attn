@@ -126,17 +126,6 @@ func (c *Client) SendStop(id, transcriptPath string) error {
 	return err
 }
 
-// UpdateTodos updates a session's todo list
-func (c *Client) UpdateTodos(id string, todos []string) error {
-	msg := protocol.TodosMessage{
-		Cmd:   protocol.CmdTodos,
-		ID:    id,
-		Todos: todos,
-	}
-	_, err := c.send(msg)
-	return err
-}
-
 // Query returns sessions matching the filter
 func (c *Client) Query(filter string) ([]protocol.Session, error) {
 	var filterPtr *string

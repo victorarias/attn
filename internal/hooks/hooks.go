@@ -82,15 +82,6 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 			},
 			"PostToolUse": {
 				{
-					Matcher: "TodoWrite",
-					Hooks: []Hook{
-						{
-							Type:    "command",
-							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-todo "%s"`, socketCmd, wrapperCmd, sessionID),
-						},
-					},
-				},
-				{
 					// PostToolUse fires AFTER user responds - set back to working
 					Matcher: "AskUserQuestion",
 					Hooks: []Hook{
