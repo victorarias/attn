@@ -505,6 +505,12 @@ function workspaceActionKey(action: string, sessionId: string, paneId?: string):
 
 const ATTACH_RETRY_TIMEOUT_MS = 3_000;
 const ATTACH_RETRY_DELAY_MS = 150;
+const GIT_METADATA_TIMEOUT_MS = 30 * 60_000;
+const GIT_DIFF_TIMEOUT_MS = 10 * 60_000;
+const GIT_WORKTREE_TIMEOUT_MS = 30 * 60_000;
+const GIT_NETWORK_TIMEOUT_MS = 30 * 60_000;
+const GIT_CLONE_TIMEOUT_MS = 90 * 60_000;
+const GITHUB_REFRESH_TIMEOUT_MS = 5 * 60_000;
 
 export function isTransientAttachError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -2450,13 +2456,12 @@ export function useDaemonSocket({
 
       ws.send(JSON.stringify({ cmd: 'refresh_prs' }));
 
-      // Timeout after 30 seconds
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
           reject(new Error('Refresh timed out'));
         }
-      }, 30000);
+      }, GITHUB_REFRESH_TIMEOUT_MS);
     });
   }, []);
 
@@ -2479,7 +2484,7 @@ export function useDaemonSocket({
           pendingActionsRef.current.delete(key);
           reject(new Error('Fetch PR details timed out'));
         }
-      }, 30000);
+      }, GITHUB_REFRESH_TIMEOUT_MS);
     });
   }, []);
 
@@ -2551,13 +2556,12 @@ export function useDaemonSocket({
       const actionKey = `worktree_create_worktree_result_${endpointId || 'local'}`;
       pendingActionsRef.current.set(actionKey, { resolve, reject });
 
-      // Set timeout for action
       setTimeout(() => {
         if (pendingActionsRef.current.has(actionKey)) {
           pendingActionsRef.current.delete(actionKey);
           reject(new Error('Create worktree timed out'));
         }
-      }, 30000);
+      }, GIT_WORKTREE_TIMEOUT_MS);
 
       ws.send(JSON.stringify({
         cmd: 'create_worktree',
@@ -2581,13 +2585,12 @@ export function useDaemonSocket({
       const actionKey = `worktree_delete_worktree_result_${endpointId || 'local'}`;
       pendingActionsRef.current.set(actionKey, { resolve, reject });
 
-      // Set timeout for action
       setTimeout(() => {
         if (pendingActionsRef.current.has(actionKey)) {
           pendingActionsRef.current.delete(actionKey);
           reject(new Error('Delete worktree timed out'));
         }
-      }, 30000);
+      }, GIT_WORKTREE_TIMEOUT_MS);
 
       ws.send(JSON.stringify({
         cmd: 'delete_worktree',
@@ -2805,7 +2808,7 @@ export function useDaemonSocket({
           pendingActionsRef.current.delete(key);
           reject(new Error('Browse directory timed out'));
         }
-      }, 10000);
+      }, GIT_METADATA_TIMEOUT_MS);
     });
   }, [nextRequestID]);
 
@@ -2833,7 +2836,7 @@ export function useDaemonSocket({
           pendingActionsRef.current.delete(key);
           reject(new Error('Inspect path timed out'));
         }
-      }, 10000);
+      }, GIT_METADATA_TIMEOUT_MS);
     });
   }, [nextRequestID]);
 
@@ -2854,7 +2857,7 @@ export function useDaemonSocket({
           pendingActionsRef.current.delete(actionKey);
           reject(new Error('Create worktree from branch timed out'));
         }
-      }, 30000);
+      }, GIT_WORKTREE_TIMEOUT_MS);
 
       ws.send(JSON.stringify({
         cmd: 'create_worktree_from_branch',
@@ -2884,7 +2887,7 @@ export function useDaemonSocket({
           pendingActionsRef.current.delete(key);
           reject(new Error('Fetch remotes timed out'));
         }
-      }, 60000); // Longer timeout for network operations
+      }, GIT_NETWORK_TIMEOUT_MS);
     });
   }, []);
 
@@ -2906,13 +2909,12 @@ export function useDaemonSocket({
         clone_url: cloneUrl,
       }));
 
-      // Longer timeout for clone operations (2 minutes)
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
           reject(new Error('Ensure repo timed out'));
         }
-      }, 120000);
+      }, GIT_CLONE_TIMEOUT_MS);
     });
   }, []);
 
@@ -2985,7 +2987,7 @@ export function useDaemonSocket({
           pendingActionsRef.current.delete(key);
           reject(new Error('Get file diff timed out'));
         }
-      }, 10000);
+      }, GIT_DIFF_TIMEOUT_MS);
     });
   }, []);
 
@@ -3029,7 +3031,7 @@ export function useDaemonSocket({
           branchDiffInFlightRef.current.delete(key);
           reject(new Error('Get branch diff files timed out'));
         }
-      }, 30000); // 30s timeout for potentially large diffs
+      }, GIT_DIFF_TIMEOUT_MS);
     });
 
     branchDiffInFlightRef.current.set(key, request);
@@ -3055,7 +3057,7 @@ export function useDaemonSocket({
           pendingActionsRef.current.delete(key);
           reject(new Error('get_repo_info timeout'));
         }
-      }, 30000);
+      }, GIT_METADATA_TIMEOUT_MS);
     });
   }, []);
 

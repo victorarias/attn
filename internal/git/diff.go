@@ -2,7 +2,6 @@
 package git
 
 import (
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,9 +25,7 @@ func GetBranchDiffFiles(repoDir, baseRef string) ([]DiffFileInfo, error) {
 	fileMap := make(map[string]*DiffFileInfo)
 
 	// 1. Get committed changes: git diff --name-status baseRef...HEAD
-	statusCmd := exec.Command("git", "diff", "--name-status", baseRef+"...HEAD")
-	statusCmd.Dir = repoDir
-	statusOut, err := statusCmd.Output()
+	statusOut, err := runGitOutput(OpDiff, repoDir, "diff", "--name-status", baseRef+"...HEAD")
 	if err != nil {
 		// If baseRef doesn't exist or there's no merge-base, this will fail
 		// That's OK - we'll fall back to just uncommitted changes
@@ -66,9 +63,7 @@ func GetBranchDiffFiles(repoDir, baseRef string) ([]DiffFileInfo, error) {
 	}
 
 	// 2. Get line stats: git diff --numstat baseRef...HEAD
-	numstatCmd := exec.Command("git", "diff", "--numstat", baseRef+"...HEAD")
-	numstatCmd.Dir = repoDir
-	numstatOut, _ := numstatCmd.Output() // Ignore errors, stats are optional
+	numstatOut, _ := runGitOutput(OpDiff, repoDir, "diff", "--numstat", baseRef+"...HEAD") // Ignore errors, stats are optional
 
 	// Parse --numstat output
 	// Format: "10\t5\tfile.go" (additions deletions path)
@@ -102,9 +97,7 @@ func GetBranchDiffFiles(repoDir, baseRef string) ([]DiffFileInfo, error) {
 	// --untracked-files=all expands a brand-new untracked directory into
 	// its individual files; without it, git collapses the whole folder
 	// into a single "?? dir/" entry, which hides every file inside.
-	porcelainCmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
-	porcelainCmd.Dir = repoDir
-	porcelainOut, _ := porcelainCmd.Output()
+	porcelainOut, _ := runGitOutput(OpStatus, repoDir, "status", "--porcelain", "--untracked-files=all")
 
 	uncommittedFiles := make(map[string]bool)
 	if len(porcelainOut) > 0 {
@@ -147,9 +140,7 @@ func GetBranchDiffFiles(repoDir, baseRef string) ([]DiffFileInfo, error) {
 	// 4. Get line stats for uncommitted changes
 	// For files that are only uncommitted (not in committed diff)
 	if len(uncommittedFiles) > 0 {
-		unstatsCmd := exec.Command("git", "diff", "--numstat")
-		unstatsCmd.Dir = repoDir
-		unstatsOut, _ := unstatsCmd.Output()
+		unstatsOut, _ := runGitOutput(OpDiff, repoDir, "diff", "--numstat")
 
 		if len(unstatsOut) > 0 {
 			lines := strings.Split(strings.TrimSpace(string(unstatsOut)), "\n")
@@ -170,9 +161,7 @@ func GetBranchDiffFiles(repoDir, baseRef string) ([]DiffFileInfo, error) {
 		}
 
 		// Also get staged numstat
-		stagedStatsCmd := exec.Command("git", "diff", "--numstat", "--cached")
-		stagedStatsCmd.Dir = repoDir
-		stagedStatsOut, _ := stagedStatsCmd.Output()
+		stagedStatsOut, _ := runGitOutput(OpDiff, repoDir, "diff", "--numstat", "--cached")
 
 		if len(stagedStatsOut) > 0 {
 			lines := strings.Split(strings.TrimSpace(string(stagedStatsOut)), "\n")

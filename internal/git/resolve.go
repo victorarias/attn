@@ -3,7 +3,6 @@ package git
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -70,8 +69,7 @@ func ResolveRepoDir(repoDir string) (string, error) {
 }
 
 func originRepoName(path string) string {
-	cmd := exec.Command("git", "-C", path, "remote", "get-url", "origin")
-	out, err := cmd.Output()
+	out, err := runGitOutput(OpMetadata, path, "remote", "get-url", "origin")
 	if err != nil {
 		return ""
 	}

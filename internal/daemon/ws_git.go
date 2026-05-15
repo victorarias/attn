@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -10,18 +9,20 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
+const gitStatusPollInterval = 2 * time.Second
+
 func (d *Daemon) handleSubscribeGitStatus(client *wsClient, msg *protocol.SubscribeGitStatusMessage) {
 	client.stopGitStatusPoll()
 
 	client.gitStatusMu.Lock()
 	client.gitStatusDir = msg.Directory
 	client.gitStatusStop = make(chan struct{})
-	client.gitStatusTicker = time.NewTicker(500 * time.Millisecond)
+	client.gitStatusTicker = time.NewTicker(gitStatusPollInterval)
 	stopChan := client.gitStatusStop
 	ticker := client.gitStatusTicker
 	client.gitStatusMu.Unlock()
 
-	d.sendGitStatusUpdate(client)
+	go d.sendGitStatusUpdate(client)
 
 	go func() {
 		for {
@@ -86,9 +87,7 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 		baseRef = *msg.BaseRef
 	}
 
-	origCmd := exec.Command("git", "show", baseRef+":"+msg.Path)
-	origCmd.Dir = msg.Directory
-	origOutput, origErr := origCmd.Output()
+	origOutput, origErr := git.Output(git.OpDiff, msg.Directory, "show", baseRef+":"+msg.Path)
 
 	var original string
 	if origErr == nil {
@@ -97,9 +96,7 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 
 	var modified string
 	if msg.Staged != nil && *msg.Staged {
-		stagedCmd := exec.Command("git", "show", ":"+msg.Path)
-		stagedCmd.Dir = msg.Directory
-		stagedOutput, err := stagedCmd.Output()
+		stagedOutput, err := git.Output(git.OpDiff, msg.Directory, "show", ":"+msg.Path)
 		if err != nil {
 			result.Error = protocol.Ptr("Failed to read staged file: " + err.Error())
 			d.sendToClient(client, result)
