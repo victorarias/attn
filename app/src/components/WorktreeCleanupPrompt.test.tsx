@@ -113,9 +113,9 @@ describe('WorktreeCleanupPrompt', () => {
     expect(keepButton).toHaveFocus();
 
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'ArrowRight' });
-    expect(screen.getByRole('button', { name: 'Always keep' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Delete worktree' })).toHaveFocus();
 
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'ArrowRight' });
-    expect(screen.getByRole('button', { name: 'Delete worktree' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Always keep' })).toHaveFocus();
   });
 });

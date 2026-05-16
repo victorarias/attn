@@ -56,7 +56,7 @@ export function WorktreeCleanupPrompt({
   }, [clearCompactTimer]);
 
   const actionButtons = useCallback(() => {
-    return [keepRef.current, alwaysRef.current, deleteRef.current].filter((button) => {
+    return [keepRef.current, deleteRef.current, alwaysRef.current].filter((button) => {
       return button && !button.disabled;
     }) as HTMLButtonElement[];
   }, []);
@@ -336,28 +336,28 @@ export function WorktreeCleanupPrompt({
             )}
           </div>
           <div className="cleanup-actions">
-            <button ref={keepRef} type="button" className="cleanup-btn keep" onClick={onKeep} disabled={isDeleting}>
-              Keep
-            </button>
-            <button
-              ref={alwaysRef}
-              type="button"
-              className="cleanup-btn always"
-              onClick={onAlwaysKeep}
+          <button ref={keepRef} type="button" className="cleanup-btn keep" onClick={onKeep} disabled={isDeleting}>
+            Keep
+          </button>
+          <button
+            ref={deleteRef}
+            type="button"
+            className={`cleanup-btn ${hasError ? 'retry' : 'delete'}`}
+            onClick={onDelete}
               disabled={isDeleting}
-            >
-              Always keep
-            </button>
-            <button
-              ref={deleteRef}
-              type="button"
-              className={`cleanup-btn ${hasError ? 'retry' : 'delete'}`}
-              onClick={onDelete}
-              disabled={isDeleting}
-            >
-              {hasError ? 'Retry delete' : 'Delete worktree'}
-            </button>
-          </div>
+          >
+            {hasError ? 'Retry delete' : 'Delete worktree'}
+          </button>
+          <button
+            ref={alwaysRef}
+            type="button"
+            className="cleanup-btn always"
+            onClick={onAlwaysKeep}
+            disabled={isDeleting}
+          >
+            Always keep
+          </button>
+        </div>
         </div>
       </div>
 
