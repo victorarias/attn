@@ -11,6 +11,19 @@ const mockUseKeyboardShortcuts = vi.fn();
 const mockSendWorkspaceClosePane = vi.fn(async () => ({ success: true }));
 const mockCloseSession = vi.fn();
 const mockOpenPR = vi.hoisted(() => vi.fn());
+let mockSessionStoreReturn: Record<string, unknown>;
+let mockDaemonStoreReturn: Record<string, unknown>;
+let mockDaemonSocketReturn: Record<string, unknown>;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
 
 vi.mock('@tauri-apps/plugin-deep-link', () => ({
   onOpenUrl: vi.fn(async () => () => {}),
@@ -142,7 +155,7 @@ describe('worktree cleanup prompt', () => {
     });
     mockSendWorkspaceClosePane.mockResolvedValue({ success: true });
 
-    mockUseSessionStore.mockReturnValue({
+    mockSessionStoreReturn = {
       sessions: [
         {
           id: 's1',
@@ -172,9 +185,10 @@ describe('worktree cleanup prompt', () => {
       setLauncherConfig: vi.fn(),
       syncFromDaemonSessions: vi.fn(),
       syncFromDaemonWorkspaces: vi.fn(),
-    });
+    };
+    mockUseSessionStore.mockReturnValue(mockSessionStoreReturn);
 
-    mockUseDaemonStore.mockReturnValue({
+    mockDaemonStoreReturn = {
       daemonSessions: [
         {
           id: 's1',
@@ -192,10 +206,11 @@ describe('worktree cleanup prompt', () => {
       setRepoStates: vi.fn(),
       authorStates: [],
       setAuthorStates: vi.fn(),
-    });
+    };
+    mockUseDaemonStore.mockReturnValue(mockDaemonStoreReturn);
 
     const fn = vi.fn();
-    mockUseDaemonSocket.mockReturnValue({
+    mockDaemonSocketReturn = {
       sendPRAction: fn,
       sendMutePR: fn,
       sendMuteRepo: fn,
@@ -236,7 +251,8 @@ describe('worktree cleanup prompt', () => {
       rateLimit: null,
       warnings: [],
       clearWarnings: fn,
-    });
+    };
+    mockUseDaemonSocket.mockReturnValue(mockDaemonSocketReturn);
   });
 
   afterEach(() => {
@@ -252,6 +268,73 @@ describe('worktree cleanup prompt', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
+  });
+
+  it('ignores stale delete completion after another worktree prompt becomes active', async () => {
+    const deleteA = deferred<{ success: true }>();
+    const sendDeleteWorktree = vi.fn((path: string) => {
+      if (path === '/tmp/repo/.worktrees/feature-a') {
+        return deleteA.promise;
+      }
+      return Promise.resolve({ success: true });
+    });
+    mockDaemonSocketReturn.sendDeleteWorktree = sendDeleteWorktree;
+
+    const { rerender } = render(<App />);
+
+    await userEvent.click(screen.getByTestId('close-session'));
+    await waitFor(() => {
+      expect(screen.getByText('/tmp/repo/.worktrees/feature-a')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete worktree' }));
+    await waitFor(() => {
+      expect(sendDeleteWorktree).toHaveBeenCalledWith('/tmp/repo/.worktrees/feature-a');
+    });
+
+    mockSessionStoreReturn.sessions = [
+      {
+        id: 's2',
+        label: 'second-worktree-session',
+        state: 'working',
+        cwd: '/tmp/repo/.worktrees/feature-b',
+        agent: 'claude',
+        transcriptMatched: true,
+        branch: 'feature-b',
+        isWorktree: true,
+        daemonActivePaneId: 'main',
+        workspace: {
+          terminals: [],
+          layoutTree: { type: 'pane', paneId: 'main' },
+        },
+      },
+    ];
+    mockSessionStoreReturn.activeSessionId = 's2';
+    mockDaemonStoreReturn.daemonSessions = [
+      {
+        id: 's2',
+        label: 'second-worktree-session',
+        directory: '/tmp/repo/.worktrees/feature-b',
+        state: 'working',
+        branch: 'feature-b',
+        is_worktree: true,
+      },
+    ];
+
+    rerender(<App />);
+
+    await userEvent.click(screen.getByTestId('close-session'));
+    await waitFor(() => {
+      expect(screen.getByText('/tmp/repo/.worktrees/feature-b')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      deleteA.resolve({ success: true });
+      await deleteA.promise;
+    });
+
+    expect(screen.getByText('/tmp/repo/.worktrees/feature-b')).toBeInTheDocument();
+    expect(screen.queryByText('/tmp/repo/.worktrees/feature-a')).not.toBeInTheDocument();
   });
 
   it('marks remote long-run sessions as visualized after the visibility delay', async () => {
