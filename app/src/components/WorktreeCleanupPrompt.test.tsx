@@ -118,4 +118,18 @@ describe('WorktreeCleanupPrompt', () => {
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'ArrowRight' });
     expect(screen.getByRole('button', { name: 'Always keep' })).toHaveFocus();
   });
+
+  it('keeps Tab trapped on the dialog while delete is running', async () => {
+    render(<WorktreeCleanupPrompt {...defaultProps} isDeleting />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(dialog).toHaveFocus();
+  });
 });

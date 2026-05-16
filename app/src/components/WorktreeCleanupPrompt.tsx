@@ -212,7 +212,11 @@ export function WorktreeCleanupPrompt({
       const buttons = actionButtons();
 
       if (event.key === 'Tab') {
-        if (buttons.length === 0) return;
+        if (buttons.length === 0) {
+          event.preventDefault();
+          dialogRef.current?.focus();
+          return;
+        }
         const active = document.activeElement as HTMLButtonElement | null;
         const currentIndex = Math.max(0, buttons.indexOf(active || buttons[0]));
         const delta = event.shiftKey ? -1 : 1;
