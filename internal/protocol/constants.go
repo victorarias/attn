@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "59"
+const ProtocolVersion = "60"
 
 // Commands
 const (
@@ -121,6 +121,8 @@ const (
 	EventWorktreesUpdated           = "worktrees_updated"
 	EventCreateWorktreeResult       = "create_worktree_result"
 	EventDeleteWorktreeResult       = "delete_worktree_result"
+	EventGitOperationStarted        = "git_operation_started"
+	EventGitOperationFinished       = "git_operation_finished"
 	EventSettingsUpdated            = "settings_updated"
 	EventRateLimited                = "rate_limited"
 	EventRecentLocationsResult      = "recent_locations_result"

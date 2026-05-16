@@ -83,6 +83,77 @@ func TestDoCreateWorktreeFromBranch_ResolvesMainRepoFromWorktree(t *testing.T) {
 	}
 }
 
+func TestDoDeleteWorktree_BroadcastsGitOperationLifecycle(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainDir := filepath.Join(tmpDir, "hurdy-gurdy")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
+		t.Fatalf("failed to create main repo dir: %v", err)
+	}
+
+	runGitDaemon(t, mainDir, "init")
+	runGitDaemon(t, mainDir, "commit", "--allow-empty", "-m", "init")
+	worktreePath := filepath.Join(tmpDir, "hurdy-gurdy--feature-slow-delete")
+	runGitDaemon(t, mainDir, "worktree", "add", "-b", "feature/slow-delete", worktreePath)
+	worktreePath = canonicalPathDaemon(worktreePath)
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	cap := captureBroadcasts(d)
+	endpointID := "endpoint-1"
+
+	if err := d.doDeleteWorktree(worktreePath, protocol.Ptr(endpointID)); err != nil {
+		t.Fatalf("doDeleteWorktree failed: %v", err)
+	}
+
+	var started, finished protocol.WebSocketEvent
+	var sawStarted, sawFinished bool
+	for _, event := range cap.snapshot() {
+		switch event.Event {
+		case protocol.EventGitOperationStarted:
+			started = event
+			sawStarted = true
+		case protocol.EventGitOperationFinished:
+			finished = event
+			sawFinished = true
+		}
+	}
+	if !sawStarted {
+		t.Fatalf("missing %s event", protocol.EventGitOperationStarted)
+	}
+	if !sawFinished {
+		t.Fatalf("missing %s event", protocol.EventGitOperationFinished)
+	}
+	if started.Operation == nil || finished.Operation == nil {
+		t.Fatalf("expected operation payloads: started=%#v finished=%#v", started.Operation, finished.Operation)
+	}
+	if started.Operation.ID == "" {
+		t.Fatalf("started operation id is empty")
+	}
+	if finished.Operation.ID != started.Operation.ID {
+		t.Fatalf("finished operation id = %q, want %q", finished.Operation.ID, started.Operation.ID)
+	}
+	if started.Operation.Kind != protocol.GitOperationKindDeleteWorktree {
+		t.Fatalf("started operation kind = %q", started.Operation.Kind)
+	}
+	if started.Operation.Status != protocol.GitOperationStatusRunning {
+		t.Fatalf("started operation status = %q", started.Operation.Status)
+	}
+	if finished.Operation.Status != protocol.GitOperationStatusSucceeded {
+		t.Fatalf("finished operation status = %q", finished.Operation.Status)
+	}
+	if protocol.Deref(started.Operation.Path) != worktreePath {
+		t.Fatalf("started operation path = %q, want %q", protocol.Deref(started.Operation.Path), worktreePath)
+	}
+	if protocol.Deref(started.Operation.EndpointID) != endpointID {
+		t.Fatalf("started endpoint = %q, want %q", protocol.Deref(started.Operation.EndpointID), endpointID)
+	}
+	if finished.Operation.FinishedAt == nil {
+		t.Fatalf("finished operation missing finished_at")
+	}
+	if finished.Operation.DurationMs == nil {
+		t.Fatalf("finished operation missing duration_ms")
+	}
+}
+
 func runGitDaemon(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

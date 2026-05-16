@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Worktree Cleanup Prompt**: Deleting a closed session's worktree now stays visible while Git runs, collapses into a resumable bottom-right cleanup job when the operation takes longer than an instant, and keeps failures actionable with retry/keep choices instead of closing silently.
+- **Git Operations**: The daemon now emits lifecycle events for worktree deletion so future UI surfaces can use daemon-owned progress instead of frontend timers.
 
 ### Fixed
 - **Worktree Cleanup Prompt**: Finishing a slow worktree delete can no longer clear a newer cleanup prompt for another worktree.

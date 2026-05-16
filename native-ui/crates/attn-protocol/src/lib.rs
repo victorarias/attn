@@ -14,7 +14,7 @@ pub use types::*;
 
 /// Current protocol version — must match `ProtocolVersion` in
 /// `internal/protocol/constants.go`.
-pub const PROTOCOL_VERSION: &str = "58";
+pub const PROTOCOL_VERSION: &str = "60";
 
 /// Capability strings advertised in `ClientHelloMessage.capabilities`.
 /// Mirror of `protocol.Capability*` in `internal/protocol/constants.go`.

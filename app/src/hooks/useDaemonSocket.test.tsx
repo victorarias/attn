@@ -196,6 +196,66 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('stores daemon git operation lifecycle events by operation id', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+
+    act(() => {
+      ws.emit({
+        event: 'git_operation_started',
+        operation: {
+          id: 'op-1',
+          kind: 'delete_worktree',
+          status: 'running',
+          path: '/tmp/repo/.worktrees/feature-a',
+          started_at: '2026-05-16T16:00:00Z',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.gitOperations['op-1']).toMatchObject({
+        kind: 'delete_worktree',
+        status: 'running',
+        path: '/tmp/repo/.worktrees/feature-a',
+      });
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'git_operation_finished',
+        operation: {
+          id: 'op-1',
+          kind: 'delete_worktree',
+          status: 'succeeded',
+          path: '/tmp/repo/.worktrees/feature-a',
+          started_at: '2026-05-16T16:00:00Z',
+          finished_at: '2026-05-16T16:00:05Z',
+          duration_ms: 5000,
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.gitOperations['op-1']).toMatchObject({
+        status: 'succeeded',
+        duration_ms: 5000,
+      });
+    });
+
+    unmount();
+  });
+
   it('rejects answerReviewLoop immediately when error result only echoes loop_id', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
@@ -344,7 +404,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '59',
+        protocol_version: '60',
         sessions: [],
         session_layouts: [{
           session_id: 'sess-remote',
@@ -420,7 +480,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '59',
+        protocol_version: '60',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -499,7 +559,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '59',
+        protocol_version: '60',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -592,7 +652,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '59',
+        protocol_version: '60',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -689,7 +749,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '59',
+        protocol_version: '60',
         sessions: [{
           id: 'sess-existing',
           label: 'attn',
@@ -772,7 +832,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '59',
+        protocol_version: '60',
         sessions: [],
         session_layouts: [{
           session_id: 'sess-remote',
@@ -881,7 +941,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '59',
+        protocol_version: '60',
         sessions: [{
           id: 'sess-stale',
           label: 'stale',
@@ -939,7 +999,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     act(() => {
       ws.emit({
         event: 'initial_state',
-        protocol_version: '59',
+        protocol_version: '60',
         sessions: [{
           id: 'sess-removed',
           label: 'removed',
