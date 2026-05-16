@@ -420,9 +420,6 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if opts.ResumePicker {
 		args = append(args, "--resume-picker")
 	}
-	if opts.ForkSession {
-		args = append(args, "--fork-session")
-	}
 	if opts.YoloMode {
 		args = append(args, "--yolo-mode")
 	}

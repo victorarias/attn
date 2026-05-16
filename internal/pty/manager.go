@@ -42,7 +42,6 @@ type SpawnOptions struct {
 
 	ResumeSessionID string
 	ResumePicker    bool
-	ForkSession     bool
 	YoloMode        bool
 
 	// Executable is the selected CLI path for the current agent.
@@ -402,9 +401,6 @@ func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string) *ex
 		args = append(args, "--resume", opts.ResumeSessionID)
 	} else if opts.ResumePicker {
 		args = append(args, "--resume")
-	}
-	if opts.ForkSession {
-		args = append(args, "--fork-session")
 	}
 	if opts.YoloMode {
 		args = append(args, "--yolo")

@@ -2227,7 +2227,6 @@ export interface SpawnSessionMessage {
     cwd:                 string;
     endpoint_id?:        string;
     executable?:         string;
-    fork_session?:       boolean;
     id:                  string;
     label?:              string;
     pi_executable?:      string;
@@ -5279,7 +5278,6 @@ const typeMap: any = {
         { json: "cwd", js: "cwd", typ: "" },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "executable", js: "executable", typ: u(undefined, "") },
-        { json: "fork_session", js: "fork_session", typ: u(undefined, true) },
         { json: "id", js: "id", typ: "" },
         { json: "label", js: "label", typ: u(undefined, "") },
         { json: "pi_executable", js: "pi_executable", typ: u(undefined, "") },

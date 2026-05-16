@@ -28,7 +28,6 @@ Purpose: map every product surface that waits on git today before choosing UI pa
 | Repo options refresh | User refreshes repo options | `get_repo_info` | Existing options remain; refresh flag passed to `RepoOptions` | No | This is already close to correct; only needs clearer stale/refresh state | Keep stale options visible. Small header spinner/text only. |
 | Repo options create worktree | User submits create-worktree form | `create_worktree`: optional fetch remote branch, `git worktree add` | Form remains; errors toast/dialog callback; no explicit progress in form | Yes | Worktree add/fetch may take minutes; user needs cancellable progress | Inline form operation state. Disable conflicting create/delete/select actions, not whole picker. On success launch session. |
 | Repo options delete worktree | User deletes from picker | `delete_worktree`: terminate sessions, `git worktree remove`, delete branch | Await then refresh repo info; limited row state | Yes for selected row, not whole picker | Slow delete can make picker ambiguous | Row-level pending state with optimistic "deleting..." and undo only if feasible. Keep other rows usable. |
-| Fork session with worktree | User forks active session and checks create worktree | `create_worktree`, then spawn session; cleanup delete on downstream failure | Fork dialog shows errors, no long-running progress | Yes | Dialog can sit inert while worktree is created | Dialog-local progress stepper: creating worktree, starting session, cleaning up on failure. |
 | Close worktree cleanup delete | User closes session and chooses delete | `delete_worktree` | Prompt closes after await; failure only console logged | Yes, but narrow | User can lose feedback if delete hangs/fails | Keep prompt or toast-style progress until result. Show failure with retry/keep. |
 | PR dashboard refresh | User refreshes PRs | GitHub, not git | Refresh button spinner/error icon | No | Not part of git slowness, but same async vocabulary | Leave mostly as-is. Do not mix with git operation UX. |
 | Open PR into worktree | User clicks PR "New" | Fetch PR details, `ensure_repo` clone/fetch, `create_worktree_from_branch`, spawn session | No local progress; errors eventually alert/toast | Yes | This is the clearest "no right dock exists yet" case. Clone/fetch/worktree can be very long before any session appears | Global app-level job toast or launcher modal, not terminal/right dock. Show steps: fetching PR, ensuring repo, creating worktree, starting session. |
@@ -41,7 +40,7 @@ Purpose: map every product surface that waits on git today before choosing UI pa
 ## Current UI Pattern Buckets
 
 - Button-local: PR refresh, PR approve/merge. Good for short explicit actions.
-- Modal-local: Location picker, repo options, fork dialog, worktree cleanup prompt. This is where create/delete/open flows should report progress.
+- Modal-local: Location picker, repo options, worktree cleanup prompt. This is where create/delete/open flows should report progress.
 - Panel-local: Changes panel and diff detail. This is where diff/status/sync state belongs when the panel is visible.
 - Silent background: branch monitor, git status polling, viewed-file change checks. These should keep prior data and avoid noisy progress.
 - Missing global job surface: open PR/ensure repo before a session exists. This needs a lightweight launcher job surface that is not terminal or right-dock anchored.
@@ -50,7 +49,7 @@ Purpose: map every product surface that waits on git today before choosing UI pa
 
 1. **State model first:** add a small frontend operation taxonomy and map existing calls to `background`, `panel`, `modal`, or `launcher` ownership. This can initially be frontend-only for request promises.
 2. **Panel-local diff/status UX:** keep previous branch diff results during refresh, add subdued panel header state, and stop showing skeletons for routine refreshes after first load.
-3. **Picker/worktree modal UX:** add operation state to repo options create/delete/refresh and fork-worktree creation.
+3. **Picker/worktree modal UX:** add operation state to repo options create/delete/refresh.
 4. **Open PR launcher job:** show durable progress while `fetch_pr_details`, `ensure_repo`, `create_worktree_from_branch`, and `createSession` run before any terminal/right dock exists.
 5. **Daemon lifecycle events:** add protocol-level `git_operation_started/updated/finished` only after the frontend ownership model is clear. Use this for true long-running git subprocesses, cancellation, and elapsed-time accuracy.
 6. **Adaptive background behavior:** reduce refresh pressure when status/diff commands are repeatedly slow, and skip hidden panel refreshes where stale cached data is good enough.

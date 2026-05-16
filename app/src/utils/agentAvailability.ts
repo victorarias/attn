@@ -8,7 +8,6 @@ const BUILTIN_AGENT_ORDER: SessionAgent[] = ['codex', 'claude', 'copilot', 'pi']
 export const AGENT_CAPABILITY_ORDER = [
   'yolo',
   'resume',
-  'fork',
   'hooks',
   'transcript',
   'transcript_watcher',
@@ -19,7 +18,6 @@ export const AGENT_CAPABILITY_ORDER = [
 const AGENT_CAPABILITY_LABELS: Record<string, string> = {
   yolo: 'YOLO',
   resume: 'Resume',
-  fork: 'Fork',
   hooks: 'Hooks',
   transcript: 'Transcript',
   transcript_watcher: 'Transcript watch',

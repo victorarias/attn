@@ -147,7 +147,6 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		settings[capabilitySettingKey(name, "classifier")] = strconv.FormatBool(caps.HasClassifier)
 		settings[capabilitySettingKey(name, "state_detector")] = strconv.FormatBool(caps.HasStateDetector)
 		settings[capabilitySettingKey(name, "resume")] = strconv.FormatBool(caps.HasResume)
-		settings[capabilitySettingKey(name, "fork")] = strconv.FormatBool(caps.HasFork)
 		settings[capabilitySettingKey(name, "yolo")] = strconv.FormatBool(caps.HasYolo)
 	}
 

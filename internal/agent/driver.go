@@ -98,9 +98,6 @@ type Capabilities struct {
 	// HasResume indicates the agent supports resuming previous sessions.
 	HasResume bool
 
-	// HasFork indicates the agent supports forking a resumed session.
-	HasFork bool
-
 	// HasYolo indicates the agent supports launching with approvals bypassed.
 	HasYolo bool
 }
@@ -116,7 +113,6 @@ var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 //   - ATTN_AGENT_<AGENT>_CLASSIFIER=0|1
 //   - ATTN_AGENT_<AGENT>_STATE_DETECTOR=0|1
 //   - ATTN_AGENT_<AGENT>_RESUME=0|1
-//   - ATTN_AGENT_<AGENT>_FORK=0|1
 //   - ATTN_AGENT_<AGENT>_YOLO=0|1
 //
 // <AGENT> is uppercased with non-alphanumeric chars replaced by underscores
@@ -145,9 +141,6 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	}
 	if v, ok := boolEnv(prefix + "RESUME"); ok {
 		caps.HasResume = v
-	}
-	if v, ok := boolEnv(prefix + "FORK"); ok {
-		caps.HasFork = v
 	}
 	if v, ok := boolEnv(prefix + "YOLO"); ok {
 		caps.HasYolo = v
@@ -197,7 +190,6 @@ type SpawnOpts struct {
 	Rows            uint16
 	ResumeSessionID string
 	ResumePicker    bool
-	ForkSession     bool
 	YoloMode        bool
 
 	// Executable is the resolved executable path (from ResolveExecutable).
@@ -251,7 +243,7 @@ type ClassifierProvider interface {
 }
 
 // LaunchPreparer performs best-effort agent-specific setup before launch
-// (e.g. Claude resume transcript copy for fork/session handoff).
+// (e.g. Claude resume transcript copy for session handoff).
 type LaunchPreparer interface {
 	PrepareLaunch(opts SpawnOpts) error
 }

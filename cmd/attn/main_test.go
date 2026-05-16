@@ -194,15 +194,15 @@ func TestResolveCopilotTranscript_FallsBackWhenResumePathMissing(t *testing.T) {
 }
 
 func TestParseDirectLaunchArgs_ResumePickerWithFlagAfterResume(t *testing.T) {
-	parsed := parseDirectLaunchArgs([]string{"--resume", "--fork-session", "--", "--model", "foo"})
+	parsed := parseDirectLaunchArgs([]string{"--resume", "--yolo", "--", "--model", "foo"})
 	if !parsed.resumePicker {
 		t.Fatalf("expected resume picker to be enabled")
 	}
 	if parsed.resumeID != "" {
 		t.Fatalf("expected empty resume id, got %q", parsed.resumeID)
 	}
-	if !parsed.forkSession {
-		t.Fatalf("expected fork-session flag to be preserved")
+	if !parsed.yoloMode {
+		t.Fatalf("expected yolo flag to be preserved")
 	}
 	if len(parsed.agentArgs) != 2 || parsed.agentArgs[0] != "--model" || parsed.agentArgs[1] != "foo" {
 		t.Fatalf("unexpected agent args: %#v", parsed.agentArgs)
@@ -210,15 +210,12 @@ func TestParseDirectLaunchArgs_ResumePickerWithFlagAfterResume(t *testing.T) {
 }
 
 func TestParseDirectLaunchArgs_ResumeIDStillAccepted(t *testing.T) {
-	parsed := parseDirectLaunchArgs([]string{"--resume", "abc123", "--fork-session"})
+	parsed := parseDirectLaunchArgs([]string{"--resume", "abc123"})
 	if parsed.resumePicker {
 		t.Fatalf("expected resume picker to be disabled")
 	}
 	if parsed.resumeID != "abc123" {
 		t.Fatalf("expected resume id abc123, got %q", parsed.resumeID)
-	}
-	if !parsed.forkSession {
-		t.Fatalf("expected fork-session flag to be true")
 	}
 }
 

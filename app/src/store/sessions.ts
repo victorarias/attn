@@ -62,13 +62,11 @@ interface SessionStore {
   setActiveSession: (id: string | null) => void;
   takeSessionSpawnArgs: (id: string, cols: number, rows: number) => PtySpawnArgs | null;
   reloadSession: (id: string, size?: { cols: number; rows: number }) => Promise<void>;
-  setForkParams: (sessionId: string, resumeSessionId: string) => void;
   setLauncherConfig: (config: LauncherConfig) => void;
   syncFromDaemonSessions: (daemonSessions: DaemonSessionSnapshot[]) => void;
   syncFromDaemonWorkspaces: (daemonWorkspaces: DaemonWorkspace[]) => void;
 }
 
-const pendingForkParams = new Map<string, { resumeSessionId?: string; forkSession?: boolean }>();
 const MIN_STABLE_COLS = 20;
 const MIN_STABLE_ROWS = 8;
 
@@ -230,8 +228,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       resolvedCols = 80;
       resolvedRows = 24;
     }
-    const forkParams = pendingForkParams.get(id);
-    pendingForkParams.delete(id);
     const selectedExecutable = launcherConfig.executables[session.agent] || '';
     return {
       id,
@@ -242,8 +238,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       rows: resolvedRows,
       shell: false,
       agent: session.agent,
-      resume_session_id: forkParams?.resumeSessionId ?? null,
-      fork_session: forkParams?.forkSession ?? null,
+      resume_session_id: null,
       yolo_mode: session.yoloMode ?? null,
       ...(selectedExecutable ? { executable: selectedExecutable } : {}),
       ...(session.agent === 'claude' && selectedExecutable
@@ -311,10 +306,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       console.error('[Session] Reload spawn failed:', e);
       throw e;
     }
-  },
-
-  setForkParams: (sessionId: string, resumeSessionId: string) => {
-    pendingForkParams.set(sessionId, { resumeSessionId, forkSession: true });
   },
 
   setLauncherConfig: (config: LauncherConfig) => {

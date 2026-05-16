@@ -12,7 +12,6 @@ export interface PtySpawnArgs {
   shell?: boolean;
   resume_session_id?: string | null;
   resume_picker?: boolean | null;
-  fork_session?: boolean | null;
   yolo_mode?: boolean | null;
   agent?: string;
   label?: string;

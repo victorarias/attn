@@ -54,7 +54,6 @@ func (c *Claude) Capabilities() Capabilities {
 		HasClassifier:        true,
 		HasStateDetector:     true,
 		HasResume:            true,
-		HasFork:              true,
 		HasYolo:              true,
 	}
 }
@@ -62,9 +61,8 @@ func (c *Claude) Capabilities() Capabilities {
 func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	args := []string{}
 
-	// Claude forbids --session-id with --resume unless --fork-session is set.
 	useSessionID := true
-	if (opts.ResumeSessionID != "" || opts.ResumePicker) && !opts.ForkSession {
+	if opts.ResumeSessionID != "" || opts.ResumePicker {
 		useSessionID = false
 	}
 	if useSessionID {
@@ -77,9 +75,6 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 
 	if opts.ResumeSessionID != "" {
 		args = append(args, "-r", opts.ResumeSessionID)
-		if opts.ForkSession {
-			args = append(args, "--fork-session")
-		}
 	} else if opts.ResumePicker {
 		args = append(args, "-r")
 	}
@@ -100,7 +95,7 @@ func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 }
 
 // PrepareLaunch copies resume transcripts into the target project folder so
-// Claude can resolve --resume in fork/session-handoff scenarios.
+// Claude can resolve --resume when the resumed transcript belongs to another project folder.
 func (c *Claude) PrepareLaunch(opts SpawnOpts) error {
 	if err := ensureAttnClaudeSkillInstalled(); err != nil {
 		return err
@@ -108,7 +103,7 @@ func (c *Claude) PrepareLaunch(opts SpawnOpts) error {
 	if strings.TrimSpace(opts.ResumeSessionID) == "" {
 		return nil
 	}
-	return copyTranscriptForFork(opts.ResumeSessionID, opts.CWD)
+	return copyTranscriptForResume(opts.ResumeSessionID, opts.CWD)
 }
 
 // --- HookProvider ---
@@ -211,13 +206,13 @@ func (c *Claude) Classify(text string, timeout time.Duration) (string, error) {
 	return classifier.ClassifyWithClaude(text, timeout)
 }
 
-func copyTranscriptForFork(parentSessionID, forkCwd string) error {
-	srcPath := transcript.FindClaudeTranscript(parentSessionID)
+func copyTranscriptForResume(resumeSessionID, cwd string) error {
+	srcPath := transcript.FindClaudeTranscript(resumeSessionID)
 	if srcPath == "" {
-		return fmt.Errorf("parent transcript not found for session %s", parentSessionID)
+		return fmt.Errorf("resume transcript not found for session %s", resumeSessionID)
 	}
 
-	destDir := claudeProjectDir(forkCwd)
+	destDir := claudeProjectDir(cwd)
 	if destDir == "" {
 		return fmt.Errorf("could not determine Claude project directory")
 	}
@@ -225,7 +220,7 @@ func copyTranscriptForFork(parentSessionID, forkCwd string) error {
 		return fmt.Errorf("failed to create project directory: %w", err)
 	}
 
-	destPath := filepath.Join(destDir, parentSessionID+".jsonl")
+	destPath := filepath.Join(destDir, resumeSessionID+".jsonl")
 	if srcPath == destPath {
 		return nil
 	}

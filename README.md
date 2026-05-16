@@ -22,7 +22,7 @@ It's a desktop app that wraps your agent CLIs — Claude Code, Codex, Copilot �
 
 **One sidebar to rule them all** — Every agent session, live state at a glance. The one that needs you glows. Click it. Done.
 
-**Embedded terminals** — No more "which terminal was that in?" Run agents inside the app. Open utility shells next to them. Resume sessions, fork them, never leave the window.
+**Embedded terminals** — No more "which terminal was that in?" Run agents inside the app. Open utility shells next to them. Resume sessions, never leave the window.
 
 **Remote daemons over SSH** — Keep sessions on a GPU box, Linux host, or local VM and manage them from the same app. Spawn new sessions remotely, browse remote repos, and open remote worktrees without juggling another terminal window.
 
@@ -34,7 +34,7 @@ It's a desktop app that wraps your agent CLIs — Claude Code, Codex, Copilot �
 
 ## Supported agents
 
-| Agent | State detection | Review & forking |
+| Agent | State detection | Resume |
 |---|---|---|
 | [Claude Code](https://claude.ai/code) | Hooks + classifier | Yes |
 | [Codex](https://developers.openai.com/codex) | PTY heuristics + transcript classifier | No |
@@ -93,7 +93,6 @@ Long-run review behavior: if a run takes 5+ minutes, attn keeps it yellow when i
 |---|---|
 | Cmd+N | New session |
 | Cmd+Shift+N | New session in a worktree |
-| Cmd+Shift+F | Fork session (Claude) |
 | Cmd+F | Quick Find |
 | Cmd+K | Attention drawer (who needs me?) |
 | Cmd+\` | Utility terminal |

@@ -77,7 +77,6 @@ vi.mock('./components/ChangesPanel', () => ({ ChangesPanel: () => null }));
 vi.mock('./components/DiffDetailPanel', () => ({ DiffDetailPanel: () => null }));
 vi.mock('./components/SessionTerminalWorkspace', () => ({ SessionTerminalWorkspace: () => null }));
 vi.mock('./components/ThumbsModal', () => ({ ThumbsModal: () => null }));
-vi.mock('./components/ForkDialog', () => ({ ForkDialog: () => null }));
 
 vi.mock('./components/CopyToast', () => ({
   CopyToast: () => null,
@@ -170,7 +169,6 @@ describe('worktree cleanup prompt', () => {
       setActiveSession: vi.fn(),
       takeSessionSpawnArgs: vi.fn(() => null),
       reloadSession: vi.fn(async () => {}),
-      setForkParams: vi.fn(),
       setLauncherConfig: vi.fn(),
       syncFromDaemonSessions: vi.fn(),
       syncFromDaemonWorkspaces: vi.fn(),
@@ -288,7 +286,6 @@ describe('worktree cleanup prompt', () => {
       setActiveSession: vi.fn(),
       takeSessionSpawnArgs: vi.fn(() => null),
       reloadSession: vi.fn(async () => {}),
-      setForkParams: vi.fn(),
       setLauncherConfig: vi.fn(),
       syncFromDaemonSessions: vi.fn(),
       syncFromDaemonWorkspaces: vi.fn(),
@@ -385,7 +382,6 @@ describe('worktree cleanup prompt', () => {
       setActiveSession: vi.fn(),
       takeSessionSpawnArgs: vi.fn(() => null),
       reloadSession: vi.fn(async () => {}),
-      setForkParams: vi.fn(),
       setLauncherConfig: vi.fn(),
       syncFromDaemonSessions: vi.fn(),
       syncFromDaemonWorkspaces: vi.fn(),
@@ -463,7 +459,6 @@ describe('worktree cleanup prompt', () => {
       setActiveSession: vi.fn(),
       takeSessionSpawnArgs: vi.fn(() => null),
       reloadSession: vi.fn(async () => {}),
-      setForkParams: vi.fn(),
       setLauncherConfig: vi.fn(),
       syncFromDaemonSessions: vi.fn(),
       syncFromDaemonWorkspaces: vi.fn(),
@@ -536,7 +531,6 @@ describe('worktree cleanup prompt', () => {
       setActiveSession: vi.fn(),
       takeSessionSpawnArgs: vi.fn(() => null),
       reloadSession: vi.fn(async () => {}),
-      setForkParams: vi.fn(),
       setLauncherConfig: vi.fn(),
       syncFromDaemonSessions: vi.fn(),
       syncFromDaemonWorkspaces: vi.fn(),
@@ -590,7 +584,6 @@ describe('worktree cleanup prompt', () => {
       setActiveSession: vi.fn(),
       takeSessionSpawnArgs: vi.fn(() => null),
       reloadSession: vi.fn(async () => {}),
-      setForkParams: vi.fn(),
       setLauncherConfig: vi.fn(),
       syncFromDaemonSessions: vi.fn(),
       syncFromDaemonWorkspaces: vi.fn(),

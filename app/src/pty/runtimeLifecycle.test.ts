@@ -115,7 +115,6 @@ describe('runtimeLifecycle', () => {
         id: 'runtime-1',
         resume_session_id: 'runtime-1',
         resume_picker: null,
-        fork_session: null,
       }),
     );
     expect(operations.attachExistingRuntime).toHaveBeenCalledTimes(2);

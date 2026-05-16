@@ -216,7 +216,6 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.Label, "label", "", "session label")
 	fs.StringVar(&cfg.ResumeSessionID, "resume-session-id", "", "resume session id")
 	fs.BoolVar(&cfg.ResumePicker, "resume-picker", false, "resume picker")
-	fs.BoolVar(&cfg.ForkSession, "fork-session", false, "fork session")
 	fs.BoolVar(&cfg.YoloMode, "yolo-mode", false, "launch agent in yolo mode")
 	fs.StringVar(&cfg.Executable, "executable", "", "selected agent executable override")
 	fs.StringVar(&cfg.ClaudeExecutable, "claude-executable", "", "claude executable override")
@@ -485,7 +484,6 @@ type directLaunchArgs struct {
 	label        string
 	resumeID     string
 	resumePicker bool
-	forkSession  bool
 	yoloMode     bool
 	agentArgs    []string
 }
@@ -494,7 +492,6 @@ func parseDirectLaunchArgs(args []string) directLaunchArgs {
 	fs := flag.NewFlagSet("attn", flag.ContinueOnError)
 	labelFlag := fs.String("s", "", "session label")
 	resumeFlag := fs.String("resume", "", "session ID to resume from")
-	forkFlag := fs.Bool("fork-session", false, "fork the resumed session")
 	yoloFlag := fs.Bool("yolo", false, "launch agent in yolo mode")
 	resumePicker := false
 
@@ -515,8 +512,6 @@ func parseDirectLaunchArgs(args []string) directLaunchArgs {
 			} else {
 				resumePicker = true
 			}
-		case "--fork-session":
-			attnArgs = append(attnArgs, arg)
 		case "--yolo":
 			attnArgs = append(attnArgs, arg)
 		case "--":
@@ -536,7 +531,6 @@ func parseDirectLaunchArgs(args []string) directLaunchArgs {
 		label:        label,
 		resumeID:     *resumeFlag,
 		resumePicker: resumePicker,
-		forkSession:  *forkFlag,
 		yoloMode:     *yoloFlag,
 		agentArgs:    agentArgs,
 	}
@@ -585,11 +579,6 @@ func runAgentDirectly(requestedAgent string) {
 		parsed.resumeID = ""
 		parsed.resumePicker = false
 	}
-	if parsed.forkSession && !caps.HasFork {
-		fmt.Fprintf(os.Stderr, "warning: %s fork not supported yet (ignoring --fork-session)\n", driver.Name())
-		parsed.forkSession = false
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error getting cwd: %v\n", err)
@@ -620,7 +609,6 @@ func runAgentDirectly(requestedAgent string) {
 		Label:           parsed.label,
 		ResumeSessionID: parsed.resumeID,
 		ResumePicker:    parsed.resumePicker,
-		ForkSession:     parsed.forkSession,
 		YoloMode:        parsed.yoloMode,
 		Executable:      driver.ResolveExecutable(""),
 		SocketPath:      config.SocketPath(),
