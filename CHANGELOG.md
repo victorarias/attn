@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **Worktree Cleanup Prompt**: Deleting a closed session's worktree now stays visible while Git runs, collapses into a resumable bottom-right cleanup job when the operation takes longer than an instant, and keeps failures actionable with retry/keep choices instead of closing silently.
 
+### Fixed
+- **Worktree Cleanup Prompt**: Finishing a slow worktree delete can no longer clear a newer cleanup prompt for another worktree.
+
 ### Removed
 - **Session Forking**: Removed the local Fork Session dialog, its keyboard shortcut, and the `fork_session` spawn path so attn no longer exposes or forwards session-fork launches.
 
