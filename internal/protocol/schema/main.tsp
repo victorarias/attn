@@ -109,6 +109,16 @@ enum ReviewLoopInteractionStatus {
   consumed,
 }
 
+enum GitOperationKind {
+  delete_worktree,
+}
+
+enum GitOperationStatus {
+  running,
+  succeeded,
+  failed,
+}
+
 // ============================================================================
 // Core Entities
 // ============================================================================
@@ -199,6 +209,18 @@ model Worktree {
   branch: string;
   main_repo: string;
   created_at?: string; // ISO timestamp
+}
+
+model GitOperation {
+  id: string;
+  kind: GitOperationKind;
+  status: GitOperationStatus;
+  path?: string;
+  endpoint_id?: string;
+  started_at: string;   // ISO timestamp
+  finished_at?: string; // ISO timestamp
+  duration_ms?: int32;
+  error?: string;
 }
 
 model RepoState {
@@ -981,6 +1003,16 @@ model DeleteWorktreeResultMessage {
   error?: string;
 }
 
+model GitOperationStartedMessage {
+  event: "git_operation_started";
+  operation: GitOperation;
+}
+
+model GitOperationFinishedMessage {
+  event: "git_operation_finished";
+  operation: GitOperation;
+}
+
 model SettingsUpdatedMessage {
   event: "settings_updated";
   settings?: Record<string>;
@@ -1368,6 +1400,7 @@ model WebSocketEvent {
   repos?: RepoState[];
   authors?: AuthorState[];
   worktrees?: Worktree[];
+  operation?: GitOperation;
   branches?: Branch[];
   recent_locations?: RecentLocation[];
   settings?: Record<string>;
@@ -1457,6 +1490,8 @@ alias DaemonEvent =
   | WorktreesUpdatedMessage
   | CreateWorktreeResultMessage
   | DeleteWorktreeResultMessage
+  | GitOperationStartedMessage
+  | GitOperationFinishedMessage
   | SettingsUpdatedMessage
   | RecentLocationsResultMessage
   | BranchesResultMessage

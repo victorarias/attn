@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionLayout, SessionLayoutActionResultMessage, SessionLayoutClosePaneMessage, SessionLayoutFocusPaneMessage, SessionLayoutGetMessage, SessionLayoutMessage, SessionLayoutPane, SessionLayoutPaneKind, SessionLayoutRenamePaneMessage, SessionLayoutRuntimeExitedMessage, SessionLayoutSplitDirection, SessionLayoutSplitPaneMessage, SessionLayoutUpdatedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, UpdateWorkspacePanelGeometryMessage, WebSocketEvent, Workspace, WorkspacePanel, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionLayout, SessionLayoutActionResultMessage, SessionLayoutClosePaneMessage, SessionLayoutFocusPaneMessage, SessionLayoutGetMessage, SessionLayoutMessage, SessionLayoutPane, SessionLayoutPaneKind, SessionLayoutRenamePaneMessage, SessionLayoutRuntimeExitedMessage, SessionLayoutSplitDirection, SessionLayoutSplitPaneMessage, SessionLayoutUpdatedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, UpdateWorkspacePanelGeometryMessage, WebSocketEvent, Workspace, WorkspacePanel, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -62,6 +62,11 @@
 //   const getReviewStateResultMessage = Convert.toGetReviewStateResultMessage(json);
 //   const getSettingsMessage = Convert.toGetSettingsMessage(json);
 //   const gitFileChange = Convert.toGitFileChange(json);
+//   const gitOperation = Convert.toGitOperation(json);
+//   const gitOperationFinishedMessage = Convert.toGitOperationFinishedMessage(json);
+//   const gitOperationKind = Convert.toGitOperationKind(json);
+//   const gitOperationStartedMessage = Convert.toGitOperationStartedMessage(json);
+//   const gitOperationStatus = Convert.toGitOperationStatus(json);
 //   const gitStatusUpdateMessage = Convert.toGitStatusUpdateMessage(json);
 //   const heartbeatMessage = Convert.toHeartbeatMessage(json);
 //   const heatState = Convert.toHeatState(json);
@@ -607,13 +612,13 @@ export enum DeleteCommentResultMessageEvent {
 }
 
 export interface DeleteWorktreeMessage {
-    cmd:          DeleteWorktreeMessageCmd;
+    cmd:          GitOperationKind;
     endpoint_id?: string;
     path:         string;
     [property: string]: any;
 }
 
-export enum DeleteWorktreeMessageCmd {
+export enum GitOperationKind {
     DeleteWorktree = "delete_worktree",
 }
 
@@ -1050,6 +1055,58 @@ export interface GitFileChange {
     path:       string;
     status:     string;
     [property: string]: any;
+}
+
+export interface GitOperation {
+    duration_ms?: number;
+    endpoint_id?: string;
+    error?:       string;
+    finished_at?: string;
+    id:           string;
+    kind:         GitOperationKind;
+    path?:        string;
+    started_at:   string;
+    status:       GitOperationStatus;
+    [property: string]: any;
+}
+
+export enum GitOperationStatus {
+    Failed = "failed",
+    Running = "running",
+    Succeeded = "succeeded",
+}
+
+export interface GitOperationFinishedMessage {
+    event:     GitOperationFinishedMessageEvent;
+    operation: Operation;
+    [property: string]: any;
+}
+
+export enum GitOperationFinishedMessageEvent {
+    GitOperationFinished = "git_operation_finished",
+}
+
+export interface Operation {
+    duration_ms?: number;
+    endpoint_id?: string;
+    error?:       string;
+    finished_at?: string;
+    id:           string;
+    kind:         GitOperationKind;
+    path?:        string;
+    started_at:   string;
+    status:       GitOperationStatus;
+    [property: string]: any;
+}
+
+export interface GitOperationStartedMessage {
+    event:     GitOperationStartedMessageEvent;
+    operation: Operation;
+    [property: string]: any;
+}
+
+export enum GitOperationStartedMessageEvent {
+    GitOperationStarted = "git_operation_started",
 }
 
 export interface GitStatusUpdateMessage {
@@ -2410,6 +2467,7 @@ export interface WebSocketEvent {
     id?:                    string;
     last_seq?:              number;
     modified?:              string;
+    operation?:             Operation;
     original?:              string;
     pane_id?:               string;
     path?:                  string;
@@ -3025,6 +3083,46 @@ export class Convert {
 
     public static gitFileChangeToJson(value: GitFileChange): string {
         return JSON.stringify(uncast(value, r("GitFileChange")), null, 2);
+    }
+
+    public static toGitOperation(json: string): GitOperation {
+        return cast(JSON.parse(json), r("GitOperation"));
+    }
+
+    public static gitOperationToJson(value: GitOperation): string {
+        return JSON.stringify(uncast(value, r("GitOperation")), null, 2);
+    }
+
+    public static toGitOperationFinishedMessage(json: string): GitOperationFinishedMessage {
+        return cast(JSON.parse(json), r("GitOperationFinishedMessage"));
+    }
+
+    public static gitOperationFinishedMessageToJson(value: GitOperationFinishedMessage): string {
+        return JSON.stringify(uncast(value, r("GitOperationFinishedMessage")), null, 2);
+    }
+
+    public static toGitOperationKind(json: string): GitOperationKind {
+        return cast(JSON.parse(json), r("GitOperationKind"));
+    }
+
+    public static gitOperationKindToJson(value: GitOperationKind): string {
+        return JSON.stringify(uncast(value, r("GitOperationKind")), null, 2);
+    }
+
+    public static toGitOperationStartedMessage(json: string): GitOperationStartedMessage {
+        return cast(JSON.parse(json), r("GitOperationStartedMessage"));
+    }
+
+    public static gitOperationStartedMessageToJson(value: GitOperationStartedMessage): string {
+        return JSON.stringify(uncast(value, r("GitOperationStartedMessage")), null, 2);
+    }
+
+    public static toGitOperationStatus(json: string): GitOperationStatus {
+        return cast(JSON.parse(json), r("GitOperationStatus"));
+    }
+
+    public static gitOperationStatusToJson(value: GitOperationStatus): string {
+        return JSON.stringify(uncast(value, r("GitOperationStatus")), null, 2);
     }
 
     public static toGitStatusUpdateMessage(json: string): GitStatusUpdateMessage {
@@ -4359,7 +4457,7 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "DeleteWorktreeMessage": o([
-        { json: "cmd", js: "cmd", typ: r("DeleteWorktreeMessageCmd") },
+        { json: "cmd", js: "cmd", typ: r("GitOperationKind") },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
     ], "any"),
@@ -4610,6 +4708,36 @@ const typeMap: any = {
         { json: "old_path", js: "old_path", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
         { json: "status", js: "status", typ: "" },
+    ], "any"),
+    "GitOperation": o([
+        { json: "duration_ms", js: "duration_ms", typ: u(undefined, 0) },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "finished_at", js: "finished_at", typ: u(undefined, "") },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: r("GitOperationKind") },
+        { json: "path", js: "path", typ: u(undefined, "") },
+        { json: "started_at", js: "started_at", typ: "" },
+        { json: "status", js: "status", typ: r("GitOperationStatus") },
+    ], "any"),
+    "GitOperationFinishedMessage": o([
+        { json: "event", js: "event", typ: r("GitOperationFinishedMessageEvent") },
+        { json: "operation", js: "operation", typ: r("Operation") },
+    ], "any"),
+    "Operation": o([
+        { json: "duration_ms", js: "duration_ms", typ: u(undefined, 0) },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "finished_at", js: "finished_at", typ: u(undefined, "") },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: r("GitOperationKind") },
+        { json: "path", js: "path", typ: u(undefined, "") },
+        { json: "started_at", js: "started_at", typ: "" },
+        { json: "status", js: "status", typ: r("GitOperationStatus") },
+    ], "any"),
+    "GitOperationStartedMessage": o([
+        { json: "event", js: "event", typ: r("GitOperationStartedMessageEvent") },
+        { json: "operation", js: "operation", typ: r("Operation") },
     ], "any"),
     "GitStatusUpdateMessage": o([
         { json: "directory", js: "directory", typ: "" },
@@ -5377,6 +5505,7 @@ const typeMap: any = {
         { json: "id", js: "id", typ: u(undefined, "") },
         { json: "last_seq", js: "last_seq", typ: u(undefined, 0) },
         { json: "modified", js: "modified", typ: u(undefined, "") },
+        { json: "operation", js: "operation", typ: u(undefined, r("Operation")) },
         { json: "original", js: "original", typ: u(undefined, "") },
         { json: "pane_id", js: "pane_id", typ: u(undefined, "") },
         { json: "path", js: "path", typ: u(undefined, "") },
@@ -5559,7 +5688,7 @@ const typeMap: any = {
     "DeleteCommentResultMessageEvent": [
         "delete_comment_result",
     ],
-    "DeleteWorktreeMessageCmd": [
+    "GitOperationKind": [
         "delete_worktree",
     ],
     "DeleteWorktreeResultMessageEvent": [
@@ -5648,6 +5777,17 @@ const typeMap: any = {
     ],
     "GetSettingsMessageCmd": [
         "get_settings",
+    ],
+    "GitOperationStatus": [
+        "failed",
+        "running",
+        "succeeded",
+    ],
+    "GitOperationFinishedMessageEvent": [
+        "git_operation_finished",
+    ],
+    "GitOperationStartedMessageEvent": [
+        "git_operation_started",
     ],
     "GitStatusUpdateMessageEvent": [
         "git_status_update",

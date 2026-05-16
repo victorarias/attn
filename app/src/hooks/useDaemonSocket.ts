@@ -6,6 +6,7 @@ import type {
   SessionLayout as GeneratedWorkspaceSnapshot,
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
+  GitOperation as GeneratedGitOperation,
   Endpoint as GeneratedEndpoint,
   RepoState as GeneratedRepoState,
   AuthorState as GeneratedAuthorState,
@@ -54,6 +55,7 @@ export type DaemonSession = GeneratedSession;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
+export type DaemonGitOperation = GeneratedGitOperation;
 export type DaemonEndpoint = GeneratedEndpoint;
 export type RepoState = GeneratedRepoState;
 export type AuthorState = GeneratedAuthorState;
@@ -141,7 +143,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '59';
+const PROTOCOL_VERSION = '60';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -644,6 +646,7 @@ export function useDaemonSocket({
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
   const [warnings, setWarnings] = useState<DaemonWarning[]>([]);
+  const [gitOperations, setGitOperations] = useState<Record<string, DaemonGitOperation>>({});
 
   // Circuit breaker state for reconnect storms
   const reconnectAttemptsRef = useRef(0);
@@ -1582,6 +1585,18 @@ export function useDaemonSocket({
           case 'worktree_deleted':
             // These events are informational, UI updates handled via worktrees_updated
             break;
+
+          case 'git_operation_started':
+          case 'git_operation_finished': {
+            const operation = data.operation as DaemonGitOperation | undefined;
+            if (operation?.id) {
+              setGitOperations((current) => ({
+                ...current,
+                [operation.id]: operation,
+              }));
+            }
+            break;
+          }
 
           case 'create_worktree_result':
           case 'delete_worktree_result':
@@ -3400,6 +3415,7 @@ export function useDaemonSocket({
     settings: settingsRef.current,
     rateLimit,
     warnings,
+    gitOperations,
     clearWarnings,
     retryConnection,
     sendPRAction,

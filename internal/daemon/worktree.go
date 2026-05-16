@@ -186,7 +186,12 @@ func (d *Daemon) discoverWorktree(path string) *store.Worktree {
 
 // doDeleteWorktree removes a worktree from git and the store.
 // Also cleans up any sessions in that directory.
-func (d *Daemon) doDeleteWorktree(path string) error {
+func (d *Daemon) doDeleteWorktree(path string, endpointID *string) (err error) {
+	finishOperation := d.beginGitOperation(protocol.GitOperationKindDeleteWorktree, path, endpointID)
+	defer func() {
+		finishOperation(err)
+	}()
+
 	// Stop/remove sessions in this directory before deleting the worktree.
 	for _, session := range d.store.List("") {
 		if session.Directory != path {
@@ -283,7 +288,7 @@ func (d *Daemon) handleCreateWorktree(conn net.Conn, msg *protocol.CreateWorktre
 }
 
 func (d *Daemon) handleDeleteWorktree(conn net.Conn, msg *protocol.DeleteWorktreeMessage) {
-	if err := d.doDeleteWorktree(msg.Path); err != nil {
+	if err := d.doDeleteWorktree(msg.Path, msg.EndpointID); err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
@@ -329,7 +334,7 @@ func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWo
 			})
 		}()
 
-		err := d.doDeleteWorktree(msg.Path)
+		err := d.doDeleteWorktree(msg.Path, msg.EndpointID)
 		result := protocol.DeleteWorktreeResultMessage{
 			Event:      protocol.EventDeleteWorktreeResult,
 			Path:       msg.Path,

@@ -834,6 +834,61 @@ type GitFileChange struct {
 	Status string `json:"status"`
 }
 
+type GitOperation struct {
+	// DurationMs corresponds to the JSON schema field "duration_ms".
+	DurationMs *int `json:"duration_ms,omitempty,omitzero"`
+
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// FinishedAt corresponds to the JSON schema field "finished_at".
+	FinishedAt *string `json:"finished_at,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind GitOperationKind `json:"kind"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path *string `json:"path,omitempty,omitzero"`
+
+	// StartedAt corresponds to the JSON schema field "started_at".
+	StartedAt string `json:"started_at"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status GitOperationStatus `json:"status"`
+}
+
+type GitOperationFinishedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Operation corresponds to the JSON schema field "operation".
+	Operation GitOperation `json:"operation"`
+}
+
+type GitOperationKind string
+
+const GitOperationKindDeleteWorktree GitOperationKind = "delete_worktree"
+
+type GitOperationStartedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Operation corresponds to the JSON schema field "operation".
+	Operation GitOperation `json:"operation"`
+}
+
+type GitOperationStatus string
+
+const GitOperationStatusFailed GitOperationStatus = "failed"
+const GitOperationStatusRunning GitOperationStatus = "running"
+const GitOperationStatusSucceeded GitOperationStatus = "succeeded"
+
 type GitStatusUpdateMessage struct {
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
@@ -2485,6 +2540,9 @@ type WebSocketEvent struct {
 
 	// Modified corresponds to the JSON schema field "modified".
 	Modified *string `json:"modified,omitempty,omitzero"`
+
+	// Operation corresponds to the JSON schema field "operation".
+	Operation *GitOperation `json:"operation,omitempty,omitzero"`
 
 	// Original corresponds to the JSON schema field "original".
 	Original *string `json:"original,omitempty,omitzero"`
