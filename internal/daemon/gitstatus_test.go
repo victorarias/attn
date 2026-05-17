@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -207,6 +208,50 @@ func TestGitStatusSchedulerUsesTrackedOnlyAfterLimitedRefresh(t *testing.T) {
 	}
 }
 
+func TestGitStatusCoordinatorSharesInFlightStatusForRepoAndMode(t *testing.T) {
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	previousGetGitStatus := getGitStatusForDaemon
+	getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
+		call := calls.Add(1)
+		if call == 1 {
+			close(started)
+			<-release
+		}
+		return testGitStatus(dir, "src/shared.ts"), nil
+	}
+	defer func() {
+		getGitStatusForDaemon = previousGetGitStatus
+	}()
+
+	d := &Daemon{}
+	results := make(chan *protocol.GitStatusUpdateMessage, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			status, _, err := d.coordinator().Status("/repo", gitStatusModeFull)
+			if err != nil {
+				t.Errorf("Status failed: %v", err)
+			}
+			results <- status
+		}()
+	}
+
+	<-started
+	time.Sleep(20 * time.Millisecond)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("git status calls while first refresh is in flight = %d, want 1", got)
+	}
+	close(release)
+
+	for i := 0; i < 2; i++ {
+		status := <-results
+		if status == nil || len(status.Unstaged) != 1 || status.Unstaged[0].Path != "src/shared.ts" {
+			t.Fatalf("status = %+v, want shared status result", status)
+		}
+	}
+}
+
 func TestTrackedOnlyStatusResultStaysLimited(t *testing.T) {
 	previousRunGitStatusCommand := runGitStatusCommandForDaemon
 	runGitStatusCommandForDaemon = func(_ string, _ time.Duration, args ...string) ([]byte, error) {
@@ -296,6 +341,152 @@ func TestSameOrNestedPath(t *testing.T) {
 				t.Fatalf("sameOrNestedPath(%q, %q) = %v, want %v", tt.path, tt.dir, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBranchDiffSnapshotSharesInFlightRefreshWithoutCache(t *testing.T) {
+	previousGetBranchDiffFiles := getBranchDiffFilesForDaemon
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	getBranchDiffFilesForDaemon = func(_, _ string) ([]attngit.DiffFileInfo, error) {
+		call := calls.Add(1)
+		if call == 1 {
+			close(started)
+			<-release
+		}
+		return []attngit.DiffFileInfo{{Path: "src/shared.ts", Status: "modified"}}, nil
+	}
+	defer func() {
+		getBranchDiffFilesForDaemon = previousGetBranchDiffFiles
+	}()
+
+	d := &Daemon{}
+	results := make(chan branchDiffSnapshot, 2)
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			snapshot, err := d.coordinator().BranchDiffSnapshot("/repo", "origin/main")
+			results <- snapshot
+			errs <- err
+		}()
+	}
+
+	<-started
+	time.Sleep(20 * time.Millisecond)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("branch diff calls while first refresh is in flight = %d, want 1", got)
+	}
+	close(release)
+
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("getBranchDiffSnapshot failed: %v", err)
+		}
+		snapshot := <-results
+		if len(snapshot.files) != 1 || snapshot.files[0].Path != "src/shared.ts" {
+			t.Fatalf("snapshot files = %+v, want shared file", snapshot.files)
+		}
+	}
+}
+
+func TestBranchDiffSnapshotReturnsCachedResultDuringRefresh(t *testing.T) {
+	previousGetBranchDiffFiles := getBranchDiffFilesForDaemon
+	var calls atomic.Int32
+	refreshStarted := make(chan struct{})
+	refreshDone := make(chan struct{})
+	releaseRefresh := make(chan struct{})
+	getBranchDiffFilesForDaemon = func(_, _ string) ([]attngit.DiffFileInfo, error) {
+		switch calls.Add(1) {
+		case 1:
+			return []attngit.DiffFileInfo{{Path: "src/old.ts", Status: "modified"}}, nil
+		case 2:
+			close(refreshStarted)
+			<-releaseRefresh
+			close(refreshDone)
+			return []attngit.DiffFileInfo{{Path: "src/new.ts", Status: "modified"}}, nil
+		default:
+			return []attngit.DiffFileInfo{{Path: "src/new.ts", Status: "modified"}}, nil
+		}
+	}
+	defer func() {
+		getBranchDiffFilesForDaemon = previousGetBranchDiffFiles
+	}()
+
+	d := &Daemon{}
+	first, err := d.coordinator().BranchDiffSnapshot("/repo", "origin/main")
+	if err != nil {
+		t.Fatalf("first getBranchDiffSnapshot failed: %v", err)
+	}
+	if got := first.files[0].Path; got != "src/old.ts" {
+		t.Fatalf("first cached path = %q, want old snapshot", got)
+	}
+
+	second, err := d.coordinator().BranchDiffSnapshot("/repo", "origin/main")
+	if err != nil {
+		t.Fatalf("second getBranchDiffSnapshot failed: %v", err)
+	}
+	if got := second.files[0].Path; got != "src/old.ts" {
+		t.Fatalf("second cached path = %q, want old snapshot while refresh runs", got)
+	}
+
+	<-refreshStarted
+	close(releaseRefresh)
+	<-refreshDone
+
+	third, err := d.coordinator().BranchDiffSnapshot("/repo", "origin/main")
+	if err != nil {
+		t.Fatalf("third getBranchDiffSnapshot failed: %v", err)
+	}
+	if got := third.files[0].Path; got != "src/new.ts" {
+		t.Fatalf("third cached path = %q, want refreshed snapshot", got)
+	}
+	waitForGitStatusTestCondition(t, 500*time.Millisecond, func() bool {
+		return calls.Load() >= 3
+	})
+}
+
+func TestGitCoordinatorSharesInFlightFileDiff(t *testing.T) {
+	previousReadFileDiff := readFileDiffForDaemon
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	readFileDiffForDaemon = func(_, _, _ string, _ bool) (fileDiffContent, error) {
+		call := calls.Add(1)
+		if call == 1 {
+			close(started)
+			<-release
+		}
+		return fileDiffContent{original: "before", modified: "after"}, nil
+	}
+	defer func() {
+		readFileDiffForDaemon = previousReadFileDiff
+	}()
+
+	d := &Daemon{}
+	results := make(chan fileDiffContent, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			content, err := d.coordinator().FileDiff("/repo", "src/file.ts", "HEAD", false)
+			if err != nil {
+				t.Errorf("FileDiff failed: %v", err)
+			}
+			results <- content
+		}()
+	}
+
+	<-started
+	time.Sleep(20 * time.Millisecond)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("file diff calls while first refresh is in flight = %d, want 1", got)
+	}
+	close(release)
+
+	for i := 0; i < 2; i++ {
+		content := <-results
+		if content.original != "before" || content.modified != "after" {
+			t.Fatalf("file diff content = %+v, want shared content", content)
+		}
 	}
 }
 
