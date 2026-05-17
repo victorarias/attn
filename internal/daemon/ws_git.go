@@ -21,12 +21,18 @@ type gitStatusRefreshRequest struct {
 	reason    string
 }
 
+type gitStatusRefreshResult struct {
+	duration time.Duration
+	limited  bool
+}
+
 var (
 	gitStatusRefreshDebounce     = 1 * time.Second
 	gitStatusSafetyInterval      = 30 * time.Second
 	gitStatusSlowSafetyInterval  = 2 * time.Minute
 	gitStatusSlowRefreshDuration = 5 * time.Second
-	getGitStatusForDaemon        = getGitStatus
+	gitStatusFullBudget          = 5 * time.Second
+	getGitStatusForDaemon        = getGitStatusForSubscription
 )
 
 func (d *Daemon) handleSubscribeGitStatus(client *wsClient, msg *protocol.SubscribeGitStatusMessage) {
@@ -71,12 +77,16 @@ func (d *Daemon) runGitStatusScheduler(client *wsClient, dir string, stop <-chan
 		timer.Reset(delay)
 	}
 
+	mode := gitStatusModeFull
 	run := func(reason string) {
-		duration := d.sendGitStatusUpdate(client, dir)
+		result := d.sendGitStatusUpdate(client, dir, mode)
+		if result.limited {
+			mode = gitStatusModeTrackedOnly
+		}
 		interval := gitStatusSafetyInterval
-		if duration >= gitStatusSlowRefreshDuration {
+		if result.duration >= gitStatusSlowRefreshDuration || result.limited {
 			interval = gitStatusSlowSafetyInterval
-			d.logf("git status refresh for %s took %s via %s; delaying safety refresh to %s", dir, duration.Round(time.Millisecond), reason, interval)
+			d.logf("git status refresh for %s took %s via %s; limited=%v; delaying safety refresh to %s", dir, result.duration.Round(time.Millisecond), reason, result.limited, interval)
 		}
 		resetTimer(safety, interval)
 	}
@@ -99,39 +109,40 @@ func (d *Daemon) runGitStatusScheduler(client *wsClient, dir string, stop <-chan
 	}
 }
 
-func (d *Daemon) sendGitStatusUpdate(client *wsClient, dir string) time.Duration {
+func (d *Daemon) sendGitStatusUpdate(client *wsClient, dir string, mode gitStatusMode) gitStatusRefreshResult {
 	client.gitStatusMu.Lock()
 	currentDir := client.gitStatusDir
 	lastHash := client.gitStatusHash
 	client.gitStatusMu.Unlock()
 
 	if dir == "" || currentDir != dir {
-		return 0
+		return gitStatusRefreshResult{}
 	}
 
 	started := time.Now()
-	status, err := getGitStatusForDaemon(dir)
+	status, err := getGitStatusForDaemon(dir, mode)
 	duration := time.Since(started)
 	if err != nil {
 		d.logf("Git status error for %s: %v", dir, err)
-		return duration
+		return gitStatusRefreshResult{duration: duration}
 	}
+	status.DurationMs = protocol.Ptr(int(duration.Milliseconds()))
 
 	newHash := hashGitStatus(status)
 	if newHash == lastHash {
-		return duration
+		return gitStatusRefreshResult{duration: duration, limited: protocol.Deref(status.Limited)}
 	}
 
 	client.gitStatusMu.Lock()
 	if client.gitStatusDir != dir {
 		client.gitStatusMu.Unlock()
-		return duration
+		return gitStatusRefreshResult{duration: duration, limited: protocol.Deref(status.Limited)}
 	}
 	client.gitStatusHash = newHash
 	client.gitStatusMu.Unlock()
 
 	d.sendToClient(client, status)
-	return duration
+	return gitStatusRefreshResult{duration: duration, limited: protocol.Deref(status.Limited)}
 }
 
 func (d *Daemon) refreshGitStatusSubscribersForPath(path string) {

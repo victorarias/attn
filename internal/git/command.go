@@ -86,6 +86,10 @@ func Output(op Operation, dir string, args ...string) ([]byte, error) {
 	return runGitOutput(op, dir, args...)
 }
 
+func OutputWithTimeout(op Operation, timeout time.Duration, dir string, args ...string) ([]byte, error) {
+	return runGitCommandWithTimeout(op, timeout, dir, nil, false, args...)
+}
+
 func runGitCombined(op Operation, dir string, args ...string) ([]byte, error) {
 	return runGitCommand(op, dir, nil, true, args...)
 }
@@ -105,6 +109,10 @@ func runGitNoOutput(op Operation, dir string, args ...string) error {
 
 func runGitCommand(op Operation, dir string, stdin io.Reader, combined bool, args ...string) ([]byte, error) {
 	timeout := defaultTimeout(op)
+	return runGitCommandWithTimeout(op, timeout, dir, stdin, combined, args...)
+}
+
+func runGitCommandWithTimeout(op Operation, timeout time.Duration, dir string, stdin io.Reader, combined bool, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 

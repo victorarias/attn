@@ -10,6 +10,8 @@ interface ChangesPanelProps {
   branchDiffLoaded?: boolean;
   branchDiffLoading?: boolean;
   branchDiffRefreshing?: boolean;
+  gitStatusLimited?: boolean;
+  gitStatusLimitedReason?: string;
   selectedFile: string | null;
   onFileSelect: (path: string, staged: boolean) => void;
   onOpenDiffClick?: () => void;
@@ -113,6 +115,8 @@ export const ChangesPanel = memo(function ChangesPanel({
   branchDiffLoaded = false,
   branchDiffLoading = false,
   branchDiffRefreshing = false,
+  gitStatusLimited = false,
+  gitStatusLimitedReason,
   selectedFile,
   onFileSelect,
   onOpenDiffClick,
@@ -198,6 +202,9 @@ export const ChangesPanel = memo(function ChangesPanel({
           {showInlineWarning && (
             <span className="changes-warning" role="status" aria-label="Stale" title={branchDiffError || undefined}>Stale</span>
           )}
+          {gitStatusLimited && (
+            <span className="changes-limited" role="status" aria-label="Tracked files only" title={gitStatusLimitedReason || undefined}>Tracked only</span>
+          )}
           {hasFiles && onOpenDiffClick && (
             <button className="review-btn" onClick={onOpenDiffClick} title="Open diff detail">
               Open Diff
@@ -219,6 +226,11 @@ export const ChangesPanel = memo(function ChangesPanel({
         {showInlineWarning && (
           <div className="changes-inline-warning">
             Could not refresh changes. Showing last result.
+          </div>
+        )}
+        {gitStatusLimited && (
+          <div className="changes-inline-warning changes-inline-warning--limited">
+            Full status was slow. Background refresh is tracking changed files already known to Git.
           </div>
         )}
         {branchDiffError && !hasLoadedResult ? (

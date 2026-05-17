@@ -143,7 +143,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '60';
+const PROTOCOL_VERSION = '61';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -350,6 +350,10 @@ export interface GitStatusUpdate {
   unstaged: GitFileChange[];
   untracked: GitFileChange[];
   error?: string;
+  mode?: string;
+  limited?: boolean;
+  limited_reason?: string;
+  duration_ms?: number;
 }
 
 export interface FileDiffResult {
@@ -1730,6 +1734,10 @@ export function useDaemonSocket({
                 unstaged: data.unstaged || [],
                 untracked: data.untracked || [],
                 error: data.error,
+                mode: data.mode,
+                limited: data.limited,
+                limited_reason: data.limited_reason,
+                duration_ms: data.duration_ms,
               });
             }
             break;

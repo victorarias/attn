@@ -1094,6 +1094,10 @@ model GitStatusUpdateMessage {
   unstaged: GitFileChange[];
   untracked: GitFileChange[];
   error?: string;
+  mode?: string;                 // "full" or "tracked_only"
+  limited?: boolean;             // true when untracked files were skipped
+  limited_reason?: string;       // user-facing reason for the limited result
+  duration_ms?: int32;           // daemon-side status command duration
 }
 
 model FileDiffResultMessage {

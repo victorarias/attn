@@ -80,4 +80,16 @@ describe('ChangesPanel', () => {
     expect(screen.getByText('Get branch diff files timed out')).toBeInTheDocument();
     expect(screen.queryByText('Could not refresh changes. Showing last result.')).not.toBeInTheDocument();
   });
+
+  it('shows tracked-only status when background git status is limited', () => {
+    renderPanel({
+      branchDiffFiles: changedFiles,
+      branchDiffLoaded: true,
+      gitStatusLimited: true,
+      gitStatusLimitedReason: 'Untracked files hidden because full git status was slow.',
+    });
+
+    expect(screen.getByRole('status', { name: 'Tracked files only' })).toBeInTheDocument();
+    expect(screen.getByText('Full status was slow. Background refresh is tracking changed files already known to Git.')).toBeInTheDocument();
+  });
 });

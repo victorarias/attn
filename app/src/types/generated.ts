@@ -1110,12 +1110,16 @@ export enum GitOperationStartedMessageEvent {
 }
 
 export interface GitStatusUpdateMessage {
-    directory: string;
-    error?:    string;
-    event:     GitStatusUpdateMessageEvent;
-    staged:    StagedElement[];
-    unstaged:  StagedElement[];
-    untracked: StagedElement[];
+    directory:       string;
+    duration_ms?:    number;
+    error?:          string;
+    event:           GitStatusUpdateMessageEvent;
+    limited?:        boolean;
+    limited_reason?: string;
+    mode?:           string;
+    staged:          StagedElement[];
+    unstaged:        StagedElement[];
+    untracked:       StagedElement[];
     [property: string]: any;
 }
 
@@ -4741,8 +4745,12 @@ const typeMap: any = {
     ], "any"),
     "GitStatusUpdateMessage": o([
         { json: "directory", js: "directory", typ: "" },
+        { json: "duration_ms", js: "duration_ms", typ: u(undefined, 0) },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("GitStatusUpdateMessageEvent") },
+        { json: "limited", js: "limited", typ: u(undefined, true) },
+        { json: "limited_reason", js: "limited_reason", typ: u(undefined, "") },
+        { json: "mode", js: "mode", typ: u(undefined, "") },
         { json: "staged", js: "staged", typ: a(r("StagedElement")) },
         { json: "unstaged", js: "unstaged", typ: a(r("StagedElement")) },
         { json: "untracked", js: "untracked", typ: a(r("StagedElement")) },

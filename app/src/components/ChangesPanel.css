@@ -31,7 +31,8 @@
 }
 
 .changes-refreshing,
-.changes-warning {
+.changes-warning,
+.changes-limited {
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
   font-weight: 600;
@@ -50,6 +51,12 @@
   color: #fbbf24;
   background: rgba(251, 191, 36, 0.11);
   border: 1px solid rgba(251, 191, 36, 0.24);
+}
+
+.changes-limited {
+  color: #c4b5fd;
+  background: rgba(124, 58, 237, 0.11);
+  border: 1px solid rgba(124, 58, 237, 0.24);
 }
 
 .editor-btn {
@@ -222,6 +229,12 @@
   background: rgba(251, 191, 36, 0.08);
   color: #d6a72a;
   font-size: var(--font-size-xs);
+}
+
+.changes-inline-warning--limited {
+  border-color: rgba(124, 58, 237, 0.22);
+  background: rgba(124, 58, 237, 0.08);
+  color: #b9a7ee;
 }
 
 .changes-loading {

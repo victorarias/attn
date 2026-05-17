@@ -2126,6 +2126,8 @@ sendFetchPRDetails,
                   branchDiffLoaded={branchDiffLoaded}
                   branchDiffLoading={branchDiffLoading}
                   branchDiffRefreshing={branchDiffRefreshing}
+                  gitStatusLimited={Boolean(gitStatus?.limited && gitStatus.directory === activeRepoDaemonSession?.directory)}
+                  gitStatusLimitedReason={gitStatus?.limited_reason}
                   selectedFile={null}
                   onFileSelect={handleFileSelect}
                   onOpenDiffClick={handleOpenDiffDetailPanel}
