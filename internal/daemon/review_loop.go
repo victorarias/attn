@@ -666,12 +666,12 @@ func normalizeReviewLoopPaths(repoPath string, candidates ...string) []string {
 }
 
 func (d *Daemon) captureReviewLoopSnapshot(repoPath string) (map[string]attngit.DiffFileInfo, string, error) {
-	defaultBranch, err := attngit.GetDefaultBranch(repoPath)
+	defaultBranch, err := d.coordinator().DefaultBranch(repoPath)
 	if err != nil {
 		return nil, "", err
 	}
 	baseRef := "origin/" + defaultBranch
-	files, err := attngit.GetBranchDiffFiles(repoPath, baseRef)
+	files, err := d.coordinator().RefreshBranchDiffFiles(repoPath, baseRef)
 	if err != nil {
 		return nil, baseRef, err
 	}
@@ -682,7 +682,7 @@ func (d *Daemon) computeReviewLoopIterationChangeStats(repoPath, baseRef string,
 	if baseRef == "" {
 		return nil, nil
 	}
-	files, err := attngit.GetBranchDiffFiles(repoPath, baseRef)
+	files, err := d.coordinator().RefreshBranchDiffFiles(repoPath, baseRef)
 	if err != nil {
 		return nil, err
 	}

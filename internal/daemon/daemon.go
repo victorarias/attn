@@ -103,6 +103,8 @@ type Daemon struct {
 	reviewLoopExec   ReviewLoopExecutor
 	repoCaches       map[string]*repoCache
 	repoCacheMu      sync.RWMutex
+	gitCoordMu       sync.Mutex
+	gitCoord         *gitCoordinator
 	warnings         []protocol.DaemonWarning
 	warningsMu       sync.RWMutex
 	ptyBackend       ptybackend.Backend
@@ -329,6 +331,7 @@ func New(socketPath string) *Daemon {
 		hubManager:       nil,
 		reviewLoopExec:   reviewLoopExecutor,
 		repoCaches:       make(map[string]*repoCache),
+		gitCoord:         newGitCoordinator(),
 		warnings:         startupWarnings,
 		ptyBackend:       ptybackend.NewEmbedded(manager),
 		transcriptWatch:  make(map[string]*transcriptWatcher),
@@ -362,6 +365,7 @@ func NewForTesting(socketPath string) *Daemon {
 		ghRegistry:       github.NewClientRegistry(),
 		hubManager:       nil,
 		repoCaches:       make(map[string]*repoCache),
+		gitCoord:         newGitCoordinator(),
 		ptyBackend:       ptybackend.NewEmbedded(manager),
 		transcriptWatch:  make(map[string]*transcriptWatcher),
 		pendingInitialWS: make(map[*wsClient]struct{}),
@@ -398,6 +402,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		ghRegistry:       registry,
 		hubManager:       nil,
 		repoCaches:       make(map[string]*repoCache),
+		gitCoord:         newGitCoordinator(),
 		ptyBackend:       ptybackend.NewEmbedded(manager),
 		transcriptWatch:  make(map[string]*transcriptWatcher),
 		pendingInitialWS: make(map[*wsClient]struct{}),
