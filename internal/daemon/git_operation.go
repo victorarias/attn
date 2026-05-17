@@ -39,5 +39,6 @@ func (d *Daemon) beginGitOperation(kind protocol.GitOperationKind, path string, 
 			Event:     protocol.EventGitOperationFinished,
 			Operation: &finishedOperation,
 		})
+		d.refreshGitStatusSubscribersForPath(path)
 	}
 }
