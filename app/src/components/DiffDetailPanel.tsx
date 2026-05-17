@@ -265,7 +265,6 @@ export function DiffDetailPanel({
   const [isSyncingRemotes, setIsSyncingRemotes] = useState(false);
   const [remotesSyncWarning, setRemotesSyncWarning] = useState<string | null>(null);
   const branchDiffRequestIdRef = useRef(0);
-  const branchDiffCacheRef = useRef<Map<string, { files: BranchDiffFile[]; baseRef: string }>>(new Map());
 
   // Comment state
   const [allReviewComments, setAllReviewComments] = useState<ReviewComment[]>([]);
@@ -490,7 +489,6 @@ export function DiffDetailPanel({
     let cancelled = false;
     const requestId = ++branchDiffRequestIdRef.current;
     const isCurrentRequest = () => !cancelled && requestId === branchDiffRequestIdRef.current;
-    const cacheKey = `${repoPath}::${branch}`;
     let localRequestStarted = false;
     let localApplied = false;
     let remoteApplied = false;
@@ -499,10 +497,6 @@ export function DiffDetailPanel({
     const applyBranchDiff = (result: BranchDiffFilesResult) => {
       setBranchDiffFiles(result.files);
       setBaseRef(result.base_ref);
-      branchDiffCacheRef.current.set(cacheKey, {
-        files: result.files,
-        baseRef: result.base_ref,
-      });
     };
 
     const runLocalDiff = () => {
@@ -530,22 +524,14 @@ export function DiffDetailPanel({
     };
 
     setRemotesSyncWarning(null);
-    const cached = branchDiffCacheRef.current.get(cacheKey);
-    if (cached) {
-      setBranchDiffFiles(cached.files);
-      setBaseRef(cached.baseRef);
-      localApplied = true;
-      setIsLoadingBranchDiff(false);
-    } else {
-      // Clear stale files from a previous branch so orphan-cleanup
-      // doesn't run against the wrong file list while the fetch is in-flight.
-      setBranchDiffFiles([]);
-      setIsLoadingBranchDiff(true);
-      // Small delay avoids guaranteed duplicate heavy diff calls when remote sync is fast.
-      localTimer = setTimeout(() => {
-        runLocalDiff();
-      }, 150);
-    }
+    // Clear stale files from a previous branch so orphan-cleanup
+    // doesn't run against the wrong file list while the fetch is in-flight.
+    setBranchDiffFiles([]);
+    setIsLoadingBranchDiff(true);
+    // Small delay avoids guaranteed duplicate heavy diff calls when remote sync is fast.
+    localTimer = setTimeout(() => {
+      runLocalDiff();
+    }, 150);
 
     // 2) Freshness path: refresh remotes in background and update in place
     setIsSyncingRemotes(true);
@@ -1083,7 +1069,6 @@ export function DiffDetailPanel({
         commentCount: comments.length,
         editorCommentCount: editorComments.length,
         commentBuildDurationMs: editorCommentBuildDurationMsRef.current,
-        branchDiffCacheEntries: branchDiffCacheRef.current.size,
         originalLength: diffContent?.original.length || 0,
         modifiedLength: diffContent?.modified.length || 0,
       },
@@ -1111,7 +1096,6 @@ export function DiffDetailPanel({
           commentCount: 0,
           editorCommentCount: 0,
           commentBuildDurationMs: 0,
-          branchDiffCacheEntries: 0,
           originalLength: 0,
           modifiedLength: 0,
         },
