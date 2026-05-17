@@ -24,6 +24,7 @@ vi.mock('./UnifiedDiffEditor', () => ({
   )),
   buildUnifiedDocument: vi.fn(() => []),
   resolveAnchor: vi.fn(() => ({ docLine: 1, isOutdated: false, isOrphaned: false })),
+  hashContent: vi.fn((content: string) => content),
 }));
 
 describe('DiffDetailPanel', () => {
@@ -433,6 +434,48 @@ describe('DiffDetailPanel', () => {
   });
 
   describe('change detection', () => {
+    async function prepareViewedFiles(files: string[], selectedAtEnd: string) {
+      mockDaemon.setResponse('getBranchDiffFiles', () =>
+        createBranchDiffFilesResult(files)
+      );
+      mockDaemon.setResponse('fetchDiff', (args: unknown[]) => {
+        const [path] = args as [string];
+        return {
+          ...createFileDiffResult(`// original ${path}`, `// modified ${path}`),
+          path,
+        };
+      });
+
+      const initialGitStatus = createGitStatus(files);
+      const view = renderPanel({
+        gitStatus: initialGitStatus,
+        initialSelectedFile: files[0],
+      });
+
+      await waitFor(() => {
+        expect(getFileInList(files[0])).toBeInTheDocument();
+      });
+
+      for (const file of files) {
+        getFileInList(file).click();
+        await waitFor(() => {
+          expect(mockDaemon.getCalls('fetchDiff').some((call) => call.args[0] === file)).toBe(true);
+        });
+      }
+
+      getFileInList(selectedAtEnd).click();
+      await waitFor(() => {
+        expect(getFileInList(selectedAtEnd)).toHaveClass('selected');
+      });
+
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('fetchDiff').some((call) => call.args[0] === selectedAtEnd)).toBe(true);
+      });
+      mockDaemon.clearCalls();
+
+      return view;
+    }
+
     it('shows CHANGED badge when file content differs from last view', async () => {
       const gitStatus = createGitStatus(['src/App.tsx']);
 
@@ -485,6 +528,124 @@ describe('DiffDetailPanel', () => {
 
       // Badge should not be visible (no changes detected in this test)
       expect(screen.queryByText('changed')).not.toBeInTheDocument();
+    });
+
+    it('shows foreground pending state when the selected diff is slow', async () => {
+      mockDaemon.setResponse('getBranchDiffFiles', () =>
+        createBranchDiffFilesResult(['src/slow.ts'])
+      );
+      let resolveDiff: ((value: ReturnType<typeof createFileDiffResult> & { path: string }) => void) | undefined;
+      mockDaemon.setResponse('fetchDiff', (args: unknown[]) => {
+        const [path] = args as [string];
+        return new Promise((resolve) => {
+          resolveDiff = resolve;
+        }).then((result) => ({ ...(result as ReturnType<typeof createFileDiffResult>), path }));
+      });
+
+      renderPanel({
+        gitStatus: createGitStatus(['src/slow.ts']),
+        initialSelectedFile: 'src/slow.ts',
+      });
+
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('fetchDiff').some((call) => call.args[0] === 'src/slow.ts')).toBe(true);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Loading selected diff...');
+      });
+
+      expect(screen.getByText('Waiting for git to return the file diff.')).toBeInTheDocument();
+
+      resolveDiff?.({
+        ...createFileDiffResult('// original slow', '// modified slow'),
+        path: 'src/slow.ts',
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      });
+    });
+
+    it('caps viewed-file background checks at two concurrent diff requests', async () => {
+      const files = ['file-A.tsx', 'file-B.tsx', 'file-C.tsx', 'file-D.tsx'];
+      const view = await prepareViewedFiles(files, 'file-A.tsx');
+
+      const pending = new Map<string, (value: ReturnType<typeof createFileDiffResult> & { path: string }) => void>();
+      mockDaemon.setResponse('fetchDiff', (args: unknown[]) => {
+        const [path] = args as [string];
+        return new Promise((resolve) => {
+          pending.set(path, resolve);
+        });
+      });
+
+      view.rerender(
+        <ControlledDiffDetailPanel
+          gitStatus={createGitStatus(['file-B.tsx', 'file-C.tsx', 'file-D.tsx'])}
+          isOpen={true}
+          initialSelectedFile="file-A.tsx"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Checking 3 viewed files...')).toBeInTheDocument();
+      });
+      await sleep(650);
+
+      const backgroundCalls = mockDaemon.getCalls('fetchDiff').map((call) => call.args[0]);
+      expect(backgroundCalls).toEqual(['file-B.tsx', 'file-C.tsx']);
+      expect(pending.size).toBe(2);
+      expect(pending.has('file-D.tsx')).toBe(false);
+    });
+
+    it('coalesces duplicate viewed-file background checks across status bursts', async () => {
+      const files = ['file-A.tsx', 'file-B.tsx', 'file-C.tsx', 'file-D.tsx'];
+      const view = await prepareViewedFiles(files, 'file-A.tsx');
+
+      mockDaemon.setResponse('fetchDiff', (args: unknown[]) => {
+        const [path] = args as [string];
+        return {
+          ...createFileDiffResult(`// original ${path}`, `// modified ${path} updated`),
+          path,
+        };
+      });
+
+      view.rerender(
+        <ControlledDiffDetailPanel
+          gitStatus={createGitStatus(['file-B.tsx', 'file-C.tsx', 'file-D.tsx'])}
+          isOpen={true}
+          initialSelectedFile="file-A.tsx"
+        />
+      );
+      view.rerender(
+        <ControlledDiffDetailPanel
+          gitStatus={createGitStatus(['file-B.tsx', 'file-C.tsx', 'file-D.tsx'])}
+          isOpen={true}
+          initialSelectedFile="file-A.tsx"
+        />
+      );
+      view.rerender(
+        <ControlledDiffDetailPanel
+          gitStatus={createGitStatus(['file-B.tsx', 'file-C.tsx', 'file-D.tsx'])}
+          isOpen={true}
+          initialSelectedFile="file-A.tsx"
+        />
+      );
+
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('fetchDiff').length).toBe(3);
+      }, { timeout: 1500 });
+
+      const counts = mockDaemon.getCalls('fetchDiff').reduce<Record<string, number>>((acc, call) => {
+        const path = call.args[0] as string;
+        acc[path] = (acc[path] || 0) + 1;
+        return acc;
+      }, {});
+      expect(counts).toEqual({
+        'file-B.tsx': 1,
+        'file-C.tsx': 1,
+        'file-D.tsx': 1,
+      });
     });
   });
 
