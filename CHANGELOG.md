@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-17]
+
+### Changed
+- **Changes Panel Refreshes**: The Changes panel now avoids branch-diff refreshes while closed, refreshes once when opened, and coalesces status-triggered refreshes so slow monorepos do not stack repeated Git diff work behind every status update.
+
+---
+
 ## [2026-05-16]
 
 ### Changed

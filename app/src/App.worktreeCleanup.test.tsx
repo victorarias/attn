@@ -270,6 +270,86 @@ describe('worktree cleanup prompt', () => {
     });
   });
 
+  it('does not refresh Changes branch diff while the Changes panel is closed', async () => {
+    const sendGetBranchDiffFiles = vi.fn(async () => ({ success: true, base_ref: 'main', files: [] }));
+    mockDaemonSocketReturn.sendGetBranchDiffFiles = sendGetBranchDiffFiles;
+
+    render(<App />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(sendGetBranchDiffFiles).not.toHaveBeenCalled();
+
+    const daemonSocketArgs = mockUseDaemonSocket.mock.calls[mockUseDaemonSocket.mock.calls.length - 1]?.[0] as {
+      onGitStatusUpdate?: (status: { directory: string; staged: unknown[]; unstaged: unknown[]; untracked: unknown[] }) => void;
+    };
+    act(() => {
+      daemonSocketArgs.onGitStatusUpdate?.({
+        directory: '/tmp/repo/.worktrees/feature-a',
+        staged: [],
+        unstaged: [],
+        untracked: [],
+      });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(sendGetBranchDiffFiles).not.toHaveBeenCalled();
+  });
+
+  it('refreshes Changes branch diff on open and coalesces status updates while in flight', async () => {
+    const firstBranchDiff = deferred<{ success: true; base_ref: string; files: [] }>();
+    const sendGetBranchDiffFiles = vi.fn()
+      .mockReturnValueOnce(firstBranchDiff.promise)
+      .mockResolvedValue({ success: true, base_ref: 'main', files: [] });
+    mockDaemonSocketReturn.sendGetBranchDiffFiles = sendGetBranchDiffFiles;
+
+    render(<App />);
+
+    const keyboardArgs = mockUseKeyboardShortcuts.mock.calls[mockUseKeyboardShortcuts.mock.calls.length - 1]?.[0] as {
+      onToggleDiffPanel?: () => void;
+    };
+    act(() => {
+      keyboardArgs.onToggleDiffPanel?.();
+    });
+
+    await waitFor(() => {
+      expect(sendGetBranchDiffFiles).toHaveBeenCalledTimes(1);
+    });
+
+    const daemonSocketArgs = mockUseDaemonSocket.mock.calls[mockUseDaemonSocket.mock.calls.length - 1]?.[0] as {
+      onGitStatusUpdate?: (status: { directory: string; staged: unknown[]; unstaged: unknown[]; untracked: unknown[] }) => void;
+    };
+    act(() => {
+      daemonSocketArgs.onGitStatusUpdate?.({
+        directory: '/tmp/repo/.worktrees/feature-a',
+        staged: [],
+        unstaged: [{ path: 'app/src/App.tsx' }],
+        untracked: [],
+      });
+      daemonSocketArgs.onGitStatusUpdate?.({
+        directory: '/tmp/repo/.worktrees/feature-a',
+        staged: [],
+        unstaged: [{ path: 'app/src/App.tsx' }, { path: 'internal/git/command.go' }],
+        untracked: [],
+      });
+    });
+
+    expect(sendGetBranchDiffFiles).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstBranchDiff.resolve({ success: true, base_ref: 'main', files: [] });
+      await firstBranchDiff.promise;
+    });
+
+    await waitFor(() => {
+      expect(sendGetBranchDiffFiles).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('ignores stale delete completion after another worktree prompt becomes active', async () => {
     const deleteA = deferred<{ success: true }>();
     const sendDeleteWorktree = vi.fn((path: string) => {
