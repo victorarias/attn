@@ -1628,11 +1628,11 @@ sendFetchPRDetails,
       }
       setBranchDiffError(err instanceof Error ? err.message : 'Failed to load branch diff');
     } finally {
-      const durationMs = Date.now() - startedAt;
-      if (durationMs >= CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS) {
-        branchDiffCooldownUntilRef.current = Date.now() + CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS;
-      }
       if (requestId === branchDiffRequestId.current) {
+        const durationMs = Date.now() - startedAt;
+        if (durationMs >= CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS) {
+          branchDiffCooldownUntilRef.current = Date.now() + CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS;
+        }
         branchDiffInFlightRef.current = false;
         setBranchDiffLoading(false);
         setBranchDiffRefreshing(false);
