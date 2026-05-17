@@ -37,7 +37,7 @@ var (
 	gitCommit         = ""
 )
 
-// hookInput represents the JSON input from Claude Code hooks
+// hookInput represents the JSON input from agent hooks.
 type hookInput struct {
 	SessionID      string          `json:"session_id"`
 	TranscriptPath string          `json:"transcript_path"`
@@ -133,6 +133,8 @@ func main() {
 		runList()
 	case "_hook-stop":
 		runHookStop()
+	case "_hook-session-start":
+		runHookSessionStart()
 	case "_hook-state":
 		runHookState()
 	case "_hook-todo":
@@ -633,6 +635,9 @@ func runAgentDirectly(requestedAgent string) {
 	}
 
 	hasHooks := false
+	if cp, ok := agentdriver.GetConfigOverrideProvider(driver); ok {
+		opts.ConfigOverrides = cp.GenerateConfigOverrides(sessionID, opts.SocketPath, opts.WrapperPath)
+	}
 	if hp, ok := agentdriver.GetHookProvider(driver); ok {
 		content := hp.GenerateHooksConfig(sessionID, opts.SocketPath, opts.WrapperPath)
 		settingsPath, err := wrapper.WriteSettingsConfig(os.TempDir(), sessionID, content)
@@ -763,11 +768,11 @@ func startDaemonBackground() error {
 }
 
 func runHookStop() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "usage: attn _hook-stop <session_id>\n")
+	sessionID := hookSessionIDFromArgOrEnv(2)
+	if sessionID == "" {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-stop [session_id]\n")
 		os.Exit(1)
 	}
-	sessionID := os.Args[2]
 
 	// Parse hook input from stdin to extract transcript path
 	var input hookInput
@@ -786,13 +791,26 @@ func runHookStop() {
 	}
 }
 
-func runHookState() {
-	if len(os.Args) < 4 {
-		fmt.Fprintf(os.Stderr, "usage: attn _hook-state <session_id> <state>\n")
+func runHookSessionStart() {
+	sessionID := hookSessionIDFromArgOrEnv(2)
+	if sessionID == "" {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-session-start [session_id]\n")
 		os.Exit(1)
 	}
-	sessionID := os.Args[2]
-	state := os.Args[3]
+
+	var input hookInput
+	_ = json.NewDecoder(os.Stdin).Decode(&input)
+
+	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	syncSessionResumeID(c, sessionID, input.SessionID)
+}
+
+func runHookState() {
+	sessionID, state := parseHookStateArgs()
+	if sessionID == "" || state == "" {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-state [session_id] <state>\n")
+		os.Exit(1)
+	}
 
 	var input hookInput
 	_ = json.NewDecoder(os.Stdin).Decode(&input)
@@ -806,11 +824,11 @@ func runHookState() {
 }
 
 func runHookTodo() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "usage: attn _hook-todo <session_id>\n")
+	sessionID := hookSessionIDFromArgOrEnv(2)
+	if sessionID == "" {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-todo [session_id]\n")
 		os.Exit(1)
 	}
-	sessionID := os.Args[2]
 
 	// Parse hook input from stdin
 	var input hookInput
@@ -847,12 +865,30 @@ func runHookTodo() {
 	}
 }
 
-func syncSessionResumeID(c *client.Client, attnSessionID, claudeSessionID string) {
-	claudeSessionID = strings.TrimSpace(claudeSessionID)
-	if claudeSessionID == "" {
+func hookSessionIDFromArgOrEnv(index int) string {
+	if len(os.Args) > index {
+		return strings.TrimSpace(os.Args[index])
+	}
+	return strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+}
+
+func parseHookStateArgs() (sessionID string, state string) {
+	switch {
+	case len(os.Args) >= 4:
+		return strings.TrimSpace(os.Args[2]), strings.TrimSpace(os.Args[3])
+	case len(os.Args) >= 3:
+		return strings.TrimSpace(os.Getenv("ATTN_SESSION_ID")), strings.TrimSpace(os.Args[2])
+	default:
+		return "", ""
+	}
+}
+
+func syncSessionResumeID(c *client.Client, attnSessionID, agentSessionID string) {
+	agentSessionID = strings.TrimSpace(agentSessionID)
+	if agentSessionID == "" {
 		return
 	}
-	if err := c.SetSessionResumeID(attnSessionID, claudeSessionID); err != nil {
+	if err := c.SetSessionResumeID(attnSessionID, agentSessionID); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not sync resume session id: %v\n", err)
 	}
 }

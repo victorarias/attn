@@ -102,6 +102,31 @@ func TestGenerateHooks_DefaultsWrapperToAttn(t *testing.T) {
 	}
 }
 
+func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
+	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn")
+	joined := strings.Join(overrides, "\n")
+
+	if !strings.Contains(joined, "hooks.SessionStart=") {
+		t.Fatal("codex overrides should include SessionStart hook")
+	}
+	if !strings.Contains(joined, "_hook-session-start") {
+		t.Fatal("codex overrides should sync session id on start")
+	}
+	if strings.Contains(joined, "session-1") {
+		t.Fatal("codex hook commands should not embed per-session attn ids")
+	}
+	if strings.Contains(joined, "/tmp/attn.sock") {
+		t.Fatal("codex hook commands should not embed per-session socket paths")
+	}
+	if !strings.Contains(joined, "features.hooks=true") {
+		t.Fatal("codex overrides should enable hooks for attn-managed sessions")
+	}
+	if !strings.Contains(joined, `hooks.state={`) ||
+		!strings.Contains(joined, `"/<session-flags>/config.toml:session_start:0:0" = { trusted_hash =`) {
+		t.Fatal("codex overrides should trust attn-managed session flag hooks")
+	}
+}
+
 // NOTE: AskUserQuestion PostToolUse hook was removed because it fires
 // AFTER the user responds, not when the question is displayed.
 // See: https://github.com/anthropics/claude-code/issues/10168

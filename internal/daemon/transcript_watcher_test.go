@@ -39,6 +39,42 @@ func TestHandlePTYState_CodexIgnoresWaitingAndIdle(t *testing.T) {
 	}
 }
 
+func TestHandlePTYState_CodexWorkingDoesNotOverrideStoppedStates(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "sock"))
+
+	addCodexSession := func(id string, state protocol.SessionState) {
+		nowStr := string(protocol.TimestampNow())
+		d.store.Add(&protocol.Session{
+			ID:             id,
+			Label:          id,
+			Agent:          protocol.SessionAgentCodex,
+			Directory:      "/tmp",
+			State:          state,
+			StateSince:     nowStr,
+			StateUpdatedAt: nowStr,
+			LastSeen:       nowStr,
+		})
+	}
+
+	addCodexSession("codex-idle", protocol.SessionStateIdle)
+	d.handlePTYState("codex-idle", protocol.StateWorking)
+	if got := d.store.Get("codex-idle"); got.State != protocol.SessionStateIdle {
+		t.Fatalf("codex working PTY should not override idle, got=%s", got.State)
+	}
+
+	addCodexSession("codex-waiting", protocol.SessionStateWaitingInput)
+	d.handlePTYState("codex-waiting", protocol.StateWorking)
+	if got := d.store.Get("codex-waiting"); got.State != protocol.SessionStateWaitingInput {
+		t.Fatalf("codex working PTY should not override waiting_input, got=%s", got.State)
+	}
+
+	addCodexSession("codex-pending", protocol.SessionStatePendingApproval)
+	d.handlePTYState("codex-pending", protocol.StateWorking)
+	if got := d.store.Get("codex-pending"); got.State != protocol.SessionStatePendingApproval {
+		t.Fatalf("codex working PTY should not override pending_approval, got=%s", got.State)
+	}
+}
+
 func TestHandlePTYState_ClaudeAcceptsWaiting(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "sock"))
 

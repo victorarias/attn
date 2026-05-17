@@ -2,9 +2,11 @@ package agent
 
 import (
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/victorarias/attn/internal/classifier"
+	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/transcript"
 )
@@ -18,6 +20,8 @@ var _ TranscriptWatcherBehaviorProvider = (*Codex)(nil)
 var _ ClassifierProvider = (*Codex)(nil)
 var _ PTYStatePolicyProvider = (*Codex)(nil)
 var _ ExecutableClassifierProvider = (*Codex)(nil)
+var _ ConfigOverrideProvider = (*Codex)(nil)
+var _ ResumePolicyProvider = (*Codex)(nil)
 
 func init() {
 	Register(&Codex{})
@@ -34,7 +38,7 @@ func (c *Codex) ResolveExecutable(configured string) string {
 
 func (c *Codex) Capabilities() Capabilities {
 	return Capabilities{
-		HasHooks:             false,
+		HasHooks:             true,
 		HasTranscript:        true,
 		HasTranscriptWatcher: true,
 		HasClassifier:        true,
@@ -46,6 +50,12 @@ func (c *Codex) Capabilities() Capabilities {
 
 func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	args := []string{}
+	for _, override := range opts.ConfigOverrides {
+		if strings.TrimSpace(override) == "" {
+			continue
+		}
+		args = append(args, "-c", override)
+	}
 
 	if opts.ResumeSessionID != "" {
 		args = append(args, "resume", opts.ResumeSessionID)
@@ -72,11 +82,23 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 }
 
 func (c *Codex) BuildEnv(opts SpawnOpts) []string {
-	var env []string
+	env := []string{
+		"ATTN_SESSION_ID=" + opts.SessionID,
+		"ATTN_AGENT=codex",
+	}
+	if opts.SocketPath != "" {
+		env = append(env, "ATTN_SOCKET_PATH="+opts.SocketPath)
+	}
 	if opts.Executable != "" && opts.Executable != c.DefaultExecutable() {
 		env = append(env, c.ExecutableEnvVar()+"="+opts.Executable)
 	}
 	return env
+}
+
+// --- ConfigOverrideProvider ---
+
+func (c *Codex) GenerateConfigOverrides(sessionID, socketPath, wrapperPath string) []string {
+	return hooks.GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath)
 }
 
 // --- TranscriptFinder ---
@@ -107,7 +129,31 @@ func (c *Codex) RecoveredRunningState(ptyState string) protocol.SessionState {
 }
 
 func (c *Codex) ShouldApplyPTYState(current protocol.SessionState, incoming string) bool {
-	return incoming == protocol.StateWorking || incoming == protocol.StatePendingApproval
+	switch incoming {
+	case protocol.StatePendingApproval:
+		return true
+	case protocol.StateWorking:
+		return current == protocol.SessionStateWorking
+	default:
+		return false
+	}
+}
+
+func (c *Codex) ResolveSpawnResumeSessionID(existingSessionID, requestedResumeID, storedResumeID string) string {
+	requested := strings.TrimSpace(requestedResumeID)
+	stored := strings.TrimSpace(storedResumeID)
+	if stored != "" && (requested == "" || requested == strings.TrimSpace(existingSessionID)) {
+		return stored
+	}
+	return requested
+}
+
+func (c *Codex) SpawnResumeSessionID(sessionID, resolvedResumeID string, resumePicker bool) string {
+	return strings.TrimSpace(resolvedResumeID)
+}
+
+func (c *Codex) ResumeSessionIDFromStopTranscriptPath(transcriptPath string) string {
+	return ""
 }
 
 // --- ClassifierProvider ---

@@ -408,6 +408,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
       const setValue = descriptor?.set;
       for (const char of text) {
+        if (char === '\n' || char === '\r') {
+          textarea.dispatchEvent(new KeyboardEvent('keydown', {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            key: 'Enter',
+            code: 'Enter',
+            keyCode: 13,
+            which: 13,
+          }));
+          continue;
+        }
         if (setValue) {
           setValue.call(textarea, char);
         } else {

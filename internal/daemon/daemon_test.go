@@ -1380,6 +1380,105 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDEvenWhenNotRecoverab
 	}
 }
 
+func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForCodexSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	d.ptyBackend = backend
+
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "attn-session",
+		Label:          "attn-session",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateIdle,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+	d.store.SetResumeSessionID("attn-session", "codex-session")
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+	msg := &protocol.SpawnSessionMessage{
+		Cmd:             protocol.CmdSpawnSession,
+		ID:              "attn-session",
+		Cwd:             t.TempDir(),
+		Cols:            80,
+		Rows:            24,
+		Agent:           "codex",
+		ResumeSessionID: protocol.Ptr("attn-session"),
+	}
+
+	d.handleSpawnSession(client, msg)
+
+	lastSpawn, ok := backend.LastSpawn()
+	if !ok {
+		t.Fatal("expected spawn call")
+	}
+	if lastSpawn.ResumeSessionID != "codex-session" {
+		t.Fatalf("resume session id = %q, want %q", lastSpawn.ResumeSessionID, "codex-session")
+	}
+	if got := d.store.Get("attn-session"); got == nil || got.State != protocol.SessionStateIdle {
+		t.Fatalf("reloaded existing codex session state = %v, want %s", got, protocol.SessionStateIdle)
+	}
+}
+
+func TestDaemon_HandleSetSessionResumeID_QueuesUntilSessionExists(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+	serverConn, clientConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.handleSetSessionResumeID(serverConn, &protocol.SetSessionResumeIDMessage{
+			ID:              "attn-session",
+			ResumeSessionID: "codex-session",
+		})
+		_ = serverConn.Close()
+	}()
+
+	var resp protocol.Response
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode set resume response: %v", err)
+	}
+	_ = clientConn.Close()
+	<-done
+	if !resp.Ok {
+		t.Fatalf("set resume response ok=%v, want true", resp.Ok)
+	}
+	if got := d.store.GetResumeSessionID("attn-session"); got != "" {
+		t.Fatalf("resume id before registration = %q, want empty", got)
+	}
+
+	serverConn, clientConn = net.Pipe()
+	done = make(chan struct{})
+	go func() {
+		defer close(done)
+		d.handleRegister(serverConn, &protocol.RegisterMessage{
+			ID:    "attn-session",
+			Label: protocol.Ptr("attn-session"),
+			Dir:   t.TempDir(),
+			Agent: protocol.Ptr(protocol.SessionAgentCodex),
+		})
+		_ = serverConn.Close()
+	}()
+
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
+	_ = clientConn.Close()
+	<-done
+	if !resp.Ok {
+		t.Fatalf("register response ok=%v, want true", resp.Ok)
+	}
+	if got := d.store.GetResumeSessionID("attn-session"); got != "codex-session" {
+		t.Fatalf("resume id after registration = %q, want codex-session", got)
+	}
+}
+
 func TestDaemon_ForwardPTYStreamEvents_ClosesStreamOnSendFailure(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := &wsClient{

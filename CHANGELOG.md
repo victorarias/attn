@@ -12,6 +12,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Changes Panel Refreshes**: The Changes panel now avoids branch-diff refreshes while closed, refreshes once when opened, and coalesces status-triggered refreshes so slow monorepos do not stack repeated Git diff work behind every status update.
 - **Diff Detail Loading**: The Diff detail view now shows a foreground pending state when the selected file diff is slow, keeps cached content visible while it refreshes, and caps background viewed-file checks so status bursts do not fan out into repeated Git diff work.
 
+### Fixed
+- **Codex Session Resume**: Reloading a Codex session from attn now records Codex's native session id from hooks and resumes the same Codex conversation instead of handing Codex attn's wrapper session id.
+- **Codex Activity State**: Reloaded or completed Codex sessions no longer stay green just because the Codex TUI process is alive at an idle prompt.
+
 ---
 
 ## [2026-05-16]

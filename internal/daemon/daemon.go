@@ -115,6 +115,8 @@ type Daemon struct {
 	longRun          map[string]longRunSession
 	forcedStopMu     sync.Mutex
 	forcedStop       map[string]time.Time
+	pendingResumeMu  sync.Mutex
+	pendingResumeID  map[string]string
 	reviewLoopMu     sync.Mutex
 	reviewLoopCancel map[string]context.CancelFunc
 	inputSourceMu    sync.Mutex
@@ -336,6 +338,7 @@ func New(socketPath string) *Daemon {
 		classifyingTurn:  make(map[string]string),
 		longRun:          make(map[string]longRunSession),
 		forcedStop:       make(map[string]time.Time),
+		pendingResumeID:  make(map[string]string),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 		tailscale:        newTailscaleRuntime(),
@@ -367,6 +370,7 @@ func NewForTesting(socketPath string) *Daemon {
 		classifyingTurn:  make(map[string]string),
 		longRun:          make(map[string]longRunSession),
 		forcedStop:       make(map[string]time.Time),
+		pendingResumeID:  make(map[string]string),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 		tailscale:        newTailscaleRuntime(),
@@ -402,6 +406,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		classifyingTurn:  make(map[string]string),
 		longRun:          make(map[string]longRunSession),
 		forcedStop:       make(map[string]time.Time),
+		pendingResumeID:  make(map[string]string),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 		tailscale:        newTailscaleRuntime(),
@@ -1552,6 +1557,9 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		}
 	}
 	d.store.Add(session)
+	if resumeSessionID := d.consumePendingResumeSessionID(session.ID); resumeSessionID != "" {
+		d.store.SetResumeSessionID(session.ID, resumeSessionID)
+	}
 	if _, err := d.ensureSessionLayout(session.ID); err != nil {
 		d.logf("session layout bootstrap failed for session %s: %v", session.ID, err)
 	}
@@ -1622,8 +1630,38 @@ func (d *Daemon) handleSetSessionResumeID(conn net.Conn, msg *protocol.SetSessio
 		d.sendError(conn, "missing resume_session_id")
 		return
 	}
-	d.store.SetResumeSessionID(msg.ID, resumeSessionID)
+	d.setOrQueueResumeSessionID(msg.ID, resumeSessionID)
 	d.sendOK(conn)
+}
+
+func (d *Daemon) setOrQueueResumeSessionID(sessionID, resumeSessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	resumeSessionID = strings.TrimSpace(resumeSessionID)
+	if sessionID == "" || resumeSessionID == "" {
+		return
+	}
+	if d.store.Get(sessionID) != nil {
+		d.store.SetResumeSessionID(sessionID, resumeSessionID)
+		return
+	}
+	d.pendingResumeMu.Lock()
+	if d.pendingResumeID == nil {
+		d.pendingResumeID = make(map[string]string)
+	}
+	d.pendingResumeID[sessionID] = resumeSessionID
+	d.pendingResumeMu.Unlock()
+}
+
+func (d *Daemon) consumePendingResumeSessionID(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	d.pendingResumeMu.Lock()
+	defer d.pendingResumeMu.Unlock()
+	resumeSessionID := d.pendingResumeID[sessionID]
+	delete(d.pendingResumeID, sessionID)
+	return strings.TrimSpace(resumeSessionID)
 }
 
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {

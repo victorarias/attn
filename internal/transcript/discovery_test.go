@@ -55,6 +55,76 @@ func writeCopilotSessionState(
 	return eventsPath
 }
 
+func writeCodexTranscript(
+	t *testing.T,
+	homeDir,
+	sessionID,
+	cwd string,
+	startTime time.Time,
+	modTime time.Time,
+) string {
+	t.Helper()
+
+	sessionDir := filepath.Join(homeDir, ".codex", "sessions", "2026", "05", "17")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir codex session dir: %v", err)
+	}
+
+	transcriptPath := filepath.Join(sessionDir, fmt.Sprintf("rollout-%s-%s.jsonl", startTime.UTC().Format("2006-01-02T15-04-05"), sessionID))
+	lines := fmt.Sprintf(
+		`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","timestamp":"%s","cwd":"%s"}}`+"\n",
+		startTime.UTC().Format(time.RFC3339Nano),
+		sessionID,
+		startTime.UTC().Format(time.RFC3339Nano),
+		cwd,
+	)
+	if err := os.WriteFile(transcriptPath, []byte(lines), 0o644); err != nil {
+		t.Fatalf("write codex transcript: %v", err)
+	}
+	if err := os.Chtimes(transcriptPath, modTime, modTime); err != nil {
+		t.Fatalf("chtimes codex transcript: %v", err)
+	}
+
+	return transcriptPath
+}
+
+func TestFindCodexTranscript_MatchesSymlinkEquivalentCWD(t *testing.T) {
+	homeDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
+
+	root := t.TempDir()
+	realCWD := filepath.Join(root, "real", "project")
+	if err := os.MkdirAll(realCWD, 0o755); err != nil {
+		t.Fatalf("mkdir real cwd: %v", err)
+	}
+	linkRoot := filepath.Join(root, "link")
+	if err := os.Symlink(filepath.Join(root, "real"), linkRoot); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	linkCWD := filepath.Join(linkRoot, "project")
+	startedAt := time.Date(2026, 5, 17, 14, 6, 42, 0, time.UTC)
+
+	expected := writeCodexTranscript(
+		t,
+		homeDir,
+		"codex-session-123",
+		realCWD,
+		startedAt,
+		startedAt.Add(1*time.Minute),
+	)
+
+	got := FindCodexTranscript(linkCWD, startedAt)
+	if got != expected {
+		t.Fatalf("FindCodexTranscript() = %q, want %q", got, expected)
+	}
+}
+
 func TestFindCopilotTranscript_PrefersClosestStartTime(t *testing.T) {
 	homeDir := t.TempDir()
 	oldHome := os.Getenv("HOME")

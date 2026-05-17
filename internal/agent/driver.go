@@ -77,7 +77,7 @@ type Driver interface {
 type Capabilities struct {
 	// HasHooks indicates the agent supports a hook/settings system
 	// (e.g. Claude Code hooks that report state changes via IPC).
-	// If true, the driver should implement HookProvider.
+	// If true, the driver should implement HookProvider or ConfigOverrideProvider.
 	HasHooks bool
 
 	// HasTranscript indicates the agent writes transcript files that attn
@@ -205,6 +205,9 @@ type SpawnOpts struct {
 	// support it (e.g. Claude's --settings <path>).
 	SettingsPath string
 
+	// ConfigOverrides are agent CLI config overrides generated for this launch.
+	ConfigOverrides []string
+
 	// AgentArgs are passthrough CLI args provided after attn wrapper flags.
 	AgentArgs []string
 }
@@ -212,11 +215,16 @@ type SpawnOpts struct {
 // --- Optional capability interfaces ---
 
 // HookProvider generates hook/settings configurations for agents that support them.
-// Currently only Claude Code uses this (its hooks report state changes via IPC).
+// Some agents consume these through a generated settings file.
 type HookProvider interface {
 	// GenerateHooksConfig returns the content of a settings/hooks config file.
 	// The caller writes it to a temp file and passes --settings to the agent.
 	GenerateHooksConfig(sessionID, socketPath, wrapperPath string) string
+}
+
+// ConfigOverrideProvider generates per-launch CLI config overrides.
+type ConfigOverrideProvider interface {
+	GenerateConfigOverrides(sessionID, socketPath, wrapperPath string) []string
 }
 
 // TranscriptFinder locates transcript files written by the agent.
@@ -303,6 +311,15 @@ func GetHookProvider(d Driver) (HookProvider, bool) {
 	}
 	hp, ok := d.(HookProvider)
 	return hp, ok
+}
+
+// GetConfigOverrideProvider returns the ConfigOverrideProvider if supported.
+func GetConfigOverrideProvider(d Driver) (ConfigOverrideProvider, bool) {
+	if d == nil || !EffectiveCapabilities(d).HasHooks {
+		return nil, false
+	}
+	cp, ok := d.(ConfigOverrideProvider)
+	return cp, ok
 }
 
 // GetTranscriptFinder returns the TranscriptFinder if the driver supports transcripts.

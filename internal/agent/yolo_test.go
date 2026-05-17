@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuildCommand_YoloMapping(t *testing.T) {
 	tests := []struct {
@@ -32,6 +35,21 @@ func TestBuildCommand_YoloMapping(t *testing.T) {
 				t.Fatalf("%s args = %#v, want flag %q", tt.name, cmd.Args, tt.wantFlag)
 			}
 		})
+	}
+}
+
+func TestCodexBuildCommand_IncludesConfigOverridesBeforeResume(t *testing.T) {
+	cmd := (&Codex{}).BuildCommand(SpawnOpts{
+		CWD:             "/tmp/project",
+		Executable:      "codex",
+		ResumeSessionID: "codex-session",
+		ConfigOverrides: []string{"features.hooks=true"},
+	})
+	args := strings.Join(cmd.Args, "\x00")
+	wantArgs := []string{"codex", "-c", "features.hooks=true", "resume", "codex-session", "-C", "/tmp/project"}
+	want := strings.Join(wantArgs, "\x00")
+	if args != want {
+		t.Fatalf("args = %#v, want %#v", cmd.Args, wantArgs)
 	}
 }
 
