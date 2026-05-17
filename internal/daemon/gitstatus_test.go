@@ -47,7 +47,7 @@ func TestGitStatusSchedulerCoalescesDirtyRefreshes(t *testing.T) {
 	releaseFirst := make(chan struct{})
 
 	previousGetGitStatus := getGitStatusForDaemon
-	getGitStatusForDaemon = func(dir string) (*protocol.GitStatusUpdateMessage, error) {
+	getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
 		if inFlight.Add(1) > 1 {
 			overlapped.Store(true)
 		}
@@ -97,7 +97,7 @@ func TestGitOperationMarksMatchingStatusSubscriptionDirty(t *testing.T) {
 
 	var calls atomic.Int32
 	previousGetGitStatus := getGitStatusForDaemon
-	getGitStatusForDaemon = func(dir string) (*protocol.GitStatusUpdateMessage, error) {
+	getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
 		call := calls.Add(1)
 		return testGitStatus(dir, fmt.Sprintf("file-%d.txt", call)), nil
 	}
@@ -133,7 +133,7 @@ func TestGitStatusSchedulerDelaysSafetyRefreshAfterSlowRun(t *testing.T) {
 
 	var calls atomic.Int32
 	previousGetGitStatus := getGitStatusForDaemon
-	getGitStatusForDaemon = func(dir string) (*protocol.GitStatusUpdateMessage, error) {
+	getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
 		call := calls.Add(1)
 		time.Sleep(5 * time.Millisecond)
 		return testGitStatus(dir, fmt.Sprintf("file-%d.txt", call)), nil
@@ -160,6 +160,123 @@ func TestGitStatusSchedulerDelaysSafetyRefreshAfterSlowRun(t *testing.T) {
 	}
 }
 
+func TestGitStatusSchedulerUsesTrackedOnlyAfterLimitedRefresh(t *testing.T) {
+	restore := overrideGitStatusSchedulerForTesting(10*time.Millisecond, time.Hour, time.Hour, time.Hour)
+	defer restore()
+
+	var calls atomic.Int32
+	modes := make(chan gitStatusMode, 2)
+	previousGetGitStatus := getGitStatusForDaemon
+	getGitStatusForDaemon = func(dir string, mode gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
+		modes <- mode
+		call := calls.Add(1)
+		status := testGitStatus(dir, fmt.Sprintf("file-%d.txt", call))
+		if call == 1 {
+			status.Limited = protocol.Ptr(true)
+			status.Mode = protocol.Ptr(string(gitStatusModeTrackedOnly))
+		}
+		return status, nil
+	}
+	defer func() {
+		getGitStatusForDaemon = previousGetGitStatus
+	}()
+
+	d := &Daemon{}
+	client := &wsClient{send: make(chan outboundMessage, 10)}
+	d.handleSubscribeGitStatus(client, &protocol.SubscribeGitStatusMessage{
+		Cmd:       protocol.CmdSubscribeGitStatus,
+		Directory: "/repo",
+	})
+	defer client.stopGitStatusPoll()
+
+	waitForGitStatusTestCondition(t, 500*time.Millisecond, func() bool {
+		return calls.Load() == 1
+	})
+	client.requestGitStatusRefresh(gitStatusRefreshRequest{reason: gitStatusRefreshReasonDirty})
+	waitForGitStatusTestCondition(t, 500*time.Millisecond, func() bool {
+		return calls.Load() == 2
+	})
+
+	first := <-modes
+	second := <-modes
+	if first != gitStatusModeFull {
+		t.Fatalf("first mode = %q, want %q", first, gitStatusModeFull)
+	}
+	if second != gitStatusModeTrackedOnly {
+		t.Fatalf("second mode = %q, want %q", second, gitStatusModeTrackedOnly)
+	}
+}
+
+func TestTrackedOnlyStatusResultStaysLimited(t *testing.T) {
+	previousRunGitStatusCommand := runGitStatusCommandForDaemon
+	runGitStatusCommandForDaemon = func(_ string, _ time.Duration, args ...string) ([]byte, error) {
+		if !containsArg(args, "--untracked-files=no") {
+			t.Fatalf("args = %v, want tracked-only status", args)
+		}
+		return []byte(" M tracked.txt\x00"), nil
+	}
+	defer func() {
+		runGitStatusCommandForDaemon = previousRunGitStatusCommand
+	}()
+
+	status, err := getGitStatusWithOptions("/repo", gitStatusOptions{
+		mode: gitStatusModeTrackedOnly,
+	})
+	if err != nil {
+		t.Fatalf("getGitStatusWithOptions failed: %v", err)
+	}
+	if !protocol.Deref(status.Limited) {
+		t.Fatal("tracked-only status limited = false, want true")
+	}
+	if protocol.Deref(status.LimitedReason) == "" {
+		t.Fatal("tracked-only status missing limited reason")
+	}
+}
+
+func TestGetGitStatusWithOptionsFallsBackToTrackedOnlyAfterFullTimeout(t *testing.T) {
+	var calls atomic.Int32
+	argsSeen := make(chan []string, 2)
+	previousRunGitStatusCommand := runGitStatusCommandForDaemon
+	runGitStatusCommandForDaemon = func(_ string, _ time.Duration, args ...string) ([]byte, error) {
+		argsSeen <- append([]string(nil), args...)
+		if calls.Add(1) == 1 {
+			return nil, fmt.Errorf("git status timed out after 5s: git status")
+		}
+		return []byte(" M tracked.txt\x00"), nil
+	}
+	defer func() {
+		runGitStatusCommandForDaemon = previousRunGitStatusCommand
+	}()
+
+	status, err := getGitStatusWithOptions("/repo", gitStatusOptions{
+		mode:        gitStatusModeFull,
+		fullTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("getGitStatusWithOptions failed: %v", err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("status command calls = %d, want 2", calls.Load())
+	}
+	firstArgs := <-argsSeen
+	secondArgs := <-argsSeen
+	if !containsArg(firstArgs, "--untracked-files=all") {
+		t.Fatalf("first args = %v, want full untracked status", firstArgs)
+	}
+	if !containsArg(secondArgs, "--untracked-files=no") {
+		t.Fatalf("second args = %v, want tracked-only status", secondArgs)
+	}
+	if !protocol.Deref(status.Limited) {
+		t.Fatal("status limited = false, want true")
+	}
+	if got := protocol.Deref(status.Mode); got != string(gitStatusModeTrackedOnly) {
+		t.Fatalf("status mode = %q, want %q", got, gitStatusModeTrackedOnly)
+	}
+	if len(status.Untracked) != 0 {
+		t.Fatalf("untracked = %v, want none in tracked-only fallback", status.Untracked)
+	}
+}
+
 func TestSameOrNestedPath(t *testing.T) {
 	tests := []struct {
 		name string
@@ -180,6 +297,15 @@ func TestSameOrNestedPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }
 
 func overrideGitStatusSchedulerForTesting(debounce, safety, slowSafety, slowThreshold time.Duration) func() {

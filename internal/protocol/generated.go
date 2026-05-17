@@ -893,11 +893,23 @@ type GitStatusUpdateMessage struct {
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
 
+	// DurationMs corresponds to the JSON schema field "duration_ms".
+	DurationMs *int `json:"duration_ms,omitempty,omitzero"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
+
+	// Limited corresponds to the JSON schema field "limited".
+	Limited *bool `json:"limited,omitempty,omitzero"`
+
+	// LimitedReason corresponds to the JSON schema field "limited_reason".
+	LimitedReason *string `json:"limited_reason,omitempty,omitzero"`
+
+	// Mode corresponds to the JSON schema field "mode".
+	Mode *string `json:"mode,omitempty,omitzero"`
 
 	// Staged corresponds to the JSON schema field "staged".
 	Staged []GitFileChange `json:"staged"`

@@ -8,10 +8,26 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 )
+
+type gitStatusMode string
+
+const (
+	gitStatusModeFull        gitStatusMode = "full"
+	gitStatusModeTrackedOnly gitStatusMode = "tracked_only"
+)
+
+type gitStatusOptions struct {
+	mode         gitStatusMode
+	fullTimeout  time.Duration
+	includeStats bool
+}
+
+var runGitStatusCommandForDaemon = runGitStatusCommand
 
 type diffStats struct {
 	Additions int
@@ -172,25 +188,66 @@ func parseGitDiffNumstat(output string) map[string]diffStats {
 	return result
 }
 
-// getGitStatus runs git commands and returns parsed status
+// getGitStatus runs git commands and returns parsed status.
 func getGitStatus(dir string) (*protocol.GitStatusUpdateMessage, error) {
+	return getGitStatusWithOptions(dir, gitStatusOptions{
+		mode:         gitStatusModeFull,
+		includeStats: true,
+	})
+}
+
+func getGitStatusForSubscription(dir string, mode gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
+	return getGitStatusWithOptions(dir, gitStatusOptions{
+		mode:         mode,
+		fullTimeout:  gitStatusFullBudget,
+		includeStats: false,
+	})
+}
+
+func getGitStatusWithOptions(dir string, opts gitStatusOptions) (*protocol.GitStatusUpdateMessage, error) {
+	mode := opts.mode
+	if mode == "" {
+		mode = gitStatusModeFull
+	}
+
 	// Get porcelain status
 	// --untracked-files=all expands brand-new untracked directories into
 	// their individual files; the default collapses each into a single
 	// "?? dir/" line which hides everything inside.
-	statusOutput, err := attngit.Output(attngit.OpStatus, dir, "status", "--porcelain", "-z", "--untracked-files=all")
+	statusArgs := []string{"status", "--porcelain", "-z", "--untracked-files=all"}
+	if mode == gitStatusModeTrackedOnly {
+		statusArgs = []string{"status", "--porcelain", "-z", "--untracked-files=no"}
+	}
+
+	statusOutput, err := runGitStatusCommandForDaemon(dir, opts.fullTimeout, statusArgs...)
+	limited := mode == gitStatusModeTrackedOnly
+	var limitedReason *string
+	if limited {
+		limitedReason = protocol.Ptr("Untracked files hidden because full git status was slow.")
+	}
+	if err != nil && mode == gitStatusModeFull && isGitStatusTimeout(err) {
+		statusArgs = []string{"status", "--porcelain", "-z", "--untracked-files=no"}
+		statusOutput, err = runGitStatusCommandForDaemon(dir, opts.fullTimeout, statusArgs...)
+		mode = gitStatusModeTrackedOnly
+		limited = true
+		limitedReason = protocol.Ptr("Untracked files hidden because full git status was slow.")
+	}
 	if err != nil {
+		errorMessage := "Not a git repository"
+		if isGitStatusTimeout(err) {
+			errorMessage = "Git status timed out"
+		}
 		return &protocol.GitStatusUpdateMessage{
 			Event:     protocol.EventGitStatusUpdate,
 			Directory: dir,
-			Error:     protocol.Ptr("Not a git repository"),
+			Error:     protocol.Ptr(errorMessage),
 		}, nil
 	}
 
 	staged, unstaged, untracked := parseGitStatusPorcelain(string(statusOutput), dir)
 
 	// Get numstat for unstaged changes
-	if len(unstaged) > 0 {
+	if opts.includeStats && len(unstaged) > 0 {
 		numstatOutput, _ := attngit.Output(attngit.OpDiff, dir, "diff", "--numstat")
 		stats := parseGitDiffNumstat(string(numstatOutput))
 
@@ -203,7 +260,7 @@ func getGitStatus(dir string) (*protocol.GitStatusUpdateMessage, error) {
 	}
 
 	// Get numstat for staged changes
-	if len(staged) > 0 {
+	if opts.includeStats && len(staged) > 0 {
 		numstatOutput, _ := attngit.Output(attngit.OpDiff, dir, "diff", "--numstat", "--cached")
 		stats := parseGitDiffNumstat(string(numstatOutput))
 
@@ -216,17 +273,33 @@ func getGitStatus(dir string) (*protocol.GitStatusUpdateMessage, error) {
 	}
 
 	return &protocol.GitStatusUpdateMessage{
-		Event:     protocol.EventGitStatusUpdate,
-		Directory: dir,
-		Staged:    staged,
-		Unstaged:  unstaged,
-		Untracked: untracked,
+		Event:         protocol.EventGitStatusUpdate,
+		Directory:     dir,
+		Staged:        staged,
+		Unstaged:      unstaged,
+		Untracked:     untracked,
+		Mode:          protocol.Ptr(string(mode)),
+		Limited:       protocol.Ptr(limited),
+		LimitedReason: limitedReason,
 	}, nil
+}
+
+func runGitStatusCommand(dir string, timeout time.Duration, args ...string) ([]byte, error) {
+	if timeout > 0 {
+		return attngit.OutputWithTimeout(attngit.OpStatus, timeout, dir, args...)
+	}
+	return attngit.Output(attngit.OpStatus, dir, args...)
+}
+
+func isGitStatusTimeout(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "timed out")
 }
 
 // hashGitStatus returns a hash of the status for change detection
 func hashGitStatus(status *protocol.GitStatusUpdateMessage) string {
-	data, _ := json.Marshal(status)
+	stableStatus := *status
+	stableStatus.DurationMs = nil
+	data, _ := json.Marshal(stableStatus)
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:8]) // First 8 bytes is enough
 }
