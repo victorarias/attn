@@ -7,7 +7,6 @@ export interface ReviewPanelPerfSnapshot {
   commentCount: number;
   editorCommentCount: number;
   commentBuildDurationMs: number;
-  branchDiffCacheEntries: number;
   originalLength: number;
   modifiedLength: number;
 }

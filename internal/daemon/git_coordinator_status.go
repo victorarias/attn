@@ -27,6 +27,8 @@ type gitStatusOptions struct {
 	includeStats bool
 }
 
+// runGitStatusCommandForDaemon is the low-level command hook used by the
+// daemon git coordinator's status implementation.
 var runGitStatusCommandForDaemon = runGitStatusCommand
 
 type diffStats struct {
@@ -188,7 +190,8 @@ func parseGitDiffNumstat(output string) map[string]diffStats {
 	return result
 }
 
-// getGitStatus runs git commands and returns parsed status.
+// getGitStatus runs git commands and returns parsed status for one-shot
+// callers. Active subscriptions should go through gitCoordinator.Status.
 func getGitStatus(dir string) (*protocol.GitStatusUpdateMessage, error) {
 	return getGitStatusWithOptions(dir, gitStatusOptions{
 		mode:         gitStatusModeFull,
@@ -196,6 +199,9 @@ func getGitStatus(dir string) (*protocol.GitStatusUpdateMessage, error) {
 	})
 }
 
+// getGitStatusForSubscription is the coordinator-owned active-session status
+// implementation. Callers should use gitCoordinator.Status so concurrent
+// status requests for the same repo/mode share the same git process.
 func getGitStatusForSubscription(dir string, mode gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
 	return getGitStatusWithOptions(dir, gitStatusOptions{
 		mode:         mode,

@@ -636,6 +636,9 @@ export function useDaemonSocket({
   const pendingOutboundCommandsRef = useRef<string[]>([]);
   const recoveryNoticeTimeoutRef = useRef<number | null>(null);
   const gitStatusSubscriptionRef = useRef<string | null>(null);
+  // Branch diff result messages are keyed by directory, not request id. Keep a
+  // per-directory pending request so duplicate callers share the same result;
+  // the daemon coordinator owns the actual git/process coalescing and snapshot.
   const branchDiffInFlightRef = useRef<Map<string, Promise<BranchDiffFilesResult>>>(new Map());
   const ptyTransportRef = useRef(createPtyTransportState<AttachRequestContext>());
   const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
