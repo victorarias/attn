@@ -315,6 +315,7 @@ export function DiffDetailPanel({
   const backgroundCheckQueueRef = useRef<string[]>([]);
   const backgroundCheckQueuedPathsRef = useRef<Set<string>>(new Set());
   const backgroundCheckInFlightPathsRef = useRef<Set<string>>(new Set());
+  const backgroundCheckRerunPathsRef = useRef<Set<string>>(new Set());
   const backgroundCheckTimerRef = useRef<number | null>(null);
   const backgroundCheckGenerationRef = useRef(0);
   const selectedFilePathRef = useRef<string | null>(selectedFilePath);
@@ -331,9 +332,12 @@ export function DiffDetailPanel({
   }, [baseRef, contentVisible, fetchDiff, selectedFilePath]);
 
   const syncBackgroundChangeCheckCount = useCallback(() => {
-    setBackgroundChangeCheckCount(
-      backgroundCheckQueueRef.current.length + backgroundCheckInFlightPathsRef.current.size
-    );
+    const activePaths = new Set([
+      ...backgroundCheckQueueRef.current,
+      ...backgroundCheckInFlightPathsRef.current,
+      ...backgroundCheckRerunPathsRef.current,
+    ]);
+    setBackgroundChangeCheckCount(activePaths.size);
   }, []);
 
   const clearSelectedDiffPendingTimer = useCallback(() => {
@@ -356,6 +360,7 @@ export function DiffDetailPanel({
     backgroundCheckQueueRef.current = [];
     backgroundCheckQueuedPathsRef.current.clear();
     backgroundCheckInFlightPathsRef.current.clear();
+    backgroundCheckRerunPathsRef.current.clear();
     setBackgroundChangeCheckCount(0);
   }, [clearBackgroundChangeCheckTimer]);
 
@@ -421,6 +426,15 @@ export function DiffDetailPanel({
             return;
           }
           backgroundCheckInFlightPathsRef.current.delete(viewedPath);
+          if (
+            backgroundCheckRerunPathsRef.current.delete(viewedPath) &&
+            contentVisibleRef.current &&
+            viewedPath !== selectedFilePathRef.current &&
+            viewedDiffHashesRef.current.has(viewedPath)
+          ) {
+            backgroundCheckQueueRef.current.push(viewedPath);
+            backgroundCheckQueuedPathsRef.current.add(viewedPath);
+          }
           syncBackgroundChangeCheckCount();
           drainBackgroundChangeChecks();
         });
@@ -439,9 +453,15 @@ export function DiffDetailPanel({
         continue;
       }
       if (
-        backgroundCheckQueuedPathsRef.current.has(path) ||
-        backgroundCheckInFlightPathsRef.current.has(path)
+        backgroundCheckQueuedPathsRef.current.has(path)
       ) {
+        continue;
+      }
+      if (backgroundCheckInFlightPathsRef.current.has(path)) {
+        if (!backgroundCheckRerunPathsRef.current.has(path)) {
+          backgroundCheckRerunPathsRef.current.add(path);
+          added = true;
+        }
         continue;
       }
       backgroundCheckQueueRef.current.push(path);

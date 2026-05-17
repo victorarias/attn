@@ -647,6 +647,51 @@ describe('DiffDetailPanel', () => {
         'file-D.tsx': 1,
       });
     });
+
+    it('rechecks a viewed file when another status update arrives while its background check is in flight', async () => {
+      const files = ['file-A.tsx', 'file-B.tsx'];
+      const view = await prepareViewedFiles(files, 'file-A.tsx');
+
+      const pending: Array<(value: ReturnType<typeof createFileDiffResult> & { path: string }) => void> = [];
+      mockDaemon.setResponse('fetchDiff', (args: unknown[]) => {
+        const [path] = args as [string];
+        return new Promise((resolve) => {
+          pending.push((value) => resolve({ ...value, path }));
+        });
+      });
+
+      view.rerender(
+        <ControlledDiffDetailPanel
+          gitStatus={createGitStatus(['file-B.tsx'])}
+          isOpen={true}
+          initialSelectedFile="file-A.tsx"
+        />
+      );
+
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('fetchDiff').map((call) => call.args[0])).toEqual(['file-B.tsx']);
+      });
+
+      view.rerender(
+        <ControlledDiffDetailPanel
+          gitStatus={createGitStatus(['file-B.tsx'], { additions: 11 })}
+          isOpen={true}
+          initialSelectedFile="file-A.tsx"
+        />
+      );
+
+      pending[0]?.({
+        ...createFileDiffResult('// original file-B.tsx', '// modified file-B.tsx'),
+        path: 'file-B.tsx',
+      });
+
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('fetchDiff').map((call) => call.args[0])).toEqual([
+          'file-B.tsx',
+          'file-B.tsx',
+        ]);
+      });
+    });
   });
 
   describe('guard rails', () => {
