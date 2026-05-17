@@ -50,6 +50,10 @@ const RELEASES_LATEST_WEB = 'https://github.com/victorarias/attn/releases/latest
 const RELEASE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_BANNER_DISMISSED_STORAGE_KEY = 'attn.update_banner.dismissed_version';
 const DOCK_PANEL_EXIT_MS = 260;
+const CHANGES_BRANCH_DIFF_INTERVAL_MS = 30_000;
+const CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS = 750;
+const CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS = 5_000;
+const CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS = 30_000;
 
 interface GitHubReleaseResponse {
   tag_name?: string;
@@ -1085,6 +1089,7 @@ sendFetchPRDetails,
   const reviewLoopPanelOpen = openDockPanels.reviewLoop;
   const attentionPanelOpen = openDockPanels.attention;
   const diffDetailPanelOpen = openDockPanels.diffDetail;
+  const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
   const waitingReviewSessions = useMemo(
     () => sessions
       .map((session) => ({
@@ -1564,9 +1569,36 @@ sendFetchPRDetails,
 
   const branchDiffRequestId = useRef(0);
   const branchDiffLoadedRef = useRef(false);
+  const branchDiffInFlightRef = useRef(false);
+  const branchDiffDirtyAfterCurrentRef = useRef(false);
+  const branchDiffVisibleRef = useRef(false);
+  const branchDiffDirectoryRef = useRef<string | null>(null);
+  const branchDiffCooldownUntilRef = useRef(0);
+  const branchDiffScheduledTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    branchDiffVisibleRef.current = changesPanelVisible;
+    branchDiffDirectoryRef.current = activeRepoDaemonSession?.directory ?? null;
+  }, [activeRepoDaemonSession?.directory, changesPanelVisible]);
+
+  const clearScheduledBranchDiffRefresh = useCallback(() => {
+    if (branchDiffScheduledTimerRef.current !== null) {
+      window.clearTimeout(branchDiffScheduledTimerRef.current);
+      branchDiffScheduledTimerRef.current = null;
+    }
+  }, []);
+
   const refreshBranchDiff = useCallback(async (directory: string) => {
+    if (branchDiffInFlightRef.current) {
+      branchDiffDirtyAfterCurrentRef.current = true;
+      return;
+    }
+
+    branchDiffInFlightRef.current = true;
+    branchDiffDirtyAfterCurrentRef.current = false;
     const requestId = ++branchDiffRequestId.current;
     const hadLoadedBranchDiff = branchDiffLoadedRef.current;
+    const startedAt = Date.now();
     setBranchDiffLoading(!hadLoadedBranchDiff);
     setBranchDiffRefreshing(hadLoadedBranchDiff);
     setBranchDiffError(null);
@@ -1597,25 +1629,75 @@ sendFetchPRDetails,
       setBranchDiffError(err instanceof Error ? err.message : 'Failed to load branch diff');
     } finally {
       if (requestId === branchDiffRequestId.current) {
+        const durationMs = Date.now() - startedAt;
+        if (durationMs >= CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS) {
+          branchDiffCooldownUntilRef.current = Date.now() + CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS;
+        }
+        branchDiffInFlightRef.current = false;
         setBranchDiffLoading(false);
         setBranchDiffRefreshing(false);
+        if (
+          branchDiffDirtyAfterCurrentRef.current &&
+          branchDiffVisibleRef.current &&
+          branchDiffDirectoryRef.current === directory
+        ) {
+          const delayMs = Math.max(0, branchDiffCooldownUntilRef.current - Date.now());
+          clearScheduledBranchDiffRefresh();
+          branchDiffScheduledTimerRef.current = window.setTimeout(() => {
+            branchDiffScheduledTimerRef.current = null;
+            void refreshBranchDiff(directory);
+          }, delayMs);
+        }
       }
     }
-  }, [sendGetBranchDiffFiles]);
+  }, [clearScheduledBranchDiffRefresh, sendGetBranchDiffFiles]);
+
+  const scheduleBranchDiffRefresh = useCallback((options?: { force?: boolean; debounceMs?: number }) => {
+    const directory = branchDiffDirectoryRef.current;
+    if (!directory) {
+      return;
+    }
+
+    if (!branchDiffVisibleRef.current) {
+      branchDiffDirtyAfterCurrentRef.current = true;
+      return;
+    }
+
+    if (branchDiffInFlightRef.current) {
+      branchDiffDirtyAfterCurrentRef.current = true;
+      return;
+    }
+
+    const cooldownDelayMs = options?.force
+      ? 0
+      : Math.max(0, branchDiffCooldownUntilRef.current - Date.now());
+    const delayMs = Math.max(options?.debounceMs ?? 0, cooldownDelayMs);
+
+    clearScheduledBranchDiffRefresh();
+    branchDiffScheduledTimerRef.current = window.setTimeout(() => {
+      branchDiffScheduledTimerRef.current = null;
+      void refreshBranchDiff(directory);
+    }, delayMs);
+  }, [clearScheduledBranchDiffRefresh, refreshBranchDiff]);
 
   useEffect(() => {
+    clearScheduledBranchDiffRefresh();
     branchDiffRequestId.current += 1;
     branchDiffLoadedRef.current = false;
+    branchDiffInFlightRef.current = false;
+    branchDiffDirtyAfterCurrentRef.current = false;
+    branchDiffCooldownUntilRef.current = 0;
     setBranchDiffLoaded(false);
     setBranchDiffFiles([]);
     setBranchDiffBaseRef('');
     setBranchDiffError(null);
     setBranchDiffLoading(false);
     setBranchDiffRefreshing(false);
-  }, [activeRepoDaemonSession?.directory]);
+  }, [activeRepoDaemonSession?.directory, clearScheduledBranchDiffRefresh]);
 
   useEffect(() => {
     if (view !== 'session' || !activeRepoDaemonSession?.directory) {
+      clearScheduledBranchDiffRefresh();
       branchDiffLoadedRef.current = false;
       setBranchDiffLoaded(false);
       setBranchDiffFiles([]);
@@ -1626,21 +1708,35 @@ sendFetchPRDetails,
       return;
     }
 
-    refreshBranchDiff(activeRepoDaemonSession.directory);
+    if (!changesPanelVisible) {
+      clearScheduledBranchDiffRefresh();
+      return;
+    }
+
+    scheduleBranchDiffRefresh({ force: true });
     const intervalId = window.setInterval(() => {
-      refreshBranchDiff(activeRepoDaemonSession.directory);
-    }, 30000);
+      scheduleBranchDiffRefresh();
+    }, CHANGES_BRANCH_DIFF_INTERVAL_MS);
 
     return () => {
       window.clearInterval(intervalId);
+      clearScheduledBranchDiffRefresh();
     };
-  }, [view, activeRepoDaemonSession?.directory, refreshBranchDiff]);
+  }, [
+    activeRepoDaemonSession?.directory,
+    changesPanelVisible,
+    clearScheduledBranchDiffRefresh,
+    scheduleBranchDiffRefresh,
+    view,
+  ]);
 
   useEffect(() => {
     if (!gitStatus || !activeRepoDaemonSession?.directory) return;
     if (gitStatus.directory !== activeRepoDaemonSession.directory) return;
-    refreshBranchDiff(activeRepoDaemonSession.directory);
-  }, [gitStatus, activeRepoDaemonSession?.directory, refreshBranchDiff]);
+    branchDiffDirtyAfterCurrentRef.current = true;
+    if (!changesPanelVisible) return;
+    scheduleBranchDiffRefresh({ debounceMs: CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS });
+  }, [activeRepoDaemonSession?.directory, changesPanelVisible, gitStatus, scheduleBranchDiffRefresh]);
 
   // Diff detail panel handlers
   const handleOpenDiffDetailPanel = useCallback(() => {
