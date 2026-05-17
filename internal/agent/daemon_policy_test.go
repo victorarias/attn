@@ -65,6 +65,21 @@ func TestShouldApplyPTYState_AgentOverrides(t *testing.T) {
 	if !ShouldApplyPTYState(Get("codex"), protocol.SessionStateWorking, protocol.StatePendingApproval) {
 		t.Fatal("codex should accept pending_approval PTY state updates")
 	}
+	if ShouldApplyPTYState(Get("codex"), protocol.SessionStateLaunching, protocol.StateWorking) {
+		t.Fatal("codex should ignore launch-time working PTY noise")
+	}
+	if !ShouldApplyPTYState(Get("codex"), protocol.SessionStateWorking, protocol.StateWorking) {
+		t.Fatal("codex should accept working PTY state updates while already working")
+	}
+	if ShouldApplyPTYState(Get("codex"), protocol.SessionStateIdle, protocol.StateWorking) {
+		t.Fatal("codex should ignore working PTY noise while idle")
+	}
+	if ShouldApplyPTYState(Get("codex"), protocol.SessionStateWaitingInput, protocol.StateWorking) {
+		t.Fatal("codex should ignore working PTY noise while waiting_input")
+	}
+	if ShouldApplyPTYState(Get("codex"), protocol.SessionStatePendingApproval, protocol.StateWorking) {
+		t.Fatal("codex should ignore working PTY noise while pending_approval")
+	}
 	if ShouldApplyPTYState(Get("copilot"), protocol.SessionStatePendingApproval, protocol.StateWorking) {
 		t.Fatal("copilot should ignore working PTY noise while pending_approval")
 	}
@@ -83,6 +98,18 @@ func TestResumePolicy_Claude(t *testing.T) {
 	pathResume := ResumeSessionIDFromStopTranscriptPath(claude, "/tmp/abc-123.jsonl")
 	if pathResume != "abc-123" {
 		t.Fatalf("ResumeSessionIDFromStopTranscriptPath() = %q, want abc-123", pathResume)
+	}
+}
+
+func TestResumePolicy_Codex(t *testing.T) {
+	codex := Get("codex")
+	resolved := ResolveSpawnResumeSessionID(codex, "attn-session", "attn-session", "codex-session")
+	if resolved != "codex-session" {
+		t.Fatalf("ResolveSpawnResumeSessionID() = %q, want codex-session", resolved)
+	}
+	persisted := SpawnResumeSessionID(codex, "attn-session", "", false)
+	if persisted != "" {
+		t.Fatalf("SpawnResumeSessionID() = %q, want empty until hook reports Codex id", persisted)
 	}
 }
 

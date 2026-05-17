@@ -639,9 +639,9 @@ func (s *Store) SetRecoverable(id string, recoverable bool) {
 	}
 }
 
-// SetResumeSessionID stores the Claude resume session id for an attn session.
-// This allows recovery to use the real Claude conversation id when it differs
-// from the attn session id (for example, when using Claude resume picker).
+// SetResumeSessionID stores the agent-native resume session id for an attn session.
+// This allows recovery to use the real agent conversation id when it differs
+// from the attn session id (for example, when using an agent resume picker).
 func (s *Store) SetResumeSessionID(id, resumeSessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -656,7 +656,7 @@ func (s *Store) SetResumeSessionID(id, resumeSessionID string) {
 	}
 }
 
-// GetResumeSessionID returns the stored Claude resume session id for an attn session.
+// GetResumeSessionID returns the stored agent-native resume session id for an attn session.
 func (s *Store) GetResumeSessionID(id string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

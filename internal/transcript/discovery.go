@@ -74,8 +74,7 @@ func FindCodexTranscript(cwd string, startedAt time.Time) string {
 			return nil
 		}
 
-		entryCwd := filepath.Clean(entry.Payload.Cwd)
-		if entryCwd != cwdClean {
+		if !pathsEquivalent(entry.Payload.Cwd, cwdClean) {
 			return nil
 		}
 
@@ -110,6 +109,17 @@ func FindCodexTranscript(cwd string, startedAt time.Time) string {
 		return bestPath
 	}
 	return fallbackPath
+}
+
+func pathsEquivalent(a, b string) bool {
+	aClean := filepath.Clean(a)
+	bClean := filepath.Clean(b)
+	if aClean == bClean {
+		return true
+	}
+	aReal, aErr := filepath.EvalSymlinks(aClean)
+	bReal, bErr := filepath.EvalSymlinks(bClean)
+	return aErr == nil && bErr == nil && filepath.Clean(aReal) == filepath.Clean(bReal)
 }
 
 func readCopilotWorkspaceCWD(workspacePath string) string {

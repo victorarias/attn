@@ -1290,6 +1290,7 @@ sendFetchPRDetails,
     selectSession: handleSelectSession,
     closeSession: handleCloseSession,
     reloadSession,
+    setSetting: sendSetSetting,
     splitPane: sendWorkspaceSplitPane,
     closePane: handleClosePane,
     focusPane: (sessionId: string, paneId: string) => {

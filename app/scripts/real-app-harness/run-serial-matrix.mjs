@@ -70,6 +70,11 @@ const scenarioCatalog = [
     label: 'TR-303 local codex',
     command: ['pnpm', 'run', 'real-app:scenario-tr303-local-codex'],
   },
+  {
+    id: 'codex-resume',
+    label: 'Codex native resume id mapping',
+    command: ['pnpm', 'run', 'real-app:scenario-codex-resume'],
+  },
 ];
 
 function parseArgs(argv) {

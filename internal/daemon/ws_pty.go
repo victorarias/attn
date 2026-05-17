@@ -419,14 +419,28 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		d.clearLongRunTracking(msg.ID)
 		branchInfo, _ := git.GetBranchInfo(cwd)
 		nowStr := string(protocol.TimestampNow())
+		initialState := protocol.SessionStateLaunching
+		initialStateSince := nowStr
+		initialStateUpdatedAt := nowStr
+		if existingSession != nil {
+			initialState = existingSession.State
+			initialStateSince = existingSession.StateSince
+			initialStateUpdatedAt = existingSession.StateUpdatedAt
+			if initialStateSince == "" {
+				initialStateSince = nowStr
+			}
+			if initialStateUpdatedAt == "" {
+				initialStateUpdatedAt = nowStr
+			}
+		}
 		session := &protocol.Session{
 			ID:             msg.ID,
 			Label:          label,
 			Agent:          protocol.SessionAgent(agent),
 			Directory:      cwd,
-			State:          protocol.SessionStateLaunching,
-			StateSince:     nowStr,
-			StateUpdatedAt: nowStr,
+			State:          initialState,
+			StateSince:     initialStateSince,
+			StateUpdatedAt: initialStateUpdatedAt,
 			LastSeen:       nowStr,
 		}
 		if branchInfo != nil {
@@ -451,6 +465,9 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			protocol.Deref(msg.ResumePicker),
 		); persistResumeID != "" {
 			d.store.SetResumeSessionID(session.ID, persistResumeID)
+		}
+		if pendingResumeID := d.consumePendingResumeSessionID(session.ID); pendingResumeID != "" {
+			d.store.SetResumeSessionID(session.ID, pendingResumeID)
 		}
 		d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
 		d.store.UpsertRecentLocation(cwd, label)

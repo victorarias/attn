@@ -256,6 +256,7 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
 		longRun:          make(map[string]longRunSession),
+		pendingResumeID:  make(map[string]string),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 	}

@@ -104,7 +104,7 @@ func (c *Client) UpdateState(id, state string) error {
 	return err
 }
 
-// SetSessionResumeID stores the Claude resume session id for an attn session.
+// SetSessionResumeID stores the agent-native resume session id for an attn session.
 func (c *Client) SetSessionResumeID(id, resumeSessionID string) error {
 	msg := protocol.SetSessionResumeIDMessage{
 		Cmd:             protocol.CmdSetSessionResumeID,

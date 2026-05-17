@@ -60,6 +60,7 @@ interface UseUiAutomationBridgeArgs {
   selectSession: (sessionId: string) => void;
   closeSession: (sessionId: string) => Promise<void>;
   reloadSession?: (sessionId: string, size?: { cols: number; rows: number }) => Promise<void>;
+  setSetting?: (key: string, value: string) => void;
   splitPane: (sessionId: string, targetPaneId: string, direction: TerminalSplitDirection) => Promise<unknown>;
   closePane: (sessionId: string, paneId: string) => Promise<unknown>;
   focusPane: (sessionId: string, paneId: string) => void;
@@ -1122,6 +1123,7 @@ export function useUiAutomationBridge({
   selectSession,
   closeSession,
   reloadSession,
+  setSetting,
   splitPane,
   closePane,
   focusPane,
@@ -1235,6 +1237,19 @@ export function useUiAutomationBridge({
         await closeSession(sessionId);
         await settleUi();
         return { sessionId };
+      }
+      case 'set_setting': {
+        if (!setSetting) {
+          throw new Error('set_setting is not configured');
+        }
+        const key = typeof payload.key === 'string' ? payload.key : '';
+        const value = typeof payload.value === 'string' ? payload.value : '';
+        if (!key) {
+          throw new Error('set_setting requires key');
+        }
+        setSetting(key, value);
+        await settleUi();
+        return { key, value };
       }
       case 'reload_session': {
         if (!reloadSession) {
