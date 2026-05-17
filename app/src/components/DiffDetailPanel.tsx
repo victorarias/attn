@@ -27,6 +27,9 @@ const AUTO_SKIP_PATTERNS = [
   'poetry.lock',
 ];
 
+const BACKGROUND_CHANGE_CHECK_CONCURRENCY = 2;
+const BACKGROUND_CHANGE_CHECK_DEBOUNCE_MS = 500;
+
 // ============================================================================
 // Comment Conversion Utilities (for UnifiedDiffEditor integration)
 // ============================================================================
@@ -119,6 +122,11 @@ interface ReviewFile {
   hasUncommitted?: boolean;  // True if file has uncommitted changes on top of committed
   oldPath?: string;  // For renames
 }
+
+type DiffContent = {
+  original: string;
+  modified: string;
+};
 
 type TreeNode = {
   type: 'file' | 'dir';
@@ -240,12 +248,15 @@ export function DiffDetailPanel({
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showSelectedDiffPending, setShowSelectedDiffPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [diffContent, setDiffContent] = useState<{ original: string; modified: string } | null>(null);
+  const [diffContent, setDiffContent] = useState<DiffContent | null>(null);
   const [expandedContext, setExpandedContext] = useState(0); // 0 = hunks mode (uses 3 lines context), -1 = full file
   const fontSize = Math.round(13 * scale);
   const [scrollToLine, setScrollToLine] = useState<number | undefined>(undefined);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const diffContentCacheRef = useRef<Map<string, DiffContent>>(new Map());
+  const selectedDiffPendingTimerRef = useRef<number | null>(null);
 
   // Branch diff state - PR-like comparison against origin/main
   const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
@@ -300,6 +311,176 @@ export function DiffDetailPanel({
   const viewedDiffHashesRef = useRef<Map<string, string>>(new Map());
   const [changedSinceViewed, setChangedSinceViewed] = useState<Set<string>>(new Set());
   const previousSelectedPathRef = useRef<string | null>(null);
+  const [backgroundChangeCheckCount, setBackgroundChangeCheckCount] = useState(0);
+  const backgroundCheckQueueRef = useRef<string[]>([]);
+  const backgroundCheckQueuedPathsRef = useRef<Set<string>>(new Set());
+  const backgroundCheckInFlightPathsRef = useRef<Set<string>>(new Set());
+  const backgroundCheckRerunPathsRef = useRef<Set<string>>(new Set());
+  const backgroundCheckTimerRef = useRef<number | null>(null);
+  const backgroundCheckGenerationRef = useRef(0);
+  const selectedFilePathRef = useRef<string | null>(selectedFilePath);
+  const contentVisibleRef = useRef(contentVisible);
+  const baseRefRef = useRef(baseRef);
+  const fetchDiffRef = useRef(fetchDiff);
+  const lastBackgroundGitStatusRef = useRef<GitStatusUpdate | null>(null);
+
+  useEffect(() => {
+    selectedFilePathRef.current = selectedFilePath;
+    contentVisibleRef.current = contentVisible;
+    baseRefRef.current = baseRef;
+    fetchDiffRef.current = fetchDiff;
+  }, [baseRef, contentVisible, fetchDiff, selectedFilePath]);
+
+  const syncBackgroundChangeCheckCount = useCallback(() => {
+    const activePaths = new Set([
+      ...backgroundCheckQueueRef.current,
+      ...backgroundCheckInFlightPathsRef.current,
+      ...backgroundCheckRerunPathsRef.current,
+    ]);
+    setBackgroundChangeCheckCount(activePaths.size);
+  }, []);
+
+  const clearSelectedDiffPendingTimer = useCallback(() => {
+    if (selectedDiffPendingTimerRef.current !== null) {
+      window.clearTimeout(selectedDiffPendingTimerRef.current);
+      selectedDiffPendingTimerRef.current = null;
+    }
+  }, []);
+
+  const clearBackgroundChangeCheckTimer = useCallback(() => {
+    if (backgroundCheckTimerRef.current !== null) {
+      window.clearTimeout(backgroundCheckTimerRef.current);
+      backgroundCheckTimerRef.current = null;
+    }
+  }, []);
+
+  const resetBackgroundChangeChecks = useCallback(() => {
+    backgroundCheckGenerationRef.current += 1;
+    clearBackgroundChangeCheckTimer();
+    backgroundCheckQueueRef.current = [];
+    backgroundCheckQueuedPathsRef.current.clear();
+    backgroundCheckInFlightPathsRef.current.clear();
+    backgroundCheckRerunPathsRef.current.clear();
+    setBackgroundChangeCheckCount(0);
+  }, [clearBackgroundChangeCheckTimer]);
+
+  const drainBackgroundChangeChecks = useCallback(() => {
+    if (!contentVisibleRef.current) {
+      resetBackgroundChangeChecks();
+      return;
+    }
+
+    while (
+      backgroundCheckInFlightPathsRef.current.size < BACKGROUND_CHANGE_CHECK_CONCURRENCY &&
+      backgroundCheckQueueRef.current.length > 0
+    ) {
+      const viewedPath = backgroundCheckQueueRef.current.shift();
+      if (!viewedPath) {
+        continue;
+      }
+
+      backgroundCheckQueuedPathsRef.current.delete(viewedPath);
+      if (backgroundCheckInFlightPathsRef.current.has(viewedPath)) {
+        continue;
+      }
+
+      if (viewedPath === selectedFilePathRef.current) {
+        continue;
+      }
+
+      const prevHash = viewedDiffHashesRef.current.get(viewedPath);
+      if (!prevHash) {
+        continue;
+      }
+
+      const generation = backgroundCheckGenerationRef.current;
+      backgroundCheckInFlightPathsRef.current.add(viewedPath);
+      syncBackgroundChangeCheckCount();
+
+      fetchDiffRef.current(viewedPath, { baseRef: baseRefRef.current })
+        .then((result) => {
+          if (
+            generation !== backgroundCheckGenerationRef.current ||
+            !contentVisibleRef.current ||
+            viewedPath === selectedFilePathRef.current
+          ) {
+            return;
+          }
+
+          const newHash = hashContent(result.original + result.modified);
+          const currentHash = viewedDiffHashesRef.current.get(viewedPath);
+          if (currentHash && currentHash !== newHash) {
+            setChangedSinceViewed(prev => new Set(prev).add(viewedPath));
+            viewedDiffHashesRef.current.set(viewedPath, newHash);
+            diffContentCacheRef.current.set(viewedPath, {
+              original: result.original,
+              modified: result.modified,
+            });
+          }
+        })
+        .catch(() => {
+          // Background checks are advisory. Keep the foreground diff stable.
+        })
+        .finally(() => {
+          if (generation !== backgroundCheckGenerationRef.current) {
+            return;
+          }
+          backgroundCheckInFlightPathsRef.current.delete(viewedPath);
+          if (
+            backgroundCheckRerunPathsRef.current.delete(viewedPath) &&
+            contentVisibleRef.current &&
+            viewedPath !== selectedFilePathRef.current &&
+            viewedDiffHashesRef.current.has(viewedPath)
+          ) {
+            backgroundCheckQueueRef.current.push(viewedPath);
+            backgroundCheckQueuedPathsRef.current.add(viewedPath);
+          }
+          syncBackgroundChangeCheckCount();
+          drainBackgroundChangeChecks();
+        });
+    }
+
+    syncBackgroundChangeCheckCount();
+  }, [resetBackgroundChangeChecks, syncBackgroundChangeCheckCount]);
+
+  const scheduleBackgroundChangeChecks = useCallback((paths: string[]) => {
+    let added = false;
+    for (const path of paths) {
+      if (path === selectedFilePathRef.current) {
+        continue;
+      }
+      if (!viewedDiffHashesRef.current.has(path)) {
+        continue;
+      }
+      if (
+        backgroundCheckQueuedPathsRef.current.has(path)
+      ) {
+        continue;
+      }
+      if (backgroundCheckInFlightPathsRef.current.has(path)) {
+        if (!backgroundCheckRerunPathsRef.current.has(path)) {
+          backgroundCheckRerunPathsRef.current.add(path);
+          added = true;
+        }
+        continue;
+      }
+      backgroundCheckQueueRef.current.push(path);
+      backgroundCheckQueuedPathsRef.current.add(path);
+      added = true;
+    }
+
+    if (!added) {
+      syncBackgroundChangeCheckCount();
+      return;
+    }
+
+    syncBackgroundChangeCheckCount();
+    clearBackgroundChangeCheckTimer();
+    backgroundCheckTimerRef.current = window.setTimeout(() => {
+      backgroundCheckTimerRef.current = null;
+      drainBackgroundChangeChecks();
+    }, BACKGROUND_CHANGE_CHECK_DEBOUNCE_MS);
+  }, [clearBackgroundChangeCheckTimer, drainBackgroundChangeChecks, syncBackgroundChangeCheckCount]);
 
   // Fetch branch diff files when panel opens (PR-like comparison vs origin/main)
   // Load local refs immediately, then refresh in background after fetching remotes.
@@ -598,14 +779,19 @@ export function DiffDetailPanel({
       setError(null);
       setExpandedContext(0);
       setScrollToLine(undefined);
+      setLoading(false);
+      setShowSelectedDiffPending(false);
+      clearSelectedDiffPendingTimer();
       setIsLoadingBranchDiff(false);
       setIsSyncingRemotes(false);
       setRemotesSyncWarning(null);
+      diffContentCacheRef.current.clear();
       // Clear change detection state
       viewedDiffHashesRef.current.clear();
       setChangedSinceViewed(new Set());
+      resetBackgroundChangeChecks();
     }
-  }, [contentVisible]);
+  }, [clearSelectedDiffPendingTimer, contentVisible, resetBackgroundChangeChecks]);
 
   const previousRepoPathRef = useRef<string | null>(null);
   useEffect(() => {
@@ -616,17 +802,21 @@ export function DiffDetailPanel({
       setDiffContent(null);
       setError(null);
       setLoading(false);
+      setShowSelectedDiffPending(false);
+      clearSelectedDiffPendingTimer();
       setExpandedContext(0);
       setScrollToLine(undefined);
       setBranchDiffFiles([]);
       setBaseRef('');
       setRemotesSyncWarning(null);
+      diffContentCacheRef.current.clear();
       viewedDiffHashesRef.current.clear();
       setChangedSinceViewed(new Set());
       setViewedFiles(new Set());
+      resetBackgroundChangeChecks();
     }
     previousRepoPathRef.current = repoPath;
-  }, [isOpen, repoPath]);
+  }, [clearSelectedDiffPendingTimer, isOpen, repoPath, resetBackgroundChangeChecks]);
 
   // Create a stable key that changes when we need to refetch the diff
   // This includes the file path and a representation of the git status for that file
@@ -640,31 +830,44 @@ export function DiffDetailPanel({
   useEffect(() => {
     if (!selectedFile || !diffFetchKey) {
       setDiffContent(null);
+      setLoading(false);
+      setShowSelectedDiffPending(false);
+      clearSelectedDiffPendingTimer();
       return;
     }
 
     // Store current path to check if we're still viewing the same file when fetch completes
     const fetchPath = selectedFile.path;
     const isFirstView = !viewedFiles.has(fetchPath);
+    const cachedContent = diffContentCacheRef.current.get(fetchPath) || null;
 
-    // Only show loading on first view to avoid flickering during updates
-    if (isFirstView) {
-      setLoading(true);
-    }
+    setDiffContent(cachedContent);
+    setLoading(true);
+    setShowSelectedDiffPending(false);
     setError(null);
+    clearSelectedDiffPendingTimer();
+    selectedDiffPendingTimerRef.current = window.setTimeout(() => {
+      selectedDiffPendingTimerRef.current = null;
+      if (selectedFilePathRef.current === fetchPath) {
+        setShowSelectedDiffPending(true);
+      }
+    }, 250);
 
     // Use baseRef for PR-like diff comparison (origin/main vs working directory)
     fetchDiff(fetchPath, { baseRef })
       .then((result) => {
         // Only update if we're still viewing the same file
-        if (selectedFilePath !== fetchPath) return;
+        if (selectedFilePathRef.current !== fetchPath) return;
 
         const newContent = { original: result.original, modified: result.modified };
         const newHash = hashContent(result.original + result.modified);
         const prevHash = viewedDiffHashesRef.current.get(fetchPath);
 
+        diffContentCacheRef.current.set(fetchPath, newContent);
         setDiffContent(newContent);
         setLoading(false);
+        setShowSelectedDiffPending(false);
+        clearSelectedDiffPendingTimer();
 
         // Check if file changed since last viewed
         if (prevHash && prevHash !== newHash) {
@@ -689,41 +892,41 @@ export function DiffDetailPanel({
         }
       })
       .catch((err) => {
-        if (selectedFilePath !== fetchPath) return;
+        if (selectedFilePathRef.current !== fetchPath) return;
         setError(err.message || 'Failed to load diff');
         setLoading(false);
+        setShowSelectedDiffPending(false);
+        clearSelectedDiffPendingTimer();
       });
+    return () => {
+      clearSelectedDiffPendingTimer();
+    };
   // Note: viewedFiles intentionally excluded - we read it but don't want re-runs when it changes
-  }, [diffFetchKey, selectedFile, selectedFilePath, fetchDiff, baseRef, reviewId, markFileViewed]);
+  }, [clearSelectedDiffPendingTimer, diffFetchKey, selectedFile, fetchDiff, baseRef, reviewId, markFileViewed]);
 
   // Check for changes in viewed files when gitStatus updates (for files not currently selected)
   useEffect(() => {
-    if (!gitStatus) return;
+    if (!gitStatus || !contentVisible) return;
+    if (lastBackgroundGitStatusRef.current === gitStatus) return;
+    lastBackgroundGitStatusRef.current = gitStatus;
 
-    // For each viewed file that's still in the changes, check if it changed
-    viewedFiles.forEach(async (viewedPath) => {
-      // Skip currently selected file (handled by the main effect)
-      if (viewedPath === selectedFilePath) return;
+    const changedPaths = new Set(
+      [...gitStatus.staged, ...gitStatus.unstaged, ...gitStatus.untracked].flatMap((file) => (
+        file.old_path ? [file.path, file.old_path] : [file.path]
+      ))
+    );
+    const candidates = Array.from(viewedFiles).filter((viewedPath) => (
+      viewedPath !== selectedFilePath &&
+      changedPaths.has(viewedPath) &&
+      viewedDiffHashesRef.current.has(viewedPath)
+    ));
 
-      // Find the file in current git status
-      const fileInChanges = allFiles.find(f => f.path === viewedPath);
-      if (!fileInChanges) return; // File no longer in changes
+    if (candidates.length === 0) {
+      return;
+    }
 
-      // Fetch and check hash using baseRef for PR-like diff
-      try {
-        const result = await fetchDiff(viewedPath, { baseRef });
-        const newHash = hashContent(result.original + result.modified);
-        const prevHash = viewedDiffHashesRef.current.get(viewedPath);
-
-        if (prevHash && prevHash !== newHash) {
-          setChangedSinceViewed(prev => new Set(prev).add(viewedPath));
-          viewedDiffHashesRef.current.set(viewedPath, newHash);
-        }
-      } catch {
-        // Ignore errors for background checks
-      }
-    });
-  }, [gitStatus, viewedFiles, selectedFilePath, allFiles, fetchDiff, baseRef]);
+    scheduleBackgroundChangeChecks(candidates);
+  }, [allFiles, contentVisible, gitStatus, scheduleBackgroundChangeChecks, selectedFilePath, viewedFiles]);
 
   useEscapeStack(onClose, isOpen);
 
@@ -1075,6 +1278,10 @@ export function DiffDetailPanel({
   }, [selectedFilePath, viewedFiles, changedSinceViewed, getFileIcon, getStatusLabel, fileCommentCounts]);
 
   const currentFileIndex = selectedFile ? allFiles.findIndex(f => f.path === selectedFile.path) : -1;
+  const selectedDiffIsPending = loading && showSelectedDiffPending;
+  const selectedDiffPendingLabel = diffContent
+    ? 'Loading selected diff... showing cached content'
+    : 'Loading selected diff...';
 
   return (
       <div className="review-panel" ref={panelRef} tabIndex={-1}>
@@ -1093,6 +1300,11 @@ export function DiffDetailPanel({
           )}
           {remotesSyncWarning && (
             <span className="review-sync-status warning">{remotesSyncWarning}</span>
+          )}
+          {backgroundChangeCheckCount > 0 && (
+            <span className="review-sync-status background-checking">
+              Checking {backgroundChangeCheckCount} viewed {backgroundChangeCheckCount === 1 ? 'file' : 'files'}...
+            </span>
           )}
           <div className="review-header-actions">
             {onOpenEditor && (
@@ -1150,6 +1362,12 @@ export function DiffDetailPanel({
                   <span className="changed-badge">changed</span>
                 )}
               </span>
+              {selectedDiffIsPending && selectedFile && (
+                <span className="diff-primary-status" role="status">
+                  <span className="diff-status-dot" />
+                  {selectedDiffPendingLabel}
+                </span>
+              )}
               <div className="diff-actions">
                 <button
                   className={`expand-btn ${expandedContext === 0 ? 'active' : ''}`}
@@ -1168,34 +1386,46 @@ export function DiffDetailPanel({
               </div>
             </div>
             <div className="diff-content">
-              {loading && !diffContent ? (
-                <div className="diff-loading">Loading diff...</div>
-              ) : error ? (
+              {error ? (
                 <div className="diff-error">{error}</div>
               ) : !selectedFile ? (
                 <div className="diff-placeholder">Select a file to view diff</div>
               ) : !diffContent ? (
-                <div className="diff-loading">Loading diff...</div>
+                <div className="diff-loading diff-loading-detail">
+                  <div className="diff-loading-copy">
+                    <span className="diff-loading-title">Loading selected diff...</span>
+                    <span className="diff-loading-subtitle">Waiting for git to return the file diff.</span>
+                  </div>
+                  <div className="diff-loading-skeleton" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                </div>
               ) : (
-                <UnifiedDiffEditor
-                  original={diffContent.original}
-                  modified={diffContent.modified}
-                  comments={editorComments}
-                  editingCommentId={editingCommentId}
-                  resolvedTheme={resolvedTheme}
-                  fontSize={fontSize}
-                  language={editorLanguage}
-                  contextLines={expandedContext === -1 ? 0 : 3}
-                  scrollToLine={scrollToLine}
-                  filePath={selectedFilePath || undefined}
-                  onAddComment={handleEditorAddComment}
-                  onEditComment={handleEditorEditComment}
-                  onStartEdit={handleEditorStartEdit}
-                  onCancelEdit={handleEditorCancelEdit}
-                  onResolveComment={handleEditorResolveComment}
-                  onDeleteComment={handleEditorDeleteComment}
-                  onSendToClaude={onSendToClaude ? sendToClaudeAndClose : undefined}
-                />
+                <div className={`diff-editor-shell ${selectedDiffIsPending ? 'refreshing' : ''}`}>
+                  <UnifiedDiffEditor
+                    original={diffContent.original}
+                    modified={diffContent.modified}
+                    comments={editorComments}
+                    editingCommentId={editingCommentId}
+                    resolvedTheme={resolvedTheme}
+                    fontSize={fontSize}
+                    language={editorLanguage}
+                    contextLines={expandedContext === -1 ? 0 : 3}
+                    scrollToLine={scrollToLine}
+                    filePath={selectedFilePath || undefined}
+                    onAddComment={handleEditorAddComment}
+                    onEditComment={handleEditorEditComment}
+                    onStartEdit={handleEditorStartEdit}
+                    onCancelEdit={handleEditorCancelEdit}
+                    onResolveComment={handleEditorResolveComment}
+                    onDeleteComment={handleEditorDeleteComment}
+                    onSendToClaude={onSendToClaude ? sendToClaudeAndClose : undefined}
+                  />
+                </div>
               )}
             </div>
           </div>

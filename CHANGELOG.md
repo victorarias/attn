@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Changes Panel Refreshes**: The Changes panel now avoids branch-diff refreshes while closed, refreshes once when opened, and coalesces status-triggered refreshes so slow monorepos do not stack repeated Git diff work behind every status update.
+- **Diff Detail Loading**: The Diff detail view now shows a foreground pending state when the selected file diff is slow, keeps cached content visible while it refreshes, and caps background viewed-file checks so status bursts do not fan out into repeated Git diff work.
 
 ---
 
