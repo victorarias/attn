@@ -47,8 +47,8 @@ type wsClient struct {
 
 	// Git status subscription state
 	gitStatusDir        string
-	gitStatusTicker     *time.Ticker
 	gitStatusStop       chan struct{}
+	gitStatusRefresh    chan gitStatusRefreshRequest
 	gitStatusHash       string // hash of last sent status for dedup
 	gitStatusEndpointID string
 	gitStatusMu         sync.Mutex
@@ -143,22 +143,35 @@ func (c *wsClient) sendWithWait(message outboundMessage, wait time.Duration) boo
 	}
 }
 
-// stopGitStatusPoll stops any active git status polling for this client
+// stopGitStatusPoll stops any active git status subscription for this client.
 func (c *wsClient) stopGitStatusPoll() {
 	c.gitStatusMu.Lock()
 	defer c.gitStatusMu.Unlock()
 
-	if c.gitStatusTicker != nil {
-		c.gitStatusTicker.Stop()
-		c.gitStatusTicker = nil
-	}
 	if c.gitStatusStop != nil {
 		close(c.gitStatusStop)
 		c.gitStatusStop = nil
 	}
+	c.gitStatusRefresh = nil
 	c.gitStatusDir = ""
 	c.gitStatusHash = ""
 	c.gitStatusEndpointID = ""
+}
+
+func (c *wsClient) requestGitStatusRefresh(req gitStatusRefreshRequest) bool {
+	c.gitStatusMu.Lock()
+	refresh := c.gitStatusRefresh
+	c.gitStatusMu.Unlock()
+
+	if refresh == nil {
+		return false
+	}
+	select {
+	case refresh <- req:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *wsClient) setGitStatusEndpointID(endpointID string) {
