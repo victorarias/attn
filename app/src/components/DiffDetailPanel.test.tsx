@@ -267,7 +267,7 @@ describe('DiffDetailPanel', () => {
       }
     });
 
-    it('does not let stale local diff overwrite refreshed remote diff', async () => {
+    it('sequences remote refresh after a pending local diff and keeps the fresh result', async () => {
       type BranchDiffResult = ReturnType<typeof createBranchDiffFilesResult>;
       let resolveLocal: ((value: BranchDiffResult) => void) | undefined;
       let callCount = 0;
@@ -284,7 +284,18 @@ describe('DiffDetailPanel', () => {
 
       renderPanel();
 
-      // Wait for remote refresh call and application
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('getBranchDiffFiles')).toHaveLength(1);
+      });
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('fetchRemotes')).toHaveLength(1);
+      });
+      await sleep(150);
+      expect(mockDaemon.getCalls('getBranchDiffFiles')).toHaveLength(1);
+
+      expect(resolveLocal).toBeDefined();
+      resolveLocal!(createBranchDiffFilesResult(['src/stale-local.ts']));
+
       await waitFor(() => {
         expect(mockDaemon.getCalls('getBranchDiffFiles').length).toBeGreaterThanOrEqual(2);
       });
@@ -292,14 +303,58 @@ describe('DiffDetailPanel', () => {
         expect(getFileInList('src/remote.ts')).toBeInTheDocument();
       });
 
-      // Resolve stale local response after remote has already applied
-      expect(resolveLocal).toBeDefined();
-      resolveLocal!(createBranchDiffFilesResult(['src/stale-local.ts']));
-      await sleep(100);
-
       const fileList = document.querySelector('.review-file-list');
       expect(fileList?.querySelector('.file-name[title="src/stale-local.ts"]')).not.toBeInTheDocument();
       expect(getFileInList('src/remote.ts')).toBeInTheDocument();
+    });
+
+    it('waits for in-flight local branch diff before refreshing after remote sync', async () => {
+      type BranchDiffResult = ReturnType<typeof createBranchDiffFilesResult>;
+      let resolveLocal: ((value: BranchDiffResult) => void) | undefined;
+      let inFlightLocal: Promise<BranchDiffResult> | null = null;
+      let callCount = 0;
+
+      mockDaemon.setResponse('getBranchDiffFiles', () => {
+        if (inFlightLocal) {
+          return inFlightLocal;
+        }
+        callCount += 1;
+        if (callCount === 1) {
+          inFlightLocal = new Promise<BranchDiffResult>((resolve) => {
+            resolveLocal = (value) => {
+              inFlightLocal = null;
+              resolve(value);
+            };
+          });
+          return inFlightLocal;
+        }
+        return createBranchDiffFilesResult(['src/fresh-after-fetch.ts']);
+      });
+      mockDaemon.setDelay('fetchRemotes', 250);
+
+      renderPanel();
+
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('getBranchDiffFiles')).toHaveLength(1);
+      });
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('fetchRemotes')).toHaveLength(1);
+      });
+      await sleep(150);
+      expect(mockDaemon.getCalls('getBranchDiffFiles')).toHaveLength(1);
+
+      expect(resolveLocal).toBeDefined();
+      resolveLocal!(createBranchDiffFilesResult(['src/stale-before-fetch.ts']));
+
+      await waitFor(() => {
+        expect(mockDaemon.getCalls('getBranchDiffFiles')).toHaveLength(2);
+      });
+      await waitFor(() => {
+        expect(getFileInList('src/fresh-after-fetch.ts')).toBeInTheDocument();
+      });
+
+      const fileList = document.querySelector('.review-file-list');
+      expect(fileList?.querySelector('.file-name[title="src/stale-before-fetch.ts"]')).not.toBeInTheDocument();
     });
 
     it('uses baseRef from branch diff result for file diffs', async () => {

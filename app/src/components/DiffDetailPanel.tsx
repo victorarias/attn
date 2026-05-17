@@ -493,6 +493,7 @@ export function DiffDetailPanel({
     let localApplied = false;
     let remoteApplied = false;
     let localTimer: ReturnType<typeof setTimeout> | null = null;
+    let localDiffPromise: Promise<void> | null = null;
 
     const applyBranchDiff = (result: BranchDiffFilesResult) => {
       setBranchDiffFiles(result.files);
@@ -503,7 +504,7 @@ export function DiffDetailPanel({
       if (!isCurrentRequest() || localRequestStarted || remoteApplied) return;
       localRequestStarted = true;
 
-      sendGetBranchDiffFiles(repoPath)
+      localDiffPromise = sendGetBranchDiffFiles(repoPath)
         .then((result) => {
           // Do not let stale local results overwrite fresher remote results.
           if (!isCurrentRequest() || remoteApplied) return;
@@ -547,9 +548,13 @@ export function DiffDetailPanel({
         if (!localApplied) {
           setIsLoadingBranchDiff(true);
         }
-        return sendGetBranchDiffFiles(repoPath);
+        return (localDiffPromise ?? Promise.resolve()).then(() => {
+          if (!isCurrentRequest()) return null;
+          return sendGetBranchDiffFiles(repoPath);
+        });
       })
       .then((result) => {
+        if (!result) return;
         if (!isCurrentRequest()) return;
         if (result.success) {
           remoteApplied = true;
