@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -444,6 +445,54 @@ func TestBranchDiffSnapshotReturnsCachedResultDuringRefresh(t *testing.T) {
 	waitForGitStatusTestCondition(t, 500*time.Millisecond, func() bool {
 		return calls.Load() >= 3
 	})
+}
+
+func TestBranchDiffSnapshotInvalidatesCachedResultAfterRefreshFailure(t *testing.T) {
+	previousGetBranchDiffFiles := getBranchDiffFilesForDaemon
+	var calls atomic.Int32
+	refreshStarted := make(chan struct{})
+	refreshDone := make(chan struct{})
+	refreshErr := errors.New("branch diff unavailable")
+	getBranchDiffFilesForDaemon = func(_, _ string) ([]attngit.DiffFileInfo, error) {
+		switch calls.Add(1) {
+		case 1:
+			return []attngit.DiffFileInfo{{Path: "src/old.ts", Status: "modified"}}, nil
+		case 2:
+			close(refreshStarted)
+			close(refreshDone)
+			return nil, refreshErr
+		default:
+			return nil, refreshErr
+		}
+	}
+	defer func() {
+		getBranchDiffFilesForDaemon = previousGetBranchDiffFiles
+	}()
+
+	d := &Daemon{}
+	first, err := d.coordinator().BranchDiffSnapshot("/repo", "origin/main")
+	if err != nil {
+		t.Fatalf("first BranchDiffSnapshot failed: %v", err)
+	}
+	if got := first.files[0].Path; got != "src/old.ts" {
+		t.Fatalf("first cached path = %q, want old snapshot", got)
+	}
+
+	second, err := d.coordinator().BranchDiffSnapshot("/repo", "origin/main")
+	if err != nil {
+		t.Fatalf("second BranchDiffSnapshot failed: %v", err)
+	}
+	if got := second.files[0].Path; got != "src/old.ts" {
+		t.Fatalf("second cached path = %q, want old snapshot during background refresh", got)
+	}
+
+	<-refreshStarted
+	<-refreshDone
+
+	_, err = d.coordinator().BranchDiffSnapshot("/repo", "origin/main")
+	if !errors.Is(err, refreshErr) {
+		t.Fatalf("third BranchDiffSnapshot error = %v, want %v", err, refreshErr)
+	}
 }
 
 func TestGitCoordinatorSharesInFlightFileDiff(t *testing.T) {

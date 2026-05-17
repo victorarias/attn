@@ -193,6 +193,7 @@ func (c *gitCoordinator) finishBranchDiffRefresh(key branchDiffCacheKey, refresh
 	if err != nil {
 		refresh.err = err
 		c.mu.Lock()
+		delete(c.branchDiffCache, key)
 		if c.branchDiffActive[key] == refresh {
 			delete(c.branchDiffActive, key)
 		}
