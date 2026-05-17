@@ -1640,16 +1640,16 @@ func (d *Daemon) setOrQueueResumeSessionID(sessionID, resumeSessionID string) {
 	if sessionID == "" || resumeSessionID == "" {
 		return
 	}
+	d.pendingResumeMu.Lock()
+	defer d.pendingResumeMu.Unlock()
 	if d.store.Get(sessionID) != nil {
 		d.store.SetResumeSessionID(sessionID, resumeSessionID)
 		return
 	}
-	d.pendingResumeMu.Lock()
 	if d.pendingResumeID == nil {
 		d.pendingResumeID = make(map[string]string)
 	}
 	d.pendingResumeID[sessionID] = resumeSessionID
-	d.pendingResumeMu.Unlock()
 }
 
 func (d *Daemon) consumePendingResumeSessionID(sessionID string) string {

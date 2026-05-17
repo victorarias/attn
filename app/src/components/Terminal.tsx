@@ -407,8 +407,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // fires it regardless of document.activeElement. No focus dance required.
       const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
       const setValue = descriptor?.set;
-      for (const char of text) {
+      const chars = Array.from(text);
+      for (let index = 0; index < chars.length; index += 1) {
+        const char = chars[index];
         if (char === '\n' || char === '\r') {
+          if (char === '\r' && chars[index + 1] === '\n') {
+            index += 1;
+          }
           textarea.dispatchEvent(new KeyboardEvent('keydown', {
             bubbles: true,
             cancelable: true,
