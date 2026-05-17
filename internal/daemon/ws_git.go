@@ -1,12 +1,10 @@
 package daemon
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -32,7 +30,6 @@ var (
 	gitStatusSlowSafetyInterval  = 2 * time.Minute
 	gitStatusSlowRefreshDuration = 5 * time.Second
 	gitStatusFullBudget          = 5 * time.Second
-	getGitStatusForDaemon        = getGitStatusForSubscription
 )
 
 func (d *Daemon) handleSubscribeGitStatus(client *wsClient, msg *protocol.SubscribeGitStatusMessage) {
@@ -119,9 +116,7 @@ func (d *Daemon) sendGitStatusUpdate(client *wsClient, dir string, mode gitStatu
 		return gitStatusRefreshResult{}
 	}
 
-	started := time.Now()
-	status, err := getGitStatusForDaemon(dir, mode)
-	duration := time.Since(started)
+	status, duration, err := d.coordinator().Status(dir, mode)
 	if err != nil {
 		d.logf("Git status error for %s: %v", dir, err)
 		return gitStatusRefreshResult{duration: duration}
@@ -195,40 +190,16 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 		baseRef = *msg.BaseRef
 	}
 
-	origOutput, origErr := git.Output(git.OpDiff, msg.Directory, "show", baseRef+":"+msg.Path)
-
-	var original string
-	if origErr == nil {
-		original = string(origOutput)
+	staged := msg.Staged != nil && *msg.Staged
+	content, err := d.coordinator().FileDiff(msg.Directory, msg.Path, baseRef, staged)
+	if err != nil {
+		result.Error = protocol.Ptr("Failed to read file diff: " + err.Error())
+		d.sendToClient(client, result)
+		return
 	}
 
-	var modified string
-	if msg.Staged != nil && *msg.Staged {
-		stagedOutput, err := git.Output(git.OpDiff, msg.Directory, "show", ":"+msg.Path)
-		if err != nil {
-			result.Error = protocol.Ptr("Failed to read staged file: " + err.Error())
-			d.sendToClient(client, result)
-			return
-		}
-		modified = string(stagedOutput)
-	} else {
-		filePath := filepath.Join(msg.Directory, msg.Path)
-		content, err := os.ReadFile(filePath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				modified = ""
-			} else {
-				result.Error = protocol.Ptr("Failed to read file: " + err.Error())
-				d.sendToClient(client, result)
-				return
-			}
-		} else {
-			modified = string(content)
-		}
-	}
-
-	result.Original = original
-	result.Modified = modified
+	result.Original = content.original
+	result.Modified = content.modified
 	result.Success = true
 	d.sendToClient(client, result)
 }
@@ -249,7 +220,7 @@ func (d *Daemon) handleGetBranchDiffFiles(client *wsClient, msg *protocol.GetBra
 	if msg.BaseRef != nil && *msg.BaseRef != "" {
 		baseRef = *msg.BaseRef
 	} else {
-		defaultBranch, err := git.GetDefaultBranch(msg.Directory)
+		defaultBranch, err := d.coordinator().DefaultBranch(msg.Directory)
 		if err != nil {
 			result.Error = protocol.Ptr("Failed to get default branch: " + err.Error())
 			d.sendToClient(client, result)
@@ -259,34 +230,14 @@ func (d *Daemon) handleGetBranchDiffFiles(client *wsClient, msg *protocol.GetBra
 	}
 	result.BaseRef = baseRef
 
-	files, err := git.GetBranchDiffFiles(msg.Directory, baseRef)
+	snapshot, err := d.coordinator().BranchDiffSnapshot(msg.Directory, baseRef)
 	if err != nil {
 		result.Error = protocol.Ptr("Failed to get branch diff: " + err.Error())
 		d.sendToClient(client, result)
 		return
 	}
 
-	protoFiles := make([]protocol.BranchDiffFile, len(files))
-	for i, f := range files {
-		protoFiles[i] = protocol.BranchDiffFile{
-			Path:   f.Path,
-			Status: f.Status,
-		}
-		if f.OldPath != "" {
-			protoFiles[i].OldPath = &f.OldPath
-		}
-		if f.Additions > 0 {
-			protoFiles[i].Additions = &f.Additions
-		}
-		if f.Deletions > 0 {
-			protoFiles[i].Deletions = &f.Deletions
-		}
-		if f.HasUncommitted {
-			protoFiles[i].HasUncommitted = &f.HasUncommitted
-		}
-	}
-
-	result.Files = protoFiles
+	result.Files = snapshot.files
 	result.Success = true
 	d.sendToClient(client, result)
 }

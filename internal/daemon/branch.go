@@ -123,7 +123,7 @@ func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfo
 		commitHash, commitTime := git.GetHeadCommitInfo(repo)
 
 		// Get default branch
-		defaultBranch, _ := git.GetDefaultBranch(repo)
+		defaultBranch, _ := d.coordinator().DefaultBranch(repo)
 		if defaultBranch == "" {
 			defaultBranch = "main"
 		}
@@ -149,7 +149,7 @@ func (d *Daemon) handleGetRepoInfoWS(client *wsClient, msg *protocol.GetRepoInfo
 
 func (d *Daemon) handleGetDefaultBranchWS(client *wsClient, msg *protocol.GetDefaultBranchMessage) {
 	go func() {
-		branch, err := git.GetDefaultBranch(msg.Repo)
+		branch, err := d.coordinator().DefaultBranch(msg.Repo)
 		result := &protocol.WebSocketEvent{
 			Event:   protocol.EventGetDefaultBranchResult,
 			Success: protocol.Ptr(err == nil),

@@ -1,9 +1,20 @@
 # Long Git Operation Surface Map
 
 Date: 2026-05-15
-Last updated: 2026-05-16
+Last updated: 2026-05-17
 
 Purpose: map every product surface that waits on git today before choosing UI patterns. The problem is not one spinner. Different surfaces need different treatment depending on whether the user is blocked, whether existing data can stay visible, and whether the surface is even mounted.
+
+## Recent Work Coverage
+
+Recent PRs already cover part of the giant-repo latency problem:
+
+- Changes panel branch diff refreshes are demand-driven and coalesced while the panel is visible.
+- Diff detail keeps cached content visible and caps background viewed-file checks.
+- Active-session git status refreshes are coalesced and slow full status scans fall back to a limited tracked-only result.
+- Git status, branch-diff, and file-diff reads are routed through a daemon repo coordinator, with branch-diff snapshots owned per repo/base ref and in-flight work shared across connected clients.
+
+The remaining latency gap is not that session navigation blocks on Git. It is that slow repositories can still leave panel-owned Git data in a first-load state when the daemon has no prior snapshot. Clients should keep rendering daemon-owned state and avoid adding independent Git intelligence.
 
 ## Operating Principles
 
