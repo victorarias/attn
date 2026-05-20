@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -129,6 +130,9 @@ type Daemon struct {
 	startedOnce      sync.Once
 	startedCh        chan struct{}
 	tailscale        *tailscaleRuntime
+	plugins          *pluginRegistry
+	pluginProcesses  *pluginProcessRegistry
+	pluginDir        string
 
 	loginShellEnvMu sync.RWMutex
 	loginShellEnv   []string
@@ -345,6 +349,9 @@ func New(socketPath string) *Daemon {
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 		tailscale:        newTailscaleRuntime(),
+		plugins:          newPluginRegistry(),
+		pluginProcesses:  newPluginProcessRegistry(),
+		pluginDir:        config.PluginDir(),
 		workspaces:       newWorkspaceRegistry(),
 	}
 }
@@ -378,6 +385,8 @@ func NewForTesting(socketPath string) *Daemon {
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 		tailscale:        newTailscaleRuntime(),
+		plugins:          newPluginRegistry(),
+		pluginProcesses:  newPluginProcessRegistry(),
 		workspaces:       newWorkspaceRegistry(),
 	}
 }
@@ -415,6 +424,8 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
 		tailscale:        newTailscaleRuntime(),
+		plugins:          newPluginRegistry(),
+		pluginProcesses:  newPluginProcessRegistry(),
 		workspaces:       newWorkspaceRegistry(),
 	}
 }
@@ -453,6 +464,12 @@ func (d *Daemon) Start() error {
 	}
 	if d.workspaces == nil {
 		d.workspaces = newWorkspaceRegistry()
+	}
+	if d.plugins == nil {
+		d.plugins = newPluginRegistry()
+	}
+	if d.pluginProcesses == nil {
+		d.pluginProcesses = newPluginProcessRegistry()
 	}
 	d.loadWorkspacesFromStore()
 	if d.daemonInstanceID == "" {
@@ -533,6 +550,7 @@ func (d *Daemon) Start() error {
 		if startSucceeded {
 			return
 		}
+		d.stopInstalledPlugins()
 		if d.httpServer != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			_ = d.httpServer.Shutdown(ctx)
@@ -554,6 +572,7 @@ func (d *Daemon) Start() error {
 	}
 	d.listener = listener
 	d.log("daemon started")
+	d.startInstalledPlugins()
 
 	// Start WebSocket hub with daemon's logger
 	d.wsHub.logf = d.logf
@@ -1054,6 +1073,7 @@ func (d *Daemon) Stop() {
 	if d.hubManager != nil {
 		d.hubManager.Stop()
 	}
+	d.stopInstalledPlugins()
 	d.stopAllTranscriptWatchers()
 	if d.ptyBackend != nil {
 		_ = d.ptyBackend.Shutdown(context.Background())
@@ -1453,14 +1473,28 @@ func (d *Daemon) releasePIDLock() {
 func (d *Daemon) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	// Read message
+	// Legacy hook traffic is one JSON object per connection and does not
+	// consistently include a trailing newline. Keep that first read
+	// opportunistic; plugin-mode connections switch to line framing only
+	// after the JSON-RPC hello has been identified.
 	buf := make([]byte, 65536)
 	n, err := conn.Read(buf)
 	if err != nil {
 		return
 	}
+	data := buf[:n]
 
-	cmd, msg, err := protocol.ParseMessage(buf[:n])
+	helloID, helloParams, pluginMode, err := parsePluginHello(data)
+	if pluginMode {
+		if err != nil {
+			_ = json.NewEncoder(conn).Encode(jsonRPCFailure(helloID, jsonRPCInvalidRequest, err.Error()))
+			return
+		}
+		d.handlePluginConnection(conn, bufio.NewReader(conn), helloID, helloParams)
+		return
+	}
+
+	cmd, msg, err := protocol.ParseMessage(data)
 	if err != nil {
 		d.sendError(conn, err.Error())
 		return

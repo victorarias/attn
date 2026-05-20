@@ -17,3 +17,5 @@ require (
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	golang.org/x/time v0.14.0
 )
+
+require github.com/BurntSushi/toml v1.5.0
