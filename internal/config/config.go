@@ -186,6 +186,15 @@ func DataDir() string {
 	return attnDir()
 }
 
+// PluginDir returns the installed plugin directory for the active profile.
+// Priority: ATTN_PLUGIN_DIR env var > per-profile data directory default.
+func PluginDir() string {
+	if envPath := strings.TrimSpace(os.Getenv("ATTN_PLUGIN_DIR")); envPath != "" {
+		return envPath
+	}
+	return filepath.Join(attnDir(), "plugins")
+}
+
 // DataDirForProfile computes the canonical data directory for a given
 // profile name (without reading ATTN_PROFILE). Pass "" for the default
 // profile. Callers use this to probe whether the *other* profile's

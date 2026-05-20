@@ -3784,8 +3784,8 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 		os.Remove(sockPath)
 	}()
 
-	// Wait for daemon to start
-	time.Sleep(200 * time.Millisecond)
+	// Wait for daemon to start before dialing its Unix socket.
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	// Inject test PR via unix socket
 	testPR := protocol.PR{

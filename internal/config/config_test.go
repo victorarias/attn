@@ -58,6 +58,24 @@ func TestSocketPath_EnvVarOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestPluginDir_DefaultsToAttnDir(t *testing.T) {
+	os.Unsetenv("ATTN_PLUGIN_DIR")
+	os.Unsetenv("ATTN_PROFILE")
+
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".attn", "plugins")
+	if got := PluginDir(); got != want {
+		t.Errorf("PluginDir() = %q, want %q", got, want)
+	}
+}
+
+func TestPluginDir_EnvVarOverridesDefault(t *testing.T) {
+	t.Setenv("ATTN_PLUGIN_DIR", "/tmp/attn-test-plugins")
+	if got := PluginDir(); got != "/tmp/attn-test-plugins" {
+		t.Errorf("PluginDir() = %q, want %q", got, "/tmp/attn-test-plugins")
+	}
+}
+
 func TestDBPath_ConfigFileOverridesDefault(t *testing.T) {
 	os.Unsetenv("ATTN_DB_PATH")
 	os.Unsetenv("ATTN_PROFILE")

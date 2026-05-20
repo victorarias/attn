@@ -259,6 +259,8 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 		pendingResumeID:  make(map[string]string),
 		reviewLoopCancel: make(map[string]context.CancelFunc),
 		pendingInputSrc:  make(map[string]string),
+		plugins:          newPluginRegistry(),
+		pluginProcesses:  newPluginProcessRegistry(),
 	}
 
 	return &TestHarness{
