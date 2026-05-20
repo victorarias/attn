@@ -1474,15 +1474,15 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	// Legacy hook traffic is one JSON object per connection and does not
-	// consistently include a trailing newline. Keep that first read
-	// opportunistic; plugin-mode connections switch to line framing only
-	// after the JSON-RPC hello has been identified.
-	buf := make([]byte, 65536)
-	n, err := conn.Read(buf)
+	// consistently include a trailing newline. Read exactly one complete
+	// top-level JSON object here; plugin-mode connections switch to line
+	// framing only after their hello has been identified, and any pipelined
+	// bytes stay buffered for that loop.
+	reader := bufio.NewReader(conn)
+	data, err := readInitialSocketFrame(reader, 65536)
 	if err != nil {
 		return
 	}
-	data := buf[:n]
 
 	helloID, helloParams, pluginMode, err := parsePluginHello(data)
 	if pluginMode {
@@ -1490,7 +1490,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			_ = json.NewEncoder(conn).Encode(jsonRPCFailure(helloID, jsonRPCInvalidRequest, err.Error()))
 			return
 		}
-		d.handlePluginConnection(conn, bufio.NewReader(conn), helloID, helloParams)
+		d.handlePluginConnection(conn, reader, helloID, helloParams)
 		return
 	}
 

@@ -327,15 +327,85 @@ func (p *pluginConnection) request(ctx context.Context, method string, params in
 }
 
 func readSocketFrame(reader *bufio.Reader) ([]byte, error) {
-	data, err := reader.ReadBytes('\n')
-	data = bytes.TrimSpace(data)
-	if len(data) > 0 {
-		return data, nil
+	for {
+		data, err := reader.ReadBytes('\n')
+		data = bytes.TrimSpace(data)
+		if len(data) > 0 {
+			return data, nil
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
-	if err != nil {
-		return nil, err
+}
+
+func readInitialSocketFrame(reader *bufio.Reader, maxBytes int) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, errors.New("initial socket frame size limit must be positive")
 	}
-	return nil, io.EOF
+
+	var (
+		frame    []byte
+		started  bool
+		depth    int
+		inString bool
+		escaped  bool
+	)
+
+	for len(frame) < maxBytes {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		frame = append(frame, b)
+
+		if !started {
+			if isJSONWhitespace(b) {
+				continue
+			}
+			if b != '{' {
+				return nil, errors.New("initial socket frame must be a JSON object")
+			}
+			started = true
+			depth = 1
+			continue
+		}
+
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case b == '\\':
+				escaped = true
+			case b == '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch b {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return bytes.TrimSpace(frame), nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("initial socket frame exceeds %d bytes", maxBytes)
+}
+
+func isJSONWhitespace(b byte) bool {
+	switch b {
+	case ' ', '\t', '\r', '\n':
+		return true
+	default:
+		return false
+	}
 }
 
 func parsePluginHello(data []byte) (json.RawMessage, pluginHelloParams, bool, error) {

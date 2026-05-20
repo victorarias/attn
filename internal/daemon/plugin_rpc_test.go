@@ -83,6 +83,129 @@ func TestDaemon_HandleConnection_PluginHelloRegistersLongLivedConnection(t *test
 	}
 }
 
+func TestDaemon_HandleConnection_PluginHelloCanArriveAcrossWrites(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.handleConnection(serverConn)
+	}()
+
+	payload, err := json.Marshal(jsonRPCMessage{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage("1"),
+		Method:  "hello",
+		Params: mustMarshalPluginHelloParams(t, pluginHelloParams{
+			Name:           "split-provider",
+			Version:        "0.1.0",
+			AttnAPIVersion: pluginAPIVersion,
+			Roles:          []string{"provider"},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal split hello: %v", err)
+	}
+
+	splitAt := len(payload) / 2
+	if _, err := clientConn.Write(payload[:splitAt]); err != nil {
+		t.Fatalf("write first hello fragment: %v", err)
+	}
+	if _, err := clientConn.Write(payload[splitAt:]); err != nil {
+		t.Fatalf("write second hello fragment: %v", err)
+	}
+
+	resp := decodeJSONRPCMessage(t, clientConn)
+	if resp.Error != nil {
+		t.Fatalf("split hello error=%#v, want nil", resp.Error)
+	}
+	if got := d.plugins.get("split-provider"); got == nil {
+		t.Fatal("plugin registry missing split-provider after fragmented hello")
+	}
+
+	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fragmented plugin connection did not close after client disconnect")
+	}
+}
+
+func TestDaemon_HandleConnection_PluginHelloPreservesPipelinedFrames(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.handleConnection(serverConn)
+	}()
+
+	hello, err := json.Marshal(jsonRPCMessage{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage("1"),
+		Method:  "hello",
+		Params: mustMarshalPluginHelloParams(t, pluginHelloParams{
+			Name:           "pipelined-provider",
+			Version:        "0.1.0",
+			AttnAPIVersion: pluginAPIVersion,
+			Roles:          []string{"provider"},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal pipelined hello: %v", err)
+	}
+	registerParams, err := json.Marshal(providerRegisterParams{
+		Surfaces: []string{"worktree.create"},
+		Priority: 50,
+	})
+	if err != nil {
+		t.Fatalf("marshal pipelined provider params: %v", err)
+	}
+	register, err := json.Marshal(jsonRPCMessage{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage("2"),
+		Method:  "provider.register",
+		Params:  registerParams,
+	})
+	if err != nil {
+		t.Fatalf("marshal pipelined provider.register: %v", err)
+	}
+
+	payload := append(append(append([]byte(nil), hello...), '\n'), register...)
+	payload = append(payload, '\n')
+	writeErr := make(chan error, 1)
+	go func() {
+		_, err := clientConn.Write(payload)
+		writeErr <- err
+	}()
+
+	if resp := decodeJSONRPCMessage(t, clientConn); resp.Error != nil {
+		t.Fatalf("pipelined hello error=%#v, want nil", resp.Error)
+	}
+	if resp := decodeJSONRPCMessage(t, clientConn); resp.Error != nil {
+		t.Fatalf("pipelined provider.register error=%#v, want nil", resp.Error)
+	}
+	if err := <-writeErr; err != nil {
+		t.Fatalf("write pipelined frames: %v", err)
+	}
+
+	providers := d.plugins.providersForSurface("worktree.create")
+	if len(providers) != 1 || providers[0].PluginName != "pipelined-provider" {
+		t.Fatalf("worktree.create providers=%v, want pipelined-provider only", providers)
+	}
+
+	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pipelined plugin connection did not close after client disconnect")
+	}
+}
+
 func TestDaemon_CallPlugin_RoundTripsRequestAndResponse(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	serverConn, clientConn := net.Pipe()
@@ -304,4 +427,13 @@ func decodeJSONRPCMessage(t *testing.T, conn net.Conn) jsonRPCMessage {
 		t.Fatalf("decode JSON-RPC message: %v", err)
 	}
 	return msg
+}
+
+func mustMarshalPluginHelloParams(t *testing.T, params pluginHelloParams) json.RawMessage {
+	t.Helper()
+	payload, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal hello params: %v", err)
+	}
+	return payload
 }
