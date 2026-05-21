@@ -43,6 +43,8 @@ interface SettingsModalProps {
   onUnmuteAuthor: (author: string) => void;
   settings: DaemonSettings;
   endpoints: DaemonEndpoint[];
+  plugins: DaemonPlugin[];
+  pluginIssues: DaemonPluginIssue[];
   onAddEndpoint: (name: string, sshTarget: string, profile?: string) => Promise<{ success: boolean }>;
   onUpdateEndpoint: (endpointId: string, updates: { name?: string; ssh_target?: string; enabled?: boolean; profile?: string }) => Promise<{ success: boolean }>;
   onRemoveEndpoint: (endpointId: string) => Promise<{ success: boolean }>;
@@ -66,6 +68,8 @@ export function SettingsModal({
   onUnmuteAuthor,
   settings,
   endpoints,
+  plugins,
+  pluginIssues,
   onAddEndpoint,
   onUpdateEndpoint,
   onRemoveEndpoint,
@@ -99,8 +103,6 @@ export function SettingsModal({
   const [endpointError, setEndpointError] = useState<string | null>(null);
   const [endpointActionID, setEndpointActionID] = useState<string | null>(null);
   const [pluginSourcePath, setPluginSourcePath] = useState('');
-  const [plugins, setPlugins] = useState<DaemonPlugin[]>([]);
-  const [pluginIssues, setPluginIssues] = useState<DaemonPluginIssue[]>([]);
   const [pluginPriorityDrafts, setPluginPriorityDrafts] = useState<Record<string, string>>({});
   const [pluginError, setPluginError] = useState<string | null>(null);
   const [pluginActionName, setPluginActionName] = useState<string | null>(null);
@@ -464,8 +466,6 @@ export function SettingsModal({
     setPluginError(null);
     try {
       const result = await onListPlugins();
-      setPlugins(result.plugins);
-      setPluginIssues(result.issues);
       setPluginPriorityDrafts(
         Object.fromEntries(result.plugins.map((plugin) => [plugin.name, String(plugin.priority)])),
       );

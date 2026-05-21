@@ -17,6 +17,8 @@ describe('SettingsModal review loop prompts', () => {
         onUnmuteAuthor={vi.fn()}
         settings={{}}
         endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
@@ -51,6 +53,8 @@ describe('SettingsModal review loop prompts', () => {
         onUnmuteAuthor={vi.fn()}
         settings={{}}
         endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
@@ -98,6 +102,8 @@ describe('SettingsModal review loop prompts', () => {
         onUnmuteAuthor={vi.fn()}
         settings={{}}
         endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={onAddEndpoint}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
@@ -136,6 +142,8 @@ describe('SettingsModal review loop prompts', () => {
         onUnmuteAuthor={vi.fn()}
         settings={{}}
         endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
@@ -173,6 +181,15 @@ describe('SettingsModal review loop prompts', () => {
         onUnmuteAuthor={vi.fn()}
         settings={{}}
         endpoints={[]}
+        plugins={[{
+          name: 'services-pilot-worktrees',
+          version: '0.1.0',
+          dir: '/tmp/services-pilot-worktrees',
+          priority: 10,
+          connected: true,
+          running: true,
+        }]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
@@ -206,6 +223,58 @@ describe('SettingsModal review loop prompts', () => {
     });
   });
 
+  it('refreshes a plugin status when the live daemon snapshot changes', async () => {
+    const baseProps = {
+      isOpen: true,
+      onClose: vi.fn(),
+      mutedRepos: [] as string[],
+      connectedHosts: [] as string[],
+      onUnmuteRepo: vi.fn(),
+      mutedAuthors: [] as string[],
+      onUnmuteAuthor: vi.fn(),
+      settings: {},
+      endpoints: [],
+      pluginIssues: [],
+      onAddEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onUpdateEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onRemoveEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onSetEndpointRemoteWeb: vi.fn().mockResolvedValue({ success: true }),
+      onListPlugins: vi.fn().mockResolvedValue({ plugins: [], issues: [] }),
+      onInstallPlugin: vi.fn().mockResolvedValue({ success: true }),
+      onRemovePlugin: vi.fn().mockResolvedValue({ success: true }),
+      onSetPluginPriority: vi.fn().mockResolvedValue({ success: true }),
+      onSetSetting: vi.fn(),
+      themePreference: 'system' as const,
+      onSetTheme: vi.fn(),
+    };
+    const startingPlugin = {
+      name: 'services-pilot-worktrees',
+      version: '0.1.0',
+      dir: '/tmp/services-pilot-worktrees',
+      priority: 0,
+      connected: false,
+      running: true,
+    };
+
+    const { rerender } = render(
+      <SettingsModal
+        {...baseProps}
+        plugins={[startingPlugin]}
+      />,
+    );
+
+    expect(await screen.findByText('starting')).toBeInTheDocument();
+
+    rerender(
+      <SettingsModal
+        {...baseProps}
+        plugins={[{ ...startingPlugin, connected: true }]}
+      />,
+    );
+
+    expect(await screen.findByText('connected')).toBeInTheDocument();
+  });
+
   it('toggles tailscale serve on the existing device', async () => {
     const onSetSetting = vi.fn();
 
@@ -224,6 +293,8 @@ describe('SettingsModal review loop prompts', () => {
           tailscale_domain: 'macbook-epidemic.tail1bfe77.ts.net',
         }}
         endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
@@ -272,6 +343,8 @@ describe('SettingsModal review loop prompts', () => {
             tailscale_auth_url: 'https://login.tailscale.example/auth',
           },
         }]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
@@ -314,6 +387,8 @@ describe('SettingsModal review loop prompts', () => {
           status: 'error',
           enabled: true,
         }]}
+        plugins={[]}
+        pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
         onUpdateEndpoint={onUpdateEndpoint}
         onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}

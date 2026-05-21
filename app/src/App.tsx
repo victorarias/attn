@@ -24,7 +24,7 @@ import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { DaemonProvider } from './contexts/DaemonContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { MAIN_TERMINAL_PANE_ID, useSessionStore } from './store/sessions';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, ReviewLoopState } from './hooks/useDaemonSocket';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
@@ -119,6 +119,12 @@ function App() {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [settingError, setSettingError] = useState<string | null>(null);
   const [daemonEndpoints, setDaemonEndpoints] = useState<DaemonEndpoint[]>([]);
+  const [daemonPlugins, setDaemonPlugins] = useState<DaemonPlugin[]>([]);
+  const [daemonPluginIssues, setDaemonPluginIssues] = useState<DaemonPluginIssue[]>([]);
+  const handlePluginsUpdate = useCallback((plugins: DaemonPlugin[], issues: DaemonPluginIssue[]) => {
+    setDaemonPlugins(plugins);
+    setDaemonPluginIssues(issues);
+  }, []);
 
   const [reviewLoopsBySessionId, setReviewLoopsBySessionId] = useState<Record<string, ReviewLoopState>>({});
   const [daemonWorkspaces, setDaemonWorkspaces] = useState<DaemonWorkspace[]>([]);
@@ -308,6 +314,7 @@ function App() {
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
     onEndpointsUpdate: setDaemonEndpoints,
+    onPluginsUpdate: handlePluginsUpdate,
     onReposUpdate: setRepoStates,
     onAuthorsUpdate: setAuthorStates,
     onSettingsUpdate: setSettings,
@@ -342,6 +349,8 @@ function App() {
         daemonWorkspaces={daemonWorkspaces}
         prs={prs}
         daemonEndpoints={daemonEndpoints}
+        daemonPlugins={daemonPlugins}
+        daemonPluginIssues={daemonPluginIssues}
         settings={settings}
         gitStatus={gitStatus}
         reviewLoopsBySessionId={reviewLoopsBySessionId}
@@ -419,6 +428,8 @@ interface AppContentProps {
   daemonWorkspaces: DaemonWorkspace[];
   prs: DaemonPR[];
   daemonEndpoints: DaemonEndpoint[];
+  daemonPlugins: DaemonPlugin[];
+  daemonPluginIssues: DaemonPluginIssue[];
   settings: Record<string, string>;
   gitStatus: GitStatusUpdate | null;
   reviewLoopsBySessionId: Record<string, ReviewLoopState>;
@@ -492,6 +503,8 @@ function AppContent({
   daemonWorkspaces,
   prs,
   daemonEndpoints,
+  daemonPlugins,
+  daemonPluginIssues,
   settings,
   gitStatus,
   reviewLoopsBySessionId,
@@ -2272,6 +2285,8 @@ sendFetchPRDetails,
         onUnmuteAuthor={sendMuteAuthor}
         settings={settings}
         endpoints={daemonEndpoints}
+        plugins={daemonPlugins}
+        pluginIssues={daemonPluginIssues}
         onAddEndpoint={sendAddEndpoint}
         onUpdateEndpoint={sendUpdateEndpoint}
         onRemoveEndpoint={sendRemoveEndpoint}

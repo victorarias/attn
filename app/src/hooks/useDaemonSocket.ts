@@ -403,6 +403,7 @@ interface UseDaemonSocketOptions {
   onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onEndpointsUpdate?: (endpoints: DaemonEndpoint[]) => void;
+  onPluginsUpdate?: (plugins: DaemonPlugin[], issues: DaemonPluginIssue[]) => void;
   onReposUpdate: (repos: RepoState[]) => void;
   onAuthorsUpdate: (authors: AuthorState[]) => void;
   onWorktreesUpdate?: (worktrees: DaemonWorktree[]) => void;
@@ -629,6 +630,7 @@ export function useDaemonSocket({
   onWorkspacesUpdate,
   onPRsUpdate,
   onEndpointsUpdate,
+  onPluginsUpdate,
   onReposUpdate,
   onAuthorsUpdate,
   onWorktreesUpdate,
@@ -1562,12 +1564,15 @@ export function useDaemonSocket({
             break;
 
           case 'plugins_updated': {
+            const plugins = data.plugins || [];
+            const issues = data.issues || [];
+            onPluginsUpdate?.(plugins, issues);
             const pending = pendingActionsRef.current.get('list_plugins');
             if (pending) {
               pendingActionsRef.current.delete('list_plugins');
               pending.resolve({
-                plugins: data.plugins || [],
-                issues: data.issues || [],
+                plugins,
+                issues,
               } satisfies PluginListResult);
             }
             break;
@@ -2018,7 +2023,7 @@ export function useDaemonSocket({
     };
 
     wsRef.current = ws;
-  }, [resolvedWsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
+  }, [resolvedWsUrl, onSessionsUpdate, onWorkspacesUpdate, onPRsUpdate, onEndpointsUpdate, onPluginsUpdate, onReposUpdate, onAuthorsUpdate, onWorktreesUpdate, onSettingsUpdate, onSettingError, onGitStatusUpdate, rejectPendingForCommand, ensureDaemonRunning, showRecoveringNoticeForCommand, flushQueuedCommands, pruneAttachedPtySessions]);
 
   useEffect(() => {
     void connect();
