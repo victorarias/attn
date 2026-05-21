@@ -115,6 +115,7 @@ Provider dispatch contract:
 
 - `worktree.before_create` runs every registered handler in deterministic order before create dispatch; an RPC error aborts before mutation
 - attn asks eligible providers in deterministic order whether they want to handle the operation
+- provider priority is user-owned attn configuration, not plugin-declared metadata; higher user priority runs first and ties remain deterministic
 - a provider returns `handled`, `decline`, or `error`
 - `handled` includes the structured result attn needs to continue
 - `decline` lets attn ask the next provider or fall back to its built-in implementation
@@ -225,6 +226,7 @@ Commands:
 - `attn plugin install --path <dir>` — same, from local directory (development).
 - `attn plugin list` — installed plugins and status.
 - `attn plugin remove <name>` — uninstall + stop.
+- Settings exposes the same installed-plugin inventory plus provider priority controls so users can resolve competing plugins without editing plugin code.
 - `attn plugin update <name>` — `git pull && bun install`, restart.
 - `attn plugin dev --path <dir>` — run attn with plugin spawned foreground, auto-restart on source change, stderr piped to terminal.
 - `attn plugin inspect <name>` — print live JSON-RPC traffic for a plugin.

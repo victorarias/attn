@@ -211,6 +211,21 @@ model Worktree {
   created_at?: string; // ISO timestamp
 }
 
+model PluginInfo {
+  name: string;
+  version: string;
+  description?: string;
+  dir: string;
+  priority: int32;
+  connected: boolean;
+  running: boolean;
+}
+
+model PluginIssue {
+  path: string;
+  error: string;
+}
+
 model GitOperation {
   id: string;
   kind: GitOperationKind;
@@ -481,6 +496,26 @@ model SetSettingMessage {
   cmd: "set_setting";
   key: string;
   value: string;
+}
+
+model ListPluginsMessage {
+  cmd: "list_plugins";
+}
+
+model InstallPluginMessage {
+  cmd: "install_plugin";
+  path: string;
+}
+
+model RemovePluginMessage {
+  cmd: "remove_plugin";
+  name: string;
+}
+
+model SetPluginPriorityMessage {
+  cmd: "set_plugin_priority";
+  name: string;
+  priority: int32;
 }
 
 model AddEndpointMessage {
@@ -1021,6 +1056,20 @@ model SettingsUpdatedMessage {
   error?: string;
 }
 
+model PluginsUpdatedMessage {
+  event: "plugins_updated";
+  plugins: PluginInfo[];
+  issues?: PluginIssue[];
+}
+
+model PluginActionResultMessage {
+  event: "plugin_action_result";
+  action: string;
+  name?: string;
+  success: boolean;
+  error?: string;
+}
+
 model RecentLocationsResultMessage {
   event: "recent_locations_result";
   recent_locations: RecentLocation[];
@@ -1404,6 +1453,8 @@ model WebSocketEvent {
   repos?: RepoState[];
   authors?: AuthorState[];
   worktrees?: Worktree[];
+  plugins?: PluginInfo[];
+  plugin_issues?: PluginIssue[];
   operation?: GitOperation;
   branches?: Branch[];
   recent_locations?: RecentLocation[];
@@ -1418,6 +1469,8 @@ model WebSocketEvent {
   action?: string;
   branch?: string;
   path?: string;
+  name?: string;
+  priority?: int32;
 
   // Rate limiting
   rate_limit_resource?: string;
@@ -1497,6 +1550,8 @@ alias DaemonEvent =
   | GitOperationStartedMessage
   | GitOperationFinishedMessage
   | SettingsUpdatedMessage
+  | PluginsUpdatedMessage
+  | PluginActionResultMessage
   | RecentLocationsResultMessage
   | BranchesResultMessage
   | GetDefaultBranchResultMessage

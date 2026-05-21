@@ -2,7 +2,13 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import { open } from '@tauri-apps/plugin-dialog';
-import { DaemonEndpoint, DaemonSettings } from '../hooks/useDaemonSocket';
+import {
+  DaemonEndpoint,
+  DaemonPlugin,
+  DaemonPluginIssue,
+  DaemonSettings,
+  PluginListResult,
+} from '../hooks/useDaemonSocket';
 import { normalizeSessionAgent, type SessionAgent } from '../types/sessionAgent';
 import type { ThemePreference } from '../hooks/useTheme';
 import {
@@ -41,6 +47,10 @@ interface SettingsModalProps {
   onUpdateEndpoint: (endpointId: string, updates: { name?: string; ssh_target?: string; enabled?: boolean; profile?: string }) => Promise<{ success: boolean }>;
   onRemoveEndpoint: (endpointId: string) => Promise<{ success: boolean }>;
   onSetEndpointRemoteWeb: (endpointId: string, enabled: boolean) => Promise<{ success: boolean }>;
+  onListPlugins: () => Promise<PluginListResult>;
+  onInstallPlugin: (path: string) => Promise<{ success: boolean; name?: string }>;
+  onRemovePlugin: (name: string) => Promise<{ success: boolean; name?: string }>;
+  onSetPluginPriority: (name: string, priority: number) => Promise<{ success: boolean; name?: string }>;
   onSetSetting: (key: string, value: string) => void;
   themePreference: ThemePreference;
   onSetTheme: (theme: ThemePreference) => void;
@@ -60,6 +70,10 @@ export function SettingsModal({
   onUpdateEndpoint,
   onRemoveEndpoint,
   onSetEndpointRemoteWeb,
+  onListPlugins,
+  onInstallPlugin,
+  onRemovePlugin,
+  onSetPluginPriority,
   onSetSetting,
   themePreference,
   onSetTheme,
@@ -84,6 +98,13 @@ export function SettingsModal({
   const [editingEndpointProfile, setEditingEndpointProfile] = useState('');
   const [endpointError, setEndpointError] = useState<string | null>(null);
   const [endpointActionID, setEndpointActionID] = useState<string | null>(null);
+  const [pluginSourcePath, setPluginSourcePath] = useState('');
+  const [plugins, setPlugins] = useState<DaemonPlugin[]>([]);
+  const [pluginIssues, setPluginIssues] = useState<DaemonPluginIssue[]>([]);
+  const [pluginPriorityDrafts, setPluginPriorityDrafts] = useState<Record<string, string>>({});
+  const [pluginError, setPluginError] = useState<string | null>(null);
+  const [pluginActionName, setPluginActionName] = useState<string | null>(null);
+  const [pluginsLoading, setPluginsLoading] = useState(false);
   const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
   const hasAvailableAgents = useMemo(
     () => hasAnyAvailableAgents(agentAvailability),
@@ -161,6 +182,9 @@ export function SettingsModal({
     setEditingEndpointTarget('');
     setEndpointError(null);
     setEndpointActionID(null);
+    setPluginSourcePath('');
+    setPluginError(null);
+    setPluginActionName(null);
   }, [isOpen, actualProjectsDir, actualAgentExecutables, actualEditorExecutable, resolvedDefaultAgent, actualReviewLoopPresets, actualReviewLoopModel, actualReviewerModel]);
 
   useEffect(() => {
@@ -434,6 +458,94 @@ export function SettingsModal({
       setEndpointActionID(null);
     }
   }, [onSetEndpointRemoteWeb]);
+
+  const refreshPlugins = useCallback(async () => {
+    setPluginsLoading(true);
+    setPluginError(null);
+    try {
+      const result = await onListPlugins();
+      setPlugins(result.plugins);
+      setPluginIssues(result.issues);
+      setPluginPriorityDrafts(
+        Object.fromEntries(result.plugins.map((plugin) => [plugin.name, String(plugin.priority)])),
+      );
+    } catch (error) {
+      setPluginError(error instanceof Error ? error.message : 'Failed to load plugins');
+    } finally {
+      setPluginsLoading(false);
+    }
+  }, [onListPlugins]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void refreshPlugins();
+  }, [isOpen, refreshPlugins]);
+
+  const handleBrowsePluginPath = useCallback(async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: 'Select Plugin Directory',
+    });
+    if (selected && typeof selected === 'string') {
+      setPluginSourcePath(selected);
+    }
+  }, []);
+
+  const handleInstallPlugin = useCallback(async () => {
+    const path = pluginSourcePath.trim();
+    if (path === '') {
+      setPluginError('Plugin directory is required');
+      return;
+    }
+    setPluginError(null);
+    setPluginActionName('install');
+    try {
+      await onInstallPlugin(path);
+      setPluginSourcePath('');
+      await refreshPlugins();
+    } catch (error) {
+      setPluginError(error instanceof Error ? error.message : 'Failed to install plugin');
+    } finally {
+      setPluginActionName(null);
+    }
+  }, [onInstallPlugin, pluginSourcePath, refreshPlugins]);
+
+  const handleRemovePlugin = useCallback(async (name: string) => {
+    setPluginError(null);
+    setPluginActionName(name);
+    try {
+      await onRemovePlugin(name);
+      await refreshPlugins();
+    } catch (error) {
+      setPluginError(error instanceof Error ? error.message : 'Failed to remove plugin');
+    } finally {
+      setPluginActionName(null);
+    }
+  }, [onRemovePlugin, refreshPlugins]);
+
+  const handlePluginPriorityChange = useCallback((name: string, value: string) => {
+    setPluginPriorityDrafts((prev) => ({ ...prev, [name]: value }));
+  }, []);
+
+  const handleSavePluginPriority = useCallback(async (name: string) => {
+    const raw = (pluginPriorityDrafts[name] ?? '').trim();
+    const priority = Number(raw);
+    if (!Number.isInteger(priority)) {
+      setPluginError('Plugin priority must be an integer');
+      return;
+    }
+    setPluginError(null);
+    setPluginActionName(name);
+    try {
+      await onSetPluginPriority(name, priority);
+      await refreshPlugins();
+    } catch (error) {
+      setPluginError(error instanceof Error ? error.message : 'Failed to update plugin priority');
+    } finally {
+      setPluginActionName(null);
+    }
+  }, [onSetPluginPriority, pluginPriorityDrafts, refreshPlugins]);
 
   if (!isOpen) return null;
 
@@ -776,6 +888,93 @@ export function SettingsModal({
                           )}
                         </div>
                       )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="settings-section">
+            <h3>Plugins</h3>
+            <p className="settings-description">
+              Install user-owned plugins from local directories and control provider dispatch priority. Higher numbers run first.
+            </p>
+            <div className="plugin-form">
+              <input
+                type="text"
+                value={pluginSourcePath}
+                onChange={(e) => setPluginSourcePath(e.target.value)}
+                placeholder="/Users/you/src/my-attn-plugin"
+                className="settings-input"
+                aria-label="Plugin directory"
+                disabled={pluginActionName !== null}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <button className="browse-btn" onClick={() => void handleBrowsePluginPath()} disabled={pluginActionName !== null}>
+                Browse
+              </button>
+              <button className="browse-btn" onClick={() => void handleInstallPlugin()} disabled={pluginActionName !== null}>
+                Install Plugin
+              </button>
+            </div>
+            {pluginError && <div className="settings-agent-warning">{pluginError}</div>}
+            {pluginIssues.map((issue) => (
+              <div key={issue.path} className="settings-agent-warning">
+                {issue.path}: {issue.error}
+              </div>
+            ))}
+            {pluginsLoading ? (
+              <p className="settings-empty">Loading plugins...</p>
+            ) : plugins.length === 0 ? (
+              <p className="settings-empty">No plugins installed.</p>
+            ) : (
+              <div className="plugin-list">
+                {plugins.map((plugin) => {
+                  const busy = pluginActionName === plugin.name;
+                  const draftPriority = pluginPriorityDrafts[plugin.name] ?? String(plugin.priority);
+                  return (
+                    <div key={plugin.name} className="plugin-card">
+                      <div className="plugin-card-header">
+                        <div className="plugin-card-title">
+                          <span className="endpoint-name">{plugin.name}</span>
+                          <span className="endpoint-profile-badge">v{plugin.version}</span>
+                          <span className={`plugin-status-badge ${plugin.connected ? 'connected' : plugin.running ? 'starting' : 'stopped'}`}>
+                            {plugin.connected ? 'connected' : plugin.running ? 'starting' : 'stopped'}
+                          </span>
+                        </div>
+                        <button className="browse-btn danger" onClick={() => void handleRemovePlugin(plugin.name)} disabled={pluginActionName !== null}>
+                          Remove
+                        </button>
+                      </div>
+                      {plugin.description && <p className="settings-description plugin-description">{plugin.description}</p>}
+                      <div className="plugin-meta-grid">
+                        <div className="endpoint-meta">
+                          <span className="endpoint-meta-label">Path</span>
+                          <code>{plugin.dir}</code>
+                        </div>
+                        <label className="plugin-priority-control">
+                          <span className="endpoint-meta-label">Priority</span>
+                          <input
+                            type="number"
+                            value={draftPriority}
+                            onChange={(e) => handlePluginPriorityChange(plugin.name, e.target.value)}
+                            className="settings-input plugin-priority-input"
+                            aria-label={`${plugin.name} priority`}
+                            disabled={pluginActionName !== null}
+                          />
+                          <button
+                            className="browse-btn"
+                            onClick={() => void handleSavePluginPriority(plugin.name)}
+                            disabled={pluginActionName !== null || draftPriority === String(plugin.priority)}
+                          >
+                            Save
+                          </button>
+                        </label>
+                      </div>
+                      {busy && <div className="settings-hint">Updating {plugin.name}...</div>}
                     </div>
                   );
                 })}

@@ -161,6 +161,36 @@ func TestDaemon_HandleConnection_PluginHelloRegistersSurfaces(t *testing.T) {
 	}
 }
 
+func TestPluginRegistry_OrdersHandlersByUserPriority(t *testing.T) {
+	registry := newPluginRegistry()
+	alpha := &pluginConnection{name: "alpha"}
+	beta := &pluginConnection{name: "beta"}
+	gamma := &pluginConnection{name: "gamma"}
+
+	for _, plugin := range []*pluginConnection{alpha, beta, gamma} {
+		if err := registry.register(plugin); err != nil {
+			t.Fatalf("register %s: %v", plugin.name, err)
+		}
+		if err := registry.registerSurfaces(plugin, []string{"worktree.create"}); err != nil {
+			t.Fatalf("register %s surface: %v", plugin.name, err)
+		}
+	}
+
+	registry.setPriorities(map[string]int{
+		"beta":  50,
+		"alpha": 20,
+	})
+
+	handlers := registry.handlersForSurface("worktree.create")
+	got := []string{handlers[0].PluginName, handlers[1].PluginName, handlers[2].PluginName}
+	want := []string{"beta", "alpha", "gamma"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("handler order=%v, want %v", got, want)
+		}
+	}
+}
+
 func TestDaemon_HandleConnection_PluginHelloRejectsUnknownSurface(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	serverConn, clientConn := net.Pipe()

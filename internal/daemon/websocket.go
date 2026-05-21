@@ -765,6 +765,14 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleGetSettingsWS(client)
 	case protocol.CmdSetSetting:
 		d.handleSetSettingWS(client, msg.(*protocol.SetSettingMessage))
+	case protocol.CmdListPlugins:
+		d.handleListPluginsWS(client)
+	case protocol.CmdInstallPlugin:
+		d.handleInstallPluginWS(client, msg.(*protocol.InstallPluginMessage))
+	case protocol.CmdRemovePlugin:
+		d.handleRemovePluginWS(client, msg.(*protocol.RemovePluginMessage))
+	case protocol.CmdSetPluginPriority:
+		d.handleSetPluginPriorityWS(client, msg.(*protocol.SetPluginPriorityMessage))
 	case protocol.CmdAddEndpoint:
 		d.handleAddEndpointWS(client, msg.(*protocol.AddEndpointMessage))
 	case protocol.CmdRemoveEndpoint:

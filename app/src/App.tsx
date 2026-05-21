@@ -259,6 +259,10 @@ function App() {
     sendSetSetting,
     sendCreateWorktree,
     sendDeleteWorktree,
+    sendListPlugins,
+    sendInstallPlugin,
+    sendRemovePlugin,
+    sendSetPluginPriority,
     sendAddEndpoint,
     sendUpdateEndpoint,
     sendRemoveEndpoint,
@@ -363,6 +367,10 @@ function App() {
         sendSetSetting={sendSetSetting}
         sendCreateWorktree={sendCreateWorktree}
         sendDeleteWorktree={sendDeleteWorktree}
+        sendListPlugins={sendListPlugins}
+        sendInstallPlugin={sendInstallPlugin}
+        sendRemovePlugin={sendRemovePlugin}
+        sendSetPluginPriority={sendSetPluginPriority}
         sendAddEndpoint={sendAddEndpoint}
         sendUpdateEndpoint={sendUpdateEndpoint}
         sendRemoveEndpoint={sendRemoveEndpoint}
@@ -436,6 +444,10 @@ interface AppContentProps {
   sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
   sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
   sendDeleteWorktree: ReturnType<typeof useDaemonSocket>['sendDeleteWorktree'];
+  sendListPlugins: ReturnType<typeof useDaemonSocket>['sendListPlugins'];
+  sendInstallPlugin: ReturnType<typeof useDaemonSocket>['sendInstallPlugin'];
+  sendRemovePlugin: ReturnType<typeof useDaemonSocket>['sendRemovePlugin'];
+  sendSetPluginPriority: ReturnType<typeof useDaemonSocket>['sendSetPluginPriority'];
   sendAddEndpoint: ReturnType<typeof useDaemonSocket>['sendAddEndpoint'];
   sendUpdateEndpoint: ReturnType<typeof useDaemonSocket>['sendUpdateEndpoint'];
   sendRemoveEndpoint: ReturnType<typeof useDaemonSocket>['sendRemoveEndpoint'];
@@ -504,6 +516,10 @@ function AppContent({
   sendSetSetting,
   sendCreateWorktree,
   sendDeleteWorktree,
+  sendListPlugins,
+  sendInstallPlugin,
+  sendRemovePlugin,
+  sendSetPluginPriority,
   sendAddEndpoint,
   sendUpdateEndpoint,
   sendRemoveEndpoint,
@@ -2260,6 +2276,10 @@ sendFetchPRDetails,
         onUpdateEndpoint={sendUpdateEndpoint}
         onRemoveEndpoint={sendRemoveEndpoint}
         onSetEndpointRemoteWeb={sendSetEndpointRemoteWeb}
+        onListPlugins={sendListPlugins}
+        onInstallPlugin={sendInstallPlugin}
+        onRemovePlugin={sendRemovePlugin}
+        onSetPluginPriority={sendSetPluginPriority}
         onSetSetting={sendSetSetting}
         themePreference={themePreference}
         onSetTheme={setTheme}

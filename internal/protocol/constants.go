@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "61"
+const ProtocolVersion = "62"
 
 // Commands
 const (
@@ -42,6 +42,10 @@ const (
 	CmdDeleteWorktree               = "delete_worktree"
 	CmdGetSettings                  = "get_settings"
 	CmdSetSetting                   = "set_setting"
+	CmdListPlugins                  = "list_plugins"
+	CmdInstallPlugin                = "install_plugin"
+	CmdRemovePlugin                 = "remove_plugin"
+	CmdSetPluginPriority            = "set_plugin_priority"
 	CmdAddEndpoint                  = "add_endpoint"
 	CmdRemoveEndpoint               = "remove_endpoint"
 	CmdUpdateEndpoint               = "update_endpoint"
@@ -124,6 +128,8 @@ const (
 	EventGitOperationStarted        = "git_operation_started"
 	EventGitOperationFinished       = "git_operation_finished"
 	EventSettingsUpdated            = "settings_updated"
+	EventPluginsUpdated             = "plugins_updated"
+	EventPluginActionResult         = "plugin_action_result"
 	EventRateLimited                = "rate_limited"
 	EventRecentLocationsResult      = "recent_locations_result"
 	EventBrowseDirectoryResult      = "browse_directory_result"

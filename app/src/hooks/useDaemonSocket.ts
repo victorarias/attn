@@ -6,6 +6,8 @@ import type {
   SessionLayout as GeneratedWorkspaceSnapshot,
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
+  PluginInfo as GeneratedPluginInfo,
+  PluginIssue as GeneratedPluginIssue,
   GitOperation as GeneratedGitOperation,
   Endpoint as GeneratedEndpoint,
   RepoState as GeneratedRepoState,
@@ -55,6 +57,8 @@ export type DaemonSession = GeneratedSession;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
+export type DaemonPlugin = GeneratedPluginInfo;
+export type DaemonPluginIssue = GeneratedPluginIssue;
 export type DaemonGitOperation = GeneratedGitOperation;
 export type DaemonEndpoint = GeneratedEndpoint;
 export type RepoState = GeneratedRepoState;
@@ -115,6 +119,8 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   error?: string;
   // Worktree action result fields
   path?: string;
+  name?: string;
+  priority?: number;
   endpoint_id?: string;
   request_id?: string;
   home_path?: string;
@@ -122,6 +128,8 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   input_path?: string;
   entries?: DirectoryEntry[];
   inspection?: PathInspection;
+  plugins?: DaemonPlugin[];
+  issues?: DaemonPluginIssue[];
   // Legacy review event fields
   review_id?: string;
   session_id?: string;
@@ -143,7 +151,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-const PROTOCOL_VERSION = '61';
+const PROTOCOL_VERSION = '62';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // Runtime gate (flipped from VITE_UI_AUTOMATION). The Rust shell
 // injects this global before any page script runs — see
@@ -213,6 +221,17 @@ interface WorktreeActionResult {
   path?: string;
   endpoint_id?: string;
   error?: string;
+}
+
+interface PluginActionResult {
+  success: boolean;
+  name?: string;
+  error?: string;
+}
+
+export interface PluginListResult {
+  plugins: DaemonPlugin[];
+  issues: DaemonPluginIssue[];
 }
 
 interface RecentLocationsResult {
@@ -1542,6 +1561,37 @@ export function useDaemonSocket({
             }
             break;
 
+          case 'plugins_updated': {
+            const pending = pendingActionsRef.current.get('list_plugins');
+            if (pending) {
+              pendingActionsRef.current.delete('list_plugins');
+              pending.resolve({
+                plugins: data.plugins || [],
+                issues: data.issues || [],
+              } satisfies PluginListResult);
+            }
+            break;
+          }
+
+          case 'plugin_action_result': {
+            const action = data.action || '';
+            const exactKey = data.name ? `plugin_action:${action}:${data.name}` : '';
+            let pendingKey = exactKey;
+            if (!pendingKey || !pendingActionsRef.current.has(pendingKey)) {
+              pendingKey = Array.from(pendingActionsRef.current.keys()).find((key) => key.startsWith(`plugin_action:${action}:`)) || '';
+            }
+            const pending = pendingKey ? pendingActionsRef.current.get(pendingKey) : undefined;
+            if (pending) {
+              pendingActionsRef.current.delete(pendingKey);
+              if (data.success) {
+                pending.resolve({ success: true, name: data.name });
+              } else {
+                pending.reject(new Error(data.error || 'Plugin action failed'));
+              }
+            }
+            break;
+          }
+
           case 'pr_action_result':
             if (data.action && data.id) {
               const key = `${data.id}:${data.action}`;
@@ -2637,6 +2687,82 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'set_setting', key, value }));
   }, [onSettingsUpdate]);
 
+  const sendListPlugins = useCallback((): Promise<PluginListResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = 'list_plugins';
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'list_plugins' }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('List plugins timed out'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  const sendInstallPlugin = useCallback((path: string): Promise<PluginActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = 'plugin_action:install:pending';
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'install_plugin', path }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Install plugin timed out'));
+        }
+      }, 60000);
+    });
+  }, []);
+
+  const sendRemovePlugin = useCallback((name: string): Promise<PluginActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `plugin_action:remove:${name}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'remove_plugin', name }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Remove plugin timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  const sendSetPluginPriority = useCallback((name: string, priority: number): Promise<PluginActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `plugin_action:set_priority:${name}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'set_plugin_priority', name, priority }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Set plugin priority timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
   const sendAddEndpoint = useCallback((name: string, sshTarget: string, profile?: string): Promise<EndpointActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -3443,6 +3569,10 @@ export function useDaemonSocket({
     sendCreateWorktree,
     sendDeleteWorktree,
     sendSetSetting,
+    sendListPlugins,
+    sendInstallPlugin,
+    sendRemovePlugin,
+    sendSetPluginPriority,
     sendAddEndpoint,
     sendUpdateEndpoint,
     sendRemoveEndpoint,

@@ -58,6 +58,18 @@ func (r *pluginProcessRegistry) remove(name string, process *pluginProcess) {
 	}
 }
 
+func (r *pluginProcessRegistry) get(name string) *pluginProcess {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.processes[name]
+}
+
+func (r *pluginProcessRegistry) isRunning(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.processes[name] != nil
+}
+
 func (r *pluginProcessRegistry) list() []*pluginProcess {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -130,4 +142,12 @@ func (d *Daemon) stopInstalledPlugins() {
 		}
 		_ = process.cmd.Process.Kill()
 	}
+}
+
+func (d *Daemon) stopInstalledPlugin(name string) {
+	process := d.ensurePluginProcessRegistry().get(name)
+	if process == nil || process.cmd == nil || process.cmd.Process == nil {
+		return
+	}
+	_ = process.cmd.Process.Kill()
 }

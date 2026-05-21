@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionLayout, SessionLayoutActionResultMessage, SessionLayoutClosePaneMessage, SessionLayoutFocusPaneMessage, SessionLayoutGetMessage, SessionLayoutMessage, SessionLayoutPane, SessionLayoutPaneKind, SessionLayoutRenamePaneMessage, SessionLayoutRuntimeExitedMessage, SessionLayoutSplitDirection, SessionLayoutSplitPaneMessage, SessionLayoutUpdatedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, UpdateWorkspacePanelGeometryMessage, WebSocketEvent, Workspace, WorkspacePanel, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, AnswerReviewLoopMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewLoopRunMessage, GetReviewLoopStateMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetSettingsMessage, GitFileChange, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MuteMessage, MutePRMessage, MuteRepoMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewLoopDecision, ReviewLoopInteraction, ReviewLoopInteractionStatus, ReviewLoopIteration, ReviewLoopIterationStatus, ReviewLoopResultMessage, ReviewLoopRun, ReviewLoopRunStatus, ReviewLoopState, ReviewLoopStatus, ReviewLoopUpdatedMessage, ReviewState, Session, SessionAgent, SessionExitedMessage, SessionLayout, SessionLayoutActionResultMessage, SessionLayoutClosePaneMessage, SessionLayoutFocusPaneMessage, SessionLayoutGetMessage, SessionLayoutMessage, SessionLayoutPane, SessionLayoutPaneKind, SessionLayoutRenamePaneMessage, SessionLayoutRuntimeExitedMessage, SessionLayoutSplitDirection, SessionLayoutSplitPaneMessage, SessionLayoutUpdatedMessage, SessionRegisteredMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetReviewLoopIterationLimitMessage, SetSessionResumeIDMessage, SetSettingMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StartReviewLoopMessage, StateMessage, StopMessage, StopReviewLoopMessage, SubscribeGitStatusMessage, TodosMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, UpdateWorkspacePanelGeometryMessage, WebSocketEvent, Workspace, WorkspacePanel, WorkspaceRegisteredMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -75,9 +75,11 @@
 //   const injectTestSessionMessage = Convert.toInjectTestSessionMessage(json);
 //   const inspectPathMessage = Convert.toInspectPathMessage(json);
 //   const inspectPathResultMessage = Convert.toInspectPathResultMessage(json);
+//   const installPluginMessage = Convert.toInstallPluginMessage(json);
 //   const killSessionMessage = Convert.toKillSessionMessage(json);
 //   const listBranchesMessage = Convert.toListBranchesMessage(json);
 //   const listEndpointsMessage = Convert.toListEndpointsMessage(json);
+//   const listPluginsMessage = Convert.toListPluginsMessage(json);
 //   const listRemoteBranchesMessage = Convert.toListRemoteBranchesMessage(json);
 //   const listRemoteBranchesResultMessage = Convert.toListRemoteBranchesResultMessage(json);
 //   const listWorktreesMessage = Convert.toListWorktreesMessage(json);
@@ -94,6 +96,10 @@
 //   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
 //   const pRsUpdatedMessage = Convert.toPRsUpdatedMessage(json);
 //   const pathInspection = Convert.toPathInspection(json);
+//   const pluginActionResultMessage = Convert.toPluginActionResultMessage(json);
+//   const pluginInfo = Convert.toPluginInfo(json);
+//   const pluginIssue = Convert.toPluginIssue(json);
+//   const pluginsUpdatedMessage = Convert.toPluginsUpdatedMessage(json);
 //   const ptyDesyncMessage = Convert.toPtyDesyncMessage(json);
 //   const ptyInputMessage = Convert.toPtyInputMessage(json);
 //   const ptyOutputMessage = Convert.toPtyOutputMessage(json);
@@ -111,6 +117,7 @@
 //   const registerMessage = Convert.toRegisterMessage(json);
 //   const registerWorkspaceMessage = Convert.toRegisterWorkspaceMessage(json);
 //   const removeEndpointMessage = Convert.toRemoveEndpointMessage(json);
+//   const removePluginMessage = Convert.toRemovePluginMessage(json);
 //   const replaySegment = Convert.toReplaySegment(json);
 //   const repoInfo = Convert.toRepoInfo(json);
 //   const repoState = Convert.toRepoState(json);
@@ -155,6 +162,7 @@
 //   const sessionVisualizedMessage = Convert.toSessionVisualizedMessage(json);
 //   const sessionsUpdatedMessage = Convert.toSessionsUpdatedMessage(json);
 //   const setEndpointRemoteWebMessage = Convert.toSetEndpointRemoteWebMessage(json);
+//   const setPluginPriorityMessage = Convert.toSetPluginPriorityMessage(json);
 //   const setReviewLoopIterationLimitMessage = Convert.toSetReviewLoopIterationLimitMessage(json);
 //   const setSessionResumeIDMessage = Convert.toSetSessionResumeIDMessage(json);
 //   const setSettingMessage = Convert.toSetSettingMessage(json);
@@ -1287,6 +1295,16 @@ export interface Inspection {
     [property: string]: any;
 }
 
+export interface InstallPluginMessage {
+    cmd:  InstallPluginMessageCmd;
+    path: string;
+    [property: string]: any;
+}
+
+export enum InstallPluginMessageCmd {
+    InstallPlugin = "install_plugin",
+}
+
 export interface KillSessionMessage {
     cmd:     KillSessionMessageCmd;
     id:      string;
@@ -1315,6 +1333,15 @@ export interface ListEndpointsMessage {
 
 export enum ListEndpointsMessageCmd {
     ListEndpoints = "list_endpoints",
+}
+
+export interface ListPluginsMessage {
+    cmd: ListPluginsMessageCmd;
+    [property: string]: any;
+}
+
+export enum ListPluginsMessageCmd {
+    ListPlugins = "list_plugins",
 }
 
 export interface ListRemoteBranchesMessage {
@@ -1496,6 +1523,64 @@ export interface PathInspection {
     is_directory:  boolean;
     repo_root?:    string;
     resolved_path: string;
+    [property: string]: any;
+}
+
+export interface PluginActionResultMessage {
+    action:  string;
+    error?:  string;
+    event:   PluginActionResultMessageEvent;
+    name?:   string;
+    success: boolean;
+    [property: string]: any;
+}
+
+export enum PluginActionResultMessageEvent {
+    PluginActionResult = "plugin_action_result",
+}
+
+export interface PluginInfo {
+    connected:    boolean;
+    description?: string;
+    dir:          string;
+    name:         string;
+    priority:     number;
+    running:      boolean;
+    version:      string;
+    [property: string]: any;
+}
+
+export interface PluginIssue {
+    error: string;
+    path:  string;
+    [property: string]: any;
+}
+
+export interface PluginsUpdatedMessage {
+    event:   PluginsUpdatedMessageEvent;
+    issues?: IssueElement[];
+    plugins: PluginElement[];
+    [property: string]: any;
+}
+
+export enum PluginsUpdatedMessageEvent {
+    PluginsUpdated = "plugins_updated",
+}
+
+export interface IssueElement {
+    error: string;
+    path:  string;
+    [property: string]: any;
+}
+
+export interface PluginElement {
+    connected:    boolean;
+    description?: string;
+    dir:          string;
+    name:         string;
+    priority:     number;
+    running:      boolean;
+    version:      string;
     [property: string]: any;
 }
 
@@ -1692,6 +1777,16 @@ export interface RemoveEndpointMessage {
 
 export enum RemoveEndpointMessageCmd {
     RemoveEndpoint = "remove_endpoint",
+}
+
+export interface RemovePluginMessage {
+    cmd:  RemovePluginMessageCmd;
+    name: string;
+    [property: string]: any;
+}
+
+export enum RemovePluginMessageCmd {
+    RemovePlugin = "remove_plugin",
 }
 
 export interface ReplaySegment {
@@ -2220,6 +2315,17 @@ export enum SetEndpointRemoteWebMessageCmd {
     SetEndpointRemoteWeb = "set_endpoint_remote_web",
 }
 
+export interface SetPluginPriorityMessage {
+    cmd:      SetPluginPriorityMessageCmd;
+    name:     string;
+    priority: number;
+    [property: string]: any;
+}
+
+export enum SetPluginPriorityMessageCmd {
+    SetPluginPriority = "set_plugin_priority",
+}
+
 export interface SetReviewLoopIterationLimitMessage {
     cmd:             SetReviewLoopIterationLimitMessageCmd;
     iteration_limit: number;
@@ -2471,11 +2577,15 @@ export interface WebSocketEvent {
     id?:                    string;
     last_seq?:              number;
     modified?:              string;
+    name?:                  string;
     operation?:             Operation;
     original?:              string;
     pane_id?:               string;
     path?:                  string;
     pid?:                   number;
+    plugin_issues?:         IssueElement[];
+    plugins?:               PluginElement[];
+    priority?:              number;
     protocol_version?:      string;
     prs?:                   PRElement[];
     rate_limit_reset_at?:   string;
@@ -3193,6 +3303,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("InspectPathResultMessage")), null, 2);
     }
 
+    public static toInstallPluginMessage(json: string): InstallPluginMessage {
+        return cast(JSON.parse(json), r("InstallPluginMessage"));
+    }
+
+    public static installPluginMessageToJson(value: InstallPluginMessage): string {
+        return JSON.stringify(uncast(value, r("InstallPluginMessage")), null, 2);
+    }
+
     public static toKillSessionMessage(json: string): KillSessionMessage {
         return cast(JSON.parse(json), r("KillSessionMessage"));
     }
@@ -3215,6 +3333,14 @@ export class Convert {
 
     public static listEndpointsMessageToJson(value: ListEndpointsMessage): string {
         return JSON.stringify(uncast(value, r("ListEndpointsMessage")), null, 2);
+    }
+
+    public static toListPluginsMessage(json: string): ListPluginsMessage {
+        return cast(JSON.parse(json), r("ListPluginsMessage"));
+    }
+
+    public static listPluginsMessageToJson(value: ListPluginsMessage): string {
+        return JSON.stringify(uncast(value, r("ListPluginsMessage")), null, 2);
     }
 
     public static toListRemoteBranchesMessage(json: string): ListRemoteBranchesMessage {
@@ -3343,6 +3469,38 @@ export class Convert {
 
     public static pathInspectionToJson(value: PathInspection): string {
         return JSON.stringify(uncast(value, r("PathInspection")), null, 2);
+    }
+
+    public static toPluginActionResultMessage(json: string): PluginActionResultMessage {
+        return cast(JSON.parse(json), r("PluginActionResultMessage"));
+    }
+
+    public static pluginActionResultMessageToJson(value: PluginActionResultMessage): string {
+        return JSON.stringify(uncast(value, r("PluginActionResultMessage")), null, 2);
+    }
+
+    public static toPluginInfo(json: string): PluginInfo {
+        return cast(JSON.parse(json), r("PluginInfo"));
+    }
+
+    public static pluginInfoToJson(value: PluginInfo): string {
+        return JSON.stringify(uncast(value, r("PluginInfo")), null, 2);
+    }
+
+    public static toPluginIssue(json: string): PluginIssue {
+        return cast(JSON.parse(json), r("PluginIssue"));
+    }
+
+    public static pluginIssueToJson(value: PluginIssue): string {
+        return JSON.stringify(uncast(value, r("PluginIssue")), null, 2);
+    }
+
+    public static toPluginsUpdatedMessage(json: string): PluginsUpdatedMessage {
+        return cast(JSON.parse(json), r("PluginsUpdatedMessage"));
+    }
+
+    public static pluginsUpdatedMessageToJson(value: PluginsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("PluginsUpdatedMessage")), null, 2);
     }
 
     public static toPtyDesyncMessage(json: string): PtyDesyncMessage {
@@ -3479,6 +3637,14 @@ export class Convert {
 
     public static removeEndpointMessageToJson(value: RemoveEndpointMessage): string {
         return JSON.stringify(uncast(value, r("RemoveEndpointMessage")), null, 2);
+    }
+
+    public static toRemovePluginMessage(json: string): RemovePluginMessage {
+        return cast(JSON.parse(json), r("RemovePluginMessage"));
+    }
+
+    public static removePluginMessageToJson(value: RemovePluginMessage): string {
+        return JSON.stringify(uncast(value, r("RemovePluginMessage")), null, 2);
     }
 
     public static toReplaySegment(json: string): ReplaySegment {
@@ -3831,6 +3997,14 @@ export class Convert {
 
     public static setEndpointRemoteWebMessageToJson(value: SetEndpointRemoteWebMessage): string {
         return JSON.stringify(uncast(value, r("SetEndpointRemoteWebMessage")), null, 2);
+    }
+
+    public static toSetPluginPriorityMessage(json: string): SetPluginPriorityMessage {
+        return cast(JSON.parse(json), r("SetPluginPriorityMessage"));
+    }
+
+    public static setPluginPriorityMessageToJson(value: SetPluginPriorityMessage): string {
+        return JSON.stringify(uncast(value, r("SetPluginPriorityMessage")), null, 2);
     }
 
     public static toSetReviewLoopIterationLimitMessage(json: string): SetReviewLoopIterationLimitMessage {
@@ -4850,6 +5024,10 @@ const typeMap: any = {
         { json: "repo_root", js: "repo_root", typ: u(undefined, "") },
         { json: "resolved_path", js: "resolved_path", typ: "" },
     ], "any"),
+    "InstallPluginMessage": o([
+        { json: "cmd", js: "cmd", typ: r("InstallPluginMessageCmd") },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
     "KillSessionMessage": o([
         { json: "cmd", js: "cmd", typ: r("KillSessionMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -4861,6 +5039,9 @@ const typeMap: any = {
     ], "any"),
     "ListEndpointsMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListEndpointsMessageCmd") },
+    ], "any"),
+    "ListPluginsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("ListPluginsMessageCmd") },
     ], "any"),
     "ListRemoteBranchesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListRemoteBranchesMessageCmd") },
@@ -4962,6 +5143,44 @@ const typeMap: any = {
         { json: "repo_root", js: "repo_root", typ: u(undefined, "") },
         { json: "resolved_path", js: "resolved_path", typ: "" },
     ], "any"),
+    "PluginActionResultMessage": o([
+        { json: "action", js: "action", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("PluginActionResultMessageEvent") },
+        { json: "name", js: "name", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "PluginInfo": o([
+        { json: "connected", js: "connected", typ: true },
+        { json: "description", js: "description", typ: u(undefined, "") },
+        { json: "dir", js: "dir", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "priority", js: "priority", typ: 0 },
+        { json: "running", js: "running", typ: true },
+        { json: "version", js: "version", typ: "" },
+    ], "any"),
+    "PluginIssue": o([
+        { json: "error", js: "error", typ: "" },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "PluginsUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("PluginsUpdatedMessageEvent") },
+        { json: "issues", js: "issues", typ: u(undefined, a(r("IssueElement"))) },
+        { json: "plugins", js: "plugins", typ: a(r("PluginElement")) },
+    ], "any"),
+    "IssueElement": o([
+        { json: "error", js: "error", typ: "" },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "PluginElement": o([
+        { json: "connected", js: "connected", typ: true },
+        { json: "description", js: "description", typ: u(undefined, "") },
+        { json: "dir", js: "dir", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "priority", js: "priority", typ: 0 },
+        { json: "running", js: "running", typ: true },
+        { json: "version", js: "version", typ: "" },
+    ], "any"),
     "PtyDesyncMessage": o([
         { json: "event", js: "event", typ: r("PtyDesyncMessageEvent") },
         { json: "id", js: "id", typ: "" },
@@ -5056,6 +5275,10 @@ const typeMap: any = {
     "RemoveEndpointMessage": o([
         { json: "cmd", js: "cmd", typ: r("RemoveEndpointMessageCmd") },
         { json: "endpoint_id", js: "endpoint_id", typ: "" },
+    ], "any"),
+    "RemovePluginMessage": o([
+        { json: "cmd", js: "cmd", typ: r("RemovePluginMessageCmd") },
+        { json: "name", js: "name", typ: "" },
     ], "any"),
     "ReplaySegment": o([
         { json: "cols", js: "cols", typ: 0 },
@@ -5376,6 +5599,11 @@ const typeMap: any = {
         { json: "enabled", js: "enabled", typ: true },
         { json: "endpoint_id", js: "endpoint_id", typ: "" },
     ], "any"),
+    "SetPluginPriorityMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SetPluginPriorityMessageCmd") },
+        { json: "name", js: "name", typ: "" },
+        { json: "priority", js: "priority", typ: 0 },
+    ], "any"),
     "SetReviewLoopIterationLimitMessage": o([
         { json: "cmd", js: "cmd", typ: r("SetReviewLoopIterationLimitMessageCmd") },
         { json: "iteration_limit", js: "iteration_limit", typ: 0 },
@@ -5513,11 +5741,15 @@ const typeMap: any = {
         { json: "id", js: "id", typ: u(undefined, "") },
         { json: "last_seq", js: "last_seq", typ: u(undefined, 0) },
         { json: "modified", js: "modified", typ: u(undefined, "") },
+        { json: "name", js: "name", typ: u(undefined, "") },
         { json: "operation", js: "operation", typ: u(undefined, r("Operation")) },
         { json: "original", js: "original", typ: u(undefined, "") },
         { json: "pane_id", js: "pane_id", typ: u(undefined, "") },
         { json: "path", js: "path", typ: u(undefined, "") },
         { json: "pid", js: "pid", typ: u(undefined, 0) },
+        { json: "plugin_issues", js: "plugin_issues", typ: u(undefined, a(r("IssueElement"))) },
+        { json: "plugins", js: "plugins", typ: u(undefined, a(r("PluginElement"))) },
+        { json: "priority", js: "priority", typ: u(undefined, 0) },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "rate_limit_reset_at", js: "rate_limit_reset_at", typ: u(undefined, "") },
@@ -5829,6 +6061,9 @@ const typeMap: any = {
     "InspectPathResultMessageEvent": [
         "inspect_path_result",
     ],
+    "InstallPluginMessageCmd": [
+        "install_plugin",
+    ],
     "KillSessionMessageCmd": [
         "kill_session",
     ],
@@ -5837,6 +6072,9 @@ const typeMap: any = {
     ],
     "ListEndpointsMessageCmd": [
         "list_endpoints",
+    ],
+    "ListPluginsMessageCmd": [
+        "list_plugins",
     ],
     "ListRemoteBranchesMessageCmd": [
         "list_remote_branches",
@@ -5876,6 +6114,12 @@ const typeMap: any = {
     ],
     "PRsUpdatedMessageEvent": [
         "prs_updated",
+    ],
+    "PluginActionResultMessageEvent": [
+        "plugin_action_result",
+    ],
+    "PluginsUpdatedMessageEvent": [
+        "plugins_updated",
     ],
     "PtyDesyncMessageEvent": [
         "pty_desync",
@@ -5924,6 +6168,9 @@ const typeMap: any = {
     ],
     "RemoveEndpointMessageCmd": [
         "remove_endpoint",
+    ],
+    "RemovePluginMessageCmd": [
+        "remove_plugin",
     ],
     "ReposUpdatedMessageEvent": [
         "repos_updated",
@@ -6027,6 +6274,9 @@ const typeMap: any = {
     ],
     "SetEndpointRemoteWebMessageCmd": [
         "set_endpoint_remote_web",
+    ],
+    "SetPluginPriorityMessageCmd": [
+        "set_plugin_priority",
     ],
     "SetReviewLoopIterationLimitMessageCmd": [
         "set_review_loop_iteration_limit",

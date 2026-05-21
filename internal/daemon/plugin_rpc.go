@@ -50,15 +50,17 @@ type jsonRPCError struct {
 }
 
 type pluginRegistry struct {
-	mu       sync.RWMutex
-	plugins  map[string]*pluginConnection
-	surfaces map[string][]pluginSurfaceHandler
+	mu         sync.RWMutex
+	plugins    map[string]*pluginConnection
+	surfaces   map[string][]pluginSurfaceHandler
+	priorities map[string]int
 }
 
 func newPluginRegistry() *pluginRegistry {
 	return &pluginRegistry{
-		plugins:  make(map[string]*pluginConnection),
-		surfaces: make(map[string][]pluginSurfaceHandler),
+		plugins:    make(map[string]*pluginConnection),
+		surfaces:   make(map[string][]pluginSurfaceHandler),
+		priorities: make(map[string]int),
 	}
 }
 
@@ -122,13 +124,39 @@ func (r *pluginRegistry) registerSurfaces(plugin *pluginConnection, values []str
 		r.surfaces[surface] = append(r.surfaces[surface], pluginSurfaceHandler{
 			PluginName: plugin.name,
 		})
-		sort.Slice(r.surfaces[surface], func(i, j int) bool {
-			left := r.surfaces[surface][i]
-			right := r.surfaces[surface][j]
-			return left.PluginName < right.PluginName
-		})
+		r.sortSurfaceHandlersLocked(surface)
 	}
 	return nil
+}
+
+func (r *pluginRegistry) setPriorities(values map[string]int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.priorities = make(map[string]int, len(values))
+	for name, priority := range values {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		r.priorities[name] = priority
+	}
+	for surface := range r.surfaces {
+		r.sortSurfaceHandlersLocked(surface)
+	}
+}
+
+func (r *pluginRegistry) sortSurfaceHandlersLocked(surface string) {
+	sort.Slice(r.surfaces[surface], func(i, j int) bool {
+		left := r.surfaces[surface][i]
+		right := r.surfaces[surface][j]
+		leftPriority := r.priorities[left.PluginName]
+		rightPriority := r.priorities[right.PluginName]
+		if leftPriority != rightPriority {
+			return leftPriority > rightPriority
+		}
+		return left.PluginName < right.PluginName
+	})
 }
 
 func (r *pluginRegistry) handlersForSurface(surface string) []pluginSurfaceHandler {
@@ -449,6 +477,7 @@ func jsonRPCFailure(id json.RawMessage, code int, message string) jsonRPCMessage
 func (d *Daemon) ensurePluginRegistry() *pluginRegistry {
 	if d.plugins == nil {
 		d.plugins = newPluginRegistry()
+		d.plugins.setPriorities(d.pluginPriorities())
 	}
 	return d.plugins
 }

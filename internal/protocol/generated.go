@@ -1026,6 +1026,14 @@ type InspectPathResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type InstallPluginMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+}
+
 type KillSessionMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1046,6 +1054,11 @@ type ListBranchesMessage struct {
 }
 
 type ListEndpointsMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type ListPluginsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 }
@@ -1296,6 +1309,65 @@ type PathInspection struct {
 	ResolvedPath string `json:"resolved_path"`
 }
 
+type PluginActionResultMessage struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name *string `json:"name,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type PluginInfo struct {
+	// Connected corresponds to the JSON schema field "connected".
+	Connected bool `json:"connected"`
+
+	// Description corresponds to the JSON schema field "description".
+	Description *string `json:"description,omitempty,omitzero"`
+
+	// Dir corresponds to the JSON schema field "dir".
+	Dir string `json:"dir"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Priority corresponds to the JSON schema field "priority".
+	Priority int `json:"priority"`
+
+	// Running corresponds to the JSON schema field "running".
+	Running bool `json:"running"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version string `json:"version"`
+}
+
+type PluginIssue struct {
+	// Error corresponds to the JSON schema field "error".
+	Error string `json:"error"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+}
+
+type PluginsUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Issues corresponds to the JSON schema field "issues".
+	Issues []PluginIssue `json:"issues,omitempty,omitzero"`
+
+	// Plugins corresponds to the JSON schema field "plugins".
+	Plugins []PluginInfo `json:"plugins"`
+}
+
 type PtyDesyncMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -1495,6 +1567,14 @@ type RemoveEndpointMessage struct {
 
 	// EndpointID corresponds to the JSON schema field "endpoint_id".
 	EndpointID string `json:"endpoint_id"`
+}
+
+type RemovePluginMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
 }
 
 type ReplaySegment struct {
@@ -2220,6 +2300,17 @@ type SetEndpointRemoteWebMessage struct {
 	EndpointID string `json:"endpoint_id"`
 }
 
+type SetPluginPriorityMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Priority corresponds to the JSON schema field "priority".
+	Priority int `json:"priority"`
+}
+
 type SetReviewLoopIterationLimitMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2553,6 +2644,9 @@ type WebSocketEvent struct {
 	// Modified corresponds to the JSON schema field "modified".
 	Modified *string `json:"modified,omitempty,omitzero"`
 
+	// Name corresponds to the JSON schema field "name".
+	Name *string `json:"name,omitempty,omitzero"`
+
 	// Operation corresponds to the JSON schema field "operation".
 	Operation *GitOperation `json:"operation,omitempty,omitzero"`
 
@@ -2567,6 +2661,15 @@ type WebSocketEvent struct {
 
 	// Pid corresponds to the JSON schema field "pid".
 	Pid *int `json:"pid,omitempty,omitzero"`
+
+	// PluginIssues corresponds to the JSON schema field "plugin_issues".
+	PluginIssues []PluginIssue `json:"plugin_issues,omitempty,omitzero"`
+
+	// Plugins corresponds to the JSON schema field "plugins".
+	Plugins []PluginInfo `json:"plugins,omitempty,omitzero"`
+
+	// Priority corresponds to the JSON schema field "priority".
+	Priority *int `json:"priority,omitempty,omitzero"`
 
 	// ProtocolVersion corresponds to the JSON schema field "protocol_version".
 	ProtocolVersion *string `json:"protocol_version,omitempty,omitzero"`
