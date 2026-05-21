@@ -46,6 +46,9 @@ func Ensure(ctx context.Context, binaryPath string) (EnsureResult, error) {
 	if strings.TrimSpace(binaryPath) == "" {
 		return EnsureResult{}, fmt.Errorf("missing binary path")
 	}
+	if err := config.ValidateDaemonIsolation(config.SocketPath()); err != nil {
+		return EnsureResult{}, err
+	}
 
 	if !isSocketLive(config.SocketPath()) {
 		if err := removeStaleSocketFiles(); err != nil {

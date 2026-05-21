@@ -268,7 +268,13 @@ func runDaemonCommand() {
 }
 
 func runDaemon() {
-	d := daemon.New(config.SocketPath())
+	socketPath := config.SocketPath()
+	if err := config.ValidateDaemonIsolation(socketPath); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	d := daemon.New(socketPath)
 	if err := d.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "daemon error: %v\n", err)
 		os.Exit(1)

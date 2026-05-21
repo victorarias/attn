@@ -263,6 +263,57 @@ func SocketPath() string {
 	return filepath.Join(attnDir(), "attn.sock")
 }
 
+// ValidateDaemonIsolation rejects daemon configurations that split the
+// runtime root (socket/PID/workers) away from the active profile's data dir
+// while still pointing at that profile's default durable store.
+//
+// That combination lets an auxiliary daemon reconcile the shared session DB
+// against a different worker registry and mistakenly reap live sessions.
+func ValidateDaemonIsolation(socketPath string) error {
+	socketDir, err := comparableDaemonIsolationPath(filepath.Dir(strings.TrimSpace(socketPath)))
+	if err != nil {
+		return fmt.Errorf("resolve daemon socket root: %w", err)
+	}
+	profileDataDir, err := comparableDaemonIsolationPath(DataDir())
+	if err != nil {
+		return fmt.Errorf("resolve profile data dir: %w", err)
+	}
+	if socketDir == profileDataDir {
+		return nil
+	}
+
+	dbPath, err := comparableDaemonIsolationPath(DBPath())
+	if err != nil {
+		return fmt.Errorf("resolve daemon DB path: %w", err)
+	}
+	defaultDBPath, err := comparableDaemonIsolationPath(filepath.Join(profileDataDir, "attn.db"))
+	if err != nil {
+		return fmt.Errorf("resolve profile DB path: %w", err)
+	}
+	if dbPath != defaultDBPath {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"refusing to start daemon with socket root %q while DB path still resolves to the %s profile store %q; set ATTN_DB_PATH to an isolated database or use ATTN_PROFILE",
+		socketDir,
+		ProfileLabel(),
+		defaultDBPath,
+	)
+}
+
+func comparableDaemonIsolationPath(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", nil
+	}
+	absolute, err := filepath.Abs(trimmed)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(absolute), nil
+}
+
 // StatePath returns the legacy state file path (for migration/cleanup)
 func StatePath() string {
 	home, err := os.UserHomeDir()

@@ -58,6 +58,71 @@ func TestSocketPath_EnvVarOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestValidateDaemonIsolation_RejectsForeignSocketRootWithProfileDB(t *testing.T) {
+	t.Setenv("ATTN_PROFILE", "")
+	t.Setenv("ATTN_SOCKET_PATH", filepath.Join(t.TempDir(), "attn.sock"))
+	t.Setenv("ATTN_DB_PATH", "")
+	t.Setenv("ATTN_CONFIG_PATH", "")
+	reloadConfig()
+
+	err := ValidateDaemonIsolation(SocketPath())
+	if err == nil {
+		t.Fatal("ValidateDaemonIsolation() accepted an alternate socket root with the default profile DB")
+	}
+	if !strings.Contains(err.Error(), "refusing to start daemon") {
+		t.Fatalf("ValidateDaemonIsolation() error = %q, want refusal message", err)
+	}
+}
+
+func TestValidateDaemonIsolation_AllowsForeignSocketRootWithIsolatedDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("ATTN_PROFILE", "")
+	t.Setenv("ATTN_SOCKET_PATH", filepath.Join(tmpDir, "attn.sock"))
+	t.Setenv("ATTN_DB_PATH", filepath.Join(tmpDir, "attn.db"))
+	t.Setenv("ATTN_CONFIG_PATH", "")
+	reloadConfig()
+
+	if err := ValidateDaemonIsolation(SocketPath()); err != nil {
+		t.Fatalf("ValidateDaemonIsolation() returned unexpected error: %v", err)
+	}
+}
+
+func TestValidateDaemonIsolation_RejectsRelativeDBPathInProfileDir(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("ATTN_PROFILE", "")
+	t.Setenv("ATTN_SOCKET_PATH", filepath.Join(t.TempDir(), "attn.sock"))
+	t.Setenv("ATTN_DB_PATH", "attn.db")
+	t.Setenv("ATTN_CONFIG_PATH", "")
+	reloadConfig()
+
+	profileDataDir := DataDir()
+	if err := os.MkdirAll(profileDataDir, 0o755); err != nil {
+		t.Fatalf("mkdir profile data dir: %v", err)
+	}
+	t.Chdir(profileDataDir)
+
+	err := ValidateDaemonIsolation(SocketPath())
+	if err == nil {
+		t.Fatal("ValidateDaemonIsolation() accepted a relative DB path that resolves to the default profile DB")
+	}
+	if !strings.Contains(err.Error(), "refusing to start daemon") {
+		t.Fatalf("ValidateDaemonIsolation() error = %q, want refusal message", err)
+	}
+}
+
+func TestValidateDaemonIsolation_AllowsSocketOverrideInsideProfileDataDir(t *testing.T) {
+	t.Setenv("ATTN_PROFILE", "dev")
+	t.Setenv("ATTN_DB_PATH", "")
+	t.Setenv("ATTN_CONFIG_PATH", "")
+	reloadConfig()
+	t.Setenv("ATTN_SOCKET_PATH", filepath.Join(DataDir(), "custom.sock"))
+
+	if err := ValidateDaemonIsolation(SocketPath()); err != nil {
+		t.Fatalf("ValidateDaemonIsolation() returned unexpected error: %v", err)
+	}
+}
+
 func TestPluginDir_DefaultsToAttnDir(t *testing.T) {
 	os.Unsetenv("ATTN_PLUGIN_DIR")
 	os.Unsetenv("ATTN_PROFILE")
