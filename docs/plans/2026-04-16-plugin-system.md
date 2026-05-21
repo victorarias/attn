@@ -63,7 +63,7 @@ These were proposed in conversation but not explicitly confirmed:
 2. **Plugin distribution format.** Proposed: plugins ship TypeScript source + `package.json`, `attn plugin install` runs `bun install`, Bun is a prereq on the user's machine. Alternative: plugins ship `bun build --compile` binaries, no runtime dependency.
 3. **Plugin lifecycle.** Proposed: attn spawns installed plugins at daemon startup and reconciles on plugin-dir change. User-managed plugins (dev mode, ad-hoc scripts) spawn themselves and connect. One-per-plugin vs one-per-session not fully decided.
 4. **Remote daemons.** Proposed: plugins are daemon-local. Each daemon has its own plugin set. Install per host (SSH to remote, run `attn plugin install` there). Cross-daemon actor/observer deferred — likely exposes same JSON-RPC over the hub's existing WebSocket later. User raised this as an open question worth capturing; design sketched but not confirmed.
-5. **SDK shape and timing.** User pushed back on designing SDK top-down. **Revised approach: the first real plugins are written against raw JSON-RPC first. SDK emerges from patterns the worktree provider and pi driver actually needed, extracted after they work. No SDK in V1.** The protocol must be ergonomic enough to consume without a wrapper.
+5. **SDK shape and timing.** User pushed back on designing SDK top-down. **Revised approach: the first real plugins are written against raw JSON-RPC first. After the provider path proved out, extract a small SDK from those patterns; let richer driver/observer/actor helpers wait until their concrete plugins exist.** The protocol must still stay ergonomic enough to consume without a wrapper.
 6. **Manifest format.** Probably TOML — minimal, human-readable, Bun ecosystem-neutral. Alternatives: JSON, YAML. Not confirmed.
 7. **Install sources.** `attn plugin install <git-url>` as the headline, `--path <dir>` for local development. Not confirmed.
 8. **API versioning discipline.** Proposed: strict `attn_api_version: 1` refuses to load on mismatch. Additive protocol changes don't bump version. Not confirmed.
@@ -268,15 +268,28 @@ This phase proves that plugins can participate in daemon-owned operations, not o
 
 Ship the `attn plugin` command family. Manifest parser. Plugin spawn/reconcile loop in the daemon.
 
-### Phase 4 — Pi as the first agent-driver plugin
+### Phase 4 — Provider SDK foundation
+
+Extract the proven raw JSON-RPC provider client into a small TypeScript SDK:
+
+- connection + hello handshake
+- provider registration
+- daemon-request routing
+- typed provider result helpers
+- typed worktree provider request/result contracts
+
+Keep driver / observer / actor helpers out until their first concrete plugins
+exercise those paths.
+
+### Phase 5 — Pi as the first agent-driver plugin
 
 See companion plan `2026-04-16-pi-plugin.md`. Pi forces any driver-protocol gaps to surface after the provider model has already been validated against a non-agent extension point.
 
-### Phase 5 — Observer/actor role completion
+### Phase 6 — Observer/actor role completion
 
 Provider and driver roles are the tightest V1 requirements. Observer/actor were designed alongside but may ship slightly later. No second mechanism, just fleshing out the same protocol.
 
-### Phase 6 — Documentation + templates
+### Phase 7 — Documentation + templates
 
 "Write your first plugin" tutorial. `attn plugin new driver <name>` scaffolding. Example plugins repo. README for external plugin authors.
 
@@ -284,7 +297,7 @@ Provider and driver roles are the tightest V1 requirements. Observer/actor were 
 
 In priority order of what might come next:
 
-- **SDK extraction.** `@attn/plugin` on npm, extracted from the worktree provider and pi driver's patterns. Typed connection helper, reconnect logic, typed event handlers. Deferred until both initial real plugins have surfaced the stable patterns.
+- **SDK expansion.** Extend `@attn/plugin` beyond the initial provider foundation once driver, observer, and actor paths have real plugin implementations. Reconnect logic and richer typed helpers belong here, not in the first extraction.
 - **Cross-daemon control API.** Expose the same JSON-RPC surface over the hub's existing WebSocket at `:9849` so actor/observer plugins can span daemons. Useful for attn-as-agent and dashboards.
 - **Custom UI extensions.** Separate design.
 - **Plugin install over SSH / hub** — `attn --endpoint <server> plugin install <url>`. Nice-to-have, requires proxying through the hub.

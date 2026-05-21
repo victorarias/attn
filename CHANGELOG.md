@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Plugin Lifecycle CLI**: `attn plugin install --path`, `attn plugin list`, and `attn plugin remove` now manage user-owned plugins under attn's configured plugin directory and report when a daemon restart is required.
+- **Plugin SDK Foundation**: attn now includes an initial `@attn/plugin` TypeScript SDK for provider plugins, covering the daemon handshake, provider registration, request routing, structured provider results, and typed worktree provider contracts.
 
 ### Changed
 - **Worktree Provider Coverage**: Worktree providers now participate when attn creates a worktree from an existing branch, including preserving the source branch/ref context for user-owned tooling.

@@ -1,0 +1,9 @@
+{
+  "name": "@attn/plugin",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "test": "bun test"
+  }
+}
