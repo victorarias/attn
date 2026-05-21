@@ -1,5 +1,5 @@
 {
-  "name": "attn-example-worktree-prefix-provider",
+  "name": "attn-example-worktree-deps-provider",
   "private": true,
   "type": "module",
   "version": "0.1.0",

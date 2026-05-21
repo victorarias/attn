@@ -1,7 +1,0 @@
-name = "worktree-prefix-provider"
-version = "0.1.0"
-attn_api_version = 1
-description = "Example provider plugin built with @attn/plugin"
-
-[plugin]
-entrypoint = "src/index.ts"

@@ -1,0 +1,7 @@
+name = "worktree-deps-provider"
+version = "0.1.0"
+attn_api_version = 1
+description = "Example worktree provider that installs JavaScript dependencies"
+
+[plugin]
+entrypoint = "src/index.ts"

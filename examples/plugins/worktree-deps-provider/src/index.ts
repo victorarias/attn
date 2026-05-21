@@ -1,6 +1,5 @@
 import {
   AttnPluginClient,
-  decline,
   handled,
   providerError,
   type WorktreeCreateParams,
@@ -10,10 +9,10 @@ import {
 } from "@attn/plugin";
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 const socketPath = process.env.ATTN_SOCKET_PATH?.trim();
-const pluginName = process.env.ATTN_PLUGIN_NAME?.trim() || "worktree-prefix-provider";
+const pluginName = process.env.ATTN_PLUGIN_NAME?.trim() || "worktree-deps-provider";
 
 if (!socketPath) {
   throw new Error("ATTN_SOCKET_PATH is required");
@@ -44,15 +43,8 @@ async function createWorktree(params: WorktreeCreateParams): Promise<WorktreeCre
     return providerError("example provider requires a branch");
   }
 
-  const providerRoot = join(mainRepo, ".attn-example-worktrees");
   const requestedPath = params.requested_path?.trim();
-  if (!requestedPath) {
-    return providerError("example provider requires requested_path");
-  }
-  const worktreePath = resolve(requestedPath);
-  if (!pathWithin(providerRoot, worktreePath)) {
-    return providerError(`worktree path must stay inside ${providerRoot}`);
-  }
+  const worktreePath = resolve(requestedPath || defaultWorktreePath(mainRepo, branch));
   if (await pathExists(worktreePath)) {
     return providerError(`worktree path already exists: ${worktreePath}`);
   }
@@ -67,6 +59,12 @@ async function createWorktree(params: WorktreeCreateParams): Promise<WorktreeCre
 
   try {
     await runChecked("git", args, mainRepo);
+    try {
+      await installDependenciesIfPresent(worktreePath);
+    } catch (error) {
+      await runAllowFailure("git", ["worktree", "remove", "--force", worktreePath], mainRepo);
+      throw error;
+    }
     return handled({
       path: worktreePath,
       branch,
@@ -78,11 +76,7 @@ async function createWorktree(params: WorktreeCreateParams): Promise<WorktreeCre
 
 async function deleteWorktree(params: WorktreeDeleteParams): Promise<WorktreeDeleteResult> {
   const mainRepo = resolve(params.main_repo);
-  const providerRoot = join(mainRepo, ".attn-example-worktrees");
   const worktreePath = resolve(params.path);
-  if (!pathWithin(providerRoot, worktreePath)) {
-    return providerError(`worktree path must stay inside ${providerRoot}`);
-  }
 
   try {
     await runChecked("git", ["worktree", "remove", worktreePath], mainRepo);
@@ -101,13 +95,24 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-function pathWithin(root: string, target: string): boolean {
-  const rel = relative(resolve(root), resolve(target));
-  return rel !== "" && rel !== ".." && !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`);
+function defaultWorktreePath(mainRepo: string, branch: string): string {
+  return join(mainRepo, ".worktrees", branch.replaceAll("/", "-"));
 }
 
 async function runChecked(command: string, args: string[], cwd: string): Promise<void> {
-  const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolveResult) => {
+  const result = await runAllowFailure(command, args, cwd);
+  if (result.code !== 0) {
+    const details = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join("\n");
+    throw new Error(details || `${command} ${args.join(" ")} exited with ${result.code}`);
+  }
+}
+
+async function runAllowFailure(
+  command: string,
+  args: string[],
+  cwd: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolveResult) => {
     const child = spawn(command, args, {
       cwd,
       env: process.env,
@@ -130,10 +135,20 @@ async function runChecked(command: string, args: string[], cwd: string): Promise
       resolveResult({ code: code ?? 1, stdout, stderr });
     });
   });
+}
 
-  if (result.code !== 0) {
-    const details = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join("\n");
-    throw new Error(details || `${command} ${args.join(" ")} exited with ${result.code}`);
+async function installDependenciesIfPresent(worktreePath: string): Promise<void> {
+  const managers = [
+    { lockfile: "pnpm-lock.yaml", command: "pnpm", args: ["install"] },
+    { lockfile: "yarn.lock", command: "yarn", args: ["install"] },
+    { lockfile: "package-lock.json", command: "npm", args: ["install"] },
+  ];
+  for (const manager of managers) {
+    if (!(await pathExists(join(worktreePath, manager.lockfile)))) {
+      continue;
+    }
+    await runChecked(manager.command, manager.args, worktreePath);
+    return;
   }
 }
 
