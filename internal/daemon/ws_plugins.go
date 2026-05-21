@@ -23,7 +23,9 @@ func (d *Daemon) handleInstallPluginWS(client *wsClient, msg *protocol.InstallPl
 		return
 	}
 
-	manifest, err := plugins.InstallPath(path, d.pluginDir)
+	manifest, err := plugins.InstallPathWithOptions(path, d.pluginDir, plugins.InstallOptions{
+		Env: d.pluginCommandEnv(),
+	})
 	if err != nil {
 		d.sendPluginActionResult(client, "install", "", false, err.Error())
 		return

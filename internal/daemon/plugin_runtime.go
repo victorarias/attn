@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/victorarias/attn/internal/plugins"
@@ -100,10 +101,9 @@ func (d *Daemon) startInstalledPlugins() {
 }
 
 func (d *Daemon) startInstalledPlugin(manifest pluginManifest) error {
-	cmd := exec.Command("bun", "run", manifest.Plugin.Entrypoint)
+	cmd := exec.Command("/usr/bin/env", "bun", "run", manifest.Plugin.Entrypoint)
 	cmd.Dir = manifest.Dir
-	cmd.Env = append(
-		os.Environ(),
+	cmd.Env = d.pluginCommandEnv(
 		"ATTN_SOCKET_PATH="+d.socketPath,
 		"ATTN_PLUGIN_NAME="+manifest.Name,
 	)
@@ -133,6 +133,41 @@ func (d *Daemon) startInstalledPlugin(manifest pluginManifest) error {
 		d.logf("plugin %s exited", manifest.Name)
 	}()
 	return nil
+}
+
+func (d *Daemon) pluginCommandEnv(extra ...string) []string {
+	env := append([]string(nil), os.Environ()...)
+	env = mergePluginEnvironment(env, d.cachedLoginShellEnv())
+	env = mergePluginEnvironment(env, extra)
+	return env
+}
+
+func mergePluginEnvironment(base, overlay []string) []string {
+	if len(overlay) == 0 {
+		return append([]string(nil), base...)
+	}
+
+	merged := make([]string, 0, len(base)+len(overlay))
+	index := make(map[string]int, len(base)+len(overlay))
+	add := func(entry string) {
+		key := entry
+		if split := strings.Index(entry, "="); split >= 0 {
+			key = entry[:split]
+		}
+		if pos, ok := index[key]; ok {
+			merged[pos] = entry
+			return
+		}
+		index[key] = len(merged)
+		merged = append(merged, entry)
+	}
+	for _, entry := range base {
+		add(entry)
+	}
+	for _, entry := range overlay {
+		add(entry)
+	}
+	return merged
 }
 
 func (d *Daemon) stopInstalledPlugins() {
