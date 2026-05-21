@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func TestDoCreateWorktree_ProviderHandledRegistersValidatedWorktree(t *testing.T
 	if err != nil {
 		t.Fatalf("doCreateWorktree failed: %v", err)
 	}
-	<-responseDone
+	waitForProviderResponse(t, responseDone)
 
 	if canonicalPathDaemon(path) != canonicalPathDaemon(providerPath) {
 		t.Fatalf("created path=%q, want %q", path, providerPath)
@@ -83,7 +84,7 @@ func TestDoCreateWorktree_ProviderDeclineFallsBackToBuiltInGit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("doCreateWorktree fallback failed: %v", err)
 	}
-	<-responseDone
+	waitForProviderResponse(t, responseDone)
 
 	wantPath := git.GenerateWorktreePath(mainDir, "feat/fallback-create")
 	if canonicalPathDaemon(path) != canonicalPathDaemon(wantPath) {
@@ -123,7 +124,7 @@ func TestDoCreateWorktree_ProviderHandledPathMustBeRealExpectedWorktree(t *testi
 	}); err == nil {
 		t.Fatal("doCreateWorktree error=nil, want invalid provider result")
 	}
-	<-responseDone
+	waitForProviderResponse(t, responseDone)
 
 	_ = client.Close()
 	select {
@@ -162,7 +163,7 @@ func TestDoDeleteWorktree_ProviderHandledFinalizesDaemonState(t *testing.T) {
 	if err := d.doDeleteWorktree(worktreePath, nil); err != nil {
 		t.Fatalf("doDeleteWorktree failed: %v", err)
 	}
-	<-responseDone
+	waitForProviderResponse(t, responseDone)
 
 	if wt := d.store.GetWorktree(worktreePath); wt != nil {
 		t.Fatalf("expected deleted worktree removed from store, got %#v", wt)
@@ -201,18 +202,20 @@ func respondToCreateProviderCall(
 	t *testing.T,
 	conn net.Conn,
 	handle func(worktreeCreateProviderParams) worktreeCreateProviderResult,
-) <-chan struct{} {
+) <-chan error {
 	t.Helper()
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	go func() {
 		defer close(done)
 		request := decodeJSONRPCMessage(t, conn)
 		if request.Method != worktreeCreateProviderSurface {
-			t.Fatalf("provider method=%q, want %s", request.Method, worktreeCreateProviderSurface)
+			done <- fmt.Errorf("provider method=%q, want %s", request.Method, worktreeCreateProviderSurface)
+			return
 		}
 		var params worktreeCreateProviderParams
 		if err := json.Unmarshal(request.Params, &params); err != nil {
-			t.Fatalf("decode create provider params: %v", err)
+			done <- fmt.Errorf("decode create provider params: %w", err)
+			return
 		}
 		writeProviderResult(t, conn, request.ID, handle(params))
 	}()
@@ -223,22 +226,31 @@ func respondToDeleteProviderCall(
 	t *testing.T,
 	conn net.Conn,
 	handle func(worktreeDeleteProviderParams) worktreeDeleteProviderResult,
-) <-chan struct{} {
+) <-chan error {
 	t.Helper()
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	go func() {
 		defer close(done)
 		request := decodeJSONRPCMessage(t, conn)
 		if request.Method != worktreeDeleteProviderSurface {
-			t.Fatalf("provider method=%q, want %s", request.Method, worktreeDeleteProviderSurface)
+			done <- fmt.Errorf("provider method=%q, want %s", request.Method, worktreeDeleteProviderSurface)
+			return
 		}
 		var params worktreeDeleteProviderParams
 		if err := json.Unmarshal(request.Params, &params); err != nil {
-			t.Fatalf("decode delete provider params: %v", err)
+			done <- fmt.Errorf("decode delete provider params: %w", err)
+			return
 		}
 		writeProviderResult(t, conn, request.ID, handle(params))
 	}()
 	return done
+}
+
+func waitForProviderResponse(t *testing.T, done <-chan error) {
+	t.Helper()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeProviderResult(t *testing.T, conn net.Conn, id json.RawMessage, result interface{}) {
