@@ -128,6 +128,9 @@ func main() {
 		runPTYWorker()
 	case "review-loop":
 		runReviewLoop()
+	case "plugin":
+		maybePrintProfileBanner()
+		runPluginCommand()
 	case "list":
 		maybePrintProfileBanner()
 		runList()

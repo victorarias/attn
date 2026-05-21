@@ -168,6 +168,55 @@ func TestDoCreateWorktree_ProviderHandledPathMustBeNewWorktree(t *testing.T) {
 	}
 }
 
+func TestDoCreateWorktreeFromBranch_ProviderHandledRegistersValidatedWorktree(t *testing.T) {
+	tmpDir, mainDir := initProviderTestRepo(t)
+	runGitDaemon(t, mainDir, "branch", "feature/existing")
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	client, done := startPluginPipe(t, d, "branch-create-provider", []string{"provider"})
+	defer client.Close()
+	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+
+	providerPath := filepath.Join(tmpDir, "provider-existing-branch")
+	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
+		if params.Branch != "feature/existing" {
+			t.Fatalf("provider branch=%q, want feature/existing", params.Branch)
+		}
+		if params.StartingFrom != "feature/existing" {
+			t.Fatalf("provider starting_from=%q, want feature/existing", params.StartingFrom)
+		}
+		runGitDaemon(t, mainDir, "worktree", "add", providerPath, params.StartingFrom)
+		return worktreeCreateProviderResult{
+			Status: providerStatusHandled,
+			Path:   providerPath,
+			Branch: params.Branch,
+		}
+	})
+
+	path, err := d.doCreateWorktreeFromBranch(&protocol.CreateWorktreeFromBranchMessage{
+		MainRepo: mainDir,
+		Branch:   "feature/existing",
+	})
+	if err != nil {
+		t.Fatalf("doCreateWorktreeFromBranch failed: %v", err)
+	}
+	waitForProviderResponse(t, responseDone)
+
+	if canonicalPathDaemon(path) != canonicalPathDaemon(providerPath) {
+		t.Fatalf("created path=%q, want %q", path, providerPath)
+	}
+	if wt := d.store.GetWorktree(git.CanonicalizePath(providerPath)); wt == nil {
+		t.Fatalf("expected branch-provider worktree %q in store", providerPath)
+	}
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("branch create provider connection did not close")
+	}
+}
+
 func TestDoDeleteWorktree_ProviderHandledFinalizesDaemonState(t *testing.T) {
 	tmpDir, mainDir := initProviderTestRepo(t)
 	worktreePath := filepath.Join(tmpDir, "provider-delete")
