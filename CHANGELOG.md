@@ -14,6 +14,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **Worktree Provider Coverage**: Worktree providers now participate when attn creates a worktree from an existing branch, including preserving the source branch/ref context for user-owned tooling.
 
+### Fixed
+- **Daemon Isolation Guard**: attn now refuses to start a daemon with an alternate socket/PID root while still pointing at the active profile's normal session database, preventing auxiliary daemon runs from pruning live sessions they do not own.
+
 ---
 
 ## [2026-05-17]
