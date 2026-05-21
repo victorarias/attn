@@ -6,6 +6,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-05-21]
+
+### Added
+- **Plugin Lifecycle CLI**: `attn plugin install --path`, `attn plugin list`, and `attn plugin remove` now manage user-owned plugins under attn's configured plugin directory and report when a daemon restart is required.
+
+### Changed
+- **Worktree Provider Coverage**: Worktree providers now participate when attn creates a worktree from an existing branch, including preserving the source branch/ref context for user-owned tooling.
+
+---
+
 ## [2026-05-17]
 
 ### Changed

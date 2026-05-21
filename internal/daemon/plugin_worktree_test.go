@@ -168,6 +168,162 @@ func TestDoCreateWorktree_ProviderHandledPathMustBeNewWorktree(t *testing.T) {
 	}
 }
 
+func TestDoCreateWorktreeFromBranch_ProviderHandledRegistersValidatedWorktree(t *testing.T) {
+	tmpDir, mainDir := initProviderTestRepo(t)
+	runGitDaemon(t, mainDir, "branch", "feature/existing")
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	client, done := startPluginPipe(t, d, "branch-create-provider", []string{"provider"})
+	defer client.Close()
+	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+
+	providerPath := filepath.Join(tmpDir, "provider-existing-branch")
+	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
+		if params.Branch != "feature/existing" {
+			t.Fatalf("provider branch=%q, want feature/existing", params.Branch)
+		}
+		if params.StartingFrom != "feature/existing" {
+			t.Fatalf("provider starting_from=%q, want feature/existing", params.StartingFrom)
+		}
+		runGitDaemon(t, mainDir, "worktree", "add", providerPath, params.StartingFrom)
+		return worktreeCreateProviderResult{
+			Status: providerStatusHandled,
+			Path:   providerPath,
+			Branch: params.Branch,
+		}
+	})
+
+	path, err := d.doCreateWorktreeFromBranch(&protocol.CreateWorktreeFromBranchMessage{
+		MainRepo: mainDir,
+		Branch:   "feature/existing",
+	})
+	if err != nil {
+		t.Fatalf("doCreateWorktreeFromBranch failed: %v", err)
+	}
+	waitForProviderResponse(t, responseDone)
+
+	if canonicalPathDaemon(path) != canonicalPathDaemon(providerPath) {
+		t.Fatalf("created path=%q, want %q", path, providerPath)
+	}
+	if wt := d.store.GetWorktree(git.CanonicalizePath(providerPath)); wt == nil {
+		t.Fatalf("expected branch-provider worktree %q in store", providerPath)
+	}
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("branch create provider connection did not close")
+	}
+}
+
+func TestDoCreateWorktreeFromBranch_ProviderHandledRemoteBranchStoresLocalBranch(t *testing.T) {
+	tmpDir, mainDir := initProviderTestRepo(t)
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	client, done := startPluginPipe(t, d, "remote-branch-create-provider", []string{"provider"})
+	defer client.Close()
+	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+
+	providerPath := filepath.Join(tmpDir, "provider-remote-branch")
+	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
+		if params.Branch != "feature/remote" {
+			t.Fatalf("provider branch=%q, want feature/remote", params.Branch)
+		}
+		if params.StartingFrom != "origin/feature/remote" {
+			t.Fatalf("provider starting_from=%q, want origin/feature/remote", params.StartingFrom)
+		}
+		runGitDaemon(t, mainDir, "worktree", "add", "-b", params.Branch, providerPath)
+		return worktreeCreateProviderResult{
+			Status: providerStatusHandled,
+			Path:   providerPath,
+			Branch: params.Branch,
+		}
+	})
+
+	path, err := d.doCreateWorktreeFromBranch(&protocol.CreateWorktreeFromBranchMessage{
+		MainRepo: mainDir,
+		Branch:   "origin/feature/remote",
+	})
+	if err != nil {
+		t.Fatalf("doCreateWorktreeFromBranch failed: %v", err)
+	}
+	waitForProviderResponse(t, responseDone)
+
+	if canonicalPathDaemon(path) != canonicalPathDaemon(providerPath) {
+		t.Fatalf("created path=%q, want %q", path, providerPath)
+	}
+	created := d.store.GetWorktree(git.CanonicalizePath(providerPath))
+	if created == nil {
+		t.Fatalf("expected remote branch provider worktree %q in store", providerPath)
+	}
+	if created.Branch != "feature/remote" {
+		t.Fatalf("stored branch=%q, want feature/remote", created.Branch)
+	}
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("remote branch create provider connection did not close")
+	}
+}
+
+func TestDoCreateWorktreeFromBranch_ProviderDeclinesRemoteBranchFallsBackToBuiltInGit(t *testing.T) {
+	tmpDir, mainDir := initProviderTestRepo(t)
+	remoteBranch := "feature/remote-fallback"
+	originDir := filepath.Join(tmpDir, "origin.git")
+	runGitDaemon(t, tmpDir, "init", "--bare", originDir)
+	runGitDaemon(t, mainDir, "remote", "add", "origin", originDir)
+	runGitDaemon(t, mainDir, "branch", remoteBranch)
+	runGitDaemon(t, mainDir, "push", "origin", remoteBranch)
+	runGitDaemon(t, mainDir, "branch", "-D", remoteBranch)
+	runGitDaemon(t, mainDir, "fetch", "origin")
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	client, done := startPluginPipe(t, d, "declining-remote-branch-provider", []string{"provider"})
+	defer client.Close()
+	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+
+	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
+		if params.Branch != remoteBranch {
+			t.Fatalf("provider branch=%q, want %s", params.Branch, remoteBranch)
+		}
+		if params.StartingFrom != "origin/"+remoteBranch {
+			t.Fatalf("provider starting_from=%q, want origin/%s", params.StartingFrom, remoteBranch)
+		}
+		return worktreeCreateProviderResult{Status: providerStatusDecline}
+	})
+
+	path, err := d.doCreateWorktreeFromBranch(&protocol.CreateWorktreeFromBranchMessage{
+		MainRepo: mainDir,
+		Branch:   "origin/" + remoteBranch,
+	})
+	if err != nil {
+		t.Fatalf("doCreateWorktreeFromBranch fallback failed: %v", err)
+	}
+	waitForProviderResponse(t, responseDone)
+
+	wantPath := git.GenerateWorktreePath(mainDir, remoteBranch)
+	if canonicalPathDaemon(path) != canonicalPathDaemon(wantPath) {
+		t.Fatalf("fallback path=%q, want %q", path, wantPath)
+	}
+	created := d.store.GetWorktree(path)
+	if created == nil {
+		t.Fatalf("expected fallback remote worktree %q in store", path)
+	}
+	if created.Branch != remoteBranch {
+		t.Fatalf("stored branch=%q, want %s", created.Branch, remoteBranch)
+	}
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("declining remote branch provider connection did not close")
+	}
+}
+
 func TestDoDeleteWorktree_ProviderHandledFinalizesDaemonState(t *testing.T) {
 	tmpDir, mainDir := initProviderTestRepo(t)
 	worktreePath := filepath.Join(tmpDir, "provider-delete")

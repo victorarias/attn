@@ -5,103 +5,22 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 
-	"github.com/BurntSushi/toml"
+	"github.com/victorarias/attn/internal/plugins"
 )
 
-const pluginManifestName = "attn-plugin.toml"
+const pluginManifestName = plugins.ManifestName
 
-type pluginManifest struct {
-	Name           string `toml:"name"`
-	Version        string `toml:"version"`
-	AttnAPIVersion int    `toml:"attn_api_version"`
-	Plugin         struct {
-		Entrypoint string `toml:"entrypoint"`
-	} `toml:"plugin"`
-
-	dir string
-}
-
-type pluginManifestIssue struct {
-	Path string
-	Err  error
-}
-
-func (i pluginManifestIssue) Error() string {
-	return fmt.Sprintf("%s: %v", i.Path, i.Err)
-}
+type pluginManifest = plugins.Manifest
+type pluginManifestIssue = plugins.ManifestIssue
 
 func discoverPluginManifests(pluginDir string) ([]pluginManifest, []pluginManifestIssue) {
-	pluginDir = strings.TrimSpace(pluginDir)
-	if pluginDir == "" {
-		return nil, nil
-	}
-
-	entries, err := os.ReadDir(pluginDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, []pluginManifestIssue{{Path: pluginDir, Err: err}}
-	}
-
-	manifests := make([]pluginManifest, 0, len(entries))
-	var issues []pluginManifestIssue
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		manifestPath := filepath.Join(pluginDir, entry.Name(), pluginManifestName)
-		manifest, err := loadPluginManifest(manifestPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			issues = append(issues, pluginManifestIssue{Path: manifestPath, Err: err})
-			continue
-		}
-		manifests = append(manifests, manifest)
-	}
-
-	sort.Slice(manifests, func(i, j int) bool {
-		return manifests[i].Name < manifests[j].Name
-	})
-	return manifests, issues
+	return plugins.Discover(pluginDir)
 }
 
 func loadPluginManifest(path string) (pluginManifest, error) {
-	var manifest pluginManifest
-	if _, err := toml.DecodeFile(path, &manifest); err != nil {
-		return pluginManifest{}, err
-	}
-
-	manifest.Name = strings.TrimSpace(manifest.Name)
-	manifest.Version = strings.TrimSpace(manifest.Version)
-	manifest.Plugin.Entrypoint = strings.TrimSpace(manifest.Plugin.Entrypoint)
-	manifest.dir = filepath.Dir(path)
-
-	switch {
-	case manifest.Name == "":
-		return pluginManifest{}, errors.New("name is required")
-	case manifest.Version == "":
-		return pluginManifest{}, errors.New("version is required")
-	case manifest.AttnAPIVersion != pluginAPIVersion:
-		return pluginManifest{}, fmt.Errorf("unsupported attn_api_version %d", manifest.AttnAPIVersion)
-	case manifest.Plugin.Entrypoint == "":
-		return pluginManifest{}, errors.New("plugin.entrypoint is required")
-	case filepath.IsAbs(manifest.Plugin.Entrypoint):
-		return pluginManifest{}, errors.New("plugin.entrypoint must be relative to the plugin directory")
-	}
-
-	entrypointPath := filepath.Join(manifest.dir, manifest.Plugin.Entrypoint)
-	if _, err := os.Stat(entrypointPath); err != nil {
-		return pluginManifest{}, fmt.Errorf("plugin.entrypoint %q: %w", manifest.Plugin.Entrypoint, err)
-	}
-	return manifest, nil
+	return plugins.LoadManifest(path)
 }
 
 type pluginProcessRegistry struct {
@@ -170,7 +89,7 @@ func (d *Daemon) startInstalledPlugins() {
 
 func (d *Daemon) startInstalledPlugin(manifest pluginManifest) error {
 	cmd := exec.Command("bun", "run", manifest.Plugin.Entrypoint)
-	cmd.Dir = manifest.dir
+	cmd.Dir = manifest.Dir
 	cmd.Env = append(
 		os.Environ(),
 		"ATTN_SOCKET_PATH="+d.socketPath,

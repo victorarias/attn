@@ -3,11 +3,9 @@ package daemon
 
 import (
 	"strings"
-	"time"
 
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/store"
 )
 
 // doCreateWorktreeFromBranch creates a worktree from an existing branch
@@ -22,12 +20,22 @@ func (d *Daemon) doCreateWorktreeFromBranch(msg *protocol.CreateWorktreeFromBran
 		localBranch = strings.TrimPrefix(branch, "origin/")
 	}
 
-	path := protocol.Deref(msg.Path)
+	requestedPath := protocol.Deref(msg.Path)
+	path := requestedPath
 	if path == "" {
 		// Use local branch name for cleaner worktree path
 		path = git.GenerateWorktreePath(mainRepo, localBranch)
 	}
 	path = git.ExpandPath(path)
+
+	providerPath, providerBranch, handled, err := d.dispatchWorktreeCreateProvider(mainRepo, localBranch, branch, requestedPath)
+	if err != nil {
+		return "", err
+	}
+	if handled {
+		d.registerCreatedWorktree(mainRepo, providerPath, providerBranch)
+		return providerPath, nil
+	}
 
 	if isRemote {
 		// Create worktree with local branch tracking remote
@@ -42,25 +50,7 @@ func (d *Daemon) doCreateWorktreeFromBranch(msg *protocol.CreateWorktreeFromBran
 		}
 	}
 
-	wt := &store.Worktree{
-		Path:      path,
-		Branch:    localBranch, // Store local branch name, not origin/xxx
-		MainRepo:  mainRepo,
-		CreatedAt: time.Now(),
-	}
-	d.store.AddWorktree(wt)
-
-	// Broadcast created event to all clients
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventWorktreeCreated,
-		Worktrees: []protocol.Worktree{{
-			Path:      wt.Path,
-			Branch:    wt.Branch,
-			MainRepo:  wt.MainRepo,
-			CreatedAt: protocol.Ptr(wt.CreatedAt.Format(time.RFC3339)),
-		}},
-	})
-
+	d.registerCreatedWorktree(mainRepo, path, localBranch)
 	return path, nil
 }
 
