@@ -134,6 +134,40 @@ func TestDoCreateWorktree_ProviderHandledPathMustBeRealExpectedWorktree(t *testi
 	}
 }
 
+func TestDoCreateWorktree_ProviderHandledPathMustBeNewWorktree(t *testing.T) {
+	tmpDir, mainDir := initProviderTestRepo(t)
+	existingPath := filepath.Join(tmpDir, "existing")
+	runGitDaemon(t, mainDir, "worktree", "add", "-b", "feat/existing", existingPath)
+
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+	client, done := startPluginPipe(t, d, "existing-create-provider", []string{"provider"})
+	defer client.Close()
+	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+
+	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
+		return worktreeCreateProviderResult{
+			Status: providerStatusHandled,
+			Path:   existingPath,
+			Branch: "feat/existing",
+		}
+	})
+
+	if _, err := d.doCreateWorktree(&protocol.CreateWorktreeMessage{
+		MainRepo: mainDir,
+		Branch:   "feat/new-request",
+	}); err == nil {
+		t.Fatal("doCreateWorktree error=nil, want pre-existing provider result rejected")
+	}
+	waitForProviderResponse(t, responseDone)
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("existing create provider connection did not close")
+	}
+}
+
 func TestDoDeleteWorktree_ProviderHandledFinalizesDaemonState(t *testing.T) {
 	tmpDir, mainDir := initProviderTestRepo(t)
 	worktreePath := filepath.Join(tmpDir, "provider-delete")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/victorarias/attn/internal/git"
 )
@@ -11,6 +12,7 @@ import (
 const (
 	worktreeCreateProviderSurface = "worktree.create"
 	worktreeDeleteProviderSurface = "worktree.delete"
+	worktreeProviderCallTimeout   = 30 * time.Second
 
 	providerStatusHandled = "handled"
 	providerStatusDecline = "decline"
@@ -47,6 +49,10 @@ func (d *Daemon) dispatchWorktreeCreateProvider(mainRepo, branch, startingFrom, 
 	if len(providers) == 0 {
 		return "", "", false, nil
 	}
+	preExisting, err := currentWorktreePathSet(mainRepo)
+	if err != nil {
+		return "", "", false, fmt.Errorf("list worktrees before provider create: %w", err)
+	}
 
 	params := worktreeCreateProviderParams{
 		MainRepo:     mainRepo,
@@ -59,7 +65,10 @@ func (d *Daemon) dispatchWorktreeCreateProvider(mainRepo, branch, startingFrom, 
 
 	for _, provider := range providers {
 		var result worktreeCreateProviderResult
-		if err := d.callPlugin(context.Background(), provider.PluginName, worktreeCreateProviderSurface, params, &result); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), worktreeProviderCallTimeout)
+		err := d.callPlugin(ctx, provider.PluginName, worktreeCreateProviderSurface, params, &result)
+		cancel()
+		if err != nil {
 			return "", "", false, fmt.Errorf("worktree provider %q create call failed: %w", provider.PluginName, err)
 		}
 
@@ -69,7 +78,7 @@ func (d *Daemon) dispatchWorktreeCreateProvider(mainRepo, branch, startingFrom, 
 		case providerStatusError:
 			return "", "", false, providerOperationError(provider.PluginName, worktreeCreateProviderSurface, result.Error)
 		case providerStatusHandled:
-			path, createdBranch, err := validateCreatedProviderWorktree(mainRepo, result)
+			path, createdBranch, err := validateCreatedProviderWorktree(mainRepo, result, preExisting)
 			if err != nil {
 				return "", "", false, fmt.Errorf("worktree provider %q returned invalid create result: %w", provider.PluginName, err)
 			}
@@ -95,7 +104,10 @@ func (d *Daemon) dispatchWorktreeDeleteProvider(mainRepo, path, branch string) (
 	}
 	for _, provider := range providers {
 		var result worktreeDeleteProviderResult
-		if err := d.callPlugin(context.Background(), provider.PluginName, worktreeDeleteProviderSurface, params, &result); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), worktreeProviderCallTimeout)
+		err := d.callPlugin(ctx, provider.PluginName, worktreeDeleteProviderSurface, params, &result)
+		cancel()
+		if err != nil {
 			return false, fmt.Errorf("worktree provider %q delete call failed: %w", provider.PluginName, err)
 		}
 
@@ -125,10 +137,13 @@ func providerOperationError(pluginName, surface, message string) error {
 	return fmt.Errorf("worktree provider %q %s: %s", pluginName, surface, message)
 }
 
-func validateCreatedProviderWorktree(mainRepo string, result worktreeCreateProviderResult) (string, string, error) {
+func validateCreatedProviderWorktree(mainRepo string, result worktreeCreateProviderResult, preExisting map[string]bool) (string, string, error) {
 	path := git.CanonicalizePath(strings.TrimSpace(result.Path))
 	if path == "" {
 		return "", "", fmt.Errorf("handled create result is missing path")
+	}
+	if preExisting[path] {
+		return "", "", fmt.Errorf("handled create result path %q already existed before provider create", path)
 	}
 
 	branch := strings.TrimSpace(result.Branch)
@@ -151,6 +166,18 @@ func validateCreatedProviderWorktree(mainRepo string, result worktreeCreateProvi
 	}
 
 	return "", "", fmt.Errorf("created path %q is not a worktree of %q", path, mainRepo)
+}
+
+func currentWorktreePathSet(mainRepo string) (map[string]bool, error) {
+	worktrees, err := git.ListWorktrees(mainRepo)
+	if err != nil {
+		return nil, err
+	}
+	paths := make(map[string]bool, len(worktrees))
+	for _, worktree := range worktrees {
+		paths[git.CanonicalizePath(worktree.Path)] = true
+	}
+	return paths, nil
 }
 
 func validateDeletedProviderWorktree(mainRepo, path string) error {
