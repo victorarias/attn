@@ -7,18 +7,16 @@ It demonstrates:
 - the SDK-backed daemon handshake
 - provider registration
 - typed `worktree.create` and `worktree.delete` handlers
-- `decline()` for repos outside the example contract
-- `handled()` after the example provider actually creates or removes a worktree
+- `providerError()` for unsupported calls
+- `handled()` after the provider actually creates or removes a worktree
 
-The plugin only claims repositories that contain a
-`.attn-example-provider` marker file. For those repos:
+The example keeps the behavior intentionally concrete:
 
-- create requests are routed into
-  `<main_repo>/.attn-example-worktrees/<branch>`
-- delete requests under that directory use `git worktree remove`
-
-That makes it small enough to read while still showing the actual worktree
-operations a provider would perform.
+- create requests must include `requested_path`
+- that path must stay inside `<main_repo>/.attn-example-worktrees/`
+- the plugin runs `git worktree add` there
+- delete requests outside that directory are rejected
+- delete requests inside it use `git worktree remove`
 
 This example consumes `@attn/plugin` through a local `file:` dependency back
 into this repository. Until the SDK has a publishable external consumption path,

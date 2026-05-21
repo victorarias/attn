@@ -39,19 +39,17 @@ await client.registerProvider(["worktree.create", "worktree.delete"], 50);
 
 async function createWorktree(params: WorktreeCreateParams): Promise<WorktreeCreateResult> {
   const mainRepo = resolve(params.main_repo);
-  if (!(await isEnabledRepo(mainRepo))) {
-    return decline();
-  }
-
   const branch = params.branch.trim();
   if (!branch) {
     return providerError("example provider requires a branch");
   }
 
   const providerRoot = join(mainRepo, ".attn-example-worktrees");
-  const defaultPath = join(providerRoot, branch.replaceAll("/", "-"));
   const requestedPath = params.requested_path?.trim();
-  const worktreePath = resolve(requestedPath || defaultPath);
+  if (!requestedPath) {
+    return providerError("example provider requires requested_path");
+  }
+  const worktreePath = resolve(requestedPath);
   if (!pathWithin(providerRoot, worktreePath)) {
     return providerError(`worktree path must stay inside ${providerRoot}`);
   }
@@ -80,14 +78,10 @@ async function createWorktree(params: WorktreeCreateParams): Promise<WorktreeCre
 
 async function deleteWorktree(params: WorktreeDeleteParams): Promise<WorktreeDeleteResult> {
   const mainRepo = resolve(params.main_repo);
-  if (!(await isEnabledRepo(mainRepo))) {
-    return decline();
-  }
-
   const providerRoot = join(mainRepo, ".attn-example-worktrees");
   const worktreePath = resolve(params.path);
   if (!pathWithin(providerRoot, worktreePath)) {
-    return decline();
+    return providerError(`worktree path must stay inside ${providerRoot}`);
   }
 
   try {
@@ -96,10 +90,6 @@ async function deleteWorktree(params: WorktreeDeleteParams): Promise<WorktreeDel
   } catch (error) {
     return providerError(errorMessage(error));
   }
-}
-
-async function isEnabledRepo(mainRepo: string): Promise<boolean> {
-  return pathExists(join(mainRepo, ".attn-example-provider"));
 }
 
 async function pathExists(path: string): Promise<boolean> {
