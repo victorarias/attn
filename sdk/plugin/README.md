@@ -47,3 +47,6 @@ await client.registerProvider(["worktree.create"], 100);
 
 The runtime remains intentionally small. Driver, observer, and actor helpers
 should be extracted once those flows have concrete plugin implementations.
+
+For a full plugin directory built on this SDK, see
+`examples/plugins/worktree-prefix-provider`.

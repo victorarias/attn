@@ -116,6 +116,47 @@ describe("AttnPluginClient", () => {
     client.close();
     await server.close();
   });
+
+  test("drops pending requests when send fails before writing", async () => {
+    const client = new AttnPluginClient({
+      socketPath: "/tmp/unused.sock",
+      name: "sdk-provider",
+      version: "0.1.0",
+      roles: ["provider"],
+    });
+
+    await expect(client.request("provider.register", {})).rejects.toThrow(
+      "attn plugin socket is not connected",
+    );
+    expect(pendingRequestCount(client)).toBe(0);
+  });
+
+  test("resets a rejected hello so connect can retry cleanly", async () => {
+    let helloCount = 0;
+    const server = await startServer(async (socket, request) => {
+      if (request.method !== "hello") {
+        return;
+      }
+      helloCount += 1;
+      socket.write(
+        `${JSON.stringify(response(request.id, { ok: helloCount > 1 }))}\n`,
+      );
+    });
+
+    const client = new AttnPluginClient({
+      socketPath: server.socketPath,
+      name: "sdk-provider",
+      version: "0.1.0",
+      roles: ["provider"],
+    });
+
+    await expect(client.connect()).rejects.toThrow("attn rejected plugin hello");
+    await client.connect();
+
+    expect(helloCount).toBe(2);
+    client.close();
+    await server.close();
+  });
 });
 
 describe("provider result helpers", () => {
@@ -210,4 +251,8 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await Bun.sleep(10);
   }
   throw new Error("timed out waiting for condition");
+}
+
+function pendingRequestCount(client: AttnPluginClient): number {
+  return (client as unknown as { pending: Map<string, unknown> }).pending.size;
 }

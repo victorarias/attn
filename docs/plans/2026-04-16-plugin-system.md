@@ -277,6 +277,7 @@ Extract the proven raw JSON-RPC provider client into a small TypeScript SDK:
 - daemon-request routing
 - typed provider result helpers
 - typed worktree provider request/result contracts
+- one checked-in example provider plugin that consumes the SDK end to end
 
 Keep driver / observer / actor helpers out until their first concrete plugins
 exercise those paths.

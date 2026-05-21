@@ -1,0 +1,9 @@
+{
+  "name": "attn-example-worktree-prefix-provider",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "dependencies": {
+    "@attn/plugin": "file:../../../sdk/plugin"
+  }
+}

@@ -105,32 +105,37 @@ export class AttnPluginClient {
       return;
     }
 
-    this.socket = await new Promise<Socket>((resolve, reject) => {
-      const socket = createConnection({ path: this.options.socketPath });
-      const onError = (error: Error) => reject(error);
-      socket.once("error", onError);
-      socket.once("connect", () => {
-        socket.off("error", onError);
-        resolve(socket);
+    try {
+      this.socket = await new Promise<Socket>((resolve, reject) => {
+        const socket = createConnection({ path: this.options.socketPath });
+        const onError = (error: Error) => reject(error);
+        socket.once("error", onError);
+        socket.once("connect", () => {
+          socket.off("error", onError);
+          resolve(socket);
+        });
       });
-    });
 
-    this.socket.setEncoding("utf8");
-    this.socket.on("data", (chunk) => this.consume(chunk));
-    this.socket.on("error", (error) => this.failPending(error));
-    this.socket.on("close", () => {
-      this.socket = undefined;
-      this.failPending(new Error("attn plugin socket closed"));
-    });
+      this.socket.setEncoding("utf8");
+      this.socket.on("data", (chunk) => this.consume(chunk));
+      this.socket.on("error", (error) => this.failPending(error));
+      this.socket.on("close", () => {
+        this.socket = undefined;
+        this.failPending(new Error("attn plugin socket closed"));
+      });
 
-    const result = await this.request<HelloResult>("hello", {
-      name: this.options.name,
-      version: this.options.version,
-      attn_api_version: this.options.attnAPIVersion ?? pluginAPIVersion,
-      roles: this.options.roles,
-    });
-    if (!result.ok) {
-      throw new Error("attn rejected plugin hello");
+      const result = await this.request<HelloResult>("hello", {
+        name: this.options.name,
+        version: this.options.version,
+        attn_api_version: this.options.attnAPIVersion ?? pluginAPIVersion,
+        roles: this.options.roles,
+      });
+      if (!result.ok) {
+        throw new Error("attn rejected plugin hello");
+      }
+    } catch (error) {
+      this.resetSocket(error instanceof Error ? error : new Error(String(error)));
+      throw error;
     }
   }
 
@@ -167,12 +172,17 @@ export class AttnPluginClient {
       });
     });
 
-    this.send({
-      jsonrpc: "2.0",
-      id,
-      method,
-      params,
-    });
+    try {
+      this.send({
+        jsonrpc: "2.0",
+        id,
+        method,
+        params,
+      });
+    } catch (error) {
+      this.pending.delete(String(id));
+      throw error;
+    }
 
     return response;
   }
@@ -250,6 +260,13 @@ export class AttnPluginClient {
       pending.reject(error);
     }
     this.pending.clear();
+  }
+
+  private resetSocket(error: Error): void {
+    const socket = this.socket;
+    this.socket = undefined;
+    this.failPending(error);
+    socket?.destroy();
   }
 }
 
