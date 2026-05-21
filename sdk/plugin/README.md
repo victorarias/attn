@@ -1,4 +1,4 @@
-# `@attn/plugin`
+# `@victorarias/attn-plugin`
 
 Small TypeScript SDK for attn plugins.
 
@@ -15,7 +15,7 @@ import {
   AttnPluginClient,
   decline,
   handled,
-} from "@attn/plugin";
+} from "@victorarias/attn-plugin";
 
 const client = new AttnPluginClient({
   version: "0.1.0",
@@ -49,7 +49,7 @@ Create lifecycle hooks use the same registration path:
 ```ts
 import {
   type WorktreeAfterCreateParams,
-} from "@attn/plugin";
+} from "@victorarias/attn-plugin";
 
 client.handle<"worktree.after_create">(
   "worktree.after_create",

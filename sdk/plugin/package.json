@@ -1,8 +1,23 @@
 {
-  "name": "@attn/plugin",
+  "name": "@victorarias/attn-plugin",
   "version": "0.1.0",
+  "description": "TypeScript SDK for attn plugins",
+  "license": "GPL-3.0-only",
   "type": "module",
+  "types": "./src/index.ts",
   "exports": "./src/index.ts",
+  "files": [
+    "README.md",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/victorarias/attn.git",
+    "directory": "sdk/plugin"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "bun test"
   }

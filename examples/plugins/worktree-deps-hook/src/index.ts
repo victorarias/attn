@@ -1,4 +1,4 @@
-import { AttnPluginClient } from "@attn/plugin";
+import { AttnPluginClient } from "@victorarias/attn-plugin";
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
