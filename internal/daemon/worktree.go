@@ -99,13 +99,23 @@ func (d *Daemon) doListWorktrees(mainRepo string) []protocol.Worktree {
 func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, error) {
 	mainRepo := git.ResolveMainRepoPath(msg.MainRepo)
 
-	path := protocol.Deref(msg.Path)
+	requestedPath := protocol.Deref(msg.Path)
+	path := requestedPath
 	if path == "" {
 		path = git.GenerateWorktreePath(mainRepo, msg.Branch)
 	}
 	path = git.CanonicalizePath(path)
 
 	startingFrom := protocol.Deref(msg.StartingFrom)
+	providerPath, providerBranch, handled, err := d.dispatchWorktreeCreateProvider(mainRepo, msg.Branch, startingFrom, requestedPath)
+	if err != nil {
+		return "", err
+	}
+	if handled {
+		d.registerCreatedWorktree(mainRepo, providerPath, providerBranch)
+		return providerPath, nil
+	}
+
 	// If starting from a remote tracking ref (e.g. "origin/main"), fetch it
 	// first so the worktree is created from the latest upstream commit.
 	// Guard against local branches that happen to contain "/" (e.g. "feat/x")
@@ -117,19 +127,24 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 			}
 		}
 	}
-	var err error
+	var createErr error
 	if startingFrom != "" {
-		err = git.CreateWorktreeFromPoint(mainRepo, msg.Branch, path, startingFrom)
+		createErr = git.CreateWorktreeFromPoint(mainRepo, msg.Branch, path, startingFrom)
 	} else {
-		err = git.CreateWorktree(mainRepo, msg.Branch, path)
+		createErr = git.CreateWorktree(mainRepo, msg.Branch, path)
 	}
-	if err != nil {
-		return "", err
+	if createErr != nil {
+		return "", createErr
 	}
 
+	d.registerCreatedWorktree(mainRepo, path, msg.Branch)
+	return path, nil
+}
+
+func (d *Daemon) registerCreatedWorktree(mainRepo, path, branch string) {
 	wt := &store.Worktree{
 		Path:      path,
-		Branch:    msg.Branch,
+		Branch:    branch,
 		MainRepo:  mainRepo,
 		CreatedAt: time.Now(),
 	}
@@ -145,8 +160,6 @@ func (d *Daemon) doCreateWorktree(msg *protocol.CreateWorktreeMessage) (string, 
 			CreatedAt: protocol.Ptr(wt.CreatedAt.Format(time.RFC3339)),
 		}},
 	})
-
-	return path, nil
 }
 
 // discoverWorktree tries to find a worktree from git state when it's not in the registry.
@@ -232,31 +245,40 @@ func (d *Daemon) doDeleteWorktree(path string, endpointID *string) (err error) {
 	branch := wt.Branch
 	mainRepo := wt.MainRepo
 
-	if err := git.DeleteWorktree(mainRepo, path); err != nil {
+	handled, err := d.dispatchWorktreeDeleteProvider(mainRepo, path, branch)
+	if err != nil {
 		return err
 	}
+	if !handled {
+		if err := git.DeleteWorktree(mainRepo, path); err != nil {
+			return err
+		}
+	}
 
+	d.finalizeDeletedWorktree(path, mainRepo, branch)
+	return nil
+}
+
+func (d *Daemon) finalizeDeletedWorktree(path, mainRepo, branch string) {
 	d.store.RemoveWorktree(path)
 
-	// Also delete the branch (force=true since worktree is already deleted)
+	// Also delete the branch (force=true since worktree is already deleted).
 	if branch != "" {
 		if err := git.DeleteBranch(mainRepo, branch, true); err != nil {
 			d.logf("Warning: worktree deleted but failed to delete branch %s: %v", branch, err)
-			// Don't fail the whole operation - worktree is already deleted
+			// Don't fail the whole operation - worktree is already deleted.
 		} else {
 			d.logf("Deleted branch %s along with worktree", branch)
 		}
 	}
 
-	// Broadcast deleted event to all clients
+	// Broadcast deleted event to all clients.
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event: protocol.EventWorktreeDeleted,
 		Worktrees: []protocol.Worktree{{
 			Path: path,
 		}},
 	})
-
-	return nil
 }
 
 type worktreeNotFoundError struct {
