@@ -296,6 +296,21 @@ Provider dispatch and future driver work are the tightest V1 requirements. Assis
 
 "Write your first plugin" tutorial. `attn plugin new driver <name>` scaffolding. Example plugins repo. README for external plugin authors.
 
+## Immediate follow-up after plugin registration
+
+The next plugin slice should close the runtime-health gap exposed by installed plugins before moving on to broader driver surfaces:
+
+1. **Plugin healthcheck, end to end.**
+   - Add an explicit daemon↔plugin health protocol instead of treating an open socket as sufficient proof of health.
+   - Model the daemon state distinction clearly: process running, socket connected, health response fresh/stale/unhealthy.
+   - Extend `@victorarias/attn-plugin` with the health responder/client behavior required by the protocol, publish the SDK update, and update the user-owned `services-pilot-worktrees` plugin to consume it.
+   - Surface the resulting health state through plugin inventory/UI so "connected but wedged" is distinguishable from "starting" or "stopped".
+
+2. **Settings panel redesign, after prototyping.**
+   - The current Settings modal has accumulated too many unrelated sections and is now materially harder to scan and operate.
+   - Do a dedicated prototype pass first to explore structure, grouping, navigation, and plugin-management ergonomics before changing production UI.
+   - Treat this as a Settings information-architecture redesign, not a plugin-only visual cleanup; the plugin section is the forcing case that made the broader problem obvious.
+
 ## Deferred — post-V1
 
 In priority order of what might come next:
