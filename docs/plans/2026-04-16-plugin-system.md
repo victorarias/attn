@@ -39,14 +39,14 @@ The design evolved across a multi-turn conversation on 2026-04-16. Recording the
    - WASM: language-agnostic but painful ABI for the state-reporting event volume; you still own the host API problem. Rejected.
 4. **Minimum viable ("normalize schema + publish protocol + docs, no installer").** Rejected because the user wants a product that sparks creativity and grows an ecosystem, not infrastructure-for-future-infrastructure.
 
-**Landed:** subprocess plugins in TypeScript (Bun runtime), JSON-RPC 2.0 over the existing unix socket, long-running connection per plugin, one mechanism for providers / drivers / observers / actors, real CLI and dev mode.
+**Landed:** subprocess plugins in TypeScript (Bun runtime), JSON-RPC 2.0 over the existing unix socket, long-running connection per plugin, concrete declared surfaces for daemon→plugin calls, real CLI and dev mode.
 
 ## Locked decisions
 
 These have been explicitly confirmed in conversation:
 
 - **Subprocess, not in-process.** Plugins run as their own processes. Crash isolation, language freedom, no runtime to maintain.
-- **One mechanism covers agent drivers AND future non-driver plugins.** Provider/observer/actor roles share the same protocol. No second system for worktree customization, attn-as-agent, assistants, dashboards, etc.
+- **One mechanism covers agent drivers AND future non-driver plugins.** Plugins declare concrete surfaces they handle during the daemon handshake. No generic role taxonomy in the base protocol, and no second system for worktree customization, attn-as-agent, assistants, dashboards, etc.
 - **Provider plugins are first-class.** Plugins may claim daemon-owned extension points that must run inside an attn operation, returning structured `handled`, `decline`, or `error` outcomes so attn can continue, fall back, or fail coherently.
 - **TypeScript with Bun as the canonical runtime.**
 - **Pi is the first agent-driver plugin, not an in-tree driver.** See companion plan `2026-04-16-pi-plugin.md`. The first provider use case is user-owned worktree customization, proving that plugins are not limited to agent integration.
@@ -62,8 +62,8 @@ These were proposed in conversation but not explicitly confirmed:
 1. **Bun-only vs Bun-preferred SDK.** Proposed: Bun-only. Simpler, cleaner, bets on Bun. Alternative: Bun-preferred with Node fallback.
 2. **Plugin distribution format.** Proposed: plugins ship TypeScript source + `package.json`, `attn plugin install` runs `bun install`, Bun is a prereq on the user's machine. Alternative: plugins ship `bun build --compile` binaries, no runtime dependency.
 3. **Plugin lifecycle.** Proposed: attn spawns installed plugins at daemon startup and reconciles on plugin-dir change. User-managed plugins (dev mode, ad-hoc scripts) spawn themselves and connect. One-per-plugin vs one-per-session not fully decided.
-4. **Remote daemons.** Proposed: plugins are daemon-local. Each daemon has its own plugin set. Install per host (SSH to remote, run `attn plugin install` there). Cross-daemon actor/observer deferred — likely exposes same JSON-RPC over the hub's existing WebSocket later. User raised this as an open question worth capturing; design sketched but not confirmed.
-5. **SDK shape and timing.** User pushed back on designing SDK top-down. **Revised approach: the first real plugins are written against raw JSON-RPC first. SDK emerges from patterns the worktree provider and pi driver actually needed, extracted after they work. No SDK in V1.** The protocol must be ergonomic enough to consume without a wrapper.
+4. **Remote daemons.** Proposed: plugins are daemon-local. Each daemon has its own plugin set. Install per host (SSH to remote, run `attn plugin install` there). Cross-daemon control plugins are deferred — likely exposing the same JSON-RPC over the hub's existing WebSocket later. User raised this as an open question worth capturing; design sketched but not confirmed.
+5. **SDK shape and timing.** User pushed back on designing SDK top-down. **Revised approach: the first real plugins are written against raw JSON-RPC first. After the provider path proved out, extract a small SDK from those patterns; let richer plugin surfaces wait until their concrete implementations exist.** The protocol must still stay ergonomic enough to consume without a wrapper.
 6. **Manifest format.** Probably TOML — minimal, human-readable, Bun ecosystem-neutral. Alternatives: JSON, YAML. Not confirmed.
 7. **Install sources.** `attn plugin install <git-url>` as the headline, `--path <dir>` for local development. Not confirmed.
 8. **API versioning discipline.** Proposed: strict `attn_api_version: 1` refuses to load on mismatch. Additive protocol changes don't bump version. Not confirmed.
@@ -89,40 +89,38 @@ These were proposed in conversation but not explicitly confirmed:
 └─────────────────┘          └────────────────────────────┘
 ```
 
-### Plugin lifecycle — driver role
+### Plugin lifecycle — future driver flow
 
 1. attn spawns the plugin binary at daemon startup (or user runs it in dev mode).
-2. Plugin connects to `~/.attn/attn.sock`, sends `hello { name, version, attn_api_version, roles }`.
-3. attn replies with accepted capabilities. If `driver` is in roles, plugin sends `driver.register { agent, capabilities }`.
+2. Plugin connects to `~/.attn/attn.sock`, sends `hello { name, version, attn_api_version, surfaces? }`.
+3. attn replies with accepted capabilities. Future driver support adds explicit driver-specific methods when that phase lands; the base handshake does not carry a speculative role field.
 4. When user runs `attn -s foo` with agent = the registered name, attn calls `driver.spawn { session_id, cwd, agent_args, resume, fork, yolo }` on the plugin.
 5. Plugin responds `{ argv, env, cwd }`. attn spawns that command in a PTY under the session. **Attn owns the PTY. Plugin owns agent-specific semantics.**
 6. Plugin stages companion files (extensions, hooks) however it likes. Plugin monitors the agent however it likes.
 7. Plugin reports state via `session.report_state`, `session.report_stop`, `session.report_metadata`.
 8. Plugin exits when attn shuts down or its own lifecycle ends.
 
-### Observer / actor roles
+### Provider and lifecycle surfaces
 
-An observer plugin subscribes to events attn already broadcasts (state changes, stops, reviews, PR updates) — notification-only. An actor plugin invokes the methods the frontend invokes (`session.launch`, `session.send_input`, `pr.action`). A plugin can combine roles.
+A provider plugin claims daemon-owned extension points that must run *inside* an attn operation before built-in behavior completes. Worktree creation also exposes lifecycle hooks for additive customization that should not own Git creation itself:
 
-The attn-as-agent / assistant use case is `roles: ["observer", "actor"]` — no driver surface, just observe and act. Not in V1 scope but the API must not preclude it.
-
-### Provider role
-
-A provider plugin claims daemon-owned extension points that must run *inside* an attn operation before built-in behavior completes. The initial provider surface is worktree management:
-
+- `worktree.before_create`
 - `worktree.create`
+- `worktree.after_create`
 - `worktree.delete`
 
 This exists to support user-owned policies such as "services-pilot worktrees must be created through `spt git:worktree ...` rather than plain `git worktree add`", while keeping attn generic.
 
 Provider dispatch contract:
 
+- `worktree.before_create` runs every registered handler in deterministic order before create dispatch; an RPC error aborts before mutation
 - attn asks eligible providers in deterministic order whether they want to handle the operation
 - a provider returns `handled`, `decline`, or `error`
 - `handled` includes the structured result attn needs to continue
 - `decline` lets attn ask the next provider or fall back to its built-in implementation
 - `error` fails the operation and surfaces the provider's message to the user
 - attn validates provider results before committing them to core state
+- `worktree.after_create` runs every registered handler after the created worktree is recorded; hook failures surface to the caller with the created path still preserved
 
 Example `worktree.create` request:
 
@@ -185,7 +183,7 @@ Extend the daemon's existing unix socket handler to recognize a JSON-RPC 2.0 han
 ```json
 → {"jsonrpc":"2.0","id":1,"method":"hello","params":{
     "name":"pi-driver","version":"0.1.0",
-    "attn_api_version":1,"roles":["driver"]}}
+    "attn_api_version":1}}
 ← {"jsonrpc":"2.0","id":1,"result":{"ok":true}}
 ```
 
@@ -202,19 +200,22 @@ Extend the daemon's existing unix socket handler to recognize a JSON-RPC 2.0 han
 | `session.report_metadata`     | plugin → attn   | `{ session_id, metadata }` (generic, replaces `pi_session_linked`)       |
 | `pty.request_spawn`           | plugin → attn   | (Optional) ask attn to spawn additional processes under the session    |
 
-**Provider-role methods (initial):**
+**Worktree surfaces (initial):**
 
-| Method            | Direction     | Purpose                                                                 |
-|-------------------|---------------|-------------------------------------------------------------------------|
-| `provider.register` | plugin → attn | Declare supported provider surfaces and optional dispatch priority      |
-| `worktree.create` | attn → plugin | Offer a worktree creation operation to a provider                       |
-| `worktree.delete` | attn → plugin | Offer a worktree deletion operation to a provider                       |
+| Method                   | Direction     | Purpose                                                                 |
+|--------------------------|---------------|-------------------------------------------------------------------------|
+| `worktree.before_create` | attn → plugin | Run a pre-create lifecycle hook before provider/default worktree logic |
+| `worktree.create`        | attn → plugin | Offer a worktree creation operation to a provider                       |
+| `worktree.after_create`  | attn → plugin | Run a post-create lifecycle hook with the actual created worktree      |
+| `worktree.delete`        | attn → plugin | Offer a worktree deletion operation to a provider                       |
 
-Provider methods return structured `handled`, `decline`, or `error` results. For `worktree.create`, `handled` must include the actual created `path` and resulting `branch`. Attn validates that the returned path is a real worktree of the expected main repo before storing it or launching a session.
-
-**Observer-role:** subscriptions via `subscribe { events }`, attn pushes notifications matching the frontend's existing event set.
-
-**Actor-role:** method access to `session.launch`, `session.send_input`, `pr.action`, etc. — same surface the frontend already uses.
+Surfaces are declared once in the `hello` handshake via `surfaces`. Provider
+methods return structured `handled`, `decline`, or `error` results. Lifecycle
+hooks complete successfully by returning a normal JSON-RPC response and fail by
+returning an RPC error. For `worktree.create`, `handled` must include the
+actual created `path` and resulting `branch`. Attn validates that the returned
+path is a real worktree of the expected main repo before storing it or launching
+a session.
 
 ### 3. Plugin CLI + installer + dev mode
 
@@ -222,7 +223,7 @@ Commands:
 
 - `attn plugin install <git-url>` — clone to `~/.attn/plugins/<name>/`, validate manifest, run `bun install`, register, spawn.
 - `attn plugin install --path <dir>` — same, from local directory (development).
-- `attn plugin list` — installed plugins, status, roles.
+- `attn plugin list` — installed plugins and status.
 - `attn plugin remove <name>` — uninstall + stop.
 - `attn plugin update <name>` — `git pull && bun install`, restart.
 - `attn plugin dev --path <dir>` — run attn with plugin spawned foreground, auto-restart on source change, stderr piped to terminal.
@@ -252,9 +253,9 @@ Prereq. Standalone PR. No user-visible behavior change.
 
 Extend daemon socket handler to accept JSON-RPC handshake and maintain a long-running plugin connection. Exercise request/response flow end-to-end against throwaway test plugins so both daemon-initiated calls and plugin-initiated calls are proven before real provider or driver work lands. Document the wire protocol.
 
-### Phase 2 — Provider role + worktree proving use case
+### Phase 2 — Provider registration + worktree proving use case
 
-Add provider registration and provider dispatch in the daemon. Ship `worktree.create` and `worktree.delete` as the first concrete extension points, with fallthrough to attn's built-in Git behavior when providers decline.
+Add concrete surface declaration and provider dispatch in the daemon. Ship `worktree.before_create`, `worktree.create`, `worktree.after_create`, and `worktree.delete` as the first extension points, with fallthrough to attn's built-in Git behavior when create providers decline.
 
 The proving plugin is a user-owned worktree provider that mirrors the existing shell-level `wt-create` / `wt-remove` policy:
 
@@ -268,15 +269,28 @@ This phase proves that plugins can participate in daemon-owned operations, not o
 
 Ship the `attn plugin` command family. Manifest parser. Plugin spawn/reconcile loop in the daemon.
 
-### Phase 4 — Pi as the first agent-driver plugin
+### Phase 4 — Provider SDK foundation
+
+Extract the proven raw JSON-RPC provider client into a small TypeScript SDK:
+
+- connection + hello handshake
+- surface registration derived from registered SDK handlers
+- daemon-request routing
+- typed provider result helpers
+- typed worktree provider request/result contracts
+- one checked-in example provider plugin that consumes the SDK end to end
+
+Keep broader surfaces out until their first concrete plugins exercise those paths.
+
+### Phase 5 — Pi as the first agent-driver plugin
 
 See companion plan `2026-04-16-pi-plugin.md`. Pi forces any driver-protocol gaps to surface after the provider model has already been validated against a non-agent extension point.
 
-### Phase 5 — Observer/actor role completion
+### Phase 6 — Broader plugin surfaces
 
-Provider and driver roles are the tightest V1 requirements. Observer/actor were designed alongside but may ship slightly later. No second mechanism, just fleshing out the same protocol.
+Provider dispatch and future driver work are the tightest V1 requirements. Assistant, automation, and observer-style surfaces should be designed only when their first concrete plugins are in hand. No second mechanism, just more explicit surfaces on the same protocol.
 
-### Phase 6 — Documentation + templates
+### Phase 7 — Documentation + templates
 
 "Write your first plugin" tutorial. `attn plugin new driver <name>` scaffolding. Example plugins repo. README for external plugin authors.
 
@@ -284,8 +298,8 @@ Provider and driver roles are the tightest V1 requirements. Observer/actor were 
 
 In priority order of what might come next:
 
-- **SDK extraction.** `@attn/plugin` on npm, extracted from the worktree provider and pi driver's patterns. Typed connection helper, reconnect logic, typed event handlers. Deferred until both initial real plugins have surfaced the stable patterns.
-- **Cross-daemon control API.** Expose the same JSON-RPC surface over the hub's existing WebSocket at `:9849` so actor/observer plugins can span daemons. Useful for attn-as-agent and dashboards.
+- **SDK expansion.** Extend `@attn/plugin` beyond the initial provider foundation once broader surfaces have real plugin implementations. Reconnect logic and richer typed helpers belong here, not in the first extraction.
+- **Cross-daemon control API.** Expose the same JSON-RPC surface over the hub's existing WebSocket at `:9849` so future control plugins can span daemons. Useful for attn-as-agent and dashboards.
 - **Custom UI extensions.** Separate design.
 - **Plugin install over SSH / hub** — `attn --endpoint <server> plugin install <url>`. Nice-to-have, requires proxying through the hub.
 - **Claude / codex / copilot migration** to plugins. Zero pressure; only if there's a reason.

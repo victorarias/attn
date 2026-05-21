@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -111,11 +110,11 @@ func TestDaemon_StartInstalledPlugins_SpawnsProviderPlugin(t *testing.T) {
 	defer d.Stop()
 
 	waitForSocket(t, sockPath, 5*time.Second)
-	waitForProviders(t, d, "worktree.create", 1, 5*time.Second)
+	waitForSurfaceHandlers(t, d, "worktree.create", 1, 5*time.Second)
 
-	providers := d.plugins.providersForSurface("worktree.create")
-	if providers[0].PluginName != "spawned-provider" {
-		t.Fatalf("spawned provider=%q, want spawned-provider", providers[0].PluginName)
+	handlers := d.plugins.handlersForSurface("worktree.create")
+	if handlers[0].PluginName != "spawned-provider" {
+		t.Fatalf("spawned provider=%q, want spawned-provider", handlers[0].PluginName)
 	}
 }
 
@@ -132,28 +131,9 @@ func TestDaemonPluginProcessHelper(t *testing.T) {
 	defer conn.Close()
 
 	name := os.Getenv("ATTN_PLUGIN_NAME")
-	sendPluginHello(t, conn, name)
+	sendPluginHelloWithSurfaces(t, conn, name, []string{"worktree.create", "worktree.delete"})
 	if resp := decodeJSONRPCMessage(t, conn); resp.Error != nil {
 		t.Fatalf("helper hello error=%#v", resp.Error)
-	}
-
-	params, err := json.Marshal(providerRegisterParams{
-		Surfaces: []string{"worktree.create", "worktree.delete"},
-		Priority: 25,
-	})
-	if err != nil {
-		t.Fatalf("marshal helper provider params: %v", err)
-	}
-	if err := json.NewEncoder(conn).Encode(jsonRPCMessage{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage("2"),
-		Method:  "provider.register",
-		Params:  params,
-	}); err != nil {
-		t.Fatalf("encode helper provider.register: %v", err)
-	}
-	if resp := decodeJSONRPCMessage(t, conn); resp.Error != nil {
-		t.Fatalf("helper provider.register error=%#v", resp.Error)
 	}
 
 	time.Sleep(30 * time.Second)
@@ -182,16 +162,16 @@ entrypoint = "src/index.ts"
 	}
 }
 
-func waitForProviders(t *testing.T, d *Daemon, surface string, count int, timeout time.Duration) {
+func waitForSurfaceHandlers(t *testing.T, d *Daemon, surface string, count int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if len(d.plugins.providersForSurface(surface)) == count {
+		if len(d.plugins.handlersForSurface(surface)) == count {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("surface %s did not reach provider count %d before timeout", surface, count)
+	t.Fatalf("surface %s did not reach handler count %d before timeout", surface, count)
 }
 
 func dialPluginHelper(socketPath string, timeout time.Duration) (net.Conn, error) {

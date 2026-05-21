@@ -17,9 +17,8 @@ func TestDoCreateWorktree_ProviderHandledRegistersValidatedWorktree(t *testing.T
 	tmpDir, mainDir := initProviderTestRepo(t)
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
 
-	client, done := startPluginPipe(t, d, "custom-create-provider", []string{"provider"})
+	client, done := startPluginPipe(t, d, "custom-create-provider", []string{worktreeCreateProviderSurface})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
 
 	providerPath := filepath.Join(tmpDir, "provider-created")
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
@@ -65,13 +64,89 @@ func TestDoCreateWorktree_ProviderHandledRegistersValidatedWorktree(t *testing.T
 	}
 }
 
+func TestDoCreateWorktree_BeforeCreateHookRunsBeforeBuiltInCreate(t *testing.T) {
+	tmpDir, mainDir := initProviderTestRepo(t)
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+
+	client, done := startPluginPipe(t, d, "before-create-hook", []string{worktreeBeforeCreateSurface})
+	defer client.Close()
+
+	hookDone := respondToBeforeCreateHookCall(t, client, func(params worktreeCreateProviderParams) error {
+		if params.MainRepo != git.ResolveMainRepoPath(mainDir) {
+			return fmt.Errorf("before hook main repo=%q, want %q", params.MainRepo, git.ResolveMainRepoPath(mainDir))
+		}
+		if params.Branch != "feat/before-hook" {
+			return fmt.Errorf("before hook branch=%q, want feat/before-hook", params.Branch)
+		}
+		return nil
+	})
+
+	path, err := d.doCreateWorktree(&protocol.CreateWorktreeMessage{
+		MainRepo: mainDir,
+		Branch:   "feat/before-hook",
+	})
+	if err != nil {
+		t.Fatalf("doCreateWorktree failed: %v", err)
+	}
+	waitForProviderResponse(t, hookDone)
+	if wt := d.store.GetWorktree(path); wt == nil {
+		t.Fatalf("expected before-hook worktree %q in store", path)
+	}
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("before create hook connection did not close")
+	}
+}
+
+func TestDoCreateWorktree_AfterCreateHookErrorReturnsCreatedPath(t *testing.T) {
+	tmpDir, mainDir := initProviderTestRepo(t)
+	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
+
+	client, done := startPluginPipe(t, d, "after-create-hook", []string{worktreeAfterCreateSurface})
+	defer client.Close()
+
+	hookDone := respondToAfterCreateHookCall(t, client, func(params worktreeAfterCreateHookParams) error {
+		if params.MainRepo != git.ResolveMainRepoPath(mainDir) {
+			return fmt.Errorf("after hook main repo=%q, want %q", params.MainRepo, git.ResolveMainRepoPath(mainDir))
+		}
+		if params.Branch != "feat/after-hook" {
+			return fmt.Errorf("after hook branch=%q, want feat/after-hook", params.Branch)
+		}
+		return fmt.Errorf("dependency bootstrap failed")
+	})
+
+	path, err := d.doCreateWorktree(&protocol.CreateWorktreeMessage{
+		MainRepo: mainDir,
+		Branch:   "feat/after-hook",
+	})
+	if err == nil {
+		t.Fatal("doCreateWorktree error=nil, want after-create hook error")
+	}
+	if path == "" {
+		t.Fatal("doCreateWorktree path empty, want created worktree path on after-create hook error")
+	}
+	waitForProviderResponse(t, hookDone)
+	if wt := d.store.GetWorktree(path); wt == nil {
+		t.Fatalf("expected after-hook-created worktree %q in store", path)
+	}
+
+	_ = client.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("after create hook connection did not close")
+	}
+}
+
 func TestDoCreateWorktree_ProviderDeclineFallsBackToBuiltInGit(t *testing.T) {
 	tmpDir, mainDir := initProviderTestRepo(t)
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
 
-	client, done := startPluginPipe(t, d, "declining-create-provider", []string{"provider"})
+	client, done := startPluginPipe(t, d, "declining-create-provider", []string{worktreeCreateProviderSurface})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
 
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
 		return worktreeCreateProviderResult{Status: providerStatusDecline}
@@ -106,9 +181,8 @@ func TestDoCreateWorktree_ProviderHandledPathMustBeRealExpectedWorktree(t *testi
 	tmpDir, mainDir := initProviderTestRepo(t)
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
 
-	client, done := startPluginPipe(t, d, "invalid-create-provider", []string{"provider"})
+	client, done := startPluginPipe(t, d, "invalid-create-provider", []string{worktreeCreateProviderSurface})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
 
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
 		return worktreeCreateProviderResult{
@@ -140,9 +214,8 @@ func TestDoCreateWorktree_ProviderHandledPathMustBeNewWorktree(t *testing.T) {
 	runGitDaemon(t, mainDir, "worktree", "add", "-b", "feat/existing", existingPath)
 
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
-	client, done := startPluginPipe(t, d, "existing-create-provider", []string{"provider"})
+	client, done := startPluginPipe(t, d, "existing-create-provider", []string{worktreeCreateProviderSurface})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
 
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
 		return worktreeCreateProviderResult{
@@ -173,9 +246,8 @@ func TestDoCreateWorktreeFromBranch_ProviderHandledRegistersValidatedWorktree(t 
 	runGitDaemon(t, mainDir, "branch", "feature/existing")
 
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
-	client, done := startPluginPipe(t, d, "branch-create-provider", []string{"provider"})
+	client, done := startPluginPipe(t, d, "branch-create-provider", []string{worktreeCreateProviderSurface})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
 
 	providerPath := filepath.Join(tmpDir, "provider-existing-branch")
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
@@ -221,9 +293,8 @@ func TestDoCreateWorktreeFromBranch_ProviderHandledRemoteBranchStoresLocalBranch
 	tmpDir, mainDir := initProviderTestRepo(t)
 
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
-	client, done := startPluginPipe(t, d, "remote-branch-create-provider", []string{"provider"})
+	client, done := startPluginPipe(t, d, "remote-branch-create-provider", []string{worktreeCreateProviderSurface})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
 
 	providerPath := filepath.Join(tmpDir, "provider-remote-branch")
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
@@ -281,9 +352,8 @@ func TestDoCreateWorktreeFromBranch_ProviderDeclinesRemoteBranchFallsBackToBuilt
 	runGitDaemon(t, mainDir, "fetch", "origin")
 
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
-	client, done := startPluginPipe(t, d, "declining-remote-branch-provider", []string{"provider"})
+	client, done := startPluginPipe(t, d, "declining-remote-branch-provider", []string{worktreeCreateProviderSurface})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
 
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
 		if params.Branch != remoteBranch {
@@ -333,9 +403,8 @@ func TestDoDeleteWorktree_ProviderHandledFinalizesDaemonState(t *testing.T) {
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
 	d.registerCreatedWorktree(mainDir, worktreePath, "feat/provider-delete")
 
-	client, done := startPluginPipe(t, d, "custom-delete-provider", []string{"provider"})
+	client, done := startPluginPipe(t, d, "custom-delete-provider", []string{worktreeDeleteProviderSurface})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeDeleteProviderSurface}, 100)
 
 	responseDone := respondToDeleteProviderCall(t, client, func(params worktreeDeleteProviderParams) worktreeDeleteProviderResult {
 		if params.Path != worktreePath {
@@ -436,6 +505,54 @@ func respondToDeleteProviderCall(
 	return done
 }
 
+func respondToBeforeCreateHookCall(
+	t *testing.T,
+	conn net.Conn,
+	handle func(worktreeCreateProviderParams) error,
+) <-chan error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() {
+		defer close(done)
+		request := decodeJSONRPCMessage(t, conn)
+		if request.Method != worktreeBeforeCreateSurface {
+			done <- fmt.Errorf("hook method=%q, want %s", request.Method, worktreeBeforeCreateSurface)
+			return
+		}
+		var params worktreeCreateProviderParams
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			done <- fmt.Errorf("decode before create hook params: %w", err)
+			return
+		}
+		writeHookResult(t, conn, request.ID, handle(params))
+	}()
+	return done
+}
+
+func respondToAfterCreateHookCall(
+	t *testing.T,
+	conn net.Conn,
+	handle func(worktreeAfterCreateHookParams) error,
+) <-chan error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() {
+		defer close(done)
+		request := decodeJSONRPCMessage(t, conn)
+		if request.Method != worktreeAfterCreateSurface {
+			done <- fmt.Errorf("hook method=%q, want %s", request.Method, worktreeAfterCreateSurface)
+			return
+		}
+		var params worktreeAfterCreateHookParams
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			done <- fmt.Errorf("decode after create hook params: %w", err)
+			return
+		}
+		writeHookResult(t, conn, request.ID, handle(params))
+	}()
+	return done
+}
+
 func waitForProviderResponse(t *testing.T, done <-chan error) {
 	t.Helper()
 	if err := <-done; err != nil {
@@ -455,5 +572,22 @@ func writeProviderResult(t *testing.T, conn net.Conn, id json.RawMessage, result
 		Result:  payload,
 	}); err != nil {
 		t.Fatalf("encode provider result: %v", err)
+	}
+}
+
+func writeHookResult(t *testing.T, conn net.Conn, id json.RawMessage, hookErr error) {
+	t.Helper()
+	message := jsonRPCMessage{
+		JSONRPC: "2.0",
+		ID:      id,
+	}
+	if hookErr != nil {
+		message.Error = &jsonRPCError{
+			Code:    jsonRPCInternalError,
+			Message: hookErr.Error(),
+		}
+	}
+	if err := json.NewEncoder(conn).Encode(message); err != nil {
+		t.Fatalf("encode hook result: %v", err)
 	}
 }

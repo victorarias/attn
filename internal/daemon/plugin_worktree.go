@@ -10,9 +10,11 @@ import (
 )
 
 const (
+	worktreeBeforeCreateSurface   = "worktree.before_create"
 	worktreeCreateProviderSurface = "worktree.create"
+	worktreeAfterCreateSurface    = "worktree.after_create"
 	worktreeDeleteProviderSurface = "worktree.delete"
-	worktreeProviderCallTimeout   = 30 * time.Second
+	worktreePluginCallTimeout     = 30 * time.Second
 
 	providerStatusHandled = "handled"
 	providerStatusDecline = "decline"
@@ -44,8 +46,47 @@ type worktreeDeleteProviderResult struct {
 	Error  string `json:"error,omitempty"`
 }
 
+type worktreeAfterCreateHookParams struct {
+	MainRepo string `json:"main_repo"`
+	Path     string `json:"path"`
+	Branch   string `json:"branch"`
+}
+
+func (d *Daemon) dispatchWorktreeBeforeCreateHooks(mainRepo, branch, startingFrom, requestedPath string) error {
+	params := worktreeCreateProviderParams{
+		MainRepo:     mainRepo,
+		Branch:       branch,
+		StartingFrom: startingFrom,
+	}
+	if requestedPath != "" {
+		params.RequestedPath = &requestedPath
+	}
+	return d.dispatchWorktreeHooks(worktreeBeforeCreateSurface, params)
+}
+
+func (d *Daemon) dispatchWorktreeAfterCreateHooks(mainRepo, path, branch string) error {
+	return d.dispatchWorktreeHooks(worktreeAfterCreateSurface, worktreeAfterCreateHookParams{
+		MainRepo: mainRepo,
+		Path:     path,
+		Branch:   branch,
+	})
+}
+
+func (d *Daemon) dispatchWorktreeHooks(surface string, params interface{}) error {
+	handlers := d.ensurePluginRegistry().handlersForSurface(surface)
+	for _, handler := range handlers {
+		ctx, cancel := context.WithTimeout(context.Background(), worktreePluginCallTimeout)
+		err := d.callPlugin(ctx, handler.PluginName, surface, params, nil)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("worktree hook %q %s call failed: %w", handler.PluginName, surface, err)
+		}
+	}
+	return nil
+}
+
 func (d *Daemon) dispatchWorktreeCreateProvider(mainRepo, branch, startingFrom, requestedPath string) (string, string, bool, error) {
-	providers := d.ensurePluginRegistry().providersForSurface(worktreeCreateProviderSurface)
+	providers := d.ensurePluginRegistry().handlersForSurface(worktreeCreateProviderSurface)
 	if len(providers) == 0 {
 		return "", "", false, nil
 	}
@@ -65,7 +106,7 @@ func (d *Daemon) dispatchWorktreeCreateProvider(mainRepo, branch, startingFrom, 
 
 	for _, provider := range providers {
 		var result worktreeCreateProviderResult
-		ctx, cancel := context.WithTimeout(context.Background(), worktreeProviderCallTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), worktreePluginCallTimeout)
 		err := d.callPlugin(ctx, provider.PluginName, worktreeCreateProviderSurface, params, &result)
 		cancel()
 		if err != nil {
@@ -92,7 +133,7 @@ func (d *Daemon) dispatchWorktreeCreateProvider(mainRepo, branch, startingFrom, 
 }
 
 func (d *Daemon) dispatchWorktreeDeleteProvider(mainRepo, path, branch string) (bool, error) {
-	providers := d.ensurePluginRegistry().providersForSurface(worktreeDeleteProviderSurface)
+	providers := d.ensurePluginRegistry().handlersForSurface(worktreeDeleteProviderSurface)
 	if len(providers) == 0 {
 		return false, nil
 	}
@@ -104,7 +145,7 @@ func (d *Daemon) dispatchWorktreeDeleteProvider(mainRepo, path, branch string) (
 	}
 	for _, provider := range providers {
 		var result worktreeDeleteProviderResult
-		ctx, cancel := context.WithTimeout(context.Background(), worktreeProviderCallTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), worktreePluginCallTimeout)
 		err := d.callPlugin(ctx, provider.PluginName, worktreeDeleteProviderSurface, params, &result)
 		cancel()
 		if err != nil {
