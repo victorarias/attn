@@ -139,7 +139,6 @@ func TestDaemonPluginProcessHelper(t *testing.T) {
 
 	params, err := json.Marshal(providerRegisterParams{
 		Surfaces: []string{"worktree.create", "worktree.delete"},
-		Priority: 25,
 	})
 	if err != nil {
 		t.Fatalf("marshal helper provider params: %v", err)

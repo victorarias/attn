@@ -46,7 +46,7 @@ The design evolved across a multi-turn conversation on 2026-04-16. Recording the
 These have been explicitly confirmed in conversation:
 
 - **Subprocess, not in-process.** Plugins run as their own processes. Crash isolation, language freedom, no runtime to maintain.
-- **One mechanism covers agent drivers AND future non-driver plugins.** Provider/observer/actor roles share the same protocol. No second system for worktree customization, attn-as-agent, assistants, dashboards, etc.
+- **One mechanism covers agent drivers AND future non-driver plugins.** Provider registration plus observer/actor roles share the same protocol. No second system for worktree customization, attn-as-agent, assistants, dashboards, etc.
 - **Provider plugins are first-class.** Plugins may claim daemon-owned extension points that must run inside an attn operation, returning structured `handled`, `decline`, or `error` outcomes so attn can continue, fall back, or fail coherently.
 - **TypeScript with Bun as the canonical runtime.**
 - **Pi is the first agent-driver plugin, not an in-tree driver.** See companion plan `2026-04-16-pi-plugin.md`. The first provider use case is user-owned worktree customization, proving that plugins are not limited to agent integration.
@@ -106,7 +106,7 @@ An observer plugin subscribes to events attn already broadcasts (state changes, 
 
 The attn-as-agent / assistant use case is `roles: ["observer", "actor"]` — no driver surface, just observe and act. Not in V1 scope but the API must not preclude it.
 
-### Provider role
+### Provider registration
 
 A provider plugin claims daemon-owned extension points that must run *inside* an attn operation before built-in behavior completes. The initial provider surface is worktree management:
 
@@ -202,11 +202,11 @@ Extend the daemon's existing unix socket handler to recognize a JSON-RPC 2.0 han
 | `session.report_metadata`     | plugin → attn   | `{ session_id, metadata }` (generic, replaces `pi_session_linked`)       |
 | `pty.request_spawn`           | plugin → attn   | (Optional) ask attn to spawn additional processes under the session    |
 
-**Provider-role methods (initial):**
+**Provider methods (initial):**
 
 | Method            | Direction     | Purpose                                                                 |
 |-------------------|---------------|-------------------------------------------------------------------------|
-| `provider.register` | plugin → attn | Declare supported provider surfaces and optional dispatch priority      |
+| `provider.register` | plugin → attn | Declare supported provider surfaces                                      |
 | `worktree.create` | attn → plugin | Offer a worktree creation operation to a provider                       |
 | `worktree.delete` | attn → plugin | Offer a worktree deletion operation to a provider                       |
 
@@ -252,7 +252,7 @@ Prereq. Standalone PR. No user-visible behavior change.
 
 Extend daemon socket handler to accept JSON-RPC handshake and maintain a long-running plugin connection. Exercise request/response flow end-to-end against throwaway test plugins so both daemon-initiated calls and plugin-initiated calls are proven before real provider or driver work lands. Document the wire protocol.
 
-### Phase 2 — Provider role + worktree proving use case
+### Phase 2 — Provider registration + worktree proving use case
 
 Add provider registration and provider dispatch in the daemon. Ship `worktree.create` and `worktree.delete` as the first concrete extension points, with fallthrough to attn's built-in Git behavior when providers decline.
 
@@ -288,7 +288,7 @@ See companion plan `2026-04-16-pi-plugin.md`. Pi forces any driver-protocol gaps
 
 ### Phase 6 — Observer/actor role completion
 
-Provider and driver roles are the tightest V1 requirements. Observer/actor were designed alongside but may ship slightly later. No second mechanism, just fleshing out the same protocol.
+Provider dispatch and driver roles are the tightest V1 requirements. Observer/actor were designed alongside but may ship slightly later. No second mechanism, just fleshing out the same protocol.
 
 ### Phase 7 — Documentation + templates
 

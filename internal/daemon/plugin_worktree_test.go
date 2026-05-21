@@ -19,7 +19,7 @@ func TestDoCreateWorktree_ProviderHandledRegistersValidatedWorktree(t *testing.T
 
 	client, done := startPluginPipe(t, d, "custom-create-provider", []string{"provider"})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+	registerProvider(t, client, []string{worktreeCreateProviderSurface})
 
 	providerPath := filepath.Join(tmpDir, "provider-created")
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
@@ -71,7 +71,7 @@ func TestDoCreateWorktree_ProviderDeclineFallsBackToBuiltInGit(t *testing.T) {
 
 	client, done := startPluginPipe(t, d, "declining-create-provider", []string{"provider"})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+	registerProvider(t, client, []string{worktreeCreateProviderSurface})
 
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
 		return worktreeCreateProviderResult{Status: providerStatusDecline}
@@ -108,7 +108,7 @@ func TestDoCreateWorktree_ProviderHandledPathMustBeRealExpectedWorktree(t *testi
 
 	client, done := startPluginPipe(t, d, "invalid-create-provider", []string{"provider"})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+	registerProvider(t, client, []string{worktreeCreateProviderSurface})
 
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
 		return worktreeCreateProviderResult{
@@ -142,7 +142,7 @@ func TestDoCreateWorktree_ProviderHandledPathMustBeNewWorktree(t *testing.T) {
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
 	client, done := startPluginPipe(t, d, "existing-create-provider", []string{"provider"})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+	registerProvider(t, client, []string{worktreeCreateProviderSurface})
 
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
 		return worktreeCreateProviderResult{
@@ -175,7 +175,7 @@ func TestDoCreateWorktreeFromBranch_ProviderHandledRegistersValidatedWorktree(t 
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
 	client, done := startPluginPipe(t, d, "branch-create-provider", []string{"provider"})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+	registerProvider(t, client, []string{worktreeCreateProviderSurface})
 
 	providerPath := filepath.Join(tmpDir, "provider-existing-branch")
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
@@ -223,7 +223,7 @@ func TestDoCreateWorktreeFromBranch_ProviderHandledRemoteBranchStoresLocalBranch
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
 	client, done := startPluginPipe(t, d, "remote-branch-create-provider", []string{"provider"})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+	registerProvider(t, client, []string{worktreeCreateProviderSurface})
 
 	providerPath := filepath.Join(tmpDir, "provider-remote-branch")
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
@@ -283,7 +283,7 @@ func TestDoCreateWorktreeFromBranch_ProviderDeclinesRemoteBranchFallsBackToBuilt
 	d := NewForTesting(filepath.Join(tmpDir, "attn.sock"))
 	client, done := startPluginPipe(t, d, "declining-remote-branch-provider", []string{"provider"})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeCreateProviderSurface}, 100)
+	registerProvider(t, client, []string{worktreeCreateProviderSurface})
 
 	responseDone := respondToCreateProviderCall(t, client, func(params worktreeCreateProviderParams) worktreeCreateProviderResult {
 		if params.Branch != remoteBranch {
@@ -335,7 +335,7 @@ func TestDoDeleteWorktree_ProviderHandledFinalizesDaemonState(t *testing.T) {
 
 	client, done := startPluginPipe(t, d, "custom-delete-provider", []string{"provider"})
 	defer client.Close()
-	registerProvider(t, client, []string{worktreeDeleteProviderSurface}, 100)
+	registerProvider(t, client, []string{worktreeDeleteProviderSurface})
 
 	responseDone := respondToDeleteProviderCall(t, client, func(params worktreeDeleteProviderParams) worktreeDeleteProviderResult {
 		if params.Path != worktreePath {

@@ -37,7 +37,6 @@ type pluginHelloResult struct {
 
 type providerRegisterParams struct {
 	Surfaces []string `json:"surfaces"`
-	Priority int      `json:"priority,omitempty"`
 }
 
 type providerRegisterResult struct {
@@ -108,15 +107,11 @@ func (r *pluginRegistry) get(name string) *pluginConnection {
 type pluginProvider struct {
 	PluginName string
 	Surface    string
-	Priority   int
 }
 
 func (r *pluginRegistry) registerProvider(plugin *pluginConnection, params providerRegisterParams) ([]string, error) {
 	if plugin == nil || plugin.name == "" {
 		return nil, errors.New("plugin name is required")
-	}
-	if !plugin.hasRole("provider") {
-		return nil, fmt.Errorf("plugin %q did not declare provider role", plugin.name)
 	}
 
 	surfaces := normalizeProviderSurfaces(params.Surfaces)
@@ -135,14 +130,10 @@ func (r *pluginRegistry) registerProvider(plugin *pluginConnection, params provi
 		r.providers[surface] = append(r.providers[surface], pluginProvider{
 			PluginName: plugin.name,
 			Surface:    surface,
-			Priority:   params.Priority,
 		})
 		sort.Slice(r.providers[surface], func(i, j int) bool {
 			left := r.providers[surface][i]
 			right := r.providers[surface][j]
-			if left.Priority != right.Priority {
-				return left.Priority > right.Priority
-			}
 			return left.PluginName < right.PluginName
 		})
 	}

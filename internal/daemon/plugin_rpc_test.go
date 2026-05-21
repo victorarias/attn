@@ -160,7 +160,6 @@ func TestDaemon_HandleConnection_PluginHelloPreservesPipelinedFrames(t *testing.
 	}
 	registerParams, err := json.Marshal(providerRegisterParams{
 		Surfaces: []string{"worktree.create"},
-		Priority: 50,
 	})
 	if err != nil {
 		t.Fatalf("marshal pipelined provider params: %v", err)
@@ -281,20 +280,20 @@ func TestDaemon_CallPlugin_RoundTripsRequestAndResponse(t *testing.T) {
 func TestDaemon_ProviderRegister_OrdersProvidersAndCleansUpOnDisconnect(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 
-	lowClient, lowDone := startPluginPipe(t, d, "alpha-provider", []string{"provider"})
+	lowClient, lowDone := startPluginPipe(t, d, "alpha-provider", nil)
 	defer lowClient.Close()
-	highClient, highDone := startPluginPipe(t, d, "zeta-provider", []string{"provider"})
+	highClient, highDone := startPluginPipe(t, d, "zeta-provider", nil)
 	defer highClient.Close()
 
-	registerProvider(t, lowClient, []string{"worktree.create", "worktree.delete"}, 10)
-	registerProvider(t, highClient, []string{"worktree.create"}, 100)
+	registerProvider(t, lowClient, []string{"worktree.create", "worktree.delete"})
+	registerProvider(t, highClient, []string{"worktree.create"})
 
 	providers := d.plugins.providersForSurface("worktree.create")
 	if len(providers) != 2 {
 		t.Fatalf("worktree.create provider count=%d, want 2", len(providers))
 	}
-	if providers[0].PluginName != "zeta-provider" || providers[1].PluginName != "alpha-provider" {
-		t.Fatalf("worktree.create provider order=%v, want zeta-provider then alpha-provider", providers)
+	if providers[0].PluginName != "alpha-provider" || providers[1].PluginName != "zeta-provider" {
+		t.Fatalf("worktree.create provider order=%v, want alpha-provider then zeta-provider", providers)
 	}
 	deleteProviders := d.plugins.providersForSurface("worktree.delete")
 	if len(deleteProviders) != 1 || deleteProviders[0].PluginName != "alpha-provider" {
@@ -305,7 +304,7 @@ func TestDaemon_ProviderRegister_OrdersProvidersAndCleansUpOnDisconnect(t *testi
 	select {
 	case <-highDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("high-priority plugin connection did not close")
+		t.Fatal("zeta provider connection did not close")
 	}
 	providers = d.plugins.providersForSurface("worktree.create")
 	if len(providers) != 1 || providers[0].PluginName != "alpha-provider" {
@@ -316,11 +315,11 @@ func TestDaemon_ProviderRegister_OrdersProvidersAndCleansUpOnDisconnect(t *testi
 	select {
 	case <-lowDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("low-priority plugin connection did not close")
+		t.Fatal("alpha provider connection did not close")
 	}
 }
 
-func TestDaemon_ProviderRegister_RequiresProviderRole(t *testing.T) {
+func TestDaemon_ProviderRegister_DoesNotRequireHandshakeRole(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client, done := startPluginPipe(t, d, "observer-only", []string{"observer"})
 	defer client.Close()
@@ -339,8 +338,8 @@ func TestDaemon_ProviderRegister_RequiresProviderRole(t *testing.T) {
 	}
 
 	resp := decodeJSONRPCMessage(t, client)
-	if resp.Error == nil || resp.Error.Code != jsonRPCInvalidRequest {
-		t.Fatalf("provider.register error=%#v, want invalid request", resp.Error)
+	if resp.Error != nil {
+		t.Fatalf("provider.register error=%#v, want nil", resp.Error)
 	}
 
 	_ = client.Close()
@@ -368,9 +367,9 @@ func startPluginPipe(t *testing.T, d *Daemon, name string, roles []string) (net.
 	return clientConn, done
 }
 
-func registerProvider(t *testing.T, conn net.Conn, surfaces []string, priority int) {
+func registerProvider(t *testing.T, conn net.Conn, surfaces []string) {
 	t.Helper()
-	params, err := json.Marshal(providerRegisterParams{Surfaces: surfaces, Priority: priority})
+	params, err := json.Marshal(providerRegisterParams{Surfaces: surfaces})
 	if err != nil {
 		t.Fatalf("marshal provider.register params: %v", err)
 	}
@@ -396,7 +395,7 @@ func registerProvider(t *testing.T, conn net.Conn, surfaces []string, priority i
 }
 
 func sendPluginHello(t *testing.T, conn net.Conn, name string) {
-	sendPluginHelloWithRoles(t, conn, name, []string{"provider"})
+	sendPluginHelloWithRoles(t, conn, name, nil)
 }
 
 func sendPluginHelloWithRoles(t *testing.T, conn net.Conn, name string, roles []string) {

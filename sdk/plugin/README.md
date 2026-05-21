@@ -24,7 +24,6 @@ const client = new AttnPluginClient({
   socketPath: process.env.ATTN_SOCKET_PATH ?? "",
   name: "example-worktree-provider",
   version: "0.1.0",
-  roles: ["provider"],
 });
 
 client.on<WorktreeCreateParams, WorktreeCreateResult>(
@@ -41,8 +40,9 @@ client.on<WorktreeCreateParams, WorktreeCreateResult>(
   },
 );
 
-await client.connect();
-await client.registerProvider(["worktree.create"], 100);
+await client.connect({
+  providerSurfaces: ["worktree.create"],
+});
 ```
 
 The runtime remains intentionally small. Driver, observer, and actor helpers

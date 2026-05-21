@@ -54,13 +54,10 @@ describe("AttnPluginClient", () => {
       socketPath: server.socketPath,
       name: "sdk-provider",
       version: "0.1.0",
-      roles: ["provider"],
     });
 
-    await client.connect();
-    const surfaces = await client.registerProvider(["worktree.create"], 100);
+    await client.connect({ providerSurfaces: ["worktree.create"] });
 
-    expect(surfaces).toEqual(["worktree.create"]);
     expect(server.requests.map((request) => request.method)).toEqual([
       "hello",
       "provider.register",
@@ -93,7 +90,6 @@ describe("AttnPluginClient", () => {
       socketPath: server.socketPath,
       name: "sdk-provider",
       version: "0.1.0",
-      roles: ["provider"],
     });
     client.on<WorktreeCreateParams, WorktreeCreateResult>("worktree.create", async (params) => {
       return handled({
@@ -122,7 +118,6 @@ describe("AttnPluginClient", () => {
       socketPath: "/tmp/unused.sock",
       name: "sdk-provider",
       version: "0.1.0",
-      roles: ["provider"],
     });
 
     await expect(client.request("provider.register", {})).rejects.toThrow(
@@ -147,13 +142,39 @@ describe("AttnPluginClient", () => {
       socketPath: server.socketPath,
       name: "sdk-provider",
       version: "0.1.0",
-      roles: ["provider"],
     });
 
     await expect(client.connect()).rejects.toThrow("attn rejected plugin hello");
     await client.connect();
 
     expect(helloCount).toBe(2);
+    client.close();
+    await server.close();
+  });
+
+  test("still allows provider registration after connect", async () => {
+    const server = await startServer(async (socket, request) => {
+      if (request.method === "hello") {
+        socket.write(`${JSON.stringify(response(request.id, { ok: true }))}\n`);
+        return;
+      }
+      if (request.method === "provider.register") {
+        socket.write(
+          `${JSON.stringify(response(request.id, { ok: true, surfaces: ["worktree.delete"] }))}\n`,
+        );
+      }
+    });
+
+    const client = new AttnPluginClient({
+      socketPath: server.socketPath,
+      name: "sdk-provider",
+      version: "0.1.0",
+    });
+
+    await client.connect();
+    const surfaces = await client.registerProvider(["worktree.delete"]);
+
+    expect(surfaces).toEqual(["worktree.delete"]);
     client.close();
     await server.close();
   });

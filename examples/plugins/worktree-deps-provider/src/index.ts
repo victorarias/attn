@@ -22,7 +22,6 @@ const client = new AttnPluginClient({
   socketPath,
   name: pluginName,
   version: "0.1.0",
-  roles: ["provider"],
 });
 
 client.on<WorktreeCreateParams, WorktreeCreateResult>("worktree.create", (params) => {
@@ -33,8 +32,9 @@ client.on<WorktreeDeleteParams, WorktreeDeleteResult>("worktree.delete", (params
   return deleteWorktree(params);
 });
 
-await client.connect();
-await client.registerProvider(["worktree.create", "worktree.delete"], 50);
+await client.connect({
+  providerSurfaces: ["worktree.create", "worktree.delete"],
+});
 
 async function createWorktree(params: WorktreeCreateParams): Promise<WorktreeCreateResult> {
   const mainRepo = resolve(params.main_repo);

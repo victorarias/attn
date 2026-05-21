@@ -1,6 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 
-export type PluginRole = "provider" | "driver" | "observer" | "actor";
+export type PluginRole = "driver" | "observer" | "actor";
 
 export type ProviderDecline = {
   status: "decline";
@@ -46,8 +46,12 @@ export type AttnPluginClientOptions = {
   socketPath: string;
   name: string;
   version: string;
-  roles: PluginRole[];
+  roles?: PluginRole[];
   attnAPIVersion?: number;
+};
+
+export type ConnectOptions = {
+  providerSurfaces?: string[];
 };
 
 export type PluginHandler<TParams = unknown, TResult = unknown> = (
@@ -100,7 +104,7 @@ export class AttnPluginClient {
 
   constructor(private readonly options: AttnPluginClientOptions) {}
 
-  async connect(): Promise<void> {
+  async connect(options: ConnectOptions = {}): Promise<void> {
     if (this.socket) {
       return;
     }
@@ -128,10 +132,13 @@ export class AttnPluginClient {
         name: this.options.name,
         version: this.options.version,
         attn_api_version: this.options.attnAPIVersion ?? pluginAPIVersion,
-        roles: this.options.roles,
+        roles: this.options.roles ?? [],
       });
       if (!result.ok) {
         throw new Error("attn rejected plugin hello");
+      }
+      if (options.providerSurfaces && options.providerSurfaces.length > 0) {
+        await this.registerProvider(options.providerSurfaces);
       }
     } catch (error) {
       this.resetSocket(error instanceof Error ? error : new Error(String(error)));
@@ -152,10 +159,9 @@ export class AttnPluginClient {
     this.handlers.set(method, handler as PluginHandler);
   }
 
-  async registerProvider(surfaces: string[], priority = 0): Promise<string[]> {
+  async registerProvider(surfaces: string[]): Promise<string[]> {
     const result = await this.request<ProviderRegisterResult>("provider.register", {
       surfaces,
-      priority,
     });
     if (!result.ok) {
       throw new Error("attn rejected provider registration");
